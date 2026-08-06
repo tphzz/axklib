@@ -22,6 +22,7 @@ enum class PackageKind : std::uint8_t { volume, program, sbac, sbnk, smpl, seque
 struct PackageRootSelector {
     PackageRootKind kind{PackageRootKind::volume};
     std::optional<std::uint8_t> partition_index;
+    std::optional<std::uint32_t> volume_directory_id;
     std::string group_name;
     std::string volume_name;
     std::string object_name;
@@ -108,6 +109,21 @@ struct PackageBuild {
     PortablePackage package;
     std::string required_extension;
     std::vector<std::byte> archive;
+};
+
+struct PackageBatchItem {
+    std::size_t selector_index{};
+    PackageBuild build;
+};
+
+struct PackageBatchFailure {
+    std::size_t selector_index{};
+    Error error;
+};
+
+struct PackageBatchBuild {
+    std::vector<PackageBatchItem> packages;
+    std::vector<PackageBatchFailure> failures;
 };
 
 struct PackagePublication {
@@ -320,6 +336,10 @@ AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);
 AXK_API Result<PackageBuild> build_portable_package(const MediaContainer &source,
                                                     std::span<const PackageRootSelector> roots,
                                                     const CancellationToken &cancellation = {});
+
+AXK_API Result<PackageBatchBuild> build_portable_packages(const MediaContainer &source,
+                                                          std::span<const PackageRootSelector> roots,
+                                                          const CancellationToken &cancellation = {});
 
 AXK_API Result<PackagePublication> publish_portable_package(const PackageBuild &build,
                                                             const std::filesystem::path &output_path,

@@ -280,8 +280,8 @@ TEST(MediaConversion, WritesOnePartitionAsIsoAndOneVolumeAsFloppyFromRetainedRea
             planned_type_order.push_back(prepared->image.objects[segment.object_index].type);
         }
     }
-    EXPECT_EQ(planned_type_order, (std::vector{axk::ObjectType::prog, axk::ObjectType::sbnk, axk::ObjectType::smpl,
-                                               axk::ObjectType::sbnk, axk::ObjectType::sbac}));
+    EXPECT_EQ(planned_type_order, (std::vector{axk::ObjectType::prog, axk::ObjectType::sbnk, axk::ObjectType::sbnk,
+                                               axk::ObjectType::smpl, axk::ObjectType::sbac}));
     const auto floppy_plan = axk::plan_media_conversion(open_reader(source_path), source_path, floppy_request);
     ASSERT_TRUE(floppy_plan) << floppy_plan.error().message;
     EXPECT_TRUE(floppy_plan->can_export);

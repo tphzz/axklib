@@ -24,6 +24,7 @@ const object = (kind: PackageExportObjectKind, name: string): PackageExportSelec
 
 const volume = (name: string): PackageExportSelection => ({
     kind: 'VOLUME',
+    contentId: `volume-${name}`,
     partitionIndex: 0,
     volumeName: name,
     name,

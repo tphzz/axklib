@@ -37,6 +37,33 @@ recognized package extension or an unrelated extension is rejected. Readers
 derive the kind from `manifest.json`; renaming a valid package produces the
 nonfatal `PACKAGE_EXTENSION_MISMATCH` issue without changing its kind or ID.
 
+## Axkdeck Batch Volume Export
+
+Axkdeck can export all immediate volumes under one SFS partition or Yamaha
+CD-ROM group with **Export volume packages...**. Each nonempty volume is built
+as an independent, complete `.axkvol`; the command never combines volumes into
+one root selection. Each package still follows the normal complete known
+dependency closure, so a required object placed elsewhere may be copied into
+more than one self-contained package. The selected partition or group and every
+child volume are resolved by their opaque content IDs, so duplicate visible
+names remain distinct.
+
+The destination is one new directory containing the packages directly plus
+`volume-packages.axklib.json`. Empty volumes are skipped. A package-closure
+failure for one volume is recorded in the report while other valid volumes are
+retained. If no volume succeeds, no destination directory or download archive
+is published. Package filenames are deterministic, use filesystem-safe visible
+volume names, and add a stable storage-derived suffix when sanitized names
+collide. Workspace export creates the directory without overwriting an existing
+entry. Desktop export downloads the same directory as a retained TAR and then
+removes the temporary retained resource.
+
+This batch command is an application workflow over the same version 1 package
+builder and validation rules as individual package export. FAT12 and AXK object
+directory sessions retain their existing single-volume package export; they do
+not advertise partition-level batch export because they have no equivalent
+multi-volume parent scope.
+
 ## CLI Workflow
 
 Export one Program from an SFS image:

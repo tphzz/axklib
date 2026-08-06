@@ -10,6 +10,7 @@
 #include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/application/session_media_conversion_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
+#include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
 #include "axklib/application/write_operations.hpp"
 
@@ -220,6 +221,8 @@ axk::app::Result<void> axk::app::bind_session_application_operations(
     if (auto bound = bind_session_write_operations(registry, sandbox, uploads, images, journals); !bound)
         return bound;
     if (auto bound = bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads); !bound)
+        return bound;
+    if (auto bound = bind_session_volume_package_operations(registry, sandbox, images, downloads); !bound)
         return bound;
     if (auto bound = bind_session_audio_export_operations(registry, sandbox, images, downloads); !bound)
         return bound;

@@ -189,9 +189,9 @@ axk::app::ExactExportClosure axk::app::build_exact_export_closure(const Relation
 }
 
 void axk::app::filter_export_plan(ExportPlan &plan, const ExactExportClosure &closure,
-                                  const std::set<std::pair<std::uint8_t, std::string>> &whole_volumes) {
+                                  const std::set<std::pair<std::uint8_t, std::uint32_t>> &whole_volumes) {
     for (auto &volume : plan.volumes) {
-        if (whole_volumes.contains({volume.partition.value, volume.volume_name}))
+        if (whole_volumes.contains({volume.partition.value, volume.volume_directory.value}))
             continue;
         std::erase_if(volume.samples, [&](const auto &sample) { return !closure.samples.contains(sample.object_key); });
         for (auto &sample : volume.samples) {

@@ -6,8 +6,7 @@ export function imageSessionExportRoots(items: readonly PackageExportSelection[]
         item.kind === 'VOLUME'
             ? {
                   kind: 'VOLUME',
-                  partitionIndex: item.partitionIndex,
-                  volumeName: item.volumeName,
+                  contentId: item.contentId,
               }
             : { kind: item.kind, objectId: item.objectId },
     );

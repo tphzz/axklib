@@ -24,11 +24,24 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
         catalog_objects.push_back(&snapshot);
         object_keys_by_id.emplace(id, snapshot.key);
     }
-    return ImageSessionRead{(*session)->image_id,         (*session)->revision,
-                            (*session)->source,           (*session)->source_reader,
-                            &*(*session)->media,          (*session)->target_snapshot_id,
-                            std::move(catalog_objects),   (*session)->catalog_issues,
-                            std::move(object_keys_by_id), std::move(lease)};
+    std::unordered_map<std::string, ImageVolumeScopeIdentity> volume_scopes_by_id;
+    for (const auto &item : (*session)->content) {
+        if (item.kind == "volume" && item.partition_index && item.volume_directory_id) {
+            volume_scopes_by_id.emplace(
+                item.id, ImageVolumeScopeIdentity{*item.partition_index, *item.volume_directory_id, item.display_name});
+        }
+    }
+    return ImageSessionRead{(*session)->image_id,
+                            (*session)->revision,
+                            (*session)->source,
+                            (*session)->source_reader,
+                            &*(*session)->media,
+                            (*session)->target_snapshot_id,
+                            std::move(catalog_objects),
+                            (*session)->catalog_issues,
+                            std::move(object_keys_by_id),
+                            std::move(volume_scopes_by_id),
+                            std::move(lease)};
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>
@@ -170,6 +183,25 @@ axk::app::ImageSessionManager::content(std::string_view image_id, std::string_vi
         return std::unexpected(session_error("content_not_found", "content parent does not exist"));
     return implementation_->page((*session)->content, (*session)->content_cursors, limit, cursor, scope,
                                  &children->second);
+}
+
+axk::app::Result<axk::app::ImageContentScope>
+axk::app::ImageSessionManager::content_scope(std::string_view image_id, std::string_view owner_id,
+                                             std::string_view content_id) {
+    const auto session = implementation_->owned(image_id, owner_id);
+    if (!session)
+        return std::unexpected(session.error());
+    const auto item = std::ranges::find((*session)->content, content_id, &ImageContentItem::id);
+    if (item == (*session)->content.end())
+        return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+    const auto children = (*session)->content_children.find(std::string{content_id});
+    if (children == (*session)->content_children.end())
+        return std::unexpected(session_error("content_not_found", "content scope does not exist"));
+    ImageContentScope result{*item, {}};
+    result.children.reserve(children->second.size());
+    for (const auto index : children->second)
+        result.children.push_back((*session)->content.at(index));
+    return result;
 }
 
 axk::app::Result<axk::app::ImagePage<axk::app::ImageObjectItem>> axk::app::ImageSessionManager::objects(

@@ -262,6 +262,36 @@ describe('ImageNavigator', () => {
         );
     });
 
+    it('offers batch volume-package export on an addressable partition', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'library.iso' }),
+                items: [
+                    {
+                        id: 'partition-0',
+                        name: 'SYNTHS',
+                        kind: 'partition',
+                        partitionIndex: 0,
+                        childCount: 1,
+                    },
+                ],
+                volumePackageExportEnabled: true,
+                onimageaction,
+            },
+        });
+
+        const partitionButton = screen.getByText('SYNTHS').closest('button');
+        expect(partitionButton).not.toBeNull();
+        await fireEvent.contextMenu(partitionButton!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume packages…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'partition-0' }),
+            'export-volume-packages',
+        );
+    });
+
     it('offers CD-ROM conversion for partitions and floppy conversion for addressable volumes', async () => {
         const onimageaction = vi.fn();
         render(ImageNavigator, {

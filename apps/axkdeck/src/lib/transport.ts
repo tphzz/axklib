@@ -39,6 +39,7 @@ export interface OpenedImage {
     waveDataCleanupAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
+    volumePackageExportAvailable: boolean;
     audioExportAvailable: boolean;
     sequenceExportAvailable: boolean;
     mediaConversionAvailable: boolean;
@@ -311,6 +312,11 @@ export type ImageSessionPackageImportResult = components['schemas']['ImageSessio
 export type ImageSessionPackageExportDestination = components['schemas']['ImageSessionPackageExportDestination'];
 export type ImageSessionExportRoot = components['schemas']['ImageSessionExportRoot'];
 export type ImageSessionPackageExportResult = components['schemas']['ImageSessionPackageExportResult'];
+export type ImageSessionVolumePackageExportDestination =
+    components['schemas']['ImageSessionVolumePackageExportDestination'];
+export type ImageSessionVolumePackageExportInspection =
+    components['schemas']['ImageSessionVolumePackageExportInspection'];
+export type ImageSessionVolumePackageExportResult = components['schemas']['ImageSessionVolumePackageExportResult'];
 export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
@@ -478,6 +484,15 @@ export interface ImageTransport {
         sessionId: number,
         roots: ImageSessionExportRoot[],
         destination: ImageSessionPackageExportDestination,
+    ): Promise<JobState>;
+    inspectImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumePackageExportInspection>;
+    startImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState>;
     inspectImageAudioExport(
         sessionId: number,

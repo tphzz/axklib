@@ -82,10 +82,13 @@ Error root_error(const PackageRootSelector &selector, std::string message) {
 bool matches_scope(const ObjectSnapshot &object, const PackageRootSelector &selector) {
     if (!object.placement) {
         return selector.kind != PackageRootKind::volume && !selector.partition_index && selector.group_name.empty() &&
-               selector.volume_name.empty();
+               !selector.volume_directory_id && selector.volume_name.empty();
     }
     if (selector.partition_index && object.placement->partition.value != *selector.partition_index)
         return false;
+    if (selector.volume_directory_id && object.placement->volume_directory.value != *selector.volume_directory_id) {
+        return false;
+    }
     if (!selector.group_name.empty() && object.placement->partition_name != selector.group_name)
         return false;
     return selector.volume_name.empty() || object.placement->volume_name == selector.volume_name;
@@ -289,28 +292,14 @@ std::map<std::string, std::string, std::less<>> assign_node_ids(std::vector<Prov
     return result;
 }
 
-} // namespace
-
-Result<PackageBuild> build_portable_package(const MediaContainer &source,
-                                            std::span<const PackageRootSelector> root_selectors,
+Result<PackageBuild> build_selected_package(const MediaContainer &source, std::span<const SelectedRoot> selected,
+                                            const RelationshipGraph &graph,
+                                            const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects,
                                             const CancellationToken &cancellation) {
-    if (const auto checked = cancellation.check(); !checked)
-        return std::unexpected{checked.error()};
-    auto catalog = build_object_catalog(source, 64U * 1024U * 1024U, cancellation);
-    if (!catalog)
-        return std::unexpected{catalog.error()};
-    auto selected = select_roots(*catalog, root_selectors);
-    if (!selected)
-        return std::unexpected{selected.error()};
-    const auto graph = build_relationship_graph(*catalog);
-    std::map<std::string, const ObjectSnapshot *, std::less<>> objects;
-    for (const auto &object : catalog->objects)
-        objects.emplace(object.key, &object);
-
     std::set<std::string, std::less<>> included_keys;
     std::vector<std::pair<const Relationship *, std::uint32_t>> included_relationships;
     std::vector<const ObjectSnapshot *> queue;
-    for (const auto &root : *selected)
+    for (const auto &root : selected)
         queue.insert(queue.end(), root.seeds.begin(), root.seeds.end());
     for (std::size_t cursor = 0; cursor < queue.size(); ++cursor) {
         if (const auto checked = cancellation.check(); !checked)
@@ -410,7 +399,7 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
     std::ranges::sort(package.relationships, {}, &PackageRelationship::edge_id);
     package_internal::bind_manifest_relocations(package);
 
-    for (const auto &root : *selected) {
+    for (const auto &root : selected) {
         PackageRoot packaged{root.kind, root.display_name, {}};
         for (const auto *seed : root.seeds)
             packaged.node_ids.push_back(node_ids.at(seed->key));
@@ -438,6 +427,68 @@ Result<PackageBuild> build_portable_package(const MediaContainer &source,
         return std::unexpected{archive.error()};
     const auto extension = std::string{required_package_extension(package.kind)};
     return PackageBuild{std::move(package), extension, std::move(*archive)};
+}
+
+std::map<std::string, const ObjectSnapshot *, std::less<>> catalog_objects(const ObjectCatalog &catalog) {
+    std::map<std::string, const ObjectSnapshot *, std::less<>> objects;
+    for (const auto &object : catalog.objects)
+        objects.emplace(object.key, &object);
+    return objects;
+}
+
+} // namespace
+
+Result<PackageBuild> build_portable_package(const MediaContainer &source,
+                                            std::span<const PackageRootSelector> root_selectors,
+                                            const CancellationToken &cancellation) {
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    auto catalog = build_object_catalog(source, 64U * 1024U * 1024U, cancellation);
+    if (!catalog)
+        return std::unexpected{catalog.error()};
+    auto selected = select_roots(*catalog, root_selectors);
+    if (!selected)
+        return std::unexpected{selected.error()};
+    const auto graph = build_relationship_graph(*catalog);
+    const auto objects = catalog_objects(*catalog);
+    return build_selected_package(source, *selected, graph, objects, cancellation);
+}
+
+Result<PackageBatchBuild> build_portable_packages(const MediaContainer &source,
+                                                  std::span<const PackageRootSelector> root_selectors,
+                                                  const CancellationToken &cancellation) {
+    if (root_selectors.empty())
+        return std::unexpected{
+            package_error("at least one package root selector is required", ErrorCode::invalid_argument)};
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    auto catalog = build_object_catalog(source, 64U * 1024U * 1024U, cancellation);
+    if (!catalog)
+        return std::unexpected{catalog.error()};
+    const auto graph = build_relationship_graph(*catalog);
+    const auto objects = catalog_objects(*catalog);
+
+    PackageBatchBuild result;
+    result.packages.reserve(root_selectors.size());
+    for (std::size_t index = 0; index < root_selectors.size(); ++index) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto selector = root_selectors.subspan(index, 1U);
+        auto selected = select_roots(*catalog, selector);
+        if (!selected) {
+            result.failures.push_back({index, selected.error()});
+            continue;
+        }
+        auto package = build_selected_package(source, *selected, graph, objects, cancellation);
+        if (!package) {
+            if (package.error().code == ErrorCode::operation_cancelled)
+                return std::unexpected{package.error()};
+            result.failures.push_back({index, package.error()});
+            continue;
+        }
+        result.packages.push_back({index, std::move(*package)});
+    }
+    return result;
 }
 
 } // namespace axk

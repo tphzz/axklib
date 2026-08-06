@@ -11,6 +11,7 @@ describe('PackageExportDialog', () => {
                 items: [
                     {
                         kind: 'VOLUME',
+                        contentId: 'volume-drums',
                         partitionIndex: 0,
                         volumeName: 'DRUMS',
                         name: 'DRUMS',

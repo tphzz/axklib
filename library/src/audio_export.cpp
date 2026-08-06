@@ -291,6 +291,7 @@ Result<ExportPlan> build_export_plan(const Container &container, const ObjectCat
         const Key key{item.partition.value, item.placement->volume_directory.value};
         auto &volume = volumes[key];
         volume.partition = item.partition;
+        volume.volume_directory = item.placement->volume_directory;
         volume.partition_name = item.placement->partition_name;
         volume.volume_name = item.placement->volume_name;
         volume.relative_root =
@@ -383,6 +384,7 @@ Result<ExportPlan> build_export_plan(const MediaContainer &container, const Obje
         const Key key{item.partition.value, item.placement->volume_directory.value};
         auto &volume = volumes[key];
         volume.partition = item.partition;
+        volume.volume_directory = item.placement->volume_directory;
         volume.partition_name = item.placement->partition_name;
         volume.volume_name = item.placement->volume_name;
         volume.relative_root = roots_by_key.at(item.key);

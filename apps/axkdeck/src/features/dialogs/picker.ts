@@ -6,6 +6,7 @@ export type PickerParentDialog =
     | 'companion-disks'
     | 'package-import'
     | 'package-export'
+    | 'volume-package-export'
     | 'audio-export'
     | 'sequence-export'
     | 'media-export'

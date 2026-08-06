@@ -147,7 +147,8 @@ Json package_json(const axk::PortablePackage &package);
 Result<axk::PackageRootKind> parse_root_kind(std::string_view value);
 Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &input);
 Result<std::vector<axk::PackageRootSelector>>
-parse_session_export_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id);
+parse_session_export_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
+                           const std::unordered_map<std::string, ImageVolumeScopeIdentity> &volume_scopes_by_id);
 Result<axk::PackageImportRequest> parse_import_request(const Json &input);
 std::string target_kind_name(axk::MediaKind kind);
 Json program_assignment_adjustments_json(std::span<const axk::PackageProgramAssignmentAdjustment> adjustments);

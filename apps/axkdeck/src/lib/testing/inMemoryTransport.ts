@@ -11,6 +11,8 @@ import type {
     HardDiskCreationProfileId,
     ImageTransport,
     ImageSessionPackageExportDestination,
+    ImageSessionVolumePackageExportDestination,
+    ImageSessionVolumePackageExportInspection,
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
@@ -72,6 +74,7 @@ export interface InMemoryImageTransportOptions {
         | 'waveDataCleanupAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
+        | 'volumePackageExportAvailable'
         | 'audioExportAvailable'
         | 'sequenceExportAvailable'
         | 'mediaConversionAvailable'
@@ -83,6 +86,7 @@ export interface InMemoryImageTransportOptions {
         waveDataCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
+        volumePackageExportAvailable?: boolean;
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
@@ -145,6 +149,7 @@ export class InMemoryImageTransport implements ImageTransport {
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
+            volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
@@ -167,6 +172,7 @@ export class InMemoryImageTransport implements ImageTransport {
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
+            volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
@@ -372,6 +378,21 @@ export class InMemoryImageTransport implements ImageTransport {
         destination: ImageSessionPackageExportDestination,
     ): Promise<JobState> {
         return this.invoke('startImagePackageExport', [sessionId, roots, destination]);
+    }
+
+    inspectImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumePackageExportInspection> {
+        return this.invoke('inspectImageVolumePackageExport', [sessionId, scopeId]);
+    }
+
+    startImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumePackageExportDestination,
+    ): Promise<JobState> {
+        return this.invoke('startImageVolumePackageExport', [sessionId, scopeId, destination]);
     }
 
     inspectImageAudioExport(

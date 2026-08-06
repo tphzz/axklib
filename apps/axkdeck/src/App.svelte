@@ -8,6 +8,7 @@
     import AppDialogs from './features/dialogs/AppDialogs.svelte';
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
+    import { VolumePackageExportWorkflow } from './features/export/volumePackageWorkflow.svelte';
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
@@ -80,6 +81,14 @@
         requestCompanionDisks: (retry) => imageSessionWorkflow.requestCompanionDisks(retry),
     });
     const mediaExportWorkflow = new MediaExportWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+    });
+    const volumePackageExportWorkflow = new VolumePackageExportWorkflow({
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -206,6 +215,7 @@
         audition: auditionWorkflow,
         mutation: mutationWorkflow,
         exports: exportWorkflow,
+        volumePackages: volumePackageExportWorkflow,
         mediaExports: mediaExportWorkflow,
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
@@ -219,6 +229,7 @@
 
     onDestroy(() => {
         exportWorkflow.dispose();
+        volumePackageExportWorkflow.dispose();
         mediaExportWorkflow.dispose();
         deletionWorkflow.dispose();
         pickerController.dispose();
@@ -303,6 +314,7 @@
             exportWorkflow.requestPackage([
                 {
                     kind: 'VOLUME',
+                    contentId: item.id,
                     partitionIndex: item.partitionIndex!,
                     volumeName: item.name,
                     name: item.name,
@@ -311,12 +323,19 @@
             ]);
             return;
         }
+        if (action === 'export-volume-packages') {
+            if (!imageSessionWorkflow.volumePackageExportAvailable || item.kind !== 'partition') return;
+            imageSessionWorkflow.selectedSource = item;
+            void volumePackageExportWorkflow.open(item);
+            return;
+        }
         if (action === 'export-sfz') {
             if (!imageSessionWorkflow.audioExportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
             void exportWorkflow.requestAudio([
                 {
                     kind: 'VOLUME',
+                    contentId: item.id,
                     partitionIndex: item.partitionIndex,
                     volumeName: item.name,
                     name: item.name,
@@ -466,6 +485,7 @@
     waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
+    volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
@@ -511,6 +531,7 @@
     mutation={mutationWorkflow}
     packageImport={packageImportWorkflow}
     exports={exportWorkflow}
+    volumePackages={volumePackageExportWorkflow}
     mediaExports={mediaExportWorkflow}
     deletion={deletionWorkflow}
     mediaDrop={mediaDropWorkflow}

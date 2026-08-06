@@ -2,6 +2,7 @@
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
     import type { PickerRequest, PickerSelection } from './picker';
     import type { ExportWorkflow } from '../export/workflow.svelte';
+    import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
     import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { MediaDropWorkflow } from '../import/mediaDropWorkflow.svelte';
@@ -24,6 +25,7 @@
     import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
     import VolumeActionDialog from '../../lib/components/VolumeActionDialog.svelte';
+    import VolumePackageExportDialog from '../../lib/components/VolumePackageExportDialog.svelte';
     import WaveDataCleanupDialog from '../../lib/components/WaveDataCleanupDialog.svelte';
     import WorkspaceManager from '../../lib/components/WorkspaceManager.svelte';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
@@ -63,6 +65,7 @@
         mutation: MutationWorkflow;
         packageImport: PackageImportWorkflow;
         exports: ExportWorkflow;
+        volumePackages: VolumePackageExportWorkflow;
         mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
         mediaDrop: MediaDropWorkflow;
@@ -99,6 +102,7 @@
         mutation,
         packageImport,
         exports,
+        volumePackages,
         mediaExports,
         deletion,
         mediaDrop,
@@ -217,6 +221,20 @@
         onworkspace={() => void exports.packageToWorkspace()}
         onlocal={() => void exports.packageToComputer()}
         oncancel={() => exports.closePackage()}
+    />
+{/if}
+{#if volumePackages.request && pickerRequest?.parentDialog !== 'volume-package-export'}
+    <VolumePackageExportDialog
+        scopeName={volumePackages.request.scope.name}
+        inspection={volumePackages.request.inspection}
+        desktop={isDesktop}
+        loading={volumePackages.request.loading}
+        busy={volumePackages.request.busy}
+        progressLabel={volumePackages.request.progressLabel}
+        error={volumePackages.request.error}
+        onworkspace={() => void volumePackages.toWorkspace()}
+        onlocal={() => void volumePackages.toComputer()}
+        oncancel={() => volumePackages.cancel()}
     />
 {/if}
 {#if exports.audioRequest && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest}

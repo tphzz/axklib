@@ -72,6 +72,7 @@
         waveDataCleanupAvailable: boolean;
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
+        volumePackageExportAvailable: boolean;
         audioExportAvailable: boolean;
         sequenceExportAvailable: boolean;
         mediaConversionAvailable: boolean;
@@ -127,6 +128,7 @@
         waveDataCleanupAvailable,
         packageImportAvailable,
         packageExportAvailable,
+        volumePackageExportAvailable,
         audioExportAvailable,
         sequenceExportAvailable,
         mediaConversionAvailable,
@@ -269,6 +271,7 @@
             partitionActionsEnabled={mutation.partitionAvailable}
             packageImportEnabled={packageImportAvailable}
             packageExportEnabled={packageExportAvailable}
+            volumePackageExportEnabled={volumePackageExportAvailable}
             audioExportEnabled={audioExportAvailable}
             mediaConversionEnabled={mediaConversionAvailable}
             onimageaction={imageAction}

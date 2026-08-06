@@ -170,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 44U);
+    EXPECT_EQ(entries.size(), 46U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -748,6 +748,24 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
     EXPECT_EQ(object_directory_wire_result.at("sourceMediaKind"), "AXK_OBJECT_DIRECTORY");
     EXPECT_TRUE(validator.validate("PackageInspection", object_directory_wire_result));
     EXPECT_EQ(validator.application_value("PackageInspection", object_directory_wire_result), object_directory_result);
+}
+
+TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto exact = nlohmann::json{{"kind", "VOLUME"}, {"contentId", "content-volume-1"}};
+    EXPECT_TRUE(validator.validate("ImageSessionExportRoot", exact));
+    EXPECT_FALSE(
+        validator.validate("ImageSessionExportRoot",
+                           nlohmann::json{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Duplicate"}}));
+
+    const auto request = nlohmann::json{
+        {"imageId", "image-1"},
+        {"expectedRevision", 1U},
+        {"scopeId", "content-partition-1"},
+        {"destination", {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "packages"}}}}}};
+    EXPECT_TRUE(validator.validate("ImageSessionVolumePackageExportRequest", request));
 }
 
 TEST(ServerContract, SharedRouteSchemaAdmitsOnlyDeclaredOperationDiscriminators) {

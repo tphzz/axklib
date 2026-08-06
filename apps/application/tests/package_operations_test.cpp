@@ -23,6 +23,7 @@
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
+#include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/package.hpp"
 #include "axklib/sequence.hpp"
@@ -99,6 +100,38 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     volume.programs.push_back({2U, {{"SBAC", "Bank 2", 1U}, {"SBNK", "Direct 2", 2U}}});
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest, path);
+    ASSERT_TRUE(written) << written.error().message;
+}
+
+void write_batch_volume_source(const std::filesystem::path &path) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm = {std::byte{0},    std::byte{0},    std::byte{0xe8}, std::byte{3},
+                    std::byte{0x18}, std::byte{0xfc}, std::byte{0},    std::byte{0}};
+    const auto audio_path = path.parent_path() / "batch-volume.wav";
+    const auto written_audio = axk::write_wav_atomic(audio_path, waveform);
+    ASSERT_TRUE(written_audio) << written_audio.error().message;
+
+    const auto volume = [&](std::string waveform_name, std::string sample_name) {
+        axk::VolumeSpec result;
+        result.name = "Duplicate";
+        result.waveforms.push_back({"wave", std::move(waveform_name), audio_path, 60U, {}});
+        axk::SampleSpec sample;
+        sample.name = std::move(sample_name);
+        sample.waveform_id = "wave";
+        sample.root_key = 60U;
+        sample.key_high = 127U;
+        result.samples.push_back(std::move(sample));
+        return result;
+    };
+    axk::VolumeSpec empty;
+    empty.name = "Empty";
+    const axk::HdsBuildManifest manifest{
+        "1.0",
+        4U * 1024U * 1024U,
+        {{"Batch", {volume("First Wave", "First Sample"), std::move(empty), volume("Second Wave", "Second Sample")}}}};
     const auto written = axk::write_hds_image(manifest, path);
     ASSERT_TRUE(written) << written.error().message;
 }
@@ -231,6 +264,7 @@ class PackageOperationsTest : public testing::Test {
         write_sequence_object(root_ / "sequence.bin", "Sequence");
         write_empty_target(root_ / "target.hds");
         write_mixed_root_source(root_ / "mixed-roots.hds");
+        write_batch_volume_source(root_ / "batch-volumes.hds");
         write_object_directory(root_ / "fixture.hds", root_ / "objects");
         write_split_object_directory(root_ / "fixture.hds", root_ / "disk-set");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
@@ -250,6 +284,7 @@ class PackageOperationsTest : public testing::Test {
         ASSERT_TRUE(downloads_->storage_ready());
         ASSERT_TRUE(axk::app::bind_session_package_operations(registry_, *sandbox_, *uploads_, *images_, *journals_,
                                                               *downloads_));
+        ASSERT_TRUE(axk::app::bind_session_volume_package_operations(registry_, *sandbox_, *images_, *downloads_));
         ASSERT_TRUE(axk::app::bind_session_audio_export_operations(registry_, *sandbox_, *images_, *downloads_));
         ASSERT_TRUE(axk::app::bind_session_sequence_operations(registry_, *sandbox_, *images_, *downloads_));
     }
@@ -267,6 +302,17 @@ class PackageOperationsTest : public testing::Test {
     axk::app::OperationContext context() const {
         return {
             .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    }
+
+    std::string volume_content_id(const axk::app::ImageSessionSummary &session, std::string_view name) {
+        const auto read = images_->begin_read(session.image_id, "owner", session.revision);
+        EXPECT_TRUE(read) << read.error().message;
+        if (!read)
+            return {};
+        const auto found = std::ranges::find_if(read->volume_scopes_by_id,
+                                                [&](const auto &entry) { return entry.second.display_name == name; });
+        EXPECT_NE(found, read->volume_scopes_by_id.end());
+        return found == read->volume_scopes_by_id.end() ? std::string{} : found->first;
     }
 
     std::filesystem::path root_;
@@ -482,7 +528,7 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     const auto base =
         nlohmann::json{{"imageId", opened->image_id},
                        {"expectedRevision", opened->revision},
-                       {"roots", {{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "New Volume"}}}}};
+                       {"roots", {{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "New Volume")}}}}};
 
     auto workspace_request = base;
     workspace_request["destination"] = {
@@ -567,6 +613,105 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     EXPECT_EQ(duplicate.error().code, "invalid_request");
 }
 
+TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWithReport) {
+    const auto opened = images_->open({"workspace", "batch-volumes.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(scope, roots->items.end());
+    const nlohmann::json base{
+        {"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"scopeId", scope->id}};
+
+    const auto inspected = registry_.invoke("images.volume_package_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("volumeCount"), 3U);
+    EXPECT_EQ(inspected->at("exportableCount"), 2U);
+    EXPECT_EQ(inspected->at("emptyCount"), 1U);
+    ASSERT_EQ(inspected->at("volumes").size(), 3U);
+    std::set<std::string> package_paths;
+    for (const auto &volume : inspected->at("volumes")) {
+        if (volume.at("state") == "READY")
+            package_paths.insert(volume.at("packagePath").get<std::string>());
+    }
+    EXPECT_EQ(package_paths.size(), 2U);
+
+    auto workspace_request = base;
+    workspace_request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "volume-packages"}}},
+    };
+    const auto exported = registry_.invoke("images.volume_package_export", workspace_request, context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("exportedCount"), 2U);
+    EXPECT_EQ(exported->at("skippedCount"), 1U);
+    EXPECT_EQ(exported->at("failedCount"), 0U);
+    EXPECT_EQ(exported->at("reportPath"), "volume-packages.axklib.json");
+    EXPECT_TRUE(std::filesystem::is_regular_file(root_ / "volume-packages" / "volume-packages.axklib.json"));
+    for (const auto &path : package_paths) {
+        const auto package_path = root_ / "volume-packages" / path;
+        ASSERT_TRUE(std::filesystem::is_regular_file(package_path));
+        const auto package = axk::open_portable_package(package_path);
+        ASSERT_TRUE(package) << package.error().message;
+        EXPECT_EQ(package->kind, axk::PackageKind::volume);
+    }
+
+    auto download_request = base;
+    download_request["destination"] = {{"kind", "DOWNLOAD"}, {"directoryName", "local-volume-packages"}};
+    const auto download = registry_.invoke("images.volume_package_export", download_request, context());
+    ASSERT_TRUE(download) << download.error().message;
+    EXPECT_EQ(download->at("destination"), "DOWNLOAD");
+    const auto retained = downloads_->open({download->at("download").at("archiveId").get<std::string>()}, "owner");
+    ASSERT_TRUE(retained) << retained.error().message;
+    EXPECT_EQ(retained->snapshot.entry_count, 3U);
+}
+
+TEST_F(PackageOperationsTest, SessionVolumePackageExportPublishesNothingWhenEveryVolumeIsEmpty) {
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(scope, roots->items.end());
+
+    const auto exported = registry_.invoke(
+        "images.volume_package_export",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"scopeId", scope->id},
+         {"destination",
+          {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "empty-volume-packages"}}}}}},
+        context());
+    ASSERT_FALSE(exported);
+    EXPECT_EQ(exported.error().code, "volume_package_export_empty");
+    EXPECT_FALSE(std::filesystem::exists(root_ / "empty-volume-packages"));
+}
+
+TEST_F(PackageOperationsTest, SessionVolumePackageExportCancellationPublishesNothing) {
+    const auto opened = images_->open({"workspace", "batch-volumes.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(scope, roots->items.end());
+
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    auto operation_context = context();
+    operation_context.cancellation = cancellation.token();
+    const auto exported = registry_.invoke(
+        "images.volume_package_export",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"scopeId", scope->id},
+         {"destination",
+          {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "cancelled"}}}}}},
+        operation_context);
+    ASSERT_FALSE(exported);
+    EXPECT_EQ(exported.error().code, "operation_cancelled");
+    EXPECT_FALSE(std::filesystem::exists(root_ / "cancelled"));
+}
+
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedTar) {
     const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
@@ -622,7 +767,7 @@ TEST_F(PackageOperationsTest, SessionExportsConfirmedSfzSubsetWhenRelationshipWa
     make_first_program_assignment_context_only(source_path);
     const auto opened = images_->open({"workspace", "warned-audio.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const nlohmann::json roots{{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}};
+    const nlohmann::json roots{{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "Mixed")}}};
     const auto base =
         nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
 
@@ -742,16 +887,16 @@ TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage
     ASSERT_EQ(volume.kind, "volume");
     ASSERT_TRUE(volume.partition_index);
 
-    const auto exported = registry_.invoke(
-        "images.package_export",
-        {{"imageId", opened->image_id},
-         {"expectedRevision", opened->revision},
-         {"roots", {{{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}}},
-         {"destination",
-          {{"kind", "WORKSPACE"},
-           {"output", {{"rootId", "workspace"}, {"relativePath", "object-directory"}}},
-           {"overwrite", false}}}},
-        context());
+    const auto exported =
+        registry_.invoke("images.package_export",
+                         {{"imageId", opened->image_id},
+                          {"expectedRevision", opened->revision},
+                          {"roots", {{{"kind", "VOLUME"}, {"contentId", volume.id}}}},
+                          {"destination",
+                           {{"kind", "WORKSPACE"},
+                            {"output", {{"rootId", "workspace"}, {"relativePath", "object-directory"}}},
+                            {"overwrite", false}}}},
+                         context());
     ASSERT_TRUE(exported) << exported.error().message;
     EXPECT_EQ(exported->at("packageKind"), "volume");
     EXPECT_EQ(exported->at("requiredExtension"), ".axkvol");
@@ -782,7 +927,7 @@ TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWitho
         "images.audio_export",
         {{"imageId", opened->image_id},
          {"expectedRevision", opened->revision},
-         {"roots", {{{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}}},
+         {"roots", {{{"kind", "VOLUME"}, {"contentId", volume.id}}}},
          {"format", "WAV"},
          {"destination",
           {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "object-directory-audio"}}}}}},
@@ -807,8 +952,7 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
     ASSERT_EQ(content->items.size(), 1U);
     const auto &volume = content->items.front();
     ASSERT_TRUE(volume.partition_index);
-    const nlohmann::json roots{
-        {{"kind", "VOLUME"}, {"partitionIndex", *volume.partition_index}, {"volumeName", volume.name}}};
+    const nlohmann::json roots{{{"kind", "VOLUME"}, {"contentId", volume.id}}};
     const auto destination = nlohmann::json{
         {"kind", "WORKSPACE"},
         {"output", {{"rootId", "workspace"}, {"relativePath", "split-object-directory"}}},
@@ -829,10 +973,11 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
         {axk::app::CompanionSelectionKind::sources,
          {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
+    const nlohmann::json attached_roots{{{"kind", "VOLUME"}, {"contentId", volume_content_id(*attached, volume.name)}}};
     const auto exported = registry_.invoke("images.package_export",
                                            {{"imageId", attached->image_id},
                                             {"expectedRevision", attached->revision},
-                                            {"roots", roots},
+                                            {"roots", attached_roots},
                                             {"destination", destination}},
                                            context());
     ASSERT_TRUE(exported) << exported.error().message;

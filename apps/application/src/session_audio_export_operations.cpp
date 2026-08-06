@@ -33,12 +33,13 @@ using Json = nlohmann::json;
 struct AudioExportRoot {
     std::string kind;
     std::optional<std::uint8_t> partition_index;
+    std::optional<std::uint32_t> volume_directory_id;
     std::string volume_name;
     std::string object_key;
 };
 
 struct AudioExportSelection {
-    std::set<std::pair<std::uint8_t, std::string>> volumes;
+    std::set<std::pair<std::uint8_t, std::uint32_t>> volumes;
     axk::app::ExactExportClosure closure;
     std::vector<Json> issues;
     std::string default_directory_name;
@@ -116,7 +117,8 @@ axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(c
 }
 
 axk::app::Result<std::vector<AudioExportRoot>>
-parse_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id) {
+parse_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
+            const std::unordered_map<std::string, axk::app::ImageVolumeScopeIdentity> &volume_scopes_by_id) {
     try {
         const auto &values = input.at("roots");
         if (!values.is_array() || values.empty() || values.size() > 1024U)
@@ -129,16 +131,18 @@ parse_roots(const Json &input, const std::unordered_map<std::string, std::string
             root.kind = value.at("kind").get<std::string>();
             std::string identity;
             if (root.kind == "VOLUME") {
-                const auto partition = value.at("partitionIndex").get<std::uint32_t>();
-                if (partition > 255U)
-                    return std::unexpected(operation_error("invalid_request", "partitionIndex is out of range"));
-                root.partition_index = static_cast<std::uint8_t>(partition);
-                root.volume_name = value.at("volumeName").get<std::string>();
-                if (root.volume_name.empty() || value.size() != 3U) {
+                const auto content_id = value.at("contentId").get<std::string>();
+                if (content_id.empty() || value.size() != 2U) {
                     return std::unexpected(
-                        operation_error("invalid_request", "volume roots require partitionIndex and volumeName"));
+                        operation_error("invalid_request", "volume roots require exactly kind and contentId"));
                 }
-                identity = std::format("VOLUME\\0{}\\0{}", partition, root.volume_name);
+                const auto found = volume_scopes_by_id.find(content_id);
+                if (found == volume_scopes_by_id.end())
+                    return std::unexpected(operation_error("object_not_found", "audio export volume does not exist"));
+                root.partition_index = found->second.partition_index;
+                root.volume_directory_id = found->second.volume_directory_id;
+                root.volume_name = found->second.display_name;
+                identity = "VOLUME\\0" + content_id;
             } else {
                 if (root.kind != "PROGRAM" && root.kind != "SBAC" && root.kind != "SBNK" && root.kind != "SMPL")
                     return std::unexpected(operation_error("invalid_request", "audio export root kind is unsupported"));
@@ -199,11 +203,11 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
     root_names.reserve(roots.size());
     for (const auto &root : roots) {
         if (root.kind == "VOLUME") {
-            const auto volume = std::pair{*root.partition_index, root.volume_name};
+            const auto volume = std::pair{*root.partition_index, *root.volume_directory_id};
             bool found{};
             for (const auto &object : catalog.objects) {
                 if (!object.placement || object.partition.value != volume.first ||
-                    object.placement->volume_name != volume.second) {
+                    object.placement->volume_directory.value != volume.second) {
                     continue;
                 }
                 found = true;
@@ -323,7 +327,8 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                               auto session = images.begin_read(identity->first, context.owner_id, identity->second);
                               if (!session)
                                   return std::unexpected(session.error());
-                              const auto roots = parse_roots(input, session->object_keys_by_id);
+                              const auto roots =
+                                  parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
                               if (!roots)
                                   return std::unexpected(roots.error());
                               const auto catalog = catalog_from_session(*session);
@@ -347,7 +352,7 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 auto session = images.begin_read(identity->first, context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
-                const auto roots = parse_roots(input, session->object_keys_by_id);
+                const auto roots = parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
                 if (!roots)
                     return std::unexpected(roots.error());
                 const auto catalog = catalog_from_session(*session);

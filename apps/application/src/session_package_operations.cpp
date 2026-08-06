@@ -318,7 +318,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 if (!session)
                     return std::unexpected(session.error());
 
-                auto roots = parse_session_export_roots(input, session->object_keys_by_id);
+                auto roots =
+                    parse_session_export_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
                 if (!roots)
                     return std::unexpected(roots.error());
                 auto built = axk::build_portable_package(*session->media, *roots, context.cancellation);

@@ -7,6 +7,7 @@ describe('export selection', () => {
         const items: PackageExportSelection[] = [
             {
                 kind: 'VOLUME',
+                contentId: 'volume-brass',
                 name: 'Brass',
                 partitionIndex: 3,
                 volumeName: 'Brass',
@@ -24,7 +25,7 @@ describe('export selection', () => {
         ];
 
         expect(imageSessionExportRoots(items)).toEqual([
-            { kind: 'VOLUME', partitionIndex: 3, volumeName: 'Brass' },
+            { kind: 'VOLUME', contentId: 'volume-brass' },
             { kind: 'SBNK', objectId: 'sample-7' },
         ]);
         expect(exportSelectionLabel(items)).toBe('2 objects');

@@ -2038,6 +2038,30 @@ describe('HttpImageTransport', () => {
                                 implemented: true,
                             },
                             {
+                                id: 'images.volume_package_export.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-session-volume-package-export-inspections',
+                                mode: 'REQUEST',
+                                operationClass: 'READ',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageSessionVolumePackageExportInspectionRequest',
+                                resultSchema: 'ImageSessionVolumePackageExportInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.volume_package_export',
+                                method: 'POST',
+                                route: '/api/v1/image-session-volume-package-exports',
+                                mode: 'JOB',
+                                operationClass: 'READ',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageSessionVolumePackageExportRequest',
+                                resultSchema: 'ImageSessionVolumePackageExportResult',
+                                implemented: true,
+                            },
+                            {
                                 id: 'images.audio_export.inspect',
                                 method: 'POST',
                                 route: '/api/v1/image-session-audio-export-inspections',
@@ -2082,6 +2106,7 @@ describe('HttpImageTransport', () => {
                             availableOperations: [
                                 'images.package.import',
                                 'images.package.export',
+                                'images.volume_package_export',
                                 'images.audio_export',
                             ],
                             validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
@@ -2128,24 +2153,55 @@ describe('HttpImageTransport', () => {
                         issues: [],
                     });
                 }
+                if (url.pathname.endsWith('/image-session-volume-package-export-inspections')) {
+                    return json({
+                        imageId: 'image-package',
+                        revision: 7,
+                        sourceMediaKind: 'SFS',
+                        scopeId: 'content-partition-0',
+                        scopeName: 'Partition 0',
+                        defaultDirectoryName: 'Partition 0 packages',
+                        volumeCount: 1,
+                        exportableCount: 1,
+                        emptyCount: 0,
+                        volumes: [
+                            {
+                                contentId: 'content-volume-0',
+                                name: 'DRUMS',
+                                displayName: 'DRUMS',
+                                partitionIndex: 0,
+                                volumeDirectoryId: 17,
+                                objectCount: 4,
+                                state: 'READY',
+                                packagePath: 'DRUMS.axkvol',
+                            },
+                        ],
+                    });
+                }
                 if (
                     url.pathname.endsWith('/image-session-package-imports') ||
                     url.pathname.endsWith('/image-session-package-exports') ||
+                    url.pathname.endsWith('/image-session-volume-package-exports') ||
                     url.pathname.endsWith('/image-session-audio-exports')
                 ) {
                     const audioExport = url.pathname.endsWith('/image-session-audio-exports');
+                    const volumePackageExport = url.pathname.endsWith('/image-session-volume-package-exports');
                     return json(
                         {
                             jobId: audioExport
                                 ? 'audio-export-job'
-                                : url.pathname.endsWith('exports')
-                                  ? 'export-job'
-                                  : 'import-job',
+                                : volumePackageExport
+                                  ? 'volume-package-export-job'
+                                  : url.pathname.endsWith('exports')
+                                    ? 'export-job'
+                                    : 'import-job',
                             operationId: audioExport
                                 ? 'images.audio_export'
-                                : url.pathname.endsWith('exports')
-                                  ? 'images.package_export'
-                                  : 'images.package_import',
+                                : volumePackageExport
+                                  ? 'images.volume_package_export'
+                                  : url.pathname.endsWith('exports')
+                                    ? 'images.package_export'
+                                    : 'images.package_import',
                             state: 'QUEUED',
                             latestSequence: 1,
                             progress: null,
@@ -2167,6 +2223,7 @@ describe('HttpImageTransport', () => {
         expect(opened).toMatchObject({
             packageImportAvailable: true,
             packageExportAvailable: true,
+            volumePackageExportAvailable: true,
             audioExportAvailable: true,
         });
         const source = serverFile('packages/drums.axkvol');
@@ -2199,6 +2256,15 @@ describe('HttpImageTransport', () => {
                 },
             ),
         ).resolves.toMatchObject({ kind: 'images.package_export', status: 'queued' });
+        await expect(
+            transport.inspectImageVolumePackageExport(opened.sessionId, 'content-partition-0'),
+        ).resolves.toMatchObject({ exportableCount: 1, defaultDirectoryName: 'Partition 0 packages' });
+        await expect(
+            transport.startImageVolumePackageExport(opened.sessionId, 'content-partition-0', {
+                kind: 'DOWNLOAD',
+                directoryName: 'Partition 0 packages',
+            }),
+        ).resolves.toMatchObject({ kind: 'images.volume_package_export', status: 'queued' });
         await expect(
             transport.inspectImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }]),
         ).resolves.toMatchObject({ sfzEligible: true, defaultDirectoryName: 'DRUMS' });
@@ -2244,6 +2310,17 @@ describe('HttpImageTransport', () => {
             ],
             destination: { kind: 'DOWNLOAD', filename: 'DRUMS.axkpkg' },
         });
+        expect(
+            requests.find((request) => request.path.endsWith('image-session-volume-package-export-inspections'))?.body,
+        ).toEqual({ imageId: 'image-package', expectedRevision: 7, scopeId: 'content-partition-0' });
+        expect(requests.find((request) => request.path.endsWith('image-session-volume-package-exports'))?.body).toEqual(
+            {
+                imageId: 'image-package',
+                expectedRevision: 7,
+                scopeId: 'content-partition-0',
+                destination: { kind: 'DOWNLOAD', directoryName: 'Partition 0 packages' },
+            },
+        );
         expect(
             requests.find((request) => request.path.endsWith('image-session-audio-export-inspections'))?.body,
         ).toEqual({

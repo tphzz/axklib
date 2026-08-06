@@ -262,7 +262,10 @@ session alterations and refreshes the retained session only after validation.
 Session package export is a read job. Its `roots` array accepts one to 1,024
 exact volume, Program, Sample Bank, Sample, or Wave Data roots. Object roots
 use the opaque IDs returned by the retained image session; the server resolves
-them under the same revision-bound read lease. A single root receives its
+them under the same revision-bound read lease. A volume root is
+`{"kind":"VOLUME","contentId":"..."}` and uses the volume's opaque content
+ID; the obsolete partition-index and visible-name selector is rejected. A
+single root receives its
 specific package extension. Multiple roots of the same kind keep that typed
 extension; only mixed root kinds produce `.axkpkg`. A `WORKSPACE` destination
 publishes through the normal sandbox. A `DOWNLOAD`
@@ -270,6 +273,19 @@ destination retains the package in private owner-scoped storage and returns an
 authenticated content path with a short expiry. The client streams that
 content and deletes the retained resource when the save completes; expiry is
 only a fallback.
+
+SFS and ISO9660 sessions additionally advertise
+`images.volume_package_export` on partition-like content nodes. First call
+`images.volume_package_export.inspect` with the image ID, expected revision,
+and partition or CD-ROM group `scopeId`. The bounded inspection lists only its
+immediate volumes, reports which are empty, and assigns deterministic package
+paths. The read job builds every nonempty volume against one shared catalog and
+relationship graph but publishes each result as a separate `.axkvol`. It writes
+`volume-packages.axklib.json` beside the packages, skips empty volumes, and
+records per-volume closure failures without discarding successful packages. A
+run with zero successful packages publishes nothing. `WORKSPACE` creates one
+new no-overwrite directory; `DOWNLOAD` returns the same directory as a retained
+TAR for desktop extraction.
 
 File-backed SFS sessions also advertise `images.media_conversion`. Use
 `images.media_conversion.inspect` before starting the read job. The inspection

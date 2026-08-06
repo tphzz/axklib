@@ -24,6 +24,7 @@
         partitionActionsEnabled: boolean;
         packageImportEnabled?: boolean;
         packageExportEnabled?: boolean;
+        volumePackageExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
@@ -45,6 +46,7 @@
         partitionActionsEnabled,
         packageImportEnabled = false,
         packageExportEnabled = false,
+        volumePackageExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         onimageaction,
@@ -253,6 +255,7 @@
                         {partitionActionsEnabled}
                         {packageImportEnabled}
                         {packageExportEnabled}
+                        {volumePackageExportEnabled}
                         {audioExportEnabled}
                         {mediaConversionEnabled}
                         onrequestmenu={requestTreeMenu}
@@ -297,6 +300,11 @@
         onkeydown={(event) => event.stopPropagation()}
     >
         {#if treeMenu.item.kind === 'partition'}
+            {#if volumePackageExportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-volume-packages')}
+                    >Export volume packages…</button
+                >
+            {/if}
             {#if mediaConversionEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-cdrom')}
                     >Export CD-ROM image…</button
@@ -304,6 +312,9 @@
                 {#if partitionActionsEnabled || volumeActionsEnabled}
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
+            {/if}
+            {#if volumePackageExportEnabled && !mediaConversionEnabled && partitionActionsEnabled}
+                <div class="context-menu-separator" role="separator"></div>
             {/if}
             {#if partitionActionsEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-partition')}

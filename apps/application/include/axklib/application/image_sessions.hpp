@@ -82,6 +82,12 @@ struct PreparedImageSessionCommit {
     friend class ImageSessionManager;
 };
 
+struct ImageVolumeScopeIdentity {
+    std::uint8_t partition_index{};
+    std::uint32_t volume_directory_id{};
+    std::string display_name;
+};
+
 struct ImageSessionRead {
     std::string image_id;
     std::uint64_t revision{};
@@ -92,6 +98,7 @@ struct ImageSessionRead {
     std::vector<const ObjectSnapshot *> catalog_objects;
     std::vector<CatalogIssue> catalog_issues;
     std::unordered_map<std::string, std::string> object_keys_by_id;
+    std::unordered_map<std::string, ImageVolumeScopeIdentity> volume_scopes_by_id;
     std::shared_ptr<void> lease;
 };
 
@@ -112,6 +119,11 @@ struct ImageContentItem {
     std::string basis;
     std::string notes;
     std::vector<std::string> details;
+};
+
+struct ImageContentScope {
+    ImageContentItem item;
+    std::vector<ImageContentItem> children;
 };
 
 struct WaveformMetadata {
@@ -363,6 +375,8 @@ class ImageSessionManager {
                                                               std::size_t limit,
                                                               std::optional<std::string_view> cursor = std::nullopt,
                                                               std::optional<std::string_view> parent_id = std::nullopt);
+    [[nodiscard]] Result<ImageContentScope> content_scope(std::string_view image_id, std::string_view owner_id,
+                                                          std::string_view content_id);
     [[nodiscard]] Result<ImagePage<ImageObjectItem>>
     objects(std::string_view image_id, std::string_view owner_id, std::size_t limit,
             std::optional<std::string_view> cursor = std::nullopt,

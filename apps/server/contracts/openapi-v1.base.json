@@ -2210,11 +2210,10 @@
           {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "partitionIndex", "volumeName"],
+            "required": ["kind", "contentId"],
             "properties": {
               "kind": {"const": "VOLUME"},
-              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
-              "volumeName": {"type": "string", "minLength": 1}
+              "contentId": {"type": "string", "minLength": 1}
             }
           },
           {
@@ -2277,6 +2276,170 @@
           "output": {
             "oneOf": [
               {"$ref": "#/components/schemas/FileRef"},
+              {"type": "null"}
+            ]
+          },
+          "download": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/RetainedDownload"},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "ImageSessionVolumePackageExportDestination": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "output"],
+            "properties": {
+              "kind": {"const": "WORKSPACE"},
+              "output": {"$ref": "#/components/schemas/DirectoryRef"}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "directoryName"],
+            "properties": {
+              "kind": {"const": "DOWNLOAD"},
+              "directoryName": {"type": "string", "minLength": 1}
+            }
+          }
+        ]
+      },
+      "ImageSessionVolumePackageExportInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "scopeId"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "scopeId": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageSessionVolumePackageExportInspectionItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contentId", "name", "displayName", "partitionIndex", "volumeDirectoryId", "objectCount", "state", "packagePath"],
+        "properties": {
+          "contentId": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "displayName": {"type": "string", "minLength": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "volumeDirectoryId": {"type": "integer", "minimum": 0},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "state": {"enum": ["READY", "EMPTY"]},
+          "packagePath": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "ImageSessionVolumePackageExportInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "sourceMediaKind", "scopeId", "scopeName", "defaultDirectoryName", "volumeCount", "exportableCount", "emptyCount", "volumes"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "sourceMediaKind": {"enum": ["SFS", "ISO9660"]},
+          "scopeId": {"type": "string", "minLength": 1},
+          "scopeName": {"type": "string", "minLength": 1},
+          "defaultDirectoryName": {"type": "string", "minLength": 1},
+          "volumeCount": {"type": "integer", "minimum": 1},
+          "exportableCount": {"type": "integer", "minimum": 0},
+          "emptyCount": {"type": "integer", "minimum": 0},
+          "volumes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/ImageSessionVolumePackageExportInspectionItem"}
+          }
+        }
+      },
+      "ImageSessionVolumePackageExportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "scopeId", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "scopeId": {"type": "string", "minLength": 1},
+          "destination": {"$ref": "#/components/schemas/ImageSessionVolumePackageExportDestination"}
+        }
+      },
+      "ImageSessionVolumePackageExportError": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageSessionVolumePackageExportResultItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contentId", "name", "displayName", "partitionIndex", "volumeDirectoryId", "objectCount", "status", "packagePath", "packageId", "sizeBytes", "error"],
+        "properties": {
+          "contentId": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "displayName": {"type": "string", "minLength": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "volumeDirectoryId": {"type": "integer", "minimum": 0},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "status": {"enum": ["EXPORTED", "SKIPPED_EMPTY", "FAILED"]},
+          "packagePath": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "null"}
+            ]
+          },
+          "packageId": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {"type": "null"}
+            ]
+          },
+          "sizeBytes": {
+            "oneOf": [
+              {"type": "integer", "minimum": 0},
+              {"type": "null"}
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/ImageSessionVolumePackageExportError"},
+              {"type": "null"}
+            ]
+          }
+        }
+      },
+      "ImageSessionVolumePackageExportResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "scopeId", "volumeCount", "exportedCount", "skippedCount", "failedCount", "reportPath", "volumes", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "scopeId": {"type": "string", "minLength": 1},
+          "volumeCount": {"type": "integer", "minimum": 1},
+          "exportedCount": {"type": "integer", "minimum": 1},
+          "skippedCount": {"type": "integer", "minimum": 0},
+          "failedCount": {"type": "integer", "minimum": 0},
+          "reportPath": {"const": "volume-packages.axklib.json"},
+          "volumes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/ImageSessionVolumePackageExportResultItem"}
+          },
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/DirectoryRef"},
               {"type": "null"}
             ]
           },

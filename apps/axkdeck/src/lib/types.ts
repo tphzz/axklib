@@ -15,6 +15,7 @@ export interface PackageExportObject {
 
 export interface PackageExportVolume {
     kind: 'VOLUME';
+    contentId: string;
     partitionIndex: number;
     volumeName: string;
     name: string;
@@ -45,6 +46,7 @@ export type ImageTreeAction =
     | 'rename-partition'
     | 'import-package'
     | 'export-package'
+    | 'export-volume-packages'
     | 'export-sfz'
     | 'export-cdrom'
     | 'export-floppy';

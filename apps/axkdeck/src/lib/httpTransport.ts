@@ -18,6 +18,8 @@ import type {
     HardDiskCreationProfileId,
     ImageTransport,
     ImageSessionPackageExportDestination,
+    ImageSessionVolumePackageExportDestination,
+    ImageSessionVolumePackageExportInspection,
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
@@ -276,6 +278,21 @@ export class HttpImageTransport implements ImageTransport {
         destination: ImageSessionPackageExportDestination,
     ): Promise<JobState> {
         return this.packages.startImageExport(sessionId, roots, destination);
+    }
+
+    inspectImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumePackageExportInspection> {
+        return this.packages.inspectVolumePackageExport(sessionId, scopeId);
+    }
+
+    startImageVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumePackageExportDestination,
+    ): Promise<JobState> {
+        return this.packages.startVolumePackageExport(sessionId, scopeId, destination);
     }
 
     inspectImageAudioExport(

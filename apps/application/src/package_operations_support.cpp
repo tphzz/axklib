@@ -228,8 +228,9 @@ axk::app::Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &
     }
 }
 
-axk::app::Result<std::vector<axk::PackageRootSelector>>
-parse_session_export_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id) {
+axk::app::Result<std::vector<axk::PackageRootSelector>> parse_session_export_roots(
+    const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
+    const std::unordered_map<std::string, axk::app::ImageVolumeScopeIdentity> &volume_scopes_by_id) {
     try {
         const auto &values = input.at("roots");
         if (!values.is_array() || values.empty() || values.size() > 1024U)
@@ -242,17 +243,18 @@ parse_session_export_roots(const Json &input, const std::unordered_map<std::stri
             axk::PackageRootSelector root;
             std::string identity;
             if (kind == "VOLUME") {
-                const auto partition = value.at("partitionIndex").get<std::uint32_t>();
-                if (partition > std::numeric_limits<std::uint8_t>::max())
-                    return std::unexpected(operation_error("invalid_request", "partitionIndex is out of range"));
-                root.kind = axk::PackageRootKind::volume;
-                root.partition_index = static_cast<std::uint8_t>(partition);
-                root.volume_name = value.at("volumeName").get<std::string>();
-                if (root.volume_name.empty() || value.size() != 3U) {
+                const auto content_id = value.at("contentId").get<std::string>();
+                if (content_id.empty() || value.size() != 2U) {
                     return std::unexpected(
-                        operation_error("invalid_request", "volume roots require partitionIndex and volumeName"));
+                        operation_error("invalid_request", "volume roots require exactly kind and contentId"));
                 }
-                identity = std::format("VOLUME\\0{}\\0{}", partition, root.volume_name);
+                const auto volume = volume_scopes_by_id.find(content_id);
+                if (volume == volume_scopes_by_id.end())
+                    return std::unexpected(operation_error("content_not_found", "package volume does not exist"));
+                root.kind = axk::PackageRootKind::volume;
+                root.partition_index = volume->second.partition_index;
+                root.volume_directory_id = volume->second.volume_directory_id;
+                identity = "VOLUME\\0" + content_id;
             } else {
                 if (kind == "PROGRAM")
                     root.kind = axk::PackageRootKind::prog;

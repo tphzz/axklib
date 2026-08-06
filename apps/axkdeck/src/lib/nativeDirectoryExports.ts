@@ -7,7 +7,7 @@ export interface LocalDirectoryExportDestination {
 
 export function selectLocalDirectoryExportDestination(
     suggestedName: string,
-    exportLabel: 'SFZ' | 'MIDI',
+    exportLabel: 'SFZ' | 'MIDI' | 'Packages',
 ): Promise<LocalDirectoryExportDestination | null> {
     return invoke('select_local_directory_export_destination', { suggestedName, exportLabel });
 }

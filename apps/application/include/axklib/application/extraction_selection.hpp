@@ -52,7 +52,7 @@ struct ExactExportClosure {
                                                             std::set<std::string> wave_data);
 
 void filter_export_plan(ExportPlan &plan, const ExactExportClosure &closure,
-                        const std::set<std::pair<std::uint8_t, std::string>> &whole_volumes = {});
+                        const std::set<std::pair<std::uint8_t, std::uint32_t>> &whole_volumes = {});
 
 std::vector<ExcludedExtractionRelationship> filter_export_plan(ExportPlan &plan, const RelationshipGraph &graph,
                                                                std::string_view scope, std::string_view selector_path,

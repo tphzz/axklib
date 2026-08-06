@@ -33,6 +33,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     waveDataCleanupAvailable: false,
     packageImportAvailable: false,
     packageExportAvailable: false,
+    volumePackageExportAvailable: false,
     audioExportAvailable: false,
     sequenceExportAvailable: false,
     mediaConversionAvailable: false,

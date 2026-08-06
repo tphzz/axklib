@@ -9,6 +9,8 @@ import type {
     ImageSessionAudioExportInspection,
     ImageSessionExportRoot,
     ImageSessionPackageExportDestination,
+    ImageSessionVolumePackageExportDestination,
+    ImageSessionVolumePackageExportInspection,
     ImageSessionPackageImportPlan,
     ImageSessionPackageRename,
     JobState,
@@ -119,6 +121,36 @@ export class HttpPackageOperations {
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.package_export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async inspectVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+    ): Promise<ImageSessionVolumePackageExportInspection> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionVolumePackageExportInspection>(
+            'images.volume_package_export.inspect',
+            { imageId: session.remoteId, expectedRevision: session.revision, scopeId },
+        );
+        if (this.jobs.isJob(result)) {
+            throw new Error('images.volume_package_export.inspect unexpectedly returned a job');
+        }
+        return result;
+    }
+
+    async startVolumePackageExport(
+        sessionId: number,
+        scopeId: string,
+        destination: ImageSessionVolumePackageExportDestination,
+    ): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.volume_package_export',
+            { imageId: session.remoteId, expectedRevision: session.revision, scopeId, destination },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.volume_package_export did not return a job');
         return this.jobs.map(job);
     }
 

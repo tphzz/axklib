@@ -69,7 +69,7 @@ pub(crate) async fn select_local_directory_export_destination(
     {
         return Err("the suggested export folder name is invalid".to_owned());
     }
-    if !matches!(export_label.as_str(), "SFZ" | "MIDI") {
+    if !matches!(export_label.as_str(), "SFZ" | "MIDI" | "Packages") {
         return Err("the directory export kind is unsupported".to_owned());
     }
     let starting_directory = match preferences.lock() {

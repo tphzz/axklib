@@ -92,6 +92,7 @@ struct ProgramExport {
 
 struct VolumeExport {
     PartitionIndex partition;
+    SfsId volume_directory;
     std::string partition_name;
     std::string volume_name;
     std::filesystem::path relative_root;

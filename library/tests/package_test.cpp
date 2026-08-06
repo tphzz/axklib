@@ -17,6 +17,7 @@
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
+#include "axklib/catalog.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
@@ -976,6 +977,103 @@ TEST(PortablePackage, ExportsACompleteSupportedVolumeWithOnePayloadPerDigest) {
     const auto reopened = axk::open_portable_package(volume->archive, "volume.axkvol");
     ASSERT_TRUE(reopened) << reopened.error().message;
     EXPECT_EQ(reopened->nodes.size(), 1U);
+}
+
+TEST(PortablePackage, BuildsIndependentVolumePackagesFromOneBatch) {
+    const auto output_root = publication_root("axklib-package-volume-batch");
+    const auto audio_path = output_root / "tone.wav";
+    const auto source_path = output_root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1200)));
+
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1",
+                                   {single_sample_volume(audio_path, "First", "First Wave", "First Sample"),
+                                    single_sample_volume(audio_path, "Second", "Second Wave", "Second Sample")}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+
+    const std::vector selectors{root(axk::PackageRootKind::volume, "First"),
+                                root(axk::PackageRootKind::volume, "Second")};
+    const auto batch = axk::build_portable_packages(*source, selectors);
+    ASSERT_TRUE(batch) << batch.error().message;
+    ASSERT_EQ(batch->packages.size(), 2U);
+    EXPECT_TRUE(batch->failures.empty());
+    EXPECT_EQ(batch->packages[0].selector_index, 0U);
+    EXPECT_EQ(batch->packages[0].build.package.roots.front().display_name, "First");
+    EXPECT_EQ(batch->packages[0].build.package.nodes.size(), 2U);
+    EXPECT_EQ(batch->packages[1].selector_index, 1U);
+    EXPECT_EQ(batch->packages[1].build.package.roots.front().display_name, "Second");
+    EXPECT_EQ(batch->packages[1].build.package.nodes.size(), 2U);
+    EXPECT_NE(batch->packages[0].build.package.package_id, batch->packages[1].build.package.package_id);
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PortablePackage, ExactVolumeDirectorySelectorSeparatesDuplicateVisibleNames) {
+    const auto output_root = publication_root("axklib-package-exact-volume-batch");
+    const auto audio_path = output_root / "tone.wav";
+    const auto source_path = output_root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1200)));
+
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1",
+                                   {single_sample_volume(audio_path, "Duplicate", "First Wave", "First Sample"),
+                                    single_sample_volume(audio_path, "Duplicate", "Second Wave", "Second Sample")}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
+    const auto source = axk::open_media(source_path);
+    ASSERT_TRUE(source) << source.error().message;
+    const auto *container = std::get_if<axk::Container>(&source->storage());
+    ASSERT_NE(container, nullptr);
+    const auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    std::set<std::uint32_t> directory_ids;
+    for (const auto &object : catalog->objects) {
+        if (object.placement && object.placement->volume_name == "Duplicate")
+            directory_ids.insert(object.placement->volume_directory.value);
+    }
+    ASSERT_EQ(directory_ids.size(), 2U);
+
+    std::vector<axk::PackageRootSelector> selectors;
+    for (const auto directory_id : directory_ids) {
+        auto selector = root(axk::PackageRootKind::volume, {});
+        selector.volume_directory_id = directory_id;
+        selectors.push_back(std::move(selector));
+    }
+    const auto batch = axk::build_portable_packages(*source, selectors);
+    ASSERT_TRUE(batch) << batch.error().message;
+    ASSERT_EQ(batch->packages.size(), 2U);
+    EXPECT_TRUE(batch->failures.empty());
+    const auto has_node = [](const axk::PackageBuild &build, std::string_view name) {
+        return std::ranges::contains(build.package.nodes, name, &axk::PackageNode::name);
+    };
+    EXPECT_NE(has_node(batch->packages[0].build, "First Wave"), has_node(batch->packages[1].build, "First Wave"));
+    EXPECT_NE(has_node(batch->packages[0].build, "Second Wave"), has_node(batch->packages[1].build, "Second Wave"));
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PortablePackage, VolumeBatchPreservesSuccessfulPackagesWhenAnotherSelectorFails) {
+    auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
+    ASSERT_TRUE(image) << image.error().message;
+    const axk::MediaContainer media{std::move(*image)};
+    auto valid = root(axk::PackageRootKind::volume, "FAT root");
+    auto missing = valid;
+    missing.volume_directory_id = std::numeric_limits<std::uint32_t>::max();
+    const std::vector selectors{std::move(valid), std::move(missing)};
+
+    const auto batch = axk::build_portable_packages(media, selectors);
+    ASSERT_TRUE(batch) << batch.error().message;
+    ASSERT_EQ(batch->packages.size(), 1U);
+    EXPECT_EQ(batch->packages.front().selector_index, 0U);
+    EXPECT_EQ(batch->packages.front().build.required_extension, ".axkvol");
+    ASSERT_EQ(batch->failures.size(), 1U);
+    EXPECT_EQ(batch->failures.front().selector_index, 1U);
+    EXPECT_EQ(batch->failures.front().error.code, axk::ErrorCode::object_missing);
 }
 
 TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure) {

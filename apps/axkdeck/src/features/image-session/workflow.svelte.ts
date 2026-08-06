@@ -9,6 +9,7 @@ import type { DeletionWorkflow } from '../deletion/workflow.svelte';
 import type { PickerController } from '../dialogs/picker';
 import type { ExportCompanionRetry, ExportWorkflow } from '../export/workflow.svelte';
 import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
+import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
@@ -23,6 +24,7 @@ interface SessionCollaborators {
     audition: AuditionWorkflow;
     mutation: MutationWorkflow;
     exports: ExportWorkflow;
+    volumePackages: VolumePackageExportWorkflow;
     mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
     deletion: DeletionWorkflow;
@@ -58,6 +60,7 @@ export class ImageSessionWorkflow {
     waveDataCleanupAvailable = $state(false);
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
+    volumePackageExportAvailable = $state(false);
     audioExportAvailable = $state(false);
     sequenceExportAvailable = $state(false);
     mediaConversionAvailable = $state(false);
@@ -297,6 +300,7 @@ export class ImageSessionWorkflow {
         this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
+        this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
         this.audioExportAvailable = opened.audioExportAvailable;
         this.sequenceExportAvailable = opened.sequenceExportAvailable;
         this.mediaConversionAvailable = opened.mediaConversionAvailable;
@@ -333,6 +337,7 @@ export class ImageSessionWorkflow {
         if (this.sessionId === null) return;
         const collaborators = this.requireCollaborators();
         collaborators.exports.dispose();
+        collaborators.volumePackages.dispose();
         collaborators.mediaExports.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
@@ -345,6 +350,7 @@ export class ImageSessionWorkflow {
         this.waveDataCleanupAvailable = false;
         this.packageImportAvailable = false;
         this.packageExportAvailable = false;
+        this.volumePackageExportAvailable = false;
         this.audioExportAvailable = false;
         this.sequenceExportAvailable = false;
         this.mediaConversionAvailable = false;

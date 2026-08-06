@@ -3,6 +3,7 @@ import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
     ImageSessionAudioExportInspection,
+    ImageSessionVolumePackageExportInspection,
     ImageSessionMediaConversionInspection,
     AudioImportCapabilities,
     AuditionBundleDescriptor,
@@ -99,6 +100,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startImagePackageExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectImageVolumePackageExport(): Promise<ImageSessionVolumePackageExportInspection> {
+        return this.unavailable();
+    }
+    startImageVolumePackageExport(): Promise<JobState> {
         return this.unavailable();
     }
     inspectImageAudioExport(): Promise<ImageSessionAudioExportInspection> {

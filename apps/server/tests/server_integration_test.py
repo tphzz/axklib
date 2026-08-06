@@ -1593,6 +1593,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.package.export",
                 "images.audio_export",
                 "images.sequence_export",
+                "images.volume_package_export",
                 "images.media_conversion",
                 "images.alter.volumes",
                 "images.alter.partitions",
