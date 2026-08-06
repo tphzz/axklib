@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -5,6 +8,12 @@ import { clientUploadLocation, serverFileLocation } from '../storageLocations';
 import type { ClientUploadSource } from '../clientUploadSource';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
+
+const audioImportRowsSource = readFileSync(resolve(process.cwd(), 'src/lib/components/AudioImportRows.svelte'), 'utf8');
+const audioSamplerSettingsSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/AudioSamplerSettings.svelte'),
+    'utf8',
+);
 
 const capabilities: AudioImportCapabilities = {
     supportedSampleRates: [22_050, 44_100, 48_000],
@@ -67,6 +76,13 @@ function transport(): ImageTransport {
 }
 
 describe('AudioImportDialog', () => {
+    it('keeps sampler fields aligned while reserving clearance for the scrollbar', () => {
+        expect(audioSamplerSettingsSource).toContain('grid-template-columns: repeat(7, minmax(0, 1fr));');
+        expect(audioSamplerSettingsSource).not.toContain('repeat(auto-fit');
+        expect(audioImportRowsSource).toContain('padding-right: 12px;');
+        expect(audioImportRowsSource).toContain('scrollbar-gutter: stable;');
+    });
+
     it('rejects an oversized local selection before staging any uploads', async () => {
         const imageTransport = transport();
         imageTransport.audioImportCapabilities = vi.fn().mockResolvedValue({
@@ -170,7 +186,63 @@ describe('AudioImportDialog', () => {
         expect(imageTransport.releaseClientUpload).not.toHaveBeenCalled();
     });
 
-    it('aligns mixed mono and stereo files in stable channel columns', async () => {
+    it('waits for the complete batch before naming or validating inspected rows', async () => {
+        const inspections = new Map<string, (value: AudioSourceInfo) => void>();
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn(
+            (source) =>
+                new Promise<AudioSourceInfo>((resolve) => {
+                    inspections.set(source.displayName, resolve);
+                }),
+        );
+        const first = serverFileLocation({ rootId: 'workspace', relativePath: 'First.wav' }, 'First.wav');
+        const second = serverFileLocation({ rootId: 'workspace', relativePath: 'Second.wav' }, 'Second.wav');
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [first, second],
+                target: { partitionIndex: 0, volumeName: 'Batch' },
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await waitFor(() => expect(imageTransport.inspectAudio).toHaveBeenCalledTimes(2));
+        expect(screen.getByRole('progressbar', { name: 'Inspecting audio files' })).toBeTruthy();
+        expect(screen.getByText('Inspecting 0 of 2 files')).toBeTruthy();
+
+        inspections.get('First.wav')!(
+            sourceInfo({
+                sourceFormat: 'WAV',
+                sourceSubtype: 'PCM_16',
+                channels: 1,
+                sourceSampleWidthBits: 16,
+                sampleWidthConverted: false,
+            }),
+        );
+        await waitFor(() => expect(screen.getByText('Inspecting 1 of 2 files')).toBeTruthy());
+        expect(screen.queryByText('Sample names must be 1-16 printable ASCII characters.')).toBeNull();
+        expect(screen.queryByLabelText('Sample name for First.wav')).toBeNull();
+        expect((screen.getByRole('button', { name: 'Import 2 files' }) as HTMLButtonElement).disabled).toBe(true);
+
+        inspections.get('Second.wav')!(
+            sourceInfo({
+                sourceFormat: 'WAV',
+                sourceSubtype: 'PCM_16',
+                channels: 1,
+                sourceSampleWidthBits: 16,
+                sampleWidthConverted: false,
+            }),
+        );
+        expect(((await screen.findByLabelText('Sample name for First.wav')) as HTMLInputElement).value).toBe('First');
+        expect((screen.getByLabelText('Sample name for Second.wav') as HTMLInputElement).value).toBe('Second');
+        expect(screen.queryByRole('progressbar', { name: 'Inspecting audio files' })).toBeNull();
+        expect(screen.queryByText('Sample names must be 1-16 printable ASCII characters.')).toBeNull();
+    });
+
+    it('renders one responsive card per mono or stereo file', async () => {
         const imageTransport = transport();
         imageTransport.uploadClientFile = vi.fn(async (file: ClientUploadSource, _kind, onProgress) => {
             onProgress?.(file.size, file.size);
@@ -213,23 +285,29 @@ describe('AudioImportDialog', () => {
         });
 
         expect(await screen.findAllByDisplayValue('Mono voice recor')).toHaveLength(2);
-        expect(screen.getByRole('columnheader', { name: 'Source file' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Target rate' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Sample name' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Wave data (mono/left)' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Wave data (right)' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Root key' })).toBeTruthy();
-        expect(screen.getByRole('columnheader', { name: 'Status' })).toBeTruthy();
+        const monoCard = screen.getByRole('group', { name: `Audio import file ${monoFilename}` });
+        expect(within(monoCard).getByRole('button', { name: `Play ${monoFilename}` })).toBeTruthy();
+        expect(within(monoCard).getByLabelText(`Wave data (mono/left) for ${monoFilename}`)).toBeTruthy();
+        expect(within(monoCard).queryByLabelText(`Wave data (right) for ${monoFilename}`)).toBeNull();
+        expect(within(monoCard).getAllByLabelText(`Root key for ${monoFilename}`)).toHaveLength(1);
+        const monoDetailsButton = within(monoCard).getByRole('button', {
+            name: `Import details for ${monoFilename}`,
+        });
+        expect(monoDetailsButton.classList.contains('has-adjustments')).toBe(false);
 
-        const monoRow = screen.getByTitle(monoFilename).closest('tr');
-        expect(monoRow).not.toBeNull();
-        expect(within(monoRow!).getByLabelText('Wave data (mono/left)')).toBeTruthy();
-        expect(within(monoRow!).getByLabelText('No right wave data').textContent).toBe('—');
+        const stereoCard = screen.getByRole('group', { name: 'Audio import file Stereo pad.wav' });
+        expect(within(stereoCard).getByLabelText('Wave data (mono/left) for Stereo pad.wav')).toBeTruthy();
+        expect(within(stereoCard).getByLabelText('Wave data (right) for Stereo pad.wav')).toBeTruthy();
+        expect(within(stereoCard).getAllByLabelText('Root key for Stereo pad.wav')).toHaveLength(1);
+        expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
 
-        const stereoRow = screen.getByTitle('Stereo pad.wav').closest('tr');
-        expect(stereoRow).not.toBeNull();
-        expect(within(stereoRow!).getByLabelText('Wave data (mono/left)')).toBeTruthy();
-        expect(within(stereoRow!).getByLabelText('Wave data (right)')).toBeTruthy();
+        await fireEvent.click(monoDetailsButton);
+        expect(within(monoCard).getByText('Initial value sources')).toBeTruthy();
+        expect(within(monoCard).getAllByText('A-series default (no supported WAV value was applied)')).toHaveLength(3);
+
+        await fireEvent.click(within(stereoCard).getByRole('button', { name: 'Import details for Stereo pad.wav' }));
+        expect(within(monoCard).queryByText('Initial value sources')).toBeNull();
+        expect(within(stereoCard).getByText('Initial value sources')).toBeTruthy();
     });
 
     it('reviews stereo names and releases the staged upload after one commit', async () => {
@@ -255,7 +333,9 @@ describe('AudioImportDialog', () => {
         expect(screen.getByDisplayValue('Stereo piano-R')).toBeTruthy();
         expect(screen.getByText('FLAC PCM_24 · Stereo · 48,000 Hz · 24 → 16-bit TPDF · 2.00 s')).toBeTruthy();
 
-        await fireEvent.input(screen.getByLabelText('Root key'), { target: { value: '69' } });
+        await fireEvent.input(screen.getByLabelText('Root key for Stereo piano.flac'), {
+            target: { value: '69' },
+        });
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
 
         await waitFor(() =>
@@ -313,6 +393,11 @@ describe('AudioImportDialog', () => {
                         message: 'An additional WAV sampler loop was ignored.',
                         fatal: false,
                     },
+                    {
+                        code: 'wav_sampler_loop_unsupported',
+                        message: 'An additional WAV sampler loop was ignored.',
+                        fatal: false,
+                    },
                 ],
             }),
         );
@@ -329,7 +414,8 @@ describe('AudioImportDialog', () => {
             },
         });
 
-        expect(await screen.findByLabelText('Sampler settings for Mapped.wav')).toBeTruthy();
+        const card = await screen.findByRole('group', { name: 'Audio import file Mapped.wav' });
+        expect(await within(card).findByLabelText('Sampler settings for Mapped.wav')).toBeTruthy();
         expect(screen.getByDisplayValue('-63')).toBeTruthy();
         expect(screen.getByDisplayValue('70000')).toBeTruthy();
         const playbackMode = screen.getByRole('combobox', {
@@ -340,9 +426,23 @@ describe('AudioImportDialog', () => {
             name: 'Forward loop',
         }) as HTMLOptionElement;
         expect(forwardLoopOption.selected).toBe(true);
-        expect(screen.getByText('Pitch: WAV smpl')).toBeTruthy();
-        expect(screen.getByText('Ranges: WAV inst')).toBeTruthy();
-        expect(screen.getByText('An additional WAV sampler loop was ignored.')).toBeTruthy();
+        expect(within(card).queryByText('Initial value sources')).toBeNull();
+        expect(within(card).queryByText('An additional WAV sampler loop was ignored.')).toBeNull();
+
+        const detailsButton = within(card).getByRole('button', { name: 'Import details for Mapped.wav' });
+        expect(detailsButton.getAttribute('aria-expanded')).toBe('false');
+        expect(detailsButton.classList.contains('has-adjustments')).toBe(true);
+        await fireEvent.click(detailsButton);
+
+        expect(detailsButton.getAttribute('aria-expanded')).toBe('true');
+        expect(within(card).getByText('Initial value sources')).toBeTruthy();
+        expect(within(card).getByText('Pitch (root key and fine tune)')).toBeTruthy();
+        expect(within(card).getByText('Key and velocity ranges')).toBeTruthy();
+        expect(within(card).getByText('Playback and loop')).toBeTruthy();
+        expect(within(card).getAllByText('WAV sampler metadata (smpl chunk)')).toHaveLength(2);
+        expect(within(card).getByText('WAV instrument metadata (inst chunk)')).toBeTruthy();
+        expect(within(card).getByText('Import adjustments')).toBeTruthy();
+        expect(within(card).getAllByText('An additional WAV sampler loop was ignored.')).toHaveLength(2);
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
         await waitFor(() =>

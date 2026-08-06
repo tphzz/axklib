@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onDestroy, untrack } from 'svelte';
     import { defaultAudioImportNames, defaultAudioSamplerSettings, validSamplerName } from '../audioImport';
+    import { AudioImportAuditionController, type AudioImportAuditionState } from '../audio/audioImportAudition';
     import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
     import { modal } from '../modal';
     import type { FileLocation, InputFileLocation } from '../storageLocations';
@@ -41,14 +42,18 @@
     }: Props = $props();
     let rows = $state<AudioImportRow[]>([]);
     let busy = $state(false);
+    let batchStaging = $state(false);
     let generalError = $state('');
     let stagingError = $state('');
     let nextRowId = 0;
     let audioImportCapabilities = $state<AudioImportCapabilities>();
+    let auditionState = $state<AudioImportAuditionState>({ rowId: null, status: 'idle', error: '' });
     let disposed = false;
     let stagingPromise: Promise<void> = Promise.resolve();
     const abortController = new AbortController();
+    const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
     const validationErrors = $derived.by(() => validateRows(rows));
+    const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
             rows.every((row) => row.status === 'ready') &&
@@ -73,7 +78,6 @@
                 sampleName: '',
                 waveformNames: [],
                 ...defaultAudioSamplerSettings,
-                settingsExpanded: false,
                 inspectionRevision: 0,
                 progress: 0,
                 status: 'waiting',
@@ -88,6 +92,7 @@
     onDestroy(() => {
         disposed = true;
         abortController.abort();
+        void auditionController.dispose();
         if (!busy) void stagingPromise.finally(() => releaseUploads());
     });
 
@@ -120,7 +125,7 @@
                 inspection,
                 targetSampleRate: inspection.outputSampleRate,
                 ...editableSamplerSettings(inspection),
-                status: 'ready',
+                status: 'inspected',
             });
         } catch (error) {
             if (!abortController.signal.aborted) {
@@ -141,26 +146,24 @@
             loopMode: defaults.loopMode,
             loopStartFrame: defaults.loopStartFrame,
             loopLengthFrames: defaults.loopLengthFrames,
-            settingsExpanded:
-                inspection.issues.some((issue) => issue.fatal === false) ||
-                defaults.pitchSource !== 'DEFAULT' ||
-                defaults.rangeSource !== 'DEFAULT' ||
-                defaults.loopSource !== 'DEFAULT',
         };
     }
 
     async function stageFiles(): Promise<void> {
         if (rows.length === 0) return;
+        batchStaging = true;
         try {
             audioImportCapabilities = await transport.audioImportCapabilities();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             rows = rows.map((row) => ({ ...row, status: 'failed', error: message }));
+            batchStaging = false;
             return;
         }
         const uploadCount = rows.filter((row) => !isWorkspaceFile(row.candidate)).length;
         if (uploadCount > audioImportCapabilities.maximumUploads) {
             stagingError = `This server can stage at most ${audioImportCapabilities.maximumUploads} local files at once; ${uploadCount} were selected.`;
+            batchStaging = false;
             return;
         }
         const ids = rows.map((row) => row.id);
@@ -171,11 +174,16 @@
         if (disposed || abortController.signal.aborted) return;
         const usedSamples = new Set(existingSampleNames.map((name) => name.toLocaleLowerCase()));
         const usedWaveforms = new Set(existingWaveformNames.map((name) => name.toLocaleLowerCase()));
-        rows.forEach((row) => {
-            if (!row.inspection?.valid) return;
-            const names = defaultAudioImportNames(row.fileName, row.inspection, usedSamples, usedWaveforms);
-            replaceRow(row.id, names);
+        rows = rows.map((row) => {
+            if (row.status !== 'inspected' || !row.inspection) return row;
+            if (!row.inspection.valid) return { ...row, status: 'ready' };
+            return {
+                ...row,
+                ...defaultAudioImportNames(row.fileName, row.inspection, usedSamples, usedWaveforms),
+                status: 'ready',
+            };
         });
+        batchStaging = false;
     }
 
     function validateRows(items: AudioImportRow[]): string[] {
@@ -270,6 +278,7 @@
     async function changeTargetSampleRate(row: AudioImportRow, event: Event): Promise<void> {
         const targetSampleRate = Number((event.currentTarget as HTMLSelectElement).value);
         if (!row.source || !Number.isInteger(targetSampleRate) || row.targetSampleRate === targetSampleRate) return;
+        auditionController.stop(row.id);
         const revision = row.inspectionRevision + 1;
         replaceRow(row.id, { targetSampleRate, inspectionRevision: revision, status: 'checking', error: '' });
         try {
@@ -298,12 +307,14 @@
         abortController.abort();
         busy = true;
         await stagingPromise;
+        await auditionController.dispose();
         await releaseUploads();
         oncancel();
     }
 
     async function removeRow(row: AudioImportRow): Promise<void> {
         if (busy || !['ready', 'failed'].includes(row.status)) return;
+        auditionController.stop(row.id);
         replaceRow(row.id, { status: 'removing' });
         if (row.upload) await transport.releaseClientUpload(row.upload).catch(() => undefined);
         rows = rows.filter((candidate) => candidate.id !== row.id);
@@ -315,6 +326,7 @@
 
     async function commit(): Promise<void> {
         if (!ready || busy) return;
+        auditionController.stop();
         busy = true;
         generalError = '';
         try {
@@ -341,6 +353,42 @@
             generalError = error instanceof Error ? error.message : String(error);
             busy = false;
         }
+    }
+
+    function updateRow(id: number, update: Partial<AudioImportRow>): void {
+        if (
+            'loopMode' in update ||
+            'loopStartFrame' in update ||
+            'loopLengthFrames' in update ||
+            'targetSampleRate' in update
+        ) {
+            auditionController.stop(id);
+        }
+        replaceRow(id, update);
+    }
+
+    async function loadAuditionBlob(row: AudioImportRow): Promise<Blob> {
+        if (isWorkspaceFile(row.candidate)) return (await transport.downloadFile(row.candidate)).blob;
+        return row.candidate.readChunk(0, row.candidate.size);
+    }
+
+    function audition(row: AudioImportRow): void {
+        if (auditionState.rowId === row.id && ['preparing', 'playing'].includes(auditionState.status)) {
+            auditionController.stop(row.id);
+            return;
+        }
+        if (!row.inspection || row.targetSampleRate === undefined) return;
+        void auditionController.play({
+            rowId: row.id,
+            loadBlob: () => loadAuditionBlob(row),
+            timeline: {
+                frameCount: row.inspection!.projectedOutputFrameCount,
+                sampleRate: row.targetSampleRate!,
+                loopMode: row.loopMode,
+                loopStartFrame: row.loopStartFrame,
+                loopLengthFrames: row.loopLengthFrames,
+            },
+        });
     }
 </script>
 
@@ -377,14 +425,23 @@
                 {#if stagingError}
                     <p class="dialog-error" role="alert">{stagingError}</p>
                 {:else}
+                    {#if batchStaging}
+                        <div class="inspection-progress">
+                            <span>Inspecting {inspectedCount} of {rows.length} files</span>
+                            <progress aria-label="Inspecting audio files" value={inspectedCount} max={rows.length}
+                            ></progress>
+                        </div>
+                    {/if}
                     <AudioImportRows
                         {rows}
                         {validationErrors}
                         capabilities={audioImportCapabilities}
                         {busy}
+                        audition={auditionState}
                         onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
-                        onupdate={replaceRow}
+                        onupdate={updateRow}
                         onremove={(row) => void removeRow(row)}
+                        onaudition={audition}
                     />
                 {/if}
             {/if}
@@ -419,6 +476,17 @@
         flex-direction: column;
         padding: 12px;
         gap: 10px;
+    }
+    .inspection-progress {
+        display: grid;
+        gap: 5px;
+        color: var(--color-text-muted);
+        font-size: 11px;
+    }
+    .inspection-progress progress {
+        width: 100%;
+        height: 4px;
+        accent-color: var(--color-accent);
     }
     @media (max-width: 900px) {
         .audio-import-dialog {

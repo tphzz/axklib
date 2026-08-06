@@ -204,14 +204,20 @@ produce a much smaller Yamaha Wave Data object.
 
 Audio inspection reports `samplerDefaults` in addition to storage projections.
 For WAV input, axklib maps a usable `smpl` unity note, pitch fraction, and
-forward infinite loop to the A-series root key, fine tune, and forward-loop
+single forward loop to the A-series root key, fine tune, and forward-loop
 window. Loop endpoints in `smpl` are inclusive; axklib converts them to the
 A-series start/length representation and rescales the boundaries when the
-audio is resampled. A WAV `inst` chunk supplies root key and fine tune only when
-`smpl` does not, and supplies the Sample key and velocity ranges. `smpl` wins a
-pitch conflict. Unsupported multiple, finite, backward, or alternating loops
-are not approximated: inspection reports a non-fatal issue and defaults to the
-hardware-proven forward one-shot mode.
+audio is resampled. A nonzero `smpl` repeat count is normalized to the A-series
+indefinite forward-loop mode and reported as the non-fatal
+`wav_sampler_loop_repeat_count_normalized` adjustment. The range is retained
+because A-series Samples cannot represent a finite repeat count but can safely
+represent the forward loop itself.
+
+A WAV `inst` chunk supplies root key and fine tune only when `smpl` does not,
+and supplies the Sample key and velocity ranges. `smpl` wins a pitch conflict.
+Multiple, backward, alternating, malformed, out-of-range, or resampling-empty
+loops are not approximated: inspection reports a non-fatal issue and defaults
+to the hardware-proven forward one-shot mode.
 
 Files without usable sampler metadata also default to forward one-shot. The
 inspection result records `pitchSource`, `rangeSource`, and `loopSource`, so a

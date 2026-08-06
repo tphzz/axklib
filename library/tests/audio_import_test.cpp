@@ -213,6 +213,21 @@ TEST(WavSamplerMetadata, MapsInfiniteForwardSmplLoopAndPitchToResampledAseriesSe
     EXPECT_TRUE(metadata->issues.empty());
 }
 
+TEST(WavSamplerMetadata, NormalizesFiniteForwardSmplLoopToAseriesForwardPlayback) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 1> loops{{{0U, 0U, 599U, 1U}}};
+    axk::MemoryReader reader{sampler_wav(60U, 0U, loops)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 600U, 44'100U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(metadata->settings.loop_start_frame, 0U);
+    EXPECT_EQ(metadata->settings.loop_length_frames, 600U);
+    EXPECT_EQ(metadata->settings.loop_source, "WAV_SMPL");
+    ASSERT_EQ(metadata->issues.size(), 1U);
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_loop_repeat_count_normalized");
+    EXPECT_FALSE(metadata->issues.front().fatal);
+}
+
 TEST(WavSamplerMetadata, UsesInstPitchAndRangesWhenSmplPitchIsUnavailable) {
     constexpr std::array<std::array<std::uint32_t, 4>, 0> loops{};
     constexpr std::array<std::int8_t, 7> instrument{57, -12, 3, 24, 96, 10, 110};

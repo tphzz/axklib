@@ -197,10 +197,14 @@ Result<std::optional<SmplPitch>> parse_smpl(const RandomAccessReader &reader, co
     const auto start = u32(std::span{loop}.subspan<8U, 4U>(), order);
     const auto inclusive_end = u32(std::span{loop}.subspan<12U, 4U>(), order);
     const auto play_count = u32(std::span{loop}.subspan<20U, 4U>(), order);
-    if (type != 0U || play_count != 0U || start > inclusive_end || inclusive_end >= source_frames) {
+    if (type != 0U || start > inclusive_end || inclusive_end >= source_frames) {
         warning(metadata, "wav_sampler_loop_unsupported",
-                "WAV sampler loop is finite, directional, or out of range; imported Sample will use one-shot playback");
+                "WAV sampler loop is directional or out of range; imported Sample will use one-shot playback");
         return pitch;
+    }
+    if (play_count != 0U) {
+        warning(metadata, "wav_sampler_loop_repeat_count_normalized",
+                "WAV sampler loop has a finite repeat count; imported Sample will use an indefinite forward loop");
     }
     const auto output_start = scale_boundary(start, source_rate, output_rate);
     const auto output_end = scale_boundary(static_cast<std::uint64_t>(inclusive_end) + 1U, source_rate, output_rate);

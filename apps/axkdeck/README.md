@@ -381,11 +381,21 @@ storage location, or choose files from **This computer** and upload them. Audio
 files can also be dragged onto the active workspace or a writable volume in the
 Volumes sidebar. All three entry points use the same inspection,
 collision-resistant Sample/Wave Data naming, and review flow. Axkdeck stages at
-most three files concurrently and shows the source format, sampler conversion,
-generated names, and root key before changing the image. One accepted batch is
-applied as one atomic image alteration. Mono input creates one standalone
-Sample (SBNK) and one Wave Data (SMPL) object; stereo input creates one Sample
-linked to left and right Wave Data objects.
+most three files concurrently and shows determinate batch-inspection progress.
+Generated names are assigned in source order only after the complete batch has
+been inspected, so partially prepared rows are not presented as validation
+errors. The review cards show the source format, sampler conversion, generated
+names, sampler settings, and non-fatal metadata adjustments before changing the
+image. One accepted batch is applied as one atomic image alteration. Mono input
+creates one standalone Sample (SBNK) and one Wave Data (SMPL) object; stereo
+input creates one Sample linked to left and right Wave Data objects.
+
+Each prepared card has a play/stop action beside its source filename. This is a
+client-side source preview that applies the card's current one-shot or forward
+loop fields; it does not run the server's final conversion pipeline. Very short
+one-shots use the same bounded 500 ms repeat schedule as Wave Data auditioning,
+so single-cycle files remain audible. Preview decode failures are row-local and
+do not invalidate an otherwise importable file.
 
 Wave Data auditioning uses the server's bounded HTTP range resource to assemble
 one complete WAV before playback. The browser decodes that WAV off the audio

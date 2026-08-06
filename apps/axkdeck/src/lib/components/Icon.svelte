@@ -14,6 +14,7 @@
         | 'grid'
         | 'hard-drive'
         | 'home'
+        | 'info'
         | 'layers'
         | 'list'
         | 'lock'
@@ -79,6 +80,8 @@
         <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 13h18" /><circle cx="17" cy="16" r="1" />
     {:else if name === 'home'}
         <path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" />
+    {:else if name === 'info'}
+        <circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" />
     {:else if name === 'chevron'}
         <path d="m9 18 6-6-6-6" />
     {:else if name === 'music'}

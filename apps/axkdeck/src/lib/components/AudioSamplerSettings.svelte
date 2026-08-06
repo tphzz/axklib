@@ -13,12 +13,6 @@
     function numberValue(event: Event): number {
         return (event.currentTarget as HTMLInputElement).valueAsNumber;
     }
-
-    function sourceLabel(source: string): string {
-        if (source === 'WAV_SMPL') return 'WAV smpl';
-        if (source === 'WAV_INST') return 'WAV inst';
-        return 'A-series default';
-    }
 </script>
 
 <div class="sampler-settings" aria-label={`Sampler settings for ${row.fileName}`}>
@@ -145,16 +139,6 @@
             </label>
         {/if}
     </div>
-    {#if row.inspection}
-        <div class="settings-sources">
-            <span>Pitch: {sourceLabel(row.inspection.samplerDefaults.pitchSource)}</span>
-            <span>Ranges: {sourceLabel(row.inspection.samplerDefaults.rangeSource)}</span>
-            <span>Playback: {sourceLabel(row.inspection.samplerDefaults.loopSource)}</span>
-        </div>
-        {#each row.inspection.issues.filter((issue) => issue.fatal === false) as issue}
-            <p class="settings-warning" role="status">{issue.message}</p>
-        {/each}
-    {/if}
 </div>
 
 <style>
@@ -165,7 +149,7 @@
     }
     .settings-fields {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        grid-template-columns: repeat(7, minmax(0, 1fr));
         gap: 9px 12px;
     }
     label {
@@ -211,17 +195,19 @@
         font-size: 11px;
         white-space: nowrap;
     }
-    .settings-sources {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px 18px;
-        color: var(--color-text-muted);
-        font-size: 11px;
+    @media (max-width: 1120px) {
+        .settings-fields {
+            grid-template-columns: repeat(4, minmax(130px, 1fr));
+        }
     }
-    .settings-warning {
-        margin: 0;
-        color: var(--color-warning);
-        font-size: 11px;
-        line-height: 1.4;
+    @media (max-width: 740px) {
+        .settings-fields {
+            grid-template-columns: repeat(2, minmax(130px, 1fr));
+        }
+    }
+    @media (max-width: 460px) {
+        .settings-fields {
+            grid-template-columns: minmax(0, 1fr);
+        }
     }
 </style>

@@ -22,8 +22,7 @@ export interface AudioImportRow {
     loopMode: 1 | 4;
     loopStartFrame: number;
     loopLengthFrames: number;
-    settingsExpanded: boolean;
     progress: number;
-    status: 'waiting' | 'uploading' | 'checking' | 'ready' | 'failed' | 'removing';
+    status: 'waiting' | 'uploading' | 'checking' | 'inspected' | 'ready' | 'failed' | 'removing';
     error: string;
 }
