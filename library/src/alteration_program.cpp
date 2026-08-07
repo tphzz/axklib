@@ -8,6 +8,7 @@
 #include <map>
 #include <ranges>
 #include <set>
+#include <span>
 #include <tuple>
 
 #include "axklib/bytes.hpp"
@@ -23,6 +24,63 @@ bool ascii_case_equal(std::string_view left, std::string_view right) noexcept {
     return left.size() == right.size() && std::ranges::equal(left, right, [](unsigned char lhs, unsigned char rhs) {
                return std::tolower(lhs) == std::tolower(rhs);
            });
+}
+
+Result<std::map<std::string, std::vector<SfsId>>>
+sample_bank_memberships(const std::vector<CategoryObject> &sample_banks) {
+    std::map<std::string, std::vector<SfsId>> result;
+    for (const auto &row : sample_banks) {
+        const auto *sample_bank = std::get_if<CurrentSbac>(&row.decoded.payload);
+        if (sample_bank == nullptr || sample_bank->active_slot_count > sample_bank->maximum_slot_count ||
+            sample_bank->slots.size() != sample_bank->active_slot_count) {
+            return std::unexpected{transaction_error("Sample Bank membership is unreadable")};
+        }
+        for (const auto &slot : sample_bank->slots)
+            result[slot.name].push_back(row.id);
+    }
+    return result;
+}
+
+Result<void> detach_sample_bank_members(TransactionState &state, MutablePartition &partition,
+                                        const std::vector<CategoryObject> &sample_banks,
+                                        const std::map<std::string, SfsId> &member_ids, PartitionIndex partition_index,
+                                        const CancellationToken &cancellation) {
+    constexpr std::size_t slot_base = 0x14cU;
+    constexpr std::size_t slot_size = 0x14U;
+    for (const auto &row : sample_banks) {
+        const auto *sample_bank = std::get_if<CurrentSbac>(&row.decoded.payload);
+        const auto removed = std::ranges::count_if(
+            sample_bank->slots, [&](const SbacSlot &slot) { return member_ids.contains(slot.name); });
+        if (removed == 0)
+            continue;
+        auto payload = row.payload;
+        std::size_t write_index{};
+        for (const auto &slot : sample_bank->slots) {
+            if (member_ids.contains(slot.name))
+                continue;
+            std::array<std::byte, slot_size> slot_bytes{};
+            const auto source = std::span{payload}.subspan(slot.offset, slot_size);
+            const auto target = std::span{payload}.subspan(slot_base + write_index * slot_size, slot_size);
+            std::ranges::copy(source, slot_bytes.begin());
+            std::ranges::copy(slot_bytes, target.begin());
+            ++write_index;
+        }
+        const auto old_slot_end = slot_base + sample_bank->slots.size() * slot_size;
+        std::ranges::fill(std::span{payload}.subspan(slot_base + write_index * slot_size,
+                                                     old_slot_end - slot_base - write_index * slot_size),
+                          std::byte{});
+        payload[0x144U] = static_cast<std::byte>(write_index);
+        if (auto replaced = replace_fixed_object_payload(state, partition, row.id, std::move(payload), cancellation);
+            !replaced) {
+            return std::unexpected{replaced.error()};
+        }
+        std::erase_if(state.known_edges, [&](const auto &edge) {
+            const auto &[edge_partition, source, target] = edge;
+            return edge_partition == partition_index && source == row.id &&
+                   std::ranges::any_of(member_ids, [&](const auto &member) { return member.second == target; });
+        });
+    }
+    return {};
 }
 
 } // namespace
@@ -330,21 +388,17 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
     if (!existing_sample_banks)
         return std::unexpected{existing_sample_banks.error()};
-    std::set<std::string> existing_members;
     for (const auto &existing : *existing_sample_banks) {
         if (ascii_case_equal(existing.name, spec.name)) {
             return std::unexpected{transaction_error("Sample Bank already exists")};
         }
-        const auto *sample_bank = std::get_if<CurrentSbac>(&existing.decoded.payload);
-        for (const auto &slot : sample_bank->slots)
-            existing_members.insert(slot.name);
     }
+    auto memberships = sample_bank_memberships(*existing_sample_banks);
+    if (!memberships)
+        return std::unexpected{memberships.error()};
     std::map<std::string, SampleSpec> sample_specs;
-    std::vector<SfsId> member_ids;
+    std::map<std::string, SfsId> member_ids;
     for (const auto &name : spec.member_samples) {
-        if (existing_members.contains(name)) {
-            return std::unexpected{transaction_error("Sample already belongs to another Sample Bank")};
-        }
         auto sample = category_object(state, partition, operation.volume_name, "SBNK", name, "SBNK", cancellation);
         if (!sample)
             return std::unexpected{sample.error()};
@@ -355,13 +409,26 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         if (!decoded)
             return std::unexpected{decoded.error()};
         const auto *current_sample = std::get_if<CurrentSbnk>(&decoded->payload);
-        if (current_sample == nullptr || (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U) {
-            return std::unexpected{transaction_error("Sample Bank requires Samples without existing membership")};
-        }
+        if (current_sample == nullptr)
+            return std::unexpected{transaction_error("Sample is unreadable")};
+        if (!current_sample->linked_program_numbers.empty())
+            return std::unexpected{transaction_error("Sample is assigned directly to a Program")};
+        const auto banked = (std::to_integer<std::uint8_t>((*sample_payload)[0xd0U]) & 1U) != 0U;
+        const auto sources = memberships->find(name);
+        const auto source_count = sources == memberships->end() ? 0U : sources->second.size();
+        if (source_count > 1U)
+            return std::unexpected{transaction_error("Sample is shared by multiple Sample Banks")};
+        if (banked != (source_count == 1U))
+            return std::unexpected{transaction_error("Sample membership flag disagrees with its Sample Bank")};
         SampleSpec placeholder;
         placeholder.name = name;
         sample_specs.emplace(name, std::move(placeholder));
-        member_ids.push_back(sample->second);
+        member_ids.emplace(name, sample->second);
+    }
+    if (auto detached = detach_sample_bank_members(state, partition, *existing_sample_banks, member_ids,
+                                                   *partition_index, cancellation);
+        !detached) {
+        return std::unexpected{detached.error()};
     }
     auto payload = detail::prepare_sbac_payload(spec, sample_specs);
     if (!payload)
@@ -369,7 +436,8 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
     auto allocated = allocate_record(partition, std::move(*payload), PayloadKind::object);
     if (!allocated)
         return std::unexpected{allocated.error()};
-    for (const auto id : member_ids) {
+    for (const auto &[name, id] : member_ids) {
+        static_cast<void>(name);
         if (auto updated = set_sbnk_sample_bank_flag(state, partition, id, true, cancellation); !updated)
             return std::unexpected{updated.error()};
         state.known_edges.emplace_back(*partition_index, allocated->first, id);

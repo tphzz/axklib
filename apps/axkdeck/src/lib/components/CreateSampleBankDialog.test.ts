@@ -10,6 +10,7 @@ describe('CreateSampleBankDialog', () => {
             props: {
                 volumeName: 'Keys',
                 sampleCount: 3,
+                assignedSampleCount: 2,
                 existingNames: ['Piano Bank'],
                 busy: false,
                 error: '',
@@ -17,6 +18,12 @@ describe('CreateSampleBankDialog', () => {
                 onsubmit,
             },
         });
+
+        expect(
+            screen.getByText(
+                '2 selected Samples are already assigned. They will be detached from their current Sample Banks.',
+            ),
+        ).toBeTruthy();
 
         const name = screen.getByRole('textbox', { name: 'Sample Bank name' });
         await waitFor(() => expect(document.activeElement).toBe(name));

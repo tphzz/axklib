@@ -698,9 +698,12 @@ and `key_high`. Optional fields are `right_waveform_name`, `level`,
 the evolving transaction must already exist at that point.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
-one to 127 distinct existing Sample names. Samples may be mono or stereo, but
-must not already belong to another Sample Bank. An `insert_program` object
-contains a Program `number` and exactly two assignments: a
+one to 127 distinct existing Sample names. Samples may be mono or stereo. If a
+member already belongs to another Sample Bank, the transaction removes that
+membership and moves the Sample into the new bank; the source bank remains with
+its other members and may become empty. A Sample assigned directly to a Program
+is rejected rather than silently changing the Program assignment. An
+`insert_program` object contains a Program `number` and exactly two assignments: a
 `sample_bank` on receive channel 1 followed by a direct `sample` on
 receive channel 2. These limits match the currently supported authored profile.
 `rename_program` changes the sampler-visible Program name while retaining its

@@ -6,6 +6,7 @@
     interface Props {
         volumeName: string;
         sampleCount: number;
+        assignedSampleCount: number;
         existingNames: string[];
         busy: boolean;
         error: string;
@@ -13,7 +14,8 @@
         onsubmit: (name: string) => void;
     }
 
-    let { volumeName, sampleCount, existingNames, busy, error, oncancel, onsubmit }: Props = $props();
+    let { volumeName, sampleCount, assignedSampleCount, existingNames, busy, error, oncancel, onsubmit }: Props =
+        $props();
     let value = $state('');
     const trimmedValue = $derived(value.trim());
     const duplicate = $derived(
@@ -57,9 +59,16 @@
             </header>
             <div class="volume-action-content">
                 <p>
-                    Add {sampleCount} selected {sampleCount === 1 ? 'Sample' : 'Samples'} from {volumeName} to a new Sample
+                    Move {sampleCount} selected {sampleCount === 1 ? 'Sample' : 'Samples'} from {volumeName} into a new Sample
                     Bank.
                 </p>
+                {#if assignedSampleCount > 0}
+                    <p class="dialog-warning" role="alert">
+                        {assignedSampleCount} selected {assignedSampleCount === 1 ? 'Sample is' : 'Samples are'} already assigned.
+                        {assignedSampleCount === 1 ? 'It' : 'They'} will be detached from
+                        {assignedSampleCount === 1 ? 'its current Sample Bank' : 'their current Sample Banks'}.
+                    </p>
+                {/if}
                 <label>
                     <span>Sample Bank name</span>
                     <input

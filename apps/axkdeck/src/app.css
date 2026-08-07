@@ -1758,6 +1758,10 @@ input:focus-visible {
   color: #f3a4a4;
 }
 
+.dialog-warning {
+  color: #dfbd7b;
+}
+
 .connection-mode {
   padding: 2px 6px;
   color: var(--color-text-muted);

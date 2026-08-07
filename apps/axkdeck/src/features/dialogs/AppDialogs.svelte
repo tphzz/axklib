@@ -219,6 +219,7 @@
     <CreateSampleBankDialog
         volumeName={mutation.sampleBankCreationRequest.volumeName}
         sampleCount={mutation.sampleBankCreationRequest.samples.length}
+        assignedSampleCount={mutation.sampleBankCreationRequest.assignedSampleCount}
         existingNames={mutation.sampleBankCreationRequest.existingNames}
         busy={mutation.sampleBankCreationRequest.busy}
         error={mutation.sampleBankCreationRequest.error}

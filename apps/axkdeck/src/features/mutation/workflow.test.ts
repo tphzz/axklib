@@ -72,13 +72,13 @@ function placementInspection(overrides: Partial<PlacementRepairInspection> = {})
 }
 
 describe('MutationWorkflow', () => {
-    it('creates a Sample Bank from standalone Samples in the supplied order', async () => {
+    it('creates a Sample Bank from selected Samples in the supplied order', async () => {
         const sample = (name: string): SampleStructureItem => ({
             id: `sample-${name}`,
             objectId: `sample-${name}`,
             name,
             objectType: 'SBNK',
-            sampleBankObjectIds: [],
+            sampleBankObjectIds: name === 'Sample 2' ? ['bank-existing'] : [],
             object: {
                 key: `sample-${name}`,
                 objectType: 'SBNK',

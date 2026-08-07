@@ -1295,32 +1295,83 @@ TEST(Alteration, RenamesHardwareSizedSampleBankAndNormalizesProgramHandle) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Alteration, RejectsSharedSampleBankMember) {
+TEST(Alteration, MovesSampleBankMemberToNewBankAndRejectsDirectProgramSample) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sample-bank-safety";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
+    const auto prepared = root / "prepared.hds";
+    const auto output = root / "output.hds";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
     ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
-    ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
+    ASSERT_TRUE(axk::write_hds_image(wide_sample_bank_source_manifest(audio), source));
+    const auto prepare = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank":{"name":"Other","member_samples":["Member 4"]}}
+    ]})");
+    ASSERT_TRUE(prepare);
+    const auto prepared_result = axk::alter_hds(source, *prepare, prepared);
+    ASSERT_TRUE(prepared_result) << prepared_result.error().message;
     const auto shared = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
-      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Chain",
-       "sample_bank":{"name":"Other Bank","member_samples":["Banked Sample"]}}
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank":{"name":"Moved","member_samples":["Member 2","Member 4"]}}
     ]})");
     ASSERT_TRUE(shared);
-    EXPECT_FALSE(axk::inspect_hds_alteration(source, *shared));
+    const auto applied = axk::alter_hds(prepared, *shared, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Group";
+    });
+    ASSERT_NE(bank, catalog->objects.end());
+    const auto *decoded_bank = std::get_if<axk::CurrentSbac>(&bank->object.payload);
+    ASSERT_NE(decoded_bank, nullptr);
+    ASSERT_EQ(decoded_bank->slots.size(), 2U);
+    EXPECT_EQ(decoded_bank->slots[0].name, "Member 1");
+    EXPECT_EQ(decoded_bank->slots[1].name, "Member 3");
+    const auto other_bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Other";
+    });
+    ASSERT_NE(other_bank, catalog->objects.end());
+    const auto *decoded_other_bank = std::get_if<axk::CurrentSbac>(&other_bank->object.payload);
+    ASSERT_NE(decoded_other_bank, nullptr);
+    EXPECT_TRUE(decoded_other_bank->slots.empty());
+    const auto moved_bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Moved";
+    });
+    ASSERT_NE(moved_bank, catalog->objects.end());
+    const auto *decoded_moved_bank = std::get_if<axk::CurrentSbac>(&moved_bank->object.payload);
+    ASSERT_NE(decoded_moved_bank, nullptr);
+    ASSERT_EQ(decoded_moved_bank->slots.size(), 2U);
+    EXPECT_EQ(decoded_moved_bank->slots[0].name, "Member 2");
+    EXPECT_EQ(decoded_moved_bank->slots[1].name, "Member 4");
 
     const auto duplicate_name = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
-      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Chain",
-       "sample_bank":{"name":"bank","member_samples":["Direct"]}}
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank":{"name":"group","member_samples":["Direct"]}}
     ]})");
     ASSERT_TRUE(duplicate_name);
-    const auto duplicate_inspection = axk::inspect_hds_alteration(source, *duplicate_name);
+    const auto duplicate_inspection = axk::inspect_hds_alteration(prepared, *duplicate_name);
     ASSERT_FALSE(duplicate_inspection);
     EXPECT_EQ(duplicate_inspection.error().message, "Sample Bank already exists");
+
+    const auto direct = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank":{"name":"Direct Bank","member_samples":["Direct"]}}
+    ]})");
+    ASSERT_TRUE(direct);
+    const auto direct_inspection = axk::inspect_hds_alteration(prepared, *direct);
+    ASSERT_FALSE(direct_inspection);
+    EXPECT_EQ(direct_inspection.error().message, "Sample is assigned directly to a Program");
     std::filesystem::remove_all(root, error);
 }
 

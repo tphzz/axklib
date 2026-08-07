@@ -75,6 +75,7 @@ export class MutationWorkflow {
     } | null>(null);
     sampleBankCreationRequest = $state<{
         samples: SampleStructureItem[];
+        assignedSampleCount: number;
         partitionIndex: number;
         volumeName: string;
         existingNames: string[];
@@ -123,13 +124,13 @@ export class MutationWorkflow {
             samples.every(
                 (sample) =>
                     sample.objectType === 'SBNK' &&
-                    (sample.sampleBankObjectIds?.length ?? 0) === 0 &&
                     sample.object.partitionIndex === first.partitionIndex &&
                     sample.object.volumeName === first.volumeName,
             );
         if (!valid) return;
         this.sampleBankCreationRequest = {
             samples: [...samples],
+            assignedSampleCount: samples.filter((sample) => (sample.sampleBankObjectIds?.length ?? 0) > 0).length,
             partitionIndex: first.partitionIndex,
             volumeName: first.volumeName,
             existingNames: this.dependencies.catalog.sampleBanks

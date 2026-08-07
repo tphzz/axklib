@@ -72,9 +72,11 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
-    it('creates a Sample Bank from standalone Samples in displayed order', async () => {
+    it('creates a Sample Bank from standalone and already-banked Samples in displayed order', async () => {
         const sample2 = structure('SBNK', 'Sample 2');
         const sample10 = structure('SBNK', 'Sample 10');
+        sample2.sampleBankObjectIds = ['SBAC-Existing'];
+        sample2.membershipLabel = 'Sample Bank: Existing';
         const oncreatesamplebank = vi.fn();
         const selected = [sample10, sample2].map((sample) => ({
             kind: 'SBNK' as const,

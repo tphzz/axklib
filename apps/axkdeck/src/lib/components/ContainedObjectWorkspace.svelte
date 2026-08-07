@@ -240,8 +240,7 @@
             view === 'samples' &&
             scope === 'samples' &&
             selectedSamples.length === menuSelection.items.length &&
-            selectedSamples.length <= 127 &&
-            selectedSamples.every((sample) => (sample.sampleBankObjectIds?.length ?? 0) === 0)
+            selectedSamples.length <= 127
                 ? selectedSamples
                 : null;
         objectMenu = {
