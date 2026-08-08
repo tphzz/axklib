@@ -199,6 +199,9 @@ Result<OperationReport> delete_sbac(TransactionState &state, OperationContext co
                                     const DeleteSampleBankOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbac(TransactionState &state, OperationContext context,
                                     const InsertSampleBankOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> assign_sbac_members(TransactionState &state, OperationContext context,
+                                            const AssignSampleBankMembersOperation &operation,
+                                            const CancellationToken &cancellation);
 Result<OperationReport> rename_sbac(TransactionState &state, OperationContext context,
                                     const RenameSampleBankOperation &operation, const CancellationToken &cancellation);
 

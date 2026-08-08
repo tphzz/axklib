@@ -83,6 +83,21 @@ export interface SampleStructureItem {
     memberCount?: number;
 }
 
+export interface SampleBankAssignmentOption {
+    objectId: string;
+    name: string;
+    memberCount: number;
+    selectedMemberCount: number;
+    movedSampleCount: number;
+    reassignedSampleCount: number;
+    finalMemberCount: number;
+}
+
+export interface SampleBankAssignmentBlocker {
+    sampleName: string;
+    programName: string;
+}
+
 export interface WaveDataItem {
     id: string;
     name: string;

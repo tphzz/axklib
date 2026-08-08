@@ -21,6 +21,23 @@ describe('ObjectContextMenu', () => {
         expect(oncreatesamplebank).toHaveBeenCalledOnce();
     });
 
+    it('offers assignment to an existing Sample Bank as a selection command', async () => {
+        const onassignsamplebank = vi.fn();
+        render(ObjectContextMenu, {
+            props: {
+                objectName: '2 Samples',
+                selectionCount: 2,
+                left: 20,
+                top: 30,
+                onassignsamplebank,
+                onclose: vi.fn(),
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Assign to Sample Bank…' }));
+        expect(onassignsamplebank).toHaveBeenCalledOnce();
+    });
+
     it('uses roving keyboard focus and restores the invoking control', async () => {
         const invoker = document.createElement('button');
         document.body.append(invoker);

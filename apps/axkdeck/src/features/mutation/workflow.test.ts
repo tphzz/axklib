@@ -125,6 +125,144 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankCreationRequest).toBeNull();
     });
 
+    it('assigns selected Samples to an existing Sample Bank while retaining existing members', async () => {
+        const sample = (name: string, sampleBankObjectIds: string[] = []): SampleStructureItem => ({
+            id: `sample-${name}`,
+            objectId: `sample-${name}`,
+            name,
+            objectType: 'SBNK',
+            sampleBankObjectIds,
+            object: {
+                key: `sample-${name}`,
+                objectType: 'SBNK',
+                name,
+                partitionIndex: 0,
+                partitionName: 'Partition 1',
+                volumeName: 'Samples',
+                categoryName: 'SBNK',
+                sfsId: 1,
+                storedSizeBytes: 512,
+                sampleRate: 44_100,
+                rootKey: 60,
+                frameCount: 1,
+                sampleWidthBytes: 2,
+            },
+        });
+        const target = sample('Layered') as SampleStructureItem;
+        target.objectType = 'SBAC';
+        target.object.objectType = 'SBAC';
+        target.objectId = 'bank-layered';
+        target.object.key = 'bank-layered';
+        target.memberCount = 2;
+        const other = sample('Other Bank') as SampleStructureItem;
+        other.objectType = 'SBAC';
+        other.object.objectType = 'SBAC';
+        other.objectId = 'bank-other';
+        other.object.key = 'bank-other';
+        const retained = sample('Retained', ['bank-layered']);
+        const moved = sample('Moved', ['bank-other']);
+        const catalog = {
+            sampleBanks: [other, target],
+            programs: [],
+            relationships: [],
+            membersForBank: (bankId: string) => (bankId === 'bank-layered' ? [retained, sample('Existing')] : [moved]),
+            selectedBankId: '',
+            inspectorObjectId: '',
+            editorObjectIds: { 'sample-banks': '' },
+        };
+        const startSampleBankAssignment = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
+        const { workflow, clearSelection, setWorkspaceView } = workflowWith({ startSampleBankAssignment }, catalog);
+        workflow.setCapabilities({
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+        });
+
+        workflow.requestSampleBankAssignment([moved, retained]);
+        expect(workflow.sampleBankAssignmentRequest?.options).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    objectId: 'bank-layered',
+                    memberCount: 2,
+                    selectedMemberCount: 1,
+                    movedSampleCount: 1,
+                    reassignedSampleCount: 1,
+                    finalMemberCount: 3,
+                }),
+            ]),
+        );
+        await workflow.submitSampleBankAssignment('bank-layered');
+
+        expect(startSampleBankAssignment).toHaveBeenCalledWith(7, {
+            partitionIndex: 0,
+            volumeName: 'Samples',
+            sampleBankName: 'Layered',
+            sampleNames: ['Moved', 'Retained'],
+        });
+        expect(setWorkspaceView).toHaveBeenCalledWith('sample-banks');
+        expect(catalog.selectedBankId).toBe('bank-layered');
+        expect(clearSelection).toHaveBeenCalledOnce();
+        expect(workflow.sampleBankAssignmentRequest).toBeNull();
+    });
+
+    it('blocks Sample Bank assignment when a selected Sample is assigned directly to a Program', () => {
+        const selected = {
+            id: 'sample-direct',
+            objectId: 'sample-direct',
+            name: 'Direct Sample',
+            objectType: 'SBNK' as const,
+            sampleBankObjectIds: [],
+            object: {
+                key: 'sample-direct',
+                objectType: 'SBNK',
+                name: 'Direct Sample',
+                partitionIndex: 0,
+                partitionName: 'Partition 1',
+                volumeName: 'Samples',
+                categoryName: 'SBNK',
+                sfsId: 1,
+                storedSizeBytes: 512,
+                sampleRate: 44_100,
+                rootKey: 60,
+                frameCount: 1,
+                sampleWidthBytes: 2,
+            },
+        };
+        const bank = {
+            ...selected,
+            id: 'bank-1',
+            objectId: 'bank-1',
+            name: 'Bank 1',
+            objectType: 'SBAC' as const,
+            object: { ...selected.object, key: 'bank-1', objectType: 'SBAC', name: 'Bank 1' },
+        };
+        const catalog = {
+            sampleBanks: [bank],
+            programs: [{ objectId: 'program-1', name: 'Lead', slot: '001' }],
+            relationships: [
+                {
+                    sourceObjectId: 'program-1',
+                    targetObjectId: 'sample-direct',
+                    relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
+                    quality: 'KNOWN',
+                },
+            ],
+            membersForBank: () => [],
+        };
+        const { workflow } = workflowWith({}, catalog);
+        workflow.setCapabilities({
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+        });
+
+        workflow.requestSampleBankAssignment([selected]);
+
+        expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([
+            { sampleName: 'Direct Sample', programName: '001: Lead' },
+        ]);
+    });
+
     it('keeps deletion blocked and does not implicitly repair placement', async () => {
         const inspectVolumeDeletion = vi.fn().mockResolvedValue({
             imageId: 'image-1',

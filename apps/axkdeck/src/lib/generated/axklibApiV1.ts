@@ -1458,6 +1458,7 @@ export interface components {
                 | 'RENAME_SBNK'
                 | 'DELETE_SBAC'
                 | 'INSERT_SBAC'
+                | 'ASSIGN_SBAC_MEMBERS'
                 | 'RENAME_SBAC'
                 | 'DELETE_PROGRAM'
                 | 'INSERT_PROGRAM'

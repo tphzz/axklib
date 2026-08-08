@@ -327,6 +327,8 @@
                 onrenameobject={(target) => mutation.requestObjectRename(target)}
                 sampleBankCreationAvailable={mutation.objectRenameAvailable}
                 oncreatesamplebank={(selectedSamples) => mutation.requestSampleBankCreation(selectedSamples)}
+                sampleBankAssignmentAvailable={mutation.objectRenameAvailable}
+                onassignsamplebank={(selectedSamples) => mutation.requestSampleBankAssignment(selectedSamples)}
                 {objectDeletionAvailable}
                 ondeleteobjects={deleteObjects}
                 {packageExportAvailable}

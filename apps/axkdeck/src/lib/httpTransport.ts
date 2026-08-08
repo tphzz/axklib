@@ -11,6 +11,7 @@ import type {
     AudioImportCapabilities,
     AudioImportTarget,
     SampleBankCreation,
+    SampleBankAssignment,
     AudioSourceInfo,
     ContentPage,
     AuditionBundleDescriptor,
@@ -196,7 +197,9 @@ export class HttpImageTransport implements ImageTransport {
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
         return this.imports.startSampleBankCreation(sessionId, creation);
     }
-
+    startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState> {
+        return this.imports.startSampleBankAssignment(sessionId, assignment);
+    }
     startSequenceImport(
         sessionId: number,
         target: SequenceImportTarget,
@@ -210,7 +213,6 @@ export class HttpImageTransport implements ImageTransport {
         const source = serverFile(location);
         return downloadServerFile(this.client, source.reference, source.displayName);
     }
-
     async downloadDirectory(location: DirectoryLocation): Promise<ClientDownload> {
         const source = serverDirectory(location);
         const submitted = await this.client.invoke<never>(

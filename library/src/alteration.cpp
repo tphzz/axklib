@@ -63,6 +63,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return delete_sbac(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertSampleBankOperation>)
                     return insert_sbac(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, AssignSampleBankMembersOperation>)
+                    return assign_sbac_members(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, RenameSampleBankOperation>)
                     return rename_sbac(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DeleteProgramOperation>)

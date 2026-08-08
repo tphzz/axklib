@@ -680,6 +680,7 @@ Supported operation types:
 | `rename_sbnk` | `volume_name`, `sample_name`, `new_sample_name` |
 | `delete_sbac` | `volume_name`, `sample_bank_name` |
 | `insert_sbac` | `volume_name`, `sample_bank` |
+| `assign_sbac_members` | `volume_name`, `sample_bank_name`, `sample_names` |
 | `rename_sbac` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
 | `delete_program` | `volume_name`, `program_number` |
 | `insert_program` | `volume_name`, `program` |
@@ -702,8 +703,19 @@ one to 127 distinct existing Sample names. Samples may be mono or stereo. If a
 member already belongs to another Sample Bank, the transaction removes that
 membership and moves the Sample into the new bank; the source bank remains with
 its other members and may become empty. A Sample assigned directly to a Program
-is rejected rather than silently changing the Program assignment. An
-`insert_program` object contains a Program `number` and exactly two assignments: a
+is rejected rather than silently changing the Program assignment.
+
+`assign_sbac_members` applies the same membership safety rules to an existing
+Sample Bank. `sample_bank_name` identifies that target and `sample_names`
+contains one to 127 distinct existing Sample names. Existing target members are
+left in place; all other selected Samples are appended in manifest order. The
+target Sample Bank's object identity and incoming Program relationships are
+preserved. The final bank may contain at most 127 members. This metadata-only
+operation can grow the target payload only within its currently allocated record
+extents; insufficient extent capacity rejects the transaction atomically. It
+preserves opaque bytes after the active member table when that table expands.
+
+An `insert_program` object contains a Program `number` and exactly two assignments: a
 `sample_bank` on receive channel 1 followed by a direct `sample` on
 receive channel 2. These limits match the currently supported authored profile.
 `rename_program` changes the sampler-visible Program name while retaining its

@@ -3,6 +3,7 @@ import type {
     AudioImportGrouping,
     AudioImportTarget,
     SampleBankCreation,
+    SampleBankAssignment,
     SequenceImportItem,
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
@@ -47,6 +48,11 @@ export class HttpImportOperations {
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         return this.start(sampleBankCreationRequest(session.remoteId, session.revision, creation));
+    }
+
+    startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState> {
+        const session = this.imageSessions.get(sessionId);
+        return this.start(sampleBankAssignmentRequest(session.remoteId, session.revision, assignment));
     }
 
     startSequenceImport(
@@ -172,6 +178,28 @@ export function sampleBankCreationRequest(
                     name: creation.sampleBankName,
                     member_samples: creation.sampleNames,
                 },
+            },
+        ],
+        [],
+    );
+}
+
+export function sampleBankAssignmentRequest(
+    imageId: string,
+    expectedRevision: number,
+    assignment: SampleBankAssignment,
+): ImportAlterationRequest {
+    return request(
+        imageId,
+        expectedRevision,
+        [
+            {
+                id: 'sample-bank-assignment',
+                type: 'assign_sbac_members',
+                partition_index: assignment.partitionIndex,
+                volume_name: assignment.volumeName,
+                sample_bank_name: assignment.sampleBankName,
+                sample_names: assignment.sampleNames,
             },
         ],
         [],

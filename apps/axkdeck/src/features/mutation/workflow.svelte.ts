@@ -18,6 +18,7 @@ import type {
     WorkspaceView,
 } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { SampleBankAssignmentWorkflow, type SampleBankAssignmentRequest } from './sampleBankAssignmentWorkflow.svelte';
 
 interface MutationWorkflowDependencies {
     transport: ImageTransport;
@@ -51,6 +52,7 @@ interface ObjectSelectionSnapshot {
 export class MutationWorkflow {
     private volumeActionGeneration = 0;
     private placementRepairGeneration = 0;
+    private readonly sampleBankAssignment: SampleBankAssignmentWorkflow;
     volumeAvailable = $state(false);
     partitionAvailable = $state(false);
     objectRenameAvailable = $state(false);
@@ -82,8 +84,16 @@ export class MutationWorkflow {
         busy: boolean;
         error: string;
     } | null>(null);
+    constructor(private readonly dependencies: MutationWorkflowDependencies) {
+        this.sampleBankAssignment = new SampleBankAssignmentWorkflow({
+            ...dependencies,
+            available: () => this.objectRenameAvailable,
+        });
+    }
 
-    constructor(private readonly dependencies: MutationWorkflowDependencies) {}
+    get sampleBankAssignmentRequest(): SampleBankAssignmentRequest | null {
+        return this.sampleBankAssignment.request;
+    }
 
     setCapabilities(capabilities: {
         volumeMutationsAvailable: boolean;
@@ -203,6 +213,18 @@ export class MutationWorkflow {
         }
     }
 
+    requestSampleBankAssignment(samples: SampleStructureItem[]): void {
+        this.sampleBankAssignment.open(samples);
+    }
+
+    cancelSampleBankAssignment(): void {
+        this.sampleBankAssignment.cancel();
+    }
+
+    submitSampleBankAssignment(bankObjectId: string): Promise<void> {
+        return this.sampleBankAssignment.submit(bankObjectId);
+    }
+
     cancelVolumeAction(): void {
         if (!this.volumeActionBusy) {
             ++this.volumeActionGeneration;
@@ -298,6 +320,8 @@ export class MutationWorkflow {
         ++this.placementRepairGeneration;
         this.placementRepairRequest = null;
         this.objectRenameRequest = null;
+        this.sampleBankCreationRequest = null;
+        this.sampleBankAssignment.reset();
     }
 
     async submitVolumeAction(name: string): Promise<void> {

@@ -43,6 +43,7 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SampleBankAssignment,
     SampleBankCreation,
     SequenceImportItem,
     SequenceImportTarget,
@@ -330,6 +331,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
         return this.invoke('startSampleBankCreation', [sessionId, creation]);
+    }
+
+    startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState> {
+        return this.invoke('startSampleBankAssignment', [sessionId, assignment]);
     }
 
     startSequenceImport(

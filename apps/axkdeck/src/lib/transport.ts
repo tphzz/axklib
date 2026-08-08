@@ -411,6 +411,13 @@ export interface SampleBankCreation {
     sampleNames: string[];
 }
 
+export interface SampleBankAssignment {
+    partitionIndex: number;
+    volumeName: string;
+    sampleBankName: string;
+    sampleNames: string[];
+}
+
 export interface SequenceImportItem {
     source: InputFileLocation;
     sequenceName: string;
@@ -495,6 +502,7 @@ export interface ImageTransport {
         grouping: AudioImportGrouping,
     ): Promise<JobState>;
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState>;
+    startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState>;
     startSequenceImport(
         sessionId: number,
         target: SequenceImportTarget,

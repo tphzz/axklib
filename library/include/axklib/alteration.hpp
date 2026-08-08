@@ -94,6 +94,13 @@ struct InsertSampleBankOperation {
     SampleBankSpec sample_bank;
 };
 
+struct AssignSampleBankMembersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    std::vector<std::string> sample_names;
+};
+
 struct RenameSampleBankOperation {
     PartitionSelector partition;
     std::string volume_name;
@@ -166,10 +173,10 @@ struct RepairObjectPlacementsOperation {
 using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
                  InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
-                 DeleteSampleBankOperation, InsertSampleBankOperation, RenameSampleBankOperation,
-                 DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation,
-                 InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
-                 RepairObjectPlacementsOperation>;
+                 DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
+                 RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
+                 DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
+                 RenamePartitionOperation, RepairObjectPlacementsOperation>;
 
 struct AlterationOperation {
     std::string id;

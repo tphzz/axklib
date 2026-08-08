@@ -14,6 +14,7 @@
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
     import CreateSampleBankDialog from '../../lib/components/CreateSampleBankDialog.svelte';
+    import AssignSampleBankDialog from '../../lib/components/AssignSampleBankDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
     import ObjectDeletionDialog from '../../lib/components/ObjectDeletionDialog.svelte';
@@ -225,6 +226,18 @@
         error={mutation.sampleBankCreationRequest.error}
         oncancel={() => mutation.cancelSampleBankCreation()}
         onsubmit={(name) => void mutation.submitSampleBankCreation(name)}
+    />
+{/if}
+{#if mutation.sampleBankAssignmentRequest}
+    <AssignSampleBankDialog
+        volumeName={mutation.sampleBankAssignmentRequest.volumeName}
+        sampleCount={mutation.sampleBankAssignmentRequest.samples.length}
+        options={mutation.sampleBankAssignmentRequest.options}
+        blockers={mutation.sampleBankAssignmentRequest.blockers}
+        busy={mutation.sampleBankAssignmentRequest.busy}
+        error={mutation.sampleBankAssignmentRequest.error}
+        oncancel={() => mutation.cancelSampleBankAssignment()}
+        onsubmit={(bankObjectId) => void mutation.submitSampleBankAssignment(bankObjectId)}
     />
 {/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import'}

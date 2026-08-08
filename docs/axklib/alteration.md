@@ -12,6 +12,7 @@ Supported operations are:
 - insert, delete, and rename waveform;
 - insert, delete, and rename Sample (`SBNK`);
 - insert, delete, and rename Sample Bank (`SBAC`);
+- assign selected Samples to an existing Sample Bank (`SBAC`);
 - insert, delete, and rename Program.
 
 Wave Data insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
@@ -24,6 +25,17 @@ Sample Bank references it. Wave Data can be deleted only when exact
 current-format ownership classifies it as known and unreferenced. Program and
 Sample Bank operations require their raw assignments, membership flags, Program
 bitmaps, and decoded relationships to agree.
+
+`assign_sbac_members` moves one through 127 named Samples into one existing
+Sample Bank in the same partition and volume. Members already in the target
+retain their current row and order. Other selected Samples are detached from
+their previous Sample Banks and appended in request order; source banks remain
+present and may become empty. The target Sample Bank keeps its SFS identity, so
+Program assignments to it remain valid. A Sample assigned directly to a Program,
+a shared or inconsistent membership, a final count above 127, or target payload
+growth beyond the bank's currently allocated record extents rejects the complete
+transaction without changing the image. Appending rows consumes existing slot
+padding first and preserves the target record's opaque suffix bytes.
 
 ## Object deletion planning
 

@@ -78,6 +78,9 @@ class UnavailableTransport implements ImageTransport {
     startSampleBankCreation(): Promise<never> {
         return this.unavailable();
     }
+    startSampleBankAssignment(): Promise<never> {
+        return this.unavailable();
+    }
     startSequenceImport(): Promise<never> {
         return this.unavailable();
     }

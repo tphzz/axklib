@@ -186,6 +186,7 @@
               "RENAME_SBNK",
               "DELETE_SBAC",
               "INSERT_SBAC",
+              "ASSIGN_SBAC_MEMBERS",
               "RENAME_SBAC",
               "DELETE_PROGRAM",
               "INSERT_PROGRAM",
@@ -198,6 +199,7 @@
               "REPAIR_OBJECT_PLACEMENTS"
             ],
             "x-axklib-application-enum": {
+              "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
               "DELETE_PROGRAM": "delete_program",
               "DELETE_SBAC": "delete_sbac",
               "DELETE_SBNK": "delete_sbnk",

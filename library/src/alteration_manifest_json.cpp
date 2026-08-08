@@ -213,9 +213,9 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
                 *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
                 *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
-                *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
-                *type != "rename_partition" && *type != "repair_object_placements") {
+                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
+                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
+                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -507,6 +507,11 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     spec.member_samples.push_back(std::move(*member));
                 }
                 data = InsertSampleBankOperation{std::move(selector), std::move(*volume), std::move(spec)};
+            } else if (*type == "assign_sbac_members") {
+                auto assignment = detail::parse_sample_bank_assignment_json(row, std::move(selector), context);
+                if (!assignment)
+                    return std::unexpected{assignment.error()};
+                data = std::move(*assignment);
             } else if (*type == "insert_program") {
                 if (auto valid =
                         exact_fields(row, {"id", "type", "partition_index", "volume_name", "program"}, context);

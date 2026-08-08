@@ -3134,7 +3134,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "ASSIGN_SBAC_MEMBERS", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -3146,6 +3146,7 @@
               "RENAME_SBNK": "rename_sbnk",
               "DELETE_SBAC": "delete_sbac",
               "INSERT_SBAC": "insert_sbac",
+              "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
               "RENAME_SBAC": "rename_sbac",
               "DELETE_PROGRAM": "delete_program",
               "INSERT_PROGRAM": "insert_program",

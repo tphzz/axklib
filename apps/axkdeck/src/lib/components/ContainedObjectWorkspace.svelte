@@ -50,6 +50,8 @@
         onrenameobject?: (target: ObjectRenameTarget) => void;
         sampleBankCreationAvailable?: boolean;
         oncreatesamplebank?: (samples: SampleStructureItem[]) => void;
+        sampleBankAssignmentAvailable?: boolean;
+        onassignsamplebank?: (samples: SampleStructureItem[]) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         packageExportAvailable?: boolean;
@@ -88,6 +90,8 @@
         onrenameobject = () => undefined,
         sampleBankCreationAvailable = false,
         oncreatesamplebank = () => undefined,
+        sampleBankAssignmentAvailable = false,
+        onassignsamplebank = () => undefined,
         objectDeletionAvailable = false,
         ondeleteobjects = () => undefined,
         packageExportAvailable = false,
@@ -105,6 +109,7 @@
         renameTarget: ObjectRenameTarget;
         objects: PackageExportObject[];
         sampleBankMembers: SampleStructureItem[] | null;
+        sampleBankAssignmentMembers: SampleStructureItem[] | null;
         left: number;
         top: number;
     } | null>(null);
@@ -210,6 +215,7 @@
         if (
             !objectRenameAvailable &&
             !sampleBankCreationAvailable &&
+            !sampleBankAssignmentAvailable &&
             !objectDeletionAvailable &&
             !packageExportAvailable &&
             !audioExportAvailable
@@ -243,11 +249,21 @@
             selectedSamples.length <= 127
                 ? selectedSamples
                 : null;
+        const sampleBankAssignmentMembers =
+            sampleBankAssignmentAvailable &&
+            sampleBanks.length > 0 &&
+            view === 'samples' &&
+            scope === 'samples' &&
+            selectedSamples.length === menuSelection.items.length &&
+            selectedSamples.length <= 127
+                ? selectedSamples
+                : null;
         objectMenu = {
             target: target.object,
             renameTarget: renameTarget(target),
             objects: menuSelection.items,
             sampleBankMembers,
+            sampleBankAssignmentMembers,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
         };
@@ -265,6 +281,7 @@
         if (
             !objectRenameAvailable &&
             !sampleBankCreationAvailable &&
+            !sampleBankAssignmentAvailable &&
             !objectDeletionAvailable &&
             !packageExportAvailable &&
             !audioExportAvailable
@@ -508,6 +525,9 @@
             : undefined}
         oncreatesamplebank={objectMenu.sampleBankMembers
             ? () => oncreatesamplebank(objectMenu!.sampleBankMembers!)
+            : undefined}
+        onassignsamplebank={objectMenu.sampleBankAssignmentMembers
+            ? () => onassignsamplebank(objectMenu!.sampleBankAssignmentMembers!)
             : undefined}
         onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
         onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}

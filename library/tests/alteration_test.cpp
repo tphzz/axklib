@@ -105,6 +105,27 @@ axk::HdsBuildManifest wide_sample_bank_source_manifest(const std::filesystem::pa
     return result;
 }
 
+axk::HdsBuildManifest capacity_sample_bank_source_manifest(const std::filesystem::path &audio_path) {
+    auto result = sample_source_manifest(audio_path);
+    auto &volume = result.partitions[0].volumes[0];
+    volume.name = "Bank Capacity";
+    volume.samples[0].name = "Member 001";
+    for (std::size_t index = 2U; index <= 85U; ++index) {
+        auto member = volume.samples[0];
+        member.name = std::format("Member {:03}", index);
+        volume.samples.push_back(std::move(member));
+    }
+    auto direct = volume.samples[0];
+    direct.name = "Direct";
+    volume.samples.push_back(std::move(direct));
+    volume.sample_banks.push_back({"Target", {"Member 001"}});
+    axk::ProgramSpec program;
+    program.number = 33U;
+    program.assignments = {{"SBAC", "Target", 1U}, {"SBNK", "Direct", 2U}};
+    volume.programs.push_back(std::move(program));
+    return result;
+}
+
 axk::Waveform test_waveform() {
     axk::Waveform result;
     result.format = {1U, 2U, 44100U};
@@ -508,6 +529,28 @@ TEST(AlterationManifest, ParsesStrictSampleOperations) {
     ]})"));
 }
 
+TEST(AlterationManifest, ParsesStrictSampleBankAssignment) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"assign","type":"assign_sbac_members","partition_index":0,
+       "volume_name":"Samples","sample_bank_name":"Target Bank",
+       "sample_names":["Sample 1","Sample 2"]}
+    ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *assignment = std::get_if<axk::AssignSampleBankMembersOperation>(&parsed->operations.front().data);
+    ASSERT_NE(assignment, nullptr);
+    EXPECT_EQ(assignment->volume_name, "Samples");
+    EXPECT_EQ(assignment->sample_bank_name, "Target Bank");
+    EXPECT_EQ(assignment->sample_names, (std::vector<std::string>{"Sample 1", "Sample 2"}));
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"assign","type":"assign_sbac_members","partition_index":0,
+       "volume_name":"Samples","sample_bank_name":"Target Bank",
+       "sample_names":["Sample 1","Sample 1"]}
+    ]})"));
+}
+
 TEST(AlterationManifest, ParsesStrictWaveformSamplerMetadataAndRejectsInvalidLoopWindows) {
     const auto parsed = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
@@ -555,20 +598,23 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
     const auto parsed = axk::load_alteration_manifest(path);
     ASSERT_TRUE(parsed) << parsed.error().message;
     constexpr std::array expected{
-        std::string_view{"delete_volume"},    std::string_view{"insert_volume"},   std::string_view{"delete_sbnk"},
-        std::string_view{"insert_sbnk"},      std::string_view{"insert_waveform"}, std::string_view{"delete_waveform"},
-        std::string_view{"rename_waveform"},  std::string_view{"rename_sbnk"},     std::string_view{"delete_sbac"},
-        std::string_view{"insert_sbac"},      std::string_view{"rename_sbac"},     std::string_view{"delete_program"},
-        std::string_view{"insert_program"},   std::string_view{"rename_program"},  std::string_view{"delete_sequence"},
-        std::string_view{"insert_sequence"},  std::string_view{"rename_sequence"}, std::string_view{"rename_volume"},
-        std::string_view{"rename_partition"},
+        std::string_view{"delete_volume"},       std::string_view{"insert_volume"},
+        std::string_view{"delete_sbnk"},         std::string_view{"insert_sbnk"},
+        std::string_view{"insert_waveform"},     std::string_view{"delete_waveform"},
+        std::string_view{"rename_waveform"},     std::string_view{"rename_sbnk"},
+        std::string_view{"delete_sbac"},         std::string_view{"insert_sbac"},
+        std::string_view{"assign_sbac_members"}, std::string_view{"rename_sbac"},
+        std::string_view{"delete_program"},      std::string_view{"insert_program"},
+        std::string_view{"rename_program"},      std::string_view{"delete_sequence"},
+        std::string_view{"insert_sequence"},     std::string_view{"rename_sequence"},
+        std::string_view{"rename_volume"},       std::string_view{"rename_partition"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
         EXPECT_EQ(axk::operation_type_name(parsed->operations[index].data), expected[index]);
         EXPECT_EQ(parsed->operations[index].data.index(), index);
     }
-    const auto *deleted = std::get_if<axk::DeleteProgramOperation>(&parsed->operations[11].data);
+    const auto *deleted = std::get_if<axk::DeleteProgramOperation>(&parsed->operations[12].data);
     ASSERT_NE(deleted, nullptr);
     EXPECT_EQ(deleted->program_number, 128U);
 }
@@ -1372,6 +1418,183 @@ TEST(Alteration, MovesSampleBankMemberToNewBankAndRejectsDirectProgramSample) {
     const auto direct_inspection = axk::inspect_hds_alteration(prepared, *direct);
     ASSERT_FALSE(direct_inspection);
     EXPECT_EQ(direct_inspection.error().message, "Sample is assigned directly to a Program");
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, AssignsSamplesToExistingSampleBankWithoutChangingItsIdentityOrOrder) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-assign-existing-sample-bank";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto prepared = root / "prepared.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(wide_sample_bank_source_manifest(audio), source));
+    const auto prepare = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank":{"name":"Other","member_samples":["Member 4"]}}
+    ]})");
+    ASSERT_TRUE(prepare);
+    ASSERT_TRUE(axk::alter_hds(source, *prepare, prepared));
+
+    const auto before = axk::open_image(prepared);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto before_catalog = axk::build_object_catalog(*before);
+    ASSERT_TRUE(before_catalog) << before_catalog.error().message;
+    const auto before_group = std::ranges::find_if(before_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Group";
+    });
+    ASSERT_NE(before_group, before_catalog->objects.end());
+    ASSERT_TRUE(before_group->placement);
+    const auto group_id = before_group->sfs_id;
+
+    const auto assignment = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"assign","type":"assign_sbac_members","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank_name":"Group","sample_names":["Member 1","Member 4","Member 5"]}
+    ]})");
+    ASSERT_TRUE(assignment) << assignment.error().message;
+    const auto applied = axk::alter_hds(prepared, *assignment, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto group = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Group";
+    });
+    ASSERT_NE(group, catalog->objects.end());
+    ASSERT_TRUE(group->placement);
+    EXPECT_EQ(group->sfs_id, group_id);
+    const auto *decoded_group = std::get_if<axk::CurrentSbac>(&group->object.payload);
+    ASSERT_NE(decoded_group, nullptr);
+    ASSERT_EQ(decoded_group->slots.size(), 5U);
+    EXPECT_EQ(decoded_group->slots[0].name, "Member 1");
+    EXPECT_EQ(decoded_group->slots[1].name, "Member 2");
+    EXPECT_EQ(decoded_group->slots[2].name, "Member 3");
+    EXPECT_EQ(decoded_group->slots[3].name, "Member 4");
+    EXPECT_EQ(decoded_group->slots[4].name, "Member 5");
+    const auto other = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Other";
+    });
+    ASSERT_NE(other, catalog->objects.end());
+    const auto *decoded_other = std::get_if<axk::CurrentSbac>(&other->object.payload);
+    ASSERT_NE(decoded_other, nullptr);
+    EXPECT_TRUE(decoded_other->slots.empty());
+    const auto program = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(program, catalog->objects.end());
+    const auto *decoded_program = std::get_if<axk::CurrentProg>(&program->object.payload);
+    ASSERT_NE(decoded_program, nullptr);
+    ASSERT_FALSE(decoded_program->assignments.empty());
+    EXPECT_EQ(decoded_program->assignments.front().name, "Group");
+
+    const auto no_op = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"assign","type":"assign_sbac_members","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank_name":"Group","sample_names":["Member 1"]}
+    ]})");
+    ASSERT_TRUE(no_op);
+    const auto no_op_inspection = axk::inspect_hds_alteration(output, *no_op);
+    ASSERT_FALSE(no_op_inspection);
+    EXPECT_EQ(no_op_inspection.error().message, "All selected Samples already belong to the target Sample Bank");
+
+    const auto direct = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"assign","type":"assign_sbac_members","partition_index":0,"volume_name":"Wide Bank",
+       "sample_bank_name":"Group","sample_names":["Direct"]}
+    ]})");
+    ASSERT_TRUE(direct);
+    const auto direct_inspection = axk::inspect_hds_alteration(output, *direct);
+    ASSERT_FALSE(direct_inspection);
+    EXPECT_EQ(direct_inspection.error().message, "Sample is assigned directly to a Program");
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RejectsSampleBankAssignmentBeyondExistingExtentCapacityAtomically) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-assign-bank-capacity";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(capacity_sample_bank_source_manifest(audio), source));
+
+    axk::AssignSampleBankMembersOperation assignment;
+    assignment.partition = axk::PartitionIndex{0U};
+    assignment.volume_name = "Bank Capacity";
+    assignment.sample_bank_name = "Target";
+    for (std::size_t index = 2U; index <= 85U; ++index)
+        assignment.sample_names.push_back(std::format("Member {:03}", index));
+    axk::AlterationManifest manifest{"1.0", {{"assign", std::move(assignment)}}};
+
+    const auto before = bytes(source);
+    const auto inspected = axk::inspect_hds_alteration(source, manifest);
+    ASSERT_FALSE(inspected);
+    EXPECT_EQ(inspected.error().message, "Target Sample Bank does not have enough allocated record capacity");
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_FALSE(applied);
+    EXPECT_EQ(applied.error().message, "Target Sample Bank does not have enough allocated record capacity");
+    EXPECT_EQ(bytes(source), before);
+    EXPECT_FALSE(std::filesystem::exists(output));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, PreservesSampleBankOpaqueSuffixWhenAssignmentExtendsSlotTable) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-assign-bank-suffix";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(capacity_sample_bank_source_manifest(audio), source));
+
+    const auto opened = axk::open_image(source);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto &partition = opened->partitions().front();
+    const auto target = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "SBAC" && record.object_name == "Target";
+    });
+    ASSERT_NE(target, partition.records.end());
+    constexpr std::size_t suffix_size = 0x24U;
+    ASSERT_GE(target->data_size, suffix_size);
+    std::array<std::byte, suffix_size> suffix{};
+    for (std::size_t index = 0; index < suffix.size(); ++index) {
+        suffix[index] = static_cast<std::byte>(0x80U + index);
+        patch_record_byte(source, partition, *target, target->data_size - suffix_size + index, suffix[index]);
+    }
+
+    axk::AssignSampleBankMembersOperation assignment;
+    assignment.partition = axk::PartitionIndex{0U};
+    assignment.volume_name = "Bank Capacity";
+    assignment.sample_bank_name = "Target";
+    for (std::size_t index = 2U; index <= 10U; ++index)
+        assignment.sample_names.push_back(std::format("Member {:03}", index));
+    axk::AlterationManifest manifest{"1.0", {{"assign", std::move(assignment)}}};
+    const auto applied = axk::alter_hds(source, manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto &output_partition = reopened->partitions().front();
+    const auto output_target = std::ranges::find_if(output_partition.records, [](const auto &record) {
+        return record.object_type == "SBAC" && record.object_name == "Target";
+    });
+    ASSERT_NE(output_target, output_partition.records.end());
+    const auto payload =
+        reopened->read_record_data(output_partition.index, output_target->sfs_id, output_target->data_size);
+    ASSERT_TRUE(payload) << payload.error().message;
+    ASSERT_GE(payload->size(), suffix.size());
+    EXPECT_TRUE(std::ranges::equal(suffix, std::span{*payload}.last(suffix.size())));
     std::filesystem::remove_all(root, error);
 }
 

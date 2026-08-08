@@ -313,6 +313,19 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return require_object_name(operation.sample_bank_name, "sample_bank_name");
                 } else if constexpr (std::same_as<T, InsertSampleBankOperation>) {
                     return validate_sample_bank(operation.sample_bank);
+                } else if constexpr (std::same_as<T, AssignSampleBankMembersOperation>) {
+                    if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
+                        return valid;
+                    if (operation.sample_names.empty() || operation.sample_names.size() > maximum_sample_bank_members)
+                        return std::unexpected{manifest_error("sample_names must contain 1..127 names")};
+                    std::set<std::string_view> names;
+                    for (const auto &name : operation.sample_names) {
+                        if (auto valid = require_object_name(name, "sample_names"); !valid)
+                            return valid;
+                        if (!names.insert(name).second)
+                            return std::unexpected{manifest_error("sample_names must be distinct")};
+                    }
+                    return {};
                 } else if constexpr (std::same_as<T, RenameSampleBankOperation>) {
                     if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
                         return valid;
