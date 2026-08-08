@@ -136,10 +136,13 @@ Result<MediaObject> load_media_object(const MediaContainer &container, const Med
         auto bytes = sfs->read_record_data(found->partition, found->sfs_id, maximum_object_bytes, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
-        return MediaObject{descriptor.key,          descriptor.logical_path, descriptor.scope_key,
-                           descriptor.raw_group,    descriptor.raw_volume,   descriptor.group_label,
-                           descriptor.volume_label, descriptor.data_offset,  bytes->size(),
-                           found->object,           std::move(*bytes),       std::nullopt};
+        auto decoded = detail::decode_media_object(*bytes, bytes->size());
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        return MediaObject{
+            descriptor.key,        descriptor.logical_path,    descriptor.scope_key,    descriptor.raw_group,
+            descriptor.raw_volume, descriptor.group_label,     descriptor.volume_label, descriptor.data_offset,
+            bytes->size(),         std::move(decoded->object), std::move(*bytes),       std::move(decoded->issue)};
     }
 
     if (const auto *set = std::get_if<FloppyDiskSet>(&container.storage())) {

@@ -503,11 +503,8 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
         position = (position + 3U) & ~std::size_t{3U};
         if (position > payload.size())
             return std::unexpected{sequence_error("current Sequence block alignment exceeds the payload")};
-        if (found_end) {
-            if (*next_tick != 0U)
-                return std::unexpected{sequence_error("current Sequence terminal block has a nonzero next tick")};
+        if (found_end)
             break;
-        }
         if (*next_tick < tick)
             return std::unexpected{sequence_error("current Sequence ticks are not monotonic")};
         tick = *next_tick;

@@ -1289,6 +1289,87 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     std::filesystem::remove_all(output_root, error);
 }
 
+TEST(PortablePackage, PreservesUndecodableSequenceAsOpaqueNodeWithWarning) {
+    std::vector<std::byte> payload(0x90U);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SEQU", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x32U, 16U, "Damaged Sequence", std::byte{}));
+    ASSERT_TRUE(writer.write_be16(0x7cU, 1U));
+    ASSERT_TRUE(writer.write_be16(0x7eU, 96U));
+    ASSERT_TRUE(writer.write_be32(0x80U, 0U));
+    ASSERT_TRUE(writer.write_be32(0x84U, 0U));
+    ASSERT_TRUE(writer.write_be16(0x88U, 1U));
+    ASSERT_TRUE(writer.write_u8(0x8aU, 0x90U));
+    ASSERT_TRUE(writer.write_u8(0x8bU, 60U));
+    ASSERT_TRUE(writer.write_u8(0x8cU, 0xfdU));
+    const auto original = payload;
+
+    auto standalone =
+        axk::StandaloneObject::open(std::make_shared<axk::MemoryReader>(std::move(payload)), "damaged-sequence.bin");
+    ASSERT_TRUE(standalone) << standalone.error().message;
+    const axk::MediaContainer media{std::move(*standalone)};
+    const std::vector selectors{root(axk::PackageRootKind::sequ, "Standalone object", "Damaged Sequence")};
+    const auto built = axk::build_portable_package(media, selectors);
+    ASSERT_TRUE(built) << built.error().message;
+    ASSERT_EQ(built->package.nodes.size(), 1U);
+    EXPECT_EQ(built->package.nodes.front().object_format, "unknown");
+    EXPECT_TRUE(built->package.nodes.front().relocations.empty());
+    ASSERT_EQ(built->package.issues.size(), 1U);
+    EXPECT_EQ(built->package.issues.front().code, "SEQUENCE_PAYLOAD_PRESERVED_OPAQUE");
+    EXPECT_FALSE(built->package.issues.front().fatal);
+
+    const auto reopened = axk::open_portable_package(built->archive, "damaged.axkseq");
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->issues.size(), 1U);
+    EXPECT_EQ(reopened->issues.front().code, "SEQUENCE_PAYLOAD_PRESERVED_OPAQUE");
+
+    axk::package_internal::PackageNodeRelocationContext context;
+    context.destination_name = "Renamed";
+    const auto renamed = axk::package_internal::relocate_package_node(*reopened, reopened->nodes.front(), context);
+    ASSERT_TRUE(renamed) << renamed.error().message;
+    const auto header = axk::decode_object_header(*renamed);
+    ASSERT_TRUE(header) << header.error().message;
+    EXPECT_EQ(header->name, "Renamed");
+    EXPECT_FALSE(axk::decode_object(*renamed));
+    for (std::size_t offset = 0; offset < original.size(); ++offset) {
+        if (offset < 0x32U || offset >= 0x42U) {
+            EXPECT_EQ((*renamed)[offset], original[offset]) << offset;
+        }
+    }
+
+    const auto output_root = publication_root("axklib-package-opaque-sequence-import");
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    axk::PackageImportRequest request;
+    request.root_destinations.push_back(destination(0U, "New Volume"));
+    request.policy.renames.push_back({0U, reopened->nodes.front().node_id, "Renamed"});
+    const std::vector packages{*reopened};
+    const auto target = fixture("HD00_512_single_sbnk_authored.hds");
+    const auto plan = axk::plan_package_import(target, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
+    ASSERT_EQ(plan->warnings.size(), 1U);
+    EXPECT_EQ(plan->warnings.front().code, "SEQUENCE_PAYLOAD_PRESERVED_OPAQUE");
+
+    const auto output = output_root / "imported.hds";
+    const auto applied = axk::apply_package_import(target, packages, *plan, output, false);
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto imported_media = axk::open_media(output);
+    ASSERT_TRUE(imported_media) << imported_media.error().message;
+    const auto imported_objects = imported_media->objects();
+    ASSERT_TRUE(imported_objects) << imported_objects.error().message;
+    const auto imported = std::ranges::find_if(*imported_objects, [](const auto &object) {
+        return object.decoded.header.raw_type == "SEQU" && object.decoded.header.name == "Renamed";
+    });
+    ASSERT_NE(imported, imported_objects->end());
+    EXPECT_EQ(imported->decoded.format, axk::ObjectFormat::unknown);
+    EXPECT_TRUE(imported->decode_issue.has_value());
+    EXPECT_EQ(imported->raw_payload, *renamed);
+    std::filesystem::remove_all(output_root, error);
+}
+
 TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
     const auto output_root = publication_root("axklib-package-sbac-slot-order");
     const auto audio_path = output_root / "tone.wav";

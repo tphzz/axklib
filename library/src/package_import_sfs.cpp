@@ -588,7 +588,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             auto relocated = package_internal::relocate_package_node(packages[object.package_index], *node, *context);
             if (!relocated)
                 return std::unexpected{relocated.error()};
-            auto decoded = decode_object(*relocated);
+            auto decoded = package_internal::decode_package_object(*relocated);
             if (!decoded)
                 return std::unexpected{decoded.error()};
             auto profile = package_internal::build_relocation_profile(*decoded, *relocated);

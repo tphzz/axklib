@@ -28,11 +28,20 @@ SMPL nodes remains `.axkprg`, as do two selected Programs. A Program and a
 Sample selected together form `.axkpkg`. Version 1 currently admits
 current-format `PROG`, `SBAC`, `SBNK`, `SMPL`, and `SEQU` objects. `PRF3`,
 unknown types, and non-current object profiles are rejected because their
-portable dependency and relocation contracts are not admitted. A Sequence has
-no admitted external dependency, so `.axkseq` contains its raw object payload
-without relationship or relocation entries. Complete `.axkvol` export may
-include Sequences. Optional Sequence rename changes only its current object-name
-field and preserves the internal track/lane label.
+portable dependency and relocation contracts are not admitted. The one narrow
+exception is a header-valid but semantically undecodable `SEQU`. Sequences have
+no external object dependencies, so the raw payload can be preserved as an
+opaque node with format `unknown`, no relationships, and no relocation
+descriptors. The package carries the nonfatal
+`SEQUENCE_PAYLOAD_PRESERVED_OPAQUE` issue. Full verification and import repeat
+that restriction; an opaque Sequence owning an edge, declaring a relocation, or
+changing bytes outside an explicit object-name rename is rejected.
+
+A normally decoded or opaque Sequence therefore remains eligible for `.axkseq`
+and complete `.axkvol` export. Optional Sequence rename changes only its
+object-name field and preserves the internal track/lane label. Opaque
+preservation does not make MIDI conversion or sampler playability verified;
+clients must surface the package warning to the user.
 
 Writers append the derived extension to a suffix-free output stem. A different
 recognized package extension or an unrelated extension is rejected. Readers

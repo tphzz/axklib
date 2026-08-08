@@ -43,7 +43,11 @@ Each timeline block starts with:
 
 The tick for the first block comes from `0x80`. A nonterminal block supplies
 the next block's absolute tick in its header. The terminal block contains an
-end-of-track event and has a zero next tick.
+end-of-track event. The stored next-tick field of that terminal block is not
+used: current objects normally write zero, but independent A3K archives contain
+otherwise valid timelines with a nonzero value. Decoding ends at the admitted
+end-of-track event and ignores that unused terminal value. Axklib writers remain
+canonical and write zero.
 
 The decoder expands native running status and exposes:
 
@@ -157,6 +161,14 @@ Sequences have no admitted external object dependency. Exact package import
 copies the raw payload, while an optional rename changes only the current
 object-name field. A complete `.axkvol` may contain Sequence objects alongside
 Programs and sample data without blocking portability.
+
+A header-valid `SEQU` object whose timeline cannot be decoded may also be moved
+as an opaque Sequence. The package records format `unknown`, has no relationships
+or relocation descriptors, and emits `SEQUENCE_PAYLOAD_PRESERVED_OPAQUE` as a
+nonfatal issue. Export and import preserve every byte; an explicit rename may
+change only the 16-byte object-name field at `0x32`. This recovery contract does
+not verify MIDI conversion or sampler playback. Other
+undecodable object types remain outside the portable-package profile.
 
 ## Compatibility Boundary
 

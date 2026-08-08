@@ -145,7 +145,16 @@ export class ExportWorkflow {
                 await saveRetainedPackage(localDestination.candidateId, retained.contentPath, retained.sizeBytes);
             }
             this.packageRequest = null;
-            this.dependencies.setStatus(`Exported ${exportLabel}`);
+            const warnings = result.issues.filter((issue) => issue.fatal !== true);
+            if (warnings.length === 1) {
+                this.dependencies.setStatus(`Exported ${exportLabel}; warning: ${warnings[0].message}`);
+            } else if (warnings.length > 1) {
+                this.dependencies.setStatus(
+                    `Exported ${exportLabel}; ${warnings.length} warnings: ${warnings.map((issue) => issue.message).join('; ')}`,
+                );
+            } else {
+                this.dependencies.setStatus(`Exported ${exportLabel}`);
+            }
         } catch (error) {
             const message = userFacingMessage(error);
             this.dependencies.setStatus(message);

@@ -128,6 +128,7 @@ add_library(
   src/package_import_sfs.cpp
   src/package_import_support.cpp
   src/package_manifest.cpp
+  src/package_object.cpp
   src/package_parse.cpp
   src/package_relocation.cpp
   src/package_support.cpp

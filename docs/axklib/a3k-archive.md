@@ -101,6 +101,16 @@ needed. A whole-volume package is exported through the normal **Export
 package...** action and receives `.axkvol`; the partition-level batch-volume
 workflow is not advertised because an archive has no multi-volume parent.
 
+Four corpus archives contain valid current Sequences whose terminal
+end-of-track block stores a nonzero unused next-tick value. Axklib accepts these
+timelines and exports them as ordinary current `SEQU` nodes. The Sequence in
+`nordmicrodrums#1.a3k` is structurally damaged and still fails semantic timeline
+decoding; volume and Sequence package export preserve that one object as an
+opaque node and report `SEQUENCE_PAYLOAD_PRESERVED_OPAQUE`. This warning means
+the bytes are retained but MIDI conversion and sampler playability are not
+verified. It does not block the remaining Programs, Sample Banks, Samples, or
+Wave Data in the volume from being packaged.
+
 ## Rejection And Limits
 
 Opening fails when the version, magic, fixed marker, exact terminal-index

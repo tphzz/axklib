@@ -135,7 +135,7 @@ Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const
                                            const PackageNodeRelocationContext &context,
                                            std::vector<ByteRange> *changed_ranges) {
     auto result = node.raw_payload;
-    auto decoded = decode_object(node.raw_payload);
+    auto decoded = decode_package_object(node.raw_payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
     if (decoded->header.name != context.destination_name) {
@@ -235,6 +235,8 @@ Result<std::vector<std::byte>> clear_program_assignment_rows(std::span<const std
 Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
                                                    std::span<const std::byte> raw_payload) {
     if (object.format != ObjectFormat::current) {
+        if (is_opaque_sequence(object))
+            return RelocationProfile{{raw_payload.begin(), raw_payload.end()}, {}};
         return std::unexpected{profile_error(object, "portable packages require a current Yamaha object profile")};
     }
     RelocationProfile result;
@@ -309,7 +311,7 @@ Result<std::vector<std::byte>> project_package_node_names(const PortablePackage 
 
 Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &package, const PackageNode &node,
                                                      const PackageNodeRelocationContext &context) {
-    auto source_decoded = decode_object(node.raw_payload);
+    auto source_decoded = decode_package_object(node.raw_payload);
     if (!source_decoded)
         return std::unexpected{source_decoded.error()};
     auto source_profile = build_relocation_profile(*source_decoded, node.raw_payload);
@@ -411,7 +413,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             }
         }
     } else if (node.object_type == "SEQU") {
-        if (!std::holds_alternative<CurrentSequence>(source_decoded->payload))
+        if (!std::holds_alternative<CurrentSequence>(source_decoded->payload) && !is_opaque_sequence(*source_decoded))
             return std::unexpected{relocation_error(node, "Sequence source payload is not decoded")};
     } else {
         return std::unexpected{relocation_error(node, "package node type has no admitted relocation implementation")};
@@ -423,7 +425,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         }
     }
 
-    auto decoded = decode_object(result);
+    auto decoded = decode_package_object(result);
     if (!decoded)
         return std::unexpected{decoded.error()};
     if (decoded->header.name != context.destination_name) {
@@ -506,7 +508,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         }
     }
 
-    auto projected_decoded = decode_object(*projected);
+    auto projected_decoded = decode_package_object(*projected);
     if (!projected_decoded)
         return std::unexpected{projected_decoded.error()};
     auto expected_profile = build_relocation_profile(*projected_decoded, *projected);

@@ -15,6 +15,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -31,6 +32,25 @@
 #include "file_operations_internal.hpp"
 
 namespace axk::app::file_operations_internal {
+namespace {
+
+std::string object_format_name(axk::ObjectFormat format) {
+    switch (format) {
+    case axk::ObjectFormat::current:
+        return "current";
+    case axk::ObjectFormat::alternating_byte:
+        return "alternating-byte";
+    case axk::ObjectFormat::unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
+bool is_decode_issue(const axk::CatalogIssue &issue) {
+    return issue.code == "CATALOG_OBJECT_DECODE_FAILED" || issue.code == "media_object_decode_failed";
+}
+
+} // namespace
 
 axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapshot &item, std::string display_path) {
     const auto media_object = std::ranges::find(source.inventory.objects, item.key, &axk::MediaObjectDescriptor::key);
@@ -39,7 +59,9 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
     const auto sfs = source.media.kind() == axk::MediaKind::sfs;
     std::string decoded_kind{"UnknownObject"};
     std::string decoded_fields;
-    if (item.object.header.type == axk::ObjectType::smpl) {
+    if (item.object.format == axk::ObjectFormat::unknown) {
+        decoded_kind = item.object.header.type == axk::ObjectType::sequ ? "OpaqueSequence" : "OpaqueObject";
+    } else if (item.object.header.type == axk::ObjectType::smpl) {
         decoded_kind = "DecodedWaveData";
         decoded_fields = "fine_tune;loop_length;loop_mode;loop_start;root_key;sample_rate";
     } else if (item.object.header.type == axk::ObjectType::sbnk) {
@@ -56,6 +78,17 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
     }
     const auto field_count =
         decoded_fields.empty() ? 0U : static_cast<unsigned int>(std::ranges::count(decoded_fields, ';') + 1);
+    std::vector<std::string> decode_issue_codes;
+    for (const auto &issue : source.inventory.catalog.issues) {
+        if (issue.partition == item.partition && issue.sfs_id == item.sfs_id && is_decode_issue(issue))
+            decode_issue_codes.push_back(issue.code);
+    }
+    std::string serialized_decode_issue_codes;
+    for (const auto &code : decode_issue_codes) {
+        if (!serialized_decode_issue_codes.empty())
+            serialized_decode_issue_codes.push_back(';');
+        serialized_decode_issue_codes += code;
+    }
     std::uint64_t payload_offset{};
     if (sfs) {
         const auto &container = std::get<axk::Container>(source.media.storage());
@@ -105,12 +138,12 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
         {"payload_size", payload_size},
         {"object_type", object_type_name(item.object.header.type)},
         {"object_name", item.object.header.name},
-        {"object_format", "normal-fsfsdev3splx"},
+        {"object_format", object_format_name(item.object.format)},
         {"decoded_kind", decoded_kind},
         {"decoded_field_count", static_cast<std::uint64_t>(field_count)},
         {"decoded_fields", decoded_fields},
-        {"decode_issue_count", std::uint64_t{0}},
-        {"decode_issue_codes", ""},
+        {"decode_issue_count", static_cast<std::uint64_t>(decode_issue_codes.size())},
+        {"decode_issue_codes", std::move(serialized_decode_issue_codes)},
         {"iso_extent_sector", iso && media_object != source.inventory.objects.end()
                                   ? axk::ReportValue{media_object->data_offset / 2048U}
                                   : axk::ReportValue{""}},

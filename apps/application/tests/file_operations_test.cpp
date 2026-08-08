@@ -9,6 +9,7 @@
 
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
 
 namespace {
@@ -59,6 +60,22 @@ void write_minimal_wav(const std::filesystem::path &path, std::uint16_t channels
     copy(36U, "data");
     std::ofstream output{path, std::ios::binary};
     output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
+void write_damaged_sequence(const std::filesystem::path &path) {
+    std::vector<std::byte> payload(0x90U);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SEQU", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x32U, 16U, "Damaged Sequence", std::byte{}));
+    ASSERT_TRUE(writer.write_be16(0x7cU, 1U));
+    ASSERT_TRUE(writer.write_be16(0x7eU, 96U));
+    ASSERT_TRUE(writer.write_be16(0x88U, 1U));
+    ASSERT_TRUE(writer.write_u8(0x8aU, 0x90U));
+    ASSERT_TRUE(writer.write_u8(0x8bU, 60U));
+    ASSERT_TRUE(writer.write_u8(0x8cU, 0xfdU));
+    std::ofstream output{path, std::ios::binary};
+    output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
 }
 
 std::filesystem::path fixture_path() {
@@ -448,6 +465,29 @@ TEST_F(FileOperationsTest, InventoryWritesTheCompleteCliArtifactSetAndSummary) {
     EXPECT_EQ(summary.at("load_error_count"), 0U);
     EXPECT_EQ(summary.at("object_type_counts"), nlohmann::json({{"SBAC", 1U}, {"SBNK", 8U}, {"SMPL", 8U}}));
     EXPECT_TRUE(summary.at("load_errors").empty());
+}
+
+TEST_F(FileOperationsTest, InventoryReportsAnOpaqueSequenceAndItsDecodeIssue) {
+    write_damaged_sequence(root_ / "damaged.SEQU");
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.inventory",
+        {{"sources", {{{"rootId", "workspace"}, {"relativePath", "damaged.SEQU"}}}},
+         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/damaged"}}}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("rowCount"), 1U);
+    EXPECT_EQ(result->at("decodeIssueCount"), 1U);
+
+    std::ifstream objects_input{root_ / "reports" / "damaged" / "inventory_objects.json"};
+    const auto objects = nlohmann::json::parse(objects_input);
+    ASSERT_EQ(objects.size(), 1U);
+    EXPECT_EQ(objects.front().at("object_type"), "SEQU");
+    EXPECT_EQ(objects.front().at("object_format"), "unknown");
+    EXPECT_EQ(objects.front().at("decoded_kind"), "OpaqueSequence");
+    EXPECT_EQ(objects.front().at("decode_issue_count"), 1U);
+    EXPECT_EQ(objects.front().at("decode_issue_codes"), "media_object_decode_failed");
 }
 
 TEST_F(FileOperationsTest, OrphansWritesOwnershipRowsAndPerImageSummary) {

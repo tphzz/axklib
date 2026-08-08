@@ -305,7 +305,7 @@ Result<std::string> projected_normalized_sha256(const PortablePackage &package, 
     auto projected = package_internal::project_package_node_names(package, node, context);
     if (!projected)
         return std::unexpected{projected.error()};
-    auto decoded = decode_object(*projected);
+    auto decoded = package_internal::decode_package_object(*projected);
     if (!decoded)
         return std::unexpected{decoded.error()};
     auto profile = package_internal::build_relocation_profile(*decoded, *projected);

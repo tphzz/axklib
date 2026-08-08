@@ -26,6 +26,9 @@ struct PackageNodeRelocationContext {
     bool sample_bank_member{};
 };
 
+[[nodiscard]] bool is_opaque_sequence(const DecodedObject &object);
+[[nodiscard]] Result<DecodedObject> decode_package_object(std::span<const std::byte> payload);
+
 [[nodiscard]] Result<std::vector<std::byte>> clear_program_assignment_rows(std::span<const std::byte> payload,
                                                                            std::span<const std::uint32_t> ordinals);
 

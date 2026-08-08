@@ -177,9 +177,12 @@ Result<void> validate_package_closure(const PortablePackage &package) {
     }
 
     for (const auto &node : package.nodes) {
-        const auto decoded = decode_object(node.raw_payload);
+        const auto decoded = package_internal::decode_package_object(node.raw_payload);
         if (!decoded)
             return std::unexpected{package_error("package object cannot be decoded for closure validation")};
+        if (package_internal::is_opaque_sequence(*decoded) && !package_children(package, node.node_id).empty()) {
+            return std::unexpected{package_error("opaque Sequence package nodes cannot own relationships")};
+        }
         const auto require_edge = [&](std::string_view role, std::string_view target_name, ObjectType target_type,
                                       std::optional<std::uint32_t> ordinal = std::nullopt) -> Result<void> {
             auto edges = package_children(package, node.node_id, role);
@@ -392,7 +395,7 @@ Result<PortablePackage> parse_manifest(const Json &manifest,
             if (package_internal::hex_digest(package_internal::sha256(node.raw_payload)) != node.payload_sha256) {
                 return std::unexpected{package_error("package object payload digest mismatch")};
             }
-            const auto decoded = decode_object(node.raw_payload);
+            const auto decoded = package_internal::decode_package_object(node.raw_payload);
             if (!decoded || decoded->header.type != *type || decoded->header.name != node.name ||
                 object_format_name(decoded->format) != node.object_format) {
                 return std::unexpected{package_error("package object payload does not match its declaration")};
@@ -421,6 +424,18 @@ Result<PortablePackage> parse_manifest(const Json &manifest,
                     return std::unexpected{package_error("package object relocation descriptor is invalid")};
                 }
             }
+        }
+        if (node.object_type == "SEQU" && node.object_format == "unknown") {
+            std::string message =
+                std::format("Sequence '{}' could not be decoded and was preserved byte-for-byte; MIDI conversion and "
+                            "sampler playability are not verified",
+                            node.name);
+            if (verify_payloads) {
+                const auto semantic = decode_object(node.raw_payload);
+                if (!semantic)
+                    message += ": " + semantic.error().message;
+            }
+            result.issues.push_back({"SEQUENCE_PAYLOAD_PRESERVED_OPAQUE", std::move(message), false});
         }
         result.nodes.push_back(std::move(node));
     }

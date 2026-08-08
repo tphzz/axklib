@@ -134,6 +134,24 @@ TEST(CurrentSequence, DecodesTimelineAndExportsSmf0) {
     EXPECT_EQ(std::get<axk::CurrentSequence>(roundtrip_decoded->payload).events, sequence.events);
 }
 
+TEST(CurrentSequence, IgnoresTheStoredNextTickAfterEndOfTrack) {
+    auto payload = import_smf(smf0({std::byte{}, std::byte{0xff}, std::byte{0x2f}, std::byte{}}), "Sequence",
+                              axk::SequenceSystemExclusivePolicy::reject);
+    ASSERT_TRUE(payload) << payload.error().message;
+    ASSERT_GE(payload->size(), 0x88U);
+    (*payload)[0x84U] = std::byte{0x12};
+    (*payload)[0x85U] = std::byte{0x34};
+    (*payload)[0x86U] = std::byte{0x56};
+    (*payload)[0x87U] = std::byte{0x78};
+
+    const auto decoded = axk::decode_object(*payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto &sequence = std::get<axk::CurrentSequence>(decoded->payload);
+    ASSERT_EQ(sequence.events.size(), 1U);
+    EXPECT_EQ(sequence.events.front().kind, axk::SequenceEventKind::meta);
+    EXPECT_EQ(sequence.end_tick, 0U);
+}
+
 TEST(CurrentSequence, InspectsControllersAndOpaqueSystemExclusiveWithoutReturningPayloads) {
     const auto inspected = axk::inspect_smf0(system_exclusive_smf());
     ASSERT_TRUE(inspected) << inspected.error().message;

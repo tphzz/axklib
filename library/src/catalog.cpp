@@ -4,6 +4,8 @@
 #include <format>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "axklib/catalog_internal.hpp"
 
@@ -94,7 +96,7 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                 container.read_record_data(partition.index, record.sfs_id, maximum_object_bytes, cancellation);
             if (!bytes)
                 return std::unexpected{bytes.error()};
-            const auto decoded = decode_object(*bytes);
+            auto decoded = decode_object(*bytes);
             if (!decoded) {
                 result.issues.push_back({
                     "CATALOG_OBJECT_DECODE_FAILED",
@@ -102,7 +104,11 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                     partition.index,
                     record.sfs_id,
                 });
-                continue;
+                auto header = decode_object_header(*bytes);
+                if (!header || header->type != ObjectType::sequ)
+                    continue;
+                decoded = DecodedObject{std::move(*header), ObjectFormat::unknown,
+                                        GenericObject{std::vector<std::byte>{bytes->begin(), bytes->end()}}};
             }
             std::vector<ObjectPlacement> matching;
             for (const auto &candidate : candidates) {

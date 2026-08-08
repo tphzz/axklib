@@ -220,6 +220,9 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
         auto bytes = sfs->read_record_data(item.partition, item.sfs_id, maximum_object_bytes, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
+        auto decoded = detail::decode_media_object(*bytes, bytes->size());
+        if (!decoded)
+            return std::unexpected{decoded.error()};
         result.push_back(
             {item.key,
              placement
@@ -232,9 +235,9 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
              {placement ? placement->volume_name : std::string{}, LabelStatus::confirmed, "SFS volume directory"},
              0,
              bytes->size(),
-             item.object,
+             std::move(decoded->object),
              std::move(*bytes),
-             {}});
+             std::move(decoded->issue)});
     }
     return result;
 }

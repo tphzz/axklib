@@ -387,6 +387,17 @@ Result<PackageBuild> build_selected_package(const MediaContainer &source, std::s
         packaged.payload_size_bytes = node.snapshot->raw_payload.size();
         packaged.raw_payload = node.snapshot->raw_payload;
         package.nodes.push_back(std::move(packaged));
+        if (package_internal::is_opaque_sequence(node.snapshot->object)) {
+            const auto semantic = decode_object(node.snapshot->raw_payload);
+            if (semantic)
+                return std::unexpected{package_error("opaque Sequence unexpectedly passed semantic decoding")};
+            package.issues.push_back(
+                {"SEQUENCE_PAYLOAD_PRESERVED_OPAQUE",
+                 std::format("Sequence '{}' could not be decoded and was preserved byte-for-byte; MIDI conversion "
+                             "and sampler playability are not verified: {}",
+                             node.snapshot->object.header.name, semantic.error().message),
+                 false});
+        }
     }
     std::ranges::sort(package.nodes, {}, &PackageNode::node_id);
 

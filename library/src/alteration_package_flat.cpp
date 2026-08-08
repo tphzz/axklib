@@ -64,7 +64,7 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
 }
 
 Result<std::string> normalized_payload_digest(std::span<const std::byte> payload) {
-    auto decoded = decode_object(payload);
+    auto decoded = package_internal::decode_package_object(payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
     auto profile = package_internal::build_relocation_profile(*decoded, payload);
@@ -296,7 +296,7 @@ Result<PackageImportReport> apply_fat12_package_import(const std::filesystem::pa
                 auto payload = package_internal::relocate_package_node(package, *node, *context);
                 if (!payload)
                     return std::unexpected{payload.error()};
-                auto decoded = decode_object(*payload);
+                auto decoded = package_internal::decode_package_object(*payload);
                 if (!decoded)
                     return std::unexpected{decoded.error()};
                 if (object.existing_object_key) {
@@ -468,7 +468,7 @@ apply_iso9660_package_import(const std::filesystem::path &target_path, std::span
                 auto payload = package_internal::relocate_package_node(package, *node, *context);
                 if (!payload)
                     return std::unexpected{payload.error()};
-                auto decoded = decode_object(*payload);
+                auto decoded = package_internal::decode_package_object(*payload);
                 if (!decoded)
                     return std::unexpected{decoded.error()};
                 if (object.existing_object_key) {
