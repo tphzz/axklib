@@ -318,6 +318,8 @@ export type PackageInspection = components['schemas']['PackageInspection'];
 export type PackageImportDestination = components['schemas']['PackageDestination'];
 export type PackageImportPlan = components['schemas']['PackageImportPlan'];
 export type ImageSessionPackageRename = components['schemas']['ImageSessionPackageRename'];
+export type ImageSessionPackageProgramSlotAssignment =
+    components['schemas']['ImageSessionPackageProgramSlotAssignment'];
 export type ImageSessionPackageImportPlan = components['schemas']['ImageSessionPackageImportPlan'];
 export type ImageSessionPackageImportResult = components['schemas']['ImageSessionPackageImportResult'];
 export type ImageSessionPackageExportDestination = components['schemas']['ImageSessionPackageExportDestination'];
@@ -526,6 +528,7 @@ export interface ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames?: ImageSessionPackageRename[],
+        programSlotAssignments?: ImageSessionPackageProgramSlotAssignment[],
         replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan>;
     releaseImagePackageImportPlan(planToken: string): Promise<void>;

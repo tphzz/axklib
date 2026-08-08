@@ -451,6 +451,24 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"disposition", "clear-assignment"},
     };
     const auto adjustments = nlohmann::json::array({adjustment});
+    const auto placements = nlohmann::json::array({{
+        {"placementId", "placement-1"},
+        {"partitionIndex", 0U},
+        {"volumeName", "Imported"},
+        {"mode", "contiguous"},
+        {"applied", false},
+        {"suggestedStartSlot", 5U},
+        {"requiredSlotCount", 4U},
+        {"availableSlotCount", 124U},
+        {"occupiedRanges", nlohmann::json::array({{{"first", 1U}, {"last", 4U}}})},
+        {"sourceRanges", nlohmann::json::array({{{"first", 1U}, {"last", 4U}}})},
+        {"destinationRanges", nlohmann::json::array({{{"first", 5U}, {"last", 8U}}})},
+        {"mappings", nlohmann::json::array({{{"packageIndex", 0U},
+                                             {"nodeId", "program-1"},
+                                             {"sourceSlot", 1U},
+                                             {"destinationSlot", 5U},
+                                             {"requiresUserAction", true}}})},
+    }});
     const auto application_plan = nlohmann::json{
         {"schemaVersion", "1.0"},
         {"planToken", "plan-token"},
@@ -463,12 +481,14 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"conflicts", nlohmann::json::array()},
         {"actions", nlohmann::json::array()},
         {"programAssignmentAdjustments", adjustments},
+        {"programSlotPlacements", placements},
         {"allocation", nlohmann::json::array()},
     };
     const auto wire_plan = validator.wire_value("PackageImportPlan", application_plan);
     ASSERT_TRUE(validator.validate("PackageImportPlan", wire_plan));
     EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("origin"), "EXISTING_PROGRAM");
     EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("disposition"), "CLEAR_ASSIGNMENT");
+    EXPECT_EQ(wire_plan.at("programSlotPlacements").at(0).at("mode"), "CONTIGUOUS");
 
     const auto application_result = nlohmann::json{
         {"schemaVersion", "1.0"},

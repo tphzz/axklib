@@ -19,6 +19,7 @@ export interface PackageImportRequest {
     inspection: PackageInspection | null;
     plan: ImageSessionPackageImportPlan | null;
     renames: Record<string, string>;
+    programSlots: Record<string, number>;
     status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
     progress: number;
     error: string;
@@ -55,6 +56,7 @@ export class PackageImportWorkflow {
             inspection: null,
             plan: null,
             renames: {},
+            programSlots: {},
             status: 'choosing',
             progress: 0,
             error: '',
@@ -64,6 +66,24 @@ export class PackageImportWorkflow {
     rename(nodeId: string, name: string): void {
         if (!this.request) return;
         this.request = { ...this.request, renames: { ...this.request.renames, [nodeId]: name } };
+    }
+
+    programSlot(nodeId: string, slot: number): void {
+        if (!this.request || !Number.isInteger(slot) || slot < 1 || slot > 128) return;
+        this.request = { ...this.request, programSlots: { ...this.request.programSlots, [nodeId]: slot } };
+    }
+
+    programStart(placementId: string, start: number): void {
+        if (!this.request?.plan || !Number.isInteger(start)) return;
+        const placement = this.request.plan.programSlotPlacements.find((entry) => entry.placementId === placementId);
+        if (!placement || placement.mode !== 'CONTIGUOUS' || start < 1 || start + placement.mappings.length - 1 > 128) {
+            return;
+        }
+        const programSlots = { ...this.request.programSlots };
+        placement.mappings.forEach((mapping, index) => {
+            programSlots[mapping.nodeId] = start + index;
+        });
+        this.request = { ...this.request, programSlots };
     }
 
     async dispose(): Promise<void> {
@@ -95,6 +115,7 @@ export class PackageImportWorkflow {
             inspection: null,
             plan: null,
             renames: {},
+            programSlots: {},
             status: 'choosing',
             progress: 0,
             error: '',
@@ -138,6 +159,7 @@ export class PackageImportWorkflow {
                 inspection: null,
                 plan: null,
                 renames: {},
+                programSlots: {},
                 status: 'loading',
                 progress: 0,
                 error: '',
@@ -242,6 +264,7 @@ export class PackageImportWorkflow {
             inspection: null,
             plan: null,
             renames: {},
+            programSlots: {},
             status: 'loading',
             progress: 0,
             error: '',
@@ -277,6 +300,12 @@ export class PackageImportWorkflow {
         const renames = Object.entries(request.renames)
             .map(([nodeId, destinationName]) => ({ nodeId, destinationName: destinationName.trim() }))
             .filter((rename) => rename.destinationName.length > 0);
+        const programSlotAssignments = Object.entries(request.programSlots)
+            .map(([nodeId, destinationSlot]) => ({ nodeId, destinationSlot }))
+            .sort(
+                (left, right) =>
+                    left.destinationSlot - right.destinationSlot || left.nodeId.localeCompare(right.nodeId),
+            );
         const plan = replacePlanToken
             ? await this.dependencies.transport.planImagePackageImport(
                   sessionId,
@@ -284,6 +313,7 @@ export class PackageImportWorkflow {
                   request.item.partitionIndex,
                   request.item.name,
                   renames,
+                  programSlotAssignments,
                   replacePlanToken,
               )
             : await this.dependencies.transport.planImagePackageImport(
@@ -292,17 +322,42 @@ export class PackageImportWorkflow {
                   request.item.partitionIndex,
                   request.item.name,
                   renames,
+                  programSlotAssignments,
               );
         if (generation !== this.generation || !this.request) {
             await this.dependencies.transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);
             return;
         }
-        const nextRenames = { ...request.renames };
+        const placementNodeIds = new Set(
+            plan.programSlotPlacements.flatMap((placement) => placement.mappings.map((mapping) => mapping.nodeId)),
+        );
+        const nextRenames = Object.fromEntries(
+            Object.entries(request.renames).filter(([nodeId]) => !placementNodeIds.has(nodeId)),
+        );
         for (const action of plan.actions) {
-            if (plan.conflicts.some((conflict) => conflict.nodeId === action.nodeId) && !nextRenames[action.nodeId]) {
+            if (
+                !placementNodeIds.has(action.nodeId) &&
+                plan.conflicts.some((conflict) => conflict.nodeId === action.nodeId) &&
+                !nextRenames[action.nodeId]
+            ) {
                 nextRenames[action.nodeId] = action.destinationName;
             }
         }
-        this.request = { ...this.request, plan, renames: nextRenames, status: 'ready', error: '' };
+        const nextProgramSlots = { ...request.programSlots };
+        for (const placement of plan.programSlotPlacements) {
+            for (const mapping of placement.mappings) {
+                if (nextProgramSlots[mapping.nodeId] === undefined) {
+                    nextProgramSlots[mapping.nodeId] = mapping.destinationSlot;
+                }
+            }
+        }
+        this.request = {
+            ...this.request,
+            plan,
+            renames: nextRenames,
+            programSlots: nextProgramSlots,
+            status: 'ready',
+            error: '',
+        };
     }
 }

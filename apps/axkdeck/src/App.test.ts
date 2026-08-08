@@ -1098,6 +1098,7 @@ describe('App panel layout', () => {
             conflicts: [],
             actions: [],
             programAssignmentAdjustments: [],
+            programSlotPlacements: [],
             allocation: [],
         });
         render(App);
@@ -1135,6 +1136,7 @@ describe('App panel layout', () => {
                 }),
                 0,
                 'My Volume',
+                [],
                 [],
             ),
         );

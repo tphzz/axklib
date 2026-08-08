@@ -99,6 +99,7 @@ function plan(valid = true): ImageSessionPackageImportPlan {
             },
         ],
         programAssignmentAdjustments: [],
+        programSlotPlacements: [],
         allocation: [
             {
                 partitionIndex: 0,
@@ -131,6 +132,8 @@ const callbacks = {
     onchooselocal: vi.fn(),
     onchange: vi.fn(),
     onrename: vi.fn(),
+    onprogramslot: vi.fn(),
+    onprogramstart: vi.fn(),
     onreplan: vi.fn(),
     oncancel: vi.fn(),
     onconfirm: vi.fn(),
@@ -146,6 +149,7 @@ describe('PackageImportDialog', () => {
                 inspection: null,
                 plan: null,
                 renames: {},
+                programSlots: {},
                 status: 'choosing',
                 progress: 0,
                 error: '',
@@ -170,6 +174,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: plan(false),
                 renames: {},
+                programSlots: {},
                 status: 'ready',
                 progress: 1,
                 error: '',
@@ -199,6 +204,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: plan(),
                 renames: {},
+                programSlots: {},
                 status: 'ready',
                 progress: 1,
                 error: '',
@@ -242,6 +248,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: adjusted,
                 renames: {},
+                programSlots: {},
                 status: 'ready',
                 progress: 1,
                 error: '',
@@ -293,6 +300,7 @@ describe('PackageImportDialog', () => {
                 inspection: sharedInspection,
                 plan: null,
                 renames: {},
+                programSlots: {},
                 status: 'planning',
                 progress: 0,
                 error: '',
@@ -301,6 +309,81 @@ describe('PackageImportDialog', () => {
         });
 
         expect(screen.getAllByText('Kick')).toHaveLength(2);
+    });
+
+    it('presents Program slot conflicts as one compact placement instead of duplicate rename fields', async () => {
+        const blocked = plan(false);
+        blocked.conflicts = Array.from({ length: 4 }, (_, index) => ({
+            ...blocked.conflicts[0],
+            code: 'SFS_NAME_CONFLICT',
+            nodeId: `program-${index + 1}`,
+            message: 'destination already contains the same object name with different content',
+        }));
+        blocked.actions = Array.from({ length: 4 }, (_, index) => ({
+            ...blocked.actions[0],
+            actionId: `program-action-${index + 1}`,
+            nodeId: `program-${index + 1}`,
+            objectType: 'PROG',
+            sourceName: String(index + 1).padStart(3, '0'),
+            destinationName: String(index + 1).padStart(3, '0'),
+        }));
+        blocked.programSlotPlacements = [
+            {
+                placementId: 'placement-1',
+                partitionIndex: 0,
+                volumeName: 'TARGET',
+                mode: 'CONTIGUOUS',
+                applied: false,
+                suggestedStartSlot: 5,
+                requiredSlotCount: 4,
+                availableSlotCount: 124,
+                occupiedRanges: [{ first: 1, last: 4 }],
+                sourceRanges: [{ first: 1, last: 4 }],
+                destinationRanges: [{ first: 5, last: 8 }],
+                mappings: Array.from({ length: 4 }, (_, index) => ({
+                    packageIndex: 0,
+                    nodeId: `program-${index + 1}`,
+                    sourceSlot: index + 1,
+                    destinationSlot: index + 5,
+                    requiresUserAction: false,
+                })),
+            },
+        ];
+        const onprogramstart = vi.fn();
+        const onreplan = vi.fn();
+
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: false,
+                sourceName: 'programs.axkprg',
+                inspection,
+                plan: blocked,
+                renames: {},
+                programSlots: {
+                    'program-1': 5,
+                    'program-2': 6,
+                    'program-3': 7,
+                    'program-4': 8,
+                },
+                status: 'ready',
+                progress: 0,
+                error: '',
+                ...callbacks,
+                onprogramstart,
+                onreplan,
+            },
+        });
+
+        expect(screen.getByText('1 issue prevents import')).toBeTruthy();
+        expect(screen.getAllByText('001–004')).toHaveLength(2);
+        expect(screen.getByText('005–008')).toBeTruthy();
+        expect(screen.queryByText('Choose unused destination names.')).toBeNull();
+        const start = screen.getByRole('spinbutton', { name: 'Destination start' });
+        await fireEvent.input(start, { target: { value: '9' } });
+        expect(onprogramstart).toHaveBeenCalledWith('placement-1', 9);
+        await fireEvent.click(screen.getByRole('button', { name: 'Check names' }));
+        expect(onreplan).toHaveBeenCalledOnce();
     });
 
     it('shows non-renamable plan blockers without offering a false naming remedy', () => {
@@ -321,6 +404,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: blocked,
                 renames: {},
+                programSlots: {},
                 status: 'ready',
                 progress: 0,
                 error: '',
@@ -356,6 +440,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: blocked,
                 renames: {},
+                programSlots: {},
                 status: 'ready',
                 progress: 0,
                 error: '',
@@ -378,6 +463,7 @@ describe('PackageImportDialog', () => {
                 inspection: status === 'planning' ? inspection : null,
                 plan: null,
                 renames: {},
+                programSlots: {},
                 status,
                 progress: status === 'loading' ? 1 : 0,
                 error: '',
@@ -403,6 +489,7 @@ describe('PackageImportDialog', () => {
                 inspection,
                 plan: plan(),
                 renames: {},
+                programSlots: {},
                 status: 'applying',
                 progress: 1,
                 error: '',

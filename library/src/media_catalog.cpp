@@ -154,6 +154,27 @@ Result<MediaObject> load_media_object(const MediaContainer &container, const Med
         return *found;
     }
 
+    if (const auto *archive = std::get_if<A3kArchive>(&container.storage())) {
+        const auto found = std::ranges::find_if(archive->entries(), [&](const A3kArchiveEntry &entry) {
+            return descriptor.key == std::format("a3k:{}", entry.ordinal) && descriptor.data_offset == entry.offset &&
+                   descriptor.size == entry.size;
+        });
+        if (found == archive->entries().end()) {
+            return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                              "media object is not present in the A3K archive")};
+        }
+        auto bytes = archive->read_entry(*found, cancellation);
+        if (!bytes)
+            return std::unexpected{bytes.error()};
+        auto decoded = detail::decode_media_object(*bytes, found->size);
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        return MediaObject{
+            descriptor.key,        descriptor.logical_path,    descriptor.scope_key,    descriptor.raw_group,
+            descriptor.raw_volume, descriptor.group_label,     descriptor.volume_label, descriptor.data_offset,
+            bytes->size(),         std::move(decoded->object), std::move(*bytes),       std::move(decoded->issue)};
+    }
+
     std::vector<std::byte> bytes;
     if (const auto *fat = std::get_if<FatImage>(&container.storage())) {
         const auto file = std::ranges::find(fat->files(), descriptor.logical_path, &FatFile::path);

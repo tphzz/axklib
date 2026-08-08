@@ -2429,7 +2429,13 @@ export interface components {
             sizeBytes: number;
             /** @enum {unknown} */
             sourceMediaKind:
-                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
+                | 'SFS'
+                | 'FAT12_FLOPPY'
+                | 'ISO9660'
+                | 'A3K_ARCHIVE'
+                | 'STANDALONE_OBJECT'
+                | 'AXK_OBJECT_DIRECTORY'
+                | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -2442,6 +2448,7 @@ export interface components {
             planId: string;
             planToken: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
+            programSlotPlacements: components['schemas']['PackageProgramSlotPlacement'][];
             revision: number;
             /** @constant */
             schemaVersion: '1.0';
@@ -2456,6 +2463,7 @@ export interface components {
             imageId: string;
             package: components['schemas']['InputRef'];
             partitionIndex: number;
+            programSlotAssignments?: components['schemas']['ImageSessionPackageProgramSlotAssignment'][];
             renames?: components['schemas']['ImageSessionPackageRename'][];
             replacePlanToken?: string;
             volumeName: string;
@@ -2474,6 +2482,10 @@ export interface components {
             /** @enum {unknown} */
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
+        };
+        ImageSessionPackageProgramSlotAssignment: {
+            destinationSlot: number;
+            nodeId: string;
         };
         ImageSessionPackageRename: {
             destinationName: string;
@@ -3033,7 +3045,13 @@ export interface components {
             sizeBytes: number;
             /** @enum {unknown} */
             sourceMediaKind:
-                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
+                | 'SFS'
+                | 'FAT12_FLOPPY'
+                | 'ISO9660'
+                | 'A3K_ARCHIVE'
+                | 'STANDALONE_OBJECT'
+                | 'AXK_OBJECT_DIRECTORY'
+                | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -3077,6 +3095,7 @@ export interface components {
             planId: string;
             planToken: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
+            programSlotPlacements: components['schemas']['PackageProgramSlotPlacement'][];
             /** @constant */
             schemaVersion: '1.0';
             /** @enum {unknown} */
@@ -3091,6 +3110,7 @@ export interface components {
             /** @default false */
             overwrite: boolean;
             packages: components['schemas']['InputRef'][];
+            programSlotAssignments?: components['schemas']['PackageProgramSlotAssignment'][];
             renames?: components['schemas']['PackageRename'][];
             target: components['schemas']['FileRef'];
         };
@@ -3123,7 +3143,13 @@ export interface components {
             schemaVersion: '1.0';
             /** @enum {unknown} */
             sourceMediaKind:
-                'SFS' | 'FAT12_FLOPPY' | 'ISO9660' | 'STANDALONE_OBJECT' | 'AXK_OBJECT_DIRECTORY' | 'UNKNOWN';
+                | 'SFS'
+                | 'FAT12_FLOPPY'
+                | 'ISO9660'
+                | 'A3K_ARCHIVE'
+                | 'STANDALONE_OBJECT'
+                | 'AXK_OBJECT_DIRECTORY'
+                | 'UNKNOWN';
             totalPayloadBytes: number;
             valid: boolean;
         };
@@ -3159,6 +3185,37 @@ export interface components {
             /** @enum {unknown} */
             targetObjectType: 'SBAC' | 'SBNK';
             volumeName: string;
+        };
+        PackageProgramSlotAssignment: {
+            destinationSlot: number;
+            nodeId: string;
+            packageIndex: number;
+        };
+        PackageProgramSlotMapping: {
+            destinationSlot: number;
+            nodeId: string;
+            packageIndex: number;
+            requiresUserAction: boolean;
+            sourceSlot: number;
+        };
+        PackageProgramSlotPlacement: {
+            applied: boolean;
+            availableSlotCount: number;
+            destinationRanges: components['schemas']['PackageProgramSlotRange'][];
+            mappings: components['schemas']['PackageProgramSlotMapping'][];
+            /** @enum {unknown} */
+            mode: 'CONTIGUOUS' | 'FRAGMENTED' | 'UNAVAILABLE';
+            occupiedRanges: components['schemas']['PackageProgramSlotRange'][];
+            partitionIndex: number;
+            placementId: string;
+            requiredSlotCount: number;
+            sourceRanges: components['schemas']['PackageProgramSlotRange'][];
+            suggestedStartSlot: number | null;
+            volumeName: string;
+        };
+        PackageProgramSlotRange: {
+            first: number;
+            last: number;
         };
         PackageReadRequest: {
             package: components['schemas']['InputRef'];

@@ -1,9 +1,11 @@
 # Portable Object Packages
 
 The axklib portable-package format moves complete Yamaha A-series object graphs
-between supported SFS/HDS, Yamaha FAT12 floppy, and Yamaha ISO9660 media. A
-package contains original Yamaha object payloads and a source-neutral graph. It
-is not a disk image, a WAV collection, or a general backup format.
+from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
+A3K media into portable packages and imports packages into admitted
+writable targets. A package contains original Yamaha object payloads and a
+source-neutral graph. It is not a disk image, a WAV collection, or a general
+backup format.
 
 All package files use the same version 1 deterministic ZIP container and
 manifest schema. The filename extension communicates the selected root to a
@@ -60,9 +62,10 @@ removes the temporary retained resource.
 
 This batch command is an application workflow over the same version 1 package
 builder and validation rules as individual package export. FAT12 and AXK object
-directory sessions retain their existing single-volume package export; they do
-not advertise partition-level batch export because they have no equivalent
-multi-volume parent scope.
+directory sessions retain their existing single-volume package export. An
+A3K archive likewise exports its one whole volume directly as `.axkvol`.
+These sources do not advertise partition-level batch export because they have
+no equivalent multi-volume parent scope.
 
 ## CLI Workflow
 
@@ -148,6 +151,37 @@ would otherwise acquire an exact type-and-name target in the destination. Each
 entry identifies the imported or existing Program, assignment ordinal, target
 type and name, destination scope, reason, and `clear-assignment` disposition.
 Axkdeck shows these decisions before enabling import.
+
+Program slot collisions are planned separately from object-name collisions.
+For each destination volume, `program_slot_placements` in CLI JSON and
+`programSlotPlacements` through the server contract report the occupied source
+and proposed destination ranges plus every source-to-destination Program slot
+mapping. Exact reusable Programs do not consume another slot. When placement is
+needed, the planner proposes the first contiguous free block large enough for
+all imported Programs; if no such block exists but enough slots remain, it
+proposes the lowest free fragmented slots. If the volume lacks enough of its
+128 Program slots, placement is unavailable and the plan remains blocked.
+
+Suggested placement is advisory until the caller replans with explicit Program
+slot assignments. This makes the accepted plan identity cover the final slot
+mapping and prevents a later object rename from changing which Program occupies
+which slot. Axkdeck seeds its assignment controls from the suggestion and uses
+the same explicit replan step for automatic and user-edited placement.
+
+The CLI accepts the proposed or edited mapping through
+`--program-slot-map program-slots.json`. Each entry identifies one Program node
+from the plan and its final slot:
+
+```json
+[
+  {"package": 0, "node_id": "n-<lowercase-sha256>", "slot": 5},
+  {"package": 0, "node_id": "n-<lowercase-sha256>", "slot": 6}
+]
+```
+
+Submit the complete proposed mapping, not only the Programs whose original
+slots collided. Slots must be unique, between 1 and 128, and unused in the
+destination unless that existing Program is an exact reusable object.
 
 Apply the exact plan through the same request:
 
@@ -268,7 +302,8 @@ Conflicts block the complete plan.
 | `DESTINATION_ROOT_INVALID`, `DESTINATION_ROOT_MISSING`, `DESTINATION_ROOT_DUPLICATE` | Correct the package/root indexes and supply exactly one mapping per root. |
 | `PACKAGE_RENAME_INVALID`, `RENAME_NODE_INVALID`, `RENAME_NODE_DUPLICATE`, `RENAME_NAME_INVALID` | Correct the rename-map node, uniqueness, or 1-to-16-byte ASCII destination name. |
 | `SFS_DESTINATION_INVALID`, `SFS_DESTINATION_PARTITION_MISSING`, `SFS_DESTINATION_MISSING`, `SFS_DESTINATION_ALREADY_EXISTS`, `SFS_DESTINATION_POLICY_CONFLICT` | Correct the SFS partition, volume, and `create` policy. |
-| `SFS_OBJECT_NAME_INVALID`, `SFS_PROGRAM_SLOT_INVALID`, `SFS_TARGET_NAME_AMBIGUOUS`, `SFS_NAME_CONFLICT` | Correct names, disambiguate target content, or provide an explicit rename. |
+| `SFS_OBJECT_NAME_INVALID`, `SFS_PROGRAM_SLOT_INVALID`, `SFS_TARGET_NAME_AMBIGUOUS`, `SFS_NAME_CONFLICT` | Correct names or disambiguate target content. Use Program slot assignments, not generic renames, for Program conflicts. |
+| `SFS_PROGRAM_SLOT_RENAME_UNSUPPORTED`, `SFS_PROGRAM_SLOT_ASSIGNMENTS_INCOMPLETE`, `SFS_PROGRAM_SLOT_CAPACITY_EXHAUSTED` | Submit one explicit slot assignment for every non-reused Program, or choose a destination volume with enough free Program slots. |
 | `SFS_OBJECT_ID_EXHAUSTED`, `SFS_CLUSTER_EXHAUSTED`, `SFS_ROOT_DIRECTORY_MISSING`, `SFS_ROOT_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_CATEGORY_MISSING`, `SFS_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_ALLOCATION_INVALID` | Select a target with valid SFS metadata and sufficient IDs, clusters, and directory capacity. |
 | `FAT12_DESTINATION_INVALID`, `FAT12_PROFILE_UNSUPPORTED` | Use partition 0 and `FAT root` on an admitted root-only Yamaha FAT12 image. |
 | `FAT12_OBJECT_NAME_INVALID`, `FAT12_PROGRAM_SLOT_INVALID`, `FAT12_TARGET_NAME_AMBIGUOUS`, `FAT12_NAME_CONFLICT` | Correct names, ambiguity, or collisions. |

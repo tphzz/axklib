@@ -29,6 +29,8 @@
 #include "axklib/sequence.hpp"
 #include "axklib/writer.hpp"
 
+#include "a3k_test_fixture.hpp"
+
 namespace {
 
 std::filesystem::path fixture_path() {
@@ -267,6 +269,7 @@ class PackageOperationsTest : public testing::Test {
         write_batch_volume_source(root_ / "batch-volumes.hds");
         write_object_directory(root_ / "fixture.hds", root_ / "objects");
         write_split_object_directory(root_ / "fixture.hds", root_ / "disk-set");
+        axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root_, true}});
         ASSERT_TRUE(sandbox);
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));
@@ -406,6 +409,7 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
     ASSERT_TRUE(planned) << planned.error().message;
     ASSERT_TRUE(planned->at("valid").get<bool>());
     EXPECT_TRUE(planned->at("programAssignmentAdjustments").empty());
+    EXPECT_TRUE(planned->at("programSlotPlacements").empty());
     ASSERT_FALSE(planned->at("allocation").empty());
     EXPECT_GT(planned->at("allocation").front().at("additionalAllocatedBytes").get<std::uint64_t>(), 0U);
     EXPECT_EQ(planned->at("allocation").front().at("blockedObjectCount"), 0U);
@@ -494,6 +498,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     EXPECT_EQ(planned->at("revision"), 1U);
     EXPECT_TRUE(planned->at("valid").get<bool>());
     EXPECT_TRUE(planned->at("programAssignmentAdjustments").empty());
+    EXPECT_TRUE(planned->at("programSlotPlacements").empty());
     ASSERT_FALSE(planned->at("actions").empty());
     auto replacement_request = request;
     replacement_request["replacePlanToken"] = planned->at("planToken");
@@ -611,6 +616,27 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
         context());
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, "invalid_request");
+}
+
+TEST_F(PackageOperationsTest, SessionExportsA3kArchiveVolumeAsDirectPackage) {
+    const auto opened = images_->open({"workspace", "archive.a3k"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto request = nlohmann::json{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"roots", {{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "Archive Volume")}}}},
+        {"destination", {{"kind", "DOWNLOAD"}, {"filename", "archive-volume.axkvol"}}},
+    };
+    const auto exported = registry_.invoke("images.package_export", request, context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("sourceMediaKind"), "a3k-archive");
+    const auto retained = exported->at("download");
+    const auto content = downloads_->open({retained.at("archiveId").get<std::string>()}, "owner");
+    ASSERT_TRUE(content) << content.error().message;
+    const auto package = axk::open_portable_package(*content->reader, content->snapshot.filename);
+    ASSERT_TRUE(package) << package.error().message;
+    EXPECT_EQ(package->kind, axk::PackageKind::volume);
+    EXPECT_EQ(package->source_media_kind, "a3k-archive");
 }
 
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWithReport) {

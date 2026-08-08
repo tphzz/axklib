@@ -213,9 +213,16 @@ struct package_node_rename {
     std::string destination_name;
 };
 
+struct package_program_slot_assignment {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t destination_slot{};
+};
+
 struct package_import_request {
     std::vector<package_root_destination> root_destinations;
     std::vector<package_node_rename> renames;
+    std::vector<package_program_slot_assignment> program_slot_assignments;
 };
 
 struct package_conflict_info {
@@ -270,6 +277,34 @@ struct package_program_assignment_adjustment_info {
     std::string raw_volume;
     std::string reason_code;
     std::string disposition;
+};
+
+struct package_program_slot_range_info {
+    std::uint32_t first{};
+    std::uint32_t last{};
+};
+
+struct package_program_slot_mapping_info {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t source_slot{};
+    std::uint32_t destination_slot{};
+    bool requires_user_action{};
+};
+
+struct package_program_slot_placement_info {
+    std::string placement_id;
+    std::uint32_t partition_index{};
+    std::string volume_name;
+    std::string mode;
+    bool applied{};
+    std::optional<std::uint32_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint64_t available_slot_count{};
+    std::vector<package_program_slot_range_info> occupied_ranges;
+    std::vector<package_program_slot_range_info> source_ranges;
+    std::vector<package_program_slot_range_info> destination_ranges;
+    std::vector<package_program_slot_mapping_info> mappings;
 };
 
 struct package_allocation_info {
@@ -395,6 +430,7 @@ class AXK_SDK_API package_import_plan final {
     result<std::vector<package_conflict_info>> conflicts() const;
     result<std::vector<package_action_info>> actions() const;
     result<std::vector<package_program_assignment_adjustment_info>> adjustments() const;
+    result<std::vector<package_program_slot_placement_info>> program_slot_placements() const;
     result<std::vector<package_allocation_info>> allocation() const;
     result<package_import_result> apply(const std::string &utf8_output_path, const write_options &options,
                                         operation_context &context);

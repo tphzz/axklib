@@ -7,7 +7,7 @@ integration.
 flowchart TD
     accTitle: axklib architecture dependency flow
     accDescr: Random access input flows through media readers, Yamaha enrichment, object decoders, and the catalog. The catalog provides audio export, writing, the shared SDK facade, and the CLI adapter. Native consumers use the SDK.
-    IO[Random access I/O] --> Media[SFS, FAT12, ISO9660, and object-directory readers]
+    IO[Random access I/O] --> Media[SFS, FAT12, ISO9660, A3K, and object-directory readers]
     Media --> Yamaha[Yamaha media enrichment]
     Yamaha --> Objects[Object decoders]
     Objects --> Catalog[Catalog and relationships]
@@ -48,6 +48,7 @@ The media source modules preserve a separate responsibility boundary:
 
 - `media_fat12.cpp` owns the supported FAT12 container profile.
 - `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
+- `media_a3k_archive.cpp` owns the bounded read-only A3K archive profile.
 - `media_build.cpp` inventories metadata before loading a selected dependency
   closure, enforces public aggregate build limits, and validates written
   payloads through bounded range readers.

@@ -154,6 +154,8 @@ MediaKind MediaContainer::kind() const noexcept {
         return MediaKind::fat12_floppy_set;
     if (std::holds_alternative<IsoImage>(storage_))
         return MediaKind::iso9660;
+    if (std::holds_alternative<A3kArchive>(storage_))
+        return MediaKind::a3k_archive;
     if (std::holds_alternative<StandaloneObject>(storage_))
         return MediaKind::standalone_object;
     return MediaKind::axk_object_directory;
@@ -168,6 +170,8 @@ std::filesystem::path MediaContainer::source_path() const {
         return set->source_name();
     if (const auto *iso = std::get_if<IsoImage>(&storage_))
         return iso->source_name();
+    if (const auto *archive = std::get_if<A3kArchive>(&storage_))
+        return archive->source_name();
     if (const auto *standalone = std::get_if<StandaloneObject>(&storage_))
         return standalone->object().logical_path;
     return std::get<AxkObjectDirectory>(storage_).source_name();
@@ -182,6 +186,8 @@ std::span<const MediaValidationIssue> MediaContainer::validation_issues() const 
         return set->validation_issues();
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->validation_issues();
+    if (const auto *archive = variant_ptr<A3kArchive>(storage_))
+        return archive->validation_issues();
     return {};
 }
 
@@ -198,6 +204,8 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
         return set->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->objects(mode, maximum_object_bytes, cancellation);
+    if (const auto *archive = variant_ptr<A3kArchive>(storage_))
+        return archive->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *standalone = variant_ptr<StandaloneObject>(storage_))
         return std::vector{standalone->object()};
     if (const auto *directory = variant_ptr<AxkObjectDirectory>(storage_))
@@ -261,6 +269,14 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
         if (!object)
             return std::unexpected{object.error()};
         return MediaContainer{std::move(*object)};
+    }
+    if (prefix->size() >= 22U && detail::clean_ascii(std::span{*prefix}.subspan(12U, 10U)) == "A3k"
+                                                                                              "Dis"
+                                                                                              "kyPC") {
+        auto archive = A3kArchive::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!archive)
+            return std::unexpected{archive.error()};
+        return MediaContainer{std::move(*archive)};
     }
     if (prefix->size() >= 4U && (*prefix)[0] == std::byte{'P'} && (*prefix)[1] == std::byte{'K'} &&
         (*prefix)[2] == std::byte{0x03} && (*prefix)[3] == std::byte{0x04}) {

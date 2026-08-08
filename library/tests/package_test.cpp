@@ -3120,8 +3120,8 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     ASSERT_TRUE(rejected) << rejected.error().message;
     EXPECT_FALSE(rejected->valid());
     EXPECT_TRUE(std::ranges::any_of(rejected->conflicts, [](const auto &conflict) {
-        return conflict.code == "SFS_PROGRAM_SLOT_INVALID" &&
-               conflict.message.find("001 through 128") != std::string::npos;
+        return conflict.code == "SFS_PROGRAM_SLOT_RENAME_UNSUPPORTED" &&
+               conflict.message.find("explicit Program slot assignments") != std::string::npos;
     }));
 
     axk::PackageImportRequest request;

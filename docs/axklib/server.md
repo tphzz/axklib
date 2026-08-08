@@ -274,6 +274,12 @@ authenticated content path with a short expiry. The client streams that
 content and deletes the retained resource when the save completes; expiry is
 only a fallback.
 
+A3K sessions are read-only and expose one synthetic volume. They support
+selected-object package export and direct whole-volume `.axkvol` export through
+the generic session operation. They do not advertise package import, mutation,
+repair, media conversion, floppy export, or partition-level batch-volume
+export.
+
 SFS and ISO9660 sessions additionally advertise
 `images.volume_package_export` on partition-like content nodes. First call
 `images.volume_package_export.inspect` with the image ID, expected revision,

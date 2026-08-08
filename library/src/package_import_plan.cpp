@@ -10,6 +10,8 @@
 
 #include "axklib/package_archive.hpp"
 
+#include "package_import_program_slots.hpp"
+
 namespace axk {
 namespace {
 
@@ -31,6 +33,27 @@ bool valid_digest(std::string_view value) {
     return value.size() == 64U && std::ranges::all_of(value, [](unsigned char byte) {
                return (byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'f');
            });
+}
+
+bool valid_slot_ranges(std::span<const PackageProgramSlotRange> ranges) {
+    std::uint16_t previous_last{};
+    for (const auto &range : ranges) {
+        if (range.first < 1U || range.last < range.first || range.last > 128U || range.first <= previous_last)
+            return false;
+        previous_last = range.last;
+    }
+    return true;
+}
+
+bool slot_in_ranges(std::uint8_t slot, std::span<const PackageProgramSlotRange> ranges) {
+    return std::ranges::any_of(ranges, [slot](const auto &range) { return slot >= range.first && slot <= range.last; });
+}
+
+std::uint16_t slot_range_cardinality(std::span<const PackageProgramSlotRange> ranges) {
+    std::uint32_t result{};
+    for (const auto &range : ranges)
+        result += static_cast<std::uint32_t>(range.last) - static_cast<std::uint32_t>(range.first) + 1U;
+    return static_cast<std::uint16_t>(result);
 }
 
 } // namespace
@@ -103,6 +126,39 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_field(source, adjustment.raw_volume);
         append_field(source, adjustment.reason_code);
         append_field(source, package_program_assignment_disposition_name(adjustment.disposition));
+    }
+    for (const auto &placement : plan.program_slot_placements) {
+        append_field(source, placement.placement_id);
+        append_integer(source, placement.partition_index);
+        append_field(source, placement.volume_name);
+        append_field(source, package_program_slot_placement_mode_name(placement.mode));
+        append_integer(source, placement.applied);
+        append_integer(source, placement.suggested_start_slot.value_or(0U));
+        append_integer(source, placement.required_slot_count);
+        append_integer(source, placement.available_slot_count);
+        append_integer(source, placement.occupied_ranges.size());
+        for (const auto &range : placement.occupied_ranges) {
+            append_integer(source, range.first);
+            append_integer(source, range.last);
+        }
+        append_integer(source, placement.source_ranges.size());
+        for (const auto &range : placement.source_ranges) {
+            append_integer(source, range.first);
+            append_integer(source, range.last);
+        }
+        append_integer(source, placement.destination_ranges.size());
+        for (const auto &range : placement.destination_ranges) {
+            append_integer(source, range.first);
+            append_integer(source, range.last);
+        }
+        append_integer(source, placement.mappings.size());
+        for (const auto &mapping : placement.mappings) {
+            append_integer(source, mapping.package_index);
+            append_field(source, mapping.node_id);
+            append_integer(source, mapping.source_slot);
+            append_integer(source, mapping.destination_slot);
+            append_integer(source, mapping.requires_user_action);
+        }
     }
     for (const auto &delta : plan.allocation) {
         append_integer(source, delta.partition_index);
@@ -252,6 +308,54 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             (!imported && !existing)) {
             return std::unexpected{
                 planner_error("package import plan contains an invalid Program assignment adjustment")};
+        }
+    }
+    std::set<std::string, std::less<>> placement_ids;
+    for (const auto &placement : plan.program_slot_placements) {
+        const auto unavailable = placement.mode == PackageProgramSlotPlacementMode::unavailable;
+        const auto contiguous = placement.mode == PackageProgramSlotPlacementMode::contiguous;
+        const auto occupied_ranges_valid = valid_slot_ranges(placement.occupied_ranges);
+        const auto destination_span_matches = placement.destination_ranges.size() == 1U &&
+                                              static_cast<std::uint64_t>(placement.destination_ranges.front().last -
+                                                                         placement.destination_ranges.front().first +
+                                                                         1U) == placement.required_slot_count;
+        std::set<std::pair<std::size_t, std::string>> mapping_nodes;
+        std::map<std::uint8_t, std::size_t> destination_counts;
+        for (const auto &mapping : placement.mappings)
+            ++destination_counts[mapping.destination_slot];
+        bool mappings_valid = true;
+        for (const auto &mapping : placement.mappings) {
+            const auto matching_action = std::ranges::any_of(plan.objects, [&](const auto &object) {
+                return object.package_index == mapping.package_index && object.node_id == mapping.node_id &&
+                       object.object_type == "PROG" && object.partition_index == placement.partition_index &&
+                       object.volume_name == placement.volume_name &&
+                       object.source_name == std::format("{:03}", mapping.source_slot) &&
+                       (!placement.applied ||
+                        object.destination_name == std::format("{:03}", mapping.destination_slot));
+            });
+            const auto requires_action = slot_in_ranges(mapping.destination_slot, placement.occupied_ranges) ||
+                                         destination_counts[mapping.destination_slot] > 1U;
+            mappings_valid = mappings_valid && mapping.package_index < plan.package_ids.size() &&
+                             !mapping.node_id.empty() && mapping.source_slot >= 1U && mapping.source_slot <= 128U &&
+                             mapping.destination_slot >= 1U && mapping.destination_slot <= 128U &&
+                             mapping_nodes.emplace(mapping.package_index, mapping.node_id).second && matching_action &&
+                             mapping.requires_user_action == requires_action;
+        }
+        if (plan.target_kind != MediaKind::sfs || !valid_digest(placement.placement_id) ||
+            placement.placement_id != package_import_internal::program_slot_placement_identity(
+                                          {placement.partition_index, placement.volume_name}) ||
+            !placement_ids.emplace(placement.placement_id).second || placement.volume_name.empty() ||
+            placement.required_slot_count == 0U || placement.available_slot_count > 128U || !occupied_ranges_valid ||
+            (occupied_ranges_valid &&
+             placement.available_slot_count != 128U - slot_range_cardinality(placement.occupied_ranges)) ||
+            !valid_slot_ranges(placement.source_ranges) || !valid_slot_ranges(placement.destination_ranges) ||
+            !mappings_valid ||
+            (unavailable && (!placement.mappings.empty() || placement.suggested_start_slot ||
+                             !placement.destination_ranges.empty())) ||
+            (!unavailable && (placement.mappings.size() != placement.required_slot_count ||
+                              !placement.suggested_start_slot || placement.destination_ranges.empty())) ||
+            (contiguous != destination_span_matches)) {
+            return std::unexpected{planner_error("package import plan contains an invalid Program slot placement")};
         }
     }
     for (const auto &object : plan.objects) {

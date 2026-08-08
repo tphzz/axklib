@@ -63,6 +63,10 @@ plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader
                 plan.warnings.push_back(issue);
         }
     }
+    if (target->kind() != MediaKind::sfs && !request.policy.program_slot_assignments.empty()) {
+        add_conflict(plan, "PROGRAM_SLOT_POLICY_UNSUPPORTED",
+                     "explicit Program slot assignments are only supported for SFS package imports");
+    }
 
     if (target->kind() == MediaKind::fat12_floppy) {
         return plan_fat12_import(*target_reader, packages, request, *target, std::move(plan), *before,

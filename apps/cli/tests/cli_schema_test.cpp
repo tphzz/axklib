@@ -254,6 +254,18 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .program_assignment_adjustments = {{"adjustment", "existing-program", std::nullopt, std::nullopt, "PROG:001",
                                             "001", "Program One", 2U, "SBAC", "Bank", 0U, "", "Volume", "", "",
                                             "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION", "clear-assignment"}},
+        .program_slot_placements = {{"placement",
+                                     0U,
+                                     "Volume",
+                                     "contiguous",
+                                     false,
+                                     5U,
+                                     4U,
+                                     124U,
+                                     {{1U, 4U}},
+                                     {{1U, 4U}},
+                                     {{5U, 8U}},
+                                     {{0U, "node", 1U, 5U, true}}}},
         .allocation = {{0U, "Group", "Volume", "Raw Group", "Raw Volume", 1U,  2U,  3U,  4U,  5U,
                         6U, 7U,      8U,       9U,          10U,          11U, 12U, 13U, 14U, 15U}},
         .result = std::nullopt,
@@ -269,6 +281,10 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     EXPECT_TRUE(plan_json["program_assignment_adjustments"][0]["package_index"].is_null());
     EXPECT_EQ(plan_json["program_assignment_adjustments"][0]["assignment_ordinal"], 2U);
     EXPECT_EQ(plan_json["program_assignment_adjustments"][0]["disposition"], "clear-assignment");
+    EXPECT_EQ(plan_json["program_slot_placements"][0]["mode"], "contiguous");
+    EXPECT_EQ(plan_json["program_slot_placements"][0]["suggested_start_slot"], 5U);
+    EXPECT_EQ(plan_json["program_slot_placements"][0]["destination_ranges"][0]["last"], 8U);
+    EXPECT_TRUE(plan_json["program_slot_placements"][0]["mappings"][0]["requires_user_action"]);
     EXPECT_EQ(plan_json["allocation"][0]["blocked_object_count"], 3U);
     EXPECT_EQ(plan_json["allocation"][0]["directory_growth_clusters"], 8U);
     EXPECT_EQ(plan_json["allocation"][0]["directory_continuation_clusters"], 9U);

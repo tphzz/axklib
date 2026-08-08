@@ -3,7 +3,8 @@
 Yamaha A-series containers store sampler objects as payload files. axklib reads
 the container layer first, then decodes these shared object payloads in the same
 way for SFS hard-disk images, FAT12 floppy images, CD-ROM ISO images, standalone
-object files, and explicit flat `AXK_OBJECT_DIRECTORY` sources.
+object files, read-only A3K volume archives, and explicit flat
+`AXK_OBJECT_DIRECTORY` sources.
 
 ```mermaid
 flowchart TD
@@ -73,6 +74,7 @@ the embedded header supplies its sampler object name.
 | FAT12 floppy | DOS 8.3 name such as `AUTHORED.001` | `FSFSDEV3SPLX<type>` and embedded object name. A numeric extension is not a type code. |
 | CD-ROM ISO | `<group>/Fnnn/<type>/Fnnn`; category `0000` maps display names to files | Embedded type and name remain authoritative. The category name and catalog are independently checked placement metadata. |
 | Standalone file | Host filename chosen by the caller | Entire file begins with the shared magic and type tag. |
+| A3K archive | Terminal-index path such as `Volume \SMPL\Object` | Embedded type and name are authoritative. The index path is redundant placement metadata. |
 | SFS image | SFS directory record and object ID rather than a host filename | Embedded type and name, with SFS placement retained separately. |
 
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
@@ -102,6 +104,7 @@ Container-specific placement metadata is documented in the format pages:
 | SFS | partition index, SFS ID, payload offset, payload size, scope key. |
 | FAT12 floppy | FAT filename, root directory offset, first cluster, cluster count, file size, object offset. |
 | CD-ROM ISO | raw ISO path, group/volume labels, extent sector, data offset, file size, loader-quality fields. |
+| A3K archive | terminal-index path, absolute payload offset, payload size, synthetic partition index, and scope key. |
 
 ## SMPL: Wave Data Object
 

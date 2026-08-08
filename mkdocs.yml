@@ -83,6 +83,7 @@ nav:
       - Architecture: architecture.md
   - Formats:
       - Media Containers: axklib/media.md
+      - A3K Volume Archives: axklib/a3k-archive.md
       - SFS Filesystem: axklib/sfs-filesystem.md
       - FAT12 Floppy Images: axklib/floppy.md
       - CD-ROM Images: axklib/cdrom.md

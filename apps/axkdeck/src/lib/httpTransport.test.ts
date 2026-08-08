@@ -2119,6 +2119,7 @@ describe('HttpImageTransport', () => {
                             { packageIndex: 0, rootIndex: 0, partitionIndex: 0, volumeName: 'IMPORTED', create: true },
                         ],
                         renames: [],
+                        programSlotAssignments: [],
                         overwrite: false,
                     });
                     return json({
@@ -2133,6 +2134,7 @@ describe('HttpImageTransport', () => {
                         conflicts: [],
                         actions: [],
                         programAssignmentAdjustments: [],
+                        programSlotPlacements: [],
                         allocation: [],
                     });
                 }
@@ -2358,6 +2360,7 @@ describe('HttpImageTransport', () => {
                         conflicts: [],
                         actions: [],
                         programAssignmentAdjustments: [],
+                        programSlotPlacements: [],
                         allocation: [],
                     });
                 }
@@ -2486,6 +2489,7 @@ describe('HttpImageTransport', () => {
             0,
             'DRUMS',
             [{ nodeId: 'node-1', destinationName: 'DRUM KIT 2' }],
+            [{ nodeId: 'program-1', destinationSlot: 5 }],
             plan.planToken,
         );
         await transport.releaseImagePackageImportPlan(plan.planToken);
@@ -2550,6 +2554,7 @@ describe('HttpImageTransport', () => {
             partitionIndex: 0,
             volumeName: 'DRUMS',
             renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT' }],
+            programSlotAssignments: [],
         });
         expect(planRequests[1]?.body).toEqual({
             imageId: 'image-package',
@@ -2559,6 +2564,7 @@ describe('HttpImageTransport', () => {
             partitionIndex: 0,
             volumeName: 'DRUMS',
             renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT 2' }],
+            programSlotAssignments: [{ nodeId: 'program-1', destinationSlot: 5 }],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-package-exports'))?.body).toEqual({
             imageId: 'image-package',

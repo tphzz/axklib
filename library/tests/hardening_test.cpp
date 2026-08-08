@@ -67,7 +67,11 @@ TEST(Hardening, EveryFocusedFuzzerSeedHasANormalTestReplay) {
     for (const auto &support : manifest.at("support_sources")) {
         const auto source = support.get<std::string>();
         registered_sources.insert(source);
-        EXPECT_NE(cmake.find("add_executable(axk_sfs_seed_builder fuzz/" + source + ")"), std::string::npos) << source;
+        constexpr std::string_view suffix = "_seed_builder.cpp";
+        ASSERT_TRUE(source.ends_with(suffix)) << source;
+        const auto builder = source.substr(0U, source.size() - suffix.size());
+        EXPECT_NE(cmake.find("add_executable(axk_" + builder + "_seed_builder fuzz/" + source + ")"), std::string::npos)
+            << source;
     }
     std::size_t replayed{};
     for (const auto &harness : manifest.at("harnesses")) {
@@ -75,8 +79,7 @@ TEST(Hardening, EveryFocusedFuzzerSeedHasANormalTestReplay) {
         const auto source = harness.at("source").get<std::string>();
         const auto corpus_directory = corpus / harness.at("corpus").get<std::string>();
         registered_sources.insert(source);
-        const auto directly_registered =
-            cmake.find("axk_add_fuzzer(" + target + " " + source + ")") != std::string::npos;
+        const auto directly_registered = cmake.find("axk_add_fuzzer(" + target + " " + source) != std::string::npos;
         const auto typed_registered = source == "typed_object_fuzz.cpp" &&
                                       cmake.find("axk_add_fuzzer(object_${object_type} "
                                                  "typed_object_fuzz.cpp)") != std::string::npos &&
@@ -99,6 +102,9 @@ TEST(Hardening, EveryFocusedFuzzerSeedHasANormalTestReplay) {
             } else if (target == "sfs_image") {
                 auto reader = std::make_shared<axk::MemoryReader>(bytes);
                 static_cast<void>(axk::open_image(std::move(reader), "seed.hds"));
+            } else if (target == "a3k_archive") {
+                auto reader = std::make_shared<axk::MemoryReader>(bytes);
+                static_cast<void>(axk::A3kArchive::open(std::move(reader), "seed.a3k"));
             } else if (target == "object_header") {
                 static_cast<void>(axk::decode_object_header(bytes));
             } else if (target.starts_with("object_")) {

@@ -1400,6 +1400,99 @@ input:focus-visible {
   font-size: 11px;
 }
 
+.program-slot-placements {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.program-slot-placements section {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: rgb(255 255 255 / 2%);
+}
+
+.program-slot-placements section.program-slot-placement-pending {
+  border-color: #765d2d;
+  background: rgb(150 108 26 / 8%);
+}
+
+.program-slot-placement-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.program-slot-placement-heading strong {
+  color: var(--color-text-strong);
+  font-size: 11px;
+}
+
+.program-slot-placement-heading small,
+.program-slot-placements section > small,
+.program-slot-placements section > p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.program-slot-placements dl {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+
+.program-slot-placements dl > div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.program-slot-placements dt,
+.program-slot-placements dd {
+  margin: 0;
+  font-size: 10px;
+}
+
+.program-slot-placements dt {
+  color: var(--color-text-muted);
+}
+
+.program-slot-placements dd {
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.program-slot-start,
+.program-slot-exception {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 74px;
+  align-items: center;
+  gap: 8px;
+}
+
+.program-slot-start span,
+.program-slot-exception span {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.program-slot-start input,
+.program-slot-exception input {
+  width: 74px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font-size: 11px;
+}
+
 .package-conflicts {
   display: grid;
   gap: 8px;

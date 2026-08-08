@@ -24,6 +24,7 @@ enum class MediaKind : std::uint8_t {
     fat12_floppy,
     fat12_floppy_set,
     iso9660,
+    a3k_archive,
     standalone_object,
     axk_object_directory
 };
@@ -85,6 +86,15 @@ struct IsoFile {
     std::uint32_t extent_sector{};
     std::uint32_t size{};
     bool is_directory{};
+};
+
+struct A3kArchiveEntry {
+    std::uint32_t ordinal{};
+    std::string indexed_path;
+    std::uint32_t offset{};
+    std::uint32_t size{};
+
+    bool operator==(const A3kArchiveEntry &) const = default;
 };
 
 struct MenuLabel {
@@ -225,6 +235,48 @@ class AXK_API IsoImage {
     std::vector<MediaValidationIssue> validation_issues_;
 };
 
+// Read-only A3K volume archive. The archive index contains complete
+// Yamaha object files; its redundant path text is navigation metadata rather
+// than authoritative object identity.
+class AXK_API A3kArchive {
+  public:
+    static constexpr std::size_t maximum_entries = 1'024U;
+    static constexpr std::size_t maximum_banner_bytes = 64U * 1'024U;
+
+    [[nodiscard]] static Result<A3kArchive> open(std::shared_ptr<const RandomAccessReader> reader,
+                                                 std::string source_name = {},
+                                                 const CancellationToken &cancellation = {});
+    [[nodiscard]] static Result<A3kArchive> open(const std::filesystem::path &path,
+                                                 const CancellationToken &cancellation = {});
+
+    [[nodiscard]] const std::string &source_name() const noexcept;
+    [[nodiscard]] const std::string &banner() const noexcept;
+    [[nodiscard]] const MenuLabel &volume_label() const noexcept;
+    [[nodiscard]] std::span<const A3kArchiveEntry> entries() const noexcept;
+    [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
+    [[nodiscard]] Result<std::vector<std::byte>> read_entry(const A3kArchiveEntry &entry,
+                                                            const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_entry_range(const A3kArchiveEntry &entry, std::uint64_t offset,
+                                                                  std::size_t size,
+                                                                  const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_entry_prefix(const A3kArchiveEntry &entry,
+                                                                   std::size_t maximum_bytes,
+                                                                   const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode,
+                                                           std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
+                                                           const CancellationToken &cancellation = {}) const;
+
+  private:
+    std::shared_ptr<const RandomAccessReader> reader_;
+    std::string source_name_;
+    std::string banner_;
+    MenuLabel volume_label_;
+    std::vector<A3kArchiveEntry> entries_;
+    std::vector<MediaValidationIssue> validation_issues_;
+};
+
 class AXK_API FloppyDiskSet {
   public:
     static constexpr std::size_t maximum_members = 32U;
@@ -300,7 +352,8 @@ class AXK_API AxkObjectDirectory {
     std::vector<MediaObject> objects_;
 };
 
-using MediaStorage = std::variant<Container, FatImage, FloppyDiskSet, IsoImage, StandaloneObject, AxkObjectDirectory>;
+using MediaStorage =
+    std::variant<Container, FatImage, FloppyDiskSet, IsoImage, A3kArchive, StandaloneObject, AxkObjectDirectory>;
 
 class AXK_API MediaContainer {
   public:

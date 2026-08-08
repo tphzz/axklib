@@ -2,9 +2,9 @@
 
 The native library exposes opened container variants through
 `axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
-floppies, ISO9660 CD-ROM images, standalone `FSFSDEV3SPLX` object files, and
-AXK object directories.
-The individual `axk::FatImage`, `axk::IsoImage`, and
+floppies, ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
+`FSFSDEV3SPLX` object files, and AXK object directories. The individual
+`axk::FatImage`, `axk::IsoImage`, `axk::A3kArchive`, and
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
 
@@ -75,6 +75,22 @@ not recover FAT allocation, DOS directory order, deleted entries, volume labels,
 or any other missing container metadata. Higher collection directories remain
 navigation scopes rather than media sessions.
 
+## A3K archive profile
+
+An A3K `.a3k` file is a read-only PC volume archive, not an SFS image.
+It contains a fixed `archive signature` header, uncompressed complete Yamaha sampler
+objects, and a terminal path index. Axklib exposes the admitted objects as one
+synthetic partition and one volume. Embedded Yamaha object type and name fields
+are authoritative; redundant index paths remain placement metadata and
+diagnostics.
+
+Inventory loads only object prefixes and metadata needed by the catalog. Wave
+Data payloads remain lazy until preview, audition, audio/SFZ export, or package
+export needs them. A whole archive can be exported directly as one `.axkvol`,
+but archive creation, repacking, alteration, repair, package import, and media
+conversion are unsupported. See [A3K Volume Archives](a3k-archive.md) for
+the bounded byte contract and support status.
+
 ## Format Documentation Map
 
 The public format pages divide the byte contracts by layer:
@@ -83,6 +99,7 @@ The public format pages divide the byte contracts by layer:
 | --- | --- |
 | FAT12 boot sector, FAT entries, directory entries, DOS 8.3 names, and generated root filenames | [FAT12 Floppy Images](floppy.md) |
 | ISO descriptors, both path tables, directory records, raw folder names, `0000` catalogs, group-label files, and generated `Fnnn` names | [CD-ROM Images](cdrom.md) |
+| A3K header, payload area, terminal index, and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
 | Complete `FSFSDEV3SPLX<type>` files and decoded `SMPL`, `SBNK`, `SBAC`, and `PROG` fields | [Sampler Data Structures](sampler-data.md) |
 | Fresh floppy, fresh ISO, and floppy-object-to-ISO manifests | [Writer And Alteration](write.md) |
 | Sampler-facing labels, duplicate disambiguation, and export filenames | [Name, Path, And Export Mapping](names-and-paths.md) |
@@ -104,8 +121,8 @@ graph service.
 
 The installed `axk::image::open()` SDK facade uses the same media dispatcher.
 SDK inventory, validation, preview, PCM, and export operations therefore accept
-SFS, FAT12, ISO9660, standalone Yamaha objects, and AXK object directories
-through one session API.
+SFS, FAT12, ISO9660, A3K archives, standalone Yamaha objects, and AXK
+object directories through one session API.
 
 ## CD menu labels
 

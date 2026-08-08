@@ -464,6 +464,12 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
                            {"nodeId", rename.node_id},
                            {"destinationName", rename.destination_name}});
     }
+    auto program_slot_assignments = Json::array();
+    for (const auto &assignment : request.policy.program_slot_assignments) {
+        program_slot_assignments.push_back({{"packageIndex", assignment.package_index},
+                                            {"nodeId", assignment.node_id},
+                                            {"destinationSlot", assignment.destination_slot}});
+    }
     auto plan =
         registry_.invoke("package.plan_import",
                          {{"target", file_ref_json(target)},
@@ -471,6 +477,7 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
                           {"packages", std::move(package_inputs)},
                           {"destinations", std::move(destinations)},
                           {"renames", std::move(renames)},
+                          {"programSlotAssignments", std::move(program_slot_assignments)},
                           {"overwrite", overwrite}},
                          local_context([this](const app::FileRef &reference) { return display_path(reference); }));
     if (!plan)

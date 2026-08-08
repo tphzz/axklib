@@ -24,6 +24,7 @@ import type {
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
     ImageSessionPackageImportPlan,
+    ImageSessionPackageProgramSlotAssignment,
     ImageSessionPackageRename,
     InputBinding,
     JobState,
@@ -401,6 +402,7 @@ export class InMemoryImageTransport implements ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames?: ImageSessionPackageRename[],
+        programSlotAssignments?: ImageSessionPackageProgramSlotAssignment[],
         replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan> {
         return this.invoke('planImagePackageImport', [
@@ -409,6 +411,7 @@ export class InMemoryImageTransport implements ImageTransport {
             partitionIndex,
             volumeName,
             renames,
+            programSlotAssignments,
             replacePlanToken,
         ]);
     }

@@ -4578,11 +4578,13 @@
               "SFS",
               "FAT12_FLOPPY",
               "ISO9660",
+              "A3K_ARCHIVE",
               "STANDALONE_OBJECT",
               "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "A3K_ARCHIVE": "a3k-archive",
               "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
@@ -4665,6 +4667,12 @@
             },
             "type": "array"
           },
+          "programSlotPlacements": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotPlacement"
+            },
+            "type": "array"
+          },
           "revision": {
             "minimum": 1,
             "type": "integer"
@@ -4710,6 +4718,7 @@
           "conflicts",
           "actions",
           "programAssignmentAdjustments",
+          "programSlotPlacements",
           "allocation",
           "imageId",
           "revision"
@@ -4734,6 +4743,13 @@
             "maximum": 255,
             "minimum": 0,
             "type": "integer"
+          },
+          "programSlotAssignments": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionPackageProgramSlotAssignment"
+            },
+            "maxItems": 128,
+            "type": "array"
           },
           "renames": {
             "items": {
@@ -4832,6 +4848,25 @@
           "revision",
           "objectCount",
           "applied"
+        ],
+        "type": "object"
+      },
+      "ImageSessionPackageProgramSlotAssignment": {
+        "additionalProperties": false,
+        "properties": {
+          "destinationSlot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "nodeId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "nodeId",
+          "destinationSlot"
         ],
         "type": "object"
       },
@@ -7463,11 +7498,13 @@
               "SFS",
               "FAT12_FLOPPY",
               "ISO9660",
+              "A3K_ARCHIVE",
               "STANDALONE_OBJECT",
               "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "A3K_ARCHIVE": "a3k-archive",
               "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
@@ -7721,6 +7758,12 @@
             },
             "type": "array"
           },
+          "programSlotPlacements": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotPlacement"
+            },
+            "type": "array"
+          },
           "schemaVersion": {
             "const": "1.0"
           },
@@ -7762,6 +7805,7 @@
           "conflicts",
           "actions",
           "programAssignmentAdjustments",
+          "programSlotPlacements",
           "allocation"
         ],
         "type": "object"
@@ -7788,6 +7832,12 @@
             },
             "maxItems": 256,
             "minItems": 1,
+            "type": "array"
+          },
+          "programSlotAssignments": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotAssignment"
+            },
             "type": "array"
           },
           "renames": {
@@ -7924,11 +7974,13 @@
               "SFS",
               "FAT12_FLOPPY",
               "ISO9660",
+              "A3K_ARCHIVE",
               "STANDALONE_OBJECT",
               "AXK_OBJECT_DIRECTORY",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
+              "A3K_ARCHIVE": "a3k-archive",
               "AXK_OBJECT_DIRECTORY": "axk-object-directory",
               "FAT12_FLOPPY": "fat12-floppy",
               "ISO9660": "iso9660",
@@ -8116,6 +8168,173 @@
           "rawVolume",
           "reasonCode",
           "disposition"
+        ],
+        "type": "object"
+      },
+      "PackageProgramSlotAssignment": {
+        "additionalProperties": false,
+        "properties": {
+          "destinationSlot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "nodeId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "packageIndex": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "packageIndex",
+          "nodeId",
+          "destinationSlot"
+        ],
+        "type": "object"
+      },
+      "PackageProgramSlotMapping": {
+        "additionalProperties": false,
+        "properties": {
+          "destinationSlot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "nodeId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "packageIndex": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requiresUserAction": {
+            "type": "boolean"
+          },
+          "sourceSlot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "packageIndex",
+          "nodeId",
+          "sourceSlot",
+          "destinationSlot",
+          "requiresUserAction"
+        ],
+        "type": "object"
+      },
+      "PackageProgramSlotPlacement": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "availableSlotCount": {
+            "maximum": 128,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "destinationRanges": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotRange"
+            },
+            "type": "array"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotMapping"
+            },
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "CONTIGUOUS",
+              "FRAGMENTED",
+              "UNAVAILABLE"
+            ],
+            "x-axklib-application-enum": {
+              "CONTIGUOUS": "contiguous",
+              "FRAGMENTED": "fragmented",
+              "UNAVAILABLE": "unavailable"
+            }
+          },
+          "occupiedRanges": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotRange"
+            },
+            "type": "array"
+          },
+          "partitionIndex": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "placementId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "requiredSlotCount": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sourceRanges": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotRange"
+            },
+            "type": "array"
+          },
+          "suggestedStartSlot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "volumeName": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "placementId",
+          "partitionIndex",
+          "volumeName",
+          "mode",
+          "applied",
+          "suggestedStartSlot",
+          "requiredSlotCount",
+          "availableSlotCount",
+          "occupiedRanges",
+          "sourceRanges",
+          "destinationRanges",
+          "mappings"
+        ],
+        "type": "object"
+      },
+      "PackageProgramSlotRange": {
+        "additionalProperties": false,
+        "properties": {
+          "first": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "last": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "first",
+          "last"
         ],
         "type": "object"
       },
@@ -19450,6 +19669,7 @@
                         "planId": "x",
                         "planToken": "x",
                         "programAssignmentAdjustments": [],
+                        "programSlotPlacements": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
@@ -19473,6 +19693,7 @@
                         "planId": "x",
                         "planToken": "x",
                         "programAssignmentAdjustments": [],
+                        "programSlotPlacements": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
@@ -25259,6 +25480,7 @@
                         "planId": "x",
                         "planToken": "x",
                         "programAssignmentAdjustments": [],
+                        "programSlotPlacements": [],
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
@@ -25280,6 +25502,7 @@
                         "planId": "x",
                         "planToken": "x",
                         "programAssignmentAdjustments": [],
+                        "programSlotPlacements": [],
                         "schemaVersion": "1.0",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",

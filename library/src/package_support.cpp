@@ -87,6 +87,8 @@ std::string media_kind_name(MediaKind kind) {
         return "standalone-object";
     case MediaKind::axk_object_directory:
         return "axk-object-directory";
+    case MediaKind::a3k_archive:
+        return "a3k-archive";
     }
     return "unknown";
 }

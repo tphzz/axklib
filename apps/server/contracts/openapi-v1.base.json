@@ -1863,8 +1863,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "A3K_ARCHIVE", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "A3K_ARCHIVE": "a3k-archive", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
@@ -1891,8 +1891,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "A3K_ARCHIVE", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "A3K_ARCHIVE": "a3k-archive", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},
@@ -1931,6 +1931,7 @@
           "packages": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"$ref": "#/components/schemas/InputRef"}},
           "destinations": {"type": "array", "items": {"$ref": "#/components/schemas/PackageDestination"}},
           "renames": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRename"}},
+          "programSlotAssignments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotAssignment"}},
           "overwrite": {"type": "boolean", "default": false}
         }
       },
@@ -1942,6 +1943,16 @@
           "packageIndex": {"type": "integer", "minimum": 0},
           "nodeId": {"type": "string", "minLength": 1},
           "destinationName": {"type": "string", "minLength": 1}
+        }
+      },
+      "PackageProgramSlotAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "nodeId", "destinationSlot"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "nodeId": {"type": "string", "minLength": 1},
+          "destinationSlot": {"type": "integer", "minimum": 1, "maximum": 128}
         }
       },
       "PackageImportConflict": {
@@ -2023,6 +2034,49 @@
           }
         }
       },
+      "PackageProgramSlotRange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["first", "last"],
+        "properties": {
+          "first": {"type": "integer", "minimum": 1, "maximum": 128},
+          "last": {"type": "integer", "minimum": 1, "maximum": 128}
+        }
+      },
+      "PackageProgramSlotMapping": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "nodeId", "sourceSlot", "destinationSlot", "requiresUserAction"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "nodeId": {"type": "string", "minLength": 1},
+          "sourceSlot": {"type": "integer", "minimum": 1, "maximum": 128},
+          "destinationSlot": {"type": "integer", "minimum": 1, "maximum": 128},
+          "requiresUserAction": {"type": "boolean"}
+        }
+      },
+      "PackageProgramSlotPlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["placementId", "partitionIndex", "volumeName", "mode", "applied", "suggestedStartSlot", "requiredSlotCount", "availableSlotCount", "occupiedRanges", "sourceRanges", "destinationRanges", "mappings"],
+        "properties": {
+          "placementId": {"type": "string", "minLength": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "volumeName": {"type": "string", "minLength": 1},
+          "mode": {
+            "enum": ["CONTIGUOUS", "FRAGMENTED", "UNAVAILABLE"],
+            "x-axklib-application-enum": {"CONTIGUOUS": "contiguous", "FRAGMENTED": "fragmented", "UNAVAILABLE": "unavailable"}
+          },
+          "applied": {"type": "boolean"},
+          "suggestedStartSlot": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+          "requiredSlotCount": {"type": "integer", "minimum": 1},
+          "availableSlotCount": {"type": "integer", "minimum": 0, "maximum": 128},
+          "occupiedRanges": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotRange"}},
+          "sourceRanges": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotRange"}},
+          "destinationRanges": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotRange"}},
+          "mappings": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotMapping"}}
+        }
+      },
       "PackageAllocationEstimate": {
         "type": "object",
         "additionalProperties": false,
@@ -2053,7 +2107,7 @@
       "PackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "allocation"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "programSlotPlacements", "allocation"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2069,6 +2123,7 @@
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
+          "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
         }
       },
@@ -2079,6 +2134,15 @@
         "properties": {
           "nodeId": {"type": "string", "minLength": 1},
           "destinationName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImageSessionPackageProgramSlotAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["nodeId", "destinationSlot"],
+        "properties": {
+          "nodeId": {"type": "string", "minLength": 1},
+          "destinationSlot": {"type": "integer", "minimum": 1, "maximum": 128}
         }
       },
       "ImageSessionPackageImportPlanRequest": {
@@ -2096,13 +2160,18 @@
             "type": "array",
             "maxItems": 1024,
             "items": {"$ref": "#/components/schemas/ImageSessionPackageRename"}
+          },
+          "programSlotAssignments": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {"$ref": "#/components/schemas/ImageSessionPackageProgramSlotAssignment"}
           }
         }
       },
       "ImageSessionPackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "allocation", "imageId", "revision"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2118,6 +2187,7 @@
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
+          "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1}
@@ -2259,8 +2329,8 @@
           },
           "requiredExtension": {"type": "string", "pattern": "^\\.axk[a-z]+$"},
           "sourceMediaKind": {
-            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
-            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
+            "enum": ["SFS", "FAT12_FLOPPY", "ISO9660", "A3K_ARCHIVE", "STANDALONE_OBJECT", "AXK_OBJECT_DIRECTORY", "UNKNOWN"],
+            "x-axklib-application-enum": {"SFS": "sfs", "FAT12_FLOPPY": "fat12-floppy", "ISO9660": "iso9660", "A3K_ARCHIVE": "a3k-archive", "STANDALONE_OBJECT": "standalone-object", "AXK_OBJECT_DIRECTORY": "axk-object-directory", "UNKNOWN": "unknown"}
           },
           "valid": {"type": "boolean"},
           "payloadsVerified": {"type": "boolean"},

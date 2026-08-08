@@ -14,6 +14,7 @@ import type {
     ImageSessionVolumeFloppyExportDestination,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionPackageImportPlan,
+    ImageSessionPackageProgramSlotAssignment,
     ImageSessionPackageRename,
     JobState,
     ImageSessionSequenceExportDestination,
@@ -53,6 +54,7 @@ export class HttpPackageOperations {
             packages: packages.map((source) => serverInput(source)),
             destinations,
             renames: [],
+            programSlotAssignments: [],
             overwrite,
         });
         if (this.jobs.isJob(result)) throw new Error('package import planning unexpectedly returned a job');
@@ -75,6 +77,7 @@ export class HttpPackageOperations {
         partitionIndex: number,
         volumeName: string,
         renames: ImageSessionPackageRename[] = [],
+        programSlotAssignments: ImageSessionPackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan> {
         const session = this.imageSessions.get(sessionId);
@@ -85,6 +88,7 @@ export class HttpPackageOperations {
             partitionIndex,
             volumeName,
             renames,
+            programSlotAssignments,
             ...(replacePlanToken ? { replacePlanToken } : {}),
         });
         if (this.jobs.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');

@@ -178,6 +178,18 @@ std::string_view package_import_action_name(PackageImportObjectAction action) no
     return "conflict";
 }
 
+std::string_view package_program_slot_placement_mode_name(PackageProgramSlotPlacementMode mode) noexcept {
+    switch (mode) {
+    case PackageProgramSlotPlacementMode::contiguous:
+        return "contiguous";
+    case PackageProgramSlotPlacementMode::fragmented:
+        return "fragmented";
+    case PackageProgramSlotPlacementMode::unavailable:
+        return "unavailable";
+    }
+    return "unavailable";
+}
+
 std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept {
     switch (origin) {
     case PackageProgramAssignmentOrigin::imported_program:

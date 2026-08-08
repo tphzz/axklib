@@ -387,7 +387,8 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 axk::app::filter_export_plan(*plan, selection->closure, selection->volumes);
                 const auto flat_media = session->media->kind() == axk::MediaKind::fat12_floppy ||
                                         session->media->kind() == axk::MediaKind::standalone_object ||
-                                        session->media->kind() == axk::MediaKind::axk_object_directory;
+                                        session->media->kind() == axk::MediaKind::axk_object_directory ||
+                                        session->media->kind() == axk::MediaKind::a3k_archive;
                 const auto flatten_selected_volume =
                     flat_media && roots->size() == 1U && roots->front().kind == "VOLUME";
                 axk::app::PooledPathAllocator pooled_paths;

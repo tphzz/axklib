@@ -6,9 +6,10 @@ application, and a Crow-based REST and WebSocket server backed by a C++23
 implementation.
 
 The project reads SFS HDA/HDS images, Yamaha-supported FAT12 floppy and ISO9660
-sample CD-ROM profiles, and standalone sampler objects. It provides full binary codecs for
-`SMPL` (Wave Data), `SBNK` (Sample), `SBAC` (Sample Bank), `PROG` (Program),
-and the current `SEQU` (Sequence) timeline profile.
+sample CD-ROM profiles, read-only A3K `.a3k` volume archives, and
+standalone sampler objects. It provides full binary codecs for `SMPL` (Wave
+Data), `SBNK` (Sample), `SBAC` (Sample Bank), `PROG` (Program), and the current
+`SEQU` (Sequence) timeline profile.
 It can inspect and validate media, export exact waveform audio and rendered SFZ instruments,
 convert Sequences to and from Standard MIDI File format 0, transfer dependency-complete
 object packages, create multi-partition HDS (1–8 partitions up to 2 GiB),

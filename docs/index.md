@@ -5,10 +5,11 @@ Yamaha A3000, A4000, and A5000 disk images and sampler objects. Its internal
 engine is implemented in C++23.
 
 It reads SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs,
-standalone sampler objects, and bounded flat AXK object directories. It can inventory object relationships, export exact
-Wave Data and rendered stereo audio, create fresh HDS images, and apply ordered
-changes to existing images. It can also build the documented Yamaha-supported
-FAT12 floppy and primary ISO9660 image profiles.
+read-only A3K `.a3k` volume archives, standalone sampler objects, and
+bounded flat AXK object directories. It can inventory object relationships,
+export exact Wave Data and rendered stereo audio, create fresh HDS images, and
+apply ordered changes to existing images. It can also build the documented
+Yamaha-supported FAT12 floppy and primary ISO9660 image profiles.
 
 ## Build
 

@@ -153,6 +153,8 @@ std::string info_media_kind_name(axk::MediaKind kind) {
         return "standalone_object";
     case axk::MediaKind::axk_object_directory:
         return "axk_object_directory";
+    case axk::MediaKind::a3k_archive:
+        return "a3k_archive";
     }
     return "unknown";
 }
@@ -313,6 +315,8 @@ std::string public_object_key(const LoadedSource &source, std::string_view nativ
         return std::format("{}:iso9660:{}", filename, object->logical_path);
     if (source.media.kind() == axk::MediaKind::axk_object_directory)
         return std::format("{}:axk-object-directory:{}", filename, object->logical_path);
+    if (source.media.kind() == axk::MediaKind::a3k_archive)
+        return std::format("{}:a3k-archive:{}", filename, object->logical_path);
     return std::format("{}:standalone-object", filename);
 }
 
@@ -326,6 +330,8 @@ std::string public_scope_key(const LoadedSource &source, const axk::ObjectSnapsh
         return std::format("{}:standalone-object", display_path);
     if (source.media.kind() == axk::MediaKind::axk_object_directory)
         return std::format("{}:axk-object-directory", display_path);
+    if (source.media.kind() == axk::MediaKind::a3k_archive)
+        return std::format("{}:a3k-archive", display_path);
     const auto object = std::ranges::find(source.inventory.objects, item.key, &axk::MediaObjectDescriptor::key);
     return object == source.inventory.objects.end() ? std::format("{}:iso", display_path)
                                                     : std::format("{}:{}", display_path, object->scope_key);

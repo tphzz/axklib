@@ -33,6 +33,7 @@ import type {
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
     ImageSessionPackageImportPlan,
+    ImageSessionPackageProgramSlotAssignment,
     ImageSessionPackageRename,
     InputBinding,
     JobState,
@@ -96,9 +97,7 @@ import {
     serverInputBindings,
     volumeMutationOperation,
 } from './httpTransportWire';
-
 type HttpImageTransportConnection = AxklibApiConnection;
-
 export class HttpImageTransport implements ImageTransport {
     readonly storageMode = 'server' as const;
     readonly supportsClientUploads = true;
@@ -116,27 +115,21 @@ export class HttpImageTransport implements ImageTransport {
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
         this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
     }
-
     sandboxRoots(): Promise<SandboxRoot[]> {
         return this.client.roots();
     }
-
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing> {
         return this.client.listDirectory(directory, { cursor });
     }
-
     inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
         return this.client.inspectMediaSource(directory);
     }
-
     async createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void> {
         await this.client.createDirectory(parent, name);
     }
-
     async renameSandboxEntry(entry: FileRef, name: string): Promise<void> {
         await this.client.renameEntry(entry, name);
     }
-
     async deleteSandboxEntry(entry: FileRef): Promise<void> {
         await this.client.deleteEntry(entry);
     }
@@ -239,7 +232,6 @@ export class HttpImageTransport implements ImageTransport {
             await this.client.deleteDirectoryArchive(archive).catch(() => undefined);
         }
     }
-
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection> {
         return this.packages.inspect(source, verify);
     }
@@ -261,9 +253,18 @@ export class HttpImageTransport implements ImageTransport {
         partitionIndex: number,
         volumeName: string,
         renames: ImageSessionPackageRename[] = [],
+        programSlotAssignments: ImageSessionPackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
     ): Promise<ImageSessionPackageImportPlan> {
-        return this.packages.planImageImport(sessionId, source, partitionIndex, volumeName, renames, replacePlanToken);
+        return this.packages.planImageImport(
+            sessionId,
+            source,
+            partitionIndex,
+            volumeName,
+            renames,
+            programSlotAssignments,
+            replacePlanToken,
+        );
     }
     releaseImagePackageImportPlan(planToken: string): Promise<void> {
         return this.packages.releaseImageImportPlan(planToken);

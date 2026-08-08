@@ -118,6 +118,7 @@ struct PackageImportRequest {
     std::vector<std::filesystem::path> packages;
     std::vector<std::string> destinations;
     std::optional<std::filesystem::path> rename_map;
+    std::optional<std::filesystem::path> program_slot_map;
     std::optional<std::filesystem::path> output;
     std::string format{"summary"};
     bool overwrite{};

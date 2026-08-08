@@ -6,6 +6,11 @@ int sdk_header_test() {
     root.kind = axk::package_root_kind::wave_data;
     axk::package_import_request request;
     request.root_destinations.push_back({});
-    return value && root.kind == axk::package_root_kind::wave_data && request.root_destinations.size() == 1U ? *value
-                                                                                                             : 0;
+    request.program_slot_assignments.push_back({0U, "program", 1U});
+    axk::package_program_slot_placement_info placement;
+    placement.mode = "contiguous";
+    return value && root.kind == axk::package_root_kind::wave_data && request.root_destinations.size() == 1U &&
+                   request.program_slot_assignments.size() == 1U && placement.mode == "contiguous"
+               ? *value
+               : 0;
 }

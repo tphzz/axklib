@@ -296,13 +296,18 @@ def canonical_package_summary(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def canonical_package_plan(value: dict[str, Any]) -> dict[str, Any]:
+    def normalized_value(value: Any, key: str = "") -> Any:
+        if key == "actions" and isinstance(value, list):
+            return [str(entry).lower() for entry in value]
+        if isinstance(value, dict):
+            return normalized_item(value)
+        if isinstance(value, list):
+            return [normalized_value(entry) for entry in value]
+        return value
+
     def normalized_item(item: dict[str, Any]) -> dict[str, Any]:
         return {
-            key.replace("_", "").lower(): (
-                [str(entry).lower() for entry in item[key]]
-                if key in {"actions"}
-                else item[key]
-            )
+            key.replace("_", "").lower(): normalized_value(item[key], key)
             for key in sorted(item)
         }
 
@@ -324,6 +329,12 @@ def canonical_package_plan(value: dict[str, Any]) -> dict[str, Any]:
             for item in value.get(
                 "programAssignmentAdjustments",
                 value.get("program_assignment_adjustments", []),
+            )
+        ],
+        "programSlotPlacements": [
+            normalized_item(item)
+            for item in value.get(
+                "programSlotPlacements", value.get("program_slot_placements", [])
             )
         ],
         "allocation": [normalized_item(item) for item in value["allocation"]],

@@ -33,6 +33,64 @@ OrderedJson issue_json(const IssueOutput &issue) {
     return {{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}};
 }
 
+ProgramSlotPlacementOutput project_program_slot_placement(const PackageProgramSlotPlacement &placement) {
+    ProgramSlotPlacementOutput result;
+    result.placement_id = placement.placement_id;
+    result.partition_index = placement.partition_index;
+    result.volume_name = placement.volume_name;
+    result.mode = package_program_slot_placement_mode_name(placement.mode);
+    result.applied = placement.applied;
+    if (placement.suggested_start_slot)
+        result.suggested_start_slot = *placement.suggested_start_slot;
+    result.required_slot_count = placement.required_slot_count;
+    result.available_slot_count = placement.available_slot_count;
+    const auto project_ranges = [](const auto &ranges) {
+        std::vector<ProgramSlotRangeOutput> projected;
+        projected.reserve(ranges.size());
+        std::ranges::transform(ranges, std::back_inserter(projected),
+                               [](const auto &range) { return ProgramSlotRangeOutput{range.first, range.last}; });
+        return projected;
+    };
+    result.occupied_ranges = project_ranges(placement.occupied_ranges);
+    result.source_ranges = project_ranges(placement.source_ranges);
+    result.destination_ranges = project_ranges(placement.destination_ranges);
+    result.mappings.reserve(placement.mappings.size());
+    std::ranges::transform(placement.mappings, std::back_inserter(result.mappings), [](const auto &mapping) {
+        return ProgramSlotMappingOutput{mapping.package_index, mapping.node_id, mapping.source_slot,
+                                        mapping.destination_slot, mapping.requires_user_action};
+    });
+    return result;
+}
+
+ProgramSlotPlacementOutput project_program_slot_placement(const nlohmann::json &placement) {
+    ProgramSlotPlacementOutput result;
+    result.placement_id = placement.at("placementId").get<std::string>();
+    result.partition_index = placement.at("partitionIndex").get<std::uint32_t>();
+    result.volume_name = placement.at("volumeName").get<std::string>();
+    result.mode = placement.at("mode").get<std::string>();
+    result.applied = placement.at("applied").get<bool>();
+    result.suggested_start_slot = optional_value<std::uint32_t>(placement.at("suggestedStartSlot"));
+    result.required_slot_count = placement.at("requiredSlotCount").get<std::uint64_t>();
+    result.available_slot_count = placement.at("availableSlotCount").get<std::uint64_t>();
+    const auto project_ranges = [](const nlohmann::json &ranges) {
+        std::vector<ProgramSlotRangeOutput> projected;
+        projected.reserve(ranges.size());
+        for (const auto &range : ranges)
+            projected.push_back({range.at("first").get<std::uint32_t>(), range.at("last").get<std::uint32_t>()});
+        return projected;
+    };
+    result.occupied_ranges = project_ranges(placement.at("occupiedRanges"));
+    result.source_ranges = project_ranges(placement.at("sourceRanges"));
+    result.destination_ranges = project_ranges(placement.at("destinationRanges"));
+    for (const auto &mapping : placement.at("mappings")) {
+        result.mappings.push_back(
+            {mapping.at("packageIndex").get<std::uint64_t>(), mapping.at("nodeId").get<std::string>(),
+             mapping.at("sourceSlot").get<std::uint32_t>(), mapping.at("destinationSlot").get<std::uint32_t>(),
+             mapping.at("requiresUserAction").get<bool>()});
+    }
+    return result;
+}
+
 } // namespace
 
 PackageOutput project_package(const std::filesystem::path &path, const PortablePackage &package) {
@@ -180,6 +238,9 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
             std::string{package_program_assignment_disposition_name(adjustment.disposition)},
         });
     }
+    result.program_slot_placements.reserve(plan.program_slot_placements.size());
+    std::ranges::transform(plan.program_slot_placements, std::back_inserter(result.program_slot_placements),
+                           [](const auto &placement) { return project_program_slot_placement(placement); });
     result.allocation.reserve(plan.allocation.size());
     for (const auto &allocation : plan.allocation) {
         result.allocation.push_back({
@@ -292,6 +353,8 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 adjustment.at("disposition").get<std::string>(),
             });
         }
+        for (const auto &placement : service_plan.at("programSlotPlacements"))
+            result.program_slot_placements.push_back(project_program_slot_placement(placement));
         for (const auto &allocation : service_plan.at("allocation")) {
             result.allocation.push_back({
                 allocation.at("partitionIndex").get<std::uint32_t>(),
@@ -462,6 +525,39 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"disposition", adjustment.disposition},
             });
         }
+        auto program_slot_placements = OrderedJson::array();
+        for (const auto &placement : output.program_slot_placements) {
+            const auto range_json = [](const auto &ranges) {
+                auto result = OrderedJson::array();
+                for (const auto &range : ranges)
+                    result.push_back({{"first", range.first}, {"last", range.last}});
+                return result;
+            };
+            auto mappings = OrderedJson::array();
+            for (const auto &mapping : placement.mappings) {
+                mappings.push_back({
+                    {"package_index", mapping.package_index},
+                    {"node_id", mapping.node_id},
+                    {"source_slot", mapping.source_slot},
+                    {"destination_slot", mapping.destination_slot},
+                    {"requires_user_action", mapping.requires_user_action},
+                });
+            }
+            program_slot_placements.push_back({
+                {"placement_id", placement.placement_id},
+                {"partition_index", placement.partition_index},
+                {"volume_name", placement.volume_name},
+                {"mode", placement.mode},
+                {"applied", placement.applied},
+                {"suggested_start_slot", optional_number(placement.suggested_start_slot)},
+                {"required_slot_count", placement.required_slot_count},
+                {"available_slot_count", placement.available_slot_count},
+                {"occupied_ranges", range_json(placement.occupied_ranges)},
+                {"source_ranges", range_json(placement.source_ranges)},
+                {"destination_ranges", range_json(placement.destination_ranges)},
+                {"mappings", std::move(mappings)},
+            });
+        }
         const auto result = output.result ? OrderedJson{{"output_path", output.result->output_path_utf8},
                                                         {"source_snapshot_id", output.result->source_snapshot_id},
                                                         {"output_snapshot_id", output.result->output_snapshot_id},
@@ -479,6 +575,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
             {"conflicts", std::move(conflicts)},
             {"objects", std::move(objects)},
             {"program_assignment_adjustments", std::move(program_assignment_adjustments)},
+            {"program_slot_placements", std::move(program_slot_placements)},
             {"allocation", std::move(allocation)},
             {"result", result},
         }

@@ -106,6 +106,34 @@ struct ProgramAssignmentAdjustmentOutput {
     std::string disposition;
 };
 
+struct ProgramSlotRangeOutput {
+    std::uint32_t first{};
+    std::uint32_t last{};
+};
+
+struct ProgramSlotMappingOutput {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t source_slot{};
+    std::uint32_t destination_slot{};
+    bool requires_user_action{};
+};
+
+struct ProgramSlotPlacementOutput {
+    std::string placement_id;
+    std::uint32_t partition_index{};
+    std::string volume_name;
+    std::string mode;
+    bool applied{};
+    std::optional<std::uint32_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint64_t available_slot_count{};
+    std::vector<ProgramSlotRangeOutput> occupied_ranges;
+    std::vector<ProgramSlotRangeOutput> source_ranges;
+    std::vector<ProgramSlotRangeOutput> destination_ranges;
+    std::vector<ProgramSlotMappingOutput> mappings;
+};
+
 struct AllocationOutput {
     std::uint32_t partition_index{};
     std::string group_name;
@@ -147,6 +175,7 @@ struct PlanOutput {
     std::vector<ConflictOutput> conflicts;
     std::vector<ActionOutput> objects;
     std::vector<ProgramAssignmentAdjustmentOutput> program_assignment_adjustments;
+    std::vector<ProgramSlotPlacementOutput> program_slot_placements;
     std::vector<AllocationOutput> allocation;
     std::optional<ImportResultOutput> result;
 };

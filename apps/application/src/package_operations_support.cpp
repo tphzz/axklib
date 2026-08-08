@@ -320,6 +320,18 @@ axk::app::Result<axk::PackageImportRequest> parse_import_request(const Json &inp
                                                  value.at("destinationName").get<std::string>()});
             }
         }
+        if (input.contains("programSlotAssignments")) {
+            if (!input.at("programSlotAssignments").is_array())
+                return std::unexpected(operation_error("invalid_request", "programSlotAssignments must be an array"));
+            for (const auto &value : input.at("programSlotAssignments")) {
+                const auto slot = value.at("destinationSlot").get<std::uint32_t>();
+                if (slot < 1U || slot > 128U)
+                    return std::unexpected(operation_error("invalid_request", "Program slot is out of range"));
+                result.policy.program_slot_assignments.push_back({value.at("packageIndex").get<std::size_t>(),
+                                                                  value.at("nodeId").get<std::string>(),
+                                                                  static_cast<std::uint8_t>(slot)});
+            }
+        }
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "package import mappings are malformed"));
     }
@@ -340,6 +352,8 @@ std::string target_kind_name(axk::MediaKind kind) {
         return "standalone-object";
     case axk::MediaKind::axk_object_directory:
         return "axk-object-directory";
+    case axk::MediaKind::a3k_archive:
+        return "a3k-archive";
     }
     return "unknown";
 }
@@ -365,6 +379,40 @@ Json program_assignment_adjustments_json(std::span<const axk::PackageProgramAssi
              {"rawVolume", adjustment.raw_volume},
              {"reasonCode", adjustment.reason_code},
              {"disposition", std::string{axk::package_program_assignment_disposition_name(adjustment.disposition)}}});
+    }
+    return result;
+}
+
+Json program_slot_placements_json(std::span<const axk::PackageProgramSlotPlacement> placements) {
+    auto result = Json::array();
+    for (const auto &placement : placements) {
+        const auto range_json = [](std::span<const axk::PackageProgramSlotRange> ranges) {
+            auto values = Json::array();
+            for (const auto &range : ranges)
+                values.push_back({{"first", range.first}, {"last", range.last}});
+            return values;
+        };
+        auto mappings = Json::array();
+        for (const auto &mapping : placement.mappings) {
+            mappings.push_back({{"packageIndex", mapping.package_index},
+                                {"nodeId", mapping.node_id},
+                                {"sourceSlot", mapping.source_slot},
+                                {"destinationSlot", mapping.destination_slot},
+                                {"requiresUserAction", mapping.requires_user_action}});
+        }
+        result.push_back(
+            {{"placementId", placement.placement_id},
+             {"partitionIndex", placement.partition_index},
+             {"volumeName", placement.volume_name},
+             {"mode", std::string{axk::package_program_slot_placement_mode_name(placement.mode)}},
+             {"applied", placement.applied},
+             {"suggestedStartSlot", placement.suggested_start_slot ? Json(*placement.suggested_start_slot) : Json{}},
+             {"requiredSlotCount", placement.required_slot_count},
+             {"availableSlotCount", placement.available_slot_count},
+             {"occupiedRanges", range_json(placement.occupied_ranges)},
+             {"sourceRanges", range_json(placement.source_ranges)},
+             {"destinationRanges", range_json(placement.destination_ranges)},
+             {"mappings", std::move(mappings)}});
     }
     return result;
 }
@@ -446,6 +494,7 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
             {"conflicts", std::move(conflicts)},
             {"actions", std::move(actions)},
             {"programAssignmentAdjustments", program_assignment_adjustments_json(plan.program_assignment_adjustments)},
+            {"programSlotPlacements", program_slot_placements_json(plan.program_slot_placements)},
             {"allocation", std::move(allocation)}};
 }
 
@@ -521,8 +570,17 @@ axk::app::Result<axk::PackageImportRequest> parse_session_import_request(const J
                     {0U, rename.at("nodeId").get<std::string>(), rename.at("destinationName").get<std::string>()});
             }
         }
+        if (input.contains("programSlotAssignments")) {
+            for (const auto &assignment : input.at("programSlotAssignments")) {
+                const auto slot = assignment.at("destinationSlot").get<std::uint32_t>();
+                if (slot < 1U || slot > 128U)
+                    return std::unexpected(operation_error("invalid_request", "Program slot is out of range"));
+                request.policy.program_slot_assignments.push_back(
+                    {0U, assignment.at("nodeId").get<std::string>(), static_cast<std::uint8_t>(slot)});
+            }
+        }
     } catch (const Json::exception &) {
-        return std::unexpected(operation_error("invalid_request", "package destination or renames are malformed"));
+        return std::unexpected(operation_error("invalid_request", "package destination mappings are malformed"));
     }
     return request;
 }

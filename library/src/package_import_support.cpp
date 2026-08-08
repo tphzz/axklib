@@ -40,6 +40,16 @@ std::string policy_digest(const PackageImportPolicy &policy) {
         append_field(canonical, rename.node_id);
         append_field(canonical, rename.destination_name);
     }
+    auto assignments = policy.program_slot_assignments;
+    std::ranges::sort(assignments, [](const auto &left, const auto &right) {
+        return std::tie(left.package_index, left.node_id, left.destination_slot) <
+               std::tie(right.package_index, right.node_id, right.destination_slot);
+    });
+    for (const auto &assignment : assignments) {
+        append_integer(canonical, assignment.package_index);
+        append_field(canonical, assignment.node_id);
+        append_integer(canonical, assignment.destination_slot);
+    }
     return digest_text(canonical);
 }
 

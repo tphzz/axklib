@@ -106,6 +106,7 @@ add_library(
   src/file_publication.cpp
   src/io.cpp
   src/media.cpp
+  src/media_a3k_archive.cpp
   src/media_catalog.cpp
   src/media_fat12.cpp
   src/media_fat12_catalog.cpp
@@ -122,6 +123,7 @@ add_library(
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
   src/package_import_plan.cpp
+  src/package_import_program_slots.cpp
   src/package_program_adjustment.cpp
   src/package_import_sfs.cpp
   src/package_import_support.cpp
@@ -344,10 +346,16 @@ if(AXK_BUILD_FUZZERS)
     message(FATAL_ERROR "AXK_BUILD_FUZZERS requires a Clang compiler with libFuzzer")
   endif()
   function(axk_add_fuzzer name source)
+    set(options CORE_ONLY)
+    cmake_parse_arguments(AXK_FUZZ "${options}" "" "" ${ARGN})
     add_executable(axk_${name}_fuzz fuzz/${source})
     set_property(GLOBAL APPEND PROPERTY AXK_FUZZ_TARGETS axk_${name}_fuzz)
     target_compile_features(axk_${name}_fuzz PRIVATE cxx_std_23)
-    target_link_libraries(axk_${name}_fuzz PRIVATE axklib::audio)
+    if(AXK_FUZZ_CORE_ONLY)
+      target_link_libraries(axk_${name}_fuzz PRIVATE axklib::core)
+    else()
+      target_link_libraries(axk_${name}_fuzz PRIVATE axklib::audio)
+    endif()
     target_compile_options(axk_${name}_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(axk_${name}_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     axk_set_project_warnings(axk_${name}_fuzz)
@@ -358,7 +366,12 @@ if(AXK_BUILD_FUZZERS)
   target_link_libraries(axk_sfs_seed_builder PRIVATE axklib::audio)
   axk_set_project_warnings(axk_sfs_seed_builder)
 
+  add_executable(axk_a3k_seed_builder fuzz/a3k_seed_builder.cpp)
+  target_compile_features(axk_a3k_seed_builder PRIVATE cxx_std_23)
+  axk_set_project_warnings(axk_a3k_seed_builder)
+
   axk_add_fuzzer(bytes bytes_fuzz.cpp)
+  axk_add_fuzzer(a3k_archive a3k_archive_fuzz.cpp CORE_ONLY)
   axk_add_fuzzer(sfs_image sfs_image_fuzz.cpp)
   axk_add_fuzzer(object_header object_header_fuzz.cpp)
   foreach(object_type smpl sbnk sbac prog sequ prf3)
@@ -388,6 +401,9 @@ if(AXK_BUILD_FUZZERS)
     if(corpus_name STREQUAL "sfs_image")
       list(APPEND seed_command
            COMMAND "$<TARGET_FILE:axk_sfs_seed_builder>" "${working_corpus}/valid_minimal.hds")
+    elseif(corpus_name STREQUAL "a3k_archive")
+      list(APPEND seed_command
+           COMMAND "$<TARGET_FILE:axk_a3k_seed_builder>" "${working_corpus}/valid_minimal.a3k")
     endif()
     add_custom_command(
       TARGET fuzz-local
@@ -403,7 +419,7 @@ if(AXK_BUILD_FUZZERS)
     )
     add_dependencies(fuzz-local ${target})
   endforeach()
-  add_dependencies(fuzz-local axk_sfs_seed_builder)
+  add_dependencies(fuzz-local axk_sfs_seed_builder axk_a3k_seed_builder)
 endif()
 
 if(BUILD_TESTING)
@@ -484,6 +500,7 @@ if(BUILD_TESTING)
     tests/file_publication_test.cpp
     tests/io_test.cpp
     tests/hardening_test.cpp
+    tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
@@ -491,6 +508,7 @@ if(BUILD_TESTING)
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/package_archive_test.cpp
+    tests/package_program_slot_test.cpp
     tests/package_test.cpp
     tests/report_test.cpp
     tests/sequence_test.cpp

@@ -44,6 +44,8 @@ std::string media_kind_name(MediaKind kind) {
         return "standalone-object";
     case MediaKind::axk_object_directory:
         return "axk-object-directory";
+    case MediaKind::a3k_archive:
+        return "a3k-archive";
     }
     return "unknown";
 }
@@ -129,6 +131,36 @@ public_program_assignment_adjustment(const PackageProgramAssignmentAdjustment &a
         adjustment.reason_code,
         std::string{package_program_assignment_disposition_name(adjustment.disposition)},
     };
+}
+
+package_program_slot_placement_info public_program_slot_placement(const PackageProgramSlotPlacement &placement) {
+    package_program_slot_placement_info result_value;
+    result_value.placement_id = placement.placement_id;
+    result_value.partition_index = placement.partition_index;
+    result_value.volume_name = placement.volume_name;
+    result_value.mode = package_program_slot_placement_mode_name(placement.mode);
+    result_value.applied = placement.applied;
+    if (placement.suggested_start_slot)
+        result_value.suggested_start_slot = *placement.suggested_start_slot;
+    result_value.required_slot_count = placement.required_slot_count;
+    result_value.available_slot_count = placement.available_slot_count;
+    const auto project_ranges = [](const auto &ranges) {
+        std::vector<package_program_slot_range_info> result;
+        result.reserve(ranges.size());
+        std::ranges::transform(ranges, std::back_inserter(result), [](const auto &range) {
+            return package_program_slot_range_info{range.first, range.last};
+        });
+        return result;
+    };
+    result_value.occupied_ranges = project_ranges(placement.occupied_ranges);
+    result_value.source_ranges = project_ranges(placement.source_ranges);
+    result_value.destination_ranges = project_ranges(placement.destination_ranges);
+    result_value.mappings.reserve(placement.mappings.size());
+    std::ranges::transform(placement.mappings, std::back_inserter(result_value.mappings), [](const auto &mapping) {
+        return package_program_slot_mapping_info{mapping.package_index, mapping.node_id, mapping.source_slot,
+                                                 mapping.destination_slot, mapping.requires_user_action};
+    });
+    return result_value;
 }
 
 package_allocation_info public_package_allocation(const PackageAllocationDelta &allocation) {
@@ -322,6 +354,16 @@ result<package_import_plan> package_import_plan::create(const std::string &utf8_
             internal_request.policy.renames.push_back(
                 {static_cast<std::size_t>(rename.package_index), rename.node_id, rename.destination_name});
         }
+        internal_request.policy.program_slot_assignments.reserve(request.program_slot_assignments.size());
+        for (const auto &assignment : request.program_slot_assignments) {
+            if (assignment.package_index > std::numeric_limits<std::size_t>::max())
+                return invalid_argument("package Program slot assignment index is out of range");
+            if (assignment.destination_slot < 1U || assignment.destination_slot > 128U)
+                return invalid_argument("package Program destination slot must be between 1 and 128");
+            internal_request.policy.program_slot_assignments.push_back(
+                {static_cast<std::size_t>(assignment.package_index), assignment.node_id,
+                 static_cast<std::uint8_t>(assignment.destination_slot)});
+        }
 
         auto planned = plan_package_import(*target, packages, internal_request, context.impl_->cancellation.token());
         if (!planned)
@@ -413,6 +455,19 @@ result<std::vector<package_program_assignment_adjustment_info>> package_import_p
             result_value.reserve(impl_->plan.program_assignment_adjustments.size());
             std::ranges::transform(impl_->plan.program_assignment_adjustments, std::back_inserter(result_value),
                                    public_program_assignment_adjustment);
+            return result_value;
+        });
+}
+
+result<std::vector<package_program_slot_placement_info>> package_import_plan::program_slot_placements() const {
+    return protect<std::vector<package_program_slot_placement_info>>(
+        [&]() -> result<std::vector<package_program_slot_placement_info>> {
+            if (!impl_)
+                return invalid_argument("package import plan is not initialized");
+            std::vector<package_program_slot_placement_info> result_value;
+            result_value.reserve(impl_->plan.program_slot_placements.size());
+            std::ranges::transform(impl_->plan.program_slot_placements, std::back_inserter(result_value),
+                                   public_program_slot_placement);
             return result_value;
         });
 }

@@ -153,6 +153,44 @@ Result<std::vector<PackageNodeRename>> load_renames(const std::filesystem::path 
     }
 }
 
+Result<std::vector<PackageProgramSlotAssignment>> load_program_slot_assignments(const std::filesystem::path &path) {
+    std::ifstream input{path};
+    if (!input)
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open Program slot map")};
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    if (!input && !input.eof())
+        return std::unexpected{
+            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read Program slot map")};
+    const auto text_value = buffer.str();
+    if (!text::is_valid_utf8(text_value))
+        return std::unexpected{argument_error("Program slot map is not valid UTF-8")};
+    try {
+        const auto array = Json::parse(text_value);
+        if (!array.is_array())
+            return std::unexpected{argument_error("Program slot map must be a JSON array")};
+        std::vector<PackageProgramSlotAssignment> result;
+        result.reserve(array.size());
+        static const std::set<std::string, std::less<>> fields{"package", "node_id", "slot"};
+        for (const auto &item : array) {
+            if (!has_only_fields(item, fields) || !item.contains("package") || !item.contains("node_id") ||
+                !item.contains("slot")) {
+                return std::unexpected{
+                    argument_error("each Program slot assignment must contain only package, node_id, and slot")};
+            }
+            const auto slot = item.at("slot").get<std::uint32_t>();
+            if (slot < 1U || slot > 128U)
+                return std::unexpected{argument_error("Program destination slots must be between 1 and 128")};
+            result.push_back({item.at("package").get<std::size_t>(), item.at("node_id").get<std::string>(),
+                              static_cast<std::uint8_t>(slot)});
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{argument_error(std::string{"invalid Program slot map JSON: "} + error.what())};
+    }
+}
+
 void print_package_summary(const schema::package_v1::PackageOutput &output, bool verify_only) {
     std::cout << output.path_utf8 << '\t' << (output.valid ? "valid" : "invalid") << "\tkind=" << output.package_kind
               << "\tpackage_id=" << output.package_id << "\troots=" << output.roots.size()
@@ -258,6 +296,12 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         if (!renames)
             return report_failure(renames.error());
         internal_request.policy.renames = std::move(*renames);
+    }
+    if (request.program_slot_map) {
+        auto assignments = load_program_slot_assignments(*request.program_slot_map);
+        if (!assignments)
+            return report_failure(assignments.error());
+        internal_request.policy.program_slot_assignments = std::move(*assignments);
     }
 
     std::vector<std::filesystem::path> paths{request.target};

@@ -172,10 +172,59 @@ struct PackageNodeRename {
     friend bool operator==(const PackageNodeRename &, const PackageNodeRename &) = default;
 };
 
+struct PackageProgramSlotAssignment {
+    std::size_t package_index{};
+    std::string node_id;
+    std::uint8_t destination_slot{};
+
+    friend bool operator==(const PackageProgramSlotAssignment &, const PackageProgramSlotAssignment &) = default;
+};
+
 struct PackageImportPolicy {
     std::vector<PackageNodeRename> renames;
+    std::vector<PackageProgramSlotAssignment> program_slot_assignments;
 
     friend bool operator==(const PackageImportPolicy &, const PackageImportPolicy &) = default;
+};
+
+enum class PackageProgramSlotPlacementMode : std::uint8_t {
+    contiguous,
+    fragmented,
+    unavailable,
+};
+
+struct PackageProgramSlotRange {
+    std::uint8_t first{};
+    std::uint8_t last{};
+
+    friend bool operator==(const PackageProgramSlotRange &, const PackageProgramSlotRange &) = default;
+};
+
+struct PackageProgramSlotMapping {
+    std::size_t package_index{};
+    std::string node_id;
+    std::uint8_t source_slot{};
+    std::uint8_t destination_slot{};
+    bool requires_user_action{};
+
+    friend bool operator==(const PackageProgramSlotMapping &, const PackageProgramSlotMapping &) = default;
+};
+
+struct PackageProgramSlotPlacement {
+    std::string placement_id;
+    std::uint8_t partition_index{};
+    std::string volume_name;
+    PackageProgramSlotPlacementMode mode{PackageProgramSlotPlacementMode::unavailable};
+    bool applied{};
+    std::optional<std::uint8_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint16_t available_slot_count{};
+    std::vector<PackageProgramSlotRange> occupied_ranges;
+    std::vector<PackageProgramSlotRange> source_ranges;
+    std::vector<PackageProgramSlotRange> destination_ranges;
+    std::vector<PackageProgramSlotMapping> mappings;
+
+    friend bool operator==(const PackageProgramSlotPlacement &, const PackageProgramSlotPlacement &) = default;
 };
 
 struct PackageImportRequest {
@@ -303,6 +352,7 @@ struct PackageImportPlan {
     std::vector<PlannedPackageDestination> destinations;
     std::vector<PlannedPackageObject> objects;
     std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
+    std::vector<PackageProgramSlotPlacement> program_slot_placements;
     std::vector<PackageAllocationDelta> allocation;
     std::vector<PackageImportConflict> conflicts;
 
@@ -326,6 +376,7 @@ AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;
 AXK_API std::string_view package_kind_name(PackageKind kind) noexcept;
 AXK_API std::string_view required_package_extension(PackageKind kind) noexcept;
 AXK_API std::string_view package_import_action_name(PackageImportObjectAction action) noexcept;
+AXK_API std::string_view package_program_slot_placement_mode_name(PackageProgramSlotPlacementMode mode) noexcept;
 AXK_API std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept;
 AXK_API std::string_view
 package_program_assignment_disposition_name(PackageProgramAssignmentDisposition disposition) noexcept;

@@ -18,6 +18,8 @@
 #include "axklib/media.hpp"
 #include "axklib/writer.hpp"
 
+#include "a3k_test_fixture.hpp"
+
 namespace {
 
 std::filesystem::path fixture_path() {
@@ -303,6 +305,48 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
         const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
         EXPECT_EQ(read->media->kind(), axk::MediaKind::axk_object_directory);
+    }
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
+    EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
+}
+
+TEST_F(ImageSessionTest, OpensReadOnlyA3kArchiveWithBrowseAndAuditionCapabilities) {
+    axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "archive.a3k"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_EQ(opened->format, "a3k-archive");
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
+              opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.audio_export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_package_export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+
+    const auto content = sessions.content(opened->image_id, "owner-a", 64U);
+    ASSERT_TRUE(content) << content.error().message;
+    ASSERT_EQ(content->items.size(), 1U);
+    EXPECT_EQ(content->items.front().kind, "volume");
+    EXPECT_EQ(content->items.front().display_name, "Archive Volume");
+    EXPECT_EQ(content->items.front().partition_index, 0U);
+    EXPECT_EQ(content->items.front().volume_directory_id, 1U);
+
+    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
+    ASSERT_FALSE(wave_data->items.empty());
+    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave_data->items.front().id});
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_GT(audition->content_size_bytes, 44U);
+
+    {
+        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        ASSERT_TRUE(read) << read.error().message;
+        EXPECT_EQ(read->media->kind(), axk::MediaKind::a3k_archive);
     }
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);

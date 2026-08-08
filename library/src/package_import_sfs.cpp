@@ -1,6 +1,9 @@
 #include "package_import_support.hpp"
 
+#include "package_import_program_slots.hpp"
+
 #include <algorithm>
+#include <format>
 #include <limits>
 #include <map>
 #include <optional>
@@ -99,20 +102,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         }
     }
 
-    std::map<std::pair<std::size_t, std::string>, std::string> renames;
-    for (const auto &rename : request.policy.renames) {
-        if (rename.package_index >= packages.size() ||
-            node_by_id(packages[std::min(rename.package_index, packages.size() - 1U)], rename.node_id) == nullptr) {
-            add_conflict(plan, "RENAME_NODE_INVALID", "rename references a missing package node");
-            continue;
-        }
-        const auto key = std::pair{rename.package_index, rename.node_id};
-        if (!valid_sfs_name(rename.destination_name)) {
-            add_conflict(plan, "RENAME_NAME_INVALID", "SFS destination names must contain 1 to 16 ASCII bytes");
-        } else if (!renames.emplace(key, rename.destination_name).second) {
-            add_conflict(plan, "RENAME_NODE_DUPLICATE", "package node has more than one rename");
-        }
-    }
+    const auto policy = validate_sfs_import_policy(packages, request.policy, plan);
 
     std::vector<Candidate> candidates;
     std::map<DestinationKey, bool> destination_creation;
@@ -154,8 +144,13 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         std::map<std::string, std::string, std::less<>> destination_names;
         for (const auto *node : closure) {
             auto name = node->name;
-            if (const auto renamed = renames.find({package_index, node->node_id}); renamed != renames.end())
+            if (const auto assigned = policy.program_slots.find({package_index, node->node_id});
+                assigned != policy.program_slots.end()) {
+                name = std::format("{:03}", assigned->second);
+            } else if (const auto renamed = policy.renames.find({package_index, node->node_id});
+                       renamed != policy.renames.end()) {
                 name = renamed->second;
+            }
             destination_names.emplace(node->node_id, std::move(name));
         }
         for (const auto *node : closure) {
@@ -181,6 +176,12 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     }
     if (auto adjusted = plan_program_assignment_adjustments(candidates, existing, plan); !adjusted)
         return std::unexpected{adjusted.error()};
+    if (auto placed = append_sfs_program_slot_placements(candidates, existing, container,
+                                                         retained_session ? retained_session->stats : nullptr,
+                                                         policy.program_slots, plan, cancellation);
+        !placed) {
+        return std::unexpected{placed.error()};
+    }
 
     std::map<std::pair<std::uint8_t, std::uint32_t>, ClusterReservation> infrastructure_layouts;
     std::map<std::uint8_t, std::size_t> new_volume_counts;

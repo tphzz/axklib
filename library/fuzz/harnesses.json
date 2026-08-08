@@ -1,9 +1,10 @@
 {
   "schema_version": "1.0",
   "threat_model": "Untrusted container, object, and manifest bytes must fail with bounded typed results without memory errors, hangs, or filesystem publication.",
-  "support_sources": ["sfs_seed_builder.cpp"],
+  "support_sources": ["a3k_seed_builder.cpp", "sfs_seed_builder.cpp"],
   "harnesses": [
     {"target":"bytes","source":"bytes_fuzz.cpp","corpus":"bytes","parser":"ByteReader checked slices, integers, and ASCII fields","envelope":"none","maximum_input_bytes":4194304,"invariants":["bounded result","no out-of-range access"]},
+    {"target":"a3k_archive","source":"a3k_archive_fuzz.cpp","corpus":"a3k_archive","parser":"A3K archive header, index, entry extents, embedded Yamaha object headers, and lazy metadata decode","envelope":"none","maximum_input_bytes":4194304,"invariants":["typed success or failure","bounded index allocation","bounded entry reads","no file publication"]},
     {"target":"sfs_image","source":"sfs_image_fuzz.cpp","corpus":"sfs_image","parser":"open_image SFS/HDS container parser","envelope":"none","maximum_input_bytes":4194304,"invariants":["typed success or failure","bounded input allocation","no file publication"]},
     {"target":"object_header","source":"object_header_fuzz.cpp","corpus":"object_header","parser":"decode_object_header","envelope":"none","maximum_input_bytes":4194304,"invariants":["header fields remain within input"]},
     {"target":"object_smpl","source":"typed_object_fuzz.cpp","corpus":"object_smpl","parser":"SMPL payload decoder","envelope":"minimal current object header","maximum_input_bytes":4194304,"invariants":["bounded decoded payload"]},

@@ -384,6 +384,9 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     auto adjustments = import_plan->adjustments();
     ASSERT_TRUE(adjustments) << adjustments.error().message;
     EXPECT_TRUE(adjustments->empty());
+    auto program_slots = import_plan->program_slot_placements();
+    ASSERT_TRUE(program_slots) << program_slots.error().message;
+    EXPECT_TRUE(program_slots->empty());
 
     const std::string invalid_import_path = root.string() + "/invalid-\xc3\x28";
     const auto invalid_apply = import_plan->apply(invalid_import_path, {}, context);

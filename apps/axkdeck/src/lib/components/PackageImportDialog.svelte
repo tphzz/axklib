@@ -12,6 +12,7 @@
         inspection: PackageInspection | null;
         plan: ImageSessionPackageImportPlan | null;
         renames: Record<string, string>;
+        programSlots: Record<string, number>;
         status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
         progress: number;
         error: string;
@@ -19,6 +20,8 @@
         onchooselocal: () => void;
         onchange: () => void;
         onrename: (nodeId: string, name: string) => void;
+        onprogramslot: (nodeId: string, slot: number) => void;
+        onprogramstart: (placementId: string, start: number) => void;
         onreplan: () => void;
         oncancel: () => void;
         onconfirm: () => void;
@@ -38,6 +41,7 @@
         inspection,
         plan,
         renames,
+        programSlots,
         status,
         progress,
         error,
@@ -45,6 +49,8 @@
         onchooselocal,
         onchange,
         onrename,
+        onprogramslot,
+        onprogramstart,
         onreplan,
         oncancel,
         onconfirm,
@@ -55,11 +61,29 @@
     const canImport = $derived(status === 'ready' && Boolean(plan?.valid));
     const treeRows = $derived(packageTree(inspection));
     const conflictNodes = $derived(new Set(plan?.conflicts.map((conflict) => conflict.nodeId) ?? []));
+    const placementNodeIds = $derived(
+        new Set(
+            plan?.programSlotPlacements.flatMap((placement) => placement.mappings.map((mapping) => mapping.nodeId)),
+        ),
+    );
+    const placementIssues = $derived(
+        (plan?.programSlotPlacements ?? []).filter(
+            (placement) =>
+                !placement.applied ||
+                placement.mode === 'UNAVAILABLE' ||
+                placement.mappings.some((mapping) => mapping.requiresUserAction),
+        ),
+    );
     const renameActions = $derived(
         Array.from(
             new Map(
                 (plan?.actions ?? [])
-                    .filter((action) => conflictNodes.has(action.nodeId) && action.actions.includes('CONFLICT'))
+                    .filter(
+                        (action) =>
+                            !placementNodeIds.has(action.nodeId) &&
+                            conflictNodes.has(action.nodeId) &&
+                            action.actions.includes('CONFLICT'),
+                    )
                     .map((action) => [action.nodeId, action]),
             ).values(),
         ),
@@ -68,12 +92,16 @@
         Array.from(
             new Map(
                 (plan?.conflicts ?? [])
-                    .filter((conflict) => !renameActions.some((action) => action.nodeId === conflict.nodeId))
+                    .filter(
+                        (conflict) =>
+                            !(placementNodeIds.has(conflict.nodeId) && conflict.code === 'SFS_NAME_CONFLICT') &&
+                            !renameActions.some((action) => action.nodeId === conflict.nodeId),
+                    )
                     .map((conflict) => [`${conflict.code}:${conflict.nodeId}:${conflict.message}`, conflict]),
             ).values(),
         ),
     );
-    const visibleConflictCount = $derived(renameActions.length + nonRenameConflicts.length);
+    const visibleConflictCount = $derived(placementIssues.length + renameActions.length + nonRenameConflicts.length);
     const insertedObjects = $derived(
         (plan?.allocation ?? []).reduce((total, allocation) => total + allocation.insertedObjectCount, 0),
     );
@@ -91,6 +119,21 @@
         if (type === 'SMPL') return 'Wave Data';
         if (type === 'VOLUME') return 'Volume';
         return type;
+    }
+
+    function formatSlot(slot: number): string {
+        return String(slot).padStart(3, '0');
+    }
+
+    function formatRanges(ranges: { first: number; last: number }[]): string {
+        if (ranges.length === 0) return 'None';
+        return ranges
+            .map((range) =>
+                range.first === range.last
+                    ? formatSlot(range.first)
+                    : `${formatSlot(range.first)}–${formatSlot(range.last)}`,
+            )
+            .join(', ');
     }
 
     function packageTree(value: PackageInspection | null): PackageTreeRow[] {
@@ -221,7 +264,81 @@
                                         <dd>{formatStoredSize(allocatedBytes)}</dd>
                                     </div>
                                 </dl>
-                                {#if plan.conflicts.length > 0}
+                                {#if plan.programSlotPlacements.length > 0}
+                                    <div class="program-slot-placements" aria-label="Program slot placement">
+                                        {#each plan.programSlotPlacements as placement (placement.placementId)}
+                                            <section class:program-slot-placement-pending={!placement.applied}>
+                                                <div class="program-slot-placement-heading">
+                                                    <strong>Program slots</strong>
+                                                    {#if placement.mode === 'UNAVAILABLE'}
+                                                        <small>Not enough free slots</small>
+                                                    {:else if placement.applied}
+                                                        <small>Checked</small>
+                                                    {:else}
+                                                        <small>Suggested</small>
+                                                    {/if}
+                                                </div>
+                                                <dl>
+                                                    <div>
+                                                        <dt>Occupied</dt>
+                                                        <dd>{formatRanges(placement.occupiedRanges)}</dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt>Package</dt>
+                                                        <dd>{formatRanges(placement.sourceRanges)}</dd>
+                                                    </div>
+                                                    <div>
+                                                        <dt>Destination</dt>
+                                                        <dd>{formatRanges(placement.destinationRanges)}</dd>
+                                                    </div>
+                                                </dl>
+                                                {#if placement.mode === 'UNAVAILABLE'}
+                                                    <p>
+                                                        {placement.requiredSlotCount} slots are required, but only
+                                                        {placement.availableSlotCount} are available.
+                                                    </p>
+                                                {:else if !placement.applied && placement.mode === 'CONTIGUOUS'}
+                                                    <label class="program-slot-start">
+                                                        <span>Destination start</span>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={128 - placement.requiredSlotCount + 1}
+                                                            value={programSlots[placement.mappings[0]?.nodeId] ??
+                                                                placement.suggestedStartSlot ??
+                                                                1}
+                                                            oninput={(event) =>
+                                                                onprogramstart(
+                                                                    placement.placementId,
+                                                                    event.currentTarget.valueAsNumber,
+                                                                )}
+                                                        />
+                                                    </label>
+                                                {:else if !placement.applied}
+                                                    <small>Using the lowest available Program slots.</small>
+                                                {/if}
+                                                {#each placement.mappings.filter((mapping) => mapping.requiresUserAction) as mapping (mapping.nodeId)}
+                                                    <label class="program-slot-exception">
+                                                        <span>Program {formatSlot(mapping.sourceSlot)}</span>
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max="128"
+                                                            value={programSlots[mapping.nodeId] ??
+                                                                mapping.destinationSlot}
+                                                            oninput={(event) =>
+                                                                onprogramslot(
+                                                                    mapping.nodeId,
+                                                                    event.currentTarget.valueAsNumber,
+                                                                )}
+                                                        />
+                                                    </label>
+                                                {/each}
+                                            </section>
+                                        {/each}
+                                    </div>
+                                {/if}
+                                {#if visibleConflictCount > 0}
                                     <div class="package-conflicts" role="alert">
                                         <strong
                                             >{visibleConflictCount} issue{visibleConflictCount === 1 ? '' : 's'}
@@ -243,7 +360,7 @@
                                                 />
                                             </label>
                                         {/each}
-                                        {#if renameActions.length > 0}
+                                        {#if renameActions.length > 0 || placementIssues.length > 0}
                                             <button
                                                 class="secondary-button"
                                                 type="button"

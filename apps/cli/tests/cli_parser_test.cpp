@@ -539,6 +539,7 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
     const auto package = root / "sine.axksbnk";
     const auto target = root / "target.hds";
     const auto manifest = root / "target.json";
+    const auto program_slot_map = root / "program-slots.json";
     const auto output = root / "must-not-exist.hds";
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -563,6 +564,14 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
         run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination", "not-json"}),
         2);
     EXPECT_NE(testing::internal::GetCapturedStderr().find("destination JSON"), std::string::npos);
+
+    std::ofstream{program_slot_map} << R"([{"package":0,"node_id":"not-a-program","slot":129}])";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination",
+                       R"({"package":0,"root":0,"partition":0,"volume":"Imported"})", "--program-slot-map",
+                       program_slot_map.string()}),
+              2);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("between 1 and 128"), std::string::npos);
 
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "import", target.string(), package.string(), "--destination",
