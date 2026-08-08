@@ -1,4 +1,4 @@
-import type { DirectoryLocation, DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
+import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 
 export type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
 export type PickerParentDialog =
@@ -18,6 +18,7 @@ export interface PickerNavigation {
     parentDialog?: PickerParentDialog;
     requireWritableDirectory?: boolean;
     initialDirectory?: DirectoryRef | null;
+    initialFile?: FileRef | null;
     ondirectorychange?: (directory: DirectoryRef | null) => void;
 }
 

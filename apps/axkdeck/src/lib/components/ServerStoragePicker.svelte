@@ -8,12 +8,14 @@
         serverDirectoryLocation,
         serverFileLocation,
         type DirectoryRef,
+        type FileRef,
         type FileLocation,
         type ImageLocation,
         type DirectoryLocation,
         type SandboxEntry,
         type SandboxRoot,
     } from '../storageLocations';
+    import { restoreRememberedFile, storageEntryIsVisible } from '../storagePickerRestoration';
     import Icon from './Icon.svelte';
 
     type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
@@ -25,6 +27,7 @@
         suggestedName?: string;
         multiple?: boolean;
         initialDirectory?: DirectoryRef | null;
+        initialFile?: FileRef | null;
         requireWritableDirectory?: boolean;
         ondirectorychange?: (directory: DirectoryRef | null) => void;
         onmanagelocations?: () => void;
@@ -41,6 +44,7 @@
         suggestedName = '',
         multiple = false,
         initialDirectory = null,
+        initialFile = null,
         requireWritableDirectory = true,
         ondirectorychange,
         onmanagelocations,
@@ -106,7 +110,7 @@
             if (initialDirectory) {
                 const root = roots.find((candidate) => candidate.id === initialDirectory.rootId);
                 if (root) {
-                    if (!(await openDirectory(initialDirectory, root))) ondirectorychange?.(null);
+                    if (!(await openDirectory(initialDirectory, root, initialFile))) ondirectorychange?.(null);
                 } else {
                     ondirectorychange?.(null);
                 }
@@ -119,11 +123,7 @@
     });
 
     function entryIsVisible(entry: SandboxEntry): boolean {
-        if (entry.kind === 'DIRECTORY') return true;
-        if (mode !== 'file' && mode !== 'media-source') return false;
-        if (normalizedExtensions.length === 0) return true;
-        const extension = entry.name.split('.').pop()?.toLocaleLowerCase() ?? '';
-        return normalizedExtensions.includes(extension);
+        return storageEntryIsVisible(entry, mode === 'file' || mode === 'media-source', normalizedExtensions);
     }
 
     function rootIsDisabled(root: SandboxRoot): boolean {
@@ -174,18 +174,28 @@
         await openDirectory({ rootId: root.id, relativePath: '' }, root);
     }
 
-    async function openDirectory(reference: DirectoryRef, root = activeRoot): Promise<boolean> {
+    async function openDirectory(
+        reference: DirectoryRef,
+        root = activeRoot,
+        rememberedFile: FileRef | null = null,
+    ): Promise<boolean> {
         if (!root) return false;
         loading = true;
         error = '';
         try {
-            const listing = await transport.sandboxDirectory(reference);
+            const restored = await restoreRememberedFile(
+                await transport.sandboxDirectory(reference),
+                rememberedFile,
+                entryIsVisible,
+                (cursor) => transport.sandboxDirectory(reference, cursor),
+            );
+            const listing = restored.listing;
             activeRoot = root;
             directory = listing.directory;
             entries = listing.entries;
             nextCursor = listing.nextCursor;
             selectedFilePaths = [];
-            activeOptionIndex = listing.entries.some(entryIsVisible) ? 0 : -1;
+            activeOptionIndex = restored.activeOptionIndex ?? (listing.entries.some(entryIsVisible) ? 0 : -1);
             ondirectorychange?.(listing.directory);
             void revealActiveOption();
             void revealCurrentBreadcrumb();

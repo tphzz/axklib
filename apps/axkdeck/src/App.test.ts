@@ -616,6 +616,35 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
     });
 
+    it('restores the last successfully opened image as the active picker row after ejecting', async () => {
+        mocks.sandboxDirectory.mockImplementation(async (directory) => ({
+            directory,
+            entries:
+                directory.relativePath === 'images'
+                    ? [
+                          { name: 'earlier.hds', relativePath: 'images/earlier.hds', kind: 'FILE', size: 1024 },
+                          { name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'FILE', size: 2048 },
+                      ]
+                    : [{ name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null }],
+            truncated: false,
+            nextCursor: null,
+        }));
+        render(App);
+
+        await chooseNestedImage();
+        await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
+        await mocks.openImage.mock.results[0].value;
+        await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
+        await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Open image' })).toBeTruthy());
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+        const picker = await screen.findByRole('dialog', { name: 'Open image' });
+        const list = within(picker).getByRole('listbox', { name: 'Storage entries' });
+        const remembered = await within(picker).findByRole('option', { name: /nested\.hds/ });
+        expect(list.getAttribute('aria-activedescendant')).toBe(remembered.id);
+        expect(remembered.getAttribute('aria-selected')).toBe('true');
+    });
+
     it('preserves the active image when opening a replacement fails', async () => {
         render(App);
 
@@ -630,6 +659,39 @@ describe('App panel layout', () => {
         expect(screen.getAllByText('nested.hds')).not.toHaveLength(0);
         expect(screen.getByRole('button', { name: 'Eject image' })).toBeTruthy();
         expect(mocks.closeImage).not.toHaveBeenCalledWith(17);
+    });
+
+    it('does not replace the remembered image when opening another file fails', async () => {
+        mocks.sandboxDirectory.mockImplementation(async (directory) => ({
+            directory,
+            entries:
+                directory.relativePath === 'images'
+                    ? [
+                          { name: 'earlier.hds', relativePath: 'images/earlier.hds', kind: 'FILE', size: 1024 },
+                          { name: 'nested.hds', relativePath: 'images/nested.hds', kind: 'FILE', size: 2048 },
+                      ]
+                    : [{ name: 'images', relativePath: 'images', kind: 'DIRECTORY', size: null }],
+            truncated: false,
+            nextCursor: null,
+        }));
+        render(App);
+        await chooseNestedImage();
+        await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
+        await mocks.openImage.mock.results[0].value;
+        mocks.openImage.mockRejectedValueOnce(new Error('Replacement is invalid'));
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Open another image' }));
+        const replacementPicker = await screen.findByRole('dialog', { name: 'Open image' });
+        await fireEvent.click(await within(replacementPicker).findByText('earlier.hds'));
+        await vi.waitFor(() => expect(screen.getByText('Replacement is invalid')).toBeTruthy());
+        await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
+        await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Open image' })).toBeTruthy());
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+        const picker = await screen.findByRole('dialog', { name: 'Open image' });
+        const list = within(picker).getByRole('listbox', { name: 'Storage entries' });
+        const remembered = await within(picker).findByRole('option', { name: /nested\.hds/ });
+        expect(list.getAttribute('aria-activedescendant')).toBe(remembered.id);
     });
 
     it('closes the active image session when the application is unmounted', async () => {

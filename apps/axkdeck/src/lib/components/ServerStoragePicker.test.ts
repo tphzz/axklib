@@ -113,6 +113,97 @@ describe('ServerStoragePicker', () => {
         });
     });
 
+    it('loads later pages and scrolls the remembered file into view', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory, cursor) => ({
+            directory,
+            entries: cursor
+                ? [
+                      {
+                          name: 'remembered.hds',
+                          relativePath: 'images/remembered.hds',
+                          kind: 'FILE',
+                          size: 2048,
+                      },
+                  ]
+                : [
+                      {
+                          name: 'first.hds',
+                          relativePath: 'images/first.hds',
+                          kind: 'FILE',
+                          size: 1024,
+                      },
+                  ],
+            truncated: !cursor,
+            nextCursor: cursor ? null : 'next',
+        }));
+        const scrollIntoView = vi.fn();
+        const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            value: scrollIntoView,
+        });
+
+        try {
+            render(ServerStoragePicker, {
+                props: {
+                    transport: imageTransport,
+                    mode: 'file',
+                    title: 'Open image',
+                    extensions: ['hds'],
+                    initialDirectory: { rootId: 'workspace', relativePath: 'images' },
+                    initialFile: { rootId: 'workspace', relativePath: 'images/remembered.hds' },
+                    onselect: vi.fn(),
+                    oncancel: vi.fn(),
+                },
+            });
+
+            const remembered = await screen.findByRole('option', { name: /remembered\.hds/ });
+            const list = screen.getByRole('listbox', { name: 'Storage entries' });
+            expect(activeOption(list)).toBe(remembered);
+            expect(remembered.getAttribute('aria-selected')).toBe('true');
+            expect(imageTransport.sandboxDirectory).toHaveBeenCalledWith(
+                { rootId: 'workspace', relativePath: 'images' },
+                'next',
+            );
+            await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' }));
+        } finally {
+            Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+                configurable: true,
+                value: originalScrollIntoView,
+            });
+        }
+    });
+
+    it('falls back to the first visible entry when the remembered file no longer exists', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.sandboxDirectory).mockImplementation(async (directory, cursor) => ({
+            directory,
+            entries: cursor
+                ? [{ name: 'last.hds', relativePath: 'images/last.hds', kind: 'FILE', size: 2048 }]
+                : [{ name: 'first.hds', relativePath: 'images/first.hds', kind: 'FILE', size: 1024 }],
+            truncated: !cursor,
+            nextCursor: cursor ? null : 'next',
+        }));
+        render(ServerStoragePicker, {
+            props: {
+                transport: imageTransport,
+                mode: 'file',
+                title: 'Open image',
+                extensions: ['hds'],
+                initialDirectory: { rootId: 'workspace', relativePath: 'images' },
+                initialFile: { rootId: 'workspace', relativePath: 'images/removed.hds' },
+                onselect: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        await screen.findByRole('option', { name: /last\.hds/ });
+        const list = screen.getByRole('listbox', { name: 'Storage entries' });
+        expect(activeOption(list).textContent).toContain('first.hds');
+        expect(screen.queryByRole('alert')).toBeNull();
+    });
+
     it('returns directly from a remembered directory to the workspace list', async () => {
         const ondirectorychange = vi.fn();
         render(ServerStoragePicker, {

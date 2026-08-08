@@ -1,5 +1,5 @@
 import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
-import type { DirectoryLocation, DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
+import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type { CompanionSelection, FloppySetSummary, ImageTransport, OpenedImage } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
@@ -73,6 +73,7 @@ export class ImageSessionWorkflow {
     private collaborators: SessionCollaborators | null = null;
     private nextCompanionRequestId = 1;
     private lastImageDirectory = $state<DirectoryRef | null>(null);
+    private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
 
     constructor(
@@ -122,7 +123,10 @@ export class ImageSessionWorkflow {
         this.status = 'Opening image';
         try {
             const opened = await this.controller.open(location);
-            if (opened) await this.applyOpenedImage(opened, preferred);
+            if (opened) {
+                this.lastOpenedImageFile = location.kind === 'server-file' ? location.reference : null;
+                await this.applyOpenedImage(opened, preferred);
+            }
         } catch (error) {
             this.status = userFacingMessage(error);
         }
@@ -271,6 +275,7 @@ export class ImageSessionWorkflow {
             '',
             {
                 initialDirectory: this.lastImageDirectory,
+                initialFile: this.lastOpenedImageFile,
                 ondirectorychange: (directory) => (this.lastImageDirectory = directory),
             },
         );

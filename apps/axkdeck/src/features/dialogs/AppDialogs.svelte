@@ -134,6 +134,7 @@
         suggestedName={pickerRequest.suggestedName}
         multiple={pickerRequest.multiple}
         initialDirectory={pickerRequest.initialDirectory}
+        initialFile={pickerRequest.initialFile}
         requireWritableDirectory={pickerRequest.requireWritableDirectory}
         ondirectorychange={pickerRequest.ondirectorychange}
         onmanagelocations={() => {
