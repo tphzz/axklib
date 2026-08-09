@@ -72,6 +72,40 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('mounts and scrolls a bounded window for a large Sample collection', async () => {
+        const samples = Array.from({ length: 200 }, (_, index) =>
+            structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
+        );
+
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'samples',
+                sampleBanks: [],
+                samples,
+                waveData: [],
+                activeSampleBankId: '',
+                activeSampleId: '',
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+            },
+        });
+
+        expect(screen.getByText('200 items')).toBeTruthy();
+        expect(document.querySelectorAll('.contained-row').length).toBeLessThan(60);
+        expect(screen.getByRole('button', { name: 'Inspect Sample 001' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Inspect Sample 200' })).toBeNull();
+
+        const list = document.querySelector('.contained-list') as HTMLElement;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 260 });
+        list.scrollTop = 5_200;
+        await fireEvent.scroll(list);
+
+        expect(screen.queryByRole('button', { name: 'Inspect Sample 001' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'Inspect Sample 200' })).toBeTruthy();
+    });
+
     it('creates a Sample Bank from standalone and already-banked Samples in displayed order', async () => {
         const sample2 = structure('SBNK', 'Sample 2');
         const sample10 = structure('SBNK', 'Sample 10');
@@ -162,6 +196,7 @@ describe('ContainedObjectWorkspace', () => {
         expect(listRule).toContain('scrollbar-gutter: stable');
         expect(appStyles).toContain('--contained-playback-clearance: 10px');
         expect(rowRule).toContain('grid-template-columns: minmax(0, 1fr) 26px var(--contained-playback-clearance)');
+        expect(rowRule).toContain('height: var(--density-row)');
         expect(rowRule).toContain('border-bottom-color: rgb(61 68 72 / 72%)');
     });
 

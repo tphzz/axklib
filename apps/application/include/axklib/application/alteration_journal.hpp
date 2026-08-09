@@ -14,6 +14,9 @@
 
 namespace axk::app {
 
+inline constexpr std::uint64_t default_maximum_alteration_journal_bytes =
+    2ULL * 2'147'483'648ULL + 64ULL * 1024ULL * 1024ULL;
+
 struct AlterationJournalPatch {
     std::uint64_t offset{};
     std::vector<std::byte> original;
@@ -25,7 +28,7 @@ class AlterationJournalStore {
     using InterruptionHook = std::function<bool(std::string_view, std::size_t)>;
 
     explicit AlterationJournalStore(std::filesystem::path directory,
-                                    std::size_t maximum_journal_bytes = 256U * 1024U * 1024U,
+                                    std::uint64_t maximum_journal_bytes = default_maximum_alteration_journal_bytes,
                                     InterruptionHook interruption_hook = {},
                                     std::size_t maximum_patch_write_bytes = 1024U * 1024U);
 
@@ -38,7 +41,7 @@ class AlterationJournalStore {
 
   private:
     std::filesystem::path directory_;
-    std::size_t maximum_journal_bytes_;
+    std::uint64_t maximum_journal_bytes_;
     InterruptionHook interruption_hook_;
     std::size_t maximum_patch_write_bytes_;
     std::atomic_bool storage_available_{};

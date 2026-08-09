@@ -10,12 +10,14 @@
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
+    import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
 
     type ContainedView = 'sample-banks' | 'samples';
     type LaneId = 'primary' | 'secondary' | 'tertiary';
+    const containedRowExtent = 26;
 
     interface LaneQueries {
         primary: string;
@@ -113,6 +115,8 @@
         left: number;
         top: number;
     } | null>(null);
+    let sampleViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
+    let waveDataViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
 
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
@@ -122,6 +126,18 @@
     const filteredBanks = $derived(orderedBanks.filter((item) => matchesSearch(item.name, queries.primary)));
     const filteredSamples = $derived(orderedSamples.filter((item) => matchesSearch(item.name, sampleQuery)));
     const filteredWaveData = $derived(orderedWaveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
+    const sampleWindow = $derived(fixedVirtualWindow(filteredSamples.length, sampleViewport, containedRowExtent));
+    const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, containedRowExtent));
+    const visibleSamples = $derived(filteredSamples.slice(sampleWindow.startIndex, sampleWindow.endIndex));
+    const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
+
+    function updateSampleViewport(viewport: VirtualViewportState): void {
+        sampleViewport = viewport;
+    }
+
+    function updateWaveDataViewport(viewport: VirtualViewportState): void {
+        waveDataViewport = viewport;
+    }
 
     function objectId(item: SelectableItem): string {
         return 'objectId' in item ? item.objectId : item.objectKey;
@@ -383,57 +399,76 @@
             actionLabel={view === 'samples' ? 'Import audio' : undefined}
             onaction={onimportaudio}
         />
-        <div class="contained-list">
-            {#each filteredSamples as item (item.id)}
-                {@const playbackActive = playingObjectId === item.objectId || preparingObjectId === item.objectId}
-                {@const auditionable = auditionableSampleIds.has(item.objectId)}
-                <div
-                    class="contained-row"
-                    class:active={activeSampleId === item.objectId}
-                    class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
-                >
-                    <button
-                        class="contained-identity"
-                        type="button"
-                        aria-label={`Inspect ${item.name}`}
-                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
-                        onclick={(event) => {
-                            if (
-                                updateSelection(event, 'samples', orderedSamples, filteredSamples, item) === 'replace'
-                            ) {
-                                onsampleselect(item);
-                            }
-                        }}
-                        oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
-                        onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, 'samples', orderedSamples, filteredSamples, item)}
+        <div class="contained-list" use:virtualViewport={updateSampleViewport}>
+            {#if filteredSamples.length > 0}
+                <div class="virtual-list-space" style={`height: ${sampleWindow.totalHeight}px`}>
+                    <div
+                        class="virtual-list-window contained-virtual-window"
+                        style={`transform: translateY(${sampleWindow.offset}px)`}
                     >
-                        <strong>{item.name}</strong>
-                        {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
-                    </button>
-                    <button
-                        class="contained-playback icon-button"
-                        type="button"
-                        disabled={!playbackActive && !auditionable}
-                        aria-label={playbackActive
-                            ? `Stop ${item.name}`
-                            : auditionable
-                              ? `Play ${item.name}`
-                              : `${item.name} cannot be auditioned`}
-                        title={preparingObjectId === item.objectId
-                            ? 'Stop preparing audio'
-                            : playingObjectId === item.objectId
-                              ? 'Stop'
-                              : auditionable
-                                ? 'Play'
-                                : 'No confirmed Wave Data'}
-                        onclick={() => {
-                            if (playbackActive) onstop();
-                            else if (auditionable) onplaysample(item);
-                        }}
-                    >
-                        <Icon name={playbackActive ? 'stop' : 'play'} size={13} />
-                    </button>
+                        {#each visibleSamples as item (item.id)}
+                            {@const playbackActive =
+                                playingObjectId === item.objectId || preparingObjectId === item.objectId}
+                            {@const auditionable = auditionableSampleIds.has(item.objectId)}
+                            <div
+                                class="contained-row"
+                                class:active={activeSampleId === item.objectId}
+                                class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
+                            >
+                                <button
+                                    class="contained-identity"
+                                    type="button"
+                                    aria-label={`Inspect ${item.name}`}
+                                    aria-pressed={selection.items.some(
+                                        (selected) => selected.objectId === item.objectId,
+                                    )}
+                                    onclick={(event) => {
+                                        if (
+                                            updateSelection(event, 'samples', orderedSamples, filteredSamples, item) ===
+                                            'replace'
+                                        ) {
+                                            onsampleselect(item);
+                                        }
+                                    }}
+                                    oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
+                                    onkeydown={(event) =>
+                                        openObjectMenuFromKeyboard(
+                                            event,
+                                            'samples',
+                                            orderedSamples,
+                                            filteredSamples,
+                                            item,
+                                        )}
+                                >
+                                    <strong>{item.name}</strong>
+                                    {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
+                                </button>
+                                <button
+                                    class="contained-playback icon-button"
+                                    type="button"
+                                    disabled={!playbackActive && !auditionable}
+                                    aria-label={playbackActive
+                                        ? `Stop ${item.name}`
+                                        : auditionable
+                                          ? `Play ${item.name}`
+                                          : `${item.name} cannot be auditioned`}
+                                    title={preparingObjectId === item.objectId
+                                        ? 'Stop preparing audio'
+                                        : playingObjectId === item.objectId
+                                          ? 'Stop'
+                                          : auditionable
+                                            ? 'Play'
+                                            : 'No confirmed Wave Data'}
+                                    onclick={() => {
+                                        if (playbackActive) onstop();
+                                        else if (auditionable) onplaysample(item);
+                                    }}
+                                >
+                                    <Icon name={playbackActive ? 'stop' : 'play'} size={13} />
+                                </button>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
             {:else}
                 <p class="empty-copy">
@@ -441,7 +476,7 @@
                         ? 'Select a Sample Bank to inspect its Samples'
                         : 'No matching Samples'}
                 </p>
-            {/each}
+            {/if}
         </div>
     </section>
 
@@ -452,61 +487,87 @@
             query={waveDataQuery}
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'tertiary' : 'secondary', value)}
         />
-        <div class="contained-list">
-            {#each filteredWaveData as item (item.id)}
-                <div
-                    class="contained-row"
-                    class:active={activeWaveDataId === item.objectKey}
-                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                >
-                    <button
-                        class="contained-identity"
-                        type="button"
-                        aria-label={`Inspect ${item.name}`}
-                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                        onclick={(event) => {
-                            if (
-                                updateSelection(event, 'wave-data', orderedWaveData, filteredWaveData, item) ===
-                                'replace'
-                            ) {
-                                onwavedataselect(item);
-                            }
-                        }}
-                        oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
-                        onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, 'wave-data', orderedWaveData, filteredWaveData, item)}
+        <div class="contained-list" use:virtualViewport={updateWaveDataViewport}>
+            {#if filteredWaveData.length > 0}
+                <div class="virtual-list-space" style={`height: ${waveDataWindow.totalHeight}px`}>
+                    <div
+                        class="virtual-list-window contained-virtual-window"
+                        style={`transform: translateY(${waveDataWindow.offset}px)`}
                     >
-                        <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
-                    </button>
-                    <button
-                        class="contained-playback icon-button"
-                        type="button"
-                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                            ? `Stop ${item.name}`
-                            : `Play ${item.name}`}
-                        title={preparingObjectId === item.objectKey
-                            ? 'Stop preparing audio'
-                            : playingObjectId === item.objectKey
-                              ? 'Stop'
-                              : 'Play'}
-                        onclick={() => {
-                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
-                            else onplaywavedata(item);
-                        }}
-                    >
-                        <Icon
-                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                                ? 'stop'
-                                : 'play'}
-                            size={13}
-                        />
-                    </button>
+                        {#each visibleWaveData as item (item.id)}
+                            <div
+                                class="contained-row"
+                                class:active={activeWaveDataId === item.objectKey}
+                                class:selected={selection.items.some(
+                                    (selected) => selected.objectId === item.objectKey,
+                                )}
+                            >
+                                <button
+                                    class="contained-identity"
+                                    type="button"
+                                    aria-label={`Inspect ${item.name}`}
+                                    aria-pressed={selection.items.some(
+                                        (selected) => selected.objectId === item.objectKey,
+                                    )}
+                                    onclick={(event) => {
+                                        if (
+                                            updateSelection(
+                                                event,
+                                                'wave-data',
+                                                orderedWaveData,
+                                                filteredWaveData,
+                                                item,
+                                            ) === 'replace'
+                                        ) {
+                                            onwavedataselect(item);
+                                        }
+                                    }}
+                                    oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
+                                    onkeydown={(event) =>
+                                        openObjectMenuFromKeyboard(
+                                            event,
+                                            'wave-data',
+                                            orderedWaveData,
+                                            filteredWaveData,
+                                            item,
+                                        )}
+                                >
+                                    <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
+                                </button>
+                                <button
+                                    class="contained-playback icon-button"
+                                    type="button"
+                                    aria-label={playingObjectId === item.objectKey ||
+                                    preparingObjectId === item.objectKey
+                                        ? `Stop ${item.name}`
+                                        : `Play ${item.name}`}
+                                    title={preparingObjectId === item.objectKey
+                                        ? 'Stop preparing audio'
+                                        : playingObjectId === item.objectKey
+                                          ? 'Stop'
+                                          : 'Play'}
+                                    onclick={() => {
+                                        if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey)
+                                            onstop();
+                                        else onplaywavedata(item);
+                                    }}
+                                >
+                                    <Icon
+                                        name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                            ? 'stop'
+                                            : 'play'}
+                                        size={13}
+                                    />
+                                </button>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
             {:else}
                 <p class="empty-copy">
                     {!activeSampleId ? 'Select a Sample to inspect its Wave Data' : 'No matching Wave Data'}
                 </p>
-            {/each}
+            {/if}
         </div>
     </section>
 </section>

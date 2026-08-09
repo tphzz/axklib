@@ -271,6 +271,11 @@
             "minimum": 1,
             "type": "integer"
           },
+          "maximumAlterationJournalBytes": {
+            "maximum": 8589934592,
+            "minimum": 1,
+            "type": "integer"
+          },
           "maximumAuditionBundleBytes": {
             "minimum": 45,
             "type": "integer"
@@ -381,6 +386,7 @@
           "maximumJsonNodes",
           "maximumJsonContainerItems",
           "maximumJsonStringBytes",
+          "maximumAlterationJournalBytes",
           "maximumUploadBytes",
           "maximumUploadTotalBytes",
           "maximumUploads",

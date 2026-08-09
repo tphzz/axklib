@@ -157,6 +157,20 @@ during planning; an oversized ISO projection is rejected during apply before
 the temporary file is resized or published. These values are reported by
 `GET /api/v1/system/capabilities`.
 
+In-place image mutations are protected by an `AXKJNL02` alteration journal.
+The journal stores both the original and replacement bytes for every changed
+extent, so its exact size is approximately twice the changed payload plus
+metadata. `maximumAlterationJournalBytes` defaults to 4,362,076,160 bytes,
+which covers a complete rewrite at the supported 2 GiB image boundary plus
+64 MiB of metadata, and may be configured up to 8 GiB. Journal publication and
+recovery use bounded streaming I/O; the configured limit is a storage and
+admission bound, not a request to allocate that amount of memory. Before
+mutating an image, the server verifies both the exact encoded journal size and
+available space in the state directory. Capacity failures leave the target
+image unchanged and report the required and configured or available byte
+counts. The active limit is reported by
+`GET /api/v1/system/capabilities`.
+
 The application listener is plaintext because Crow TLS is intentionally not
 enabled. Non-loopback startup is therefore rejected unless
 `allowInsecureRemoteHttp` or `--allow-insecure-remote-http` is explicit, in
@@ -398,10 +412,11 @@ still allowing one long-running image operation:
 
 Add authentication, origins, and the state directory described above;
 the fragment is not a complete server configuration. Keep the state directory
-on storage with enough free space for the configured upload total. Increase
-workers only after measuring the actual image and extraction workload. A
-single large domain operation can require substantially more memory than the
-HTTP transport, so the transport budget is not a whole-image memory promise.
+on storage with enough free space for the configured upload total and one
+maximum-size alteration journal. Increase workers only after measuring the
+actual image and extraction workload. A single large domain operation can
+require substantially more memory than the HTTP transport, so the transport
+budget is not a whole-image memory promise.
 
 The maintained loopback profile enforces these broad release-build budgets:
 

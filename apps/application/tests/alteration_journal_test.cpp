@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/writer.hpp"
 
 namespace {
 
@@ -21,6 +22,39 @@ bool journal_state_empty(const std::filesystem::path &path) {
             return false;
     }
     return true;
+}
+
+TEST(AlterationJournalStoreTest, DefaultLimitCoversTheSupportedImageBoundary) {
+    constexpr auto metadata_allowance = 64ULL * 1024ULL * 1024ULL;
+    EXPECT_GE(axk::app::default_maximum_alteration_journal_bytes, axk::maximum_hds_size * 2U + metadata_allowance);
+}
+
+TEST(AlterationJournalStoreTest, ReportsExactCapacityBeforeWritingTheTarget) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-journal-capacity-test";
+    const auto workspace = root / "workspace";
+    const auto journals = root / "journals";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(workspace);
+    std::ofstream(workspace / "image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", workspace, true}});
+    ASSERT_TRUE(sandbox) << sandbox.error().message;
+    axk::app::AlterationJournalStore store{journals, 1U};
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target) << target.error().message;
+    const std::array patches{
+        axk::app::AlterationJournalPatch{2U, {std::byte{'2'}, std::byte{'3'}}, {std::byte{'A'}, std::byte{'B'}}},
+    };
+
+    const auto applied = store.apply(*target, 10U, patches);
+    ASSERT_FALSE(applied);
+    EXPECT_EQ(applied.error().code, "alteration_journal_capacity");
+    EXPECT_NE(applied.error().message.find("requires"), std::string::npos);
+    EXPECT_NE(applied.error().message.find("configured limit"), std::string::npos);
+    target = {};
+    EXPECT_EQ(read_text(workspace / "image.hds"), "0123456789");
+    EXPECT_TRUE(journal_state_empty(journals));
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(AlterationJournalStoreTest, AppliesPreparedPatchesAndRemovesCommittedJournal) {

@@ -235,7 +235,7 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                           config_.maximum_download_archive_path_bytes},
                          std::chrono::seconds{config_.download_archive_retention_seconds}),
       archive_download_budget_(config_.maximum_concurrent_archive_downloads),
-      alteration_journals_(alteration_journal_directory()),
+      alteration_journals_(alteration_journal_directory(), config_.maximum_alteration_journal_bytes),
       images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
               std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now, &path_reservations_,
               config_.maximum_audition_bundle_bytes),

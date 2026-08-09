@@ -1,8 +1,8 @@
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
-import { auditionableSampleIds } from '../../lib/sampleRelationships';
-import type { ImageTransport } from '../../lib/transport';
+import { auditionableSampleBankIds, auditionableSampleIds } from '../../lib/sampleRelationships';
+import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
 import type { Program, ProgramAssignmentRow, SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
@@ -28,6 +28,16 @@ interface AuditionWorkflowDependencies {
     requestCompanionDisks: (retry: CompanionRetry) => void;
 }
 
+interface AuditionabilityIndex {
+    relationships: readonly SamplerRelationship[];
+    waveData: readonly WaveDataItem[];
+    sampleBanks: readonly SampleStructureItem[];
+    samples: readonly SampleStructureItem[];
+    objectIds: Set<string>;
+    sampleIds: Set<string>;
+    sampleBankIds: Set<string>;
+}
+
 export class AuditionWorkflow {
     state = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
     autoplay = $state(false);
@@ -49,6 +59,7 @@ export class AuditionWorkflow {
     private readonly previewFailed = new Set<string>();
     private previewInflight = 0;
     private previewGeneration = 0;
+    private auditionabilityCache?: AuditionabilityIndex;
 
     constructor(private readonly dependencies: AuditionWorkflowDependencies) {
         this.controller = new AuditionController(dependencies.transport, (state) => {
@@ -80,27 +91,45 @@ export class AuditionWorkflow {
     }
 
     get auditionableSampleObjectIds(): Set<string> {
-        return auditionableSampleIds(this.dependencies.catalog.relationships, this.dependencies.catalog.waveData);
+        return this.auditionabilityIndex().sampleIds;
     }
 
     get auditionableObjectIds(): Set<string> {
-        return new Set([
-            ...this.auditionableSampleObjectIds,
-            ...this.dependencies.catalog.waveData.map((item) => item.objectKey),
-        ]);
+        return this.auditionabilityIndex().objectIds;
     }
 
     get auditionableSampleBankObjectIds(): Set<string> {
-        const sampleIds = this.auditionableSampleObjectIds;
-        return new Set(
-            this.dependencies.catalog.sampleBanks
-                .filter((bank) =>
-                    this.dependencies.catalog
-                        .membersForBank(bank.objectId)
-                        .some((member) => sampleIds.has(member.objectId)),
-                )
-                .map((bank) => bank.objectId),
-        );
+        return this.auditionabilityIndex().sampleBankIds;
+    }
+
+    private auditionabilityIndex(): AuditionabilityIndex {
+        const catalog = this.dependencies.catalog;
+        const cached = this.auditionabilityCache;
+        if (
+            cached?.relationships === catalog.relationships &&
+            cached.waveData === catalog.waveData &&
+            cached.sampleBanks === catalog.sampleBanks &&
+            cached.samples === catalog.samples
+        ) {
+            return cached;
+        }
+        const sampleIds = auditionableSampleIds(catalog.relationships, catalog.waveData);
+        const result = {
+            relationships: catalog.relationships,
+            waveData: catalog.waveData,
+            sampleBanks: catalog.sampleBanks,
+            samples: catalog.samples,
+            sampleIds,
+            sampleBankIds: auditionableSampleBankIds(
+                catalog.relationships,
+                catalog.sampleBanks,
+                catalog.samples,
+                sampleIds,
+            ),
+            objectIds: new Set([...sampleIds, ...catalog.waveData.map((item) => item.objectKey)]),
+        };
+        this.auditionabilityCache = result;
+        return result;
     }
 
     get active(): boolean {

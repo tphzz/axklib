@@ -1478,6 +1478,7 @@ export interface components {
         };
         ApiLimits: {
             downloadArchiveRetentionSeconds: number;
+            maximumAlterationJournalBytes: number;
             maximumAuditionBundleBytes: number;
             maximumConcurrentArchiveDownloads: number;
             maximumDownloadArchiveBytes: number;

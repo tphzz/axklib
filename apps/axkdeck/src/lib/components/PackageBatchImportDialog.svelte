@@ -213,7 +213,7 @@
                             <p>{conflict.message}</p>
                         {/each}
                     </section>
-                {:else if plan?.valid && !hasUnvalidatedChanges}
+                {:else if plan?.valid && !hasUnvalidatedChanges && !error}
                     <p class="batch-ready"><Icon name="check" size={14} /> Ready to import</p>
                 {/if}
 

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/contracts.hpp"
 
 namespace axk::server {
@@ -40,6 +41,7 @@ struct Config {
     std::size_t maximum_event_tickets{1024U};
     std::uint32_t event_ticket_ttl_seconds{30U};
     std::uint32_t job_retention_seconds{900U};
+    std::uint64_t maximum_alteration_journal_bytes{app::default_maximum_alteration_journal_bytes};
     std::uint64_t maximum_upload_bytes{4ULL * 1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_upload_total_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
     std::size_t maximum_uploads{1024U};

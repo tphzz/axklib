@@ -11,10 +11,13 @@
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
+    import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import Waveform from './Waveform.svelte';
+
+    const waveDataRowExtent = 42;
 
     interface Props {
         programs: Program[];
@@ -87,6 +90,7 @@
         left: number;
         top: number;
     } | null>(null);
+    let waveDataViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
 
     onDestroy(() => clearPrefetch());
 
@@ -280,9 +284,15 @@
             ? orderedWaveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery))
             : orderedWaveData,
     );
+    const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, waveDataRowExtent));
+    const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
+
+    function updateWaveDataViewport(viewport: VirtualViewportState): void {
+        waveDataViewport = viewport;
+    }
 </script>
 
 <section class="collection-panel" aria-label={title}>
@@ -303,6 +313,7 @@
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
+        use:virtualViewport={updateWaveDataViewport}
         onclick={clearWaveDataSelection}
     >
         {#if view === 'programs'}
@@ -326,79 +337,87 @@
             {:else}
                 <p class="empty-copy">No matching Programs</p>
             {/each}
-        {:else}
-            {#each filteredWaveData as item (item.id)}
-                <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        {:else if filteredWaveData.length > 0}
+            <div class="virtual-list-space" style={`height: ${waveDataWindow.totalHeight}px`}>
                 <div
-                    use:observePreview={item}
-                    class:active={activeObjectId === item.objectKey}
-                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                    class="wave-data-row"
-                    role="group"
-                    aria-label={`${item.name} Wave Data`}
-                    oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
+                    class="virtual-list-window wave-data-virtual-window"
+                    style={`transform: translateY(${waveDataWindow.offset}px)`}
                 >
-                    <button
-                        class="wave-data-selection"
-                        type="button"
-                        aria-label={`Inspect ${item.name}`}
-                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                        onclick={(event) => selectWaveData(event, item)}
-                        onkeydown={(event) =>
-                            openObjectMenuFromKeyboard(event, item.object, waveDataRenameTarget(item))}
-                    ></button>
-                    <strong class="wave-data-identity">{item.name}</strong>
-                    <span class="wave-data-meta">{item.note} · {item.duration}</span>
-                    <button
-                        class="waveform-seek"
-                        type="button"
-                        aria-label={`Seek ${item.name}`}
-                        onclick={(event) => selectWaveData(event, item, true)}
-                    >
-                        <Waveform
-                            values={item.waveform}
-                            playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
-                                ? playheadFrame / item.object.frameCount
-                                : 0}
-                        />
-                    </button>
-                    <span class="wave-data-format"
-                        >{item.sampleRate} · {item.bitDepth} · {formatStoredSize(item.storedSizeBytes)}</span
-                    >
-                    <button
-                        class="wave-data-playback icon-button"
-                        type="button"
-                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                            ? `Stop ${item.name}`
-                            : `Play ${item.name}`}
-                        title={preparingObjectId === item.objectKey
-                            ? 'Stop preparing audio'
-                            : playingObjectId === item.objectKey
-                              ? 'Stop'
-                              : 'Play'}
-                        onpointerenter={() => schedulePrefetch(item)}
-                        onpointerleave={clearPrefetch}
-                        onfocus={() => schedulePrefetch(item)}
-                        onblur={clearPrefetch}
-                        onclick={(event) => {
-                            event.stopPropagation();
-                            clearPrefetch();
-                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
-                            else onplay(item);
-                        }}
-                    >
-                        <Icon
-                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                                ? 'stop'
-                                : 'play'}
-                            size={13}
-                        />
-                    </button>
+                    {#each visibleWaveData as item (item.id)}
+                        <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
+                        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                        <div
+                            use:observePreview={item}
+                            class:active={activeObjectId === item.objectKey}
+                            class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                            class="wave-data-row"
+                            role="group"
+                            aria-label={`${item.name} Wave Data`}
+                            oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
+                        >
+                            <button
+                                class="wave-data-selection"
+                                type="button"
+                                aria-label={`Inspect ${item.name}`}
+                                aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                                onclick={(event) => selectWaveData(event, item)}
+                                onkeydown={(event) =>
+                                    openObjectMenuFromKeyboard(event, item.object, waveDataRenameTarget(item))}
+                            ></button>
+                            <strong class="wave-data-identity">{item.name}</strong>
+                            <span class="wave-data-meta">{item.note} · {item.duration}</span>
+                            <button
+                                class="waveform-seek"
+                                type="button"
+                                aria-label={`Seek ${item.name}`}
+                                onclick={(event) => selectWaveData(event, item, true)}
+                            >
+                                <Waveform
+                                    values={item.waveform}
+                                    playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
+                                        ? playheadFrame / item.object.frameCount
+                                        : 0}
+                                />
+                            </button>
+                            <span class="wave-data-format"
+                                >{item.sampleRate} · {item.bitDepth} · {formatStoredSize(item.storedSizeBytes)}</span
+                            >
+                            <button
+                                class="wave-data-playback icon-button"
+                                type="button"
+                                aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                    ? `Stop ${item.name}`
+                                    : `Play ${item.name}`}
+                                title={preparingObjectId === item.objectKey
+                                    ? 'Stop preparing audio'
+                                    : playingObjectId === item.objectKey
+                                      ? 'Stop'
+                                      : 'Play'}
+                                onpointerenter={() => schedulePrefetch(item)}
+                                onpointerleave={clearPrefetch}
+                                onfocus={() => schedulePrefetch(item)}
+                                onblur={clearPrefetch}
+                                onclick={(event) => {
+                                    event.stopPropagation();
+                                    clearPrefetch();
+                                    if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey)
+                                        onstop();
+                                    else onplay(item);
+                                }}
+                            >
+                                <Icon
+                                    name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                        ? 'stop'
+                                        : 'play'}
+                                    size={13}
+                                />
+                            </button>
+                        </div>
+                    {/each}
                 </div>
-            {:else}
-                <p class="empty-copy">No matching Wave Data</p>
-            {/each}
+            </div>
+        {:else}
+            <p class="empty-copy">No matching Wave Data</p>
         {/if}
     </div>
 </section>

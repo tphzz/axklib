@@ -121,4 +121,13 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByRole('button', { name: 'Check conflicts' })).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
     });
+
+    it('does not report readiness while an apply error is visible', () => {
+        render(PackageBatchImportDialog, {
+            props: { ...props(), error: 'Alteration journal storage is full' },
+        });
+
+        expect(screen.queryByText('Ready to import')).toBeNull();
+        expect(screen.getByRole('alert').textContent).toContain('Alteration journal storage is full');
+    });
 });

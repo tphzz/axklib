@@ -68,6 +68,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         "imageIdleSeconds",
         "jobRetentionSeconds",
         "jobWorkerThreads",
+        "maximumAlterationJournalBytes",
         "maximumAuditionBundleBytes",
         "maximumDownloadRangeBytes",
         "maximumDownloadArchiveBytes",
@@ -139,6 +140,7 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("maximumEventTickets", config.maximum_event_tickets);
         assign("eventTicketTtlSeconds", config.event_ticket_ttl_seconds);
         assign("jobRetentionSeconds", config.job_retention_seconds);
+        assign("maximumAlterationJournalBytes", config.maximum_alteration_journal_bytes);
         assign("maximumUploadBytes", config.maximum_upload_bytes);
         assign("maximumUploadTotalBytes", config.maximum_upload_total_bytes);
         assign("maximumUploads", config.maximum_uploads);
@@ -548,6 +550,10 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
     if (config.maximum_event_tickets == 0U || config.maximum_event_tickets > 100000U ||
         config.event_ticket_ttl_seconds == 0U || config.event_ticket_ttl_seconds > 300U) {
         return std::unexpected(argument_error("event ticket limits are invalid"));
+    }
+    if (config.maximum_alteration_journal_bytes == 0U ||
+        config.maximum_alteration_journal_bytes > 8ULL * 1024ULL * 1024ULL * 1024ULL) {
+        return std::unexpected(argument_error("alteration journal byte limit must be between 1 byte and 8 GiB"));
     }
     if (config.maximum_upload_bytes == 0U || config.maximum_upload_total_bytes < config.maximum_upload_bytes ||
         config.maximum_uploads == 0U || config.maximum_uploads > 10000U || config.maximum_upload_chunk_bytes == 0U ||

@@ -1217,6 +1217,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "maximumJsonNodes": 100000,
                 "maximumJsonContainerItems": 10000,
                 "maximumJsonStringBytes": 256 * 1024,
+                "maximumAlterationJournalBytes": 2 * 2_147_483_648 + 64 * 1024 * 1024,
                 "maximumUploadBytes": 4 * 1024 * 1024 * 1024,
                 "maximumUploadTotalBytes": 8 * 1024 * 1024 * 1024,
                 "maximumUploads": 1024,

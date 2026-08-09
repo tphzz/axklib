@@ -34,6 +34,30 @@ export function auditionableSampleIds(
     );
 }
 
+export function auditionableSampleBankIds(
+    relationships: readonly SamplerRelationship[],
+    sampleBanks: readonly SampleStructureItem[],
+    samples: readonly SampleStructureItem[],
+    auditionableSamples: ReadonlySet<string>,
+): Set<string> {
+    const loadedBankIds = new Set(sampleBanks.map((bank) => bank.objectId));
+    const loadedSampleIds = new Set(samples.map((sample) => sample.objectId));
+    const result = new Set<string>();
+    for (const relationship of relationships) {
+        if (
+            relationship.relationshipType === 'SBAC_SLOT_TO_SBNK' &&
+            isConfirmedRelationship(relationship) &&
+            loadedBankIds.has(relationship.sourceObjectId) &&
+            relationship.targetObjectId &&
+            loadedSampleIds.has(relationship.targetObjectId) &&
+            auditionableSamples.has(relationship.targetObjectId)
+        ) {
+            result.add(relationship.sourceObjectId);
+        }
+    }
+    return result;
+}
+
 export function linkedWaveDataForSample(
     sampleId: string,
     relationships: readonly SamplerRelationship[],

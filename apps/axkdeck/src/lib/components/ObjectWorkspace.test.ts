@@ -34,6 +34,48 @@ const common = {
 };
 
 describe('ObjectWorkspace', () => {
+    it('mounts and scrolls a bounded window of Wave Data rows and canvases', async () => {
+        const waveData = Array.from({ length: 200 }, (_, index) => {
+            const name = `SMP ${String(index + 1).padStart(3, '0')}`;
+            const waveObject = {
+                ...object('SMPL', name),
+                sampleRate: 44_100,
+                sampleWidthBytes: 2,
+                frameCount: 1,
+            };
+            return {
+                id: waveObject.key,
+                objectKey: waveObject.key,
+                name,
+                note: 'C3',
+                duration: '0.00 s',
+                sampleRate: '44.1 kHz',
+                bitDepth: '16-bit',
+                channels: 'Mono' as const,
+                storedSizeBytes: 2,
+                waveform: [],
+                previewState: 'idle' as const,
+                object: waveObject,
+            };
+        });
+
+        render(ObjectWorkspace, { props: { ...common, waveData, view: 'wave-data' } });
+
+        expect(screen.getByText('200 items')).toBeTruthy();
+        expect(document.querySelectorAll('.wave-data-row').length).toBeLessThan(60);
+        expect(document.querySelectorAll('.wave-data-row canvas').length).toBeLessThan(60);
+        expect(screen.getByRole('group', { name: 'SMP 001 Wave Data' })).toBeTruthy();
+        expect(screen.queryByRole('group', { name: 'SMP 200 Wave Data' })).toBeNull();
+
+        const list = document.querySelector('.collection-body') as HTMLElement;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 420 });
+        list.scrollTop = 8_400;
+        await fireEvent.scroll(list);
+
+        expect(screen.queryByRole('group', { name: 'SMP 001 Wave Data' })).toBeNull();
+        expect(screen.getByRole('group', { name: 'SMP 200 Wave Data' })).toBeTruthy();
+    });
+
     it('naturally orders the standalone Wave Data lane', () => {
         const wave2 = {
             ...object('SMPL', 'SMP 2'),

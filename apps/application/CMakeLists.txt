@@ -6,7 +6,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 
-add_library(axk_application STATIC src/alteration_journal.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
+add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_journal_io.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp
                                    src/file_coverage_operations.cpp src/file_coverage_support.cpp
                                    src/file_info_operations.cpp src/file_inventory_operations.cpp

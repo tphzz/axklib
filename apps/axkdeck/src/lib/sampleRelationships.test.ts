@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SamplerObject, SamplerRelationship } from './transport';
 import type { SampleStructureItem, WaveDataItem } from './types';
 import {
+    auditionableSampleBankIds,
     auditionableSampleIds,
     distinctWaveDataForSample,
     linkedWaveDataForSample,
@@ -178,6 +179,40 @@ describe('auditionableSampleIds', () => {
         expect(
             auditionableSampleIds([relationship('missing', 'SBNK_LEFT_MEMBER_TO_SMPL', 'SMPL-MISSING')], []),
         ).toEqual(new Set());
+    });
+});
+
+describe('auditionableSampleBankIds', () => {
+    it('indexes loaded Sample Banks with confirmed playable members', () => {
+        const firstBank = { ...sample('SBAC-1'), objectType: 'SBAC' as const };
+        const secondBank = { ...sample('SBAC-2'), objectType: 'SBAC' as const };
+        const playableMember = sample('SBNK-PLAYABLE');
+        const unavailableMember = sample('SBNK-UNAVAILABLE');
+        const member = (
+            id: string,
+            bankId: string,
+            targetObjectId: string,
+            quality: SamplerRelationship['quality'] = 'KNOWN',
+        ): SamplerRelationship => ({
+            ...relationship(id, 'SBAC_SLOT_TO_SBNK', targetObjectId),
+            sourceObjectId: bankId,
+            quality,
+        });
+
+        expect(
+            auditionableSampleBankIds(
+                [
+                    member('playable', firstBank.objectId, playableMember.objectId),
+                    member('unavailable', secondBank.objectId, unavailableMember.objectId),
+                    member('unconfirmed', secondBank.objectId, playableMember.objectId, 'LIKELY'),
+                    member('unloaded', 'SBAC-UNLOADED', playableMember.objectId),
+                    member('missing-sample', secondBank.objectId, 'SBNK-MISSING'),
+                ],
+                [firstBank, secondBank],
+                [playableMember, unavailableMember],
+                new Set([playableMember.objectId, 'SBNK-MISSING']),
+            ),
+        ).toEqual(new Set([firstBank.objectId]));
     });
 });
 

@@ -2582,6 +2582,19 @@ input:focus-visible {
   padding: 12px;
 }
 
+.virtual-list-space {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.virtual-list-window {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
 .horizontal-splitter {
   position: relative;
   z-index: 2;
@@ -2653,12 +2666,17 @@ input:focus-visible {
 .contained-row {
   display: grid;
   width: 100%;
+  height: var(--density-row);
   min-height: var(--density-row);
   grid-template-columns: minmax(0, 1fr) 26px var(--contained-playback-clearance);
   align-items: center;
   border: 1px solid transparent;
   border-bottom-color: rgb(61 68 72 / 72%);
   background: transparent;
+}
+
+.contained-virtual-window {
+  display: block;
 }
 
 .contained-row:hover,
@@ -2716,12 +2734,14 @@ input:focus-visible {
   color: var(--color-text-strong);
   font-size: 10px;
   font-weight: 600;
+  line-height: 10px;
 }
 
 .contained-list small {
   margin-top: 0;
   color: var(--color-text-muted);
   font-size: 8.5px;
+  line-height: 9px;
 }
 
 .editor-header {
@@ -2943,16 +2963,20 @@ input:focus-visible {
 }
 
 .wave-data-list {
+  padding-right: calc(6px + var(--overlay-scrollbar-clearance));
+}
+
+.wave-data-virtual-window {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-right: calc(6px + var(--overlay-scrollbar-clearance));
 }
 
 .wave-data-row {
   position: relative;
   display: grid;
   width: 100%;
+  height: 40px;
   min-height: 40px;
   grid-template-columns: minmax(112px, 0.72fr) 74px minmax(150px, 2fr) minmax(116px, 0.8fr) 26px;
   align-items: center;

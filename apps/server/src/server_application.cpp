@@ -76,6 +76,7 @@ crow::response ServerApplication::capability_response(const crow::request &reque
                       {"maximumJsonNodes", config_.maximum_json_nodes},
                       {"maximumJsonContainerItems", config_.maximum_json_container_items},
                       {"maximumJsonStringBytes", config_.maximum_json_string_bytes},
+                      {"maximumAlterationJournalBytes", config_.maximum_alteration_journal_bytes},
                       {"maximumUploadBytes", config_.maximum_upload_bytes},
                       {"maximumUploadTotalBytes", config_.maximum_upload_total_bytes},
                       {"maximumUploads", config_.maximum_uploads},
