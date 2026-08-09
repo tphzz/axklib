@@ -8,6 +8,7 @@
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { MediaDropWorkflow } from '../import/mediaDropWorkflow.svelte';
     import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
+    import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
     import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
@@ -21,6 +22,7 @@
     import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
@@ -69,6 +71,7 @@
         closeConnectionSettings: () => void;
         mutation: MutationWorkflow;
         packageImport: PackageImportWorkflow;
+        packageBatchImport: PackageBatchImportWorkflow;
         exports: ExportWorkflow;
         volumePackages: VolumePackageExportWorkflow;
         volumeFloppies: VolumeFloppyExportWorkflow;
@@ -108,6 +111,7 @@
         closeConnectionSettings,
         mutation,
         packageImport,
+        packageBatchImport,
         exports,
         volumePackages,
         volumeFloppies,
@@ -265,6 +269,31 @@
         onreplan={() => void packageImport.replan()}
         oncancel={() => void packageImport.close()}
         onconfirm={() => void packageImport.apply()}
+    />
+{/if}
+{#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import'}
+    <PackageBatchImportDialog
+        partitionName={packageBatchImport.request.partition.name}
+        desktop={isDesktop}
+        items={packageBatchImport.request.items}
+        plan={packageBatchImport.request.plan}
+        volumeNames={packageBatchImport.request.volumeNames}
+        opaqueSequenceActions={packageBatchImport.request.opaqueSequenceActions}
+        hasUnvalidatedChanges={packageBatchImport.request.hasUnvalidatedChanges}
+        status={packageBatchImport.request.status}
+        completedFiles={packageBatchImport.request.completedFiles}
+        totalFiles={packageBatchImport.request.totalFiles}
+        progress={packageBatchImport.request.progress}
+        error={packageBatchImport.request.error}
+        onchooseworkspace={() => void packageBatchImport.chooseWorkspace()}
+        onchooselocal={() => void packageBatchImport.chooseLocal()}
+        onrename={(packageIndex, name) => packageBatchImport.renameVolume(packageIndex, name)}
+        onremove={(packageIndex) => void packageBatchImport.remove(packageIndex)}
+        onopaquesequenceaction={(packageIndex, nodeId, action) =>
+            packageBatchImport.opaqueSequenceAction(packageIndex, nodeId, action)}
+        onreplan={() => void packageBatchImport.replan()}
+        oncancel={() => void packageBatchImport.close()}
+        onconfirm={() => void packageBatchImport.apply()}
     />
 {/if}
 {#if exports.packageRequest && pickerRequest?.parentDialog !== 'package-export' && !companionRequest}

@@ -52,6 +52,17 @@ function programPlan(
         planId: `${planToken}-id`,
         targetKind: 'SFS',
         targetSnapshotId: 'snapshot-1',
+        packages: [
+            {
+                packageIndex: 0,
+                packageId: 'program-package',
+                sourceVolumeName: 'Imported',
+                destinationVolumeName: 'Imported',
+                objectCount: mappings.length,
+                payloadBytes: 0,
+                objectCounts: { programs: mappings.length, sampleBanks: 0, samples: 0, waveData: 0, sequences: 0 },
+            },
+        ],
         valid: applied,
         warnings: [],
         opaqueSequences: [],
@@ -161,15 +172,24 @@ describe('PackageImportWorkflow', () => {
         expect(workflow.request?.programSlots).toEqual(
             Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`program-${index + 1}`, index + 5])),
         );
-        expect(planImagePackageImport).toHaveBeenNthCalledWith(1, 17, source, 0, 'Imported', [], [], undefined, []);
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(
+            1,
+            17,
+            [source],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
+            [],
+            [],
+            undefined,
+            [],
+        );
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             2,
             17,
-            source,
-            0,
-            'Imported',
+            [source],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
             [],
             Array.from({ length: 33 }, (_, index) => ({
+                packageIndex: 0,
                 nodeId: `program-${index + 1}`,
                 destinationSlot: index + 5,
             })),
@@ -190,11 +210,11 @@ describe('PackageImportWorkflow', () => {
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             3,
             17,
-            source,
-            0,
-            'Imported',
+            [source],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
             [],
             Array.from({ length: 33 }, (_, index) => ({
+                packageIndex: 0,
                 nodeId: `program-${index + 1}`,
                 destinationSlot: index + 9,
             })),
@@ -284,9 +304,16 @@ describe('PackageImportWorkflow', () => {
         workflow.opaqueSequenceAction('sequence-1', 'PRESERVE_UNCHANGED');
 
         await vi.waitFor(() => expect(workflow.request?.plan?.planToken).toBe('preserved-plan'));
-        expect(planImagePackageImport).toHaveBeenNthCalledWith(2, 17, source, 0, 'Imported', [], [], 'opaque-plan', [
-            { packageIndex: 0, nodeId: 'sequence-1', action: 'PRESERVE_UNCHANGED' },
-        ]);
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(
+            2,
+            17,
+            [source],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
+            [],
+            [],
+            'opaque-plan',
+            [{ packageIndex: 0, nodeId: 'sequence-1', action: 'PRESERVE_UNCHANGED' }],
+        );
         expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
         expect(workflow.request?.plan?.valid).toBe(true);
     });
@@ -365,11 +392,11 @@ describe('PackageImportWorkflow', () => {
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             3,
             17,
-            source,
-            0,
-            'Imported',
+            [source],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
             [],
             Array.from({ length: 33 }, (_, index) => ({
+                packageIndex: 0,
                 nodeId: `program-${index + 1}`,
                 destinationSlot: index + 5,
             })),

@@ -37,9 +37,9 @@ struct ResolvedPackage {
     std::optional<UploadLease> lease;
 };
 
-struct VerifiedPackageSnapshot {
-    PackageInput input;
-    axk::PortablePackage package;
+struct VerifiedPackageSet {
+    std::vector<PackageInput> inputs;
+    std::vector<axk::PortablePackage> packages;
     std::uint64_t retained_payload_bytes{};
 };
 
@@ -49,7 +49,7 @@ struct SessionPackagePlanRecord {
     Clock::time_point expires_at;
     std::string image_id;
     std::uint64_t expected_revision{};
-    std::shared_ptr<const VerifiedPackageSnapshot> package_snapshot;
+    std::shared_ptr<const VerifiedPackageSet> package_set;
     axk::PackageImportPlan plan;
     bool claimed{};
 };
@@ -159,7 +159,16 @@ std::uint64_t retained_session_package_bytes(const SessionPackageOperationState 
 Result<SessionPackagePlanClaim> claim_session_plan(const std::shared_ptr<SessionPackageOperationState> &state,
                                                    std::string_view token, std::string_view owner_id);
 Result<std::pair<std::string, std::uint64_t>> parse_session_identity(const Json &input);
-Result<axk::PackageImportRequest> parse_session_import_request(const Json &input, const axk::PortablePackage &package);
+struct SessionImportPreparation {
+    axk::PackageImportRequest request;
+    std::vector<std::string> destination_volume_names;
+};
+
+Result<SessionImportPreparation>
+prepare_session_import(const Json &input, std::span<const axk::PortablePackage> packages,
+                       const std::unordered_map<std::string, ImageVolumeScopeIdentity> &volume_scopes_by_id);
+Json session_package_summaries(std::span<const axk::PortablePackage> packages,
+                               std::span<const std::string> destination_volume_names);
 Json session_import_result(const SessionPackagePlanRecord &record, const ImageSessionSummary &summary, bool applied);
 Result<Json> read_operation(const Json &input, const OperationContext &context, const Sandbox &sandbox,
                             UploadStore &uploads, bool verify);

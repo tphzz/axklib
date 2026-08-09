@@ -554,12 +554,12 @@ axk::app::Result<std::uint64_t> retained_package_bytes(const axk::PortablePackag
 }
 
 std::uint64_t retained_session_package_bytes(const SessionPackageOperationState &state) {
-    std::set<const VerifiedPackageSnapshot *> counted;
+    std::set<const VerifiedPackageSet *> counted;
     std::uint64_t total{};
     for (const auto &[token, record] : state.plans) {
         static_cast<void>(token);
-        if (record->package_snapshot && counted.emplace(record->package_snapshot.get()).second)
-            total += record->package_snapshot->retained_payload_bytes;
+        if (record->package_set && counted.emplace(record->package_set.get()).second)
+            total += record->package_set->retained_payload_bytes;
     }
     return total;
 }
@@ -584,53 +584,6 @@ axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(c
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
     }
-}
-
-axk::app::Result<axk::PackageImportRequest> parse_session_import_request(const Json &input,
-                                                                         const axk::PortablePackage &package) {
-    axk::PackageImportRequest request;
-    try {
-        const auto partition = input.at("partitionIndex").get<std::uint32_t>();
-        const auto volume = input.at("volumeName").get<std::string>();
-        if (partition > std::numeric_limits<std::uint8_t>::max() || volume.empty())
-            return std::unexpected(operation_error("invalid_request", "package destination is invalid"));
-        for (std::size_t root_index = 0U; root_index < package.roots.size(); ++root_index) {
-            request.root_destinations.push_back(
-                {0U, root_index, static_cast<std::uint8_t>(partition), {}, volume, {}, {}, false});
-        }
-        if (input.contains("renames")) {
-            for (const auto &rename : input.at("renames")) {
-                request.policy.renames.push_back(
-                    {0U, rename.at("nodeId").get<std::string>(), rename.at("destinationName").get<std::string>()});
-            }
-        }
-        if (input.contains("programSlotAssignments")) {
-            for (const auto &assignment : input.at("programSlotAssignments")) {
-                const auto slot = assignment.at("destinationSlot").get<std::uint32_t>();
-                if (slot < 1U || slot > 128U)
-                    return std::unexpected(operation_error("invalid_request", "Program slot is out of range"));
-                request.policy.program_slot_assignments.push_back(
-                    {0U, assignment.at("nodeId").get<std::string>(), static_cast<std::uint8_t>(slot)});
-            }
-        }
-        if (input.contains("opaqueSequenceDecisions")) {
-            for (const auto &decision : input.at("opaqueSequenceDecisions")) {
-                if (decision.at("packageIndex").get<std::size_t>() != 0U)
-                    return std::unexpected(operation_error("invalid_request", "package index must be zero"));
-                const auto action = decision.at("action").get<std::string>();
-                if (action != "preserve-unchanged" && action != "skip") {
-                    return std::unexpected(operation_error("invalid_request", "opaque Sequence action is invalid"));
-                }
-                request.policy.opaque_sequence_decisions.push_back(
-                    {0U, decision.at("nodeId").get<std::string>(),
-                     action == "preserve-unchanged" ? axk::PackageOpaqueSequenceAction::preserve_unchanged
-                                                    : axk::PackageOpaqueSequenceAction::skip});
-            }
-        }
-    } catch (const Json::exception &) {
-        return std::unexpected(operation_error("invalid_request", "package destination mappings are malformed"));
-    }
-    return request;
 }
 
 Json session_import_result(const SessionPackagePlanRecord &record, const axk::app::ImageSessionSummary &summary,

@@ -1155,6 +1155,17 @@ describe('App panel layout', () => {
             planId: 'plan-id',
             targetKind: 'SFS',
             targetSnapshotId: 'snapshot-1',
+            packages: [
+                {
+                    packageIndex: 0,
+                    packageId: 'package-1',
+                    sourceVolumeName: 'Grand Piano',
+                    destinationVolumeName: 'My Volume',
+                    objectCount: 0,
+                    payloadBytes: 0,
+                    objectCounts: { programs: 0, sampleBanks: 0, samples: 0, waveData: 0, sequences: 0 },
+                },
+            ],
             valid: true,
             warnings: [],
             opaqueSequences: [],
@@ -1193,12 +1204,13 @@ describe('App panel layout', () => {
         await vi.waitFor(() =>
             expect(mocks.planImagePackageImport).toHaveBeenCalledWith(
                 17,
-                expect.objectContaining({
-                    kind: 'server-file',
-                    reference: { rootId: 'workspace', relativePath: 'GrPiano Fazioli.axkvol' },
-                }),
-                0,
-                'My Volume',
+                [
+                    expect.objectContaining({
+                        kind: 'server-file',
+                        reference: { rootId: 'workspace', relativePath: 'GrPiano Fazioli.axkvol' },
+                    }),
+                ],
+                { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'My Volume' },
                 [],
                 [],
                 undefined,
@@ -1207,6 +1219,46 @@ describe('App panel layout', () => {
         );
         expect(await screen.findByText('Ready to import')).toBeTruthy();
         expect(screen.queryByText(/Uploading package/)).toBeNull();
+    });
+
+    it('opens multi-package import from a writable partition', async () => {
+        const partition = {
+            id: 'partition-0',
+            name: 'My Partition',
+            kind: 'partition' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [partition] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: null,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+            packageImportAvailable: true,
+            packageExportAvailable: true,
+        });
+        render(App);
+
+        await chooseNestedImage();
+        const partitionButton = await screen.findByRole('button', { name: /My Partition/ });
+        await fireEvent.contextMenu(partitionButton);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+
+        const dialog = screen.getByRole('dialog', { name: 'Import volume packages' });
+        expect(within(dialog).getByText('Create volumes in My Partition from selected .axkvol packages.')).toBeTruthy();
+        expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
 
     it('updates repeated modifier deselection immediately without moving the inspected object', async () => {

@@ -110,7 +110,7 @@
         treeMenu = {
             item,
             left: Math.max(8, Math.min(x, window.innerWidth - 228)),
-            top: Math.max(8, Math.min(y, window.innerHeight - 208)),
+            top: Math.max(8, Math.min(y, window.innerHeight - 244)),
         };
     }
 
@@ -303,6 +303,11 @@
         onkeydown={(event) => event.stopPropagation()}
     >
         {#if treeMenu.item.kind === 'partition'}
+            {#if packageImportEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('import-packages')}
+                    >Import packages…</button
+                >
+            {/if}
             {#if volumePackageExportEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-volume-packages')}
                     >Export volume packages…</button
@@ -321,7 +326,7 @@
                     <div class="context-menu-separator" role="separator"></div>
                 {/if}
             {/if}
-            {#if (volumePackageExportEnabled || volumeFloppyExportEnabled) && !mediaConversionEnabled && partitionActionsEnabled}
+            {#if (packageImportEnabled || volumePackageExportEnabled || volumeFloppyExportEnabled) && !mediaConversionEnabled && partitionActionsEnabled}
                 <div class="context-menu-separator" role="separator"></div>
             {/if}
             {#if partitionActionsEnabled}

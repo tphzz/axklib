@@ -58,6 +58,17 @@ function plan(valid = true): ImageSessionPackageImportPlan {
         planId: 'plan-id',
         targetKind: 'SFS',
         targetSnapshotId: 'snapshot',
+        packages: [
+            {
+                packageIndex: 0,
+                packageId: 'package-1',
+                sourceVolumeName: 'SOURCE',
+                destinationVolumeName: 'TARGET',
+                objectCount: 2,
+                payloadBytes: 0,
+                objectCounts: { programs: 0, sampleBanks: 0, samples: 1, waveData: 1, sequences: 0 },
+            },
+        ],
         valid,
         warnings: [],
         opaqueSequences: [],

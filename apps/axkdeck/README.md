@@ -280,10 +280,20 @@ Data graph, and presents the exact insertion, reuse, allocation, warning, and
 naming-conflict plan before enabling **Import package**. Conflict renames are
 replanned before application.
 
+Right-click a writable SFS partition and choose **Import packages…** to select
+up to 256 `.axkvol` files at once. Axkdeck uses each package's volume placement
+hint to propose one new destination volume, adds numeric suffixes where names
+would collide, and previews the Program, Sample Bank, Sample, Wave Data, and
+Sequence counts for every volume. Destination names remain editable and must be
+checked again after a change. Removing a row excludes that entire package. The
+confirmed set is applied as one journaled mutation: either every previewed
+volume is created or none of them are.
+
 Session import is an atomic, journaled change to the currently open writable
 SFS image. The plan is bound to the image revision and retained package
 identity; an outdated plan cannot alter the image. After a successful job,
-axkdeck refreshes the same image session and restores the destination volume.
+axkdeck refreshes the same image session and restores the first destination
+volume.
 
 Volume export creates one `.axkvol` containing the complete admitted object
 dependency graph. Programs, Sample Banks, Samples, and Wave Data can also be

@@ -280,6 +280,15 @@ the generic session operation. They do not advertise package import, mutation,
 repair, media conversion, floppy export, or partition-level batch-volume
 export.
 
+Writable SFS sessions advertise package import on both volumes and partitions.
+A volume import plans one or more package roots into that existing volume. A
+partition batch import accepts one to 256 `.axkvol` inputs, derives one new
+volume from each package's placement hint, resolves duplicate hints with
+deterministic suffixes, and returns per-volume object counts and final names for
+preview. Edited names are submitted as indexed overrides in a replacement plan.
+Applying the accepted token creates the complete set in one journaled image
+mutation and one session revision; any failure rolls back every volume.
+
 SFS and ISO9660 sessions additionally advertise
 `images.volume_package_export` on partition-like content nodes. First call
 `images.volume_package_export.inspect` with the image ID, expected revision,

@@ -216,11 +216,20 @@ are refused unless `--overwrite` is explicit. A plan with conflicts is reported
 with exit code 3 and is not applied.
 
 An authenticated writable SFS image session has a separate in-place workflow
-for axkdeck. `images.package_import.plan` fully verifies one package and returns
-an owner-bound, expiring plan tied to the current image revision and retained
-image identity. `images.package_import` applies that exact plan through the
+for axkdeck. `images.package_import.plan` fully verifies an ordered set of one
+to 256 packages and returns an owner-bound, expiring plan tied to the current
+image revision and retained package identities. The destination is either one
+existing volume shared by every package root or one new volume per `.axkvol`
+package. New-volume mode reads the exact Volume root placement hint, proposes a
+unique 1-16 character Yamaha volume name, and accepts explicit indexed name
+overrides when the user edits that proposal. The plan response reports each
+package's source hint, final volume name, payload size, total object count, and
+Program, Sample Bank, Sample, Wave Data, and Sequence counts.
+
+`images.package_import` applies the complete retained package set through one
 alteration journal, validates the resulting image, and refreshes the retained
-session. `images.package_import.release` explicitly discards an unused plan.
+session once. A failure rolls back the whole set; a partial batch is never
+published. `images.package_import.release` explicitly discards an unused plan.
 This session workflow preserves crash recovery and atomic rollback guarantees;
 it is not the CLI's separate-output publication model.
 

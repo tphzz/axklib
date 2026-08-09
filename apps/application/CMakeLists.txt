@@ -24,7 +24,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/application_op
                                    src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp
                                    src/operation_registry.cpp src/package_filename.cpp src/package_operations.cpp
-                                   src/package_operations_support.cpp src/session_package_operations.cpp
+                                   src/package_operations_support.cpp src/session_package_import_plan.cpp
+                                   src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp
                                    src/session_audio_export_operations.cpp src/session_media_conversion_operations.cpp

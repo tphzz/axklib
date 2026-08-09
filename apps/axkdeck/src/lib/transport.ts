@@ -317,9 +317,9 @@ export interface ClientDownload {
 export type PackageInspection = components['schemas']['PackageInspection'];
 export type PackageImportDestination = components['schemas']['PackageDestination'];
 export type PackageImportPlan = components['schemas']['PackageImportPlan'];
-export type ImageSessionPackageRename = components['schemas']['ImageSessionPackageRename'];
-export type ImageSessionPackageProgramSlotAssignment =
-    components['schemas']['ImageSessionPackageProgramSlotAssignment'];
+export type PackageRename = components['schemas']['PackageRename'];
+export type PackageProgramSlotAssignment = components['schemas']['PackageProgramSlotAssignment'];
+export type ImageSessionPackageImportDestination = components['schemas']['ImageSessionPackageImportDestination'];
 export type PackageOpaqueSequenceDecision = components['schemas']['PackageOpaqueSequenceDecision'];
 export type ImageSessionPackageImportPlan = components['schemas']['ImageSessionPackageImportPlan'];
 export type ImageSessionPackageImportResult = components['schemas']['ImageSessionPackageImportResult'];
@@ -525,11 +525,10 @@ export interface ImageTransport {
     startPackageImport(planToken: string): Promise<JobState>;
     planImagePackageImport(
         sessionId: number,
-        source: InputFileLocation,
-        partitionIndex: number,
-        volumeName: string,
-        renames?: ImageSessionPackageRename[],
-        programSlotAssignments?: ImageSessionPackageProgramSlotAssignment[],
+        sources: InputFileLocation[],
+        destination: ImageSessionPackageImportDestination,
+        renames?: PackageRename[],
+        programSlotAssignments?: PackageProgramSlotAssignment[],
         replacePlanToken?: string,
         opaqueSequenceDecisions?: PackageOpaqueSequenceDecision[],
     ): Promise<ImageSessionPackageImportPlan>;

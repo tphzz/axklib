@@ -154,6 +154,58 @@ pub(crate) async fn select_local_package(
 }
 
 #[tauri::command]
+pub(crate) async fn select_local_volume_packages(
+    app: AppHandle,
+    window: WebviewWindow,
+    preferred_path: Option<String>,
+) -> Result<Vec<String>, String> {
+    let scope_window = window.clone();
+    let (starting_directory, _) = package_picker_hint(preferred_path.as_deref());
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app
+            .dialog()
+            .file()
+            .set_title("Choose volume packages")
+            .add_filter("axklib volume packages", &["axkvol"])
+            .set_parent(&window);
+        if let Some(directory) = starting_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        dialog.blocking_pick_files()
+    })
+    .await
+    .map_err(|error| format!("open volume package file picker: {error}"))?;
+    selected
+        .unwrap_or_default()
+        .into_iter()
+        .map(|file| {
+            let path = file
+                .into_path()
+                .map_err(|_| "the selected package is not a local filesystem path".to_owned())?
+                .canonicalize()
+                .map_err(|error| format!("resolve selected package: {error}"))?;
+            if !path.is_file()
+                || !path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("axkvol"))
+            {
+                return Err("every selected package must be a regular .axkvol file".to_owned());
+            }
+            scope_window
+                .fs_scope()
+                .allow_file(&path)
+                .map_err(|error| format!("allow selected package for reading: {error}"))?;
+            scope_window
+                .state::<tauri::scope::Scopes>()
+                .allow_file(&path)
+                .map_err(|error| format!("allow selected package for the webview: {error}"))?;
+            Ok(path.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+#[tauri::command]
 pub(crate) async fn select_local_package_destination(
     app: AppHandle,
     window: WebviewWindow,

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <span>
@@ -61,13 +62,21 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                                                            "package import requires a writable SFS image session"));
                 }
 
-                PackageInput source;
+                std::vector<PackageInput> sources;
                 std::optional<std::string> replace_plan_token;
                 try {
-                    auto parsed = parse_package_input(input.at("package"));
-                    if (!parsed)
-                        return std::unexpected(parsed.error());
-                    source = std::move(*parsed);
+                    const auto &package_values = input.at("packages");
+                    if (!package_values.is_array() || package_values.empty() || package_values.size() > 256U) {
+                        return std::unexpected(
+                            operation_error("invalid_request", "packages must contain 1 to 256 package inputs"));
+                    }
+                    sources.reserve(package_values.size());
+                    for (const auto &package_value : package_values) {
+                        auto parsed = parse_package_input(package_value);
+                        if (!parsed)
+                            return std::unexpected(parsed.error());
+                        sources.push_back(std::move(*parsed));
+                    }
                     if (input.contains("replacePlanToken")) {
                         replace_plan_token = input.at("replacePlanToken").get<std::string>();
                         if (replace_plan_token->empty())
@@ -75,7 +84,7 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                                 operation_error("invalid_request", "replacePlanToken must not be empty"));
                     }
                 } catch (const Json::exception &) {
-                    return std::unexpected(operation_error("invalid_request", "package is required"));
+                    return std::unexpected(operation_error("invalid_request", "packages are required"));
                 }
                 diagnostic("admission", admission_started,
                            {{"imageId", identity->first},
@@ -85,7 +94,7 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                             {"replacement", replace_plan_token.has_value()}});
 
                 const auto package_started = Clock::now();
-                std::shared_ptr<const VerifiedPackageSnapshot> package_snapshot;
+                std::shared_ptr<const VerifiedPackageSet> package_set;
                 if (replace_plan_token) {
                     std::lock_guard lock{state->mutex};
                     cleanup_session_plans(*state, Clock::now());
@@ -100,44 +109,60 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     }
                     if (found->second->image_id != identity->first ||
                         found->second->expected_revision != identity->second ||
-                        found->second->package_snapshot->input != source) {
-                        return std::unexpected(operation_error(
-                            "package_plan_stale", "replacement plan does not match this image, revision, and package"));
+                        found->second->package_set->inputs != sources) {
+                        return std::unexpected(
+                            operation_error("package_plan_stale",
+                                            "replacement plan does not match this image, revision, and packages"));
                     }
-                    package_snapshot = found->second->package_snapshot;
+                    package_set = found->second->package_set;
                 } else {
-                    auto resolved = resolve_package(source, context.owner_id, sandbox, uploads);
-                    if (!resolved)
-                        return std::unexpected(resolved.error());
-                    auto package = read_package(*resolved, true, context);
-                    if (!package)
-                        return std::unexpected(package.error());
-                    auto retained_bytes = retained_package_bytes(*package);
-                    if (!retained_bytes)
-                        return std::unexpected(retained_bytes.error());
-                    package_snapshot = std::make_shared<VerifiedPackageSnapshot>(
-                        VerifiedPackageSnapshot{source, std::move(*package), *retained_bytes});
+                    std::vector<axk::PortablePackage> packages;
+                    packages.reserve(sources.size());
+                    std::uint64_t retained_bytes{};
+                    for (const auto &source : sources) {
+                        auto resolved = resolve_package(source, context.owner_id, sandbox, uploads);
+                        if (!resolved)
+                            return std::unexpected(resolved.error());
+                        auto package = read_package(*resolved, true, context);
+                        if (!package)
+                            return std::unexpected(package.error());
+                        auto package_bytes = retained_package_bytes(*package);
+                        if (!package_bytes)
+                            return std::unexpected(package_bytes.error());
+                        if (*package_bytes > std::numeric_limits<std::uint64_t>::max() - retained_bytes) {
+                            return std::unexpected(operation_error("package_read_failed",
+                                                                   "retained package set exceeds supported bounds"));
+                        }
+                        retained_bytes += *package_bytes;
+                        packages.push_back(std::move(*package));
+                    }
+                    package_set = std::make_shared<VerifiedPackageSet>(
+                        VerifiedPackageSet{std::move(sources), std::move(packages), retained_bytes});
                 }
+                std::size_t package_object_count{};
+                for (const auto &package : package_set->packages)
+                    package_object_count += package.nodes.size();
                 diagnostic("package", package_started,
                            {{"imageId", identity->first},
                             {"cacheHit", replace_plan_token.has_value()},
-                            {"packageObjectCount", package_snapshot->package.nodes.size()},
-                            {"packagePayloadBytes", package_snapshot->retained_payload_bytes}});
+                            {"packageCount", package_set->packages.size()},
+                            {"packageObjectCount", package_object_count},
+                            {"packagePayloadBytes", package_set->retained_payload_bytes}});
 
-                auto request = parse_session_import_request(input, package_snapshot->package);
-                if (!request)
-                    return std::unexpected(request.error());
+                auto preparation = prepare_session_import(input, package_set->packages, session->volume_scopes_by_id);
+                if (!preparation)
+                    return std::unexpected(preparation.error());
 
                 const auto planning_started = Clock::now();
-                const auto packages = std::span<const axk::PortablePackage>{&package_snapshot->package, 1U};
+                const auto packages = std::span<const axk::PortablePackage>{package_set->packages};
                 axk::package_import_internal::RetainedPackageImportStats planning_stats;
                 const axk::package_import_internal::RetainedPackageImportTarget target{
                     session->reader,          std::filesystem::path{session->source.relative_path},
                     session->media,           session->target_snapshot_id,
                     session->catalog_objects, session->catalog_issues,
                     &planning_stats,          true};
-                auto plan = axk::package_import_internal::plan_package_import_retained(target, packages, *request,
-                                                                                       context.cancellation);
+                auto plan = axk::package_import_internal::plan_package_import_retained(
+                    target, packages, preparation->request, context.cancellation);
                 if (!plan)
                     return std::unexpected(core_error(plan.error(), session->source.relative_path));
                 diagnostic("planning", planning_started,
@@ -154,14 +179,14 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     return std::unexpected(token.error());
                 auto record = std::make_shared<SessionPackagePlanRecord>(
                     SessionPackagePlanRecord{*token, context.owner_id, now + state->retention, identity->first,
-                                             identity->second, package_snapshot, std::move(*plan), false});
+                                             identity->second, package_set, std::move(*plan), false});
                 {
                     std::lock_guard lock{state->mutex};
                     cleanup_session_plans(*state, now);
                     if (replace_plan_token) {
                         const auto found = state->plans.find(*replace_plan_token);
                         if (found == state->plans.end() || found->second->owner_id != context.owner_id ||
-                            found->second->claimed || found->second->package_snapshot != package_snapshot) {
+                            found->second->claimed || found->second->package_set != package_set) {
                             return std::unexpected(operation_error(
                                 "package_plan_stale", "replacement package import plan changed while replanning"));
                         }
@@ -172,8 +197,7 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     if (!replace_plan_token) {
                         const auto retained = retained_session_package_bytes(*state);
                         if (retained > state->maximum_retained_package_bytes ||
-                            package_snapshot->retained_payload_bytes >
-                                state->maximum_retained_package_bytes - retained) {
+                            package_set->retained_payload_bytes > state->maximum_retained_package_bytes - retained) {
                             return std::unexpected(operation_error(
                                 "package_plan_capacity", "retained package import payload budget is exhausted",
                                 std::nullopt, true));
@@ -188,18 +212,20 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 diagnostic("storage", storage_started,
                            {{"imageId", identity->first},
                             {"replacement", replace_plan_token.has_value()},
-                            {"retainedPackageBytes", package_snapshot->retained_payload_bytes}});
+                            {"retainedPackageBytes", package_set->retained_payload_bytes}});
                 auto result =
                     plan_json(record->plan, record->token, static_cast<std::uint64_t>(state->retention.count() * 60));
                 result["imageId"] = record->image_id;
                 result["revision"] = record->expected_revision;
+                result["packages"] = session_package_summaries(packages, preparation->destination_volume_names);
                 diagnostic("total", operation_started,
                            {{"imageId", identity->first},
                             {"revision", identity->second},
                             {"cacheHit", replace_plan_token.has_value()},
                             {"imageBytes", session->reader->size()},
-                            {"packageObjectCount", package_snapshot->package.nodes.size()},
-                            {"packagePayloadBytes", package_snapshot->retained_payload_bytes},
+                            {"packageCount", package_set->packages.size()},
+                            {"packageObjectCount", package_object_count},
+                            {"packagePayloadBytes", package_set->retained_payload_bytes},
                             {"targetPayloadBytesRead", planning_stats.target_payload_bytes_read},
                             {"targetPayloadObjectsRead", planning_stats.target_payload_objects_read}});
                 return result;
@@ -268,7 +294,7 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     return std::unexpected(
                         operation_error("package_plan_stale", "image changed after package import planning"));
                 }
-                const auto packages = std::span<const axk::PortablePackage>{&record->package_snapshot->package, 1U};
+                const auto packages = std::span<const axk::PortablePackage>{record->package_set->packages};
                 auto prepared = axk::detail::prepare_sfs_package_import_verified(
                     mutation->target, std::filesystem::path{mutation->source.relative_path}, packages, record->plan,
                     *current_snapshot, context.cancellation, context.progress);

@@ -46,6 +46,7 @@ export type ImageTreeAction =
     | 'rename-partition'
     | 'repair-placement'
     | 'import-package'
+    | 'import-packages'
     | 'export-package'
     | 'export-volume-packages'
     | 'export-volume-floppies'

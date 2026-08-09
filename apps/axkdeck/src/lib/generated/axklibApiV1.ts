@@ -2439,6 +2439,20 @@ export interface components {
             totalPayloadBytes: number;
             valid: boolean;
         };
+        /** @description Either one existing SFS volume shared by every package root or one new SFS volume per volume package, named from its placement hint with optional indexed overrides. */
+        ImageSessionPackageImportDestination:
+            | {
+                  /** @constant */
+                  kind: 'EXISTING_VOLUME';
+                  partitionIndex: number;
+                  volumeName: string;
+              }
+            | {
+                  /** @constant */
+                  kind: 'CREATE_VOLUMES_FROM_HINTS';
+                  partitionIndex: number;
+                  volumeNameOverrides: components['schemas']['ImageSessionPackageVolumeNameOverride'][];
+              };
         ImageSessionPackageImportPlan: {
             actions: components['schemas']['PackageImportAction'][];
             allocation: components['schemas']['PackageAllocationEstimate'][];
@@ -2446,6 +2460,7 @@ export interface components {
             expiresInSeconds: number;
             imageId: string;
             opaqueSequences: components['schemas']['PackageOpaqueSequenceChoice'][];
+            packages: components['schemas']['ImageSessionPackageSummary'][];
             planId: string;
             planToken: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
@@ -2460,15 +2475,15 @@ export interface components {
             warnings: components['schemas']['PackageImportWarning'][];
         };
         ImageSessionPackageImportPlanRequest: {
+            destination: components['schemas']['ImageSessionPackageImportDestination'];
             expectedRevision: number;
             imageId: string;
             opaqueSequenceDecisions?: components['schemas']['PackageOpaqueSequenceDecision'][];
-            package: components['schemas']['InputRef'];
-            partitionIndex: number;
-            programSlotAssignments?: components['schemas']['ImageSessionPackageProgramSlotAssignment'][];
-            renames?: components['schemas']['ImageSessionPackageRename'][];
+            /** @description Ordered set of packages retained and planned as one atomic image mutation. */
+            packages: components['schemas']['InputRef'][];
+            programSlotAssignments?: components['schemas']['PackageProgramSlotAssignment'][];
+            renames?: components['schemas']['PackageRename'][];
             replacePlanToken?: string;
-            volumeName: string;
         };
         ImageSessionPackageImportResult: {
             actions: components['schemas']['PackageImportAction'][];
@@ -2486,13 +2501,25 @@ export interface components {
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
         };
-        ImageSessionPackageProgramSlotAssignment: {
-            destinationSlot: number;
-            nodeId: string;
+        ImageSessionPackageObjectCounts: {
+            programs: number;
+            sampleBanks: number;
+            samples: number;
+            sequences: number;
+            waveData: number;
         };
-        ImageSessionPackageRename: {
-            destinationName: string;
-            nodeId: string;
+        ImageSessionPackageSummary: {
+            destinationVolumeName: string;
+            objectCount: number;
+            objectCounts: components['schemas']['ImageSessionPackageObjectCounts'];
+            packageId: string;
+            packageIndex: number;
+            payloadBytes: number;
+            sourceVolumeName: string;
+        };
+        ImageSessionPackageVolumeNameOverride: {
+            packageIndex: number;
+            volumeName: string;
         };
         ImageSessionResponse: {
             data: components['schemas']['ImageSession'];

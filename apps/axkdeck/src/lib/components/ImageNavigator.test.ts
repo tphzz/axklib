@@ -269,7 +269,7 @@ describe('ImageNavigator', () => {
         );
     });
 
-    it('offers batch package and floppy-set exports on an addressable partition', async () => {
+    it('offers batch imports, package exports, and floppy-set exports on an addressable partition', async () => {
         const onimageaction = vi.fn();
         render(ImageNavigator, {
             props: {
@@ -284,6 +284,7 @@ describe('ImageNavigator', () => {
                         childCount: 1,
                     },
                 ],
+                packageImportEnabled: true,
                 volumePackageExportEnabled: true,
                 volumeFloppyExportEnabled: true,
                 onimageaction,
@@ -307,6 +308,9 @@ describe('ImageNavigator', () => {
         expect(menuStyle.width).toBe('220px');
         expect(floppyActionStyle.whiteSpace).toBe('nowrap');
         style.remove();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition-0' }), 'import-packages');
+        await fireEvent.contextMenu(partitionButton!);
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume packages…' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'partition-0' }),

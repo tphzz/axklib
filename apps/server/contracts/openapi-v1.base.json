@@ -2180,44 +2180,95 @@
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
         }
       },
-      "ImageSessionPackageRename": {
+      "ImageSessionPackageVolumeNameOverride": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["nodeId", "destinationName"],
+        "required": ["packageIndex", "volumeName"],
         "properties": {
-          "nodeId": {"type": "string", "minLength": 1},
-          "destinationName": {"type": "string", "minLength": 1, "maxLength": 16}
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
         }
       },
-      "ImageSessionPackageProgramSlotAssignment": {
+      "ImageSessionPackageImportDestination": {
+        "description": "Either one existing SFS volume shared by every package root or one new SFS volume per volume package, named from its placement hint with optional indexed overrides.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "partitionIndex", "volumeName"],
+            "properties": {
+              "kind": {"const": "EXISTING_VOLUME"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "partitionIndex", "volumeNameOverrides"],
+            "properties": {
+              "kind": {"const": "CREATE_VOLUMES_FROM_HINTS"},
+              "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+              "volumeNameOverrides": {
+                "type": "array",
+                "maxItems": 256,
+                "items": {"$ref": "#/components/schemas/ImageSessionPackageVolumeNameOverride"}
+              }
+            }
+          }
+        ]
+      },
+      "ImageSessionPackageObjectCounts": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["nodeId", "destinationSlot"],
+        "required": ["programs", "sampleBanks", "samples", "waveData", "sequences"],
         "properties": {
-          "nodeId": {"type": "string", "minLength": 1},
-          "destinationSlot": {"type": "integer", "minimum": 1, "maximum": 128}
+          "programs": {"type": "integer", "minimum": 0},
+          "sampleBanks": {"type": "integer", "minimum": 0},
+          "samples": {"type": "integer", "minimum": 0},
+          "waveData": {"type": "integer", "minimum": 0},
+          "sequences": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageSessionPackageSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "packageId", "sourceVolumeName", "destinationVolumeName", "objectCount", "payloadBytes", "objectCounts"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "packageId": {"type": "string", "minLength": 1},
+          "sourceVolumeName": {"type": "string", "minLength": 1},
+          "destinationVolumeName": {"type": "string", "minLength": 1, "maxLength": 16},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "payloadBytes": {"type": "integer", "minimum": 0},
+          "objectCounts": {"$ref": "#/components/schemas/ImageSessionPackageObjectCounts"}
         }
       },
       "ImageSessionPackageImportPlanRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "expectedRevision", "package", "partitionIndex", "volumeName"],
+        "required": ["imageId", "expectedRevision", "packages", "destination"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "expectedRevision": {"type": "integer", "minimum": 1},
-          "package": {"$ref": "#/components/schemas/InputRef"},
+          "packages": {
+            "description": "Ordered set of packages retained and planned as one atomic image mutation.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {"$ref": "#/components/schemas/InputRef"}
+          },
+          "destination": {"$ref": "#/components/schemas/ImageSessionPackageImportDestination"},
           "replacePlanToken": {"type": "string", "minLength": 1},
-          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
-          "volumeName": {"type": "string", "minLength": 1},
           "renames": {
             "type": "array",
             "maxItems": 1024,
-            "items": {"$ref": "#/components/schemas/ImageSessionPackageRename"}
+            "items": {"$ref": "#/components/schemas/PackageRename"}
           },
           "programSlotAssignments": {
             "type": "array",
-            "maxItems": 128,
-            "items": {"$ref": "#/components/schemas/ImageSessionPackageProgramSlotAssignment"}
+            "maxItems": 32768,
+            "items": {"$ref": "#/components/schemas/PackageProgramSlotAssignment"}
           },
           "opaqueSequenceDecisions": {
             "type": "array",
@@ -2229,7 +2280,7 @@
       "ImageSessionPackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision", "packages"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2249,7 +2300,13 @@
           "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
-          "revision": {"type": "integer", "minimum": 1}
+          "revision": {"type": "integer", "minimum": 1},
+          "packages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 256,
+            "items": {"$ref": "#/components/schemas/ImageSessionPackageSummary"}
+          }
         }
       },
       "PlanTokenRequest": {

@@ -1,6 +1,6 @@
 import { nativeFileSource } from '../../lib/nativeFileSource';
 import { selectLocalPackage } from '../../lib/nativePackages';
-import type { ClientUploadLocation, DirectoryRef, FileRef, InputFileLocation } from '../../lib/storageLocations';
+import type { ClientUploadLocation, InputFileLocation } from '../../lib/storageLocations';
 import type {
     ImageSessionPackageImportPlan,
     ImageTransport,
@@ -12,6 +12,7 @@ import { userFacingMessage } from '../../lib/userFacingMessage';
 import { reportError } from '../../lib/diagnostics';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
+import { PackagePickerHistory } from './packagePickerHistory';
 
 const packageExtensions = ['axkvol', 'axkprg', 'axksbac', 'axksbnk', 'axksmpl', 'axkseq', 'axkpkg'];
 const packageExtensionSet = new Set(packageExtensions);
@@ -42,17 +43,18 @@ interface PackageImportDependencies {
     invalidateSession: (sessionId: number) => Promise<void>;
     refreshSession: (preferred: { partitionIndex: number; volumeName?: string }) => Promise<void>;
     setStatus: (status: string) => void;
+    pickerHistory?: PackagePickerHistory;
 }
 
 export class PackageImportWorkflow {
     request = $state<PackageImportRequest | null>(null);
     private generation = 0;
     private abortController: AbortController | null = null;
-    private lastDirectory = $state<DirectoryRef | null>(null);
-    private lastImportedWorkspaceFile = $state<FileRef | null>(null);
-    private lastImportedLocalPath = $state<string | null>(null);
+    private readonly pickerHistory: PackagePickerHistory;
 
-    constructor(private readonly dependencies: PackageImportDependencies) {}
+    constructor(private readonly dependencies: PackageImportDependencies) {
+        this.pickerHistory = dependencies.pickerHistory ?? new PackagePickerHistory();
+    }
 
     open(item: DiskTreeItem): void {
         ++this.generation;
@@ -180,9 +182,9 @@ export class PackageImportWorkflow {
             '',
             {
                 parentDialog: 'package-import',
-                initialDirectory: this.lastDirectory,
-                initialFile: this.lastImportedWorkspaceFile,
-                ondirectorychange: (directory) => (this.lastDirectory = directory),
+                initialDirectory: this.pickerHistory.lastDirectory,
+                initialFile: this.pickerHistory.lastImportedWorkspaceFile,
+                ondirectorychange: (directory) => (this.pickerHistory.lastDirectory = directory),
             },
         );
         if (selection?.kind !== 'server-file' || !this.request) return;
@@ -194,7 +196,7 @@ export class PackageImportWorkflow {
         let controller: AbortController | null = null;
         let generation = -1;
         try {
-            const path = await selectLocalPackage(this.lastImportedLocalPath);
+            const path = await selectLocalPackage(this.pickerHistory.lastImportedLocalPath);
             if (!path || !this.request) return;
             const file = await nativeFileSource(path, packageExtensionSet, 'application/octet-stream');
             controller = new AbortController();
@@ -283,9 +285,9 @@ export class PackageImportWorkflow {
             );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Package import did not complete');
             if (importedSource.kind === 'server-file') {
-                this.lastImportedWorkspaceFile = importedSource.reference;
+                this.pickerHistory.lastImportedWorkspaceFile = importedSource.reference;
             } else if (request.localSourcePath) {
-                this.lastImportedLocalPath = request.localSourcePath;
+                this.pickerHistory.lastImportedLocalPath = request.localSourcePath;
             }
             if (request.upload) {
                 await this.dependencies.transport.releaseClientUpload(request.upload).catch(() => undefined);
@@ -385,10 +387,10 @@ export class PackageImportWorkflow {
             error: '',
         };
         const renames = Object.entries(request.renames)
-            .map(([nodeId, destinationName]) => ({ nodeId, destinationName: destinationName.trim() }))
+            .map(([nodeId, destinationName]) => ({ packageIndex: 0, nodeId, destinationName: destinationName.trim() }))
             .filter((rename) => rename.destinationName.length > 0);
         const programSlotAssignments = Object.entries(request.programSlots)
-            .map(([nodeId, destinationSlot]) => ({ nodeId, destinationSlot }))
+            .map(([nodeId, destinationSlot]) => ({ packageIndex: 0, nodeId, destinationSlot }))
             .sort(
                 (left, right) =>
                     left.destinationSlot - right.destinationSlot || left.nodeId.localeCompare(right.nodeId),
@@ -396,27 +398,19 @@ export class PackageImportWorkflow {
         const opaqueSequenceDecisions = Object.entries(request.opaqueSequenceActions)
             .map(([nodeId, action]) => ({ packageIndex: 0, nodeId, action }))
             .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
-        const plan = replacePlanToken
-            ? await this.dependencies.transport.planImagePackageImport(
-                  sessionId,
-                  request.source,
-                  request.item.partitionIndex,
-                  request.item.name,
-                  renames,
-                  programSlotAssignments,
-                  replacePlanToken,
-                  opaqueSequenceDecisions,
-              )
-            : await this.dependencies.transport.planImagePackageImport(
-                  sessionId,
-                  request.source,
-                  request.item.partitionIndex,
-                  request.item.name,
-                  renames,
-                  programSlotAssignments,
-                  undefined,
-                  opaqueSequenceDecisions,
-              );
+        const plan = await this.dependencies.transport.planImagePackageImport(
+            sessionId,
+            [request.source],
+            {
+                kind: 'EXISTING_VOLUME',
+                partitionIndex: request.item.partitionIndex,
+                volumeName: request.item.name,
+            },
+            renames,
+            programSlotAssignments,
+            replacePlanToken,
+            opaqueSequenceDecisions,
+        );
         if (generation !== this.generation || !this.request) {
             await this.dependencies.transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);
             return null;

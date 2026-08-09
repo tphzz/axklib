@@ -13,6 +13,8 @@
     import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
+    import { PackageBatchImportWorkflow } from './features/import/packageBatchWorkflow.svelte';
+    import { PackagePickerHistory } from './features/import/packagePickerHistory';
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
     import { JobController } from './features/jobs/actions';
@@ -70,6 +72,7 @@
     const pickerController = new PickerController((request) => {
         pickerRequest = request;
     });
+    const packagePickerHistory = new PackagePickerHistory();
     const imageSessionWorkflow = new ImageSessionWorkflow(transport, pickerController);
     const exportWorkflow = new ExportWorkflow({
         transport,
@@ -148,6 +151,18 @@
         transport,
         jobs: jobController,
         picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        pickerHistory: packagePickerHistory,
+    });
+    const packageBatchImportWorkflow = new PackageBatchImportWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        pickerHistory: packagePickerHistory,
         isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
         invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
@@ -248,6 +263,7 @@
         deletionWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
+        void packageBatchImportWorkflow.close();
         void jobController.dispose();
         void imageSessionWorkflow
             .dispose()
@@ -320,6 +336,12 @@
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
             packageImportWorkflow.open(item);
+            return;
+        }
+        if (action === 'import-packages') {
+            if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'partition') return;
+            imageSessionWorkflow.selectedSource = item;
+            packageBatchImportWorkflow.open(item);
             return;
         }
         if (action === 'export-package') {
@@ -551,6 +573,7 @@
     closeConnectionSettings={() => (connectionSettings = null)}
     mutation={mutationWorkflow}
     packageImport={packageImportWorkflow}
+    packageBatchImport={packageBatchImportWorkflow}
     exports={exportWorkflow}
     volumePackages={volumePackageExportWorkflow}
     volumeFloppies={volumeFloppyExportWorkflow}
