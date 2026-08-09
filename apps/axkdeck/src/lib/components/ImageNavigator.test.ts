@@ -271,7 +271,7 @@ describe('ImageNavigator', () => {
 
     it('offers batch imports, package exports, and floppy-set exports on an addressable partition', async () => {
         const onimageaction = vi.fn();
-        render(ImageNavigator, {
+        const { container } = render(ImageNavigator, {
             props: {
                 ...common,
                 image: serverFileLocation({ rootId: 'workspace', relativePath: 'library.iso' }),
@@ -293,7 +293,10 @@ describe('ImageNavigator', () => {
 
         const partitionButton = screen.getByText('SYNTHS').closest('button');
         expect(partitionButton).not.toBeNull();
+        const treeScroll = container.querySelector('.image-tree-scroll');
+        expect(treeScroll).not.toBeNull();
         await fireEvent.contextMenu(partitionButton!);
+        expect(treeScroll?.classList.contains('context-menu-open')).toBe(true);
         const menuGeometry = appStyles.match(/\.tree-context-menu\s*\{[^}]+\}/)?.[0];
         const menuActionGeometry = appStyles.match(/\.tree-context-menu button\s*\{[^}]+\}/)?.[0];
         expect(menuGeometry).toBeDefined();
@@ -309,6 +312,7 @@ describe('ImageNavigator', () => {
         expect(floppyActionStyle.whiteSpace).toBe('nowrap');
         style.remove();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+        expect(treeScroll?.classList.contains('context-menu-open')).toBe(false);
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition-0' }), 'import-packages');
         await fireEvent.contextMenu(partitionButton!);
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume packages…' }));
@@ -321,6 +325,14 @@ describe('ImageNavigator', () => {
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'partition-0' }),
             'export-volume-floppies',
+        );
+        await fireEvent.contextMenu(partitionButton!);
+        await fireEvent.keyDown(window, { key: 'Escape' });
+        expect(treeScroll?.classList.contains('context-menu-open')).toBe(false);
+        expect(screen.queryByRole('menu')).toBeNull();
+        expect(appStyles).toMatch(/\.image-tree-scroll\.context-menu-open\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/);
+        expect(appStyles).toMatch(
+            /\.image-tree-scroll\.context-menu-open::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/,
         );
     });
 

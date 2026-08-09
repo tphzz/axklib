@@ -441,6 +441,14 @@ input:focus-visible {
   line-height: 1.2;
 }
 
+.image-tree-scroll.context-menu-open {
+  scrollbar-width: none;
+}
+
+.image-tree-scroll.context-menu-open::-webkit-scrollbar {
+  display: none;
+}
+
 .contents-load-error {
   display: grid;
   justify-items: center;

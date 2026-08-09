@@ -245,7 +245,10 @@
             </label>
         {/if}
 
-        <div class="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <div
+            class="image-tree-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4"
+            class:context-menu-open={treeMenu !== null}
+        >
             {#if image}
                 {#each visibleItems as item (item.id)}
                     <TreeNode
