@@ -98,8 +98,8 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     volume.samples.push_back(std::move(sample));
     volume.sample_banks.push_back({"Bank", {"Sample"}});
     volume.sample_banks.push_back({"Bank 2", {"Sample 2"}});
-    volume.programs.push_back({1U, {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
-    volume.programs.push_back({2U, {{"SBAC", "Bank 2", 1U}, {"SBNK", "Direct 2", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
+    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Bank 2", 1U}, {"SBNK", "Direct 2", 2U}}});
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
     const auto written = axk::write_hds_image(manifest, path);

@@ -170,7 +170,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 51U);
+    EXPECT_EQ(entries.size(), 53U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -727,6 +727,48 @@ TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {
     auto wrong_type = inspection;
     wrong_type["candidates"][0]["objectType"] = "SBNK";
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspection", wrong_type));
+}
+
+TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto inspection_request =
+        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    EXPECT_TRUE(
+        axk::server::validate_openapi_value(document, "ImageProgramGenerationInspectionRequest", inspection_request));
+
+    const auto inspection = nlohmann::json{{"imageId", "image-1"},
+                                           {"revision", 4U},
+                                           {"contentScopeId", "content-volume-1"},
+                                           {"availableProgramNumbers", nlohmann::json::array({2U, 5U})},
+                                           {"candidates", nlohmann::json::array({{{"targetObjectId", "object-bank"},
+                                                                                  {"targetObjectType", "SBAC"},
+                                                                                  {"targetObjectName", "Bass Bank"},
+                                                                                  {"defaultProgramName", "Bass Bnk"},
+                                                                                  {"programNumber", 2U},
+                                                                                  {"defaultSelected", true}},
+                                                                                 {{"targetObjectId", "object-sample"},
+                                                                                  {"targetObjectType", "SBNK"},
+                                                                                  {"targetObjectName", "Loose"},
+                                                                                  {"defaultProgramName", "Loose"},
+                                                                                  {"programNumber", 5U},
+                                                                                  {"defaultSelected", true}}})},
+                                           {"notices", nlohmann::json::array()}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramGenerationInspection", inspection));
+    auto invalid_candidate = inspection;
+    invalid_candidate["candidates"][0]["targetObjectType"] = "SMPL";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageProgramGenerationInspection", invalid_candidate));
+
+    const auto request = nlohmann::json{
+        {"imageId", "image-1"},
+        {"expectedRevision", 4U},
+        {"contentScopeId", "content-volume-1"},
+        {"programs", nlohmann::json::array(
+                         {{{"targetObjectId", "object-bank"}, {"programNumber", 2U}, {"programName", "Bass Bnk"}}})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramGenerationRequest", request));
+    auto invalid_name = request;
+    invalid_name["programs"][0]["programName"] = " TooLong ";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageProgramGenerationRequest", invalid_name));
 }
 
 TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {

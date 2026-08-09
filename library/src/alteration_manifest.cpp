@@ -108,19 +108,56 @@ Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
     return {};
 }
 
-Result<void> validate_program(const ProgramSpec &program) {
+Result<void> validate_program_fields(const ProgramSpec &program) {
     if (program.number == 0U || program.number > 128U)
         return std::unexpected{manifest_error("program.number must be between 1 and 128")};
-    if (program.assignments.size() != 2U)
-        return std::unexpected{manifest_error("Program requires exactly two assignments")};
-    constexpr std::array<std::string_view, 2> kinds{"SBAC", "SBNK"};
-    for (std::size_t index = 0; index < program.assignments.size(); ++index) {
-        const auto &assignment = program.assignments[index];
-        if (assignment.target_kind != kinds[index] || assignment.receive_channel != index + 1U) {
-            return std::unexpected{manifest_error("Program assignments must be SBAC/channel 1 then SBNK/channel 2")};
-        }
+    if (auto valid = require_program_name(program.name, "program.name"); !valid)
+        return valid;
+    if (program.assignments.empty() || program.assignments.size() > 11U)
+        return std::unexpected{manifest_error("program.assignments must contain 1..11 assignments")};
+    for (const auto &assignment : program.assignments) {
+        if (assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK")
+            return std::unexpected{manifest_error("Program assignment target must be SBAC or SBNK")};
         if (auto valid = require_object_name(assignment.target_name, "program assignment target"); !valid)
             return valid;
+        if (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
+            (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) {
+            return std::unexpected{manifest_error("MIDI_CHANNEL Program assignment requires channel 1..16")};
+        }
+        if (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U)
+            return std::unexpected{manifest_error("SAMPLE Program assignment must not specify a MIDI channel")};
+    }
+    return {};
+}
+
+Result<void> validate_authored_program(const ProgramSpec &program) {
+    if (auto valid = validate_program_fields(program); !valid)
+        return valid;
+    if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
+        program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
+        program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
+        program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
+        program.assignments[1].receive_channel != 2U) {
+        return std::unexpected{manifest_error("authored Program assignments must be SBAC/channel 1 then "
+                                              "SBNK/channel 2")};
+    }
+    return {};
+}
+
+Result<void> validate_inserted_program(const ProgramSpec &program) {
+    if (auto valid = validate_program_fields(program); !valid)
+        return valid;
+    const auto generated_profile =
+        program.assignments.size() == 1U && program.assignments.front().receive_mode == ProgramReceiveMode::sample;
+    const auto authored_profile = program.assignments.size() == 2U && program.assignments[0].target_kind == "SBAC" &&
+                                  program.assignments[0].receive_mode == ProgramReceiveMode::midi_channel &&
+                                  program.assignments[0].receive_channel == 1U &&
+                                  program.assignments[1].target_kind == "SBNK" &&
+                                  program.assignments[1].receive_mode == ProgramReceiveMode::midi_channel &&
+                                  program.assignments[1].receive_channel == 2U;
+    if (!generated_profile && !authored_profile) {
+        return std::unexpected{manifest_error("inserted Program must use one SBAC/SBNK SAMPLE assignment or the "
+                                              "verified SBAC/channel 1 then SBNK/channel 2 profile")};
     }
     return {};
 }
@@ -210,7 +247,7 @@ Result<void> validate_volume(const VolumeSpec &volume) {
     }
     std::set<std::uint8_t> program_numbers;
     for (const auto &program : volume.programs) {
-        if (auto valid = validate_program(program); !valid)
+        if (auto valid = validate_authored_program(program); !valid)
             return valid;
         if (!program_numbers.insert(program.number).second)
             return std::unexpected{manifest_error("volume has duplicate Program numbers")};
@@ -361,7 +398,7 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         return std::unexpected{manifest_error("new_sequence_name must differ")};
                     return {};
                 } else {
-                    return validate_program(operation.program);
+                    return validate_inserted_program(operation.program);
                 }
             }
         },

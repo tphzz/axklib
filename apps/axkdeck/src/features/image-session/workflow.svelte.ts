@@ -14,6 +14,7 @@ import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
+import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
 import { validationStatus } from './validationStatus';
 
 export type CompanionRetry =
@@ -31,6 +32,7 @@ interface SessionCollaborators {
     mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
     deletion: DeletionWorkflow;
+    programGeneration: ProgramGenerationWorkflow;
     clearExportSelection: () => void;
 }
 
@@ -61,6 +63,7 @@ export class ImageSessionWorkflow {
     } | null>(null);
     objectDeletionAvailable = $state(false);
     waveDataCleanupAvailable = $state(false);
+    programGenerationAvailable = $state(false);
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
     volumePackageExportAvailable = $state(false);
@@ -307,6 +310,7 @@ export class ImageSessionWorkflow {
         mutation.setCapabilities(opened);
         this.objectDeletionAvailable = opened.objectDeletionAvailable;
         this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
+        this.programGenerationAvailable = opened.programGenerationAvailable;
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
         this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
@@ -367,6 +371,8 @@ export class ImageSessionWorkflow {
         this.sequenceExportAvailable = false;
         this.mediaConversionAvailable = false;
         collaborators.deletion.dispose();
+        collaborators.programGeneration.dispose();
+        this.programGenerationAvailable = false;
     }
 }
 

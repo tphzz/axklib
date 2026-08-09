@@ -140,8 +140,8 @@ axk::HdsBuildManifest all_action_source_manifest(const std::filesystem::path &au
         {"Old Bank", {"Old Bank Sample"}},
     };
     volume.programs = {
-        {128U, {{"SBAC", "Delete Bank", 1U}, {"SBNK", "Delete Direct", 2U}}},
-        {127U, {{"SBAC", "Old Bank", 1U}, {"SBNK", "Old Direct", 2U}}},
+        {128U, "Pgm 128", {{"SBAC", "Delete Bank", 1U}, {"SBNK", "Delete Direct", 2U}}},
+        {127U, "Pgm 127", {{"SBAC", "Old Bank", 1U}, {"SBNK", "Old Direct", 2U}}},
     };
 
     axk::VolumeSpec deleted_volume;
@@ -229,9 +229,10 @@ nlohmann::json all_action_alteration_manifest() {
               {"volume_name", "Volume"},
               {"program",
                {{"number", 128U},
+                {"name", "Inserted"},
                 {"assignments",
-                 {{{"sample_bank", "Insert Bank"}, {"receive_channel", 1U}},
-                  {{"sample", "Delete Direct"}, {"receive_channel", 2U}}}}}}},
+                 {{{"sample_bank", "Insert Bank"}, {"receive_mode", "MIDI_CHANNEL"}, {"receive_channel", 1U}},
+                  {{"sample", "Delete Direct"}, {"receive_mode", "MIDI_CHANNEL"}, {"receive_channel", 2U}}}}}}},
              {{"id", "rename-program"},
               {"type", "rename_program"},
               {"partition_index", 0U},
@@ -1023,6 +1024,51 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
     ASSERT_TRUE(remaining) << remaining.error().message;
     EXPECT_FALSE(std::ranges::contains(remaining->items, sample->id, &axk::app::ImageObjectItem::id));
     EXPECT_FALSE(std::ranges::contains(remaining->items, included.front(), &axk::app::ImageObjectItem::id));
+}
+
+TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerControlledPrograms) {
+    write_tone(root_ / "program-generation.wav");
+    const auto written = axk::write_hds_image(all_action_source_manifest(root_ / "program-generation.wav"),
+                                              root_ / "program-generation.hds");
+    ASSERT_TRUE(written) << written.error().message;
+    const auto opened = images_->open({"workspace", "program-generation.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto inspection = registry_.invoke(
+        "images.programs.generate.inspect",
+        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
+        context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_FALSE(inspection->at("candidates").empty());
+    const auto &candidate = inspection->at("candidates").front();
+    ASSERT_TRUE(candidate.at("defaultSelected").get<bool>());
+
+    const auto generated =
+        registry_.invoke("images.programs.generate",
+                         {{"imageId", opened->image_id},
+                          {"expectedRevision", opened->revision},
+                          {"contentScopeId", volume->id},
+                          {"programs", nlohmann::json::array({{{"targetObjectId", candidate.at("targetObjectId")},
+                                                               {"programNumber", candidate.at("programNumber")},
+                                                               {"programName", candidate.at("defaultProgramName")}}})}},
+                         context());
+    ASSERT_TRUE(generated) << generated.error().message;
+    EXPECT_EQ(generated->at("kind"), "PROGRAM_GENERATION");
+    EXPECT_EQ(generated->at("revision"), 2U);
+    ASSERT_EQ(generated->at("createdPrograms").size(), 1U);
+    EXPECT_EQ(generated->at("createdPrograms").front().at("targetObjectId"), candidate.at("targetObjectId"));
+
+    const auto programs = images_->objects(opened->image_id, "owner", 128U, std::nullopt, "PROG");
+    ASSERT_TRUE(programs) << programs.error().message;
+    const auto generated_slot = std::format("{:03}", candidate.at("programNumber").get<unsigned int>());
+    EXPECT_NE(std::ranges::find(programs->items, generated_slot, &axk::app::ImageObjectItem::entry_name),
+              programs->items.end());
 }
 
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {

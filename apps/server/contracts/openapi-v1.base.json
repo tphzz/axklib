@@ -3767,6 +3767,150 @@
           }
         }
       },
+      "ImageProgramGenerationInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "contentScopeId"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageProgramGenerationNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "objectIds"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "objectIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      },
+      "ImageProgramGenerationCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targetObjectId", "targetObjectType", "targetObjectName", "defaultProgramName", "programNumber", "defaultSelected"],
+        "properties": {
+          "targetObjectId": {"type": "string", "minLength": 1},
+          "targetObjectType": {"enum": ["SBAC", "SBNK"]},
+          "targetObjectName": {"type": "string", "minLength": 1},
+          "defaultProgramName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8,
+            "pattern": "^(?:[!-~]|[!-~][ -~]{0,6}[!-~])$"
+          },
+          "programNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+          "defaultSelected": {"type": "boolean"}
+        }
+      },
+      "ImageProgramGenerationInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "contentScopeId", "availableProgramNumbers", "candidates", "notices"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1},
+          "availableProgramNumbers": {
+            "type": "array",
+            "maxItems": 128,
+            "uniqueItems": true,
+            "items": {"type": "integer", "minimum": 1, "maximum": 128}
+          },
+          "candidates": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {"$ref": "#/components/schemas/ImageProgramGenerationCandidate"}
+          },
+          "notices": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {"$ref": "#/components/schemas/ImageProgramGenerationNotice"}
+          }
+        }
+      },
+      "ImageProgramGenerationSelection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targetObjectId", "programNumber", "programName"],
+        "properties": {
+          "targetObjectId": {"type": "string", "minLength": 1},
+          "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
+          "programName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8,
+            "pattern": "^(?:[!-~]|[!-~][ -~]{0,6}[!-~])$"
+          }
+        }
+      },
+      "ImageProgramGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "contentScopeId", "programs"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1},
+          "programs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {"$ref": "#/components/schemas/ImageProgramGenerationSelection"}
+          }
+        }
+      },
+      "ImageGeneratedProgram": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["programNumber", "programName", "targetObjectId", "targetObjectType", "targetObjectName"],
+        "properties": {
+          "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
+          "programName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8,
+            "pattern": "^(?:[!-~]|[!-~][ -~]{0,6}[!-~])$"
+          },
+          "targetObjectId": {"type": "string", "minLength": 1},
+          "targetObjectType": {"enum": ["SBAC", "SBNK"]},
+          "targetObjectName": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageProgramGenerationResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "imageId", "revision", "summary", "objectCount", "validation", "warnings", "applied", "operations", "createdPrograms"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"const": "PROGRAM_GENERATION"},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 2},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "applied": {"const": true},
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {"$ref": "#/components/schemas/AlterationOperationReport"}
+          },
+          "createdPrograms": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {"$ref": "#/components/schemas/ImageGeneratedProgram"}
+          }
+        }
+      },
       "ErrorContext": {
         "type": "object",
         "additionalProperties": false,

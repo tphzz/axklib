@@ -264,6 +264,42 @@ struct ImageWaveDataOrphanInspection {
     std::vector<ImageWaveDataOrphanCandidate> candidates;
 };
 
+struct ImageProgramGenerationNotice {
+    std::string code;
+    std::string message;
+    std::vector<std::string> object_ids;
+};
+
+struct ImageProgramGenerationCandidate {
+    std::string target_object_id;
+    std::string target_object_type;
+    std::string target_object_name;
+    std::string default_program_name;
+    std::optional<std::uint8_t> program_number;
+    bool default_selected{};
+};
+
+struct ImageProgramGenerationInspection {
+    std::string image_id;
+    std::uint64_t revision{};
+    std::string content_scope_id;
+    std::vector<std::uint8_t> available_program_numbers;
+    std::vector<ImageProgramGenerationCandidate> candidates;
+    std::vector<ImageProgramGenerationNotice> notices;
+};
+
+struct ImageProgramGenerationSelection {
+    std::string target_object_id;
+    std::uint8_t program_number{};
+    std::string program_name;
+};
+
+struct ImageProgramGenerationPlan {
+    ImageProgramGenerationInspection inspection;
+    std::vector<ImageProgramGenerationSelection> selections;
+    axk::AlterationManifest manifest;
+};
+
 struct ImageValidationItem {
     std::string code;
     std::string severity;
@@ -358,6 +394,13 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageWaveDataOrphanInspection>
     inspect_wave_data_orphans(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                               std::string_view content_scope_id, std::size_t maximum_candidates = 1024U);
+    [[nodiscard]] Result<ImageProgramGenerationInspection>
+    inspect_program_generation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                               std::string_view content_scope_id);
+    [[nodiscard]] Result<ImageProgramGenerationPlan>
+    plan_program_generation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                            std::string_view content_scope_id,
+                            const std::vector<ImageProgramGenerationSelection> &selections);
     [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,

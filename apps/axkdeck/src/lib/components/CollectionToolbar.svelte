@@ -7,7 +7,7 @@
         query: string;
         onquerychange: (value: string) => void;
         actionLabel?: string;
-        actionIcon?: 'upload' | 'broom';
+        actionIcon?: 'upload' | 'broom' | 'sparkles';
         onaction?: () => void;
     }
 

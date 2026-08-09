@@ -11,6 +11,7 @@
     import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
     import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
+    import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
@@ -24,6 +25,7 @@
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
+    import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
     import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
@@ -77,6 +79,7 @@
         volumeFloppies: VolumeFloppyExportWorkflow;
         mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
+        programGeneration: ProgramGenerationWorkflow;
         mediaDrop: MediaDropWorkflow;
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
@@ -117,6 +120,7 @@
         volumeFloppies,
         mediaExports,
         deletion,
+        programGeneration,
         mediaDrop,
         audioImport,
         audioFileInput,
@@ -398,6 +402,21 @@
         onselectall={(selected) => deletion.updateAllCleanup(selected)}
         oncancel={() => deletion.cancelCleanup()}
         onconfirm={() => void deletion.submitCleanup()}
+    />
+{/if}
+{#if programGeneration.request}
+    <ProgramGenerationDialog
+        volumeName={programGeneration.request.volumeName}
+        inspection={programGeneration.request.inspection}
+        rows={programGeneration.request.rows}
+        loading={programGeneration.request.loading}
+        busy={programGeneration.request.busy}
+        error={programGeneration.request.error}
+        onselectionchange={(objectId, selected) => programGeneration.setSelected(objectId, selected)}
+        onnamechange={(objectId, name) => programGeneration.setProgramName(objectId, name)}
+        onselectall={(selected) => programGeneration.setAllSelected(selected)}
+        oncancel={() => programGeneration.close()}
+        onconfirm={() => void programGeneration.submit()}
     />
 {/if}
 {#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import'}

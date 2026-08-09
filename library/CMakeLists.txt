@@ -204,6 +204,7 @@ add_library(
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_manifest_program.cpp
   src/alteration_manifest_sample_bank.cpp
   src/alteration_manifest_placement.cpp
   src/alteration_manifest_sequence.cpp

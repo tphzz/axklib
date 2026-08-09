@@ -152,6 +152,30 @@ describe('ObjectWorkspace', () => {
         expect(screen.queryByRole('button', { name: 'Clean up unreferenced Wave Data' })).toBeNull();
     });
 
+    it('offers Program generation only in the Programs view when available', async () => {
+        const onGeneratePrograms = vi.fn();
+        const rendered = render(ObjectWorkspace, {
+            props: {
+                ...common,
+                view: 'programs',
+                programGenerationAvailable: true,
+                onprogramgeneration: onGeneratePrograms,
+            },
+        });
+
+        const action = screen.getByRole('button', { name: 'Generate Programs' });
+        await fireEvent.click(action);
+        expect(onGeneratePrograms).toHaveBeenCalledOnce();
+
+        await rendered.rerender({
+            ...common,
+            view: 'wave-data',
+            programGenerationAvailable: true,
+            onprogramgeneration: onGeneratePrograms,
+        });
+        expect(screen.queryByRole('button', { name: 'Generate Programs' })).toBeNull();
+    });
+
     it('renders Programs as factual list rows without fabricated keyboard metadata', () => {
         const programObject = object('PROG', '001');
         render(ObjectWorkspace, {

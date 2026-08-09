@@ -166,7 +166,7 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     direct_sample.key_high = 127U;
     volume.samples.push_back(std::move(direct_sample));
     volume.sample_banks.push_back({"Long Bank", {"Bank Sample"}});
-    volume.programs.push_back({1U, {{"SBAC", "Long Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Long Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     const axk::HdsBuildManifest manifest{"1.0", 8U * 1024U * 1024U, {{"PARTITION ONE", {std::move(volume)}}}};
     const auto written = axk::write_hds_image(manifest, root_ / "long.hds");
     ASSERT_TRUE(written) << written.error().message;

@@ -154,7 +154,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             std::set<std::string> assigned_direct;
             for (const auto &program : volume.programs) {
                 if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
+                    program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
                     program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
+                    program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
                     program.assignments[1].receive_channel != 2U) {
                     return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                       "Program profile requires SBAC channel 1 "
@@ -235,7 +237,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
         std::map<std::string, std::vector<std::uint8_t>> linked_programs;
         for (const auto &program : volume.programs) {
             if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
+                program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
                 program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
+                program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
                 program.assignments[1].receive_channel != 2U) {
                 return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                   "Program profile requires SBAC channel 1 then SBNK channel "

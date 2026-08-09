@@ -165,13 +165,14 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.root_id, "workspace");
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(opened->available_operations,
-              (std::vector<std::string>{
-                  "images.content", "images.objects", "images.relationships", "images.validation.issues",
-                  "images.preview", "auditions.prepare", "images.package.export", "images.audio_export",
-                  "images.sequence_export", "images.volume_package_export", "images.volume_floppy_export",
-                  "images.media_conversion", "images.alter.volumes", "images.alter.partitions", "images.alter.objects",
-                  "images.package.import", "images.deletion.orphans.inspect"}));
+    EXPECT_EQ(
+        opened->available_operations,
+        (std::vector<std::string>{
+            "images.content", "images.objects", "images.relationships", "images.validation.issues", "images.preview",
+            "auditions.prepare", "images.package.export", "images.audio_export", "images.sequence_export",
+            "images.volume_package_export", "images.volume_floppy_export", "images.media_conversion",
+            "images.alter.volumes", "images.alter.partitions", "images.alter.objects", "images.package.import",
+            "images.deletion.orphans.inspect", "images.programs.generate.inspect", "images.programs.generate"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -234,6 +235,8 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
               opened->available_operations.end());
     EXPECT_EQ(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.programs.generate.inspect"),
               opened->available_operations.end());
 
     {
@@ -828,7 +831,7 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     direct_sample.name = "Direct Sample";
     volume_spec.samples.push_back(std::move(direct_sample));
     volume_spec.sample_banks.push_back({"Bank", {"Sample"}});
-    volume_spec.programs.push_back({1U, {{"SBAC", "Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume_spec.programs.push_back({1U, "Pgm 001", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
     const auto image_path = root_ / "program-scope.hds";
     const auto written = axk::write_hds_image(manifest, image_path);
@@ -874,6 +877,110 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     ASSERT_TRUE(reference_scope) << reference_scope.error().message;
     ASSERT_EQ(reference_scope->items.size(), 1U);
     EXPECT_NE(reference_scope->items.front().type, "PROG");
+}
+
+TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSamples) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm = {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
+                    std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}};
+    const auto audio_path = root_ / "generation.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
+
+    axk::VolumeSpec volume_spec;
+    volume_spec.name = "Generation";
+    volume_spec.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
+    const auto add_sample = [&](std::string name) {
+        axk::SampleSpec sample;
+        sample.name = std::move(name);
+        sample.waveform_id = "wave";
+        sample.root_key = 60U;
+        sample.key_high = 127U;
+        volume_spec.samples.push_back(std::move(sample));
+    };
+    add_sample("Ref Member");
+    add_sample("Ref Direct");
+    add_sample("Member 10");
+    add_sample("Member 2");
+    add_sample("Loose 3");
+    volume_spec.sample_banks = {
+        {"Ref Bank", {"Ref Member"}},
+        {"Bank 10", {"Member 10"}},
+        {"Bank 2", {"Member 2"}},
+    };
+    volume_spec.programs.push_back({4U,
+                                    "Ref Pgm",
+                                    {{"SBAC", "Ref Bank", 1U, axk::ProgramReceiveMode::midi_channel},
+                                     {"SBNK", "Ref Direct", 2U, axk::ProgramReceiveMode::midi_channel}}});
+    volume_spec.programs.push_back({127U,
+                                    "Bank 2",
+                                    {{"SBAC", "Bank 2", 1U, axk::ProgramReceiveMode::midi_channel},
+                                     {"SBNK", "Member 10", 2U, axk::ProgramReceiveMode::midi_channel}}});
+    volume_spec.programs.push_back({128U,
+                                    "Bank 10",
+                                    {{"SBAC", "Bank 10", 1U, axk::ProgramReceiveMode::midi_channel},
+                                     {"SBNK", "Member 2", 2U, axk::ProgramReceiveMode::midi_channel}}});
+    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
+    const auto written = axk::write_hds_image(manifest, root_ / "generation.hds");
+    ASSERT_TRUE(written) << written.error().message;
+    const axk::AlterationManifest pruning{
+        std::string{axk::alteration_manifest_schema_version},
+        {{"delete-127", axk::DeleteProgramOperation{axk::PartitionIndex{0U}, "Generation", 127U}},
+         {"delete-128", axk::DeleteProgramOperation{axk::PartitionIndex{0U}, "Generation", 128U}}}};
+    const auto pruned = axk::alter_hds(root_ / "generation.hds", pruning, root_ / "generation-pruned.hds");
+    ASSERT_TRUE(pruned) << pruned.error().message;
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
+    const auto opened = sessions.open({"workspace", "generation-pruned.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_EQ(roots->items.size(), 1U);
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto inspection =
+        sessions.inspect_program_generation(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_GE(inspection->available_program_numbers.size(), 3U);
+    EXPECT_EQ(inspection->available_program_numbers[0], 1U);
+    EXPECT_EQ(inspection->available_program_numbers[1], 2U);
+    EXPECT_EQ(inspection->available_program_numbers[2], 3U);
+    ASSERT_EQ(inspection->candidates.size(), 3U);
+    EXPECT_EQ(inspection->candidates[0].target_object_type, "SBAC");
+    EXPECT_EQ(inspection->candidates[0].target_object_name, "Bank 2");
+    EXPECT_EQ(inspection->candidates[1].target_object_name, "Bank 10");
+    EXPECT_EQ(inspection->candidates[2].target_object_type, "SBNK");
+    EXPECT_EQ(inspection->candidates[2].target_object_name, "Loose 3");
+    EXPECT_TRUE(
+        std::ranges::all_of(inspection->candidates, &axk::app::ImageProgramGenerationCandidate::default_selected));
+
+    const std::vector selections{
+        axk::app::ImageProgramGenerationSelection{inspection->candidates[0].target_object_id, 1U, "Bank 2"},
+        axk::app::ImageProgramGenerationSelection{inspection->candidates[2].target_object_id, 2U, "Loose 3"},
+    };
+    const auto plan =
+        sessions.plan_program_generation(opened->image_id, "owner-a", opened->revision, volume->id, selections);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->manifest.operations.size(), 2U);
+    const auto *bank_program = std::get_if<axk::InsertProgramOperation>(&plan->manifest.operations[0].data);
+    const auto *sample_program = std::get_if<axk::InsertProgramOperation>(&plan->manifest.operations[1].data);
+    ASSERT_NE(bank_program, nullptr);
+    ASSERT_NE(sample_program, nullptr);
+    EXPECT_EQ(bank_program->program.number, 1U);
+    ASSERT_EQ(bank_program->program.assignments.size(), 1U);
+    EXPECT_EQ(bank_program->program.assignments.front().target_kind, "SBAC");
+    EXPECT_EQ(bank_program->program.assignments.front().receive_mode, axk::ProgramReceiveMode::sample);
+    EXPECT_EQ(sample_program->program.number, 2U);
+    EXPECT_EQ(sample_program->program.assignments.front().target_kind, "SBNK");
+
+    const auto stale =
+        sessions.inspect_program_generation(opened->image_id, "owner-a", opened->revision + 1U, volume->id);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
 TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursorsToTheFilter) {

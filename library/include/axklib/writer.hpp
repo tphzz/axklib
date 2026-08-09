@@ -76,14 +76,21 @@ struct SampleBankSpec {
     std::vector<std::string> member_samples;
 };
 
+enum class ProgramReceiveMode : std::uint8_t {
+    midi_channel,
+    sample,
+};
+
 struct ProgramAssignmentSpec {
     std::string target_kind;
     std::string target_name;
     std::uint8_t receive_channel{};
+    ProgramReceiveMode receive_mode{ProgramReceiveMode::midi_channel};
 };
 
 struct ProgramSpec {
     std::uint8_t number{};
+    std::string name;
     std::vector<ProgramAssignmentSpec> assignments;
 };
 

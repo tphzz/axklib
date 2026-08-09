@@ -70,6 +70,7 @@
         packageSelection: PackageExportSelectionState;
         objectDeletionAvailable: boolean;
         waveDataCleanupAvailable: boolean;
+        programGenerationAvailable: boolean;
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
         volumePackageExportAvailable: boolean;
@@ -90,6 +91,7 @@
         exportMidi: (items: PackageExportObject[]) => void;
         deleteObjects: (items: PackageExportObject[]) => void;
         cleanupWaveData: () => void;
+        generatePrograms: () => void;
         clearSelection: () => void;
         selectionChanged: (selection: PackageExportSelectionState) => void;
         selectionLimit: () => void;
@@ -127,6 +129,7 @@
         packageSelection,
         objectDeletionAvailable,
         waveDataCleanupAvailable,
+        programGenerationAvailable,
         packageImportAvailable,
         packageExportAvailable,
         volumePackageExportAvailable,
@@ -147,6 +150,7 @@
         exportMidi,
         deleteObjects,
         cleanupWaveData,
+        generatePrograms,
         clearSelection,
         selectionChanged,
         selectionLimit,
@@ -388,6 +392,8 @@
                 ondeleteobjects={deleteObjects}
                 waveDataCleanupAvailable={waveDataCleanupAvailable && catalog.activeVolumeId !== ''}
                 oncleanupwavedata={cleanupWaveData}
+                programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
+                onprogramgeneration={generatePrograms}
                 {packageExportAvailable}
                 onexportobjects={exportPackage}
                 {audioExportAvailable}

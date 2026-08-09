@@ -394,23 +394,27 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     for (std::size_t index = 0; index < programs.size(); ++index) {
         const auto program_context = context + ".programs[" + std::to_string(index) + "]";
         const auto &row = programs[index];
-        if (auto valid = fields(row, program_context, {"number", "assignments"}); !valid) {
+        if (auto valid = fields(row, program_context, {"number", "name", "assignments"}); !valid) {
             return std::unexpected{valid.error()};
         }
         auto number = integer(row["number"], program_context + ".number", 1, 128);
+        auto name = text(row["name"], program_context + ".name");
         if (!number)
             return std::unexpected{number.error()};
+        if (!name)
+            return std::unexpected{name.error()};
         if (!program_numbers.insert(*number).second) {
             return std::unexpected{manifest_error(context + " has duplicate Program numbers")};
         }
         if (!row["assignments"].is_array()) {
             return std::unexpected{manifest_error(program_context + ".assignments must be an array")};
         }
-        ProgramSpec program{static_cast<std::uint8_t>(*number), {}};
+        ProgramSpec program{static_cast<std::uint8_t>(*number), std::move(*name), {}};
         for (std::size_t assignment_index = 0; assignment_index < row["assignments"].size(); ++assignment_index) {
             const auto assignment_context = program_context + ".assignments[" + std::to_string(assignment_index) + "]";
             const auto &assignment = row["assignments"][assignment_index];
-            if (auto valid = fields(assignment, assignment_context, {"receive_channel"}, {"sample", "sample_bank"});
+            if (auto valid = fields(assignment, assignment_context, {"receive_mode"},
+                                    {"receive_channel", "sample", "sample_bank"});
                 !valid) {
                 return std::unexpected{valid.error()};
             }
@@ -420,17 +424,27 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
                 return std::unexpected{manifest_error(assignment_context + " must contain exactly one target")};
             const auto target_field = sample_target ? "sample" : "sample_bank";
             auto target = text(assignment[target_field], assignment_context + "." + target_field);
-            auto channel = integer(assignment["receive_channel"], assignment_context + ".receive_channel", 1, 16);
+            auto receive_mode = text(assignment["receive_mode"], assignment_context + ".receive_mode");
             if (!target)
                 return std::unexpected{target.error()};
+            if (!receive_mode || (*receive_mode != "MIDI_CHANNEL" && *receive_mode != "SAMPLE"))
+                return std::unexpected{manifest_error(assignment_context + ".receive_mode is invalid")};
+            const auto midi_mode = *receive_mode == "MIDI_CHANNEL";
+            if (assignment.contains("receive_channel") != midi_mode)
+                return std::unexpected{
+                    manifest_error(assignment_context + " must specify receive_channel only for MIDI_CHANNEL")};
+            auto channel = midi_mode
+                               ? integer(assignment["receive_channel"], assignment_context + ".receive_channel", 1, 16)
+                               : Result<std::uint64_t>{0U};
             if (!channel)
                 return std::unexpected{channel.error()};
             if ((sample_target && !sample_names.contains(*target)) ||
                 (sample_bank_target && !sample_bank_names.contains(*target))) {
                 return std::unexpected{manifest_error(assignment_context + " references an unknown target")};
             }
-            program.assignments.push_back(
-                {sample_target ? "SBNK" : "SBAC", *target, static_cast<std::uint8_t>(*channel)});
+            program.assignments.push_back({sample_target ? "SBNK" : "SBAC", *target,
+                                           static_cast<std::uint8_t>(*channel),
+                                           midi_mode ? ProgramReceiveMode::midi_channel : ProgramReceiveMode::sample});
         }
         result.programs.push_back(std::move(program));
     }

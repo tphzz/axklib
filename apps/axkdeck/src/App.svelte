@@ -19,6 +19,7 @@
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
+    import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
     import { createTransport } from './lib/createTransport';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
@@ -183,6 +184,22 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const programGenerationWorkflow = new ProgramGenerationWorkflow({
+        transport,
+        jobs: jobController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        activeVolumeId: () => catalog.activeVolumeId,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
+        selectProgram: (programNumber) => {
+            const program = catalog.programs.find((candidate) => Number(candidate.slot) === programNumber);
+            if (program) auditionWorkflow.selectProgram(program);
+        },
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     catalogHooks.resetCleanup = () => deletionWorkflow.resetCleanup();
     const audioImportWorkflow = new AudioImportWorkflow({
         transport,
@@ -247,6 +264,7 @@
         mediaExports: mediaExportWorkflow,
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
+        programGeneration: programGenerationWorkflow,
         clearExportSelection: clearPackageExportSelection,
     });
     const programs = $derived(catalog.programs);
@@ -261,6 +279,7 @@
         volumeFloppyExportWorkflow.dispose();
         mediaExportWorkflow.dispose();
         deletionWorkflow.dispose();
+        programGenerationWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
@@ -525,6 +544,7 @@
     packageSelection={packageExportSelection}
     objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
     waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
+    programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
@@ -545,6 +565,7 @@
     exportMidi={requestSequenceExport}
     deleteObjects={requestObjectDeletion}
     cleanupWaveData={requestWaveDataCleanup}
+    generatePrograms={() => void programGenerationWorkflow.open()}
     clearSelection={clearPackageExportSelection}
     selectionChanged={(selection) => (packageExportSelection = selection)}
     selectionLimit={reportPackageExportSelectionLimit}
@@ -579,6 +600,7 @@
     volumeFloppies={volumeFloppyExportWorkflow}
     mediaExports={mediaExportWorkflow}
     deletion={deletionWorkflow}
+    programGeneration={programGenerationWorkflow}
     mediaDrop={mediaDropWorkflow}
     audioImport={audioImportWorkflow}
     {audioFileInput}

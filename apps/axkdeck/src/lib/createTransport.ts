@@ -21,6 +21,7 @@ import type {
     RetainedDownload,
     PlanSummary,
     PlacementRepairInspection,
+    ProgramGenerationInspection,
     PreviewEnvelope,
     RelationshipPage,
     WaveDataOrphanInspection,
@@ -196,6 +197,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startObjectDeletion(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectProgramGeneration(): Promise<ProgramGenerationInspection> {
+        return this.unavailable();
+    }
+    startProgramGeneration(): Promise<JobState> {
         return this.unavailable();
     }
     preview(): Promise<PreviewEnvelope> {

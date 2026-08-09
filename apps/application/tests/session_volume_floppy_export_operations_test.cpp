@@ -33,7 +33,7 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     direct_sample.root_key = 60U;
     volume.samples.push_back(std::move(direct_sample));
     volume.sample_banks.push_back({"Sample Bank", {"Sample"}});
-    volume.programs.push_back({1U, {{"SBAC", "Sample Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Sample Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     return volume;
 }
 

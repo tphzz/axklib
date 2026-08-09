@@ -715,9 +715,24 @@ operation can grow the target payload only within its currently allocated record
 extents; insufficient extent capacity rejects the transaction atomically. It
 preserves opaque bytes after the active member table when that table expands.
 
-An `insert_program` object contains a Program `number` and exactly two assignments: a
-`sample_bank` on receive channel 1 followed by a direct `sample` on
-receive channel 2. These limits match the currently supported authored profile.
+An `insert_program` object contains a Program `number`, its sampler-visible
+`name` (`1..8` printable ASCII characters without leading or trailing spaces),
+and one supported assignment profile:
+
+- A single `sample_bank` or `sample` assignment with
+  `"receive_mode":"SAMPLE"`. It omits `receive_channel` and encodes the
+  sampler's `Rch Assign =SMP` mode. Axkdeck's **Generate Programs** action uses
+  this profile to make otherwise unassigned Sample Banks and Samples directly
+  auditionable.
+- Exactly two ordered assignments using `"receive_mode":"MIDI_CHANNEL"`: a
+  `sample_bank` on `receive_channel` 1 followed by a direct `sample` on
+  `receive_channel` 2. This is the full-image authored Program profile.
+
+Program generation is deliberately conservative. It only offers unreferenced
+Sample Banks whose complete same-volume membership is known, then unreferenced
+Samples not covered by those banks. Ambiguous, overlapping, unreadable, and
+cross-volume relationships are reported and excluded. The operation recomputes
+eligibility and free slots immediately before applying the reviewed selection.
 `rename_program` changes the sampler-visible Program name while retaining its
 numeric slot; `new_program_name` is `1..8` printable ASCII characters without
 leading or trailing spaces.

@@ -589,27 +589,33 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                         "programs": [
                             {
                                 "number": 128,
+                                "name": "Delete P",
                                 "assignments": [
                                     {
                                         "sample_bank": "Delete Bank",
                                         "receive_channel": 1,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                     {
                                         "sample": "Delete Direct",
                                         "receive_channel": 2,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                 ],
                             },
                             {
                                 "number": 127,
+                                "name": "Old Pgm",
                                 "assignments": [
                                     {
                                         "sample_bank": "Old Bank",
                                         "receive_channel": 1,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                     {
                                         "sample": "Old Direct",
                                         "receive_channel": 2,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                 ],
                             },
@@ -732,12 +738,18 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "volume_name": "Volume",
                 "program": {
                     "number": 128,
+                    "name": "Inserted",
                     "assignments": [
                         {
                             "sample_bank": "Insert Bank",
                             "receive_channel": 1,
+                            "receive_mode": "MIDI_CHANNEL",
                         },
-                        {"sample": "Delete Direct", "receive_channel": 2},
+                        {
+                            "sample": "Delete Direct",
+                            "receive_channel": 2,
+                            "receive_mode": "MIDI_CHANNEL",
+                        },
                     ],
                 },
             },
@@ -1614,6 +1626,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.alter.objects",
                 "images.package.import",
                 "images.deletion.orphans.inspect",
+                "images.programs.generate.inspect",
+                "images.programs.generate",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(

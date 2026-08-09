@@ -5,8 +5,10 @@ import {
     type ApiContentItem,
     type ApiImageSummary,
     type ApiObjectItem,
+    type ApiObjectDeletionInspection,
     type ApiPage,
     type ApiRelationshipItem,
+    type ApiWaveDataOrphanInspection,
     type SessionState,
     mapContentItem,
     mapObject,
@@ -24,9 +26,13 @@ import type {
     RelationshipPage,
     RelationshipPageFilter,
     JobState,
+    ObjectDeletionInspection,
     PlacementRepairInspection,
     PlacementRepairScope,
+    ProgramGenerationInspection,
+    ProgramGenerationSelection,
     VolumeDeletionInspection,
+    WaveDataOrphanInspection,
 } from './transport';
 import { randomIdempotencyKey } from './httpTransportWire';
 import type { DiskTreeItem } from './types';
@@ -239,6 +245,86 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
+    async inspectObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<ObjectDeletionInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<ApiObjectDeletionInspection>('images.deletion.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            targetObjectIds,
+            cleanupObjectIds,
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.deletion.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<ApiWaveDataOrphanInspection>('images.deletion.orphans.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            contentScopeId,
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.deletion.orphans.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.delete',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                targetObjectIds,
+                cleanupObjectIds,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) throw new Error('images.delete did not return a job');
+        return this.jobs.map(result);
+    }
+
+    async inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<ProgramGenerationInspection>('images.programs.generate.inspect', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            contentScopeId,
+        });
+        if (this.jobs.isJob(result)) {
+            throw new Error('images.programs.generate.inspect unexpectedly returned a job');
+        }
+        return result;
+    }
+
+    async startProgramGeneration(
+        sessionId: number,
+        contentScopeId: string,
+        programs: ProgramGenerationSelection[],
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.programs.generate',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                contentScopeId,
+                programs,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) throw new Error('images.programs.generate did not return a job');
+        return this.jobs.map(result);
+    }
+
     async startMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
         const session = this.get(sessionId);
         const job = await this.client.invoke<never>(
@@ -290,6 +376,9 @@ export class HttpImageSessions {
             objectRenameAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
             waveDataCleanupAvailable: (summary.availableOperations ?? []).includes('images.deletion.orphans.inspect'),
+            programGenerationAvailable:
+                (summary.availableOperations ?? []).includes('images.programs.generate.inspect') &&
+                (summary.availableOperations ?? []).includes('images.programs.generate'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             volumePackageExportAvailable: (summary.availableOperations ?? []).includes('images.volume_package_export'),

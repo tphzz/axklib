@@ -87,7 +87,7 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     direct.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Source Bank", {"Source Sample"}});
-    volume.programs.push_back({1U, {{"SBAC", "Source Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Source Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     return volume;
 }
 
@@ -106,8 +106,9 @@ axk::VolumeSpec dense_source_volume(const std::filesystem::path &audio_path) {
     for (std::uint8_t number = 1U; number <= 64U; ++number) {
         const auto bank_name = std::format("Bank {:03}", number);
         volume.sample_banks.push_back({bank_name, {volume.samples[number - 1U].name}});
-        volume.programs.push_back(
-            {number, {{"SBAC", bank_name, 1U}, {"SBNK", volume.samples[64U + number - 1U].name, 2U}}});
+        volume.programs.push_back({number,
+                                   std::format("Pgm {:03}", number),
+                                   {{"SBAC", bank_name, 1U}, {"SBNK", volume.samples[64U + number - 1U].name, 2U}}});
     }
     return volume;
 }

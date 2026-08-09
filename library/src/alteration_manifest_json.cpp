@@ -16,6 +16,7 @@
 
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_placement.hpp"
+#include "alteration_manifest_program.hpp"
 #include "alteration_manifest_sequence.hpp"
 
 namespace axk {
@@ -513,44 +514,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{assignment.error()};
                 data = std::move(*assignment);
             } else if (*type == "insert_program") {
-                if (auto valid =
-                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "program"}, context);
-                    !valid)
-                    return std::unexpected{valid.error()};
-                auto volume = required_text(row, "volume_name", context);
-                if (!volume)
-                    return std::unexpected{volume.error()};
-                const auto &program = row["program"];
-                if (auto valid = exact_fields(program, {"number", "assignments"}, context + ".program"); !valid)
-                    return std::unexpected{valid.error()};
-                auto number = program_value(program, "number", context + ".program");
-                if (!number)
-                    return std::unexpected{number.error()};
-                if (!program["assignments"].is_array() || program["assignments"].size() != 2U)
-                    return std::unexpected{transaction_error("Program requires exactly two assignments")};
-                ProgramSpec spec;
-                spec.number = *number;
-                constexpr std::array<std::string_view, 2> target_fields{"sample_bank", "sample"};
-                for (std::size_t assignment_index = 0; assignment_index < 2U; ++assignment_index) {
-                    const auto &assignment = program["assignments"][assignment_index];
-                    const auto field = target_fields[assignment_index];
-                    if (auto valid =
-                            exact_fields(assignment, {field, "receive_channel"}, context + ".program.assignments");
-                        !valid)
-                        return std::unexpected{valid.error()};
-                    auto target = object_name(assignment, field, context + ".program.assignments");
-                    if (!target)
-                        return std::unexpected{target.error()};
-                    auto channel =
-                        midi_value(assignment, "receive_channel", context + ".program.assignments", 0U, true);
-                    const auto expected_channel = static_cast<std::uint8_t>(assignment_index + 1U);
-                    if (!channel || *channel != expected_channel)
-                        return std::unexpected{transaction_error("Program assignments must be SBAC/channel 1 then "
-                                                                 "SBNK/channel 2")};
-                    spec.assignments.push_back(
-                        {assignment_index == 0U ? "SBAC" : "SBNK", std::move(*target), *channel});
-                }
-                data = InsertProgramOperation{std::move(selector), std::move(*volume), std::move(spec)};
+                auto program = detail::parse_insert_program_json(row, std::move(selector), context);
+                if (!program)
+                    return std::unexpected{program.error()};
+                data = std::move(*program);
             } else if (*type == "rename_program") {
                 if (auto valid = exact_fields(
                         row, {"id", "type", "partition_index", "volume_name", "program_number", "new_program_name"},

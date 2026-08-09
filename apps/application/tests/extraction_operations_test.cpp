@@ -93,7 +93,7 @@ void write_program_iso(const std::filesystem::path &root) {
     volume.samples.push_back({"Banked Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
     volume.samples.push_back({"Direct Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
     volume.sample_banks.push_back({"Graph Bank", {"Banked Sample"}});
-    volume.programs.push_back({1U, {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
 
     axk::MediaBuildManifest manifest;
     manifest.schema_version = "1.0";

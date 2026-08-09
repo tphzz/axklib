@@ -66,6 +66,7 @@ axk::HdsBuildManifest chain_source_manifest(const std::filesystem::path &audio_p
     volume.sample_banks.push_back({"Bank", {"Banked Sample"}});
     axk::ProgramSpec program;
     program.number = 33U;
+    program.name = "Pgm 033";
     program.assignments = {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}};
     volume.programs.push_back(std::move(program));
     return result;
@@ -100,6 +101,7 @@ axk::HdsBuildManifest wide_sample_bank_source_manifest(const std::filesystem::pa
     volume.sample_banks.push_back({"Group", {"Member 1", "Member 2", "Member 3"}});
     axk::ProgramSpec program;
     program.number = 33U;
+    program.name = "Pgm 033";
     program.assignments = {{"SBAC", "Group", 1U}, {"SBNK", "Direct", 2U}};
     volume.programs.push_back(std::move(program));
     return result;
@@ -121,6 +123,7 @@ axk::HdsBuildManifest capacity_sample_bank_source_manifest(const std::filesystem
     volume.sample_banks.push_back({"Target", {"Member 001"}});
     axk::ProgramSpec program;
     program.number = 33U;
+    program.name = "Pgm 033";
     program.assignments = {{"SBAC", "Target", 1U}, {"SBNK", "Direct", 2U}};
     volume.programs.push_back(std::move(program));
     return result;
@@ -638,6 +641,53 @@ TEST(AlterationManifest, ParsesStrictProgramRename) {
             name));
         EXPECT_FALSE(rejected) << name;
     }
+}
+
+TEST(Alteration, InsertsSamplerControlledProgramForDirectSample) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-generate-program";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(sample_source_manifest(audio), source));
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"generate","type":"insert_program","partition_index":0,"volume_name":"Samples",
+         "program":{"number":1,"name":"Old Samp","assignments":[
+           {"sample":"Old Sample","receive_mode":"SAMPLE"}
+         ]}}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto program = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "001";
+    });
+    ASSERT_NE(program, catalog->objects.end());
+    const auto *decoded_program = std::get_if<axk::CurrentProg>(&program->object.payload);
+    ASSERT_NE(decoded_program, nullptr);
+    EXPECT_EQ(decoded_program->program_name, "Old Samp");
+    ASSERT_FALSE(decoded_program->assignments.empty());
+    EXPECT_EQ(decoded_program->assignments.front().name, "Old Sample");
+    EXPECT_EQ(decoded_program->assignments.front().flags, 0xffU);
+
+    const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "Old Sample";
+    });
+    ASSERT_NE(sample, catalog->objects.end());
+    const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&sample->object.payload);
+    ASSERT_NE(decoded_sample, nullptr);
+    EXPECT_TRUE(decoded_sample->linked_program_numbers == std::vector<std::uint8_t>{1U});
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(AlterationManifest, RequiresAnExplicitSequenceSystemExclusivePolicy) {

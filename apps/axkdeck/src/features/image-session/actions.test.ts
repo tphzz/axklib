@@ -36,6 +36,7 @@ function opened(sessionId: number): OpenedImage {
         objectRenameAvailable: false,
         objectDeletionAvailable: false,
         waveDataCleanupAvailable: false,
+        programGenerationAvailable: false,
         packageImportAvailable: false,
         packageExportAvailable: false,
         volumePackageExportAvailable: false,

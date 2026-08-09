@@ -42,6 +42,8 @@
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         waveDataCleanupAvailable?: boolean;
         oncleanupwavedata?: () => void;
+        programGenerationAvailable?: boolean;
+        onprogramgeneration?: () => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         audioExportAvailable?: boolean;
@@ -74,6 +76,8 @@
         ondeleteobjects = () => undefined,
         waveDataCleanupAvailable = false,
         oncleanupwavedata = () => undefined,
+        programGenerationAvailable = false,
+        onprogramgeneration = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         audioExportAvailable = false,
@@ -289,9 +293,22 @@
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
+    const toolbarActionLabel = $derived(
+        view === 'programs' && programGenerationAvailable
+            ? 'Generate Programs'
+            : view === 'wave-data' && waveDataCleanupAvailable
+              ? 'Clean up unreferenced Wave Data'
+              : undefined,
+    );
+    const toolbarActionIcon = $derived(view === 'programs' ? 'sparkles' : 'broom');
 
     function updateWaveDataViewport(viewport: VirtualViewportState): void {
         waveDataViewport = viewport;
+    }
+
+    function runToolbarAction(): void {
+        if (view === 'programs') onprogramgeneration();
+        else oncleanupwavedata();
     }
 </script>
 
@@ -301,9 +318,9 @@
         {count}
         {query}
         {onquerychange}
-        actionLabel={view === 'wave-data' && waveDataCleanupAvailable ? 'Clean up unreferenced Wave Data' : undefined}
-        actionIcon="broom"
-        onaction={oncleanupwavedata}
+        actionLabel={toolbarActionLabel}
+        actionIcon={toolbarActionIcon}
+        onaction={runToolbarAction}
     />
     <!-- Blank-space clearing is a pointer shortcut; the selection toolbar exposes the keyboard-accessible command. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->

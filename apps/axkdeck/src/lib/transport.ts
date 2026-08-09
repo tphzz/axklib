@@ -37,6 +37,7 @@ export interface OpenedImage {
     objectRenameAvailable: boolean;
     objectDeletionAvailable: boolean;
     waveDataCleanupAvailable: boolean;
+    programGenerationAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
     volumePackageExportAvailable: boolean;
@@ -148,6 +149,11 @@ export interface ObjectDeletionInspection {
 }
 
 export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
+export type ProgramGenerationCandidate = components['schemas']['ImageProgramGenerationCandidate'];
+export type ProgramGenerationInspection = components['schemas']['ImageProgramGenerationInspection'];
+export type ProgramGenerationSelection = components['schemas']['ImageProgramGenerationSelection'];
+export type ProgramGenerationResult = components['schemas']['ImageProgramGenerationResult'];
+export type GeneratedProgram = components['schemas']['ImageGeneratedProgram'];
 export type PlacementRepairScope = components['schemas']['ImagePlacementScope'];
 export type PlacementRepairInspection = components['schemas']['ImagePlacementInspection'];
 
@@ -480,6 +486,12 @@ export interface ImageTransport {
     ): Promise<ObjectDeletionInspection>;
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection>;
     startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
+    inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection>;
+    startProgramGeneration(
+        sessionId: number,
+        contentScopeId: string,
+        programs: ProgramGenerationSelection[],
+    ): Promise<JobState>;
     preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
     prepareAuditionBundle(
         sessionId: number,

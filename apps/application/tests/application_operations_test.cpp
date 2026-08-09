@@ -12,6 +12,7 @@ namespace {
 bool session_operation(std::string_view id) {
     return id == "auditions.prepare" || id == "files.archive" || id == "images.alter" ||
            id == "images.deletion.inspect" || id == "images.deletion.orphans.inspect" || id == "images.delete" ||
+           id == "images.programs.generate.inspect" || id == "images.programs.generate" ||
            id == "images.volume_deletion.inspect" || id == "images.placement.inspect" ||
            id == "images.placement.repair" || id == "images.package_import.plan" ||
            id == "images.package_import.release" || id == "images.package_import" || id == "images.package_export" ||

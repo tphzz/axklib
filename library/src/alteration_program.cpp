@@ -10,6 +10,7 @@
 #include <set>
 #include <span>
 #include <tuple>
+#include <vector>
 
 #include "axklib/bytes.hpp"
 #include "axklib/object.hpp"
@@ -183,19 +184,20 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
     if (std::ranges::any_of(*entries, [&](const auto &entry) { return entry.name == name; })) {
         return std::unexpected{transaction_error("volume already contains Program " + name)};
     }
-    if (spec.assignments.size() != 2U) {
-        return std::unexpected{transaction_error("Program requires exactly two assignments")};
+    struct ResolvedTarget {
+        const ProgramAssignmentSpec *assignment{};
+        SfsId id{};
+    };
+    std::vector<ResolvedTarget> targets;
+    targets.reserve(spec.assignments.size());
+    for (const auto &assignment : spec.assignments) {
+        const auto category = assignment.target_kind == "SBAC" ? "SBAC" : "SBNK";
+        auto target = category_object(state, partition, operation.volume_name, category, assignment.target_name,
+                                      category, cancellation);
+        if (!target)
+            return std::unexpected{target.error()};
+        targets.push_back({&assignment, target->second});
     }
-    const auto &sample_bank_assignment = spec.assignments[0];
-    const auto &sample_assignment = spec.assignments[1];
-    auto sample_bank = category_object(state, partition, operation.volume_name, "SBAC",
-                                       sample_bank_assignment.target_name, "SBAC", cancellation);
-    if (!sample_bank)
-        return std::unexpected{sample_bank.error()};
-    auto sample = category_object(state, partition, operation.volume_name, "SBNK", sample_assignment.target_name,
-                                  "SBNK", cancellation);
-    if (!sample)
-        return std::unexpected{sample.error()};
     auto existing_programs =
         category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
     if (!existing_programs)
@@ -203,20 +205,27 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
     for (const auto &existing : *existing_programs) {
         const auto *decoded_program = std::get_if<CurrentProg>(&existing.decoded.payload);
         for (const auto &assignment : decoded_program->assignments) {
-            if ((assignment.kind == 0x11U && assignment.name == sample_bank_assignment.target_name) ||
-                (assignment.kind == 0x10U && assignment.name == sample_assignment.target_name)) {
+            const auto duplicate = std::ranges::any_of(targets, [&](const auto &target) {
+                const auto kind = target.assignment->target_kind == "SBAC" ? 0x11U : 0x10U;
+                return assignment.kind == kind && assignment.name == target.assignment->target_name;
+            });
+            if (duplicate) {
                 return std::unexpected{transaction_error("Program target is already assigned by another Program")};
             }
         }
     }
-    auto sample_payload = current_payload(state, partition, sample->second, cancellation);
-    if (!sample_payload)
-        return std::unexpected{sample_payload.error()};
-    auto bit = sbnk_program_bit(*sample_payload, spec.number);
-    if (!bit)
-        return std::unexpected{bit.error()};
-    if (*bit)
-        return std::unexpected{transaction_error("SBNK already links this Program")};
+    for (const auto &target : targets) {
+        if (target.assignment->target_kind != "SBNK")
+            continue;
+        auto sample_payload = current_payload(state, partition, target.id, cancellation);
+        if (!sample_payload)
+            return std::unexpected{sample_payload.error()};
+        auto bit = sbnk_program_bit(*sample_payload, spec.number);
+        if (!bit)
+            return std::unexpected{bit.error()};
+        if (*bit)
+            return std::unexpected{transaction_error("SBNK already links this Program")};
+    }
     auto payload = detail::prepare_prog_payload(spec);
     if (!payload)
         return std::unexpected{payload.error()};
@@ -226,11 +235,14 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
     if (auto appended = append_directory_entry(state, partition, *directory, allocated->first, name, cancellation);
         !appended)
         return std::unexpected{appended.error()};
-    if (auto updated = set_sbnk_program_bit(state, partition, sample->second, spec.number, true, cancellation);
-        !updated)
-        return std::unexpected{updated.error()};
-    state.known_edges.emplace_back(*partition_index, allocated->first, sample_bank->second);
-    state.known_edges.emplace_back(*partition_index, allocated->first, sample->second);
+    for (const auto &target : targets) {
+        if (target.assignment->target_kind == "SBNK") {
+            if (auto updated = set_sbnk_program_bit(state, partition, target.id, spec.number, true, cancellation);
+                !updated)
+                return std::unexpected{updated.error()};
+        }
+        state.known_edges.emplace_back(*partition_index, allocated->first, target.id);
+    }
     OperationReport report;
     report.id = context.id;
     report.type = context.type;

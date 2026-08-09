@@ -62,7 +62,7 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     direct.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
-    volume.programs.push_back({1U, {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     return volume;
 }
 
@@ -550,10 +550,31 @@ TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
 
     axk::ProgramSpec program;
     program.number = 1U;
+    program.name = "Program";
     program.assignments.resize(12U);
     const auto oversized_program = axk::detail::prepare_prog_payload(program);
     ASSERT_FALSE(oversized_program);
     EXPECT_EQ(oversized_program.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {
+    axk::ProgramSpec program;
+    program.number = 7U;
+    program.name = "Bass";
+    program.assignments.push_back({"SBAC", "Bass Bank", 0U, axk::ProgramReceiveMode::sample});
+
+    const auto payload = axk::detail::prepare_prog_payload(program);
+    ASSERT_TRUE(payload) << payload.error().message;
+    const auto decoded = axk::decode_object(*payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *current = std::get_if<axk::CurrentProg>(&decoded->payload);
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->program_name, "Bass");
+    ASSERT_EQ(std::ranges::count_if(current->assignments, [](const auto &row) { return !row.name.empty(); }), 1U);
+    EXPECT_EQ(current->assignments.front().name, "Bass Bank");
+    EXPECT_EQ(current->assignments.front().kind, 0x11U);
+    EXPECT_EQ(current->assignments.front().flags, 0xffU);
+    EXPECT_EQ(current->assignments.front().raw_row[0x28], std::byte{0xff});
 }
 
 TEST(HdsWriter, AtomicallyWritesAndReopensPartitionWithoutVolumes) {

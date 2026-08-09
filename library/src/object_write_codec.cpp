@@ -390,13 +390,16 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
 
 Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
     constexpr std::size_t maximum_assignments = 11U;
-    if (program.number == 0U || program.number > 128U || program.assignments.size() > maximum_assignments) {
+    if (program.number == 0U || program.number > 128U || program.name.empty() || program.name.size() > 8U ||
+        program.assignments.empty() || program.assignments.size() > maximum_assignments) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Program number or assignment count exceeds the encoded capacity")};
     }
     for (const auto &assignment : program.assignments) {
         if ((assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK") || assignment.target_name.empty() ||
-            assignment.receive_channel == 0U || assignment.receive_channel > 16U) {
+            (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
+             (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) ||
+            (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U)) {
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "Program assignment cannot be represented by the object codec")};
         }
@@ -417,7 +420,7 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
     if (!name)
         return std::unexpected{name.error()};
     std::ranges::copy(*name, result.begin() + 0x32);
-    auto display = ascii("Pgm " + object_name, 8);
+    auto display = ascii(program.name, 8);
     if (!display)
         return std::unexpected{display.error()};
     std::ranges::copy(*display, result.begin() + 0x78);
@@ -435,7 +438,9 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
             return std::unexpected{target.error()};
         std::ranges::copy(*target, result.begin() + static_cast<std::ptrdiff_t>(offset));
         result[offset + 0x14U] = assignment.target_kind == "SBAC" ? std::byte{0x11} : std::byte{0x10};
-        result[offset + 0x15U] = static_cast<std::byte>(assignment.receive_channel - 1U);
+        result[offset + 0x15U] = assignment.receive_mode == ProgramReceiveMode::sample
+                                     ? std::byte{0xff}
+                                     : static_cast<std::byte>(assignment.receive_channel - 1U);
         result[offset + 0x1dU] = std::byte{0xff};
         result[offset + 0x1eU] = std::byte{0x7f};
         result[offset + 0x21U] = std::byte{0x7f};

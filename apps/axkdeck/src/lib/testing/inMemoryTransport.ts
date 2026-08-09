@@ -38,6 +38,8 @@ import type {
     PackageOpaqueSequenceDecision,
     PackageProgramSlotAssignment,
     PackageRename,
+    ProgramGenerationInspection,
+    ProgramGenerationSelection,
     RetainedDownload,
     PartitionMutation,
     PlanSummary,
@@ -83,6 +85,7 @@ export interface InMemoryImageTransportOptions {
         | 'objectRenameAvailable'
         | 'objectDeletionAvailable'
         | 'waveDataCleanupAvailable'
+        | 'programGenerationAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
         | 'volumePackageExportAvailable'
@@ -96,6 +99,7 @@ export interface InMemoryImageTransportOptions {
         objectRenameAvailable?: boolean;
         objectDeletionAvailable?: boolean;
         waveDataCleanupAvailable?: boolean;
+        programGenerationAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
         volumePackageExportAvailable?: boolean;
@@ -160,6 +164,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
+            programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -184,6 +189,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectRenameAvailable: this.options.opened.objectRenameAvailable ?? false,
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
+            programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -272,6 +278,18 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState> {
         return this.invoke('startObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
+    }
+
+    inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection> {
+        return this.invoke('inspectProgramGeneration', [sessionId, contentScopeId]);
+    }
+
+    startProgramGeneration(
+        sessionId: number,
+        contentScopeId: string,
+        programs: ProgramGenerationSelection[],
+    ): Promise<JobState> {
+        return this.invoke('startProgramGeneration', [sessionId, contentScopeId, programs]);
     }
 
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {

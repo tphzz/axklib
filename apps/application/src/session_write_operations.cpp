@@ -250,6 +250,80 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         if (!bound)
             return bound;
     }
+    if (!registry.is_implemented("images.programs.generate.inspect")) {
+        auto bound =
+            registry.bind("images.programs.generate.inspect",
+                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                              try {
+                                  const auto image_id = input.at("imageId").get<std::string>();
+                                  const auto revision = input.at("expectedRevision").get<std::uint64_t>();
+                                  const auto content_scope_id = input.at("contentScopeId").get<std::string>();
+                                  auto inspection = images.inspect_program_generation(image_id, context.owner_id,
+                                                                                      revision, content_scope_id);
+                                  if (!inspection)
+                                      return std::unexpected(inspection.error());
+                                  return program_generation_inspection_json(*inspection);
+                              } catch (const Json::exception &) {
+                                  return std::unexpected(operation_error(
+                                      "invalid_request", "imageId, expectedRevision, and contentScopeId are required"));
+                              }
+                          });
+        if (!bound)
+            return bound;
+    }
+    if (!registry.is_implemented("images.programs.generate")) {
+        auto bound = registry.bind(
+            "images.programs.generate",
+            [&images, alter_session](const Json &input, const OperationContext &context) -> Result<Json> {
+                std::string image_id;
+                std::uint64_t revision{};
+                std::string content_scope_id;
+                std::vector<ImageProgramGenerationSelection> selections;
+                try {
+                    image_id = input.at("imageId").get<std::string>();
+                    revision = input.at("expectedRevision").get<std::uint64_t>();
+                    content_scope_id = input.at("contentScopeId").get<std::string>();
+                    for (const auto &row : input.at("programs")) {
+                        selections.push_back({row.at("targetObjectId").get<std::string>(),
+                                              row.at("programNumber").get<std::uint8_t>(),
+                                              row.at("programName").get<std::string>()});
+                    }
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error(
+                        "invalid_request",
+                        "imageId, expectedRevision, contentScopeId, and valid Program selections are required"));
+                }
+                auto plan =
+                    images.plan_program_generation(image_id, context.owner_id, revision, content_scope_id, selections);
+                if (!plan)
+                    return std::unexpected(plan.error());
+                auto altered =
+                    alter_session({{"imageId", image_id},
+                                   {"expectedRevision", revision},
+                                   {"manifest", {{"inline", program_generation_manifest_json(plan->manifest)}}},
+                                   {"inputBindings", Json::array()}},
+                                  context);
+                if (!altered)
+                    return std::unexpected(altered.error());
+                std::unordered_map<std::string, const ImageProgramGenerationCandidate *> candidates;
+                for (const auto &candidate : plan->inspection.candidates)
+                    candidates.emplace(candidate.target_object_id, &candidate);
+                Json created = Json::array();
+                for (const auto &selection : plan->selections) {
+                    const auto candidate = candidates.at(selection.target_object_id);
+                    created.push_back({{"programNumber", selection.program_number},
+                                       {"programName", selection.program_name},
+                                       {"targetObjectId", selection.target_object_id},
+                                       {"targetObjectType", candidate->target_object_type},
+                                       {"targetObjectName", candidate->target_object_name}});
+                }
+                (*altered)["kind"] = "PROGRAM_GENERATION";
+                (*altered)["createdPrograms"] = std::move(created);
+                return altered;
+            });
+        if (!bound)
+            return bound;
+    }
     if (!registry.is_implemented("images.delete")) {
         auto bound = registry.bind(
             "images.delete",

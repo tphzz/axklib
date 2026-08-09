@@ -221,6 +221,28 @@ Json wave_data_orphan_inspection_json(const axk::app::ImageWaveDataOrphanInspect
             {"candidates", std::move(candidates)}};
 }
 
+Json program_generation_inspection_json(const axk::app::ImageProgramGenerationInspection &inspection) {
+    Json candidates = Json::array();
+    for (const auto &candidate : inspection.candidates) {
+        candidates.push_back(
+            {{"targetObjectId", candidate.target_object_id},
+             {"targetObjectType", candidate.target_object_type},
+             {"targetObjectName", candidate.target_object_name},
+             {"defaultProgramName", candidate.default_program_name},
+             {"programNumber", candidate.program_number ? Json(*candidate.program_number) : Json(nullptr)},
+             {"defaultSelected", candidate.default_selected}});
+    }
+    Json notices = Json::array();
+    for (const auto &notice : inspection.notices)
+        notices.push_back({{"code", notice.code}, {"message", notice.message}, {"objectIds", notice.object_ids}});
+    return {{"imageId", inspection.image_id},
+            {"revision", inspection.revision},
+            {"contentScopeId", inspection.content_scope_id},
+            {"availableProgramNumbers", inspection.available_program_numbers},
+            {"candidates", std::move(candidates)},
+            {"notices", std::move(notices)}};
+}
+
 Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
     Json operations = Json::array();
     for (const auto &operation : manifest.operations) {
@@ -255,6 +277,36 @@ Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
                 }
             },
             operation.data));
+    }
+    return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
+}
+
+Json program_generation_manifest_json(const axk::AlterationManifest &manifest) {
+    Json operations = Json::array();
+    for (const auto &operation : manifest.operations) {
+        const auto *insert = std::get_if<axk::InsertProgramOperation>(&operation.data);
+        if (insert == nullptr)
+            continue;
+        const auto *partition = std::get_if<axk::PartitionIndex>(&insert->partition);
+        if (partition == nullptr)
+            continue;
+        Json assignments = Json::array();
+        for (const auto &assignment : insert->program.assignments) {
+            Json row{{"receive_mode",
+                      assignment.receive_mode == axk::ProgramReceiveMode::sample ? "SAMPLE" : "MIDI_CHANNEL"}};
+            row[assignment.target_kind == "SBAC" ? "sample_bank" : "sample"] = assignment.target_name;
+            if (assignment.receive_mode == axk::ProgramReceiveMode::midi_channel)
+                row["receive_channel"] = assignment.receive_channel;
+            assignments.push_back(std::move(row));
+        }
+        operations.push_back({{"id", operation.id},
+                              {"type", "insert_program"},
+                              {"partition_index", partition->value},
+                              {"volume_name", insert->volume_name},
+                              {"program",
+                               {{"number", insert->program.number},
+                                {"name", insert->program.name},
+                                {"assignments", std::move(assignments)}}}});
     }
     return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
 }

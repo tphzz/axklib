@@ -1531,6 +1531,131 @@ describe('HttpImageTransport', () => {
         });
     });
 
+    it('inspects and starts revision-bound Program generation through typed operations', async () => {
+        const bodies = new Map<string, unknown>();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.programs.generate.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-program-generation-inspections',
+                                mode: 'read',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageProgramGenerationInspectionRequest',
+                                resultSchema: 'ImageProgramGenerationInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.programs.generate',
+                                method: 'POST',
+                                route: '/api/v1/image-program-generations',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageProgramGenerationRequest',
+                                resultSchema: 'ImageProgramGenerationResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json({
+                        imageId: 'image-programs',
+                        revision: 5,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 2,
+                        relationshipCount: 1,
+                        availableOperations: ['images.programs.generate.inspect', 'images.programs.generate'],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-program-generation-inspections')) {
+                    bodies.set('inspect', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-programs',
+                        revision: 5,
+                        contentScopeId: 'volume-1',
+                        availableProgramNumbers: [1, 3],
+                        candidates: [
+                            {
+                                targetObjectId: 'object-bank',
+                                targetObjectType: 'SBAC',
+                                targetObjectName: 'Drums',
+                                defaultProgramName: 'Drums',
+                                programNumber: 1,
+                                defaultSelected: true,
+                            },
+                        ],
+                        notices: [],
+                    });
+                }
+                if (url.pathname.endsWith('/image-program-generations')) {
+                    bodies.set('generate', JSON.parse(String(init?.body)));
+                    return json(
+                        {
+                            jobId: 'job-programs',
+                            operationId: 'images.programs.generate',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+        });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened.programGenerationAvailable).toBe(true);
+
+        const inspection = await transport.inspectProgramGeneration(opened.sessionId, 'volume-1');
+        expect(inspection.candidates).toEqual([
+            expect.objectContaining({ targetObjectId: 'object-bank', programNumber: 1 }),
+        ]);
+        const programs = [{ targetObjectId: 'object-bank', programNumber: 1, programName: 'Drums' }];
+        const job = await transport.startProgramGeneration(opened.sessionId, 'volume-1', programs);
+        expect(job).toMatchObject({ kind: 'images.programs.generate', status: 'queued' });
+        expect(bodies.get('inspect')).toEqual({
+            imageId: 'image-programs',
+            expectedRevision: 5,
+            contentScopeId: 'volume-1',
+        });
+        expect(bodies.get('generate')).toEqual({
+            imageId: 'image-programs',
+            expectedRevision: 5,
+            contentScopeId: 'volume-1',
+            programs,
+        });
+    });
+
     it('imports uploaded and workspace audio into one Sample Bank through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(
