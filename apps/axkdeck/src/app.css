@@ -832,8 +832,17 @@ input:focus-visible {
   box-shadow: 0 7px 20px rgb(0 0 0 / 24%);
 }
 
-.primary-button:hover {
+.primary-button:hover:not(:disabled) {
   filter: brightness(1.1);
+}
+
+.secondary-button:disabled,
+.primary-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: none;
+  box-shadow: none;
 }
 
 .waveform {

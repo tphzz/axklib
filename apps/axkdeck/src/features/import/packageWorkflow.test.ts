@@ -291,6 +291,95 @@ describe('PackageImportWorkflow', () => {
         expect(workflow.request?.plan?.valid).toBe(true);
     });
 
+    it('retains an automatic Program slot assignment when skipping an opaque Sequence', async () => {
+        const source = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'NordMicroDrums.axkvol' },
+            'NordMicroDrums.axkvol',
+        );
+        const opaqueConflict = {
+            code: 'OPAQUE_SEQUENCE_DECISION_REQUIRED',
+            message: 'opaque Sequence requires an explicit import decision',
+            nodeId: 'sequence-1',
+            packageId: 'program-package',
+            packageIndex: 0,
+            rootIndex: 0,
+            partitionIndex: 0,
+            groupName: '',
+            volumeName: 'Imported',
+            rawGroup: '',
+            rawVolume: '',
+        };
+        const initialPlan: ImageSessionPackageImportPlan = {
+            ...programPlan(false, 5, 'initial-plan'),
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            conflicts: [...programPlan(false, 5).conflicts, opaqueConflict],
+        };
+        const checkedPlan: ImageSessionPackageImportPlan = {
+            ...programPlan(true, 5, 'checked-plan'),
+            valid: false,
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            conflicts: [opaqueConflict],
+        };
+        const skippedPlan: ImageSessionPackageImportPlan = {
+            ...programPlan(true, 5, 'skipped-plan'),
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: 'SKIP' }],
+        };
+        const planImagePackageImport = vi
+            .fn()
+            .mockResolvedValueOnce(initialPlan)
+            .mockResolvedValueOnce(checkedPlan)
+            .mockResolvedValueOnce(skippedPlan);
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageImportWorkflow({
+            transport: {
+                inspectPackage: vi.fn().mockResolvedValue(inspection),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        workflow.open({
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 109,
+            partitionIndex: 0,
+        });
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(source);
+        await choosing;
+
+        expect(workflow.request?.plan?.planToken).toBe('checked-plan');
+        expect(workflow.request?.plan?.valid).toBe(false);
+
+        workflow.opaqueSequenceAction('sequence-1', 'SKIP');
+
+        await vi.waitFor(() => expect(workflow.request?.plan?.planToken).toBe('skipped-plan'));
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(
+            3,
+            17,
+            source,
+            0,
+            'Imported',
+            [],
+            Array.from({ length: 33 }, (_, index) => ({
+                nodeId: `program-${index + 1}`,
+                destinationSlot: index + 5,
+            })),
+            'checked-plan',
+            [{ packageIndex: 0, nodeId: 'sequence-1', action: 'SKIP' }],
+        );
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+        expect(workflow.request?.plan?.valid).toBe(true);
+    });
+
     it('preserves unchecked Program slots when a manual conflict check fails', async () => {
         const source = serverFileLocation({ rootId: 'workspace', relativePath: 'programs.axkprg' }, 'programs.axkprg');
         const planImagePackageImport = vi

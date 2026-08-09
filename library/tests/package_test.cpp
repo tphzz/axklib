@@ -28,6 +28,7 @@
 
 #include "../src/package_internal.hpp"
 #include "axklib/file_publication.hpp"
+#include "axklib/package_import_planning.hpp"
 #include "axklib/writer_internal.hpp"
 #include "media_test_fixtures.hpp"
 
@@ -1380,6 +1381,13 @@ TEST(PortablePackage, PreservesUndecodableSequenceAsOpaqueNodeWithWarning) {
     EXPECT_TRUE(imported->decode_issue.has_value());
     EXPECT_EQ(imported->raw_payload, *renamed);
 
+    const auto reused = axk::plan_package_import(output, packages, request);
+    ASSERT_TRUE(reused) << reused.error().message;
+    ASSERT_TRUE(reused->valid()) << conflict_summary(*reused);
+    ASSERT_EQ(reused->preserved_target_objects.size(), 1U);
+    ASSERT_EQ(reused->objects.size(), 1U);
+    EXPECT_TRUE(std::ranges::contains(reused->objects.front().actions, axk::PackageImportObjectAction::reuse));
+
     const auto valid_source = axk::open_media(target);
     ASSERT_TRUE(valid_source) << valid_source.error().message;
     const std::vector valid_roots{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
@@ -1396,6 +1404,32 @@ TEST(PortablePackage, PreservesUndecodableSequenceAsOpaqueNodeWithWarning) {
         return warning.code == "TARGET_SEQUENCE_PRESERVED_OPAQUE" &&
                warning.origin == axk::PackageImportWarningOrigin::target;
     }));
+
+    const auto retained_inventory =
+        axk::build_media_inventory(*imported_media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(retained_inventory) << retained_inventory.error().message;
+    std::vector<const axk::ObjectSnapshot *> retained_objects;
+    retained_objects.reserve(retained_inventory->catalog.objects.size());
+    for (const auto &object : retained_inventory->catalog.objects)
+        retained_objects.push_back(&object);
+    auto retained_reader = axk::FileReader::open(output);
+    ASSERT_TRUE(retained_reader) << retained_reader.error().message;
+    axk::package_import_internal::RetainedPackageImportStats retained_stats;
+    const axk::package_import_internal::RetainedPackageImportTarget retained_target{
+        *retained_reader, output,
+        &*imported_media, unrelated_plan->target_snapshot_id,
+        retained_objects, retained_inventory->catalog.issues,
+        &retained_stats,  true,
+    };
+    const auto retained_plan = axk::package_import_internal::plan_package_import_retained(
+        retained_target, unrelated_packages, unrelated_request);
+    ASSERT_TRUE(retained_plan) << retained_plan.error().message;
+    ASSERT_TRUE(retained_plan->valid()) << conflict_summary(*retained_plan);
+    EXPECT_TRUE(std::ranges::any_of(retained_plan->warnings, [](const auto &warning) {
+        return warning.code == "TARGET_SEQUENCE_PRESERVED_OPAQUE" &&
+               warning.origin == axk::PackageImportWarningOrigin::target;
+    }));
+
     const auto unrelated_output = output_root / "unrelated-import.hds";
     const auto unrelated_applied =
         axk::apply_package_import(output, unrelated_packages, *unrelated_plan, unrelated_output, false);

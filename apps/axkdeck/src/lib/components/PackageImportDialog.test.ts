@@ -242,7 +242,9 @@ describe('PackageImportDialog', () => {
         expect(screen.getByText('Drum Bank')).toBeTruthy();
         expect(screen.getByText('Kick')).toBeTruthy();
         expect(screen.getByRole('heading', { name: 'Import into TARGET' })).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(true);
+        const importButton = screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement;
+        expect(importButton.disabled).toBe(true);
+        expect(importButton.title).toBe('Resolve import issues before importing.');
         await fireEvent.input(screen.getByDisplayValue('Kick'), { target: { value: 'Kick 2' } });
         expect(onrename).toHaveBeenCalledWith('sample-1', 'Kick 2');
         await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));

@@ -1,11 +1,14 @@
 #include "package_import_opaque_sequences.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <map>
 #include <ranges>
 #include <set>
+#include <span>
 #include <tuple>
 #include <utility>
+#include <variant>
 
 #include "axklib/package_archive.hpp"
 
@@ -33,10 +36,19 @@ const ObjectSnapshot *catalog_object(std::span<const ObjectSnapshot *const> obje
     return found == objects.end() ? nullptr : *found;
 }
 
+std::span<const std::byte> opaque_target_payload(const ObjectSnapshot *object) {
+    if (object == nullptr)
+        return {};
+    if (!object->raw_payload.empty())
+        return object->raw_payload;
+    const auto *generic = std::get_if<GenericObject>(&object->object.payload);
+    return generic == nullptr ? std::span<const std::byte>{} : std::span<const std::byte>{generic->raw_payload};
+}
+
 bool exact_opaque_target_sequence(const ObjectSnapshot *object) {
     return object != nullptr && object->object.header.raw_type == "SEQU" &&
            object->object.format == ObjectFormat::unknown && object->placement &&
-           object->placement_resolution == PlacementResolution::exact && !object->raw_payload.empty();
+           object->placement_resolution == PlacementResolution::exact && !opaque_target_payload(object).empty();
 }
 
 } // namespace
@@ -132,10 +144,11 @@ void append_sfs_catalog_issues(PackageImportPlan &plan, std::span<const CatalogI
         warning.partition_index = object->partition.value;
         warning.volume_name = object->placement->volume_name;
         plan.warnings.push_back(std::move(warning));
-        plan.preserved_target_objects.push_back(
-            {object->key, object->partition.value, object->sfs_id.value, "SEQU", object->object.header.name,
-             object->placement->volume_name, object->placement->category_name, object->placement->entry_name,
-             package_internal::hex_digest(package_internal::sha256(object->raw_payload))});
+        const auto payload = opaque_target_payload(object);
+        plan.preserved_target_objects.push_back({object->key, object->partition.value, object->sfs_id.value, "SEQU",
+                                                 object->object.header.name, object->placement->volume_name,
+                                                 object->placement->category_name, object->placement->entry_name,
+                                                 package_internal::hex_digest(package_internal::sha256(payload))});
     }
 }
 
@@ -146,6 +159,11 @@ void reject_preserved_target_object_use(PackageImportPlan &plan) {
         });
         if (used == plan.objects.end())
             continue;
+        if (std::ranges::contains(used->actions, PackageImportObjectAction::reuse) &&
+            !std::ranges::contains(used->actions, PackageImportObjectAction::insert) &&
+            !std::ranges::contains(used->actions, PackageImportObjectAction::conflict)) {
+            continue;
+        }
         add_conflict(plan, "TARGET_OPAQUE_SEQUENCE_MUTATION_UNSUPPORTED",
                      "the import would use an existing undecodable Sequence that can only be preserved unchanged");
         plan.conflicts.back().partition_index = preserved.partition_index;

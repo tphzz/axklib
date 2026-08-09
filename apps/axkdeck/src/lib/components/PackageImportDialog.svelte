@@ -65,6 +65,15 @@
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
     const locked = $derived(status === 'applying');
     const canImport = $derived(status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges);
+    const importDisabledReason = $derived(
+        canImport
+            ? ''
+            : status !== 'ready'
+              ? 'Wait for package planning to finish.'
+              : hasUnvalidatedChanges
+                ? 'Check conflicts before importing.'
+                : 'Resolve import issues before importing.',
+    );
     const treeRows = $derived(packageTree(inspection));
     const conflictNodes = $derived(new Set(plan?.conflicts.map((conflict) => conflict.nodeId) ?? []));
     const placementNodeIds = $derived(
@@ -523,7 +532,13 @@
         <footer class="dialog-footer">
             <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
             {#if sourceName}
-                <button class="primary-button" type="button" disabled={!canImport} onclick={onconfirm}>
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={!canImport}
+                    title={importDisabledReason}
+                    onclick={onconfirm}
+                >
                     {status === 'applying' ? 'Importing…' : 'Import package'}
                 </button>
             {/if}
