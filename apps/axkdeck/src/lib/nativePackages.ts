@@ -5,8 +5,8 @@ export interface LocalPackageDestination {
     filename: string;
 }
 
-export function selectLocalPackage(): Promise<string | null> {
-    return invoke('select_local_package');
+export function selectLocalPackage(preferredPath: string | null): Promise<string | null> {
+    return invoke('select_local_package', { preferredPath });
 }
 
 export function selectLocalPackageDestination(suggestedName: string): Promise<LocalPackageDestination | null> {

@@ -95,8 +95,8 @@ mod tests {
         checked_tar_path, extract_directory_tar, normalize_directory_destination,
     };
     use crate::local_packages::{
-        normalize_package_destination, supported_media_extension, supported_package_extension,
-        valid_retained_content_path,
+        normalize_package_destination, package_picker_hint, supported_media_extension,
+        supported_package_extension, valid_retained_content_path,
     };
 
     #[test]
@@ -162,6 +162,41 @@ mod tests {
         );
         assert_eq!(supported_package_extension("Sequence.zip"), None);
         assert_eq!(supported_package_extension("Sequence"), None);
+    }
+
+    #[test]
+    fn package_picker_hint_uses_only_an_existing_supported_file() {
+        let root = std::env::temp_dir().join(format!(
+            "axkdeck-package-picker-hint-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir(&root).expect("create package picker test directory");
+        let package = root.join("Imported.axkvol");
+        std::fs::write(&package, b"package").expect("create package picker test file");
+        let canonical_root = root.canonicalize().expect("canonical test directory");
+
+        assert_eq!(
+            package_picker_hint(package.to_str()),
+            (
+                Some(canonical_root.clone()),
+                Some("Imported.axkvol".to_owned())
+            )
+        );
+        assert_eq!(
+            package_picker_hint(root.join("Removed.axkvol").to_str()),
+            (Some(canonical_root.clone()), None)
+        );
+
+        let unsupported = root.join("Imported.zip");
+        std::fs::write(&unsupported, b"archive").expect("create unsupported test file");
+        assert_eq!(
+            package_picker_hint(unsupported.to_str()),
+            (Some(canonical_root), None)
+        );
+        assert_eq!(package_picker_hint(None), (None, None));
+
+        std::fs::remove_dir_all(root).expect("remove package picker test directory");
     }
 
     #[test]

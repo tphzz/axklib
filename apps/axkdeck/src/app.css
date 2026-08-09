@@ -85,8 +85,10 @@ input:focus-visible {
 }
 
 .app-shell {
+  --library-column-width: 248px;
+
   display: grid;
-  grid-template-columns: 248px minmax(520px, 1fr) 268px;
+  grid-template-columns: var(--library-column-width) minmax(520px, 1fr) 268px;
   grid-template-rows: var(--density-app-header) minmax(0, 1fr) var(--density-status-bar);
   height: 100%;
   min-width: 760px;
@@ -99,7 +101,7 @@ input:focus-visible {
 }
 
 .app-shell.inspector-closed {
-  grid-template-columns: 248px minmax(520px, 1fr);
+  grid-template-columns: var(--library-column-width) minmax(520px, 1fr);
 }
 
 .app-shell.sidebar-closed.inspector-closed {
@@ -108,10 +110,10 @@ input:focus-visible {
 
 .app-header {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--library-column-width) minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  padding: 0 10px;
+  padding-right: 10px;
   border-bottom: 1px solid var(--color-border);
   background: rgb(28 31 33 / 98%);
   backdrop-filter: blur(18px);
@@ -120,10 +122,12 @@ input:focus-visible {
 
 .brand {
   display: flex;
+  min-width: 0;
+  height: 100%;
+  grid-column: 1;
   align-items: center;
-  width: 224px;
-  flex: none;
   gap: 10px;
+  padding: 0 10px;
 }
 
 .brand-mark {
@@ -150,6 +154,7 @@ input:focus-visible {
   display: flex;
   min-width: 0;
   height: 100%;
+  grid-column: 2;
   align-items: stretch;
   gap: 3px;
   overflow-x: auto;
@@ -158,9 +163,10 @@ input:focus-visible {
 
 .global-controls {
   display: flex;
-  margin-left: auto;
+  grid-column: 4;
   align-items: center;
   gap: 4px;
+  padding-left: 8px;
 }
 
 .package-selection-controls {
@@ -168,6 +174,7 @@ input:focus-visible {
   flex: none;
   min-width: 0;
   height: 28px;
+  grid-column: 3;
   align-items: center;
   gap: 3px;
   padding-left: 7px;
@@ -1529,7 +1536,20 @@ input:focus-visible {
   font-size: 11px;
 }
 
-.package-conflicts .secondary-button {
+.package-conflict-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.package-conflict-actions small {
+  color: #e4c17c;
+  font-size: 10px;
+}
+
+.package-conflict-actions .secondary-button {
   justify-self: start;
 }
 
@@ -2243,7 +2263,9 @@ input:focus-visible {
 
 @media (max-width: 1100px) {
   .app-shell {
-    grid-template-columns: 220px minmax(460px, 1fr) 240px;
+    --library-column-width: 220px;
+
+    grid-template-columns: var(--library-column-width) minmax(460px, 1fr) 240px;
   }
 
   .app-shell.sidebar-closed {
@@ -2251,22 +2273,20 @@ input:focus-visible {
   }
 
   .app-shell.inspector-closed {
-    grid-template-columns: 220px minmax(460px, 1fr);
+    grid-template-columns: var(--library-column-width) minmax(460px, 1fr);
   }
 
   .app-shell.sidebar-closed.inspector-closed {
     grid-template-columns: minmax(460px, 1fr);
-  }
-
-  .brand {
-    width: 188px;
   }
 }
 
 @media (max-width: 850px) {
   .app-shell,
   .app-shell.inspector-closed {
-    grid-template-columns: 205px minmax(500px, 1fr);
+    --library-column-width: 205px;
+
+    grid-template-columns: var(--library-column-width) minmax(500px, 1fr);
   }
 
   .app-shell.sidebar-closed,
@@ -2967,10 +2987,6 @@ input:focus-visible {
 @media (max-width: 1200px) {
   .workspace-tabs button span {
     display: none;
-  }
-
-  .brand {
-    width: 206px;
   }
 }
 

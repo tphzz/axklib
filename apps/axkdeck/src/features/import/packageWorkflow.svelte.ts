@@ -1,6 +1,6 @@
 import { nativeFileSource } from '../../lib/nativeFileSource';
 import { selectLocalPackage } from '../../lib/nativePackages';
-import type { ClientUploadLocation, DirectoryRef, InputFileLocation } from '../../lib/storageLocations';
+import type { ClientUploadLocation, DirectoryRef, FileRef, InputFileLocation } from '../../lib/storageLocations';
 import type { ImageSessionPackageImportPlan, ImageTransport, PackageInspection } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
@@ -15,11 +15,13 @@ export interface PackageImportRequest {
     item: DiskTreeItem;
     source: InputFileLocation | null;
     upload: ClientUploadLocation | null;
+    localSourcePath: string | null;
     sourceName: string;
     inspection: PackageInspection | null;
     plan: ImageSessionPackageImportPlan | null;
     renames: Record<string, string>;
     programSlots: Record<string, number>;
+    hasUnvalidatedChanges: boolean;
     status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
     progress: number;
     error: string;
@@ -41,6 +43,8 @@ export class PackageImportWorkflow {
     private generation = 0;
     private abortController: AbortController | null = null;
     private lastDirectory = $state<DirectoryRef | null>(null);
+    private lastImportedWorkspaceFile = $state<FileRef | null>(null);
+    private lastImportedLocalPath = $state<string | null>(null);
 
     constructor(private readonly dependencies: PackageImportDependencies) {}
 
@@ -52,11 +56,13 @@ export class PackageImportWorkflow {
             item,
             source: null,
             upload: null,
+            localSourcePath: null,
             sourceName: '',
             inspection: null,
             plan: null,
             renames: {},
             programSlots: {},
+            hasUnvalidatedChanges: false,
             status: 'choosing',
             progress: 0,
             error: '',
@@ -64,26 +70,47 @@ export class PackageImportWorkflow {
     }
 
     rename(nodeId: string, name: string): void {
-        if (!this.request) return;
-        this.request = { ...this.request, renames: { ...this.request.renames, [nodeId]: name } };
+        if (!this.request || this.request.status !== 'ready' || this.request.renames[nodeId] === name) return;
+        this.request = {
+            ...this.request,
+            renames: { ...this.request.renames, [nodeId]: name },
+            hasUnvalidatedChanges: true,
+        };
     }
 
     programSlot(nodeId: string, slot: number): void {
-        if (!this.request || !Number.isInteger(slot) || slot < 1 || slot > 128) return;
-        this.request = { ...this.request, programSlots: { ...this.request.programSlots, [nodeId]: slot } };
+        if (
+            !this.request ||
+            this.request.status !== 'ready' ||
+            !Number.isInteger(slot) ||
+            slot < 1 ||
+            slot > 128 ||
+            this.request.programSlots[nodeId] === slot
+        ) {
+            return;
+        }
+        this.request = {
+            ...this.request,
+            programSlots: { ...this.request.programSlots, [nodeId]: slot },
+            hasUnvalidatedChanges: true,
+        };
     }
 
     programStart(placementId: string, start: number): void {
-        if (!this.request?.plan || !Number.isInteger(start)) return;
+        if (!this.request?.plan || this.request.status !== 'ready' || !Number.isInteger(start)) return;
         const placement = this.request.plan.programSlotPlacements.find((entry) => entry.placementId === placementId);
         if (!placement || placement.mode !== 'CONTIGUOUS' || start < 1 || start + placement.mappings.length - 1 > 128) {
             return;
         }
         const programSlots = { ...this.request.programSlots };
+        let changed = false;
         placement.mappings.forEach((mapping, index) => {
-            programSlots[mapping.nodeId] = start + index;
+            const destinationSlot = start + index;
+            changed = changed || programSlots[mapping.nodeId] !== destinationSlot;
+            programSlots[mapping.nodeId] = destinationSlot;
         });
-        this.request = { ...this.request, programSlots };
+        if (!changed) return;
+        this.request = { ...this.request, programSlots, hasUnvalidatedChanges: true };
     }
 
     async dispose(): Promise<void> {
@@ -111,11 +138,13 @@ export class PackageImportWorkflow {
             ...request,
             source: null,
             upload: null,
+            localSourcePath: null,
             sourceName: '',
             inspection: null,
             plan: null,
             renames: {},
             programSlots: {},
+            hasUnvalidatedChanges: false,
             status: 'choosing',
             progress: 0,
             error: '',
@@ -132,6 +161,7 @@ export class PackageImportWorkflow {
             {
                 parentDialog: 'package-import',
                 initialDirectory: this.lastDirectory,
+                initialFile: this.lastImportedWorkspaceFile,
                 ondirectorychange: (directory) => (this.lastDirectory = directory),
             },
         );
@@ -144,7 +174,7 @@ export class PackageImportWorkflow {
         let controller: AbortController | null = null;
         let generation = -1;
         try {
-            const path = await selectLocalPackage();
+            const path = await selectLocalPackage(this.lastImportedLocalPath);
             if (!path || !this.request) return;
             const file = await nativeFileSource(path, packageExtensionSet, 'application/octet-stream');
             controller = new AbortController();
@@ -156,10 +186,12 @@ export class PackageImportWorkflow {
                 sourceName: file.name,
                 source: null,
                 upload: null,
+                localSourcePath: path,
                 inspection: null,
                 plan: null,
                 renames: {},
                 programSlots: {},
+                hasUnvalidatedChanges: false,
                 status: 'loading',
                 progress: 0,
                 error: '',
@@ -179,7 +211,7 @@ export class PackageImportWorkflow {
                 await this.dependencies.transport.releaseClientUpload(upload).catch(() => undefined);
                 return;
             }
-            await this.inspect(upload, file.name, upload);
+            await this.inspect(upload, file.name, upload, path);
         } catch (error) {
             if (this.abortController === controller) this.abortController = null;
             if (generation >= 0 && (generation !== this.generation || !this.request)) return;
@@ -207,7 +239,16 @@ export class PackageImportWorkflow {
     async apply(): Promise<void> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
-        if (!request?.plan?.valid || sessionId === null || request.item.partitionIndex === undefined) return;
+        if (
+            !request?.source ||
+            !request.plan?.valid ||
+            request.hasUnvalidatedChanges ||
+            sessionId === null ||
+            request.item.partitionIndex === undefined
+        ) {
+            return;
+        }
+        const importedSource = request.source;
         const generation = ++this.generation;
         this.request = { ...request, status: 'applying', error: '' };
         this.dependencies.setStatus(`Importing package into ${request.item.name}`);
@@ -220,6 +261,11 @@ export class PackageImportWorkflow {
                 },
             );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Package import did not complete');
+            if (importedSource.kind === 'server-file') {
+                this.lastImportedWorkspaceFile = importedSource.reference;
+            } else if (request.localSourcePath) {
+                this.lastImportedLocalPath = request.localSourcePath;
+            }
             if (request.upload) {
                 await this.dependencies.transport.releaseClientUpload(request.upload).catch(() => undefined);
             }
@@ -253,6 +299,7 @@ export class PackageImportWorkflow {
         source: InputFileLocation,
         sourceName: string,
         upload: ClientUploadLocation | null = null,
+        localSourcePath: string | null = null,
     ): Promise<void> {
         if (!this.request) return;
         const generation = ++this.generation;
@@ -260,11 +307,13 @@ export class PackageImportWorkflow {
             ...this.request,
             source,
             upload,
+            localSourcePath,
             sourceName,
             inspection: null,
             plan: null,
             renames: {},
             programSlots: {},
+            hasUnvalidatedChanges: false,
             status: 'loading',
             progress: 0,
             error: '',
@@ -287,10 +336,26 @@ export class PackageImportWorkflow {
     }
 
     private async plan(generation: number, replacePlanToken?: string): Promise<void> {
+        const automaticPlanToken = await this.planOnce(generation, replacePlanToken, true);
+        if (!automaticPlanToken) return;
+        try {
+            await this.planOnce(generation, automaticPlanToken, false);
+        } catch (error) {
+            if (generation === this.generation && this.request) {
+                this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
+            }
+        }
+    }
+
+    private async planOnce(
+        generation: number,
+        replacePlanToken: string | undefined,
+        allowAutomaticProgramSlotCheck: boolean,
+    ): Promise<string | null> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
-        if (!request?.source || sessionId === null || request.item.partitionIndex === undefined) return;
-        if (generation !== this.generation) return;
+        if (!request?.source || sessionId === null || request.item.partitionIndex === undefined) return null;
+        if (generation !== this.generation) return null;
         this.request = {
             ...request,
             status: 'planning',
@@ -326,7 +391,7 @@ export class PackageImportWorkflow {
               );
         if (generation !== this.generation || !this.request) {
             await this.dependencies.transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);
-            return;
+            return null;
         }
         const placementNodeIds = new Set(
             plan.programSlotPlacements.flatMap((placement) => placement.mappings.map((mapping) => mapping.nodeId)),
@@ -344,20 +409,30 @@ export class PackageImportWorkflow {
             }
         }
         const nextProgramSlots = { ...request.programSlots };
+        let addedSuggestedProgramSlots = false;
         for (const placement of plan.programSlotPlacements) {
             for (const mapping of placement.mappings) {
                 if (nextProgramSlots[mapping.nodeId] === undefined) {
                     nextProgramSlots[mapping.nodeId] = mapping.destinationSlot;
+                    addedSuggestedProgramSlots = true;
                 }
             }
         }
+        const checkSuggestedProgramSlots =
+            allowAutomaticProgramSlotCheck &&
+            addedSuggestedProgramSlots &&
+            plan.programSlotPlacements.some(
+                (placement) => !placement.applied && placement.mode !== 'UNAVAILABLE' && placement.mappings.length > 0,
+            );
         this.request = {
             ...this.request,
             plan,
             renames: nextRenames,
             programSlots: nextProgramSlots,
-            status: 'ready',
+            hasUnvalidatedChanges: addedSuggestedProgramSlots,
+            status: checkSuggestedProgramSlots ? 'planning' : 'ready',
             error: '',
         };
+        return checkSuggestedProgramSlots ? plan.planToken : null;
     }
 }

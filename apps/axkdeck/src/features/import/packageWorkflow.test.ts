@@ -1,10 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
-import { serverFileLocation } from '../../lib/storageLocations';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ClientUploadSource } from '../../lib/clientUploadSource';
+import { clientUploadLocation, serverFileLocation } from '../../lib/storageLocations';
 import type { ImageSessionPackageImportPlan, ImageTransport, PackageInspection } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
-import { PickerController } from '../dialogs/picker';
+import { PickerController, type PickerRequest } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
 import { PackageImportWorkflow } from './packageWorkflow.svelte';
+
+const nativeMocks = vi.hoisted(() => ({
+    selectLocalPackage: vi.fn(),
+    nativeFileSource: vi.fn(),
+}));
+
+vi.mock('../../lib/nativePackages', () => ({ selectLocalPackage: nativeMocks.selectLocalPackage }));
+vi.mock('../../lib/nativeFileSource', () => ({ nativeFileSource: nativeMocks.nativeFileSource }));
 
 const inspection: PackageInspection = {
     schemaVersion: '1.0',
@@ -22,21 +31,25 @@ const inspection: PackageInspection = {
     issues: [],
 };
 
-function programPlan(applied: boolean): ImageSessionPackageImportPlan {
+function programPlan(
+    applied: boolean,
+    destinationStart = 5,
+    planToken = applied ? 'checked-plan' : 'suggested-plan',
+): ImageSessionPackageImportPlan {
     const mappings = Array.from({ length: 33 }, (_, index) => ({
         packageIndex: 0,
         nodeId: `program-${index + 1}`,
         sourceSlot: index + 1,
-        destinationSlot: index + 5,
+        destinationSlot: index + destinationStart,
         requiresUserAction: false,
     }));
     return {
         schemaVersion: '1.0',
         imageId: 'image-1',
         revision: 1,
-        planToken: applied ? 'checked-plan' : 'suggested-plan',
+        planToken,
         expiresInSeconds: 600,
-        planId: applied ? 'checked-id' : 'suggested-id',
+        planId: `${planToken}-id`,
         targetKind: 'SFS',
         targetSnapshotId: 'snapshot-1',
         valid: applied,
@@ -83,12 +96,12 @@ function programPlan(applied: boolean): ImageSessionPackageImportPlan {
                 volumeName: 'Imported',
                 mode: 'CONTIGUOUS',
                 applied,
-                suggestedStartSlot: 5,
+                suggestedStartSlot: destinationStart,
                 requiredSlotCount: 33,
                 availableSlotCount: 124,
                 occupiedRanges: [{ first: 1, last: 4 }],
                 sourceRanges: [{ first: 1, last: 33 }],
-                destinationRanges: [{ first: 5, last: 37 }],
+                destinationRanges: [{ first: destinationStart, last: destinationStart + 32 }],
                 mappings,
             },
         ],
@@ -97,7 +110,12 @@ function programPlan(applied: boolean): ImageSessionPackageImportPlan {
 }
 
 describe('PackageImportWorkflow', () => {
-    it('replans compact Program suggestions as slot assignments without accumulating renames', async () => {
+    beforeEach(() => {
+        nativeMocks.selectLocalPackage.mockReset();
+        nativeMocks.nativeFileSource.mockReset();
+    });
+
+    it('checks compact Program suggestions automatically and supports a later manual recheck', async () => {
         const source = serverFileLocation(
             { rootId: 'workspace', relativePath: 'CosmoPad and others.axkprg' },
             'CosmoPad and others.axkprg',
@@ -106,16 +124,18 @@ describe('PackageImportWorkflow', () => {
         const planImagePackageImport = vi
             .fn()
             .mockResolvedValueOnce(programPlan(false))
-            .mockResolvedValueOnce(programPlan(true));
+            .mockResolvedValueOnce(programPlan(true))
+            .mockResolvedValueOnce(programPlan(true, 9, 'rechecked-plan'));
         const transport = {
             inspectPackage,
             planImagePackageImport,
             releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
         } as unknown as ImageTransport;
         const picker = new PickerController(() => undefined);
+        const runJob = vi.fn();
         const workflow = new PackageImportWorkflow({
             transport,
-            jobs: {} as JobController,
+            jobs: { run: runJob } as unknown as JobController,
             picker,
             isDesktop: false,
             sessionId: () => 17,
@@ -141,9 +161,6 @@ describe('PackageImportWorkflow', () => {
             Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`program-${index + 1}`, index + 5])),
         );
         expect(planImagePackageImport).toHaveBeenNthCalledWith(1, 17, source, 0, 'Imported', [], []);
-
-        await workflow.replan();
-
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             2,
             17,
@@ -159,5 +176,285 @@ describe('PackageImportWorkflow', () => {
         );
         expect(workflow.request?.plan?.valid).toBe(true);
         expect(workflow.request?.renames).toEqual({});
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+
+        workflow.programStart('placement-1', 9);
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
+        await workflow.apply();
+        expect(runJob).not.toHaveBeenCalled();
+
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(
+            3,
+            17,
+            source,
+            0,
+            'Imported',
+            [],
+            Array.from({ length: 33 }, (_, index) => ({
+                nodeId: `program-${index + 1}`,
+                destinationSlot: index + 9,
+            })),
+            'checked-plan',
+        );
+        expect(workflow.request?.plan?.planToken).toBe('rechecked-plan');
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+    });
+
+    it('preserves unchecked Program slots when a manual conflict check fails', async () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'programs.axkprg' }, 'programs.axkprg');
+        const planImagePackageImport = vi
+            .fn()
+            .mockResolvedValueOnce(programPlan(false))
+            .mockResolvedValueOnce(programPlan(true))
+            .mockRejectedValueOnce(new Error('conflict check failed'));
+        const transport = {
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport,
+            releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: {} as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        workflow.open({
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 4,
+            partitionIndex: 0,
+        });
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(source);
+        await choosing;
+        workflow.programStart('placement-1', 9);
+
+        await workflow.replan();
+
+        expect(workflow.request?.status).toBe('ready');
+        expect(workflow.request?.plan?.planToken).toBe('checked-plan');
+        expect(workflow.request?.programSlots['program-1']).toBe(9);
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
+        expect(workflow.request?.error).toBe('Conflict check failed');
+    });
+
+    it('limits automatic Program slot checks to one follow-up plan', async () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'programs.axkprg' }, 'programs.axkprg');
+        const planImagePackageImport = vi
+            .fn()
+            .mockResolvedValueOnce(programPlan(false, 5, 'suggested-plan-1'))
+            .mockResolvedValueOnce(programPlan(false, 5, 'suggested-plan-2'));
+        const transport = {
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport,
+            releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: {} as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        workflow.open({
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 4,
+            partitionIndex: 0,
+        });
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(source);
+        await choosing;
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(2);
+        expect(workflow.request?.status).toBe('ready');
+        expect(workflow.request?.plan?.planToken).toBe('suggested-plan-2');
+        expect(workflow.request?.plan?.valid).toBe(false);
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+    });
+
+    it('restores the workspace directory and file from the last completed package import', async () => {
+        const source = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'packages/Imported.axkvol' },
+            'Imported.axkvol',
+        );
+        const transport = {
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport: vi
+                .fn()
+                .mockResolvedValueOnce(programPlan(false))
+                .mockResolvedValueOnce(programPlan(true)),
+            releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const pickerRequests: PickerRequest[] = [];
+        const picker = new PickerController((request) => {
+            if (request) pickerRequests.push(request);
+        });
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: {
+                run: vi.fn().mockResolvedValue({ jobId: 1, kind: 'package-import', status: 'completed', result: {} }),
+            } as unknown as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+        const target: DiskTreeItem = {
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 4,
+            partitionIndex: 0,
+        };
+
+        workflow.open(target);
+        const choosing = workflow.chooseWorkspace();
+        pickerRequests[0]!.ondirectorychange?.({ rootId: 'workspace', relativePath: 'packages' });
+        picker.finish(source);
+        await choosing;
+        await workflow.apply();
+
+        workflow.open(target);
+        const choosingAgain = workflow.chooseWorkspace();
+
+        expect(pickerRequests.at(-1)?.initialDirectory).toEqual({ rootId: 'workspace', relativePath: 'packages' });
+        expect(pickerRequests.at(-1)?.initialFile).toEqual(source.reference);
+        picker.finish(null);
+        await choosingAgain;
+    });
+
+    it('does not replace the remembered workspace file when a later import fails', async () => {
+        const successfulSource = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'packages/Working.axkvol' },
+            'Working.axkvol',
+        );
+        const failedSource = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'packages/Broken.axkvol' },
+            'Broken.axkvol',
+        );
+        const transport = {
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport: vi
+                .fn()
+                .mockResolvedValueOnce(programPlan(false))
+                .mockResolvedValueOnce(programPlan(true))
+                .mockResolvedValueOnce(programPlan(false, 5, 'failed-suggestion'))
+                .mockResolvedValueOnce(programPlan(true, 5, 'failed-plan')),
+            releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const pickerRequests: PickerRequest[] = [];
+        const picker = new PickerController((request) => {
+            if (request) pickerRequests.push(request);
+        });
+        const run = vi
+            .fn()
+            .mockResolvedValueOnce({ jobId: 1, kind: 'package-import', status: 'completed', result: {} })
+            .mockResolvedValueOnce({ jobId: 2, kind: 'package-import', status: 'failed', error: 'write failed' });
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: { run } as unknown as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+        const target: DiskTreeItem = {
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 4,
+            partitionIndex: 0,
+        };
+
+        workflow.open(target);
+        let choosing = workflow.chooseWorkspace();
+        pickerRequests[0]!.ondirectorychange?.({ rootId: 'workspace', relativePath: 'packages' });
+        picker.finish(successfulSource);
+        await choosing;
+        await workflow.apply();
+
+        workflow.open(target);
+        choosing = workflow.chooseWorkspace();
+        picker.finish(failedSource);
+        await choosing;
+        await workflow.apply();
+        await workflow.close();
+
+        workflow.open(target);
+        choosing = workflow.chooseWorkspace();
+        expect(pickerRequests.at(-1)?.initialFile).toEqual(successfulSource.reference);
+        picker.finish(null);
+        await choosing;
+    });
+
+    it('passes the last successfully imported native package to the next native chooser', async () => {
+        const localPath = 'previous-package.axkvol';
+        const upload = clientUploadLocation({ uploadId: 'upload-1' }, 'PACKAGE', 'Imported.axkvol');
+        const localSource: ClientUploadSource = {
+            name: 'Imported.axkvol',
+            type: 'application/octet-stream',
+            size: 1024,
+            readChunk: vi.fn(),
+        };
+        nativeMocks.selectLocalPackage.mockResolvedValueOnce(localPath).mockResolvedValueOnce(null);
+        nativeMocks.nativeFileSource.mockResolvedValue(localSource);
+        const transport = {
+            uploadClientFile: vi.fn().mockResolvedValue(upload),
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport: vi
+                .fn()
+                .mockResolvedValueOnce(programPlan(false))
+                .mockResolvedValueOnce(programPlan(true)),
+            releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: {
+                run: vi.fn().mockResolvedValue({ jobId: 1, kind: 'package-import', status: 'completed', result: {} }),
+            } as unknown as JobController,
+            picker: new PickerController(() => undefined),
+            isDesktop: true,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+        const target: DiskTreeItem = {
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 4,
+            partitionIndex: 0,
+        };
+
+        workflow.open(target);
+        await workflow.chooseLocal();
+        await workflow.apply();
+        workflow.open(target);
+        await workflow.chooseLocal();
+
+        expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(1, null);
+        expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(2, localPath);
     });
 });

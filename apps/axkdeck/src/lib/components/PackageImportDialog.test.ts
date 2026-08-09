@@ -127,6 +127,58 @@ function plan(valid = true): ImageSessionPackageImportPlan {
     };
 }
 
+function programSlotPlan(
+    applied: boolean,
+    mode: 'CONTIGUOUS' | 'FRAGMENTED' = 'CONTIGUOUS',
+): ImageSessionPackageImportPlan {
+    const value = plan(applied);
+    const destinations = mode === 'CONTIGUOUS' ? [5, 6, 7, 8] : [5, 7, 9, 11];
+    const mappings = destinations.map((destinationSlot, index) => ({
+        packageIndex: 0,
+        nodeId: `program-${index + 1}`,
+        sourceSlot: index + 1,
+        destinationSlot,
+        requiresUserAction: false,
+    }));
+    value.conflicts = applied
+        ? []
+        : mappings.map((mapping) => ({
+              ...value.conflicts[0],
+              code: 'SFS_NAME_CONFLICT',
+              nodeId: mapping.nodeId,
+              message: 'destination already contains the same object name with different content',
+          }));
+    value.actions = mappings.map((mapping) => ({
+        ...value.actions[0],
+        actionId: `program-action-${mapping.sourceSlot}`,
+        nodeId: mapping.nodeId,
+        objectType: 'PROG',
+        sourceName: String(mapping.sourceSlot).padStart(3, '0'),
+        destinationName: String(mapping.destinationSlot).padStart(3, '0'),
+        actions: applied ? (['INSERT'] as const) : (['CONFLICT'] as const),
+    }));
+    value.programSlotPlacements = [
+        {
+            placementId: 'placement-1',
+            partitionIndex: 0,
+            volumeName: 'TARGET',
+            mode,
+            applied,
+            suggestedStartSlot: 5,
+            requiredSlotCount: 4,
+            availableSlotCount: 124,
+            occupiedRanges: [{ first: 1, last: 4 }],
+            sourceRanges: [{ first: 1, last: 4 }],
+            destinationRanges:
+                mode === 'CONTIGUOUS'
+                    ? [{ first: 5, last: 8 }]
+                    : destinations.map((slot) => ({ first: slot, last: slot })),
+            mappings,
+        },
+    ];
+    return value;
+}
+
 const callbacks = {
     onchooseworkspace: vi.fn(),
     onchooselocal: vi.fn(),
@@ -191,7 +243,7 @@ describe('PackageImportDialog', () => {
         expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(true);
         await fireEvent.input(screen.getByDisplayValue('Kick'), { target: { value: 'Kick 2' } });
         expect(onrename).toHaveBeenCalledWith('sample-1', 'Kick 2');
-        await fireEvent.click(screen.getByRole('button', { name: 'Check names' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
         expect(onreplan).toHaveBeenCalledOnce();
     });
 
@@ -312,43 +364,7 @@ describe('PackageImportDialog', () => {
     });
 
     it('presents Program slot conflicts as one compact placement instead of duplicate rename fields', async () => {
-        const blocked = plan(false);
-        blocked.conflicts = Array.from({ length: 4 }, (_, index) => ({
-            ...blocked.conflicts[0],
-            code: 'SFS_NAME_CONFLICT',
-            nodeId: `program-${index + 1}`,
-            message: 'destination already contains the same object name with different content',
-        }));
-        blocked.actions = Array.from({ length: 4 }, (_, index) => ({
-            ...blocked.actions[0],
-            actionId: `program-action-${index + 1}`,
-            nodeId: `program-${index + 1}`,
-            objectType: 'PROG',
-            sourceName: String(index + 1).padStart(3, '0'),
-            destinationName: String(index + 1).padStart(3, '0'),
-        }));
-        blocked.programSlotPlacements = [
-            {
-                placementId: 'placement-1',
-                partitionIndex: 0,
-                volumeName: 'TARGET',
-                mode: 'CONTIGUOUS',
-                applied: false,
-                suggestedStartSlot: 5,
-                requiredSlotCount: 4,
-                availableSlotCount: 124,
-                occupiedRanges: [{ first: 1, last: 4 }],
-                sourceRanges: [{ first: 1, last: 4 }],
-                destinationRanges: [{ first: 5, last: 8 }],
-                mappings: Array.from({ length: 4 }, (_, index) => ({
-                    packageIndex: 0,
-                    nodeId: `program-${index + 1}`,
-                    sourceSlot: index + 1,
-                    destinationSlot: index + 5,
-                    requiresUserAction: false,
-                })),
-            },
-        ];
+        const blocked = programSlotPlan(false);
         const onprogramstart = vi.fn();
         const onreplan = vi.fn();
 
@@ -382,8 +398,76 @@ describe('PackageImportDialog', () => {
         const start = screen.getByRole('spinbutton', { name: 'Destination start' });
         await fireEvent.input(start, { target: { value: '9' } });
         expect(onprogramstart).toHaveBeenCalledWith('placement-1', 9);
-        await fireEvent.click(screen.getByRole('button', { name: 'Check names' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
         expect(onreplan).toHaveBeenCalledOnce();
+    });
+
+    it('keeps checked Program slots editable and requires changed slots to be checked again', async () => {
+        const onprogramstart = vi.fn();
+        const onreplan = vi.fn();
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: false,
+                sourceName: 'programs.axkprg',
+                inspection,
+                plan: programSlotPlan(true),
+                renames: {},
+                programSlots: {
+                    'program-1': 9,
+                    'program-2': 10,
+                    'program-3': 11,
+                    'program-4': 12,
+                },
+                hasUnvalidatedChanges: true,
+                status: 'ready',
+                progress: 0,
+                error: '',
+                ...callbacks,
+                onprogramstart,
+                onreplan,
+            },
+        });
+
+        const destinationStart = screen.getByRole('spinbutton', { name: 'Destination start' });
+        expect((destinationStart as HTMLInputElement).value).toBe('9');
+        await fireEvent.input(destinationStart, { target: { value: '13' } });
+        expect(onprogramstart).toHaveBeenCalledWith('placement-1', 13);
+        const checkConflicts = screen.getByRole('button', { name: 'Check conflicts' }) as HTMLButtonElement;
+        expect(checkConflicts.disabled).toBe(false);
+        expect(screen.queryByText('Ready to import')).toBeNull();
+        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(true);
+        await fireEvent.click(checkConflicts);
+        expect(onreplan).toHaveBeenCalledOnce();
+    });
+
+    it('keeps checked fragmented Program placements individually editable', () => {
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: false,
+                sourceName: 'programs.axkprg',
+                inspection,
+                plan: programSlotPlan(true, 'FRAGMENTED'),
+                renames: {},
+                programSlots: {
+                    'program-1': 5,
+                    'program-2': 7,
+                    'program-3': 9,
+                    'program-4': 11,
+                },
+                hasUnvalidatedChanges: false,
+                status: 'ready',
+                progress: 0,
+                error: '',
+                ...callbacks,
+            },
+        });
+
+        expect(screen.getByRole('spinbutton', { name: 'Program 001' })).toBeTruthy();
+        expect(screen.getByRole('spinbutton', { name: 'Program 004' })).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Check conflicts' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('shows non-renamable plan blockers without offering a false naming remedy', () => {
@@ -414,7 +498,7 @@ describe('PackageImportDialog', () => {
 
         expect(screen.getByText('1 issue prevents import')).toBeTruthy();
         expect(screen.getByText('The destination does not have enough free clusters')).toBeTruthy();
-        expect(screen.queryByRole('button', { name: 'Check names' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Check conflicts' })).toBeNull();
     });
 
     it('groups repeated plan conflicts and node-scoped rename actions without duplicate keys', () => {

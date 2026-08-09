@@ -81,19 +81,52 @@ pub(crate) fn supported_media_extension(filename: &str) -> Option<&'static str> 
         .find(|supported| extension.eq_ignore_ascii_case(supported))
 }
 
+pub(crate) fn package_picker_hint(
+    preferred_path: Option<&str>,
+) -> (Option<PathBuf>, Option<String>) {
+    let Some(path) = preferred_path
+        .filter(|value| !value.is_empty())
+        .map(Path::new)
+    else {
+        return (None, None);
+    };
+    let directory = path
+        .parent()
+        .and_then(|parent| parent.canonicalize().ok())
+        .filter(|parent| parent.is_dir());
+    let filename = if directory.is_some() && path.is_file() {
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| supported_package_extension(value).is_some())
+            .map(str::to_owned)
+    } else {
+        None
+    };
+    (directory, filename)
+}
+
 #[tauri::command]
 pub(crate) async fn select_local_package(
     app: AppHandle,
     window: WebviewWindow,
+    preferred_path: Option<String>,
 ) -> Result<Option<String>, String> {
     let scope_window = window.clone();
+    let (starting_directory, starting_filename) = package_picker_hint(preferred_path.as_deref());
     let selected = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        let mut dialog = app
+            .dialog()
             .file()
             .set_title("Choose axklib package")
             .add_filter("axklib packages", &SUPPORTED_PACKAGE_EXTENSIONS)
-            .set_parent(&window)
-            .blocking_pick_file()
+            .set_parent(&window);
+        if let Some(directory) = starting_directory {
+            dialog = dialog.set_directory(directory);
+        }
+        if let Some(filename) = starting_filename {
+            dialog = dialog.set_file_name(filename);
+        }
+        dialog.blocking_pick_file()
     })
     .await
     .map_err(|error| format!("open package file picker: {error}"))?;

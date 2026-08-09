@@ -250,6 +250,7 @@
         plan={packageImport.request.plan}
         renames={packageImport.request.renames}
         programSlots={packageImport.request.programSlots}
+        hasUnvalidatedChanges={packageImport.request.hasUnvalidatedChanges}
         status={packageImport.request.status}
         progress={packageImport.request.progress}
         error={packageImport.request.error}
