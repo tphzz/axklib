@@ -26,6 +26,7 @@
 #include "axklib/package_relocation.hpp"
 #include "axklib/writer.hpp"
 
+#include "../src/package_import_sfs_capacity.hpp"
 #include "../src/package_internal.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/package_import_planning.hpp"
@@ -2710,11 +2711,77 @@ TEST(PackageImportPlanner, ReportsSfsObjectAndClusterCapacityBeforeApply) {
     const auto plan = axk::plan_package_import(target, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_FALSE(plan->valid());
-    EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
-                                    [](const auto &conflict) { return conflict.code == "SFS_OBJECT_ID_EXHAUSTED"; }));
+    const auto capacity_conflicts = std::ranges::count(plan->conflicts, std::string{"SFS_RECORD_CAPACITY_EXHAUSTED"},
+                                                       &axk::PackageImportConflict::code);
+    EXPECT_EQ(capacity_conflicts, 1U);
+    EXPECT_FALSE(std::ranges::any_of(plan->conflicts,
+                                     [](const auto &conflict) { return conflict.code == "SFS_OBJECT_ID_EXHAUSTED"; }));
     EXPECT_FALSE(std::ranges::any_of(
         plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_DIRECTORY_CAPACITY_EXHAUSTED"; }));
+    ASSERT_EQ(plan->sfs_index_capacity.size(), 1U);
+    const auto &capacity = plan->sfs_index_capacity.front();
+    EXPECT_EQ(capacity.partition_index, 0U);
+    EXPECT_EQ(capacity.records_per_index_block, 14U);
+    EXPECT_EQ(capacity.total_record_slots, capacity.index_block_count * capacity.records_per_index_block);
+    EXPECT_EQ(capacity.allocatable_record_slots, capacity.total_record_slots - capacity.reserved_record_slots);
+    EXPECT_EQ(capacity.used_record_slots + capacity.free_record_slots, capacity.allocatable_record_slots);
+    EXPECT_EQ(capacity.required_record_slots, capacity.allocated_record_slots + capacity.shortfall_record_slots);
+    EXPECT_EQ(capacity.remaining_record_slots, 0U);
+    EXPECT_GT(capacity.shortfall_record_slots, 0U);
+    EXPECT_EQ(capacity.packages.size(), package_count);
+    EXPECT_EQ(
+        std::ranges::fold_left(capacity.packages, std::uint64_t{},
+                               [](const auto total, const auto &usage) { return total + usage.planned_record_slots; }),
+        capacity.required_record_slots);
+    EXPECT_EQ(std::ranges::fold_left(
+                  capacity.packages, std::uint64_t{},
+                  [](const auto total, const auto &usage) { return total + usage.allocated_record_slots; }),
+              capacity.allocated_record_slots);
+    EXPECT_EQ(std::ranges::fold_left(
+                  capacity.packages, std::uint64_t{},
+                  [](const auto total, const auto &usage) { return total + usage.shortfall_record_slots; }),
+              capacity.shortfall_record_slots);
     EXPECT_EQ(read_file(target), before);
+}
+
+TEST(PackageImportPlanner, ReportsAtomicVolumeScaffoldingShortfallExactly) {
+    axk::Partition partition;
+    partition.index = axk::PartitionIndex{0U};
+    axk::package_import_internal::PartitionCapacity capacity;
+    capacity.partition = &partition;
+    capacity.index_block_count = 1U;
+    capacity.total_record_slots = 14U;
+    capacity.reserved_record_slots = 3U;
+    capacity.allocatable_record_slots = 11U;
+    capacity.used_record_slots = 7U;
+    capacity.free_ids = {10U, 11U, 12U, 13U};
+
+    axk::PackageImportPlan plan;
+    plan.package_ids.push_back("package-0");
+    axk::PlannedPackageDestination destination;
+    destination.partition_index = 0U;
+    destination.volume_name = "New Volume";
+    destination.create = true;
+
+    axk::package_import_internal::SfsRecordCapacityPlanner planner;
+    planner.observe_destination(capacity, 0U);
+    EXPECT_FALSE(planner.allocate_destination(capacity, destination, 0U));
+    planner.finalize(plan);
+
+    ASSERT_EQ(plan.sfs_index_capacity.size(), 1U);
+    const auto &report = plan.sfs_index_capacity.front();
+    EXPECT_EQ(report.free_record_slots, 4U);
+    EXPECT_EQ(report.required_record_slots, 6U);
+    EXPECT_EQ(report.allocated_record_slots, 4U);
+    EXPECT_EQ(report.shortfall_record_slots, 2U);
+    EXPECT_EQ(report.remaining_record_slots, 0U);
+    ASSERT_EQ(report.packages.size(), 1U);
+    EXPECT_EQ(report.packages.front().allocated_record_slots, 4U);
+    EXPECT_EQ(report.packages.front().shortfall_record_slots, 2U);
+    EXPECT_TRUE(destination.infrastructure_sfs_ids.empty());
+    EXPECT_EQ(std::ranges::count(plan.conflicts, std::string{"SFS_RECORD_CAPACITY_EXHAUSTED"},
+                                 &axk::PackageImportConflict::code),
+              1U);
 }
 
 TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {

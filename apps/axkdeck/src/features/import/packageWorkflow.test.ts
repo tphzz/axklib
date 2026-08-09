@@ -118,6 +118,7 @@ function programPlan(
             },
         ],
         allocation: [],
+        sfsIndexCapacity: [],
     };
 }
 

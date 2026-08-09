@@ -432,6 +432,38 @@ Json program_slot_placements_json(std::span<const axk::PackageProgramSlotPlaceme
     return result;
 }
 
+Json sfs_index_capacity_json(std::span<const axk::SfsIndexCapacityEstimate> capacities) {
+    auto result = Json::array();
+    for (const auto &capacity : capacities) {
+        auto packages = Json::array();
+        for (const auto &usage : capacity.packages) {
+            packages.push_back({{"packageIndex", usage.package_index},
+                                {"effectiveObjectRecordSlots", usage.effective_object_record_slots},
+                                {"volumeScaffoldingRecordSlots", usage.volume_scaffolding_record_slots},
+                                {"standaloneRequiredRecordSlots", usage.standalone_required_record_slots},
+                                {"plannedObjectRecordSlots", usage.planned_object_record_slots},
+                                {"plannedRecordSlots", usage.planned_record_slots},
+                                {"reusedObjectCount", usage.reused_object_count},
+                                {"allocatedRecordSlots", usage.allocated_record_slots},
+                                {"shortfallRecordSlots", usage.shortfall_record_slots}});
+        }
+        result.push_back({{"partitionIndex", capacity.partition_index},
+                          {"indexBlockCount", capacity.index_block_count},
+                          {"recordsPerIndexBlock", capacity.records_per_index_block},
+                          {"totalRecordSlots", capacity.total_record_slots},
+                          {"reservedRecordSlots", capacity.reserved_record_slots},
+                          {"allocatableRecordSlots", capacity.allocatable_record_slots},
+                          {"usedRecordSlots", capacity.used_record_slots},
+                          {"freeRecordSlots", capacity.free_record_slots},
+                          {"requiredRecordSlots", capacity.required_record_slots},
+                          {"allocatedRecordSlots", capacity.allocated_record_slots},
+                          {"shortfallRecordSlots", capacity.shortfall_record_slots},
+                          {"remainingRecordSlots", capacity.remaining_record_slots},
+                          {"packages", std::move(packages)}});
+    }
+    return result;
+}
+
 Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::uint64_t expires_in_seconds) {
     auto warnings = Json::array();
     for (const auto &warning : plan.warnings) {
@@ -529,7 +561,8 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
             {"opaqueSequences", std::move(opaque_sequences)},
             {"programAssignmentAdjustments", program_assignment_adjustments_json(plan.program_assignment_adjustments)},
             {"programSlotPlacements", program_slot_placements_json(plan.program_slot_placements)},
-            {"allocation", std::move(allocation)}};
+            {"allocation", std::move(allocation)},
+            {"sfsIndexCapacity", sfs_index_capacity_json(plan.sfs_index_capacity)}};
 }
 
 void cleanup_session_plans(SessionPackageOperationState &state, Clock::time_point now) {
@@ -588,18 +621,19 @@ axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(c
 
 Json session_import_result(const SessionPackagePlanRecord &record, const axk::app::ImageSessionSummary &summary,
                            bool applied) {
-    auto result = plan_json(record.plan, record.token, 0U);
-    result.erase("planToken");
-    result.erase("expiresInSeconds");
-    result.erase("valid");
-    result.erase("warnings");
-    result.erase("conflicts");
-    result.erase("opaqueSequences");
-    result["imageId"] = record.image_id;
-    result["revision"] = summary.revision;
-    result["objectCount"] = summary.object_count;
-    result["applied"] = applied;
-    return result;
+    const auto plan = plan_json(record.plan, record.token, 0U);
+    return {{"schemaVersion", plan.at("schemaVersion")},
+            {"planId", plan.at("planId")},
+            {"targetKind", plan.at("targetKind")},
+            {"targetSnapshotId", plan.at("targetSnapshotId")},
+            {"actions", plan.at("actions")},
+            {"programAssignmentAdjustments", plan.at("programAssignmentAdjustments")},
+            {"programSlotPlacements", plan.at("programSlotPlacements")},
+            {"allocation", plan.at("allocation")},
+            {"imageId", record.image_id},
+            {"revision", summary.revision},
+            {"objectCount", summary.object_count},
+            {"applied", applied}};
 }
 
 axk::app::Result<Json> read_operation(const Json &input, const axk::app::OperationContext &context,

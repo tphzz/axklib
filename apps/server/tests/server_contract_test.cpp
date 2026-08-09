@@ -495,6 +495,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"programAssignmentAdjustments", adjustments},
         {"programSlotPlacements", placements},
         {"allocation", nlohmann::json::array()},
+        {"sfsIndexCapacity", nlohmann::json::array()},
     };
     const auto wire_plan = validator.wire_value("PackageImportPlan", application_plan);
     ASSERT_TRUE(validator.validate("PackageImportPlan", wire_plan));
@@ -523,6 +524,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     application_session_result.erase("warnings");
     application_session_result.erase("opaqueSequences");
     application_session_result.erase("conflicts");
+    application_session_result.erase("sfsIndexCapacity");
     application_session_result["imageId"] = "image-1";
     application_session_result["revision"] = 2U;
     application_session_result["objectCount"] = 4U;
@@ -530,6 +532,9 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     const auto wire_session_result =
         validator.wire_value("ImageSessionPackageImportResult", application_session_result);
     EXPECT_TRUE(validator.validate("ImageSessionPackageImportResult", wire_session_result));
+    auto invalid_session_result = wire_session_result;
+    invalid_session_result["sfsIndexCapacity"] = nlohmann::json::array();
+    EXPECT_FALSE(validator.validate("ImageSessionPackageImportResult", invalid_session_result));
 
     auto invalid_result = wire_result;
     invalid_result.at("programAssignmentAdjustments").at(0)["unexpected"] = true;

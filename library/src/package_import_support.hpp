@@ -49,6 +49,12 @@ struct Candidate {
 
 struct PartitionCapacity {
     const Partition *partition{};
+    std::uint64_t index_block_count{};
+    std::uint64_t records_per_index_block{14U};
+    std::uint64_t total_record_slots{};
+    std::uint64_t reserved_record_slots{};
+    std::uint64_t allocatable_record_slots{};
+    std::uint64_t used_record_slots{};
     std::vector<std::uint32_t> free_ids;
     std::set<std::uint32_t> used_clusters;
     std::set<std::uint32_t> used_wave_data_reference_values;

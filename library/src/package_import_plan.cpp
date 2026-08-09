@@ -56,6 +56,45 @@ std::uint16_t slot_range_cardinality(std::span<const PackageProgramSlotRange> ra
     return static_cast<std::uint16_t>(result);
 }
 
+bool valid_sfs_index_capacity(const PackageImportPlan &plan) {
+    if (plan.target_kind != MediaKind::sfs)
+        return plan.sfs_index_capacity.empty();
+    std::set<std::uint8_t> partitions;
+    for (const auto &capacity : plan.sfs_index_capacity) {
+        std::set<std::size_t> package_indices;
+        std::uint64_t required{};
+        std::uint64_t allocated{};
+        std::uint64_t shortfall{};
+        for (const auto &usage : capacity.packages) {
+            if (usage.package_index >= plan.package_ids.size() ||
+                !package_indices.emplace(usage.package_index).second ||
+                usage.standalone_required_record_slots !=
+                    usage.effective_object_record_slots + usage.volume_scaffolding_record_slots ||
+                usage.planned_record_slots !=
+                    usage.planned_object_record_slots + usage.volume_scaffolding_record_slots ||
+                usage.planned_record_slots != usage.allocated_record_slots + usage.shortfall_record_slots ||
+                usage.planned_object_record_slots + usage.reused_object_count > usage.effective_object_record_slots) {
+                return false;
+            }
+            required += usage.planned_record_slots;
+            allocated += usage.allocated_record_slots;
+            shortfall += usage.shortfall_record_slots;
+        }
+        if (!partitions.emplace(capacity.partition_index).second || capacity.records_per_index_block != 14U ||
+            capacity.total_record_slots != capacity.index_block_count * capacity.records_per_index_block ||
+            capacity.reserved_record_slots > capacity.total_record_slots ||
+            capacity.allocatable_record_slots != capacity.total_record_slots - capacity.reserved_record_slots ||
+            capacity.used_record_slots + capacity.free_record_slots != capacity.allocatable_record_slots ||
+            required != capacity.required_record_slots || allocated != capacity.allocated_record_slots ||
+            shortfall != capacity.shortfall_record_slots || allocated > capacity.free_record_slots ||
+            capacity.remaining_record_slots != capacity.free_record_slots - allocated ||
+            capacity.required_record_slots != capacity.allocated_record_slots + capacity.shortfall_record_slots) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 namespace package_import_internal {
@@ -182,6 +221,31 @@ std::string plan_identity(const PackageImportPlan &plan) {
         append_integer(source, delta.projected_image_sectors);
         append_integer(source, delta.projected_image_size_bytes);
     }
+    for (const auto &capacity : plan.sfs_index_capacity) {
+        append_integer(source, capacity.partition_index);
+        append_integer(source, capacity.index_block_count);
+        append_integer(source, capacity.records_per_index_block);
+        append_integer(source, capacity.total_record_slots);
+        append_integer(source, capacity.reserved_record_slots);
+        append_integer(source, capacity.allocatable_record_slots);
+        append_integer(source, capacity.used_record_slots);
+        append_integer(source, capacity.free_record_slots);
+        append_integer(source, capacity.required_record_slots);
+        append_integer(source, capacity.allocated_record_slots);
+        append_integer(source, capacity.shortfall_record_slots);
+        append_integer(source, capacity.remaining_record_slots);
+        for (const auto &usage : capacity.packages) {
+            append_integer(source, usage.package_index);
+            append_integer(source, usage.effective_object_record_slots);
+            append_integer(source, usage.volume_scaffolding_record_slots);
+            append_integer(source, usage.standalone_required_record_slots);
+            append_integer(source, usage.planned_object_record_slots);
+            append_integer(source, usage.planned_record_slots);
+            append_integer(source, usage.reused_object_count);
+            append_integer(source, usage.allocated_record_slots);
+            append_integer(source, usage.shortfall_record_slots);
+        }
+    }
     for (const auto &warning : plan.warnings) {
         append_field(source, warning.code);
         append_field(source, warning.message);
@@ -233,6 +297,8 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
         !valid_digest(plan.plan_id)) {
         return std::unexpected{planner_error("package import plan identity fields are invalid")};
     }
+    if (!valid_sfs_index_capacity(plan))
+        return std::unexpected{planner_error("package import plan contains invalid SFS index capacity metadata")};
     if (std::ranges::any_of(plan.warnings, [&](const auto &warning) {
             return warning.code.empty() || warning.message.empty() ||
                    (warning.package_index && *warning.package_index >= plan.package_ids.size());
@@ -256,10 +322,15 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
         const auto has_infrastructure = !destination.infrastructure_sfs_ids.empty() ||
                                         destination.infrastructure_clusters != 0U ||
                                         destination.root_directory_growth_bytes != 0U;
+        const auto record_capacity_exhausted = std::ranges::any_of(plan.conflicts, [&](const auto &conflict) {
+            return conflict.code == "SFS_RECORD_CAPACITY_EXHAUSTED" && conflict.partition_index &&
+                   *conflict.partition_index == destination.partition_index;
+        });
         const auto valid_creation =
             !destination.create ||
             (plan.target_kind == MediaKind::sfs && destination.infrastructure_sfs_ids.size() == 6U &&
              destination.infrastructure_clusters == 12U && destination.root_directory_growth_bytes == 32U) ||
+            (plan.target_kind == MediaKind::sfs && !has_infrastructure && record_capacity_exhausted) ||
             (plan.target_kind == MediaKind::iso9660 && !has_infrastructure);
         if (destination.volume_name.empty() ||
             !destination_keys

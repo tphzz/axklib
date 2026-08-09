@@ -127,6 +127,7 @@ add_library(
   src/package_import_program_slots.cpp
   src/package_program_adjustment.cpp
   src/package_import_sfs.cpp
+  src/package_import_sfs_capacity.cpp
   src/package_import_support.cpp
   src/package_manifest.cpp
   src/package_object.cpp

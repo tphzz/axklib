@@ -387,6 +387,13 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     auto program_slots = import_plan->program_slot_placements();
     ASSERT_TRUE(program_slots) << program_slots.error().message;
     EXPECT_TRUE(program_slots->empty());
+    auto index_capacity = import_plan->sfs_index_capacity();
+    ASSERT_TRUE(index_capacity) << index_capacity.error().message;
+    ASSERT_EQ(index_capacity->size(), 1U);
+    EXPECT_EQ(index_capacity->front().records_per_index_block, 14U);
+    EXPECT_EQ(index_capacity->front().required_record_slots, 1U);
+    ASSERT_EQ(index_capacity->front().packages.size(), 1U);
+    EXPECT_EQ(index_capacity->front().packages.front().planned_object_record_slots, 1U);
 
     const std::string invalid_import_path = root.string() + "/invalid-\xc3\x28";
     const auto invalid_apply = import_plan->apply(invalid_import_path, {}, context);

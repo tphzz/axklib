@@ -2,6 +2,7 @@
 
 #include "package_import_opaque_sequences.hpp"
 #include "package_import_program_slots.hpp"
+#include "package_import_sfs_capacity.hpp"
 
 #include <algorithm>
 #include <format>
@@ -103,6 +104,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
 
     std::vector<Candidate> candidates;
     std::map<DestinationKey, bool> destination_creation;
+    std::map<DestinationKey, std::size_t> destination_packages;
     for (const auto &[key, destination] : destinations) {
         const auto &[package_index, root_index] = key;
         const auto &package = packages[package_index];
@@ -132,6 +134,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         }
         const auto [creation, inserted] =
             destination_creation.emplace(destination_key, destination->create_destination);
+        destination_packages.try_emplace(destination_key, package_index);
         if (!inserted && creation->second != destination->create_destination) {
             add_conflict(plan, "SFS_DESTINATION_POLICY_CONFLICT",
                          "package roots disagree about destination volume creation", destination, &package);
@@ -182,6 +185,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
 
     std::map<std::pair<std::uint8_t, std::uint32_t>, ClusterReservation> infrastructure_layouts;
     std::map<std::uint8_t, std::size_t> new_volume_counts;
+    SfsRecordCapacityPlanner record_capacity;
     for (const auto &[key, create] : destination_creation) {
         PlannedPackageDestination planned;
         planned.partition_index = key.first;
@@ -189,34 +193,31 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         planned.create = create;
         if (create) {
             auto capacity = capacities.find(key.first);
+            const auto package_index = destination_packages.at(key);
             if (capacity == capacities.end()) {
                 add_conflict(plan, "SFS_DESTINATION_PARTITION_MISSING", "SFS destination partition does not exist");
-            } else if (capacity->second.free_ids.size() - capacity->second.next_id < 6U) {
-                add_conflict(plan, "SFS_OBJECT_ID_EXHAUSTED",
-                             "partition lacks six SFS records for destination "
-                             "volume scaffolding");
             } else {
-                for (std::size_t index = 0; index < 6U; ++index) {
-                    planned.infrastructure_sfs_ids.push_back(capacity->second.free_ids[capacity->second.next_id++]);
-                }
-                bool cluster_failure{};
-                for (std::size_t index = 0; index < planned.infrastructure_sfs_ids.size(); ++index) {
-                    const auto reserved = reserve_clusters(capacity->second, 2U);
-                    if (!reserved) {
-                        cluster_failure = true;
-                        break;
+                record_capacity.observe_destination(capacity->second, package_index);
+                if (record_capacity.allocate_destination(capacity->second, planned, package_index)) {
+                    bool cluster_failure{};
+                    for (std::size_t index = 0; index < planned.infrastructure_sfs_ids.size(); ++index) {
+                        const auto reserved = reserve_clusters(capacity->second, 2U);
+                        if (!reserved) {
+                            cluster_failure = true;
+                            break;
+                        }
+                        planned.infrastructure_clusters += reserved->payload_clusters + reserved->continuation_clusters;
+                        infrastructure_layouts.emplace(
+                            std::pair{planned.partition_index, planned.infrastructure_sfs_ids[index]}, *reserved);
                     }
-                    planned.infrastructure_clusters += reserved->payload_clusters + reserved->continuation_clusters;
-                    infrastructure_layouts.emplace(
-                        std::pair{planned.partition_index, planned.infrastructure_sfs_ids[index]}, *reserved);
+                    if (cluster_failure) {
+                        add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
+                                     "partition lacks clusters for destination "
+                                     "volume scaffolding");
+                    }
+                    planned.root_directory_growth_bytes = 32U;
+                    ++new_volume_counts[key.first];
                 }
-                if (cluster_failure) {
-                    add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                                 "partition lacks clusters for destination "
-                                 "volume scaffolding");
-                }
-                planned.root_directory_growth_bytes = 32U;
-                ++new_volume_counts[key.first];
             }
         }
         plan.destinations.push_back(std::move(planned));
@@ -350,6 +351,8 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         }
         plan.objects.push_back(std::move(object));
     }
+    for (const auto &object : plan.objects)
+        record_capacity.observe_object(capacities.at(object.partition_index), object);
 
     using CategoryKey = std::tuple<std::uint8_t, std::string, std::string>;
     std::map<CategoryKey, std::vector<std::size_t>> category_insertions;
@@ -360,21 +363,10 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             continue;
         }
         auto &capacity = capacities.at(object.partition_index);
-        if (capacity.next_id >= capacity.free_ids.size()) {
+        if (!record_capacity.allocate_object(capacity, object)) {
             mark_conflict(object);
-            add_conflict(plan, "SFS_OBJECT_ID_EXHAUSTED",
-                         "partition has no free SFS object record for the "
-                         "planned import");
-            auto &conflict = plan.conflicts.back();
-            conflict.package_index = object.package_index;
-            conflict.root_index = object.root_index;
-            conflict.package_id = object.package_id;
-            conflict.node_id = object.node_id;
-            conflict.partition_index = object.partition_index;
-            conflict.volume_name = object.volume_name;
             continue;
         }
-        object.target_sfs_id = capacity.free_ids[capacity.next_id++];
         if (object.object_type == "SMPL") {
             while (capacity.used_wave_data_reference_values.contains(capacity.next_wave_data_reference_value))
                 capacity.next_wave_data_reference_value += 0x100U;
@@ -384,6 +376,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         }
         category_insertions[{object.partition_index, object.volume_name, object.object_type}].push_back(index);
     }
+    record_capacity.finalize(plan);
 
     std::map<DestinationKey, std::pair<std::uint64_t, std::uint64_t>> directory_allocations;
     for (const auto &[key, indices] : category_insertions) {

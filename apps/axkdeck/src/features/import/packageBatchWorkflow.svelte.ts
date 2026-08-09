@@ -18,6 +18,8 @@ const volumePackageExtensions = new Set(['axkvol']);
 const maximumBatchPackages = 256;
 
 export interface BatchPackageItem {
+    id: string;
+    selected: boolean;
     source: InputFileLocation;
     sourceName: string;
     inspection: PackageInspection;
@@ -29,7 +31,7 @@ export interface PackageBatchImportRequest {
     partition: DiskTreeItem;
     items: BatchPackageItem[];
     plan: ImageSessionPackageImportPlan | null;
-    volumeNames: Record<number, string>;
+    volumeNames: Record<string, string>;
     opaqueSequenceActions: Record<string, PackageOpaqueSequenceDecision['action']>;
     hasUnvalidatedChanges: boolean;
     status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
@@ -55,6 +57,7 @@ export class PackageBatchImportWorkflow {
     request = $state<PackageBatchImportRequest | null>(null);
     private generation = 0;
     private abortController: AbortController | null = null;
+    private plannedItemIds: string[] = [];
 
     constructor(private readonly dependencies: PackageBatchImportDependencies) {}
 
@@ -62,6 +65,7 @@ export class PackageBatchImportWorkflow {
         ++this.generation;
         this.abortController?.abort();
         this.abortController = null;
+        this.plannedItemIds = [];
         this.request = {
             partition,
             items: [],
@@ -77,20 +81,45 @@ export class PackageBatchImportWorkflow {
         };
     }
 
-    renameVolume(packageIndex: number, name: string): void {
+    renameVolume(itemId: string, name: string): void {
         if (!this.request || this.request.status !== 'ready') return;
-        const current = this.destinationName(packageIndex);
+        const current = this.destinationName(itemId);
         if (current === name) return;
         this.request = {
             ...this.request,
-            volumeNames: { ...this.request.volumeNames, [packageIndex]: name },
+            volumeNames: { ...this.request.volumeNames, [itemId]: name },
             hasUnvalidatedChanges: true,
         };
     }
 
-    opaqueSequenceAction(packageIndex: number, nodeId: string, action: PackageOpaqueSequenceDecision['action']): void {
+    setSelected(itemId: string, selected: boolean): void {
         if (!this.request || this.request.status !== 'ready') return;
-        const key = this.opaqueSequenceKey(packageIndex, nodeId);
+        const item = this.request.items.find((candidate) => candidate.id === itemId);
+        if (!item || item.selected === selected) return;
+        this.request = {
+            ...this.request,
+            items: this.request.items.map((candidate) =>
+                candidate.id === itemId ? { ...candidate, selected } : candidate,
+            ),
+            hasUnvalidatedChanges: true,
+            error: '',
+        };
+    }
+
+    setAllSelected(selected: boolean): void {
+        if (!this.request || this.request.status !== 'ready') return;
+        if (this.request.items.every((item) => item.selected === selected)) return;
+        this.request = {
+            ...this.request,
+            items: this.request.items.map((item) => ({ ...item, selected })),
+            hasUnvalidatedChanges: true,
+            error: '',
+        };
+    }
+
+    opaqueSequenceAction(itemId: string, nodeId: string, action: PackageOpaqueSequenceDecision['action']): void {
+        if (!this.request || this.request.status !== 'ready') return;
+        const key = this.opaqueSequenceKey(itemId, nodeId);
         if (this.request.opaqueSequenceActions[key] === action) return;
         this.request = {
             ...this.request,
@@ -100,10 +129,20 @@ export class PackageBatchImportWorkflow {
         void this.replan();
     }
 
-    destinationName(packageIndex: number): string {
+    destinationName(itemId: string): string {
+        const request = this.request;
+        if (!request) return '';
+        const item = request.items.find((candidate) => candidate.id === itemId);
+        if (!item) return '';
+        const selectedItems = request.items.filter((candidate) => candidate.selected);
+        const packageIndex = selectedItems.findIndex((candidate) => candidate.id === itemId);
         return (
-            this.request?.volumeNames[packageIndex] ??
-            this.request?.plan?.packages.find((item) => item.packageIndex === packageIndex)?.destinationVolumeName ??
+            request.volumeNames[itemId] ??
+            (!request.hasUnvalidatedChanges && packageIndex >= 0
+                ? request.plan?.packages.find((candidate) => candidate.packageIndex === packageIndex)
+                      ?.destinationVolumeName
+                : undefined) ??
+            item.inspection.roots[0]?.displayName ??
             ''
         );
     }
@@ -194,54 +233,64 @@ export class PackageBatchImportWorkflow {
         }
     }
 
-    async remove(packageIndex: number): Promise<void> {
-        const request = this.request;
-        if (!request || request.status === 'applying' || !request.items[packageIndex]) return;
-        const removed = request.items[packageIndex];
-        ++this.generation;
-        await this.releasePlan(request.plan);
-        await this.releaseUpload(removed.upload);
-        const items = request.items.filter((_, index) => index !== packageIndex);
-        this.request = {
-            ...request,
-            items,
-            plan: null,
-            volumeNames: {},
-            opaqueSequenceActions: {},
-            hasUnvalidatedChanges: false,
-            status: items.length ? 'planning' : 'choosing',
-            error: '',
-        };
-        if (items.length) await this.plan(++this.generation);
-    }
-
     async replan(): Promise<void> {
-        if (!this.request?.items.length || this.request.status === 'applying') return;
-        await this.plan(++this.generation, this.request.plan?.planToken);
+        const request = this.request;
+        if (!request?.items.some((item) => item.selected) || request.status === 'applying') return;
+        const selectedItemIds = request.items.filter((item) => item.selected).map((item) => item.id);
+        const canReplacePlan =
+            request.plan !== null &&
+            selectedItemIds.length === this.plannedItemIds.length &&
+            selectedItemIds.every((itemId, index) => itemId === this.plannedItemIds[index]);
+        const generation = ++this.generation;
+        if (!canReplacePlan && request.plan) {
+            this.request = { ...request, status: 'planning', error: '' };
+            await this.releasePlan(request.plan);
+            if (generation !== this.generation || !this.request) return;
+            this.request = { ...this.request, plan: null };
+            this.plannedItemIds = [];
+        }
+        await this.plan(generation, canReplacePlan ? request.plan?.planToken : undefined);
     }
 
     async apply(): Promise<void> {
         const request = this.request;
+        const selectedItems = request?.items.filter((item) => item.selected) ?? [];
         const sessionId = this.dependencies.sessionId();
         if (
             !request?.plan?.valid ||
             request.hasUnvalidatedChanges ||
+            selectedItems.length === 0 ||
             sessionId === null ||
             request.partition.partitionIndex === undefined
         ) {
             return;
         }
         const generation = ++this.generation;
+        let jobStarted = false;
         this.request = { ...request, status: 'applying', error: '' };
-        this.dependencies.setStatus(`Importing ${request.items.length} volume packages`);
+        this.dependencies.setStatus(`Importing ${selectedItems.length} volume packages`);
         try {
             await this.dependencies.invalidateSession(sessionId);
             const completed = await this.dependencies.jobs.run(
                 () => this.dependencies.transport.startImagePackageImport(request.plan!.planToken),
                 (update) => update.progress?.label && this.dependencies.setStatus(update.progress.label),
+                () => {
+                    jobStarted = true;
+                },
             );
-            if (completed.status !== 'completed') throw new Error(completed.error ?? 'Package import did not complete');
-            const last = request.items.at(-1);
+            if (completed.status !== 'completed') {
+                if (this.isStalePlanError(completed.errorCode)) {
+                    await this.recoverStalePlan(request, generation);
+                    return;
+                }
+                const message = completed.error ?? 'Package import did not complete';
+                this.dependencies.setStatus(message);
+                if (generation === this.generation && this.request) {
+                    this.request = { ...this.request, status: 'ready', error: message };
+                }
+                return;
+            }
+            const last = selectedItems.at(-1);
             if (last?.source.kind === 'server-file') {
                 this.dependencies.pickerHistory.lastImportedWorkspaceFile = last.source.reference;
             } else if (last?.localPath) {
@@ -253,13 +302,65 @@ export class PackageBatchImportWorkflow {
                 partitionIndex: request.partition.partitionIndex,
                 volumeName: request.plan.packages[0]?.destinationVolumeName,
             });
-            this.dependencies.setStatus(`Imported ${request.items.length} volume packages`);
+            this.dependencies.setStatus(`Imported ${selectedItems.length} volume packages`);
         } catch (error) {
+            if (jobStarted) {
+                await this.recoverUncertainApply(request, generation);
+                return;
+            }
             const message = userFacingMessage(error);
             this.dependencies.setStatus(message);
             if (generation === this.generation && this.request) {
                 this.request = { ...this.request, status: 'ready', error: message };
             }
+        }
+    }
+
+    private isStalePlanError(errorCode: string | undefined): boolean {
+        return errorCode === 'image_revision_stale' || errorCode === 'package_plan_stale';
+    }
+
+    private async recoverStalePlan(request: PackageBatchImportRequest, generation: number): Promise<void> {
+        if (generation !== this.generation || !this.request) return;
+        this.request = {
+            ...request,
+            plan: null,
+            hasUnvalidatedChanges: true,
+            status: 'planning',
+            error: '',
+        };
+        this.plannedItemIds = [];
+        await this.releasePlan(request.plan);
+        try {
+            await this.dependencies.refreshSession({ partitionIndex: request.partition.partitionIndex! });
+            if (generation !== this.generation || !this.request) return;
+            await this.plan(generation);
+            if (generation === this.generation && this.request?.status === 'ready' && this.request.plan) {
+                this.dependencies.setStatus('Image changed; import conflicts checked again');
+            }
+        } catch (error) {
+            if (generation !== this.generation || !this.request) return;
+            const message = userFacingMessage(error);
+            this.request = { ...this.request, status: 'ready', error: message };
+            this.dependencies.setStatus(message);
+        }
+    }
+
+    private async recoverUncertainApply(request: PackageBatchImportRequest, generation: number): Promise<void> {
+        if (generation !== this.generation) return;
+        this.request = null;
+        this.plannedItemIds = [];
+        await Promise.all(request.items.map((item) => this.releaseUpload(item.upload)));
+        const message = 'Import completion could not be confirmed; review the refreshed image before retrying';
+        try {
+            await this.dependencies.refreshSession({
+                partitionIndex: request.partition.partitionIndex!,
+                volumeName: request.plan?.packages[0]?.destinationVolumeName,
+            });
+            this.dependencies.setStatus(message);
+        } catch (error) {
+            reportError('Refresh after uncertain package import failed', error);
+            this.dependencies.setStatus(`${message}. Refresh failed: ${userFacingMessage(error)}`);
         }
     }
 
@@ -271,6 +372,7 @@ export class PackageBatchImportWorkflow {
         this.abortController?.abort();
         this.abortController = null;
         if (!request) return;
+        this.plannedItemIds = [];
         await this.releasePlan(request.plan);
         await Promise.all(request.items.map((item) => this.releaseUpload(item.upload)));
     }
@@ -288,6 +390,7 @@ export class PackageBatchImportWorkflow {
         const previous = this.request;
         await this.releasePlan(previous.plan);
         await Promise.all(previous.items.map((item) => this.releaseUpload(item.upload)));
+        this.plannedItemIds = [];
         const generation = existingGeneration ?? ++this.generation;
         this.request = {
             ...previous,
@@ -307,7 +410,7 @@ export class PackageBatchImportWorkflow {
             for (const [index, source] of sources.entries()) {
                 const inspection = await this.dependencies.transport.inspectPackage(source.source, false);
                 this.validateInspection(source.sourceName, inspection);
-                items.push({ ...source, inspection });
+                items.push({ ...source, id: `batch-${generation}-${index}`, selected: true, inspection });
                 if (generation !== this.generation || !this.request) {
                     await Promise.all(sources.map((item) => this.releaseUpload(item.upload)));
                     return;
@@ -339,22 +442,25 @@ export class PackageBatchImportWorkflow {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         const partitionIndex = request?.partition.partitionIndex;
-        if (!request?.items.length || sessionId === null || partitionIndex === undefined) return;
+        const selectedItems = request?.items.filter((item) => item.selected) ?? [];
+        if (!request || selectedItems.length === 0 || sessionId === null || partitionIndex === undefined) return;
         this.request = { ...request, status: 'planning', error: '' };
         try {
-            const volumeNameOverrides = Object.entries(request.volumeNames)
-                .map(([packageIndex, volumeName]) => ({
-                    packageIndex: Number(packageIndex),
-                    volumeName: volumeName.trim(),
+            const volumeNameOverrides = selectedItems
+                .map((item, packageIndex) => ({
+                    packageIndex,
+                    volumeName: request.volumeNames[item.id]?.trim() ?? '',
                 }))
                 .filter((item) => item.volumeName.length > 0);
-            const opaqueSequenceDecisions = Object.entries(request.opaqueSequenceActions).map(([key, action]) => {
-                const separator = key.indexOf(':');
-                return { packageIndex: Number(key.slice(0, separator)), nodeId: key.slice(separator + 1), action };
+            const opaqueSequenceDecisions = selectedItems.flatMap((item, packageIndex) => {
+                const prefix = `${item.id}:`;
+                return Object.entries(request.opaqueSequenceActions)
+                    .filter(([key]) => key.startsWith(prefix))
+                    .map(([key, action]) => ({ packageIndex, nodeId: key.slice(prefix.length), action }));
             });
             const plan = await this.dependencies.transport.planImagePackageImport(
                 sessionId,
-                request.items.map((item) => item.source),
+                selectedItems.map((item) => item.source),
                 { kind: 'CREATE_VOLUMES_FROM_HINTS', partitionIndex, volumeNameOverrides },
                 [],
                 [],
@@ -368,16 +474,27 @@ export class PackageBatchImportWorkflow {
             this.request = {
                 ...this.request,
                 plan,
-                volumeNames: Object.fromEntries(
-                    plan.packages.map((item) => [
-                        item.packageIndex,
-                        request.volumeNames[item.packageIndex] ?? item.destinationVolumeName,
-                    ]),
-                ),
+                volumeNames: {
+                    ...request.volumeNames,
+                    ...Object.fromEntries(
+                        plan.packages.flatMap((item) => {
+                            const selectedItem = selectedItems[item.packageIndex];
+                            return selectedItem
+                                ? [
+                                      [
+                                          selectedItem.id,
+                                          request.volumeNames[selectedItem.id] ?? item.destinationVolumeName,
+                                      ],
+                                  ]
+                                : [];
+                        }),
+                    ),
+                },
                 hasUnvalidatedChanges: false,
                 status: 'ready',
                 error: '',
             };
+            this.plannedItemIds = selectedItems.map((item) => item.id);
         } catch (error) {
             if (generation === this.generation && this.request) {
                 this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
@@ -385,8 +502,8 @@ export class PackageBatchImportWorkflow {
         }
     }
 
-    private opaqueSequenceKey(packageIndex: number, nodeId: string): string {
-        return `${packageIndex}:${nodeId}`;
+    private opaqueSequenceKey(itemId: string, nodeId: string): string {
+        return `${itemId}:${nodeId}`;
     }
 
     private async releasePlan(plan: ImageSessionPackageImportPlan | null): Promise<void> {

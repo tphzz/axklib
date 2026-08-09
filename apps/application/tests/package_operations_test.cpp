@@ -563,6 +563,14 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
     EXPECT_EQ(planned->at("packages").at(0).at("objectCounts").at("sampleBanks"), 2U);
     EXPECT_EQ(planned->at("packages").at(0).at("objectCounts").at("samples"), 4U);
     EXPECT_EQ(planned->at("packages").at(0).at("objectCounts").at("waveData"), 1U);
+    ASSERT_EQ(planned->at("sfsIndexCapacity").size(), 1U);
+    const auto &capacity = planned->at("sfsIndexCapacity").front();
+    EXPECT_EQ(capacity.at("recordsPerIndexBlock"), 14U);
+    EXPECT_EQ(capacity.at("requiredRecordSlots"), capacity.at("allocatedRecordSlots"));
+    EXPECT_EQ(capacity.at("shortfallRecordSlots"), 0U);
+    ASSERT_EQ(capacity.at("packages").size(), 2U);
+    EXPECT_EQ(capacity.at("packages").at(0).at("volumeScaffoldingRecordSlots"), 6U);
+    EXPECT_EQ(capacity.at("packages").at(1).at("volumeScaffoldingRecordSlots"), 6U);
 
     auto replacement_request = request;
     replacement_request["replacePlanToken"] = planned->at("planToken");
@@ -581,6 +589,8 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
                                           {{"planToken", replanned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ(applied->at("revision"), opened->revision + 1U);
+    EXPECT_EQ(applied->size(), 12U);
+    EXPECT_FALSE(applied->contains("sfsIndexCapacity"));
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_FALSE(volume_content_id(*refreshed, "Mixed").empty());

@@ -332,9 +332,11 @@ Result<std::string> projected_normalized_sha256(const PortablePackage &package, 
 PartitionCapacity partition_capacity(const Partition &partition, const ObjectCatalog &catalog) {
     PartitionCapacity result;
     result.partition = &partition;
-    const auto capacity = (static_cast<std::uint64_t>(partition.directory_index_span_clusters) *
-                           partition.sectors_per_cluster * 512U / 1024U) *
-                          14U;
+    result.index_block_count = static_cast<std::uint64_t>(partition.directory_index_span_clusters) *
+                               partition.sectors_per_cluster * 512U / 1024U;
+    result.total_record_slots = result.index_block_count * result.records_per_index_block;
+    result.reserved_record_slots = std::min<std::uint64_t>(3U, result.total_record_slots);
+    result.allocatable_record_slots = result.total_record_slots - result.reserved_record_slots;
     std::set<std::uint32_t> used_ids;
     for (const auto &record : partition.records) {
         used_ids.insert(record.sfs_id.value);
@@ -346,10 +348,11 @@ PartitionCapacity partition_capacity(const Partition &partition, const ObjectCat
         }
         result.used_clusters.insert(record.continuation_clusters.begin(), record.continuation_clusters.end());
     }
-    for (std::uint32_t id = 3U; id < capacity; ++id) {
+    for (std::uint32_t id = 3U; id < result.total_record_slots; ++id) {
         if (!used_ids.contains(id))
             result.free_ids.push_back(id);
     }
+    result.used_record_slots = result.allocatable_record_slots - result.free_ids.size();
     for (const auto &object : catalog.objects) {
         if (object.partition != partition.index)
             continue;
@@ -365,9 +368,11 @@ PartitionCapacity partition_capacity(const Partition &partition,
                                      std::span<const ObjectSnapshot *const> catalog_objects) {
     PartitionCapacity result;
     result.partition = &partition;
-    const auto capacity = (static_cast<std::uint64_t>(partition.directory_index_span_clusters) *
-                           partition.sectors_per_cluster * 512U / 1024U) *
-                          14U;
+    result.index_block_count = static_cast<std::uint64_t>(partition.directory_index_span_clusters) *
+                               partition.sectors_per_cluster * 512U / 1024U;
+    result.total_record_slots = result.index_block_count * result.records_per_index_block;
+    result.reserved_record_slots = std::min<std::uint64_t>(3U, result.total_record_slots);
+    result.allocatable_record_slots = result.total_record_slots - result.reserved_record_slots;
     std::set<std::uint32_t> used_ids;
     for (const auto &record : partition.records) {
         used_ids.insert(record.sfs_id.value);
@@ -379,10 +384,11 @@ PartitionCapacity partition_capacity(const Partition &partition,
         }
         result.used_clusters.insert(record.continuation_clusters.begin(), record.continuation_clusters.end());
     }
-    for (std::uint32_t id = 3U; id < capacity; ++id) {
+    for (std::uint32_t id = 3U; id < result.total_record_slots; ++id) {
         if (!used_ids.contains(id))
             result.free_ids.push_back(id);
     }
+    result.used_record_slots = result.allocatable_record_slots - result.free_ids.size();
     for (const auto *object : catalog_objects) {
         if (object == nullptr || object->partition != partition.index)
             continue;

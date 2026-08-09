@@ -136,6 +136,7 @@ function plan(valid = true): ImageSessionPackageImportPlan {
                 projectedImageSizeBytes: 0,
             },
         ],
+        sfsIndexCapacity: [],
     };
 }
 

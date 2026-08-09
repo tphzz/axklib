@@ -287,10 +287,11 @@
         error={packageBatchImport.request.error}
         onchooseworkspace={() => void packageBatchImport.chooseWorkspace()}
         onchooselocal={() => void packageBatchImport.chooseLocal()}
-        onrename={(packageIndex, name) => packageBatchImport.renameVolume(packageIndex, name)}
-        onremove={(packageIndex) => void packageBatchImport.remove(packageIndex)}
-        onopaquesequenceaction={(packageIndex, nodeId, action) =>
-            packageBatchImport.opaqueSequenceAction(packageIndex, nodeId, action)}
+        onrename={(itemId, name) => packageBatchImport.renameVolume(itemId, name)}
+        ontoggleselected={(itemId, selected) => packageBatchImport.setSelected(itemId, selected)}
+        ontoggleall={(selected) => packageBatchImport.setAllSelected(selected)}
+        onopaquesequenceaction={(itemId, nodeId, action) =>
+            packageBatchImport.opaqueSequenceAction(itemId, nodeId, action)}
         onreplan={() => void packageBatchImport.replan()}
         oncancel={() => void packageBatchImport.close()}
         onconfirm={() => void packageBatchImport.apply()}

@@ -377,6 +377,38 @@ struct PackageAllocationDelta {
     friend bool operator==(const PackageAllocationDelta &, const PackageAllocationDelta &) = default;
 };
 
+struct PackageSfsRecordUsage {
+    std::size_t package_index{};
+    std::uint64_t effective_object_record_slots{};
+    std::uint64_t volume_scaffolding_record_slots{};
+    std::uint64_t standalone_required_record_slots{};
+    std::uint64_t planned_object_record_slots{};
+    std::uint64_t planned_record_slots{};
+    std::uint64_t reused_object_count{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+
+    friend bool operator==(const PackageSfsRecordUsage &, const PackageSfsRecordUsage &) = default;
+};
+
+struct SfsIndexCapacityEstimate {
+    std::uint8_t partition_index{};
+    std::uint64_t index_block_count{};
+    std::uint64_t records_per_index_block{};
+    std::uint64_t total_record_slots{};
+    std::uint64_t reserved_record_slots{};
+    std::uint64_t allocatable_record_slots{};
+    std::uint64_t used_record_slots{};
+    std::uint64_t free_record_slots{};
+    std::uint64_t required_record_slots{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+    std::uint64_t remaining_record_slots{};
+    std::vector<PackageSfsRecordUsage> packages;
+
+    friend bool operator==(const SfsIndexCapacityEstimate &, const SfsIndexCapacityEstimate &) = default;
+};
+
 struct PlannedPackageDestination {
     std::uint8_t partition_index{};
     std::string group_name;
@@ -406,6 +438,7 @@ struct PackageImportPlan {
     std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
     std::vector<PackageProgramSlotPlacement> program_slot_placements;
     std::vector<PackageAllocationDelta> allocation;
+    std::vector<SfsIndexCapacityEstimate> sfs_index_capacity;
     std::vector<PackageImportConflict> conflicts;
 
     [[nodiscard]] bool valid() const noexcept { return conflicts.empty(); }

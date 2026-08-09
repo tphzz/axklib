@@ -358,6 +358,34 @@ struct package_allocation_info {
     std::uint64_t projected_image_size_bytes{};
 };
 
+struct package_sfs_record_usage_info {
+    std::uint64_t package_index{};
+    std::uint64_t effective_object_record_slots{};
+    std::uint64_t volume_scaffolding_record_slots{};
+    std::uint64_t standalone_required_record_slots{};
+    std::uint64_t planned_object_record_slots{};
+    std::uint64_t planned_record_slots{};
+    std::uint64_t reused_object_count{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+};
+
+struct sfs_index_capacity_info {
+    std::uint32_t partition_index{};
+    std::uint64_t index_block_count{};
+    std::uint64_t records_per_index_block{};
+    std::uint64_t total_record_slots{};
+    std::uint64_t reserved_record_slots{};
+    std::uint64_t allocatable_record_slots{};
+    std::uint64_t used_record_slots{};
+    std::uint64_t free_record_slots{};
+    std::uint64_t required_record_slots{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+    std::uint64_t remaining_record_slots{};
+    std::vector<package_sfs_record_usage_info> packages;
+};
+
 struct package_import_summary {
     std::string schema_version;
     std::string plan_id;
@@ -461,6 +489,7 @@ class AXK_SDK_API package_import_plan final {
     result<std::vector<package_program_assignment_adjustment_info>> adjustments() const;
     result<std::vector<package_program_slot_placement_info>> program_slot_placements() const;
     result<std::vector<package_allocation_info>> allocation() const;
+    result<std::vector<sfs_index_capacity_info>> sfs_index_capacity() const;
     result<package_import_result> apply(const std::string &utf8_output_path, const write_options &options,
                                         operation_context &context);
 

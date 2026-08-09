@@ -220,6 +220,39 @@ package_allocation_info public_package_allocation(const PackageAllocationDelta &
     };
 }
 
+sfs_index_capacity_info public_sfs_index_capacity(const SfsIndexCapacityEstimate &capacity) {
+    sfs_index_capacity_info result{
+        capacity.partition_index,
+        capacity.index_block_count,
+        capacity.records_per_index_block,
+        capacity.total_record_slots,
+        capacity.reserved_record_slots,
+        capacity.allocatable_record_slots,
+        capacity.used_record_slots,
+        capacity.free_record_slots,
+        capacity.required_record_slots,
+        capacity.allocated_record_slots,
+        capacity.shortfall_record_slots,
+        capacity.remaining_record_slots,
+        {},
+    };
+    result.packages.reserve(capacity.packages.size());
+    std::ranges::transform(capacity.packages, std::back_inserter(result.packages), [](const auto &usage) {
+        return package_sfs_record_usage_info{
+            usage.package_index,
+            usage.effective_object_record_slots,
+            usage.volume_scaffolding_record_slots,
+            usage.standalone_required_record_slots,
+            usage.planned_object_record_slots,
+            usage.planned_record_slots,
+            usage.reused_object_count,
+            usage.allocated_record_slots,
+            usage.shortfall_record_slots,
+        };
+    });
+    return result;
+}
+
 } // namespace
 
 struct portable_package::impl {
@@ -534,6 +567,18 @@ result<std::vector<package_allocation_info>> package_import_plan::allocation() c
         std::vector<package_allocation_info> result_value;
         result_value.reserve(impl_->plan.allocation.size());
         std::ranges::transform(impl_->plan.allocation, std::back_inserter(result_value), public_package_allocation);
+        return result_value;
+    });
+}
+
+result<std::vector<sfs_index_capacity_info>> package_import_plan::sfs_index_capacity() const {
+    return protect<std::vector<sfs_index_capacity_info>>([&]() -> result<std::vector<sfs_index_capacity_info>> {
+        if (!impl_)
+            return invalid_argument("package import plan is not initialized");
+        std::vector<sfs_index_capacity_info> result_value;
+        result_value.reserve(impl_->plan.sfs_index_capacity.size());
+        std::ranges::transform(impl_->plan.sfs_index_capacity, std::back_inserter(result_value),
+                               public_sfs_index_capacity);
         return result_value;
     });
 }

@@ -2157,10 +2157,46 @@
           "projectedImageSizeBytes": {"type": "integer", "minimum": 0}
         }
       },
+      "PackageSfsRecordUsage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "effectiveObjectRecordSlots", "volumeScaffoldingRecordSlots", "standaloneRequiredRecordSlots", "plannedObjectRecordSlots", "plannedRecordSlots", "reusedObjectCount", "allocatedRecordSlots", "shortfallRecordSlots"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "effectiveObjectRecordSlots": {"type": "integer", "minimum": 0},
+          "volumeScaffoldingRecordSlots": {"type": "integer", "minimum": 0},
+          "standaloneRequiredRecordSlots": {"type": "integer", "minimum": 0},
+          "plannedObjectRecordSlots": {"type": "integer", "minimum": 0},
+          "plannedRecordSlots": {"type": "integer", "minimum": 0},
+          "reusedObjectCount": {"type": "integer", "minimum": 0},
+          "allocatedRecordSlots": {"type": "integer", "minimum": 0},
+          "shortfallRecordSlots": {"type": "integer", "minimum": 0}
+        }
+      },
+      "SfsIndexCapacityEstimate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "indexBlockCount", "recordsPerIndexBlock", "totalRecordSlots", "reservedRecordSlots", "allocatableRecordSlots", "usedRecordSlots", "freeRecordSlots", "requiredRecordSlots", "allocatedRecordSlots", "shortfallRecordSlots", "remainingRecordSlots", "packages"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "indexBlockCount": {"type": "integer", "minimum": 0},
+          "recordsPerIndexBlock": {"type": "integer", "minimum": 1},
+          "totalRecordSlots": {"type": "integer", "minimum": 0},
+          "reservedRecordSlots": {"type": "integer", "minimum": 0},
+          "allocatableRecordSlots": {"type": "integer", "minimum": 0},
+          "usedRecordSlots": {"type": "integer", "minimum": 0},
+          "freeRecordSlots": {"type": "integer", "minimum": 0},
+          "requiredRecordSlots": {"type": "integer", "minimum": 0},
+          "allocatedRecordSlots": {"type": "integer", "minimum": 0},
+          "shortfallRecordSlots": {"type": "integer", "minimum": 0},
+          "remainingRecordSlots": {"type": "integer", "minimum": 0},
+          "packages": {"type": "array", "items": {"$ref": "#/components/schemas/PackageSfsRecordUsage"}}
+        }
+      },
       "PackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "sfsIndexCapacity"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2178,7 +2214,8 @@
           "opaqueSequences": {"type": "array", "items": {"$ref": "#/components/schemas/PackageOpaqueSequenceChoice"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
-          "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
+          "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
+          "sfsIndexCapacity": {"type": "array", "items": {"$ref": "#/components/schemas/SfsIndexCapacityEstimate"}}
         }
       },
       "ImageSessionPackageVolumeNameOverride": {
@@ -2281,7 +2318,7 @@
       "ImageSessionPackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision", "packages"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "sfsIndexCapacity", "imageId", "revision", "packages"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2300,6 +2337,7 @@
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
+          "sfsIndexCapacity": {"type": "array", "items": {"$ref": "#/components/schemas/SfsIndexCapacityEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
           "packages": {

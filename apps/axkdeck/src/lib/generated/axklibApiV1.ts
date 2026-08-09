@@ -2469,6 +2469,7 @@ export interface components {
             revision: number;
             /** @constant */
             schemaVersion: '1.0';
+            sfsIndexCapacity: components['schemas']['SfsIndexCapacityEstimate'][];
             /** @enum {unknown} */
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
@@ -3130,6 +3131,7 @@ export interface components {
             programSlotPlacements: components['schemas']['PackageProgramSlotPlacement'][];
             /** @constant */
             schemaVersion: '1.0';
+            sfsIndexCapacity: components['schemas']['SfsIndexCapacityEstimate'][];
             /** @enum {unknown} */
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
@@ -3303,6 +3305,17 @@ export interface components {
             partitionIndex?: number | null;
             volumeName?: string;
         };
+        PackageSfsRecordUsage: {
+            allocatedRecordSlots: number;
+            effectiveObjectRecordSlots: number;
+            packageIndex: number;
+            plannedObjectRecordSlots: number;
+            plannedRecordSlots: number;
+            reusedObjectCount: number;
+            shortfallRecordSlots: number;
+            standaloneRequiredRecordSlots: number;
+            volumeScaffoldingRecordSlots: number;
+        };
         PackageVerification: components['schemas']['PackageInspection'];
         PlanReleaseResult: {
             /** @constant */
@@ -3427,6 +3440,21 @@ export interface components {
         SequenceTempoEvent: {
             microsecondsPerQuarterNote: number;
             tick: number;
+        };
+        SfsIndexCapacityEstimate: {
+            allocatableRecordSlots: number;
+            allocatedRecordSlots: number;
+            freeRecordSlots: number;
+            indexBlockCount: number;
+            packages: components['schemas']['PackageSfsRecordUsage'][];
+            partitionIndex: number;
+            recordsPerIndexBlock: number;
+            remainingRecordSlots: number;
+            requiredRecordSlots: number;
+            reservedRecordSlots: number;
+            shortfallRecordSlots: number;
+            totalRecordSlots: number;
+            usedRecordSlots: number;
         };
         Upload: {
             declaredSize: number;

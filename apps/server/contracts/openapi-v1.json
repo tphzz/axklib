@@ -4755,6 +4755,12 @@
           "schemaVersion": {
             "const": "1.0"
           },
+          "sfsIndexCapacity": {
+            "items": {
+              "$ref": "#/components/schemas/SfsIndexCapacityEstimate"
+            },
+            "type": "array"
+          },
           "targetKind": {
             "enum": [
               "SFS",
@@ -4796,6 +4802,7 @@
           "programAssignmentAdjustments",
           "programSlotPlacements",
           "allocation",
+          "sfsIndexCapacity",
           "imageId",
           "revision",
           "packages"
@@ -7920,6 +7927,12 @@
           "schemaVersion": {
             "const": "1.0"
           },
+          "sfsIndexCapacity": {
+            "items": {
+              "$ref": "#/components/schemas/SfsIndexCapacityEstimate"
+            },
+            "type": "array"
+          },
           "targetKind": {
             "enum": [
               "SFS",
@@ -7960,7 +7973,8 @@
           "opaqueSequences",
           "programAssignmentAdjustments",
           "programSlotPlacements",
-          "allocation"
+          "allocation",
+          "sfsIndexCapacity"
         ],
         "type": "object"
       },
@@ -8779,6 +8793,59 @@
         ],
         "type": "object"
       },
+      "PackageSfsRecordUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "allocatedRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "effectiveObjectRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packageIndex": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plannedObjectRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plannedRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reusedObjectCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shortfallRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "standaloneRequiredRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "volumeScaffoldingRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "packageIndex",
+          "effectiveObjectRecordSlots",
+          "volumeScaffoldingRecordSlots",
+          "standaloneRequiredRecordSlots",
+          "plannedObjectRecordSlots",
+          "plannedRecordSlots",
+          "reusedObjectCount",
+          "allocatedRecordSlots",
+          "shortfallRecordSlots"
+        ],
+        "type": "object"
+      },
       "PackageVerification": {
         "$ref": "#/components/schemas/PackageInspection"
       },
@@ -9302,6 +9369,82 @@
         "required": [
           "tick",
           "microsecondsPerQuarterNote"
+        ],
+        "type": "object"
+      },
+      "SfsIndexCapacityEstimate": {
+        "additionalProperties": false,
+        "properties": {
+          "allocatableRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "allocatedRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "freeRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "indexBlockCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "packages": {
+            "items": {
+              "$ref": "#/components/schemas/PackageSfsRecordUsage"
+            },
+            "type": "array"
+          },
+          "partitionIndex": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "recordsPerIndexBlock": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remainingRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "requiredRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reservedRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "shortfallRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "totalRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "usedRecordSlots": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partitionIndex",
+          "indexBlockCount",
+          "recordsPerIndexBlock",
+          "totalRecordSlots",
+          "reservedRecordSlots",
+          "allocatableRecordSlots",
+          "usedRecordSlots",
+          "freeRecordSlots",
+          "requiredRecordSlots",
+          "allocatedRecordSlots",
+          "shortfallRecordSlots",
+          "remainingRecordSlots",
+          "packages"
         ],
         "type": "object"
       },
@@ -19986,6 +20129,7 @@
                         "programSlotPlacements": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
+                        "sfsIndexCapacity": [],
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -20028,6 +20172,7 @@
                         "programSlotPlacements": [],
                         "revision": 1,
                         "schemaVersion": "1.0",
+                        "sfsIndexCapacity": [],
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -25815,6 +25960,7 @@
                         "programAssignmentAdjustments": [],
                         "programSlotPlacements": [],
                         "schemaVersion": "1.0",
+                        "sfsIndexCapacity": [],
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -25838,6 +25984,7 @@
                         "programAssignmentAdjustments": [],
                         "programSlotPlacements": [],
                         "schemaVersion": "1.0",
+                        "sfsIndexCapacity": [],
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
