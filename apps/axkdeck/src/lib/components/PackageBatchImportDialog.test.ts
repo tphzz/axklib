@@ -1,9 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { serverFileLocation } from '../storageLocations';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
 import type { BatchPackageItem } from '../../features/import/packageBatchWorkflow.svelte';
 import PackageBatchImportDialog from './PackageBatchImportDialog.svelte';
+
+const dialogSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchImportDialog.svelte'), 'utf8');
 
 function inspection(packageId: string, volumeName: string): PackageInspection {
     return {
@@ -212,6 +216,69 @@ describe('PackageBatchImportDialog', () => {
 
         expect(screen.getByRole('button', { name: 'Check conflicts' })).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('keeps conflict checking in the fixed footer and uses compact top-aligned rows', () => {
+        render(PackageBatchImportDialog, { props: props() });
+
+        const checkConflicts = screen.getByRole('button', { name: 'Check conflicts' });
+        const footer = checkConflicts.closest('footer');
+        expect(footer?.classList.contains('dialog-footer')).toBe(true);
+        expect(
+            Array.from(footer?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
+        ).toEqual(['Check conflicts', 'Cancel', 'Import 2 packages']);
+        expect(footer?.querySelector('.batch-package-footer-actions')).toBeTruthy();
+        expect(screen.getByText('21').tagName).toBe('SPAN');
+        expect(dialogSource).toMatch(/\.batch-table-row\s*\{[^}]*align-items:\s*start;/s);
+        expect(dialogSource).toMatch(/\.batch-table-row\s*\{[^}]*padding-block:\s*6px;/s);
+        expect(dialogSource).toMatch(/\.batch-package-footer\s*\{[^}]*flex-wrap:\s*wrap;/s);
+    });
+
+    it('disables conflict checking and reports progress while planning', () => {
+        render(PackageBatchImportDialog, {
+            props: { ...props(), status: 'planning' },
+        });
+
+        const checking = screen.getByRole('button', { name: 'Checking conflicts…' });
+        expect(checking.hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('status').textContent).toContain('Planning batch import…');
+    });
+
+    it('scrolls to the capacity summary after a successful conflict check', async () => {
+        let completeCheck: (() => void) | undefined;
+        callbacks.onreplan.mockReturnValueOnce(
+            new Promise<void>((resolveCheck) => {
+                completeCheck = resolveCheck;
+            }),
+        );
+        render(PackageBatchImportDialog, {
+            props: { ...props(), hasUnvalidatedChanges: true },
+        });
+        const content = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-package-content');
+        expect(content).toBeTruthy();
+        content!.scrollTop = 480;
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        expect(content!.scrollTop).toBe(480);
+        completeCheck?.();
+
+        await waitFor(() => expect(content!.scrollTop).toBe(0));
+    });
+
+    it('keeps the current scroll position when conflict checking reports an error', async () => {
+        const initialProps = { ...props(), hasUnvalidatedChanges: true };
+        const rendered = render(PackageBatchImportDialog, { props: initialProps });
+        callbacks.onreplan.mockImplementationOnce(async () => {
+            await rendered.rerender({ ...initialProps, error: 'Conflict planning failed' });
+        });
+        const content = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-package-content');
+        expect(content).toBeTruthy();
+        content!.scrollTop = 480;
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+
+        await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Conflict planning failed'));
+        expect(content!.scrollTop).toBe(480);
     });
 
     it('does not report readiness while an apply error is visible', () => {

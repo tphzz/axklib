@@ -292,7 +292,7 @@
         ontoggleall={(selected) => packageBatchImport.setAllSelected(selected)}
         onopaquesequenceaction={(itemId, nodeId, action) =>
             packageBatchImport.opaqueSequenceAction(itemId, nodeId, action)}
-        onreplan={() => void packageBatchImport.replan()}
+        onreplan={() => packageBatchImport.replan()}
         oncancel={() => void packageBatchImport.close()}
         onconfirm={() => void packageBatchImport.apply()}
     />

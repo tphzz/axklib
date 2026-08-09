@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { tick } from 'svelte';
     import type { BatchPackageItem } from '../../features/import/packageBatchWorkflow.svelte';
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
@@ -29,7 +30,7 @@
             nodeId: string,
             action: PackageOpaqueSequenceDecision['action'],
         ) => void;
-        onreplan: () => void;
+        onreplan: () => Promise<void>;
         oncancel: () => void;
         onconfirm: () => void;
     }
@@ -58,6 +59,7 @@
         onconfirm,
     }: Props = $props();
     let selectAllCheckbox = $state<HTMLInputElement>();
+    let batchPackageContent = $state<HTMLDivElement>();
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
     const locked = $derived(status === 'applying');
@@ -116,6 +118,16 @@
     function opaqueKey(itemId: string, nodeId: string): string {
         return `${itemId}:${nodeId}`;
     }
+
+    async function replanAndRevealSummary(): Promise<void> {
+        try {
+            await onreplan();
+        } catch {
+            return;
+        }
+        await tick();
+        if (!error && batchPackageContent) batchPackageContent.scrollTop = 0;
+    }
 </script>
 
 <div class="dialog-backdrop" role="presentation">
@@ -134,7 +146,7 @@
             <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}>×</button>
         </header>
 
-        <div class="batch-package-content">
+        <div class="batch-package-content" bind:this={batchPackageContent}>
             {#if items.length === 0 && status === 'choosing'}
                 <ImportSourceChoice
                     label="Volume package sources"
@@ -281,7 +293,7 @@
                                 {:else if hasUnvalidatedChanges}
                                     <span>Pending check</span>
                                 {:else if recordUsage}
-                                    <strong>{recordUsage.plannedRecordSlots}</strong>
+                                    <span>{recordUsage.plannedRecordSlots}</span>
                                     <small>
                                         {recordUsage.plannedObjectRecordSlots} objects
                                         {#if recordUsage.volumeScaffoldingRecordSlots > 0}
@@ -351,33 +363,32 @@
                 {:else if plan?.valid && !hasUnvalidatedChanges && !error}
                     <p class="batch-ready"><Icon name="check" size={14} /> Ready to import</p>
                 {/if}
-
-                {#if hasUnvalidatedChanges || visibleConflicts.length > 0}
-                    <div class="batch-check-actions">
-                        <button
-                            class="secondary-button"
-                            type="button"
-                            disabled={busy || selectedCount === 0}
-                            onclick={onreplan}
-                        >
-                            Check conflicts
-                        </button>
-                    </div>
-                {/if}
             {/if}
             {#if status === 'planning'}<p class="dialog-progress" role="status">Planning batch import…</p>{/if}
             {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
         </div>
 
-        <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
+        <footer class="dialog-footer batch-package-footer">
             {#if items.length > 0}
-                <button class="primary-button" type="button" disabled={!canImport} onclick={onconfirm}>
-                    {status === 'applying'
-                        ? 'Importing…'
-                        : `Import ${selectedCount} package${selectedCount === 1 ? '' : 's'}`}
+                <button
+                    class="secondary-button"
+                    type="button"
+                    disabled={busy || selectedCount === 0}
+                    onclick={() => void replanAndRevealSummary()}
+                >
+                    {status === 'planning' ? 'Checking conflicts…' : 'Check conflicts'}
                 </button>
             {/if}
+            <div class="batch-package-footer-actions">
+                <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
+                {#if items.length > 0}
+                    <button class="primary-button" type="button" disabled={!canImport} onclick={onconfirm}>
+                        {status === 'applying'
+                            ? 'Importing…'
+                            : `Import ${selectedCount} package${selectedCount === 1 ? '' : 's'}`}
+                    </button>
+                {/if}
+            </div>
         </footer>
     </div>
 </div>
@@ -391,12 +402,11 @@
     .batch-package-content {
         min-height: 0;
         overflow: auto;
-        padding: 18px;
+        padding: 12px 14px;
     }
 
     .batch-progress,
-    .batch-summary,
-    .batch-check-actions {
+    .batch-summary {
         display: flex;
         align-items: center;
         gap: 12px;
@@ -414,7 +424,7 @@
 
     .batch-summary {
         justify-content: space-between;
-        margin-bottom: 14px;
+        margin-bottom: 10px;
     }
 
     .capacity-summary {
@@ -422,8 +432,8 @@
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        margin-bottom: 14px;
-        padding: 10px 12px;
+        margin-bottom: 10px;
+        padding: 8px 10px;
         border: 1px solid var(--border-strong);
         border-radius: 6px;
         background: var(--color-panel-raised);
@@ -482,15 +492,21 @@
         grid-template-columns:
             30px minmax(170px, 1.1fr) minmax(160px, 0.8fr) minmax(240px, 1.4fr)
             minmax(105px, 0.55fr);
-        align-items: center;
-        gap: 14px;
-        padding: 10px 12px;
+        gap: 12px;
+        padding-inline: 10px;
     }
 
     .batch-table-header {
+        align-items: center;
+        padding-block: 7px;
         color: var(--text-muted);
         background: var(--color-panel-raised);
         font-size: 12px;
+    }
+
+    .batch-table-row {
+        align-items: start;
+        padding-block: 6px;
     }
 
     .batch-table-row + .batch-table-row {
@@ -512,6 +528,10 @@
         margin: 0;
     }
 
+    .batch-table-row .selection-cell {
+        padding-top: 2px;
+    }
+
     .row-excluded > :not(.selection-cell) {
         opacity: 0.55;
     }
@@ -519,7 +539,7 @@
     .object-counts {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px 12px;
+        gap: 2px 10px;
         color: var(--text-muted);
         font-size: 12px;
     }
@@ -530,7 +550,7 @@
     }
 
     .batch-plan-stale {
-        margin: 0 0 14px;
+        margin: 0 0 10px;
         color: var(--text-muted);
     }
 
@@ -538,8 +558,8 @@
     .batch-conflicts {
         display: grid;
         gap: 10px;
-        margin-top: 14px;
-        padding: 12px;
+        margin-top: 10px;
+        padding: 10px;
         border: 1px solid #765d2d;
         border-radius: 6px;
         background: rgb(150 108 26 / 10%);
@@ -566,12 +586,19 @@
         display: flex;
         align-items: center;
         gap: 6px;
+        margin: 10px 0 0;
         color: #85d8ad;
     }
 
-    .batch-check-actions {
-        justify-content: flex-end;
-        margin-top: 12px;
+    .batch-package-footer {
+        flex-wrap: wrap;
+    }
+
+    .batch-package-footer-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
     }
 
     @media (max-width: 760px) {
