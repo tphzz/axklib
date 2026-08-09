@@ -182,8 +182,11 @@
     }
 
     .program-generation-content {
+        flex: 1 1 auto;
         min-height: 0;
         display: grid;
+        grid-auto-rows: max-content;
+        align-content: start;
         gap: 10px;
         padding: 12px 14px;
         overflow: auto;

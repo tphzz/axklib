@@ -115,7 +115,9 @@ describe('ProgramGenerationDialog', () => {
         expect(dialogSource).toMatch(
             /\.program-generation-dialog\s*\{[^}]*width:\s*min\(1080px, calc\(100vw - 32px\)\);[^}]*max-height:\s*min\(860px, calc\(100vh - 32px\)\);/s,
         );
-        expect(dialogSource).toMatch(/\.program-generation-content\s*\{[^}]*overflow:\s*auto;/s);
+        expect(dialogSource).toMatch(
+            /\.program-generation-content\s*\{[^}]*grid-auto-rows:\s*max-content;[^}]*overflow:\s*auto;/s,
+        );
         expect(dialogSource).toMatch(/\.program-generation-row\s*\{[^}]*align-items:\s*start;/s);
         expect(dialogSource).toMatch(/\.program-generation-row\s*\{[^}]*padding-block:\s*6px;/s);
         expect(dialogSource).toMatch(/\.excluded\s*>\s*:not\(\.selection-cell\)\s*\{[^}]*opacity:\s*0\.55;/s);
