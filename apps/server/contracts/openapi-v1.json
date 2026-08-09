@@ -4812,6 +4812,12 @@
             },
             "type": "array"
           },
+          "programSlotPlacements": {
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotPlacement"
+            },
+            "type": "array"
+          },
           "revision": {
             "minimum": 2,
             "type": "integer"
@@ -4843,6 +4849,7 @@
           "targetSnapshotId",
           "actions",
           "programAssignmentAdjustments",
+          "programSlotPlacements",
           "allocation",
           "imageId",
           "revision",

@@ -461,13 +461,12 @@ TEST_F(PackageOperationsTest, ExportInspectUploadVerifyPlanAndApplyShareOneRegis
 }
 
 TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitlyReleasable) {
-    const auto exported = registry_.invoke(
-        "package.export",
-        {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}},
-         {"output", {{"rootId", "workspace"}, {"relativePath", "session-sample.axksbnk"}}},
-         {"roots",
-          {{{"kind", "sbnk"}, {"partitionIndex", 0U}, {"volumeName", "New Volume"}, {"objectName", "sine wave"}}}}},
-        context());
+    const auto exported =
+        registry_.invoke("package.export",
+                         {{"source", {{"rootId", "workspace"}, {"relativePath", "mixed-roots.hds"}}},
+                          {"output", {{"rootId", "workspace"}, {"relativePath", "session-volume.axkvol"}}},
+                          {"roots", {{{"kind", "volume"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}}}},
+                         context());
     ASSERT_TRUE(exported) << exported.error().message;
     const auto opened = images_->open({"workspace", "target.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
@@ -475,7 +474,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     const auto request = nlohmann::json{
         {"imageId", opened->image_id},
         {"expectedRevision", opened->revision},
-        {"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "session-sample.axksbnk"}}}}},
+        {"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "session-volume.axkvol"}}}}},
         {"partitionIndex", 0U},
         {"volumeName", "Imported"},
         {"renames", nlohmann::json::array()},
@@ -509,7 +508,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
                                              {{"planToken", planned->at("planToken").get<std::string>()}}, context());
     ASSERT_FALSE(superseded);
     EXPECT_EQ(superseded.error().code, "package_plan_not_found");
-    ASSERT_TRUE(std::filesystem::remove(root_ / "session-sample.axksbnk"));
+    ASSERT_TRUE(std::filesystem::remove(root_ / "session-volume.axkvol"));
     EXPECT_TRUE(std::ranges::any_of(diagnostics, [](const auto &event) {
         return event.value("event", "") == "package_import_plan_phase" && event.value("phase", "") == "package" &&
                event.value("cacheHit", false);
@@ -521,6 +520,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     EXPECT_EQ(applied->at("revision"), 2U);
     EXPECT_TRUE(applied->at("applied").get<bool>());
     EXPECT_TRUE(applied->at("programAssignmentAdjustments").empty());
+    EXPECT_TRUE(applied->at("programSlotPlacements").empty());
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_EQ(refreshed->revision, 2U);

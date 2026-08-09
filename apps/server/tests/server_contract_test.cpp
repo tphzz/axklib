@@ -502,19 +502,16 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     const auto wire_result = validator.wire_value("PackageImportResult", application_result);
     EXPECT_TRUE(validator.validate("PackageImportResult", wire_result));
 
-    const auto application_session_result = nlohmann::json{
-        {"schemaVersion", "1.0"},
-        {"planId", "plan-1"},
-        {"targetKind", "sfs"},
-        {"targetSnapshotId", "snapshot-1"},
-        {"actions", nlohmann::json::array()},
-        {"programAssignmentAdjustments", adjustments},
-        {"allocation", nlohmann::json::array()},
-        {"imageId", "image-1"},
-        {"revision", 2U},
-        {"objectCount", 4U},
-        {"applied", true},
-    };
+    auto application_session_result = application_plan;
+    application_session_result.erase("planToken");
+    application_session_result.erase("expiresInSeconds");
+    application_session_result.erase("valid");
+    application_session_result.erase("warnings");
+    application_session_result.erase("conflicts");
+    application_session_result["imageId"] = "image-1";
+    application_session_result["revision"] = 2U;
+    application_session_result["objectCount"] = 4U;
+    application_session_result["applied"] = true;
     const auto wire_session_result =
         validator.wire_value("ImageSessionPackageImportResult", application_session_result);
     EXPECT_TRUE(validator.validate("ImageSessionPackageImportResult", wire_session_result));

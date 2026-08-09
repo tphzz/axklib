@@ -2476,6 +2476,7 @@ export interface components {
             objectCount: number;
             planId: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
+            programSlotPlacements: components['schemas']['PackageProgramSlotPlacement'][];
             revision: number;
             /** @constant */
             schemaVersion: '1.0';

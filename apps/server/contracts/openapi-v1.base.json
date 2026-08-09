@@ -2223,7 +2223,7 @@
       "ImageSessionPackageImportResult": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planId", "targetKind", "targetSnapshotId", "actions", "programAssignmentAdjustments", "allocation", "imageId", "revision", "objectCount", "applied"],
+        "required": ["schemaVersion", "planId", "targetKind", "targetSnapshotId", "actions", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision", "objectCount", "applied"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planId": {"type": "string", "minLength": 1},
@@ -2234,6 +2234,7 @@
           "targetSnapshotId": {"type": "string", "minLength": 1},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
+          "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 2},
