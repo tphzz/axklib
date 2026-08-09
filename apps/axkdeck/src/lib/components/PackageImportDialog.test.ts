@@ -60,6 +60,7 @@ function plan(valid = true): ImageSessionPackageImportPlan {
         targetSnapshotId: 'snapshot',
         valid,
         warnings: [],
+        opaqueSequences: [],
         conflicts: valid
             ? []
             : [
@@ -186,6 +187,7 @@ const callbacks = {
     onrename: vi.fn(),
     onprogramslot: vi.fn(),
     onprogramstart: vi.fn(),
+    onopaquesequenceaction: vi.fn(),
     onreplan: vi.fn(),
     oncancel: vi.fn(),
     onconfirm: vi.fn(),
@@ -311,6 +313,84 @@ describe('PackageImportDialog', () => {
         expect(screen.getByText('1 unresolved Program assignment will be cleared')).toBeTruthy();
         expect(screen.getByText('Voyager')).toBeTruthy();
         expect(screen.getByText(/Sample Bank “BPF Sweep B” · existing Program/)).toBeTruthy();
+        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('requires an explicit preserve-or-skip decision for an undecodable Sequence', async () => {
+        const undecodable = plan(false);
+        undecodable.opaqueSequences = [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }];
+        undecodable.conflicts = [
+            {
+                ...undecodable.conflicts[0],
+                code: 'OPAQUE_SEQUENCE_DECISION_REQUIRED',
+                nodeId: 'sequence-1',
+                message: 'internal parser terminology must not be shown',
+            },
+        ];
+        const onopaquesequenceaction = vi.fn();
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: true,
+                sourceName: 'nord.axkvol',
+                inspection,
+                plan: undecodable,
+                renames: {},
+                programSlots: {},
+                status: 'ready',
+                progress: 1,
+                error: '',
+                ...callbacks,
+                onopaquesequenceaction,
+            },
+        });
+
+        expect(screen.getByText('Sequence “NordMicroDrums” could not be decoded')).toBeTruthy();
+        expect(screen.queryByText('internal parser terminology must not be shown')).toBeNull();
+        const preserve = screen.getByRole('radio', { name: /Preserve unchanged/ });
+        const skip = screen.getByRole('radio', { name: /Skip Sequence/ });
+        expect((preserve as HTMLInputElement).checked).toBe(false);
+        expect((skip as HTMLInputElement).checked).toBe(false);
+        await fireEvent.click(preserve);
+        expect(onopaquesequenceaction).toHaveBeenCalledWith('sequence-1', 'PRESERVE_UNCHANGED');
+    });
+
+    it('identifies an unrelated opaque target Sequence as a nonblocking preservation warning', () => {
+        const value = plan();
+        value.warnings = [
+            {
+                code: 'TARGET_SEQUENCE_PRESERVED_OPAQUE',
+                message: 'internal target warning',
+                origin: 'TARGET',
+                packageIndex: null,
+                nodeId: '',
+                objectType: 'SEQU',
+                objectName: 'NordMicroDrums',
+                partitionIndex: 0,
+                volumeName: 'Existing',
+            },
+        ];
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: true,
+                sourceName: 'samples.axksbnk',
+                inspection,
+                plan: value,
+                renames: {},
+                programSlots: {},
+                status: 'ready',
+                progress: 1,
+                error: '',
+                ...callbacks,
+            },
+        });
+
+        expect(
+            screen.getByText(
+                'Existing Sequence “NordMicroDrums” in Existing could not be decoded. It is unrelated to this import and will be preserved unchanged.',
+            ),
+        ).toBeTruthy();
         expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
     });
 

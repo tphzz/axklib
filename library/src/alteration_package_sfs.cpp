@@ -293,6 +293,22 @@ Result<void> validate_package_result(std::shared_ptr<const RandomAccessReader> r
     auto catalog = build_object_catalog(*media, 64U * 1024U * 1024U, cancellation);
     if (!catalog)
         return std::unexpected{catalog.error()};
+    for (const auto &preserved : plan.preserved_target_objects) {
+        const auto found = std::ranges::find_if(catalog->objects, [&](const auto &snapshot) {
+            return snapshot.key == preserved.object_key && snapshot.partition.value == preserved.partition_index &&
+                   snapshot.sfs_id.value == preserved.sfs_id && snapshot.placement &&
+                   snapshot.placement_resolution == PlacementResolution::exact;
+        });
+        if (found == catalog->objects.end() || found->object.header.raw_type != preserved.object_type ||
+            found->object.header.name != preserved.object_name ||
+            found->placement->volume_name != preserved.volume_name ||
+            found->placement->category_name != preserved.category_name ||
+            found->placement->entry_name != preserved.entry_name ||
+            package_internal::hex_digest(package_internal::sha256(found->raw_payload)) != preserved.payload_sha256) {
+            return std::unexpected{
+                transaction_error("an unrelated opaque target object changed during package import")};
+        }
+    }
     const auto graph = build_relationship_graph(*catalog);
     std::map<std::string, const ObjectSnapshot *, std::less<>> actual_by_action;
     for (const auto &object : plan.objects) {

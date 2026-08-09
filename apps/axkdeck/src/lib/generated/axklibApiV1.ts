@@ -2445,6 +2445,7 @@ export interface components {
             conflicts: components['schemas']['PackageImportConflict'][];
             expiresInSeconds: number;
             imageId: string;
+            opaqueSequences: components['schemas']['PackageOpaqueSequenceChoice'][];
             planId: string;
             planToken: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
@@ -2456,11 +2457,12 @@ export interface components {
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
             valid: boolean;
-            warnings: components['schemas']['Issue'][];
+            warnings: components['schemas']['PackageImportWarning'][];
         };
         ImageSessionPackageImportPlanRequest: {
             expectedRevision: number;
             imageId: string;
+            opaqueSequenceDecisions?: components['schemas']['PackageOpaqueSequenceDecision'][];
             package: components['schemas']['InputRef'];
             partitionIndex: number;
             programSlotAssignments?: components['schemas']['ImageSessionPackageProgramSlotAssignment'][];
@@ -3093,6 +3095,7 @@ export interface components {
             allocation: components['schemas']['PackageAllocationEstimate'][];
             conflicts: components['schemas']['PackageImportConflict'][];
             expiresInSeconds: number;
+            opaqueSequences: components['schemas']['PackageOpaqueSequenceChoice'][];
             planId: string;
             planToken: string;
             programAssignmentAdjustments: components['schemas']['PackageProgramAssignmentAdjustment'][];
@@ -3103,10 +3106,11 @@ export interface components {
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
             valid: boolean;
-            warnings: components['schemas']['Issue'][];
+            warnings: components['schemas']['PackageImportWarning'][];
         };
         PackageImportPlanRequest: {
             destinations: components['schemas']['PackageDestination'][];
+            opaqueSequenceDecisions?: components['schemas']['PackageOpaqueSequenceDecision'][];
             output: components['schemas']['FileRef'];
             /** @default false */
             overwrite: boolean;
@@ -3125,6 +3129,18 @@ export interface components {
             /** @constant */
             schemaVersion: '1.0';
             sourceSnapshotId: string;
+        };
+        PackageImportWarning: {
+            code: string;
+            message: string;
+            nodeId: string;
+            objectName: string;
+            objectType: string;
+            /** @enum {unknown} */
+            origin: 'PACKAGE' | 'TARGET';
+            packageIndex: number | null;
+            partitionIndex: number | null;
+            volumeName: string;
         };
         PackageInspection: {
             issues: components['schemas']['Issue'][];
@@ -3163,6 +3179,18 @@ export interface components {
             payloadSha256: string;
             payloadSizeBytes: number;
             semanticSha256: string | null;
+        };
+        PackageOpaqueSequenceChoice: {
+            action: ('PRESERVE_UNCHANGED' | 'SKIP') | null;
+            name: string;
+            nodeId: string;
+            packageIndex: number;
+        };
+        PackageOpaqueSequenceDecision: {
+            /** @enum {unknown} */
+            action: 'PRESERVE_UNCHANGED' | 'SKIP';
+            nodeId: string;
+            packageIndex: number;
         };
         PackageProgramAssignmentAdjustment: {
             actionId: string | null;

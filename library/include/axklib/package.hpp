@@ -180,9 +180,20 @@ struct PackageProgramSlotAssignment {
     friend bool operator==(const PackageProgramSlotAssignment &, const PackageProgramSlotAssignment &) = default;
 };
 
+enum class PackageOpaqueSequenceAction : std::uint8_t { preserve_unchanged, skip };
+
+struct PackageOpaqueSequenceDecision {
+    std::size_t package_index{};
+    std::string node_id;
+    PackageOpaqueSequenceAction action{PackageOpaqueSequenceAction::preserve_unchanged};
+
+    friend bool operator==(const PackageOpaqueSequenceDecision &, const PackageOpaqueSequenceDecision &) = default;
+};
+
 struct PackageImportPolicy {
     std::vector<PackageNodeRename> renames;
     std::vector<PackageProgramSlotAssignment> program_slot_assignments;
+    std::vector<PackageOpaqueSequenceDecision> opaque_sequence_decisions;
 
     friend bool operator==(const PackageImportPolicy &, const PackageImportPolicy &) = default;
 };
@@ -248,6 +259,45 @@ struct PackageImportConflict {
     std::string raw_volume;
 
     friend bool operator==(const PackageImportConflict &, const PackageImportConflict &) = default;
+};
+
+enum class PackageImportWarningOrigin : std::uint8_t { package, target };
+
+struct PackageImportWarning {
+    std::string code;
+    std::string message;
+    PackageImportWarningOrigin origin{PackageImportWarningOrigin::package};
+    std::optional<std::size_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint8_t> partition_index;
+    std::string volume_name;
+
+    friend bool operator==(const PackageImportWarning &, const PackageImportWarning &) = default;
+};
+
+struct PackageOpaqueSequenceChoice {
+    std::size_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<PackageOpaqueSequenceAction> action;
+
+    friend bool operator==(const PackageOpaqueSequenceChoice &, const PackageOpaqueSequenceChoice &) = default;
+};
+
+struct PackagePreservedTargetObject {
+    std::string object_key;
+    std::uint8_t partition_index{};
+    std::uint32_t sfs_id{};
+    std::string object_type;
+    std::string object_name;
+    std::string volume_name;
+    std::string category_name;
+    std::string entry_name;
+    std::string payload_sha256;
+
+    friend bool operator==(const PackagePreservedTargetObject &, const PackagePreservedTargetObject &) = default;
 };
 
 struct PackageProgramAssignmentAdjustment {
@@ -348,7 +398,9 @@ struct PackageImportPlan {
     std::string policy_digest;
     std::string plan_id;
     std::vector<std::string> package_ids;
-    std::vector<PackageIssue> warnings;
+    std::vector<PackageImportWarning> warnings;
+    std::vector<PackageOpaqueSequenceChoice> opaque_sequences;
+    std::vector<PackagePreservedTargetObject> preserved_target_objects;
     std::vector<PlannedPackageDestination> destinations;
     std::vector<PlannedPackageObject> objects;
     std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
@@ -376,6 +428,8 @@ AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;
 AXK_API std::string_view package_kind_name(PackageKind kind) noexcept;
 AXK_API std::string_view required_package_extension(PackageKind kind) noexcept;
 AXK_API std::string_view package_import_action_name(PackageImportObjectAction action) noexcept;
+AXK_API std::string_view package_opaque_sequence_action_name(PackageOpaqueSequenceAction action) noexcept;
+AXK_API std::string_view package_import_warning_origin_name(PackageImportWarningOrigin origin) noexcept;
 AXK_API std::string_view package_program_slot_placement_mode_name(PackageProgramSlotPlacementMode mode) noexcept;
 AXK_API std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept;
 AXK_API std::string_view

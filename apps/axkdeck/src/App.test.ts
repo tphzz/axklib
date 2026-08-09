@@ -1157,6 +1157,7 @@ describe('App panel layout', () => {
             targetSnapshotId: 'snapshot-1',
             valid: true,
             warnings: [],
+            opaqueSequences: [],
             conflicts: [],
             actions: [],
             programAssignmentAdjustments: [],
@@ -1199,6 +1200,8 @@ describe('App panel layout', () => {
                 0,
                 'My Volume',
                 [],
+                [],
+                undefined,
                 [],
             ),
         );

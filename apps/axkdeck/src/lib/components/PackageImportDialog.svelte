@@ -1,7 +1,7 @@
 <script lang="ts">
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
-    import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
+    import type { ImageSessionPackageImportPlan, PackageInspection, PackageOpaqueSequenceDecision } from '../transport';
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
@@ -13,6 +13,7 @@
         plan: ImageSessionPackageImportPlan | null;
         renames: Record<string, string>;
         programSlots: Record<string, number>;
+        opaqueSequenceActions?: Record<string, PackageOpaqueSequenceDecision['action']>;
         hasUnvalidatedChanges?: boolean;
         status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
         progress: number;
@@ -23,6 +24,7 @@
         onrename: (nodeId: string, name: string) => void;
         onprogramslot: (nodeId: string, slot: number) => void;
         onprogramstart: (placementId: string, start: number) => void;
+        onopaquesequenceaction: (nodeId: string, action: PackageOpaqueSequenceDecision['action']) => void;
         onreplan: () => void;
         oncancel: () => void;
         onconfirm: () => void;
@@ -43,6 +45,7 @@
         plan,
         renames,
         programSlots,
+        opaqueSequenceActions = {},
         hasUnvalidatedChanges = false,
         status,
         progress,
@@ -53,6 +56,7 @@
         onrename,
         onprogramslot,
         onprogramstart,
+        onopaquesequenceaction,
         onreplan,
         oncancel,
         onconfirm,
@@ -99,6 +103,7 @@
                 (plan?.conflicts ?? [])
                     .filter(
                         (conflict) =>
+                            conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
                             !(placementNodeIds.has(conflict.nodeId) && conflict.code === 'SFS_NAME_CONFLICT') &&
                             !renameActions.some((action) => action.nodeId === conflict.nodeId),
                     )
@@ -106,7 +111,14 @@
             ).values(),
         ),
     );
-    const visibleConflictCount = $derived(placementIssues.length + renameActions.length + nonRenameConflicts.length);
+    const undecidedOpaqueSequences = $derived(
+        (plan?.opaqueSequences ?? []).filter(
+            (sequence) => !(opaqueSequenceActions[sequence.nodeId] ?? sequence.action),
+        ),
+    );
+    const visibleConflictCount = $derived(
+        placementIssues.length + renameActions.length + nonRenameConflicts.length + undecidedOpaqueSequences.length,
+    );
     const showConflictCheck = $derived(renameActions.length > 0 || editableProgramPlacements.length > 0);
     const canCheckConflicts = $derived(
         status === 'ready' &&
@@ -123,12 +135,19 @@
     const allocatedBytes = $derived(
         (plan?.allocation ?? []).reduce((total, allocation) => total + allocation.additionalAllocatedBytes, 0),
     );
+    const visibleWarnings = $derived(
+        (plan?.warnings ?? []).filter(
+            (warning) =>
+                warning.code !== 'OPAQUE_SEQUENCE_PRESERVED_UNCHANGED' && warning.code !== 'OPAQUE_SEQUENCE_SKIPPED',
+        ),
+    );
 
     function objectTypeLabel(type: string): string {
         if (type === 'PROG') return 'Program';
         if (type === 'SBAC') return 'Sample Bank';
         if (type === 'SBNK') return 'Sample';
         if (type === 'SMPL') return 'Wave Data';
+        if (type === 'SEQU') return 'Sequence';
         if (type === 'VOLUME') return 'Volume';
         return type;
     }
@@ -282,6 +301,61 @@
                                         <dd>{formatStoredSize(allocatedBytes)}</dd>
                                     </div>
                                 </dl>
+                                {#if plan.opaqueSequences.length > 0}
+                                    <div class="opaque-sequence-choices" aria-label="Undecodable Sequences">
+                                        {#each plan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
+                                            <fieldset>
+                                                <legend
+                                                    >Sequence “{sequence.name || 'Unnamed'}” could not be decoded</legend
+                                                >
+                                                <p>
+                                                    Its event data may be malformed or use an unsupported encoding.
+                                                    Choose how this Sequence should be handled.
+                                                </p>
+                                                <label>
+                                                    <input
+                                                        type="radio"
+                                                        name={`opaque-sequence-${sequence.nodeId}`}
+                                                        value="PRESERVE_UNCHANGED"
+                                                        checked={(opaqueSequenceActions[sequence.nodeId] ??
+                                                            sequence.action) === 'PRESERVE_UNCHANGED'}
+                                                        disabled={busy}
+                                                        onchange={() =>
+                                                            onopaquesequenceaction(
+                                                                sequence.nodeId,
+                                                                'PRESERVE_UNCHANGED',
+                                                            )}
+                                                    />
+                                                    <span>
+                                                        <strong>Preserve unchanged</strong>
+                                                        <small
+                                                            >Import its original event bytes. Playback and editing
+                                                            cannot be verified.</small
+                                                        >
+                                                    </span>
+                                                </label>
+                                                <label>
+                                                    <input
+                                                        type="radio"
+                                                        name={`opaque-sequence-${sequence.nodeId}`}
+                                                        value="SKIP"
+                                                        checked={(opaqueSequenceActions[sequence.nodeId] ??
+                                                            sequence.action) === 'SKIP'}
+                                                        disabled={busy}
+                                                        onchange={() => onopaquesequenceaction(sequence.nodeId, 'SKIP')}
+                                                    />
+                                                    <span>
+                                                        <strong>Skip Sequence</strong>
+                                                        <small
+                                                            >Do not import this Sequence. Other package objects are
+                                                            unaffected.</small
+                                                        >
+                                                    </span>
+                                                </label>
+                                            </fieldset>
+                                        {/each}
+                                    </div>
+                                {/if}
                                 {#if plan.programSlotPlacements.length > 0}
                                     <div class="program-slot-placements" aria-label="Program slot placement">
                                         {#each plan.programSlotPlacements as placement (placement.placementId)}
@@ -429,8 +503,12 @@
                                         {/each}
                                     </div>
                                 {/if}
-                                {#each plan.warnings as warning}
-                                    <p class="package-warning">{warning.message}</p>
+                                {#each visibleWarnings as warning}
+                                    <p class="package-warning">
+                                        {warning.origin === 'TARGET' && warning.objectType === 'SEQU'
+                                            ? `Existing Sequence “${warning.objectName || 'Unnamed'}”${warning.volumeName ? ` in ${warning.volumeName}` : ''} could not be decoded. It is unrelated to this import and will be preserved unchanged.`
+                                            : warning.message}
+                                    </p>
                                 {/each}
                             {:else}
                                 <p class="dialog-progress" role="status">Planning import…</p>

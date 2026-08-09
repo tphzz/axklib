@@ -246,6 +246,8 @@ int axk::cli::run(int argc, char **argv) {
         command.add_option("--rename-map", request.rename_map, "JSON array of explicit node renames");
         command.add_option("--program-slot-map", request.program_slot_map,
                            "JSON array of explicit Program slot assignments");
+        command.add_option("--opaque-sequence-map", request.opaque_sequence_map,
+                           "JSON array of preserve-or-skip decisions for undecodable Sequences");
         command.add_option("--format", request.format, "summary or json")->check(CLI::IsMember({"summary", "json"}));
     };
     auto *package_plan = package->add_subcommand("plan-import", "plan a package import");

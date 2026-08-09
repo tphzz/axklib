@@ -250,6 +250,7 @@
         plan={packageImport.request.plan}
         renames={packageImport.request.renames}
         programSlots={packageImport.request.programSlots}
+        opaqueSequenceActions={packageImport.request.opaqueSequenceActions}
         hasUnvalidatedChanges={packageImport.request.hasUnvalidatedChanges}
         status={packageImport.request.status}
         progress={packageImport.request.progress}
@@ -260,6 +261,7 @@
         onrename={(nodeId, name) => packageImport.rename(nodeId, name)}
         onprogramslot={(nodeId, slot) => packageImport.programSlot(nodeId, slot)}
         onprogramstart={(placementId, start) => packageImport.programStart(placementId, start)}
+        onopaquesequenceaction={(nodeId, action) => packageImport.opaqueSequenceAction(nodeId, action)}
         onreplan={() => void packageImport.replan()}
         oncancel={() => void packageImport.close()}
         onconfirm={() => void packageImport.apply()}

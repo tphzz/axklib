@@ -470,6 +470,13 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
                                             {"nodeId", assignment.node_id},
                                             {"destinationSlot", assignment.destination_slot}});
     }
+    auto opaque_sequence_decisions = Json::array();
+    for (const auto &decision : request.policy.opaque_sequence_decisions) {
+        opaque_sequence_decisions.push_back(
+            {{"packageIndex", decision.package_index},
+             {"nodeId", decision.node_id},
+             {"action", std::string{package_opaque_sequence_action_name(decision.action)}}});
+    }
     auto plan =
         registry_.invoke("package.plan_import",
                          {{"target", file_ref_json(target)},
@@ -478,6 +485,7 @@ axk::app::Result<axk::cli::schema::package_v1::PlanOutput> axk::cli::LocalOperat
                           {"destinations", std::move(destinations)},
                           {"renames", std::move(renames)},
                           {"programSlotAssignments", std::move(program_slot_assignments)},
+                          {"opaqueSequenceDecisions", std::move(opaque_sequence_decisions)},
                           {"overwrite", overwrite}},
                          local_context([this](const app::FileRef &reference) { return display_path(reference); }));
     if (!plan)

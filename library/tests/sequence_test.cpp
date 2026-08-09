@@ -486,7 +486,19 @@ TEST(CurrentSequence, RejectsMalformedNativeTimeline) {
 
     auto missing_status = *generated;
     missing_status[0x8aU] = std::byte{61};
-    EXPECT_FALSE(axk::decode_object(missing_status));
+    const auto missing_status_result = axk::decode_object(missing_status);
+    ASSERT_FALSE(missing_status_result);
+    EXPECT_NE(missing_status_result.error().message.find("Sequence 'Sequence'"), std::string::npos);
+    EXPECT_NE(missing_status_result.error().message.find("object offset 0x8a"), std::string::npos);
+    EXPECT_NE(missing_status_result.error().message.find("block 0, event 0, tick 448"), std::string::npos);
+    EXPECT_NE(missing_status_result.error().message.find("running status"), std::string::npos);
+
+    auto invalid_size = *generated;
+    invalid_size[0x8cU] = std::byte{0xfd};
+    const auto invalid_size_result = axk::decode_object(invalid_size);
+    ASSERT_FALSE(invalid_size_result);
+    EXPECT_NE(invalid_size_result.error().message.find("status 0x90 expects 3 bytes but observed 2"),
+              std::string::npos);
 
     auto empty_block = *generated;
     empty_block[0x88U] = std::byte{};

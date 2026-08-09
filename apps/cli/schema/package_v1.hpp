@@ -37,6 +37,25 @@ struct IssueOutput {
     bool fatal{};
 };
 
+struct ImportWarningOutput {
+    std::string code;
+    std::string message;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint32_t> partition_index;
+    std::string volume_name;
+};
+
+struct OpaqueSequenceChoiceOutput {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<std::string> action;
+};
+
 struct PackageOutput {
     std::string path_utf8;
     std::string package_id;
@@ -171,7 +190,8 @@ struct PlanOutput {
     std::string target_kind;
     std::string target_snapshot_id;
     bool valid{};
-    std::vector<IssueOutput> warnings;
+    std::vector<ImportWarningOutput> warnings;
+    std::vector<OpaqueSequenceChoiceOutput> opaque_sequences;
     std::vector<ConflictOutput> conflicts;
     std::vector<ActionOutput> objects;
     std::vector<ProgramAssignmentAdjustmentOutput> program_assignment_adjustments;

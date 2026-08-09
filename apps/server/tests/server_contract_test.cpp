@@ -477,7 +477,19 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"targetKind", "sfs"},
         {"targetSnapshotId", "snapshot-1"},
         {"valid", true},
-        {"warnings", nlohmann::json::array()},
+        {"warnings", nlohmann::json::array({{{"code", "TARGET_SEQUENCE_PRESERVED_OPAQUE"},
+                                             {"message", "existing Sequence will be preserved unchanged"},
+                                             {"origin", "target"},
+                                             {"packageIndex", nullptr},
+                                             {"nodeId", ""},
+                                             {"objectType", "SEQU"},
+                                             {"objectName", "NordMicroDrums"},
+                                             {"partitionIndex", 0U},
+                                             {"volumeName", "Existing"}}})},
+        {"opaqueSequences", nlohmann::json::array({{{"packageIndex", 0U},
+                                                    {"nodeId", "sequence-1"},
+                                                    {"name", "NordMicroDrums"},
+                                                    {"action", "preserve-unchanged"}}})},
         {"conflicts", nlohmann::json::array()},
         {"actions", nlohmann::json::array()},
         {"programAssignmentAdjustments", adjustments},
@@ -489,6 +501,8 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("origin"), "EXISTING_PROGRAM");
     EXPECT_EQ(wire_plan.at("programAssignmentAdjustments").at(0).at("disposition"), "CLEAR_ASSIGNMENT");
     EXPECT_EQ(wire_plan.at("programSlotPlacements").at(0).at("mode"), "CONTIGUOUS");
+    EXPECT_EQ(wire_plan.at("warnings").at(0).at("origin"), "TARGET");
+    EXPECT_EQ(wire_plan.at("opaqueSequences").at(0).at("action"), "PRESERVE_UNCHANGED");
 
     const auto application_result = nlohmann::json{
         {"schemaVersion", "1.0"},
@@ -507,6 +521,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     application_session_result.erase("expiresInSeconds");
     application_session_result.erase("valid");
     application_session_result.erase("warnings");
+    application_session_result.erase("opaqueSequences");
     application_session_result.erase("conflicts");
     application_session_result["imageId"] = "image-1";
     application_session_result["revision"] = 2U;

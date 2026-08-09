@@ -2131,6 +2131,7 @@ describe('HttpImageTransport', () => {
                         targetSnapshotId: 'before',
                         valid: true,
                         warnings: [],
+                        opaqueSequences: [],
                         conflicts: [],
                         actions: [],
                         programAssignmentAdjustments: [],
@@ -2357,6 +2358,7 @@ describe('HttpImageTransport', () => {
                         targetSnapshotId: 'snapshot',
                         valid: true,
                         warnings: [],
+                        opaqueSequences: [],
                         conflicts: [],
                         actions: [],
                         programAssignmentAdjustments: [],
@@ -2555,6 +2557,7 @@ describe('HttpImageTransport', () => {
             volumeName: 'DRUMS',
             renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT' }],
             programSlotAssignments: [],
+            opaqueSequenceDecisions: [],
         });
         expect(planRequests[1]?.body).toEqual({
             imageId: 'image-package',
@@ -2565,6 +2568,7 @@ describe('HttpImageTransport', () => {
             volumeName: 'DRUMS',
             renames: [{ nodeId: 'node-1', destinationName: 'DRUM KIT 2' }],
             programSlotAssignments: [{ nodeId: 'program-1', destinationSlot: 5 }],
+            opaqueSequenceDecisions: [],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-package-exports'))?.body).toEqual({
             imageId: 'image-package',

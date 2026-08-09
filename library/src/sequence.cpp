@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "axklib/bytes.hpp"
+#include "sequence_diagnostics.hpp"
 
 namespace axk {
 namespace {
@@ -208,7 +209,7 @@ Result<SequenceEvent> decode_native_event(std::span<const std::byte> stored, std
         const auto status = std::to_integer<std::uint8_t>(result.message.front());
         const auto expected = (status & 0xf0U) == 0xe0U ? 2U : channel_data_size(status) + 1U;
         if (result.message.size() != expected)
-            return std::unexpected{sequence_error("native Sequence channel event has an invalid size")};
+            return std::unexpected{sequence_channel_size_error(status, expected, result.message.size())};
         if (std::ranges::any_of(result.message.begin() + 1, result.message.end(),
                                 [](std::byte value) { return (std::to_integer<std::uint8_t>(value) & 0x80U) != 0U; })) {
             return std::unexpected{sequence_error("native Sequence channel data byte has its status bit set")};
@@ -449,13 +450,13 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
     const auto version = reader.be16(0x7cU);
     const auto division = reader.be16(0x7eU);
     const auto first_tick = reader.be32(0x80U);
+    const auto stored_name = reader.ascii_field(0x32U, 16U, true);
     if (!version || !division || !first_tick)
         return std::unexpected{sequence_error("current Sequence header is truncated")};
     if (*version != 1U || *division != current_division) {
         return std::unexpected{sequence_error("Sequence does not use the admitted current timeline profile",
                                               ErrorCode::unsupported_profile)};
     }
-
     CurrentSequence result;
     result.raw_payload.assign(payload.begin(), payload.end());
     result.format_version = *version;
@@ -469,6 +470,7 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
     std::uint32_t tick = *first_tick;
     std::optional<std::uint8_t> running_status;
     bool found_end{};
+    std::size_t block_index{};
     while (!found_end) {
         if (position > payload.size() || 6U > payload.size() - position)
             return std::unexpected{sequence_error("current Sequence timeline block is truncated")};
@@ -490,7 +492,8 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
             const auto end = static_cast<std::size_t>(terminator - payload.begin());
             auto event = decode_native_event(payload.subspan(position, end - position), tick, running_status);
             if (!event)
-                return std::unexpected{event.error()};
+                return std::unexpected{sequence_event_error(event.error(), stored_name ? *stored_name : "", position,
+                                                            block_index, index, tick)};
             found_end = event->kind == SequenceEventKind::meta && event->message.size() == 2U &&
                         event->message[0] == std::byte{0xff} && event->message[1] == std::byte{0x2f};
             result.events.push_back(std::move(*event));
@@ -508,6 +511,7 @@ Result<CurrentSequence> decode_current_sequence(std::span<const std::byte> paylo
         if (*next_tick < tick)
             return std::unexpected{sequence_error("current Sequence ticks are not monotonic")};
         tick = *next_tick;
+        ++block_index;
     }
     auto tempos = analyze_tempos(result.events);
     if (!tempos)

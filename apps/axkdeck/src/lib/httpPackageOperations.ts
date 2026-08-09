@@ -16,6 +16,7 @@ import type {
     ImageSessionPackageImportPlan,
     ImageSessionPackageProgramSlotAssignment,
     ImageSessionPackageRename,
+    PackageOpaqueSequenceDecision,
     JobState,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
@@ -79,6 +80,7 @@ export class HttpPackageOperations {
         renames: ImageSessionPackageRename[] = [],
         programSlotAssignments: ImageSessionPackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
+        opaqueSequenceDecisions: PackageOpaqueSequenceDecision[] = [],
     ): Promise<ImageSessionPackageImportPlan> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
@@ -89,6 +91,7 @@ export class HttpPackageOperations {
             volumeName,
             renames,
             programSlotAssignments,
+            opaqueSequenceDecisions,
             ...(replacePlanToken ? { replacePlanToken } : {}),
         });
         if (this.jobs.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');

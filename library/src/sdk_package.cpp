@@ -30,6 +30,26 @@ PackageRootKind internal_root_kind(package_root_kind kind) {
     return PackageRootKind::volume;
 }
 
+PackageOpaqueSequenceAction internal_opaque_sequence_action(package_opaque_sequence_action action) {
+    switch (action) {
+    case package_opaque_sequence_action::preserve_unchanged:
+        return PackageOpaqueSequenceAction::preserve_unchanged;
+    case package_opaque_sequence_action::skip:
+        return PackageOpaqueSequenceAction::skip;
+    }
+    return PackageOpaqueSequenceAction::preserve_unchanged;
+}
+
+package_opaque_sequence_action public_opaque_sequence_action(PackageOpaqueSequenceAction action) {
+    switch (action) {
+    case PackageOpaqueSequenceAction::preserve_unchanged:
+        return package_opaque_sequence_action::preserve_unchanged;
+    case PackageOpaqueSequenceAction::skip:
+        return package_opaque_sequence_action::skip;
+    }
+    return package_opaque_sequence_action::preserve_unchanged;
+}
+
 std::string media_kind_name(MediaKind kind) {
     switch (kind) {
     case MediaKind::sfs:
@@ -70,6 +90,18 @@ result<std::vector<PackageRootSelector>> internal_roots(const std::vector<packag
 }
 
 package_issue_info public_package_issue(const PackageIssue &issue) { return {issue.code, issue.message, issue.fatal}; }
+
+package_import_warning_info public_package_warning(const PackageImportWarning &warning) {
+    return {
+        warning.code,          warning.message,         std::string{package_import_warning_origin_name(warning.origin)},
+        warning.package_index, warning.node_id,         warning.object_type,
+        warning.object_name,   warning.partition_index, warning.volume_name};
+}
+
+package_opaque_sequence_choice_info public_opaque_sequence_choice(const PackageOpaqueSequenceChoice &sequence) {
+    return {sequence.package_index, sequence.node_id, sequence.name,
+            sequence.action ? std::optional{public_opaque_sequence_action(*sequence.action)} : std::nullopt};
+}
 
 package_summary public_package_summary(const PortablePackage &package) {
     return {
@@ -267,7 +299,8 @@ result<std::vector<package_issue_info>> portable_package::issues() const {
             return invalid_argument("portable package is not open");
         std::vector<package_issue_info> result_value;
         result_value.reserve(impl_->package.issues.size());
-        std::ranges::transform(impl_->package.issues, std::back_inserter(result_value), public_package_issue);
+        std::ranges::transform(impl_->package.issues, std::back_inserter(result_value),
+                               [](const auto &issue) { return public_package_issue(issue); });
         return result_value;
     });
 }
@@ -364,6 +397,14 @@ result<package_import_plan> package_import_plan::create(const std::string &utf8_
                 {static_cast<std::size_t>(assignment.package_index), assignment.node_id,
                  static_cast<std::uint8_t>(assignment.destination_slot)});
         }
+        internal_request.policy.opaque_sequence_decisions.reserve(request.opaque_sequence_decisions.size());
+        for (const auto &decision : request.opaque_sequence_decisions) {
+            if (decision.package_index > std::numeric_limits<std::size_t>::max())
+                return invalid_argument("package opaque Sequence decision index is out of range");
+            internal_request.policy.opaque_sequence_decisions.push_back(
+                {static_cast<std::size_t>(decision.package_index), decision.node_id,
+                 internal_opaque_sequence_action(decision.action)});
+        }
 
         auto planned = plan_package_import(*target, packages, internal_request, context.impl_->cancellation.token());
         if (!planned)
@@ -399,15 +440,29 @@ result<package_import_summary> package_import_plan::summary() const {
     });
 }
 
-result<std::vector<package_issue_info>> package_import_plan::warnings() const {
-    return protect<std::vector<package_issue_info>>([&]() -> result<std::vector<package_issue_info>> {
+result<std::vector<package_import_warning_info>> package_import_plan::warnings() const {
+    return protect<std::vector<package_import_warning_info>>([&]() -> result<std::vector<package_import_warning_info>> {
         if (!impl_)
             return invalid_argument("package import plan is not initialized");
-        std::vector<package_issue_info> result_value;
+        std::vector<package_import_warning_info> result_value;
         result_value.reserve(impl_->plan.warnings.size());
-        std::ranges::transform(impl_->plan.warnings, std::back_inserter(result_value), public_package_issue);
+        std::ranges::transform(impl_->plan.warnings, std::back_inserter(result_value),
+                               [](const auto &warning) { return public_package_warning(warning); });
         return result_value;
     });
+}
+
+result<std::vector<package_opaque_sequence_choice_info>> package_import_plan::opaque_sequences() const {
+    return protect<std::vector<package_opaque_sequence_choice_info>>(
+        [&]() -> result<std::vector<package_opaque_sequence_choice_info>> {
+            if (!impl_)
+                return invalid_argument("package import plan is not initialized");
+            std::vector<package_opaque_sequence_choice_info> result_value;
+            result_value.reserve(impl_->plan.opaque_sequences.size());
+            std::ranges::transform(impl_->plan.opaque_sequences, std::back_inserter(result_value),
+                                   public_opaque_sequence_choice);
+            return result_value;
+        });
 }
 
 result<std::vector<package_conflict_info>> package_import_plan::conflicts() const {

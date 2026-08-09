@@ -332,6 +332,21 @@ axk::app::Result<axk::PackageImportRequest> parse_import_request(const Json &inp
                                                                   static_cast<std::uint8_t>(slot)});
             }
         }
+        if (input.contains("opaqueSequenceDecisions")) {
+            if (!input.at("opaqueSequenceDecisions").is_array()) {
+                return std::unexpected(operation_error("invalid_request", "opaqueSequenceDecisions must be an array"));
+            }
+            for (const auto &value : input.at("opaqueSequenceDecisions")) {
+                const auto action = value.at("action").get<std::string>();
+                if (action != "preserve-unchanged" && action != "skip") {
+                    return std::unexpected(operation_error("invalid_request", "opaque Sequence action is invalid"));
+                }
+                result.policy.opaque_sequence_decisions.push_back(
+                    {value.at("packageIndex").get<std::size_t>(), value.at("nodeId").get<std::string>(),
+                     action == "preserve-unchanged" ? axk::PackageOpaqueSequenceAction::preserve_unchanged
+                                                    : axk::PackageOpaqueSequenceAction::skip});
+            }
+        }
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "package import mappings are malformed"));
     }
@@ -419,8 +434,26 @@ Json program_slot_placements_json(std::span<const axk::PackageProgramSlotPlaceme
 
 Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::uint64_t expires_in_seconds) {
     auto warnings = Json::array();
-    for (const auto &warning : plan.warnings)
-        warnings.push_back({{"code", warning.code}, {"message", warning.message}, {"fatal", warning.fatal}});
+    for (const auto &warning : plan.warnings) {
+        warnings.push_back({{"code", warning.code},
+                            {"message", warning.message},
+                            {"origin", std::string{axk::package_import_warning_origin_name(warning.origin)}},
+                            {"packageIndex", warning.package_index ? Json(*warning.package_index) : Json{}},
+                            {"nodeId", warning.node_id},
+                            {"objectType", warning.object_type},
+                            {"objectName", warning.object_name},
+                            {"partitionIndex", warning.partition_index ? Json(*warning.partition_index) : Json{}},
+                            {"volumeName", warning.volume_name}});
+    }
+    auto opaque_sequences = Json::array();
+    for (const auto &sequence : plan.opaque_sequences) {
+        opaque_sequences.push_back(
+            {{"packageIndex", sequence.package_index},
+             {"nodeId", sequence.node_id},
+             {"name", sequence.name},
+             {"action", sequence.action ? Json(std::string{axk::package_opaque_sequence_action_name(*sequence.action)})
+                                        : Json{}}});
+    }
     auto conflicts = Json::array();
     for (const auto &conflict : plan.conflicts) {
         conflicts.push_back({{"code", conflict.code},
@@ -493,6 +526,7 @@ Json plan_json(const axk::PackageImportPlan &plan, std::string_view token, std::
             {"warnings", std::move(warnings)},
             {"conflicts", std::move(conflicts)},
             {"actions", std::move(actions)},
+            {"opaqueSequences", std::move(opaque_sequences)},
             {"programAssignmentAdjustments", program_assignment_adjustments_json(plan.program_assignment_adjustments)},
             {"programSlotPlacements", program_slot_placements_json(plan.program_slot_placements)},
             {"allocation", std::move(allocation)}};
@@ -579,6 +613,20 @@ axk::app::Result<axk::PackageImportRequest> parse_session_import_request(const J
                     {0U, assignment.at("nodeId").get<std::string>(), static_cast<std::uint8_t>(slot)});
             }
         }
+        if (input.contains("opaqueSequenceDecisions")) {
+            for (const auto &decision : input.at("opaqueSequenceDecisions")) {
+                if (decision.at("packageIndex").get<std::size_t>() != 0U)
+                    return std::unexpected(operation_error("invalid_request", "package index must be zero"));
+                const auto action = decision.at("action").get<std::string>();
+                if (action != "preserve-unchanged" && action != "skip") {
+                    return std::unexpected(operation_error("invalid_request", "opaque Sequence action is invalid"));
+                }
+                request.policy.opaque_sequence_decisions.push_back(
+                    {0U, decision.at("nodeId").get<std::string>(),
+                     action == "preserve-unchanged" ? axk::PackageOpaqueSequenceAction::preserve_unchanged
+                                                    : axk::PackageOpaqueSequenceAction::skip});
+            }
+        }
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "package destination mappings are malformed"));
     }
@@ -593,6 +641,7 @@ Json session_import_result(const SessionPackagePlanRecord &record, const axk::ap
     result.erase("valid");
     result.erase("warnings");
     result.erase("conflicts");
+    result.erase("opaqueSequences");
     result["imageId"] = record.image_id;
     result["revision"] = summary.revision;
     result["objectCount"] = summary.object_count;

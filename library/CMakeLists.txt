@@ -122,6 +122,7 @@ add_library(
   src/package_import.cpp
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
+  src/package_import_opaque_sequences.cpp
   src/package_import_plan.cpp
   src/package_import_program_slots.cpp
   src/package_program_adjustment.cpp
@@ -138,6 +139,7 @@ add_library(
   src/semantic.cpp
   src/semantic_analysis.cpp
   src/sequence.cpp
+  src/sequence_diagnostics.cpp
   src/sfs.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp

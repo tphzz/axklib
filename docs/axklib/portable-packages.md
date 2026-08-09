@@ -38,10 +38,20 @@ that restriction; an opaque Sequence owning an edge, declaring a relocation, or
 changing bytes outside an explicit object-name rename is rejected.
 
 A normally decoded or opaque Sequence therefore remains eligible for `.axkseq`
-and complete `.axkvol` export. Optional Sequence rename changes only its
-object-name field and preserves the internal track/lane label. Opaque
-preservation does not make MIDI conversion or sampler playability verified;
-clients must surface the package warning to the user.
+and complete `.axkvol` export. Package import has no implicit policy for an
+opaque Sequence: each node must be explicitly preserved unchanged or skipped.
+Preservation copies the original event bytes; optional Sequence rename changes
+only its object-name field and preserves the internal track/lane label. Skipping
+omits the standalone Sequence without discarding lower-level audio objects in
+the package. Opaque preservation does not make MIDI conversion, editing, or
+sampler playability verified; clients must surface both the choice and its
+warning to the user.
+
+An unrelated malformed Sequence already stored in an SFS target does not block
+otherwise valid imports. The plan warns that it will remain untouched and
+captures its exact object placement and payload SHA-256. Apply verifies that
+invariant after the write and rolls back rather than publishing an image if the
+target Sequence changed.
 
 Writers append the derived extension to a suffix-free output stem. A different
 recognized package extension or an unrelated extension is rejected. Readers

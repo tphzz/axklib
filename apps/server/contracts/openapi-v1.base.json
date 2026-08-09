@@ -1932,6 +1932,7 @@
           "destinations": {"type": "array", "items": {"$ref": "#/components/schemas/PackageDestination"}},
           "renames": {"type": "array", "items": {"$ref": "#/components/schemas/PackageRename"}},
           "programSlotAssignments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotAssignment"}},
+          "opaqueSequenceDecisions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageOpaqueSequenceDecision"}},
           "overwrite": {"type": "boolean", "default": false}
         }
       },
@@ -1953,6 +1954,57 @@
           "packageIndex": {"type": "integer", "minimum": 0},
           "nodeId": {"type": "string", "minLength": 1},
           "destinationSlot": {"type": "integer", "minimum": 1, "maximum": 128}
+        }
+      },
+      "PackageOpaqueSequenceDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "nodeId", "action"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "nodeId": {"type": "string", "minLength": 1},
+          "action": {
+            "enum": ["PRESERVE_UNCHANGED", "SKIP"],
+            "x-axklib-application-enum": {"PRESERVE_UNCHANGED": "preserve-unchanged", "SKIP": "skip"}
+          }
+        }
+      },
+      "PackageImportWarning": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "message", "origin", "packageIndex", "nodeId", "objectType", "objectName", "partitionIndex", "volumeName"],
+        "properties": {
+          "code": {"type": "string", "minLength": 1},
+          "message": {"type": "string", "minLength": 1},
+          "origin": {
+            "enum": ["PACKAGE", "TARGET"],
+            "x-axklib-application-enum": {"PACKAGE": "package", "TARGET": "target"}
+          },
+          "packageIndex": {"type": ["integer", "null"], "minimum": 0},
+          "nodeId": {"type": "string"},
+          "objectType": {"type": "string"},
+          "objectName": {"type": "string"},
+          "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
+          "volumeName": {"type": "string"}
+        }
+      },
+      "PackageOpaqueSequenceChoice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packageIndex", "nodeId", "name", "action"],
+        "properties": {
+          "packageIndex": {"type": "integer", "minimum": 0},
+          "nodeId": {"type": "string", "minLength": 1},
+          "name": {"type": "string"},
+          "action": {
+            "oneOf": [
+              {
+                "enum": ["PRESERVE_UNCHANGED", "SKIP"],
+                "x-axklib-application-enum": {"PRESERVE_UNCHANGED": "preserve-unchanged", "SKIP": "skip"}
+              },
+              {"type": "null"}
+            ]
+          }
         }
       },
       "PackageImportConflict": {
@@ -2107,7 +2159,7 @@
       "PackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "programSlotPlacements", "allocation"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2119,9 +2171,10 @@
           },
           "targetSnapshotId": {"type": "string", "minLength": 1},
           "valid": {"type": "boolean"},
-          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportWarning"}},
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "opaqueSequences": {"type": "array", "items": {"$ref": "#/components/schemas/PackageOpaqueSequenceChoice"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}}
@@ -2165,13 +2218,18 @@
             "type": "array",
             "maxItems": 128,
             "items": {"$ref": "#/components/schemas/ImageSessionPackageProgramSlotAssignment"}
+          },
+          "opaqueSequenceDecisions": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {"$ref": "#/components/schemas/PackageOpaqueSequenceDecision"}
           }
         }
       },
       "ImageSessionPackageImportPlan": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision"],
+        "required": ["schemaVersion", "planToken", "expiresInSeconds", "planId", "targetKind", "targetSnapshotId", "valid", "warnings", "conflicts", "actions", "opaqueSequences", "programAssignmentAdjustments", "programSlotPlacements", "allocation", "imageId", "revision"],
         "properties": {
           "schemaVersion": {"const": "1.0"},
           "planToken": {"type": "string", "minLength": 1},
@@ -2183,9 +2241,10 @@
           },
           "targetSnapshotId": {"type": "string", "minLength": 1},
           "valid": {"type": "boolean"},
-          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportWarning"}},
           "conflicts": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportConflict"}},
           "actions": {"type": "array", "items": {"$ref": "#/components/schemas/PackageImportAction"}},
+          "opaqueSequences": {"type": "array", "items": {"$ref": "#/components/schemas/PackageOpaqueSequenceChoice"}},
           "programAssignmentAdjustments": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramAssignmentAdjustment"}},
           "programSlotPlacements": {"type": "array", "items": {"$ref": "#/components/schemas/PackageProgramSlotPlacement"}},
           "allocation": {"type": "array", "items": {"$ref": "#/components/schemas/PackageAllocationEstimate"}},

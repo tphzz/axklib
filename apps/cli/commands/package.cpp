@@ -191,6 +191,45 @@ Result<std::vector<PackageProgramSlotAssignment>> load_program_slot_assignments(
     }
 }
 
+Result<std::vector<PackageOpaqueSequenceDecision>> load_opaque_sequence_decisions(const std::filesystem::path &path) {
+    std::ifstream input{path};
+    if (!input)
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open opaque Sequence map")};
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    if (!input && !input.eof())
+        return std::unexpected{
+            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read opaque Sequence map")};
+    const auto text_value = buffer.str();
+    if (!text::is_valid_utf8(text_value))
+        return std::unexpected{argument_error("opaque Sequence map is not valid UTF-8")};
+    try {
+        const auto array = Json::parse(text_value);
+        if (!array.is_array())
+            return std::unexpected{argument_error("opaque Sequence map must be a JSON array")};
+        std::vector<PackageOpaqueSequenceDecision> result;
+        result.reserve(array.size());
+        static const std::set<std::string, std::less<>> fields{"package", "node_id", "action"};
+        for (const auto &item : array) {
+            if (!has_only_fields(item, fields) || !item.contains("package") || !item.contains("node_id") ||
+                !item.contains("action")) {
+                return std::unexpected{
+                    argument_error("each opaque Sequence decision must contain only package, node_id, and action")};
+            }
+            const auto action = item.at("action").get<std::string>();
+            if (action != "preserve-unchanged" && action != "skip")
+                return std::unexpected{argument_error("opaque Sequence action must be preserve-unchanged or skip")};
+            result.push_back({item.at("package").get<std::size_t>(), item.at("node_id").get<std::string>(),
+                              action == "preserve-unchanged" ? PackageOpaqueSequenceAction::preserve_unchanged
+                                                             : PackageOpaqueSequenceAction::skip});
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{argument_error(std::string{"invalid opaque Sequence map JSON: "} + error.what())};
+    }
+}
+
 void print_package_summary(const schema::package_v1::PackageOutput &output, bool verify_only) {
     std::cout << output.path_utf8 << '\t' << (output.valid ? "valid" : "invalid") << "\tkind=" << output.package_kind
               << "\tpackage_id=" << output.package_id << "\troots=" << output.roots.size()
@@ -302,6 +341,12 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         if (!assignments)
             return report_failure(assignments.error());
         internal_request.policy.program_slot_assignments = std::move(*assignments);
+    }
+    if (request.opaque_sequence_map) {
+        auto decisions = load_opaque_sequence_decisions(*request.opaque_sequence_map);
+        if (!decisions)
+            return report_failure(decisions.error());
+        internal_request.policy.opaque_sequence_decisions = std::move(*decisions);
     }
 
     std::vector<std::filesystem::path> paths{request.target};

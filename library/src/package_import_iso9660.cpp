@@ -223,7 +223,7 @@ Result<PackageImportPlan> plan_iso9660_import(const RandomAccessReader &target_r
         const auto &[package_index, root_index] = key;
         const auto &package = packages[package_index];
         const auto *destination = &normalized_destinations[destination_index];
-        const auto closure = root_closure(package, root_index);
+        const auto closure = root_closure(package, root_index, package_index, request.policy);
         std::map<std::string, std::string, std::less<>> names;
         for (const auto *node : closure) {
             auto name = node->name;
@@ -396,13 +396,18 @@ Result<PackageImportPlan> plan_iso9660_import(const RandomAccessReader &target_r
                 });
                 if ((equal_elsewhere || equal_planned_elsewhere) &&
                     duplicate_warnings.emplace(object.raw_group, object.raw_volume, object.node_id).second) {
-                    plan.warnings.push_back(
-                        {"ISO9660_CROSS_VOLUME_DUPLICATE",
-                         std::format("{} '{}' is duplicated in raw volume "
-                                     "{}/{} because ISO reuse is "
-                                     "volume-local",
-                                     object.object_type, object.destination_name, object.raw_group, object.raw_volume),
-                         false});
+                    plan.warnings.push_back({.code = "ISO9660_CROSS_VOLUME_DUPLICATE",
+                                             .message = std::format("{} '{}' is duplicated in raw volume "
+                                                                    "{}/{} because ISO reuse is "
+                                                                    "volume-local",
+                                                                    object.object_type, object.destination_name,
+                                                                    object.raw_group, object.raw_volume),
+                                             .package_index = object.package_index,
+                                             .node_id = object.node_id,
+                                             .object_type = object.object_type,
+                                             .object_name = object.destination_name,
+                                             .partition_index = object.partition_index,
+                                             .volume_name = object.volume_name});
                 }
                 planned_equal_scopes[identity_key].emplace(object.raw_group, object.raw_volume);
             }

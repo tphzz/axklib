@@ -1347,11 +1347,23 @@ TEST(PortablePackage, PreservesUndecodableSequenceAsOpaqueNodeWithWarning) {
     request.policy.renames.push_back({0U, reopened->nodes.front().node_id, "Renamed"});
     const std::vector packages{*reopened};
     const auto target = fixture("HD00_512_single_sbnk_authored.hds");
+    const auto undecided = axk::plan_package_import(target, packages, request);
+    ASSERT_TRUE(undecided) << undecided.error().message;
+    EXPECT_FALSE(undecided->valid());
+    ASSERT_EQ(undecided->opaque_sequences.size(), 1U);
+    EXPECT_FALSE(undecided->opaque_sequences.front().action);
+    EXPECT_TRUE(std::ranges::any_of(undecided->conflicts, [](const auto &conflict) {
+        return conflict.code == "OPAQUE_SEQUENCE_DECISION_REQUIRED";
+    }));
+
+    request.policy.opaque_sequence_decisions.push_back(
+        {0U, reopened->nodes.front().node_id, axk::PackageOpaqueSequenceAction::preserve_unchanged});
     const auto plan = axk::plan_package_import(target, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
     ASSERT_EQ(plan->warnings.size(), 1U);
-    EXPECT_EQ(plan->warnings.front().code, "SEQUENCE_PAYLOAD_PRESERVED_OPAQUE");
+    EXPECT_EQ(plan->warnings.front().code, "OPAQUE_SEQUENCE_PRESERVED_UNCHANGED");
+    EXPECT_EQ(plan->warnings.front().origin, axk::PackageImportWarningOrigin::package);
 
     const auto output = output_root / "imported.hds";
     const auto applied = axk::apply_package_import(target, packages, *plan, output, false);
@@ -1367,6 +1379,44 @@ TEST(PortablePackage, PreservesUndecodableSequenceAsOpaqueNodeWithWarning) {
     EXPECT_EQ(imported->decoded.format, axk::ObjectFormat::unknown);
     EXPECT_TRUE(imported->decode_issue.has_value());
     EXPECT_EQ(imported->raw_payload, *renamed);
+
+    const auto valid_source = axk::open_media(target);
+    ASSERT_TRUE(valid_source) << valid_source.error().message;
+    const std::vector valid_roots{root(axk::PackageRootKind::sbnk, "New Volume", "sine wave")};
+    const auto valid_package = axk::build_portable_package(*valid_source, valid_roots);
+    ASSERT_TRUE(valid_package) << valid_package.error().message;
+    axk::PackageImportRequest unrelated_request;
+    unrelated_request.root_destinations.push_back(destination(0U, "New Volume"));
+    const std::vector unrelated_packages{valid_package->package};
+    const auto unrelated_plan = axk::plan_package_import(output, unrelated_packages, unrelated_request);
+    ASSERT_TRUE(unrelated_plan) << unrelated_plan.error().message;
+    ASSERT_TRUE(unrelated_plan->valid()) << conflict_summary(*unrelated_plan);
+    ASSERT_EQ(unrelated_plan->preserved_target_objects.size(), 1U);
+    EXPECT_TRUE(std::ranges::any_of(unrelated_plan->warnings, [](const auto &warning) {
+        return warning.code == "TARGET_SEQUENCE_PRESERVED_OPAQUE" &&
+               warning.origin == axk::PackageImportWarningOrigin::target;
+    }));
+    const auto unrelated_output = output_root / "unrelated-import.hds";
+    const auto unrelated_applied =
+        axk::apply_package_import(output, unrelated_packages, *unrelated_plan, unrelated_output, false);
+    ASSERT_TRUE(unrelated_applied) << unrelated_applied.error().message;
+    const auto unrelated_media = axk::open_media(unrelated_output);
+    ASSERT_TRUE(unrelated_media) << unrelated_media.error().message;
+    const auto unrelated_catalog = axk::build_object_catalog(*unrelated_media);
+    ASSERT_TRUE(unrelated_catalog) << unrelated_catalog.error().message;
+    const auto preserved = std::ranges::find(unrelated_catalog->objects, std::string{"Renamed"},
+                                             [](const auto &object) { return object.object.header.name; });
+    ASSERT_NE(preserved, unrelated_catalog->objects.end());
+    EXPECT_EQ(preserved->raw_payload, *renamed);
+    ASSERT_TRUE(preserved->placement);
+    EXPECT_EQ(preserved->placement->volume_name, "New Volume");
+
+    request.policy.opaque_sequence_decisions.front().action = axk::PackageOpaqueSequenceAction::skip;
+    const auto skipped = axk::plan_package_import(target, packages, request);
+    ASSERT_TRUE(skipped) << skipped.error().message;
+    EXPECT_FALSE(skipped->valid());
+    EXPECT_TRUE(std::ranges::any_of(skipped->conflicts,
+                                    [](const auto &conflict) { return conflict.code == "PACKAGE_IMPORT_EMPTY"; }));
     std::filesystem::remove_all(output_root, error);
 }
 
@@ -1648,7 +1698,7 @@ TEST(PortablePackage, ManifestKindOverridesARecognizedWrongFilenameExtension) {
     ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
     ASSERT_EQ(plan->warnings.size(), 1U);
     EXPECT_EQ(plan->warnings.front().code, "PACKAGE_EXTENSION_MISMATCH");
-    EXPECT_FALSE(plan->warnings.front().fatal);
+    EXPECT_EQ(plan->warnings.front().origin, axk::PackageImportWarningOrigin::package);
 }
 
 TEST(PortablePackage, RejectsMissingAmbiguousAndUnsupportedSelectorsWithoutArchive) {

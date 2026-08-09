@@ -178,6 +178,26 @@ std::string_view package_import_action_name(PackageImportObjectAction action) no
     return "conflict";
 }
 
+std::string_view package_opaque_sequence_action_name(PackageOpaqueSequenceAction action) noexcept {
+    switch (action) {
+    case PackageOpaqueSequenceAction::preserve_unchanged:
+        return "preserve-unchanged";
+    case PackageOpaqueSequenceAction::skip:
+        return "skip";
+    }
+    return "preserve-unchanged";
+}
+
+std::string_view package_import_warning_origin_name(PackageImportWarningOrigin origin) noexcept {
+    switch (origin) {
+    case PackageImportWarningOrigin::package:
+        return "package";
+    case PackageImportWarningOrigin::target:
+        return "target";
+    }
+    return "package";
+}
+
 std::string_view package_program_slot_placement_mode_name(PackageProgramSlotPlacementMode mode) noexcept {
     switch (mode) {
     case PackageProgramSlotPlacementMode::contiguous:

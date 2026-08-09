@@ -219,10 +219,38 @@ struct package_program_slot_assignment {
     std::uint32_t destination_slot{};
 };
 
+enum class package_opaque_sequence_action : std::uint8_t { preserve_unchanged, skip };
+
+struct package_opaque_sequence_decision {
+    std::uint64_t package_index{};
+    std::string node_id;
+    package_opaque_sequence_action action{package_opaque_sequence_action::preserve_unchanged};
+};
+
 struct package_import_request {
     std::vector<package_root_destination> root_destinations;
     std::vector<package_node_rename> renames;
     std::vector<package_program_slot_assignment> program_slot_assignments;
+    std::vector<package_opaque_sequence_decision> opaque_sequence_decisions;
+};
+
+struct package_import_warning_info {
+    std::string code;
+    std::string message;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint32_t> partition_index;
+    std::string volume_name;
+};
+
+struct package_opaque_sequence_choice_info {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<package_opaque_sequence_action> action;
 };
 
 struct package_conflict_info {
@@ -426,7 +454,8 @@ class AXK_SDK_API package_import_plan final {
                                               const std::vector<std::string> &utf8_package_paths,
                                               const package_import_request &request, operation_context &context);
     result<package_import_summary> summary() const;
-    result<std::vector<package_issue_info>> warnings() const;
+    result<std::vector<package_import_warning_info>> warnings() const;
+    result<std::vector<package_opaque_sequence_choice_info>> opaque_sequences() const;
     result<std::vector<package_conflict_info>> conflicts() const;
     result<std::vector<package_action_info>> actions() const;
     result<std::vector<package_program_assignment_adjustment_info>> adjustments() const;

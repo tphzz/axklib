@@ -1,7 +1,12 @@
 import { nativeFileSource } from '../../lib/nativeFileSource';
 import { selectLocalPackage } from '../../lib/nativePackages';
 import type { ClientUploadLocation, DirectoryRef, FileRef, InputFileLocation } from '../../lib/storageLocations';
-import type { ImageSessionPackageImportPlan, ImageTransport, PackageInspection } from '../../lib/transport';
+import type {
+    ImageSessionPackageImportPlan,
+    ImageTransport,
+    PackageInspection,
+    PackageOpaqueSequenceDecision,
+} from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { reportError } from '../../lib/diagnostics';
@@ -21,6 +26,7 @@ export interface PackageImportRequest {
     plan: ImageSessionPackageImportPlan | null;
     renames: Record<string, string>;
     programSlots: Record<string, number>;
+    opaqueSequenceActions: Record<string, PackageOpaqueSequenceDecision['action']>;
     hasUnvalidatedChanges: boolean;
     status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
     progress: number;
@@ -62,6 +68,7 @@ export class PackageImportWorkflow {
             plan: null,
             renames: {},
             programSlots: {},
+            opaqueSequenceActions: {},
             hasUnvalidatedChanges: false,
             status: 'choosing',
             progress: 0,
@@ -113,6 +120,18 @@ export class PackageImportWorkflow {
         this.request = { ...this.request, programSlots, hasUnvalidatedChanges: true };
     }
 
+    opaqueSequenceAction(nodeId: string, action: PackageOpaqueSequenceDecision['action']): void {
+        if (!this.request || this.request.status !== 'ready' || this.request.opaqueSequenceActions[nodeId] === action) {
+            return;
+        }
+        this.request = {
+            ...this.request,
+            opaqueSequenceActions: { ...this.request.opaqueSequenceActions, [nodeId]: action },
+            hasUnvalidatedChanges: true,
+        };
+        void this.replan();
+    }
+
     async dispose(): Promise<void> {
         const request = this.request;
         this.request = null;
@@ -144,6 +163,7 @@ export class PackageImportWorkflow {
             plan: null,
             renames: {},
             programSlots: {},
+            opaqueSequenceActions: {},
             hasUnvalidatedChanges: false,
             status: 'choosing',
             progress: 0,
@@ -191,6 +211,7 @@ export class PackageImportWorkflow {
                 plan: null,
                 renames: {},
                 programSlots: {},
+                opaqueSequenceActions: {},
                 hasUnvalidatedChanges: false,
                 status: 'loading',
                 progress: 0,
@@ -313,6 +334,7 @@ export class PackageImportWorkflow {
             plan: null,
             renames: {},
             programSlots: {},
+            opaqueSequenceActions: {},
             hasUnvalidatedChanges: false,
             status: 'loading',
             progress: 0,
@@ -371,6 +393,9 @@ export class PackageImportWorkflow {
                 (left, right) =>
                     left.destinationSlot - right.destinationSlot || left.nodeId.localeCompare(right.nodeId),
             );
+        const opaqueSequenceDecisions = Object.entries(request.opaqueSequenceActions)
+            .map(([nodeId, action]) => ({ packageIndex: 0, nodeId, action }))
+            .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
         const plan = replacePlanToken
             ? await this.dependencies.transport.planImagePackageImport(
                   sessionId,
@@ -380,6 +405,7 @@ export class PackageImportWorkflow {
                   renames,
                   programSlotAssignments,
                   replacePlanToken,
+                  opaqueSequenceDecisions,
               )
             : await this.dependencies.transport.planImagePackageImport(
                   sessionId,
@@ -388,6 +414,8 @@ export class PackageImportWorkflow {
                   request.item.name,
                   renames,
                   programSlotAssignments,
+                  undefined,
+                  opaqueSequenceDecisions,
               );
         if (generation !== this.generation || !this.request) {
             await this.dependencies.transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);

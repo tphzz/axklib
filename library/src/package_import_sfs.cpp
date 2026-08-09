@@ -1,5 +1,6 @@
 #include "package_import_support.hpp"
 
+#include "package_import_opaque_sequences.hpp"
 #include "package_import_program_slots.hpp"
 
 #include <algorithm>
@@ -38,11 +39,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         catalog_objects = opened_catalog_objects;
         catalog_issues = opened_catalog->issues;
     }
-    for (const auto &issue : catalog_issues) {
-        add_conflict(plan, issue.code, issue.message);
-        auto &conflict = plan.conflicts.back();
-        conflict.partition_index = issue.partition.value;
-    }
+    append_sfs_catalog_issues(plan, catalog_issues, catalog_objects);
     for (const auto &partition : container.partitions()) {
         if (partition.allocation.invalid_extent_record_count != 0U ||
             !partition.allocation.stored_not_reconstructed.empty() ||
@@ -140,7 +137,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                          "package roots disagree about destination volume creation", destination, &package);
             continue;
         }
-        const auto closure = root_closure(package, root_index);
+        const auto closure = root_closure(package, root_index, package_index, request.policy);
         std::map<std::string, std::string, std::less<>> destination_names;
         for (const auto *node : closure) {
             auto name = node->name;
@@ -671,6 +668,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             1024U;
         plan.allocation.push_back(std::move(delta));
     }
+    reject_preserved_target_object_use(plan);
 
     if (revalidate_target) {
         if (!before)

@@ -320,6 +320,7 @@ export type PackageImportPlan = components['schemas']['PackageImportPlan'];
 export type ImageSessionPackageRename = components['schemas']['ImageSessionPackageRename'];
 export type ImageSessionPackageProgramSlotAssignment =
     components['schemas']['ImageSessionPackageProgramSlotAssignment'];
+export type PackageOpaqueSequenceDecision = components['schemas']['PackageOpaqueSequenceDecision'];
 export type ImageSessionPackageImportPlan = components['schemas']['ImageSessionPackageImportPlan'];
 export type ImageSessionPackageImportResult = components['schemas']['ImageSessionPackageImportResult'];
 export type ImageSessionPackageExportDestination = components['schemas']['ImageSessionPackageExportDestination'];
@@ -530,6 +531,7 @@ export interface ImageTransport {
         renames?: ImageSessionPackageRename[],
         programSlotAssignments?: ImageSessionPackageProgramSlotAssignment[],
         replacePlanToken?: string,
+        opaqueSequenceDecisions?: PackageOpaqueSequenceDecision[],
     ): Promise<ImageSessionPackageImportPlan>;
     releaseImagePackageImportPlan(planToken: string): Promise<void>;
     startImagePackageImport(planToken: string): Promise<JobState>;

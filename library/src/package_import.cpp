@@ -6,6 +6,7 @@
 #include "axklib/package_import_planning.hpp"
 
 #include "package_import_internal.hpp"
+#include "package_import_opaque_sequences.hpp"
 #include "package_import_support.hpp"
 
 namespace axk {
@@ -59,10 +60,16 @@ plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader
         }
         plan.package_ids.push_back(package.package_id);
         for (const auto &issue : package.issues) {
-            if (!issue.fatal)
-                plan.warnings.push_back(issue);
+            if (!issue.fatal && issue.code != "SEQUENCE_PAYLOAD_PRESERVED_OPAQUE") {
+                PackageImportWarning warning;
+                warning.code = issue.code;
+                warning.message = issue.message;
+                warning.package_index = package_index;
+                plan.warnings.push_back(std::move(warning));
+            }
         }
     }
+    validate_opaque_sequence_policy(packages, request.policy, plan);
     if (target->kind() != MediaKind::sfs && !request.policy.program_slot_assignments.empty()) {
         add_conflict(plan, "PROGRAM_SLOT_POLICY_UNSUPPORTED",
                      "explicit Program slot assignments are only supported for SFS package imports");

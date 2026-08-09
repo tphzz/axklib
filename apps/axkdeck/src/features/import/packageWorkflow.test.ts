@@ -54,6 +54,7 @@ function programPlan(
         targetSnapshotId: 'snapshot-1',
         valid: applied,
         warnings: [],
+        opaqueSequences: [],
         conflicts: applied
             ? []
             : mappings.slice(0, 4).map((mapping) => ({
@@ -160,7 +161,7 @@ describe('PackageImportWorkflow', () => {
         expect(workflow.request?.programSlots).toEqual(
             Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`program-${index + 1}`, index + 5])),
         );
-        expect(planImagePackageImport).toHaveBeenNthCalledWith(1, 17, source, 0, 'Imported', [], []);
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(1, 17, source, 0, 'Imported', [], [], undefined, []);
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             2,
             17,
@@ -173,6 +174,7 @@ describe('PackageImportWorkflow', () => {
                 destinationSlot: index + 5,
             })),
             'suggested-plan',
+            [],
         );
         expect(workflow.request?.plan?.valid).toBe(true);
         expect(workflow.request?.renames).toEqual({});
@@ -197,9 +199,96 @@ describe('PackageImportWorkflow', () => {
                 destinationSlot: index + 9,
             })),
             'checked-plan',
+            [],
         );
         expect(workflow.request?.plan?.planToken).toBe('rechecked-plan');
         expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+    });
+
+    it('replans immediately with an explicit opaque Sequence decision', async () => {
+        const source = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'NordMicroDrums.axkvol' },
+            'NordMicroDrums.axkvol',
+        );
+        const undecidedPlan: ImageSessionPackageImportPlan = {
+            ...programPlan(true, 5, 'opaque-plan'),
+            valid: false,
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            conflicts: [
+                {
+                    code: 'OPAQUE_SEQUENCE_DECISION_REQUIRED',
+                    message: 'opaque Sequence requires an explicit import decision',
+                    nodeId: 'sequence-1',
+                    packageId: 'program-package',
+                    packageIndex: 0,
+                    rootIndex: 0,
+                    partitionIndex: 0,
+                    groupName: '',
+                    volumeName: 'Imported',
+                    rawGroup: '',
+                    rawVolume: '',
+                },
+            ],
+            actions: [],
+            programSlotPlacements: [],
+        };
+        const preservedPlan: ImageSessionPackageImportPlan = {
+            ...undecidedPlan,
+            planToken: 'preserved-plan',
+            planId: 'preserved-plan-id',
+            valid: true,
+            opaqueSequences: [
+                {
+                    packageIndex: 0,
+                    nodeId: 'sequence-1',
+                    name: 'NordMicroDrums',
+                    action: 'PRESERVE_UNCHANGED',
+                },
+            ],
+            conflicts: [],
+        };
+        const planImagePackageImport = vi
+            .fn()
+            .mockResolvedValueOnce(undecidedPlan)
+            .mockResolvedValueOnce(preservedPlan);
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageImportWorkflow({
+            transport: {
+                inspectPackage: vi.fn().mockResolvedValue(inspection),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        workflow.open({
+            id: 'volume-imported',
+            name: 'Imported',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 0,
+        });
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(source);
+        await choosing;
+
+        expect(workflow.request?.plan?.valid).toBe(false);
+        expect(workflow.request?.opaqueSequenceActions).toEqual({});
+
+        workflow.opaqueSequenceAction('sequence-1', 'PRESERVE_UNCHANGED');
+
+        await vi.waitFor(() => expect(workflow.request?.plan?.planToken).toBe('preserved-plan'));
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(2, 17, source, 0, 'Imported', [], [], 'opaque-plan', [
+            { packageIndex: 0, nodeId: 'sequence-1', action: 'PRESERVE_UNCHANGED' },
+        ]);
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
+        expect(workflow.request?.plan?.valid).toBe(true);
     });
 
     it('preserves unchecked Program slots when a manual conflict check fails', async () => {

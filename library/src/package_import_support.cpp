@@ -8,6 +8,8 @@
 #include <ranges>
 #include <tuple>
 
+#include "package_import_opaque_sequences.hpp"
+
 namespace axk::package_import_internal {
 
 Error planner_error(std::string message) {
@@ -49,6 +51,16 @@ std::string policy_digest(const PackageImportPolicy &policy) {
         append_integer(canonical, assignment.package_index);
         append_field(canonical, assignment.node_id);
         append_integer(canonical, assignment.destination_slot);
+    }
+    auto opaque_sequences = policy.opaque_sequence_decisions;
+    std::ranges::sort(opaque_sequences, [](const auto &left, const auto &right) {
+        return std::tie(left.package_index, left.node_id, left.action) <
+               std::tie(right.package_index, right.node_id, right.action);
+    });
+    for (const auto &decision : opaque_sequences) {
+        append_integer(canonical, decision.package_index);
+        append_field(canonical, decision.node_id);
+        append_field(canonical, package_opaque_sequence_action_name(decision.action));
     }
     return digest_text(canonical);
 }
@@ -130,7 +142,8 @@ relocation_context(const PortablePackage &package, const PackageImportPlan &plan
     return context;
 }
 
-std::vector<const PackageNode *> root_closure(const PortablePackage &package, std::size_t root_index) {
+std::vector<const PackageNode *> root_closure(const PortablePackage &package, std::size_t root_index,
+                                              std::size_t package_index, const PackageImportPolicy &policy) {
     std::map<std::string, std::vector<std::string>, std::less<>> children;
     for (const auto &relationship : package.relationships)
         children[relationship.source_node_id].push_back(relationship.target_node_id);
@@ -151,8 +164,10 @@ std::vector<const PackageNode *> root_closure(const PortablePackage &package, st
     std::vector<const PackageNode *> result;
     result.reserve(visited.size());
     for (const auto &node_id : visited) {
-        if (const auto *node = node_by_id(package, node_id); node != nullptr)
+        if (const auto *node = node_by_id(package, node_id);
+            node != nullptr && !skip_opaque_sequence(package, policy, package_index, *node)) {
             result.push_back(node);
+        }
     }
     return result;
 }

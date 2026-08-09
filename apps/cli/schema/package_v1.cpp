@@ -33,6 +33,18 @@ OrderedJson issue_json(const IssueOutput &issue) {
     return {{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}};
 }
 
+OrderedJson import_warning_json(const ImportWarningOutput &warning) {
+    return {{"code", warning.code},
+            {"message", warning.message},
+            {"origin", warning.origin},
+            {"package_index", optional_number(warning.package_index)},
+            {"node_id", warning.node_id},
+            {"object_type", warning.object_type},
+            {"object_name", warning.object_name},
+            {"partition_index", optional_number(warning.partition_index)},
+            {"volume_name", warning.volume_name}};
+}
+
 ProgramSlotPlacementOutput project_program_slot_placement(const PackageProgramSlotPlacement &placement) {
     ProgramSlotPlacementOutput result;
     result.placement_id = placement.placement_id;
@@ -172,9 +184,28 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
     std::ranges::transform(package_paths, std::back_inserter(result.package_paths_utf8),
                            [](const auto &path) { return text::path_to_utf8(path); });
     result.warnings.reserve(plan.warnings.size());
-    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings), [](const PackageIssue &issue) {
-        return IssueOutput{issue.code, issue.message, issue.fatal};
+    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings), [](const PackageImportWarning &warning) {
+        return ImportWarningOutput{warning.code,
+                                   warning.message,
+                                   std::string{package_import_warning_origin_name(warning.origin)},
+                                   warning.package_index,
+                                   warning.node_id,
+                                   warning.object_type,
+                                   warning.object_name,
+                                   warning.partition_index,
+                                   warning.volume_name};
     });
+    result.opaque_sequences.reserve(plan.opaque_sequences.size());
+    std::ranges::transform(
+        plan.opaque_sequences, std::back_inserter(result.opaque_sequences), [](const auto &sequence) {
+            return OpaqueSequenceChoiceOutput{
+                sequence.package_index,
+                sequence.node_id,
+                sequence.name,
+                sequence.action ? std::optional{std::string{package_opaque_sequence_action_name(*sequence.action)}}
+                                : std::nullopt,
+            };
+        });
     result.conflicts.reserve(plan.conflicts.size());
     for (const auto &conflict : plan.conflicts) {
         result.conflicts.push_back({
@@ -293,8 +324,25 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
         result.target_snapshot_id = service_plan.at("targetSnapshotId").get<std::string>();
         result.valid = service_plan.at("valid").get<bool>();
         for (const auto &warning : service_plan.at("warnings")) {
-            result.warnings.push_back({warning.at("code").get<std::string>(), warning.at("message").get<std::string>(),
-                                       warning.at("fatal").get<bool>()});
+            result.warnings.push_back({
+                warning.at("code").get<std::string>(),
+                warning.at("message").get<std::string>(),
+                warning.at("origin").get<std::string>(),
+                optional_value<std::uint64_t>(warning.at("packageIndex")),
+                warning.at("nodeId").get<std::string>(),
+                warning.at("objectType").get<std::string>(),
+                warning.at("objectName").get<std::string>(),
+                optional_value<std::uint32_t>(warning.at("partitionIndex")),
+                warning.at("volumeName").get<std::string>(),
+            });
+        }
+        for (const auto &sequence : service_plan.at("opaqueSequences")) {
+            result.opaque_sequences.push_back({
+                sequence.at("packageIndex").get<std::uint64_t>(),
+                sequence.at("nodeId").get<std::string>(),
+                sequence.at("name").get<std::string>(),
+                optional_value<std::string>(sequence.at("action")),
+            });
         }
         for (const auto &conflict : service_plan.at("conflicts")) {
             result.conflicts.push_back({
@@ -439,7 +487,16 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
     try {
         auto warnings = OrderedJson::array();
         for (const auto &warning : output.warnings)
-            warnings.push_back(issue_json(warning));
+            warnings.push_back(import_warning_json(warning));
+        auto opaque_sequences = OrderedJson::array();
+        for (const auto &sequence : output.opaque_sequences) {
+            opaque_sequences.push_back({
+                {"package_index", sequence.package_index},
+                {"node_id", sequence.node_id},
+                {"name", sequence.name},
+                {"action", optional_string(sequence.action)},
+            });
+        }
         auto conflicts = OrderedJson::array();
         for (const auto &conflict : output.conflicts) {
             conflicts.push_back({
@@ -572,6 +629,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
             {"target_snapshot_id", output.target_snapshot_id},
             {"valid", output.valid},
             {"warnings", std::move(warnings)},
+            {"opaque_sequences", std::move(opaque_sequences)},
             {"conflicts", std::move(conflicts)},
             {"objects", std::move(objects)},
             {"program_assignment_adjustments", std::move(program_assignment_adjustments)},

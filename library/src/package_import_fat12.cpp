@@ -82,7 +82,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
     for (const auto &[key, destination] : destinations) {
         const auto &[package_index, root_index] = key;
         const auto &package = packages[package_index];
-        const auto closure = root_closure(package, root_index);
+        const auto closure = root_closure(package, root_index, package_index, request.policy);
         std::map<std::string, std::string, std::less<>> names;
         for (const auto *node : closure) {
             auto name = node->name;

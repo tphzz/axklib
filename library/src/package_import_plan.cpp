@@ -185,7 +185,30 @@ std::string plan_identity(const PackageImportPlan &plan) {
     for (const auto &warning : plan.warnings) {
         append_field(source, warning.code);
         append_field(source, warning.message);
-        append_integer(source, warning.fatal);
+        append_field(source, package_import_warning_origin_name(warning.origin));
+        append_integer(source, warning.package_index.value_or(0U));
+        append_field(source, warning.node_id);
+        append_field(source, warning.object_type);
+        append_field(source, warning.object_name);
+        append_integer(source, warning.partition_index.value_or(0U));
+        append_field(source, warning.volume_name);
+    }
+    for (const auto &sequence : plan.opaque_sequences) {
+        append_integer(source, sequence.package_index);
+        append_field(source, sequence.node_id);
+        append_field(source, sequence.name);
+        append_field(source, sequence.action ? package_opaque_sequence_action_name(*sequence.action) : "");
+    }
+    for (const auto &object : plan.preserved_target_objects) {
+        append_field(source, object.object_key);
+        append_integer(source, object.partition_index);
+        append_integer(source, object.sfs_id);
+        append_field(source, object.object_type);
+        append_field(source, object.object_name);
+        append_field(source, object.volume_name);
+        append_field(source, object.category_name);
+        append_field(source, object.entry_name);
+        append_field(source, object.payload_sha256);
     }
     for (const auto &conflict : plan.conflicts) {
         append_field(source, conflict.code);
@@ -210,8 +233,23 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
         !valid_digest(plan.plan_id)) {
         return std::unexpected{planner_error("package import plan identity fields are invalid")};
     }
-    if (std::ranges::any_of(plan.warnings, &PackageIssue::fatal))
-        return std::unexpected{planner_error("package import plan contains a fatal warning")};
+    if (std::ranges::any_of(plan.warnings, [&](const auto &warning) {
+            return warning.code.empty() || warning.message.empty() ||
+                   (warning.package_index && *warning.package_index >= plan.package_ids.size());
+        })) {
+        return std::unexpected{planner_error("package import plan contains an invalid warning")};
+    }
+    if (std::ranges::any_of(plan.opaque_sequences,
+                            [&](const auto &sequence) {
+                                return sequence.package_index >= plan.package_ids.size() || sequence.node_id.empty() ||
+                                       sequence.name.empty();
+                            }) ||
+        std::ranges::any_of(plan.preserved_target_objects, [&](const auto &object) {
+            return object.object_key.empty() || object.object_type.empty() || object.object_name.empty() ||
+                   !valid_digest(object.payload_sha256);
+        })) {
+        return std::unexpected{planner_error("package import plan contains invalid preservation metadata")};
+    }
 
     std::set<std::tuple<std::uint8_t, std::string, std::string, std::string, std::string>> destination_keys;
     for (const auto &destination : plan.destinations) {

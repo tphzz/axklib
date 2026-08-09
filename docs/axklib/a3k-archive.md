@@ -105,11 +105,17 @@ Four corpus archives contain valid current Sequences whose terminal
 end-of-track block stores a nonzero unused next-tick value. Axklib accepts these
 timelines and exports them as ordinary current `SEQU` nodes. The Sequence in
 `nordmicrodrums#1.a3k` is structurally damaged and still fails semantic timeline
-decoding; volume and Sequence package export preserve that one object as an
-opaque node and report `SEQUENCE_PAYLOAD_PRESERVED_OPAQUE`. This warning means
-the bytes are retained but MIDI conversion and sampler playability are not
-verified. It does not block the remaining Programs, Sample Banks, Samples, or
-Wave Data in the volume from being packaged.
+decoding. Direct byte comparison confirms a duplicated 1 KiB region at Sequence
+object offset `0x9000`, followed by omitted bytes before the stored stream
+resumes. The same malformed payload SHA-256 is retained through A3K projection,
+target-image storage, and portable-package export; this is source corruption,
+not a decoder size-policy mismatch. Volume and Sequence package export preserve
+that object as an opaque node and report
+`SEQUENCE_PAYLOAD_PRESERVED_OPAQUE`. Import then requires an explicit preserve
+or skip decision. Preservation retains the event bytes but does not claim MIDI
+conversion, editing, or sampler playability. The malformed Sequence does not
+block the remaining Programs, Sample Banks, Samples, or Wave Data in the volume
+from being packaged or imported.
 
 ## Rejection And Limits
 

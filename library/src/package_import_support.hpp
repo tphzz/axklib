@@ -73,7 +73,8 @@ const PlannedPackageObject *planned_node(const PackageImportPlan &plan, const Pl
 Result<std::uint8_t> planned_program_number(const PlannedPackageObject &object);
 Result<package_internal::PackageNodeRelocationContext>
 relocation_context(const PortablePackage &package, const PackageImportPlan &plan, const PlannedPackageObject &owner);
-std::vector<const PackageNode *> root_closure(const PortablePackage &package, std::size_t root_index);
+std::vector<const PackageNode *> root_closure(const PortablePackage &package, std::size_t root_index,
+                                              std::size_t package_index, const PackageImportPolicy &policy);
 std::map<DestinationKey, SfsVolume> sfs_volumes(const Container &container);
 std::vector<ExistingObject> existing_objects(const ObjectCatalog &catalog);
 std::vector<ExistingObject> retained_existing_objects(std::span<const ObjectSnapshot *const> objects);

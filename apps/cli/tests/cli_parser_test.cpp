@@ -540,6 +540,7 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
     const auto target = root / "target.hds";
     const auto manifest = root / "target.json";
     const auto program_slot_map = root / "program-slots.json";
+    const auto opaque_sequence_map = root / "opaque-sequences.json";
     const auto output = root / "must-not-exist.hds";
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -572,6 +573,14 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
                        program_slot_map.string()}),
               2);
     EXPECT_NE(testing::internal::GetCapturedStderr().find("between 1 and 128"), std::string::npos);
+
+    std::ofstream{opaque_sequence_map} << R"([{"package":0,"node_id":"sequence-1","action":"repair-automatically"}])";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination",
+                       R"({"package":0,"root":0,"partition":0,"volume":"Imported"})", "--opaque-sequence-map",
+                       opaque_sequence_map.string()}),
+              2);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("preserve-unchanged or skip"), std::string::npos);
 
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "import", target.string(), package.string(), "--destination",

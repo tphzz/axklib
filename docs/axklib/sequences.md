@@ -165,10 +165,19 @@ Programs and sample data without blocking portability.
 A header-valid `SEQU` object whose timeline cannot be decoded may also be moved
 as an opaque Sequence. The package records format `unknown`, has no relationships
 or relocation descriptors, and emits `SEQUENCE_PAYLOAD_PRESERVED_OPAQUE` as a
-nonfatal issue. Export and import preserve every byte; an explicit rename may
-change only the 16-byte object-name field at `0x32`. This recovery contract does
-not verify MIDI conversion or sampler playback. Other
-undecodable object types remain outside the portable-package profile.
+nonfatal issue. Import requires an explicit choice for each such Sequence:
+**Preserve unchanged** copies its original event bytes, while **Skip Sequence**
+omits only that standalone node. There is no automatic repair and no default
+choice. An explicit rename may change only the 16-byte object-name field at
+`0x32`. This recovery contract does not verify MIDI conversion, editing, or
+sampler playback. Other undecodable object types remain outside the
+portable-package profile.
+
+An opaque Sequence already present in an SFS target is not an import dependency
+by itself. An unrelated package import may proceed, but the plan reports that
+target Sequence and records its exact placement and payload hash. Post-write
+verification must find the same bytes at the same placement; otherwise the
+whole mutation fails and rolls back.
 
 ## Compatibility Boundary
 

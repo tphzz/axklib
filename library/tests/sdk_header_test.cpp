@@ -7,10 +7,13 @@ int sdk_header_test() {
     axk::package_import_request request;
     request.root_destinations.push_back({});
     request.program_slot_assignments.push_back({0U, "program", 1U});
+    request.opaque_sequence_decisions.push_back(
+        {0U, "sequence", axk::package_opaque_sequence_action::preserve_unchanged});
     axk::package_program_slot_placement_info placement;
     placement.mode = "contiguous";
     return value && root.kind == axk::package_root_kind::wave_data && request.root_destinations.size() == 1U &&
-                   request.program_slot_assignments.size() == 1U && placement.mode == "contiguous"
+                   request.program_slot_assignments.size() == 1U && request.opaque_sequence_decisions.size() == 1U &&
+                   placement.mode == "contiguous"
                ? *value
                : 0;
 }

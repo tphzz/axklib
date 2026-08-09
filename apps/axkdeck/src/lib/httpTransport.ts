@@ -46,6 +46,7 @@ import type {
     PackageImportDestination,
     PackageImportPlan,
     PackageInspection,
+    PackageOpaqueSequenceDecision,
     PartitionMutation,
     PlanSummary,
     PlacementRepairInspection,
@@ -255,6 +256,7 @@ export class HttpImageTransport implements ImageTransport {
         renames: ImageSessionPackageRename[] = [],
         programSlotAssignments: ImageSessionPackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
+        opaqueSequenceDecisions: PackageOpaqueSequenceDecision[] = [],
     ): Promise<ImageSessionPackageImportPlan> {
         return this.packages.planImageImport(
             sessionId,
@@ -264,6 +266,7 @@ export class HttpImageTransport implements ImageTransport {
             renames,
             programSlotAssignments,
             replacePlanToken,
+            opaqueSequenceDecisions,
         );
     }
     releaseImagePackageImportPlan(planToken: string): Promise<void> {
@@ -339,15 +342,12 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startMediaConversion(sessionId, selection, destination);
     }
-
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {
         return this.packages.deleteRetained(download);
     }
-
     openImage(location: ImageLocation): Promise<OpenedImage> {
         return this.imageSessions.open(location);
     }
-
     refreshImage(sessionId: number): Promise<OpenedImage> {
         return this.imageSessions.refresh(sessionId);
     }
