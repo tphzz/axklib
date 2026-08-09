@@ -518,6 +518,14 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startHardDiskCreation', [planToken]);
     }
 
+    planFloppyCreation(output: FileLocation): Promise<PlanSummary> {
+        return this.invoke('planFloppyCreation', [output]);
+    }
+
+    startFloppyCreation(planToken: string): Promise<JobState> {
+        return this.invoke('startFloppyCreation', [planToken]);
+    }
+
     planCreate(
         manifest: InputFileLocation,
         output: FileLocation,

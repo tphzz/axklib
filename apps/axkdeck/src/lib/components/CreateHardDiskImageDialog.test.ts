@@ -28,6 +28,8 @@ function transport(): ImageTransport {
             .fn()
             .mockResolvedValue({ partitionCount: 2, sizeBytes: 2_147_483_648, planToken: 'plan' }),
         startHardDiskCreation: vi.fn().mockResolvedValue({ jobId: 7, kind: 'create.hds', status: 'queued' }),
+        planFloppyCreation: vi.fn().mockResolvedValue({ sizeBytes: 1_474_560, planToken: 'floppy-plan' }),
+        startFloppyCreation: vi.fn().mockResolvedValue({ jobId: 8, kind: 'create.floppy', status: 'queued' }),
         waitForJob: vi.fn().mockResolvedValue({ jobId: 7, kind: 'create.hds', status: 'completed', result: {} }),
         cancelJob: vi.fn().mockResolvedValue(undefined),
     } as unknown as ImageTransport;
@@ -46,8 +48,9 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        expect(screen.getByRole('dialog', { name: 'Create HD image' })).toBeTruthy();
-        expect((await screen.findByRole('button', { name: 'Floppy-scale' })).getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByRole('dialog', { name: 'Create HD/Floppy image' })).toBeTruthy();
+        expect((screen.getByLabelText('Type') as HTMLSelectElement).value).toBe('HD');
+        expect((await screen.findByRole('button', { name: '1.44 MB' })).getAttribute('aria-pressed')).toBe('true');
         expect(screen.getByText('1 partition · 1.40 MiB each')).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: '2 GiB' }));
         expect(screen.getByRole('button', { name: '2 partitions' }).getAttribute('aria-pressed')).toBe('true');
@@ -75,6 +78,48 @@ describe('CreateHardDiskImageDialog', () => {
         });
     });
 
+    it('creates a sampler-formatted 1.44 MB FAT12 floppy without exposing HD geometry', async () => {
+        const imageTransport = transport();
+        vi.mocked(imageTransport.waitForJob).mockResolvedValueOnce({
+            jobId: 8,
+            kind: 'create.floppy',
+            status: 'completed',
+            result: {},
+        });
+        const onsuccess = vi.fn();
+        render(CreateHardDiskImageDialog, {
+            props: {
+                transport: imageTransport,
+                directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: 'images' }, 'Yamaha/images'),
+                onsuccess,
+                oncancel: vi.fn(),
+            },
+        });
+
+        await screen.findByRole('button', { name: '1.44 MB' });
+        await fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'Floppy' } });
+        expect(screen.queryByText('Capacity')).toBeNull();
+        expect(screen.queryByText('Partitions')).toBeNull();
+        expect(screen.getByText('1.44 MB · Yamaha A-series FAT12 · Full format')).toBeTruthy();
+        await fireEvent.input(screen.getByLabelText('File name'), { target: { value: 'Sampler disk.hds' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+        await waitFor(() =>
+            expect(imageTransport.planFloppyCreation).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    reference: { rootId: 'workspace', relativePath: 'images/Sampler disk.ima' },
+                }),
+            ),
+        );
+        expect(imageTransport.startFloppyCreation).toHaveBeenCalledWith('floppy-plan');
+        expect(imageTransport.planHardDiskCreation).not.toHaveBeenCalled();
+        expect(onsuccess).toHaveBeenCalledWith({
+            kind: 'server-file',
+            reference: { rootId: 'workspace', relativePath: 'images/Sampler disk.ima' },
+            displayName: 'Yamaha/images/Sampler disk.ima',
+        });
+    });
+
     it('keeps invalid names and server failures in the dialog', async () => {
         const imageTransport = transport();
         vi.mocked(imageTransport.planHardDiskCreation).mockRejectedValueOnce(new Error('Destination already exists'));
@@ -87,7 +132,7 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        await screen.findByRole('button', { name: 'Floppy-scale' });
+        await screen.findByRole('button', { name: '1.44 MB' });
         await fireEvent.input(screen.getByLabelText('File name'), { target: { value: '../bad' } });
         await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         expect(screen.getByRole('alert').textContent).toContain('without directory separators');
@@ -116,7 +161,7 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        await screen.findByRole('button', { name: 'Floppy-scale' });
+        await screen.findByRole('button', { name: '1.44 MB' });
         await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         await waitFor(() => expect(imageTransport.waitForJob).toHaveBeenCalledOnce());
         await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

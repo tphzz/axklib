@@ -66,7 +66,7 @@ struct WritePlanRecord {
     std::map<std::string, std::string> logical_input_paths;
     std::vector<UploadLease> leases;
     std::vector<std::shared_ptr<TemporaryDirectoryCleanup>> staging;
-    std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
+    std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::FloppyCreationPlan> manifest;
     Json summary;
     std::string semantic_version;
     std::string source_identity;

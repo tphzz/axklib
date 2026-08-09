@@ -371,6 +371,24 @@ TEST_F(WriteOperationsTest, TypedHardDiskPlanUsesTheExistingAtomicBuildLifecycle
     EXPECT_FALSE(std::filesystem::exists(root_ / "wasteful.hds"));
 }
 
+TEST_F(WriteOperationsTest, TypedFloppyPlanCreatesAnExactSamplerFullFormatImage) {
+    const auto planned = registry_.invoke("create.floppy.plan", {{"output", file_ref("blank.ima")}}, context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    EXPECT_EQ(planned->at("kind"), "FLOPPY");
+    EXPECT_EQ(planned->at("summary").at("format"), "FLOPPY");
+    EXPECT_EQ(planned->at("summary").at("sizeBytes"), 1'474'560U);
+    EXPECT_EQ(planned->at("summary").at("objectCount"), 0U);
+
+    const auto built =
+        registry_.invoke("create.floppy", {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(built) << built.error().message;
+    EXPECT_EQ(built->at("sha256"), "59225775ad66b28498940e34d318826eddd72642214a6655c71d825a5b9c4af5");
+    EXPECT_TRUE(built->at("validation").at("valid").get<bool>());
+    const auto reopened = axk::open_media(root_ / "blank.ima");
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    EXPECT_TRUE(std::holds_alternative<axk::FatImage>(reopened->storage()));
+}
+
 TEST_F(WriteOperationsTest, TypedHardDiskPlanRemainsValidAfterRegistryMove) {
     auto moved_registry = std::move(registry_);
     const auto planned = moved_registry.invoke(

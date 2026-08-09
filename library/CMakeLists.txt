@@ -228,6 +228,7 @@ add_library(
   src/media_floppy_archive.cpp
   src/volume_floppy_export.cpp
   src/media_iso9660_layout.cpp
+  src/media_format_fat12.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
@@ -503,6 +504,7 @@ if(BUILD_TESTING)
     tests/deletion_test.cpp
     tests/effects_test.cpp
     tests/file_publication_test.cpp
+    tests/formatted_floppy_test.cpp
     tests/io_test.cpp
     tests/hardening_test.cpp
     tests/media_a3k_archive_test.cpp

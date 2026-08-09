@@ -110,9 +110,23 @@ enums such as `FLOPPY_SCALE` and `CD_R_700`.
 The floppy-scale and CD-R-scale choices are still HDS containers. They are
 useful small or removable-media-sized workspaces that can later receive
 packages and be converted through a supported transfer workflow. They are not
-empty FAT12 floppy images or ISO9660 disc images. Those media require Yamaha
-catalog/object content, so axklib does not advertise unsupported empty-media
-profiles.
+FAT12 floppy images or ISO9660 disc images.
+
+## Quick Blank Floppy Profile
+
+Applications can create a genuinely blank, sampler-formatted floppy without a
+content manifest. `plan_floppy_creation()` returns the fixed 1,474,560-byte
+plan, and `write_formatted_floppy_image()` writes either the A5000-authored
+quick-format or full-format byte profile. Both outputs contain the blank Yamaha
+catalog and `A3000_SY.002` marker but no sampler objects. The serializer does
+not embed a template image.
+
+`axklib-server` exposes the desktop profile through
+`POST /api/v1/floppy-build-plans`; applying the returned token with
+`create.floppy` writes the full-format variant. Axkdeck presents this as Type
+**Floppy** in **Create HD/Floppy image** and always uses `.ima`. Type **HD**
+continues to expose the HDS capacity and partition controls, including the
+distinct `1.44 MB` HD profile.
 
 Generate an alteration starter separately:
 

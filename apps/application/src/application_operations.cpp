@@ -153,7 +153,7 @@ Result<void> bind_standard_path_accesses(axk::app::OperationRegistry &registry) 
         !bound) {
         return bound;
     }
-    for (const auto id : {"create.plan", "create.hds.plan"}) {
+    for (const auto id : {"create.plan", "create.hds.plan", "create.floppy.plan"}) {
         if (auto bound = bind(id,
                               [](const Json &input, const OperationContext &) -> Result<std::vector<PathAccess>> {
                                   std::vector<PathAccess> result;

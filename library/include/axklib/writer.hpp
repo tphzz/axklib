@@ -20,6 +20,7 @@ namespace axk {
 inline constexpr std::string_view build_manifest_schema_version = "1.0";
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
 inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
+inline constexpr std::uint64_t formatted_floppy_size_bytes = 1'474'560;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
 inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum_wave_data_frames_per_channel;
 inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 1024ULL * 1024ULL;
@@ -280,6 +281,14 @@ struct HdsCreationPlan {
     std::uint64_t unused_tail_sectors{};
 };
 
+enum class FloppyFormatMode : std::uint8_t { quick, full };
+
+struct FloppyCreationPlan {
+    FloppyFormatMode mode{FloppyFormatMode::full};
+    std::uint64_t size_bytes{formatted_floppy_size_bytes};
+    std::size_t object_count{};
+};
+
 struct MediaBuildPlanSummary {
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::size_t object_count{};
@@ -408,6 +417,8 @@ AXK_AUDIO_API Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::st
 AXK_AUDIO_API const std::vector<HdsCreationProfile> &hds_creation_profiles();
 AXK_AUDIO_API Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request,
                                                         const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<FloppyCreationPlan> plan_floppy_creation(FloppyFormatMode mode = FloppyFormatMode::full,
+                                                              const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest,
                                                          const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
@@ -441,6 +452,10 @@ AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManife
                                                           const std::filesystem::path &output_path,
                                                           bool overwrite = false,
                                                           const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage> write_formatted_floppy_image(const FloppyCreationPlan &plan,
+                                                                     const std::filesystem::path &output_path,
+                                                                     bool overwrite = false,
+                                                                     const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
                                                           const std::filesystem::path &output_path, bool overwrite,
                                                           const MediaBuildLimits &limits,

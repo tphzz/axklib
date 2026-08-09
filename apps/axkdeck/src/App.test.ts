@@ -1878,7 +1878,7 @@ describe('App panel layout', () => {
         await fireEvent.click(await screen.findByText('images'));
         await fireEvent.click(screen.getByRole('button', { name: 'Select directory' }));
 
-        const dialog = await screen.findByRole('dialog', { name: 'Create HD image' });
+        const dialog = await screen.findByRole('dialog', { name: 'Create HD/Floppy image' });
         expect(dialog.querySelector('output')?.textContent).toBe('Yamaha/images');
     });
 });

@@ -3271,6 +3271,15 @@
           "overwrite": {"type": "boolean", "default": false}
         }
       },
+      "FloppyCreationPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["output"],
+        "properties": {
+          "output": {"$ref": "#/components/schemas/FileRef"},
+          "overwrite": {"type": "boolean", "default": false}
+        }
+      },
       "ImageBuildRequest": {"$ref": "#/components/schemas/PlanTokenRequest"},
       "ImageBuildSummary": {
         "type": "object",

@@ -717,7 +717,7 @@ describe('HttpImageTransport', () => {
         expect(OpeningWebSocket.instances).toHaveLength(0);
     });
 
-    it('uses typed hard-disk profiles and planning without constructing writer geometry', async () => {
+    it('uses typed hard-disk and floppy planning without constructing writer geometry', async () => {
         vi.stubGlobal(
             'fetch',
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -762,6 +762,30 @@ describe('HttpImageTransport', () => {
                                 resultSchema: 'ImageBuildResult',
                                 implemented: true,
                             },
+                            {
+                                id: 'create.floppy.plan',
+                                method: 'POST',
+                                route: '/api/v1/floppy-build-plans',
+                                mode: 'request',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'FloppyCreationPlanRequest',
+                                resultSchema: 'ImageBuildPlan',
+                                implemented: true,
+                            },
+                            {
+                                id: 'create.floppy',
+                                method: 'POST',
+                                route: '/api/v1/image-builds',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: 'FLOPPY',
+                                requestSchema: 'ImageBuildRequest',
+                                resultSchema: 'ImageBuildResult',
+                                implemented: true,
+                            },
                         ],
                     });
                 }
@@ -795,12 +819,25 @@ describe('HttpImageTransport', () => {
                         summary: { sizeBytes: 737280000, partitionCount: 1, objectCount: 0 },
                     });
                 }
+                if (url.pathname.endsWith('/floppy-build-plans')) {
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        output: { rootId: 'workspace', relativePath: 'images/new.ima' },
+                        overwrite: false,
+                    });
+                    return json({
+                        planToken: 'floppy-plan',
+                        kind: 'FLOPPY',
+                        summary: { sizeBytes: 1474560, partitionCount: 0, objectCount: 0 },
+                    });
+                }
                 if (url.pathname.endsWith('/image-builds')) {
-                    expect(JSON.parse(String(init?.body))).toEqual({ planToken: 'quick-plan' });
+                    const body = JSON.parse(String(init?.body));
+                    expect(['quick-plan', 'floppy-plan']).toContain(body.planToken);
+                    const floppy = body.planToken === 'floppy-plan';
                     return json(
                         {
-                            jobId: 'quick-job',
-                            operationId: 'create.hds',
+                            jobId: floppy ? 'floppy-job' : 'quick-job',
+                            operationId: floppy ? 'create.floppy' : 'create.hds',
                             state: 'QUEUED',
                             latestSequence: 0,
                             progress: null,
@@ -821,6 +858,10 @@ describe('HttpImageTransport', () => {
         expect(plan).toMatchObject({ planToken: 'quick-plan', sizeBytes: 737280000 });
         const job = await transport.startHardDiskCreation(plan.planToken!);
         expect(job).toMatchObject({ kind: 'create.hds', status: 'queued' });
+        const floppyPlan = await transport.planFloppyCreation(serverFile('images/new.ima'));
+        expect(floppyPlan).toMatchObject({ planToken: 'floppy-plan', sizeBytes: 1474560 });
+        const floppyJob = await transport.startFloppyCreation(floppyPlan.planToken!);
+        expect(floppyJob).toMatchObject({ kind: 'create.floppy', status: 'queued' });
     });
 
     it('starts typed volume changes through the retained image session', async () => {

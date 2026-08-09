@@ -84,7 +84,7 @@ FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image, const 
     if (parsed_label) {
         result.identity.set_name = parsed_label->first;
         result.identity.index = parsed_label->second;
-    } else {
+    } else if (!std::ranges::all_of(catalog->disk_name, [](char character) { return character == ' '; })) {
         result.issues.push_back(
             issue("FLOPPY_SET_LABEL_INVALID",
                   std::format("Yamaha disk label '{}' has no exact two-digit set index", catalog->disk_name),

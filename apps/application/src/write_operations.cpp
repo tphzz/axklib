@@ -79,7 +79,7 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
 
             const auto serialized = document->json.dump();
             Json summary;
-            std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest> manifest;
+            std::variant<axk::HdsBuildManifest, axk::MediaBuildManifest, axk::FloppyCreationPlan> manifest;
             std::vector<std::filesystem::path> required_paths;
             if (*manifest_kind == axk::BuildManifestKind::hds) {
                 auto parsed = axk::parse_hds_build_manifest(serialized);
@@ -242,6 +242,67 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
             return bound;
     }
 
+    if (!registry.is_implemented("create.floppy.plan")) {
+        auto bound = registry.bind("create.floppy.plan", [state, &sandbox](const Json &input,
+                                                                           const OperationContext &context) {
+            auto output = parse_file_ref(input, "output");
+            if (!output)
+                return Result<Json>{std::unexpected(output.error())};
+            const auto overwrite = input.value("overwrite", false);
+            auto output_path = sandbox.resolve_output_file(*output, overwrite);
+            if (!output_path)
+                return Result<Json>{std::unexpected(output_path.error())};
+            auto planned = axk::plan_floppy_creation(axk::FloppyFormatMode::full, context.cancellation);
+            if (!planned)
+                return Result<Json>{std::unexpected(core_error(planned.error()))};
+
+            std::error_code filesystem_error;
+            const auto output_existed = std::filesystem::exists(*output_path, filesystem_error);
+            if (filesystem_error) {
+                return Result<Json>{
+                    std::unexpected(operation_error("output_read_failed", "could not inspect build destination"))};
+            }
+            std::optional<std::string> output_digest;
+            if (output_existed) {
+                auto digest = file_sha256(*output_path, context.cancellation);
+                if (!digest)
+                    return Result<Json>{std::unexpected(digest.error())};
+                output_digest = std::move(*digest);
+            }
+            auto token = axk::app::secure_random_hex(24U);
+            if (!token)
+                return Result<Json>{std::unexpected(token.error())};
+            const auto build = axk::current_build_info();
+            const auto now = Clock::now();
+            Json summary{{"format", "FLOPPY"}, {"sizeBytes", planned->size_bytes}, {"objectCount", 0U}};
+            auto record = std::make_shared<WritePlanRecord>(WritePlanRecord{std::move(*token),
+                                                                            context.owner_id,
+                                                                            now + state->retention,
+                                                                            WritePlanKind::floppy,
+                                                                            *output,
+                                                                            *output_path,
+                                                                            overwrite,
+                                                                            output_existed,
+                                                                            std::move(output_digest),
+                                                                            {},
+                                                                            {},
+                                                                            {},
+                                                                            {},
+                                                                            {},
+                                                                            {},
+                                                                            std::move(*planned),
+                                                                            std::move(summary),
+                                                                            std::string{axk::version()},
+                                                                            build.source_identity,
+                                                                            false});
+            if (auto registered = register_plan(state, record); !registered)
+                return Result<Json>{std::unexpected(registered.error())};
+            return Result<Json>{write_plan_json(*record, static_cast<std::uint64_t>(state->retention.count() * 60))};
+        });
+        if (!bound)
+            return bound;
+    }
+
     const auto bind_create = [&](std::string_view operation_id, axk::BuildManifestKind expected_kind) -> Result<void> {
         if (registry.is_implemented(operation_id))
             return {};
@@ -303,6 +364,12 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 (*result)["unusedTailSectors"] = written->unused_tail_sectors;
                 claim->consume();
                 return result;
+            } else if (expected_kind == axk::BuildManifestKind::fat12_floppy &&
+                       std::holds_alternative<axk::FloppyCreationPlan>(record.manifest)) {
+                const auto &plan = std::get<axk::FloppyCreationPlan>(record.manifest);
+                auto written = axk::write_formatted_floppy_image(plan, staged_output, false, context.cancellation);
+                if (!written)
+                    return Result<Json>{std::unexpected(core_error(written.error(), record.output.relative_path))};
             } else {
                 const auto &manifest = std::get<axk::MediaBuildManifest>(record.manifest);
                 auto written =

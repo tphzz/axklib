@@ -151,6 +151,12 @@ class UnavailableTransport implements ImageTransport {
     startHardDiskCreation(): Promise<JobState> {
         return this.unavailable();
     }
+    planFloppyCreation(): Promise<PlanSummary> {
+        return this.unavailable();
+    }
+    startFloppyCreation(): Promise<JobState> {
+        return this.unavailable();
+    }
     openImage(): Promise<OpenedImage> {
         return this.unavailable();
     }

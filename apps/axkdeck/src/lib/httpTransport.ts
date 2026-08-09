@@ -564,6 +564,26 @@ export class HttpImageTransport implements ImageTransport {
         return this.jobs.map(job);
     }
 
+    async planFloppyCreation(output: FileLocation): Promise<PlanSummary> {
+        const outputFile = serverFile(output);
+        const plan = await this.client.invoke<ApiWritePlan>('create.floppy.plan', {
+            output: outputFile.reference,
+            overwrite: false,
+        });
+        if (this.jobs.isJob(plan)) throw new Error('create.floppy.plan unexpectedly returned a job');
+        return planSummary(plan);
+    }
+
+    async startFloppyCreation(planToken: string): Promise<JobState> {
+        const job = await this.client.invoke<never>(
+            'create.floppy',
+            { planToken },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('create.floppy did not return a job');
+        return this.jobs.map(job);
+    }
+
     async planAlter(
         source: FileLocation,
         manifest: InputFileLocation,

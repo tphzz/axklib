@@ -14,7 +14,10 @@
     }
 
     let { transport, directory, onsuccess, oncancel }: Props = $props();
+    type ImageType = 'HD' | 'Floppy';
+
     let profiles = $state<HardDiskCreationProfile[]>([]);
+    let imageType = $state<ImageType>('HD');
     let profileId = $state<HardDiskCreationProfileId>('FLOPPY_SCALE');
     let partitionCount = $state(1);
     let fileName = $state('New disk');
@@ -55,7 +58,7 @@
     function profileLabel(id: HardDiskCreationProfileId): string {
         switch (id) {
             case 'FLOPPY_SCALE':
-                return 'Floppy-scale';
+                return '1.44 MB';
             case 'CD_R_650':
                 return 'CD-R 650';
             case 'CD_R_700':
@@ -69,12 +72,13 @@
 
     function normalizedFileName(): string | null {
         let stem = fileName.trim();
-        if (stem.toLocaleLowerCase().endsWith('.hds')) stem = stem.slice(0, -4).trimEnd();
+        const lower = stem.toLocaleLowerCase();
+        if (lower.endsWith('.hds') || lower.endsWith('.ima')) stem = stem.slice(0, -4).trimEnd();
         if (!stem || stem === '.' || stem === '..' || stem.includes('/') || stem.includes('\\')) {
             error = 'Enter a filename without directory separators';
             return null;
         }
-        return `${stem}.hds`;
+        return `${stem}${imageType === 'Floppy' ? '.ima' : '.hds'}`;
     }
 
     function outputLocation(name: string): FileLocation {
@@ -88,23 +92,29 @@
 
     async function createImage(event: SubmitEvent): Promise<void> {
         event.preventDefault();
-        if (busy || !selectedProfile || !selectedOption) return;
+        if (busy || (imageType === 'HD' && (!selectedProfile || !selectedOption))) return;
         const name = normalizedFileName();
         if (!name) return;
         const output = outputLocation(name);
         busy = true;
         error = '';
         try {
-            const plan = await transport.planHardDiskCreation(profileId, partitionCount, output);
+            const plan =
+                imageType === 'Floppy'
+                    ? await transport.planFloppyCreation(output)
+                    : await transport.planHardDiskCreation(profileId, partitionCount, output);
             if (!plan.planToken) throw new Error('The server did not return a build plan token');
-            activeJob = await transport.startHardDiskCreation(plan.planToken);
+            activeJob =
+                imageType === 'Floppy'
+                    ? await transport.startFloppyCreation(plan.planToken)
+                    : await transport.startHardDiskCreation(plan.planToken);
             const completed = await transport.waitForJob(activeJob.jobId, (job) => (activeJob = job));
             if (completed.status === 'cancelled') {
                 oncancel();
                 return;
             }
-            if (completed.status === 'failed') throw new Error(completed.error ?? 'Hard-disk image creation failed');
-            if (completed.status !== 'completed') throw new Error('Hard-disk image creation did not complete');
+            if (completed.status === 'failed') throw new Error(completed.error ?? 'Image creation failed');
+            if (completed.status !== 'completed') throw new Error('Image creation did not complete');
             onsuccess(output);
         } catch (reason) {
             error = userFacingMessage(reason);
@@ -142,11 +152,11 @@
         class="dialog-shell create-hds-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Create HD image"
+        aria-label="Create HD/Floppy image"
         use:modal={{ onescape: () => void cancel() }}
     >
         <header class="dialog-header">
-            <h2>Create HD image</h2>
+            <h2>Create HD/Floppy image</h2>
             <button
                 class="icon-button"
                 type="button"
@@ -164,6 +174,21 @@
                 <output>{directory.displayName}</output>
             </label>
             <label class="create-hds-field">
+                <span>Type</span>
+                <select
+                    aria-label="Type"
+                    value={imageType}
+                    disabled={busy}
+                    onchange={(event) => {
+                        imageType = event.currentTarget.value as ImageType;
+                        error = '';
+                    }}
+                >
+                    <option value="HD">HD</option>
+                    <option value="Floppy">Floppy</option>
+                </select>
+            </label>
+            <label class="create-hds-field">
                 <span>File name</span>
                 <span class="create-hds-name"
                     ><input
@@ -171,44 +196,49 @@
                         bind:value={fileName}
                         data-dialog-initial-focus="select"
                         disabled={busy}
-                    /><b>.hds</b></span
+                    /><b>{imageType === 'Floppy' ? '.ima' : '.hds'}</b></span
                 >
             </label>
 
-            <fieldset disabled={busy || loading}>
-                <legend>Capacity</legend>
-                <div class="create-hds-segments capacity-segments">
-                    {#each profiles as profile (profile.profileId)}
-                        <button
-                            type="button"
-                            aria-pressed={profileId === profile.profileId}
-                            onclick={() => selectProfile(profile.profileId)}>{profileLabel(profile.profileId)}</button
-                        >
-                    {/each}
-                </div>
-            </fieldset>
+            {#if imageType === 'HD'}
+                <fieldset disabled={busy || loading}>
+                    <legend>Capacity</legend>
+                    <div class="create-hds-segments capacity-segments">
+                        {#each profiles as profile (profile.profileId)}
+                            <button
+                                type="button"
+                                aria-pressed={profileId === profile.profileId}
+                                onclick={() => selectProfile(profile.profileId)}
+                                >{profileLabel(profile.profileId)}</button
+                            >
+                        {/each}
+                    </div>
+                </fieldset>
 
-            <fieldset disabled={busy || loading}>
-                <legend>Partitions</legend>
-                <div class="create-hds-segments partition-segments">
-                    {#each partitionCounts as count (count)}
-                        {@const option = selectedProfile?.partitionOptions.find(
-                            (candidate) => candidate.partitionCount === count,
-                        )}
-                        <button
-                            type="button"
-                            aria-label={`${count} ${count === 1 ? 'partition' : 'partitions'}`}
-                            aria-pressed={Boolean(option && partitionCount === count)}
-                            disabled={!option}
-                            onclick={() => {
-                                if (option) partitionCount = count;
-                            }}>{count}</button
-                        >
-                    {/each}
-                </div>
-            </fieldset>
+                <fieldset disabled={busy || loading}>
+                    <legend>Partitions</legend>
+                    <div class="create-hds-segments partition-segments">
+                        {#each partitionCounts as count (count)}
+                            {@const option = selectedProfile?.partitionOptions.find(
+                                (candidate) => candidate.partitionCount === count,
+                            )}
+                            <button
+                                type="button"
+                                aria-label={`${count} ${count === 1 ? 'partition' : 'partitions'}`}
+                                aria-pressed={Boolean(option && partitionCount === count)}
+                                disabled={!option}
+                                onclick={() => {
+                                    if (option) partitionCount = count;
+                                }}>{count}</button
+                            >
+                        {/each}
+                    </div>
+                </fieldset>
+            {/if}
 
-            {#if selectedProfile && selectedOption}
+            {#if imageType === 'Floppy'}
+                <p class="create-hds-summary">1.44 MB · Yamaha A-series FAT12 · Full format</p>
+            {:else if selectedProfile && selectedOption}
                 <p class="create-hds-summary">
                     {partitionCount}
                     {partitionCount === 1 ? 'partition' : 'partitions'} · {formatBytes(
@@ -228,7 +258,7 @@
                 <button
                     class="primary-button"
                     type="submit"
-                    disabled={loading || busy || !selectedProfile || !selectedOption}
+                    disabled={busy || (imageType === 'HD' && (loading || !selectedProfile || !selectedOption))}
                 >
                     {busy ? 'Creating' : 'Create'}
                 </button>
@@ -256,6 +286,7 @@
     }
 
     .create-hds-field output,
+    .create-hds-field select,
     .create-hds-name {
         min-width: 0;
         height: 30px;
@@ -273,6 +304,11 @@
     }
 
     .create-hds-field output {
+        padding: 0 9px;
+    }
+
+    .create-hds-field select {
+        width: 100%;
         padding: 0 9px;
     }
 

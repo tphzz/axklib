@@ -601,6 +601,8 @@ export interface ImageTransport {
         output: FileLocation,
     ): Promise<PlanSummary>;
     startHardDiskCreation(planToken: string): Promise<JobState>;
+    planFloppyCreation(output: FileLocation): Promise<PlanSummary>;
+    startFloppyCreation(planToken: string): Promise<JobState>;
     planCreate(
         manifest: InputFileLocation,
         output: FileLocation,
