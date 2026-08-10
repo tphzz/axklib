@@ -640,8 +640,12 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "CMakePresets.json" in workflow
     assert "library/cmake/triplets/**" in workflow
     assert "library/cmake/ports/**" in workflow
-    assert "key: vcpkg-v2-${{ matrix.triplet }}-" in workflow
-    assert "vcpkg-v2-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
+    assert "key: vcpkg-v3-${{ matrix.triplet }}-" in workflow
+    assert "vcpkg-v3-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
+    vcpkg_cache = workflow.split("      - name: Restore vcpkg binary cache\n", 1)[
+        1
+    ].split("      - name: Locate Visual Studio 2026\n", 1)[0]
+    assert "restore-keys:" not in vcpkg_cache
     assert "key: native-v3-${{ matrix.triplet }}-" in workflow
     assert "key: axkdeck-rust-v1-${{ matrix.artifact }}-" in workflow
     assert "key: axkdeck-rust-v2-macos-universal-" in workflow
@@ -1036,7 +1040,8 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
     assert workflow.count("run_tests: true") == 4
     assert "build_slice x86_64 x64-osx-axk macos-x64" in macos_helper
     assert "build_slice arm64 arm64-osx-axk macos-arm64" in macos_helper
-    assert '/usr/bin/arch -x86_64 "$ctest_path"' in macos_helper
+    assert 'ctest --test-dir "$build_directory" --output-on-failure' in macos_helper
+    assert '/usr/bin/arch -x86_64 "$ctest_path"' not in macos_helper
     assert "-DAXK_BUILD_SERVER=ON" in workflow
     assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow
     assert 'python tools/python/inspect_package.py "$scan/server"' in workflow

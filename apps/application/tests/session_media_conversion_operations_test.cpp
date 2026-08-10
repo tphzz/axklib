@@ -5,8 +5,10 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -21,6 +23,20 @@
 #include "axklib/writer.hpp"
 
 namespace {
+
+std::optional<std::string> environment_value(std::string_view key) {
+#if defined(_WIN32)
+    char *raw = nullptr;
+    std::size_t size = 0U;
+    if (_dupenv_s(&raw, &size, std::string{key}.c_str()) != 0 || raw == nullptr)
+        return std::nullopt;
+    const std::unique_ptr<char, decltype(&std::free)> value{raw, &std::free};
+    return *value == '\0' ? std::nullopt : std::optional<std::string>{value.get()};
+#else
+    const auto *value = std::getenv(std::string{key}.c_str());
+    return value == nullptr || *value == '\0' ? std::nullopt : std::optional<std::string>{value};
+#endif
+}
 
 std::filesystem::path fixture_path() {
     return std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
@@ -260,9 +276,8 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     ASSERT_TRUE(completed_audition) << completed_audition.error().message;
     EXPECT_GT(completed_audition->content_size_bytes, 44U);
 
-    if (const auto *artifact_output = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
-        artifact_output != nullptr && *artifact_output != '\0') {
-        const std::filesystem::path artifact_path{artifact_output};
+    if (const auto artifact_output = environment_value("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT")) {
+        const std::filesystem::path artifact_path{*artifact_output};
         std::filesystem::create_directories(artifact_path.parent_path());
         std::error_code error;
         ASSERT_TRUE(std::filesystem::copy_file(retained->path, artifact_path,

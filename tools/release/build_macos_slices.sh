@@ -189,7 +189,6 @@ build_slice() {
   local build_directory="$source_directory/build/native/$platform/$configuration_lower"
   local stage="$source_directory/build/tmp/macos-slice-$platform"
   local server="$stage/bin/axklib-server"
-  local ctest_path
   local binary
   local library_arguments=()
 
@@ -213,13 +212,9 @@ build_slice() {
     -DVCPKG_OVERLAY_TRIPLETS="$source_directory/library/cmake/triplets"
   cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
-  if [[ "$architecture" == x86_64 ]]; then
-    ctest_path="$(command -v ctest)"
-    /usr/bin/arch -x86_64 "$ctest_path" \
-      --test-dir "$build_directory" --output-on-failure
-  else
-    ctest --test-dir "$build_directory" --output-on-failure
-  fi
+  # Native CTest can launch Intel test binaries through macOS translation.
+  # Running an ARM64 Homebrew CTest itself under Rosetta fails before discovery.
+  ctest --test-dir "$build_directory" --output-on-failure
 
   python "$source_directory/tools/python/release_metadata.py" resolve \
     --version-metadata-file "$build_directory/version_metadata.json" \
