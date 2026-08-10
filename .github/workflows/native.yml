@@ -874,6 +874,9 @@ jobs:
   macos-slices:
     name: macOS ARM64 and Intel slices
     needs:
+      # The ARM64 Linux job runs in a VMware guest on the same Apple Silicon
+      # host. Wait for the complete native matrix so it cannot overlap that VM.
+      - native
       - release-tools
       - desktop-static
     runs-on: [self-hosted, macOS, ARM64]

@@ -820,6 +820,10 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
         "  draft-release:\n", 1
     )[0]
     assert "bash tools/release/build_macos_slices.sh" in slices_job
+    slices_needs = slices_job.split("    needs:\n", 1)[1].split(
+        "    runs-on:", 1
+    )[0]
+    assert "- native" in slices_needs
     assert "name: slice-macos-x64-${{ github.run_id }}" in slices_job
     assert "name: slice-macos-arm64-${{ github.run_id }}" in slices_job
     assert "retention-days: 2" in slices_job
