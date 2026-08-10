@@ -169,9 +169,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $git = (Get-Command git.exe -ErrorAction Stop).Source
           $gitRoot = Split-Path (Split-Path $git -Parent) -Parent
-          $bash = Get-Item (Join-Path $gitRoot 'bin\bash.exe') -ErrorAction Stop
-          $bash.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          & $bash.Source --version
+          $bash = (Get-Item (Join-Path $gitRoot 'bin\bash.exe') -ErrorAction Stop).FullName
+          Split-Path $bash -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $bash --version
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: runner.os != 'Windows'
@@ -192,12 +192,40 @@ jobs:
           version: "0.10.4"
           enable-cache: true
 
+      - name: Install Linux C++23 toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_CODENAME" = jammy
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl
+          sudo install -d -m 0755 /etc/apt/keyrings
+          curl --fail --silent --show-error \
+            https://apt.llvm.org/llvm-snapshot.gpg.key \
+            | sudo tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null
+          echo 'deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main' \
+            | sudo tee /etc/apt/sources.list.d/llvm18.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-18 \
+            libc++-18-dev \
+            libc++abi-18-dev \
+            libunwind-18-dev
+          echo "CC=clang-18" >> "$GITHUB_ENV"
+          echo "CXX=clang++-18" >> "$GITHUB_ENV"
+          clang++-18 --version
+
       - name: Resolve native cache inputs
         id: cache-inputs
         shell: bash
         run: |
           echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
-          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
+          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/toolchains/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
 
       - name: Configure vcpkg binary cache
         shell: bash
@@ -306,6 +334,7 @@ jobs:
           -DAXK_SERVER_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-server.spdx.json
           -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
           -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
+          -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${{ runner.os == 'Linux' && format('{0}/library/cmake/toolchains/LinuxClang18Libcxx.cmake', github.workspace) || '' }}
 
       - name: Build native targets
         shell: bash
@@ -793,7 +822,7 @@ jobs:
       cancel-in-progress: true
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
+      MACOSX_DEPLOYMENT_TARGET: "13.3"
     steps:
       - name: Checkout axklib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -814,7 +843,7 @@ jobs:
         shell: bash
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-          MACOSX_DEPLOYMENT_TARGET: "10.15"
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
         run: |
           set -euo pipefail
           test -d "$DEVELOPER_DIR"
@@ -852,7 +881,7 @@ jobs:
         shell: bash
         run: |
           echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
-          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
+          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/toolchains/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
 
       - name: Configure run-scoped macOS vcpkg binary cache
         shell: bash
@@ -962,7 +991,7 @@ jobs:
       cancel-in-progress: false
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      MACOSX_DEPLOYMENT_TARGET: "10.15"
+      MACOSX_DEPLOYMENT_TARGET: "13.3"
     steps:
       - name: Checkout axklib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -1341,6 +1370,17 @@ jobs:
           test -f "$sidecar"
           lipo "$main" -verify_arch x86_64 arm64
           lipo "$sidecar" -verify_arch x86_64 arm64
+          minimum_system_version=$(
+            /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+              "$app/Contents/Info.plist"
+          )
+          test "$minimum_system_version" = "$MACOSX_DEPLOYMENT_TARGET"
+          for binary in "$main" "$sidecar"; do
+            for architecture in x86_64 arm64; do
+              xcrun vtool -show-build -arch "$architecture" "$binary" \
+                | grep -Eq "minos[[:space:]]+$MACOSX_DEPLOYMENT_TARGET([[:space:]]|$)"
+            done
+          done
           test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
           test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
           test -f "$app/Contents/Resources/licenses/THIRD-PARTY-LICENSES.txt"

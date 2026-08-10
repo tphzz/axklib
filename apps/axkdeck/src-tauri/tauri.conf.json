@@ -54,6 +54,9 @@
         "uninstallerIcon": "icons/icon.ico"
       }
     },
+    "macOS": {
+      "minimumSystemVersion": "13.3"
+    },
     "category": "Music",
     "shortDescription": "Yamaha A-series disk workspace",
     "longDescription": "Browse and organize Yamaha A-series sampler disks, programs, banks, and waveforms."

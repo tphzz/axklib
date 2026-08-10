@@ -22,9 +22,11 @@ NORMALIZED_MTIME_NS = 946_684_800_000_000_000
 TOOLCHAIN_ENVIRONMENT = (
     "CC",
     "CXX",
+    "CXXFLAGS",
     "GITHUB_WORKSPACE",
     "ImageOS",
     "ImageVersion",
+    "LDFLAGS",
     "MACOSX_DEPLOYMENT_TARGET",
     "VCToolsVersion",
     "VisualStudioVersion",

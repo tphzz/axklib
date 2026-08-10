@@ -132,7 +132,7 @@ AXKDECK_LOG_LEVEL=debug corepack pnpm desktop:dev
 
 ### macOS
 
-Desktop builds require macOS 10.15 or newer and Apple's native build tools.
+Desktop builds require macOS 13.3 or newer and Apple's native build tools.
 Install the Xcode Command Line Tools:
 
 ```bash

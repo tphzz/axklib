@@ -877,11 +877,41 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "shell: powershell" in native_job
     assert "Get-Command git.exe" in native_job
     assert "'bin\\bash.exe'" in native_job
+    assert ").FullName" in native_job
+    assert "Split-Path $bash -Parent | Out-File" in native_job
+    assert "& $bash --version" in native_job
+    assert "$bash.Source" not in native_job
     assert "python -c \"import platform,sys;" in native_job
+    assert "name: Install Linux C++23 toolchain" in native_job
+    assert "https://apt.llvm.org/llvm-snapshot.gpg.key" in native_job
+    assert "llvm-toolchain-jammy-18 main" in native_job
+    assert "clang-18" in native_job
+    assert "libc++-18-dev" in native_job
+    assert "libc++abi-18-dev" in native_job
+    assert "library/cmake/toolchains/LinuxClang18Libcxx.cmake" in native_job
+    assert native_job.index("name: Install Linux C++23 toolchain") < native_job.index(
+        "name: Fingerprint native toolchain"
+    )
     assert "DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer" in macos_slices
-    assert 'MACOSX_DEPLOYMENT_TARGET: "10.15"' in macos_slices
+    assert 'MACOSX_DEPLOYMENT_TARGET: "13.3"' in macos_slices
+    assert 'MACOSX_DEPLOYMENT_TARGET: "10.15"' not in workflow
     assert 'xcrun --sdk macosx clang -arch x86_64' in macos_slices
     assert '/usr/bin/arch -x86_64 "$verification_binary"' in macos_slices
+
+    desktop_configuration = json.loads(
+        (root / "apps/axkdeck/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+    )
+    assert desktop_configuration["bundle"]["macOS"]["minimumSystemVersion"] == "13.3"
+    assert 'Print :LSMinimumSystemVersion' in workflow
+    assert 'xcrun vtool -show-build -arch "$architecture" "$binary"' in workflow
+
+    linux_toolchain = (
+        root / "library/cmake/toolchains/LinuxClang18Libcxx.cmake"
+    ).read_text(encoding="utf-8")
+    assert "find_program(AXK_CLANG_18 clang-18 REQUIRED)" in linux_toolchain
+    assert "find_program(AXK_CLANGXX_18 clang++-18 REQUIRED)" in linux_toolchain
+    assert 'set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++")' in linux_toolchain
+    assert "-nostdlib++" not in linux_toolchain
 
 
 def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:

@@ -234,6 +234,11 @@ def test_toolchain_fingerprint_is_stable_and_covers_runner_image(
     monkeypatch.setattr(native_build_cache.platform, "system", lambda: "Linux")
     first_environment = {"CXX": "c++", "ImageVersion": "20260701.1"}
     second_environment = {"CXX": "c++", "ImageVersion": "20260708.1"}
+    different_flags_environment = {
+        "CXX": "c++",
+        "CXXFLAGS": "-stdlib=libc++",
+        "ImageVersion": "20260701.1",
+    }
     moved_environment = {
         "CXX": "c++",
         "GITHUB_WORKSPACE": "/different/workspace",
@@ -247,6 +252,9 @@ def test_toolchain_fingerprint_is_stable_and_covers_runner_image(
     )
     assert first != native_build_cache.toolchain_fingerprint(
         "x64-linux-axk", second_environment
+    )
+    assert first != native_build_cache.toolchain_fingerprint(
+        "x64-linux-axk", different_flags_environment
     )
     assert first != native_build_cache.toolchain_fingerprint(
         "arm64-linux-axk", first_environment
