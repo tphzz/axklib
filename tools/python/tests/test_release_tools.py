@@ -608,7 +608,10 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     assert "  schedule:" not in workflow
     assert "draft-release:" in workflow
     assert "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}" in workflow
-    assert "concurrency:" not in workflow.split("jobs:", 1)[0]
+    workflow_header = workflow.split("jobs:", 1)[0]
+    assert "concurrency:" in workflow_header
+    assert "group: native-workflow-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}" in workflow_header
+    assert "cancel-in-progress: true" in workflow_header
     assert "macos-slices:\n    name: macOS ARM64 and Intel slices" in workflow
     assert "macos-universal:\n    name: macOS universal" in workflow
     assert action_reference_count(workflow, "actions/download-artifact", "v8") == 3
