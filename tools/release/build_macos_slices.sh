@@ -215,7 +215,7 @@ build_slice() {
     -DAXK_SERVER_SBOM_FILE="$build_directory/axklib-server.spdx.json" \
     -DVCPKG_TARGET_TRIPLET="$triplet" \
     -DVCPKG_OVERLAY_TRIPLETS="$source_directory/library/cmake/triplets" \
-    "${configure_arguments[@]}"
+    ${configure_arguments[@]+"${configure_arguments[@]}"}
   cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
   python "$source_directory/tools/python/release_metadata.py" resolve \

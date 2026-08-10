@@ -1180,6 +1180,8 @@ def test_release_tests_preserve_linux_abi_and_translate_macos_intel_discovery() 
         'configure_arguments+=("-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/arch;-x86_64")'
         in macos_helper
     )
+    assert '${configure_arguments[@]+"${configure_arguments[@]}"}' in macos_helper
+    assert '\n    "${configure_arguments[@]}"\n' not in macos_helper
 
 
 def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom() -> None:
