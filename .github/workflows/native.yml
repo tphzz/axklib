@@ -17,6 +17,13 @@ on:
 permissions:
   contents: read
 
+# A manual dispatch should have one authoritative run per branch and release
+# mode.  The native matrix already serializes platform jobs within that run;
+# this prevents overlapping workflow runs from making them appear parallel.
+concurrency:
+  group: native-workflow-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  cancel-in-progress: true
+
 jobs:
   architecture:
     name: Architecture
