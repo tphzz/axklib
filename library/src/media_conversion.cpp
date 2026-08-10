@@ -454,14 +454,14 @@ Result<detail::PreparedMediaConversion> prepare_media_conversion_from_source(con
         }
         if (request.format == MediaImageFormat::fat12_floppy &&
             (relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relationship.type == "SBNK_RIGHT_MEMBER_TO_SMPL")) {
-            const auto source = floppy_object_index_by_key.find(relationship.source_key);
+            const auto source_object = floppy_object_index_by_key.find(relationship.source_key);
             const auto target = floppy_object_index_by_key.find(*relationship.target_key);
-            if (source == floppy_object_index_by_key.end() || target == floppy_object_index_by_key.end()) {
+            if (source_object == floppy_object_index_by_key.end() || target == floppy_object_index_by_key.end()) {
                 add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
                           std::format("{} dependency has no prepared floppy object", relationship.type));
                 continue;
             }
-            const detail::PreparedMediaImage::SampleWaveDependency dependency{source->second, target->second};
+            const detail::PreparedMediaImage::SampleWaveDependency dependency{source_object->second, target->second};
             if (!std::ranges::contains(prepared.image.sample_wave_dependencies, dependency))
                 prepared.image.sample_wave_dependencies.push_back(dependency);
         }

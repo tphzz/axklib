@@ -18,7 +18,6 @@ namespace axk::detail {
 namespace {
 
 constexpr std::uint64_t floppy_image_bytes = 1'474'560U;
-constexpr std::size_t maximum_floppy_images = 32U;
 
 Error floppy_error(std::string message) {
     return make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported, std::move(message));

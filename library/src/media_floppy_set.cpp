@@ -484,15 +484,16 @@ Result<FloppyDiskSetPlan> plan_floppy_disk_set(const PreparedMediaImage &image, 
         while (offset < wave.header.payload_bytes_0x1c) {
             auto *disk = &disks.back();
             const auto available_clusters = floppy_data_clusters - disk->used_clusters;
-            const auto available_bytes = available_clusters * cluster_bytes;
-            if (disk->layout.segments.size() >= maximum_member_segments || available_bytes <= wave.header.header_size) {
+            const auto segment_available_bytes = available_clusters * cluster_bytes;
+            if (disk->layout.segments.size() >= maximum_member_segments ||
+                segment_available_bytes <= wave.header.header_size) {
                 auto next = add_disk();
                 if (!next)
                     return std::unexpected{next.error()};
                 continue;
             }
             const auto remaining = static_cast<std::uint64_t>(wave.header.payload_bytes_0x1c) - offset;
-            const auto local_bytes = std::min(remaining, available_bytes - wave.header.header_size);
+            const auto local_bytes = std::min(remaining, segment_available_bytes - wave.header.header_size);
             if (local_bytes == 0U || local_bytes > std::numeric_limits<std::uint32_t>::max())
                 return std::unexpected{floppy_error("Wave Data continuation segment size is unsupported")};
             if (auto added = add_wave_segment(*disk, wave, offset, local_bytes, segment_ordinal); !added)
