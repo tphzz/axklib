@@ -222,7 +222,6 @@ jobs:
           done
           for module in \
             openssl \
-            xdo \
             gtk+-3.0 \
             webkit2gtk-4.1 \
             ayatana-appindicator3-0.1 \
@@ -232,6 +231,10 @@ jobs:
               exit 1
             fi
           done
+          test -f /usr/include/xdo.h || {
+            echo "Linux runner image is missing libxdo development headers" >&2
+            exit 1
+          }
 
       - name: Resolve native cache inputs
         id: cache-inputs
