@@ -77,15 +77,15 @@ jobs:
     steps:
       - name: Checkout axklib
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
           standalone: true
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
         run: pnpm install --frozen-lockfile
@@ -413,16 +413,16 @@ jobs:
           test -f "$scan/server/share/doc/axklib/server.md"
           test -f "$scan/server/share/licenses/openssl/copyright"
 
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
           standalone: true
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
@@ -874,16 +874,16 @@ jobs:
         shell: bash
         run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
           standalone: true
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
@@ -1180,16 +1180,16 @@ jobs:
             --sign "$APPLE_SIGNING_IDENTITY" build/tmp/universal/bin/axklib-server
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
           standalone: true
-
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/axkdeck/pnpm-lock.yaml
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:

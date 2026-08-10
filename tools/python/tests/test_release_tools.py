@@ -909,19 +909,20 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
     assert release_tools.index(setup_python) < release_tools.index(setup_uv)
     assert release_tools.index(setup_python) < release_tools.index(raw_python)
 
-    pnpm_then_cached_node = re.compile(
+    node_then_standalone_pnpm = re.compile(
+        r"      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6\n"
+        r"        with:\n"
+        r"          node-version: 22\n\n?"
         r"      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6\n"
         r"        with:\n"
         r"          version: 10\.15\.1\n"
-        r"          standalone: true\n\n?"
-        r"      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6\n"
-        r"        with:\n"
-        r"          node-version: 22\n"
-        r"          cache: pnpm\n"
-        r"          cache-dependency-path: apps/axkdeck/pnpm-lock\.yaml"
+        r"          standalone: true\n"
+        r"          cache: true\n"
+        r"          cache_dependency_path: apps/axkdeck/pnpm-lock\.yaml"
     )
     for desktop_job in (desktop_static, native, macos_slices, macos_universal):
-        assert len(pnpm_then_cached_node.findall(desktop_job)) == 1
+        assert len(node_then_standalone_pnpm.findall(desktop_job)) == 1
+        assert "cache: pnpm" not in desktop_job
 
 
 def test_macos_signing_uses_persistent_runner_state_without_credential_secrets() -> None:
