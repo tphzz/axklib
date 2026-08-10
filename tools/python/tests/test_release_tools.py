@@ -656,6 +656,13 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "tools/python/native_build_cache.py fingerprint" in workflow
     assert "tools/python/native_build_cache.py prepare" in workflow
     assert "tools/python/native_build_cache.py finalize" in workflow
+    assert "$linker = Join-Path (Split-Path $compiler -Parent) 'link.exe'" in workflow
+    assert """$cargoTarget = if ('${{ matrix.desktop_architecture }}' -eq 'arm64') {
+            'AARCH64_PC_WINDOWS_MSVC'
+          } else {
+            'X86_64_PC_WINDOWS_MSVC'
+          }""" in workflow
+    assert '"CARGO_TARGET_${cargoTarget}_LINKER=$($linker.Replace(\'\\\', \'/\'))"' in workflow
     assert """      - name: Build native targets
         shell: bash
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
@@ -748,7 +755,7 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
 
     assert "/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf" in attributes
     assert prettier["endOfLine"] == "lf"
-    assert "libarchive-tools" in workflow
+    assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow
     assert 'rpm -Kv "$rpm"' in workflow
     assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow
     assert "rpm2cpio" not in workflow
@@ -888,6 +895,7 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "python -c \"import platform,sys;" in native_job
     assert "name: Verify preinstalled Linux C++23 toolchain" in native_job
     assert "apt.llvm.org" not in native_job
+    assert "apt-get" not in native_job
     assert "libc++-18-dev" not in native_job
     assert "libc++abi-18-dev" not in native_job
     assert "command -v clang-18" in native_job
@@ -896,9 +904,20 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "#include <expected>" in native_job
     assert "clang-18" in native_job
     assert "library/cmake/toolchains/LinuxClang18Libcxx.cmake" in native_job
+    assert "name: Verify preinstalled Linux desktop packaging toolchain" in native_job
+    assert "webkit2gtk-4.1" in native_job
+    assert "ayatana-appindicator3-0.1" in native_job
+    assert "librsvg-2.0" in native_job
+    assert "name: Configure job-local Cargo home" in native_job
+    assert 'cargo_home="$RUNNER_TEMP/cargo-home"' in native_job
+    assert "${{ runner.temp }}/cargo-home/registry" in native_job
+    assert "~/.cargo/registry" not in native_job
     assert native_job.index("name: Verify preinstalled Linux C++23 toolchain") < native_job.index(
         "name: Fingerprint native toolchain"
     )
+    assert native_job.index(
+        "name: Verify preinstalled Linux desktop packaging toolchain"
+    ) < native_job.index("name: Fingerprint native toolchain")
     assert "DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer" in macos_slices
     assert 'MACOSX_DEPLOYMENT_TARGET: "13.3"' in macos_slices
     assert 'MACOSX_DEPLOYMENT_TARGET: "10.15"' not in workflow

@@ -211,6 +211,27 @@ jobs:
           printf '#include <expected>\nint main() { std::expected<int, int> value(1); return *value - 1; }\n' \
             | clang++-18 -std=c++23 -stdlib=libc++ -x c++ -fsyntax-only -
 
+      - name: Verify preinstalled Linux desktop packaging toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb; do
+            command -v "$command"
+          done
+          for module in \
+            openssl \
+            xdo \
+            gtk+-3.0 \
+            webkit2gtk-4.1 \
+            ayatana-appindicator3-0.1 \
+            librsvg-2.0; do
+            if ! pkg-config --exists "$module"; then
+              echo "Linux runner image is missing pkg-config module: $module" >&2
+              exit 1
+            fi
+          done
+
       - name: Resolve native cache inputs
         id: cache-inputs
         shell: bash
@@ -264,6 +285,10 @@ jobs:
           if ($compiler -notlike '*\Microsoft Visual Studio\18\*') {
             throw "Expected Visual Studio 18 cl.exe, found '$compiler'"
           }
+          $linker = Join-Path (Split-Path $compiler -Parent) 'link.exe'
+          if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) {
+            throw "MSVC linker was not found beside '$compiler'"
+          }
           $ninja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
           if (-not (Test-Path -LiteralPath $ninja -PathType Leaf)) {
             throw "Visual Studio Ninja was not found at '$ninja'"
@@ -272,7 +297,15 @@ jobs:
           "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "NINJA_EXE=$($ninja.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $cargoTarget = if ('${{ matrix.desktop_architecture }}' -eq 'arm64') {
+            'AARCH64_PC_WINDOWS_MSVC'
+          } else {
+            'X86_64_PC_WINDOWS_MSVC'
+          }
+          "CARGO_TARGET_${cargoTarget}_LINKER=$($linker.Replace('\', '/'))" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Using $compiler"
+          Write-Host "Using $linker for Rust target $cargoTarget"
 
       - name: Fingerprint native toolchain
         id: native-toolchain
@@ -462,6 +495,13 @@ jobs:
           cache: true
           cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
 
+      - name: Configure job-local Cargo home
+        shell: bash
+        run: |
+          cargo_home="$RUNNER_TEMP/cargo-home"
+          cmake -E make_directory "$cargo_home"
+          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
+
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: "1.85"
@@ -471,23 +511,14 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ${{ runner.temp }}/cargo-home/registry
+            ${{ runner.temp }}/cargo-home/git
             apps/axkdeck/src-tauri/target
             !apps/axkdeck/src-tauri/target/**/bundle/**
           key: axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
             axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
             axkdeck-rust-v1-${{ matrix.artifact }}-
-
-      - name: Install Linux desktop packaging dependencies
-        if: runner.os == 'Linux'
-        shell: bash
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          build-essential curl wget file pkg-config libssl-dev libxdo-dev
-          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-          patchelf rpm libarchive-tools
 
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
