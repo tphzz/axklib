@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.22.1...3.25)
 
 if(NOT DEFINED AXK_SOURCE_ROOT)
   message(FATAL_ERROR "AXK_SOURCE_ROOT must name the axklib source directory")

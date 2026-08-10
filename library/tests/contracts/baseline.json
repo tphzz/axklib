@@ -1,7 +1,7 @@
 {
   "schema_version": "2.0",
   "build_contract": {
-    "cmake_minimum": "3.28",
+    "cmake_minimum": "3.22.1",
     "public_cpp_standard": 17,
     "implementation_cpp_standard": 23,
     "warnings_as_errors": true,

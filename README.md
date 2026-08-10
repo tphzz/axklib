@@ -20,7 +20,7 @@ Documentation is published at <https://tphzz.github.io/axklib/>.
 
 ## Native Build
 
-Building requires CMake 3.28 or newer, Ninja, Git, and a compiler with C++23
+Building requires CMake 3.22.1 or newer, Ninja, Git, and a compiler with C++23
 support. Dependencies, FatFs source, and the vcpkg tool are pinned by the
 repository.
 

@@ -21,7 +21,7 @@ Production builds contain no scripting runtime or demo-data fallback.
 - Node.js 22.12 or newer
 - Corepack (`corepack enable`)
 - Rust stable
-- CMake 3.28 or newer and Ninja
+- CMake 3.22.1 or newer and Ninja
 - The [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/)
 - A configured axklib release build in the monorepo root
 

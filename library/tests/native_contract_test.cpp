@@ -50,7 +50,15 @@ TEST(NativeContracts, HasCanonicalInventoryAndUniqueEntries) {
 TEST(NativeContracts, PinsTheBuildContractAndRetainedMediaCommands) {
     const auto baseline = read_contract("baseline.json");
     const auto build = baseline.at("build_contract");
-    EXPECT_EQ(build.at("cmake_minimum"), "3.28");
+    EXPECT_EQ(build.at("cmake_minimum"), "3.22.1");
+
+    const auto presets = read_repository_json("CMakePresets.json");
+    const auto preset_minimum = presets.at("cmakeMinimumRequired");
+    const auto preset_minimum_text = std::to_string(preset_minimum.at("major").get<unsigned int>()) + '.' +
+                                     std::to_string(preset_minimum.at("minor").get<unsigned int>()) + '.' +
+                                     std::to_string(preset_minimum.at("patch").get<unsigned int>());
+    EXPECT_EQ(build.at("cmake_minimum"), preset_minimum_text);
+
     EXPECT_EQ(build.at("public_cpp_standard"), 17);
     EXPECT_EQ(build.at("implementation_cpp_standard"), 23);
     EXPECT_TRUE(build.at("warnings_as_errors").get<bool>());
