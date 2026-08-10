@@ -2,8 +2,8 @@
 
 axklib is a cross-platform toolkit for working with Yamaha A3000, A4000, and
 A5000 sampler disks. Its main application is **axkdeck**, a desktop workspace
-for browsing, auditioning, organizing, importing, exporting, and authoring
-sampler media without navigating the sampler's small hardware display.
+for browsing, auditioning, organizing, importing, exporting, and basic authoring
+of sampler media.
 
 The repository also provides a self-contained `axklib` command-line tool and
 the C++ library source used by both applications.
@@ -23,7 +23,8 @@ CD-ROMs.
 ### Browse And Audition
 
 - Open SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, A3K
-  `.a3k` volume archives, and supported standalone sampler objects.
+  `.a3k` volume archives, and supported standalone sampler objects 
+  (e.g. from extracted floppy images).
 - Browse partitions, volumes, Programs (`PROG`), Sample Banks (`SBAC`), Samples
   (`SBNK`), Wave Data (`SMPL`), and Sequences.
 - Inspect relationships and sampler parameters without losing the visible
@@ -33,20 +34,22 @@ CD-ROMs.
 
 ### Import And Organize
 
-- Import WAV files as Samples or collect them into a new Sample Bank in one
-  operation, including compatible WAV sampler metadata and loops.
+- Import WAV/FLAC files as Samples or collect them into a new Sample Bank in one
+  operation, including compatible WAV sampler metadata (SMPL chunks) and loops.
 - Create Sample Banks from selected Samples or relink existing Samples to a
   chosen Sample Bank.
 - Import portable Program or volume packages with dependency planning, Program
   slot suggestions, conflict checking, and SFS record-capacity feedback.
 - Batch-import volume packages into a partition using their placement hints.
+- Create and rename volumes / rename sampler objects.
+- Clean up unused wave data.
 - Generate simple Programs for otherwise unreferenced Sample Banks and Samples
   so they can be played immediately on compatible A-series instruments.
 
 ### Export And Author Media
 
-- Export exact audio, rendered SFZ instruments, individual object packages,
-  and dependency-complete volume packages.
+- Export exact audio, rendered SFZ instruments (needs more work), individual 
+  object packages, and dependency-complete volume packages.
 - Batch-export every volume in a partition as packages or as per-volume floppy
   sets.
 - Create formatted multi-partition HDS images and 1.44 MB Yamaha-compatible

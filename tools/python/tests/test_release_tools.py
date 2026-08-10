@@ -610,8 +610,13 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
         encoding="utf-8"
     )
     workflow_with_platform = workflow + "\n" + native_platform
-    assert 'VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives' in workflow_with_platform
-    assert "path: ${{ runner.temp }}/vcpkg/archives" in workflow_with_platform
+    assert (
+        'job_root="$RUNNER_TEMP/vcpkg/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-'
+        '${{ inputs.artifact }}"'
+    ) in workflow_with_platform
+    assert 'VCPKG_DEFAULT_BINARY_CACHE=$job_root/archives' in workflow_with_platform
+    assert 'VCPKG_DOWNLOADS=$job_root/downloads' in workflow_with_platform
+    assert "path: ${{ steps.vcpkg-paths.outputs.archives }}" in workflow_with_platform
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}" not in workflow_with_platform
     assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow_with_platform
     assert "  workflow_dispatch:" in workflow
@@ -737,6 +742,40 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
         "&& steps.native-build-cache.outputs.cache-hit != 'true' }}"
     ) in native_platform
     assert workflow_with_platform.count("continue-on-error: true") == 5
+
+
+def test_native_workflow_recovers_only_isolated_vcpkg_tool_extraction_state() -> None:
+    root = Path(__file__).resolve().parents[3]
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+
+    isolated_state = native_platform.split(
+        "      - name: Configure isolated vcpkg state\n", 1
+    )[1].split("      - name: Restore vcpkg binary cache\n", 1)[0]
+    assert 'cmake -E remove_directory "$job_root"' in isolated_state
+    assert 'cmake -E make_directory "$job_root/archives" "$job_root/downloads"' in isolated_state
+    assert 'echo "archives=$job_root/archives" >> "$GITHUB_OUTPUT"' in isolated_state
+    assert 'echo "VCPKG_DOWNLOADS=$job_root/downloads" >> "$GITHUB_ENV"' in isolated_state
+
+    configure = native_platform.split("      - name: Configure native build\n", 1)[1].split(
+        "      - name: Build native targets\n", 1
+    )[0]
+    assert "python tools/python/native_configure.py" in configure
+    assert '--runner-temp "$RUNNER_TEMP"' in configure
+    assert '--downloads-root "$VCPKG_DOWNLOADS"' in configure
+    assert '--manifest "$build_root/vcpkg-manifest-install.log"' in configure
+    assert '--triplet "${{ inputs.triplet }}"' in configure
+    assert '--github-step-summary "$GITHUB_STEP_SUMMARY"' in configure
+    assert 'cmake --preset "$configuration" "${cmake_arguments[@]}"' in configure
+
+    failure_logs = native_platform.split(
+        "      - name: Print native dependency failure logs\n", 1
+    )[1].split("      - name: Upload native dependency failure logs\n", 1)[0]
+    assert failure_logs.index("vcpkg-manifest-attempt-*.log") < failure_logs.index(
+        "*-err.log"
+    )
+    assert "*-out.log" not in failure_logs
 
 
 def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() -> None:

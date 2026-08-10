@@ -136,17 +136,23 @@ jobs:
           echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
           echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/toolchains/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
 
-      - name: Configure vcpkg binary cache
+      - name: Configure isolated vcpkg state
+        id: vcpkg-paths
         shell: bash
         run: |
-          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives" >> "$GITHUB_ENV"
-          cmake -E make_directory "$RUNNER_TEMP/vcpkg/archives"
+          set -euo pipefail
+          job_root="$RUNNER_TEMP/vcpkg/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ inputs.artifact }}"
+          cmake -E remove_directory "$job_root"
+          cmake -E make_directory "$job_root/archives" "$job_root/downloads"
+          echo "archives=$job_root/archives" >> "$GITHUB_OUTPUT"
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$job_root/archives" >> "$GITHUB_ENV"
+          echo "VCPKG_DOWNLOADS=$job_root/downloads" >> "$GITHUB_ENV"
 
       - name: Restore vcpkg binary cache
         id: vcpkg-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ${{ runner.temp }}/vcpkg/archives
+          path: ${{ steps.vcpkg-paths.outputs.archives }}
           key: vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
 
       - name: Locate Visual Studio 2026
@@ -272,7 +278,14 @@ jobs:
               "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$workspace/library/cmake/toolchains/LinuxClang18Libcxx.cmake"
             )
           fi
-          cmake --preset "$configuration" "${cmake_arguments[@]}"
+          python tools/python/native_configure.py \
+            --runner-temp "$RUNNER_TEMP" \
+            --downloads-root "$VCPKG_DOWNLOADS" \
+            --manifest "$build_root/vcpkg-manifest-install.log" \
+            --diagnostics-directory "$workspace/build/logs/native-dependencies/${{ inputs.triplet }}" \
+            --triplet "${{ inputs.triplet }}" \
+            --github-step-summary "$GITHUB_STEP_SUMMARY" \
+            -- cmake --preset "$configuration" "${cmake_arguments[@]}"
 
       - name: Build native targets
         shell: bash
@@ -656,16 +669,25 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          for root in external/vcpkg/buildtrees build/native; do
-            test -d "$root" || continue
+          set -euo pipefail
+          shopt -s nullglob
+          manifests=(
+            build/logs/native-dependencies/${{ inputs.triplet }}/vcpkg-manifest-attempt-*.log
+            build/native/*/vcpkg-manifest-install.log
+          )
+          for log in "${manifests[@]}"; do
+            echo "::group::$log"
+            tail -n 400 "$log"
+            echo "::endgroup::"
+          done
+          if test -d external/vcpkg/buildtrees; then
             while IFS= read -r log; do
+              test -s "$log" || continue
               echo "::group::$log"
               tail -n 300 "$log"
               echo "::endgroup::"
-            done < <(find "$root" -type f \
-              \( -name '*-out.log' -o -name '*-err.log' -o -name 'vcpkg-manifest-install.log' \) \
-              -print | sort)
-          done
+            done < <(find external/vcpkg/buildtrees -type f -name '*-err.log' -print | sort)
+          fi
 
       - name: Upload native dependency failure logs
         if: failure()
@@ -675,6 +697,7 @@ jobs:
           path: |
             external/vcpkg/buildtrees/**/*-out.log
             external/vcpkg/buildtrees/**/*-err.log
+            build/logs/native-dependencies/**/*.log
             build/native/**/vcpkg-manifest-install.log
           if-no-files-found: warn
           retention-days: 7
@@ -684,7 +707,7 @@ jobs:
         continue-on-error: true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          path: ${{ runner.temp }}/vcpkg/archives
+          path: ${{ steps.vcpkg-paths.outputs.archives }}
           key: vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
 
       - name: Upload Linux or Windows CLI archive
