@@ -24,7 +24,6 @@
 
 namespace {
 
-constexpr std::size_t checksum_size = 64U;
 constexpr std::size_t maximum_journal_count = 128U;
 
 axk::app::Error journal_error(std::string message, bool retryable = false) {

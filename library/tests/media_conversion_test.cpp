@@ -7,6 +7,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -26,6 +27,20 @@
 #include "axklib/writer_internal.hpp"
 
 namespace {
+
+std::optional<std::string> environment_value(std::string_view key) {
+#if defined(_WIN32)
+    char *raw = nullptr;
+    std::size_t size = 0U;
+    if (_dupenv_s(&raw, &size, std::string{key}.c_str()) != 0 || raw == nullptr)
+        return std::nullopt;
+    const std::unique_ptr<char, decltype(&std::free)> value{raw, &std::free};
+    return *value == '\0' ? std::nullopt : std::optional<std::string>{value.get()};
+#else
+    const auto *value = std::getenv(std::string{key}.c_str());
+    return value == nullptr || *value == '\0' ? std::nullopt : std::optional<std::string>{value};
+#endif
+}
 
 class SparseReader final : public axk::RandomAccessReader {
   public:
@@ -625,15 +640,15 @@ TEST(MediaConversion, UsesMemberLocalWaveDataFilenamesAcrossContinuationDisks) {
 }
 
 TEST(MediaConversion, ExportsExternalMultiFloppyArtifactWhenRequested) {
-    const auto *source_value = std::getenv("AXK_MULTIFLOPPY_SOURCE_IMAGE");
-    const auto *output_value = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
-    if (source_value == nullptr || *source_value == '\0' || output_value == nullptr || *output_value == '\0')
+    const auto source_value = environment_value("AXK_MULTIFLOPPY_SOURCE_IMAGE");
+    const auto output_value = environment_value("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
+    if (!source_value || !output_value)
         GTEST_SKIP() << "set AXK_MULTIFLOPPY_SOURCE_IMAGE and AXK_MULTIFLOPPY_ARTIFACT_OUTPUT";
-    const auto *volume_value = std::getenv("AXK_MULTIFLOPPY_SOURCE_VOLUME");
+    const auto volume_value = environment_value("AXK_MULTIFLOPPY_SOURCE_VOLUME");
     const std::string_view volume_name =
-        volume_value == nullptr || *volume_value == '\0' ? std::string_view{"multi-floppy"} : volume_value;
-    const std::filesystem::path source_path{source_value};
-    const std::filesystem::path output_path{output_value};
+        volume_value ? std::string_view{*volume_value} : std::string_view{"multi-floppy"};
+    const std::filesystem::path source_path{*source_value};
+    const std::filesystem::path output_path{*output_value};
     const auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
 
@@ -653,12 +668,12 @@ TEST(MediaConversion, ExportsExternalMultiFloppyArtifactWhenRequested) {
 }
 
 TEST(MediaConversion, ExportsExternalPartitionVolumesAsExactRawFloppyMembersWhenRequested) {
-    const auto *source_value = std::getenv("AXK_VOLUME_FLOPPY_BATCH_SOURCE_IMAGE");
-    const auto *output_value = std::getenv("AXK_VOLUME_FLOPPY_BATCH_OUTPUT");
-    if (source_value == nullptr || *source_value == '\0' || output_value == nullptr || *output_value == '\0')
+    const auto source_value = environment_value("AXK_VOLUME_FLOPPY_BATCH_SOURCE_IMAGE");
+    const auto output_value = environment_value("AXK_VOLUME_FLOPPY_BATCH_OUTPUT");
+    if (!source_value || !output_value)
         GTEST_SKIP() << "set AXK_VOLUME_FLOPPY_BATCH_SOURCE_IMAGE and AXK_VOLUME_FLOPPY_BATCH_OUTPUT";
-    const std::filesystem::path source_path{source_value};
-    const std::filesystem::path output_path{output_value};
+    const std::filesystem::path source_path{*source_value};
+    const std::filesystem::path output_path{*output_value};
     const axk::VolumeFloppyExportRequest request{0U};
     const auto plan = axk::plan_volume_floppy_export(open_reader(source_path), source_path, request);
     ASSERT_TRUE(plan) << plan.error().message;
@@ -708,12 +723,12 @@ TEST(MediaConversion, ExportsExternalPartitionVolumesAsExactRawFloppyMembersWhen
 }
 
 TEST(MediaConversion, RewritesExternalCarrierControlWithExactObjectPayloadsWhenRequested) {
-    const auto *source_value = std::getenv("AXK_MULTIFLOPPY_CARRIER_CONTROL");
-    const auto *output_value = std::getenv("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
-    if (source_value == nullptr || *source_value == '\0' || output_value == nullptr || *output_value == '\0')
+    const auto source_value = environment_value("AXK_MULTIFLOPPY_CARRIER_CONTROL");
+    const auto output_value = environment_value("AXK_MULTIFLOPPY_ARTIFACT_OUTPUT");
+    if (!source_value || !output_value)
         GTEST_SKIP() << "set AXK_MULTIFLOPPY_CARRIER_CONTROL and AXK_MULTIFLOPPY_ARTIFACT_OUTPUT";
-    const std::filesystem::path source_path{source_value};
-    const std::filesystem::path output_path{output_value};
+    const std::filesystem::path source_path{*source_value};
+    const std::filesystem::path output_path{*output_value};
     const auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
     const auto source_objects = source->objects();
