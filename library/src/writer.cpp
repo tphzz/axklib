@@ -398,18 +398,18 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             return std::unexpected{valid.error()};
         }
         auto number = integer(row["number"], program_context + ".number", 1, 128);
-        auto name = text(row["name"], program_context + ".name");
+        auto program_name = text(row["name"], program_context + ".name");
         if (!number)
             return std::unexpected{number.error()};
-        if (!name)
-            return std::unexpected{name.error()};
+        if (!program_name)
+            return std::unexpected{program_name.error()};
         if (!program_numbers.insert(*number).second) {
             return std::unexpected{manifest_error(context + " has duplicate Program numbers")};
         }
         if (!row["assignments"].is_array()) {
             return std::unexpected{manifest_error(program_context + ".assignments must be an array")};
         }
-        ProgramSpec program{static_cast<std::uint8_t>(*number), std::move(*name), {}};
+        ProgramSpec program{static_cast<std::uint8_t>(*number), std::move(*program_name), {}};
         for (std::size_t assignment_index = 0; assignment_index < row["assignments"].size(); ++assignment_index) {
             const auto assignment_context = program_context + ".assignments[" + std::to_string(assignment_index) + "]";
             const auto &assignment = row["assignments"][assignment_index];

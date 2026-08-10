@@ -52,7 +52,8 @@ void write_fat12_entry(std::span<std::byte> fat, std::uint16_t cluster, std::uin
         fat[offset] = static_cast<std::byte>(value & 0xffU);
         fat[offset + 1U] = (fat[offset + 1U] & std::byte{0xf0}) | static_cast<std::byte>((value >> 8U) & 0x0fU);
     } else {
-        fat[offset] = (fat[offset] & std::byte{0x0f}) | static_cast<std::byte>((value << 4U) & 0xf0U);
+        fat[offset] =
+            (fat[offset] & std::byte{0x0f}) | static_cast<std::byte>((static_cast<std::uint32_t>(value) << 4U) & 0xf0U);
         fat[offset + 1U] = static_cast<std::byte>((value >> 4U) & 0xffU);
     }
 }
