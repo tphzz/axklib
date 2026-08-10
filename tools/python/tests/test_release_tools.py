@@ -884,6 +884,46 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert '/usr/bin/arch -x86_64 "$verification_binary"' in macos_slices
 
 
+def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    release_tools = workflow.split("  release-tools:\n", 1)[1].split(
+        "  desktop-static:\n", 1
+    )[0]
+    desktop_static = workflow.split("  desktop-static:\n", 1)[1].split(
+        "  native:\n", 1
+    )[0]
+    native = workflow.split("  native:\n", 1)[1].split("  macos-slices:\n", 1)[0]
+    macos_slices = workflow.split("  macos-slices:\n", 1)[1].split(
+        "  macos-universal:\n", 1
+    )[0]
+    macos_universal = workflow.split("  macos-universal:\n", 1)[1].split(
+        "  draft-release:\n", 1
+    )[0]
+
+    setup_python = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+    setup_uv = "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990"
+    raw_python = "python tools/python/release_metadata.py release-target"
+    assert setup_python in release_tools
+    assert 'python-version: "3.13.14"' in release_tools
+    assert release_tools.index(setup_python) < release_tools.index(setup_uv)
+    assert release_tools.index(setup_python) < release_tools.index(raw_python)
+
+    pnpm_then_cached_node = re.compile(
+        r"      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6\n"
+        r"        with:\n"
+        r"          version: 10\.15\.1\n"
+        r"          standalone: true\n\n?"
+        r"      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6\n"
+        r"        with:\n"
+        r"          node-version: 22\n"
+        r"          cache: pnpm\n"
+        r"          cache-dependency-path: apps/axkdeck/pnpm-lock\.yaml"
+    )
+    for desktop_job in (desktop_static, native, macos_slices, macos_universal):
+        assert len(pnpm_then_cached_node.findall(desktop_job)) == 1
+
+
 def test_macos_signing_uses_persistent_runner_state_without_credential_secrets() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
