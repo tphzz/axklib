@@ -598,10 +598,14 @@ def test_release_assets_reject_share_content(tmp_path: Path) -> None:
 def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
-    assert 'VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives' in workflow
-    assert "path: ${{ runner.temp }}/vcpkg/archives" in workflow
-    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}" not in workflow
-    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
+    assert 'VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives' in workflow_with_platform
+    assert "path: ${{ runner.temp }}/vcpkg/archives" in workflow_with_platform
+    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}" not in workflow_with_platform
+    assert "VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.." not in workflow_with_platform
     assert "  workflow_dispatch:" in workflow
     assert "  pull_request:" not in workflow
     assert "  push:" not in workflow
@@ -614,12 +618,20 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     assert "cancel-in-progress: true" in workflow_header
     assert "macos-slices:\n    name: macOS ARM64 and Intel slices" in workflow
     assert "macos-universal:\n    name: macOS universal" in workflow
+    for job in (
+        "native-linux-x64",
+        "native-windows-x64",
+        "native-linux-arm64",
+        "native-windows-arm64",
+    ):
+        assert f"  {job}:" in workflow
+    assert workflow.count("uses: ./.github/workflows/native-platform.yml") == 4
     assert action_reference_count(workflow, "actions/download-artifact", "v8") == 3
     assert "gh release create" in workflow
     assert "--draft" in workflow
     assert "version_metadata.json" in workflow
-    assert '"libaxklib.so.${project_version}"' in workflow
-    assert '"libaxklib.${project_version}.dylib"' in workflow
+    assert '"libaxklib.so.${project_version}"' in workflow_with_platform
+    assert '"libaxklib.${project_version}.dylib"' in workflow_with_platform
 
 
 def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
@@ -635,26 +647,30 @@ def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
 def test_native_workflow_uses_official_dependency_and_incremental_build_caches() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
 
-    assert action_reference_count(workflow, "actions/cache", "v6") >= 3
-    assert action_reference_count(workflow, "actions/cache/restore", "v6") >= 3
-    assert action_reference_count(workflow, "actions/cache/save", "v6") >= 5
-    assert "sccache" not in workflow.lower()
-    assert "cold_build" not in workflow
-    assert "git rev-parse HEAD:external/vcpkg" in workflow
-    assert "CMakePresets.json" in workflow
-    assert "library/cmake/triplets/**" in workflow
-    assert "library/cmake/ports/**" in workflow
-    assert "key: vcpkg-v3-${{ matrix.triplet }}-" in workflow
-    assert "vcpkg-v3-${{ matrix.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in workflow
-    vcpkg_cache = workflow.split("      - name: Restore vcpkg binary cache\n", 1)[
+    assert action_reference_count(workflow_with_platform, "actions/cache", "v6") >= 3
+    assert action_reference_count(workflow_with_platform, "actions/cache/restore", "v6") >= 3
+    assert action_reference_count(workflow_with_platform, "actions/cache/save", "v6") >= 5
+    assert "sccache" not in workflow_with_platform.lower()
+    assert "cold_build" not in workflow_with_platform
+    assert "git rev-parse HEAD:external/vcpkg" in native_platform
+    assert "CMakePresets.json" in native_platform
+    assert "library/cmake/triplets/**" in native_platform
+    assert "library/cmake/ports/**" in native_platform
+    assert "key: vcpkg-v3-${{ inputs.triplet }}-" in native_platform
+    assert "vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-" in native_platform
+    vcpkg_cache = native_platform.split("      - name: Restore vcpkg binary cache\n", 1)[
         1
     ].split("      - name: Locate Visual Studio 2026\n", 1)[0]
     assert "restore-keys:" not in vcpkg_cache
-    assert "key: native-v3-${{ matrix.triplet }}-" in workflow
-    assert "key: axkdeck-cargo-downloads-v1-${{ matrix.artifact }}-" in workflow
+    assert "key: native-v3-${{ inputs.triplet }}-" in native_platform
+    assert "key: axkdeck-cargo-downloads-v1-${{ inputs.artifact }}-" in native_platform
     assert "key: axkdeck-cargo-downloads-v1-macos-" in workflow
-    desktop_cargo_cache = workflow.split(
+    desktop_cargo_cache = native_platform.split(
         "      - name: Restore desktop Cargo download cache\n", 1
     )[1].split("      - name: Install desktop dependencies\n", 1)[0]
     assert "actions/cache/restore@" in desktop_cargo_cache
@@ -670,21 +686,21 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert "~/.cargo/registry/index" in universal_cargo_cache
     assert "~/.cargo/git/db" in universal_cargo_cache
     assert "macos-universal-cargo" not in universal_cargo_cache
-    assert workflow.count("timeout-minutes: 5\n        continue-on-error: true") >= 3
-    assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
-    assert "${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}" in workflow
-    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/vcpkg_installed/**" not in workflow
-    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in workflow
-    assert "tools/python/native_build_cache.py fingerprint" in workflow
-    assert "tools/python/native_build_cache.py prepare" in workflow
-    assert "tools/python/native_build_cache.py finalize" in workflow
-    assert "$linker = Join-Path (Split-Path $compiler -Parent) 'link.exe'" in workflow
-    assert """$cargoTarget = if ('${{ matrix.desktop_architecture }}' -eq 'arm64') {
+    assert workflow_with_platform.count("timeout-minutes: 5\n        continue-on-error: true") >= 3
+    assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in native_platform
+    assert "${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}" in native_platform
+    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/vcpkg_installed/**" not in native_platform
+    assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**" in native_platform
+    assert "tools/python/native_build_cache.py fingerprint" in native_platform
+    assert "tools/python/native_build_cache.py prepare" in native_platform
+    assert "tools/python/native_build_cache.py finalize" in native_platform
+    assert "$linker = Join-Path (Split-Path $compiler -Parent) 'link.exe'" in native_platform
+    assert """$cargoTarget = if ('${{ inputs.desktop_architecture }}' -eq 'arm64') {
             'AARCH64_PC_WINDOWS_MSVC'
           } else {
             'X86_64_PC_WINDOWS_MSVC'
-          }""" in workflow
-    assert '"CARGO_TARGET_${cargoTarget}_LINKER=$($linker.Replace(\'\\\', \'/\'))"' in workflow
+          }""" in native_platform
+    assert '"CARGO_TARGET_${cargoTarget}_LINKER=$($linker.Replace(\'\\\', \'/\'))"' in native_platform
     assert """      - name: Build native targets
         shell: bash
         run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
@@ -699,49 +715,53 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
           fi
 
       - name: Finalize native incremental build cache
-""" in workflow
-    assert workflow.index(
+""" in native_platform
+    assert native_platform.index(
         "      - name: Save native incremental build cache after failure"
-    ) > workflow.index("      - name: Upload Linux or Windows CLI archive")
-    assert action_reference_count(workflow, "actions/cache/save", "v6") == 5
-    assert "Save vcpkg binary cache after failure" in workflow
-    assert "Save native incremental build cache after failure" in workflow
-    assert workflow.count("steps.configure-native.outcome == 'success'") == 1
-    assert workflow.count("steps.finalize-native-cache.outcome == 'success'") == 1
+    ) > native_platform.index("      - name: Upload Linux or Windows CLI archive")
+    assert action_reference_count(workflow_with_platform, "actions/cache/save", "v6") == 5
+    assert "Save vcpkg binary cache after failure" in native_platform
+    assert "Save native incremental build cache after failure" in native_platform
+    assert native_platform.count("steps.configure-native.outcome == 'success'") == 1
+    assert native_platform.count("steps.finalize-native-cache.outcome == 'success'") == 1
     assert (
         "if: ${{ failure() && steps.finalize-native-cache.outcome == 'success' "
         "&& steps.native-build-cache.outputs.cache-hit != 'true' }}"
-    ) in workflow
-    assert workflow.count("continue-on-error: true") == 5
+    ) in native_platform
+    assert workflow_with_platform.count("continue-on-error: true") == 5
 
 
 def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
     macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
         encoding="utf-8"
     )
 
     assert "desktop-static:" in workflow
     assert "needs:\n      - release-tools\n      - desktop-static" in workflow
-    assert action_reference_count(workflow, "astral-sh/setup-uv", "v8.3.2") == 4
+    assert action_reference_count(workflow_with_platform, "astral-sh/setup-uv", "v8.3.2") == 4
     assert (
-        workflow.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
+        workflow_with_platform.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
     )
-    assert "AXKLIB_SERVER_BINARY=$server" in workflow
-    assert "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" in workflow
-    assert "AXKLIB_PACKAGE_BASENAME_FILE=$root/package_basename.txt" in workflow
+    assert "AXKLIB_SERVER_BINARY=$server" in native_platform
+    assert "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" in native_platform
+    assert "AXKLIB_PACKAGE_BASENAME_FILE=$root/package_basename.txt" in native_platform
     assert "pnpm version:test" in workflow
     assert 'pnpm desktop:build -- --target "$rust_target" --no-bundle' in macos_helper
-    assert workflow.count("pnpm desktop:build") + macos_helper.count("pnpm desktop:build") >= 4
-    assert "pnpm tauri build" not in workflow
-    assert "--package-json" not in workflow
-    assert workflow.count("--package-basename-file") >= 8
-    assert workflow.count("--configuration") >= 5
-    assert '--extension .deb --extension .rpm' in workflow
-    assert '--extension .exe' in workflow
+    assert workflow_with_platform.count("pnpm desktop:build") + macos_helper.count("pnpm desktop:build") >= 4
+    assert "pnpm tauri build" not in workflow_with_platform
+    assert "--package-json" not in workflow_with_platform
+    assert workflow_with_platform.count("--package-basename-file") >= 8
+    assert workflow_with_platform.count("--configuration") >= 5
+    assert '--extension .deb --extension .rpm' in native_platform
+    assert '--extension .exe' in native_platform
     assert '--extension .dmg' in workflow
-    assert "name: release-axkdeck-${{ matrix.artifact }}" in workflow
+    assert "name: release-axkdeck-${{ inputs.artifact }}" in native_platform
     assert "name: release-axkdeck-macos-universal" in workflow
     assert "name: release-${{ steps.package.outputs.sdk_artifact_stem }}" in workflow
     assert "name: release-${{ steps.package.outputs.cli_artifact_stem }}" in workflow
@@ -750,11 +770,11 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm desktop:build -- --target universal-apple-darwin" in workflow
     assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
-    assert action_reference_count(workflow, "pnpm/action-setup", "v6") == 4
+    assert action_reference_count(workflow_with_platform, "pnpm/action-setup", "v6") == 4
     assert "# v4" not in "\n".join(
-        line for line in workflow.splitlines() if "pnpm/action-setup@" in line
+        line for line in workflow_with_platform.splitlines() if "pnpm/action-setup@" in line
     )
-    assert "if-no-files-found: error" in workflow
+    assert "if-no-files-found: error" in workflow_with_platform
 
 
 def test_clang_tidy_preset_uses_clang_compile_commands() -> None:
@@ -774,13 +794,17 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     prettier = json.loads((root / "apps/axkdeck/.prettierrc.json").read_text(encoding="utf-8"))
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
 
     assert "/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf" in attributes
     assert prettier["endOfLine"] == "lf"
-    assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow
-    assert 'rpm -Kv "$rpm"' in workflow
-    assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow
-    assert "rpm2cpio" not in workflow
+    assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow_with_platform
+    assert 'rpm -Kv "$rpm"' in workflow_with_platform
+    assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow_with_platform
+    assert "rpm2cpio" not in workflow_with_platform
 
 
 def test_windows_desktop_bundle_uses_branded_gui_startup() -> None:
@@ -823,7 +847,7 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
     slices_needs = slices_job.split("    needs:\n", 1)[1].split(
         "    runs-on:", 1
     )[0]
-    assert "- native" in slices_needs
+    assert "- native-windows-arm64" in slices_needs
     assert "name: slice-macos-x64-${{ github.run_id }}" in slices_job
     assert "name: slice-macos-arm64-${{ github.run_id }}" in slices_job
     assert "retention-days: 2" in slices_job
@@ -844,12 +868,15 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
 def test_workflows_use_only_the_required_self_hosted_runner_labels() -> None:
     root = Path(__file__).resolve().parents[3]
     native_workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
     docs_workflow = (root / ".github/workflows/publish-docs.yml").read_text(encoding="utf-8")
 
     for workflow in (native_workflow, docs_workflow):
         assert not re.search(r"(?m)^\s+(?:runner|runs-on): (?:ubuntu|windows|macos)-", workflow)
     assert "runs-on: [self-hosted, Linux, X64, jammy, docker]" in native_workflow
-    assert "runs-on: ${{ fromJSON(matrix.runner_labels) }}" in native_workflow
+    assert "runs-on: ${{ fromJSON(inputs.runner_labels) }}" in native_platform
     for labels in (
         '["self-hosted","Linux","X64","jammy","docker"]',
         '["self-hosted","Linux","ARM64","jammy","docker"]',
@@ -873,9 +900,21 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
         "  desktop-static:\n", 1
     )[0]
     desktop_static = native_workflow.split("  desktop-static:\n", 1)[1].split(
-        "  native:\n", 1
+        "  native-linux-x64:\n", 1
     )[0]
-    native = native_workflow.split("  native:\n", 1)[1].split(
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    native_linux_x64 = native_workflow.split("  native-linux-x64:\n", 1)[1].split(
+        "  native-windows-x64:\n", 1
+    )[0]
+    native_windows_x64 = native_workflow.split("  native-windows-x64:\n", 1)[1].split(
+        "  native-linux-arm64:\n", 1
+    )[0]
+    native_linux_arm64 = native_workflow.split("  native-linux-arm64:\n", 1)[1].split(
+        "  native-windows-arm64:\n", 1
+    )[0]
+    native_windows_arm64 = native_workflow.split("  native-windows-arm64:\n", 1)[1].split(
         "  macos-slices:\n", 1
     )[0]
     macos_slices = native_workflow.split("  macos-slices:\n", 1)[1].split(
@@ -890,12 +929,16 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
         architecture,
         release_tools,
         desktop_static,
-        native,
+        native_platform,
         macos_slices,
     ):
         assert "concurrency:" in cancelable_job
         assert "cancel-in-progress: true" in cancelable_job
-    assert "native-${{ matrix.artifact }}-${{ github.ref }}" in native
+    assert "native-${{ inputs.artifact }}-${{ github.ref }}" in native_platform
+    assert "needs: native-linux-x64" in native_windows_x64
+    assert "needs: native-linux-arm64" in native_windows_arm64
+    assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_x64
+    assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_arm64
     assert "group: native-macos-signing" in macos_universal
     assert "cancel-in-progress: false" in macos_universal
     assert "group: native-draft-release" in draft_release
@@ -907,7 +950,9 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
 def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
-    native_job = workflow.split("  native:\n", 1)[1].split("  macos-slices:\n", 1)[0]
+    native_job = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
     macos_slices = workflow.split("  macos-slices:\n", 1)[1].split(
         "  macos-universal:\n", 1
     )[0]
@@ -989,9 +1034,11 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
         "  desktop-static:\n", 1
     )[0]
     desktop_static = workflow.split("  desktop-static:\n", 1)[1].split(
-        "  native:\n", 1
+        "  native-linux-x64:\n", 1
     )[0]
-    native = workflow.split("  native:\n", 1)[1].split("  macos-slices:\n", 1)[0]
+    native = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
     macos_slices = workflow.split("  macos-slices:\n", 1)[1].split(
         "  macos-universal:\n", 1
     )[0]
@@ -1093,6 +1140,10 @@ def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
     macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
         encoding="utf-8"
     )
@@ -1113,23 +1164,27 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
         'ctest --test-dir "$build_directory" --output-on-failure '
         "--label-exclude server-smoke"
     )
-    assert "-DAXK_BUILD_SERVER=ON" in workflow
-    assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow
-    assert 'python tools/python/inspect_package.py "$scan/server"' in workflow
-    assert "release_server_smoke.py" not in workflow
+    assert "-DAXK_BUILD_SERVER=ON" in workflow_with_platform
+    assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow_with_platform
+    assert 'python tools/python/inspect_package.py "$scan/server"' in workflow_with_platform
+    assert "release_server_smoke.py" not in workflow_with_platform
     assert "release_server_smoke.py" not in macos_helper
-    assert "build/tmp/universal/bin/axklib-server" in workflow
+    assert "build/tmp/universal/bin/axklib-server" in workflow_with_platform
     for installed_file in (
         "share/axklib/axklib-server.spdx.json",
         "share/axklib/server/openapi-v1.json",
         "share/doc/axklib/server.md",
     ):
-        assert installed_file in workflow
+        assert installed_file in workflow_with_platform
 
 
 def test_release_workflow_excludes_server_smoke_tests_but_keeps_them_registered() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
     macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
         encoding="utf-8"
     )
@@ -1138,7 +1193,7 @@ def test_release_workflow_excludes_server_smoke_tests_but_keeps_them_registered(
     assert (
         "ctest --preset ${{ inputs.debug && 'debug' || 'release' }} "
         "--label-exclude server-smoke"
-    ) in workflow
+    ) in workflow_with_platform
     assert (
         'ctest --test-dir "$build_directory" --output-on-failure '
         "--label-exclude server-smoke"
@@ -1217,12 +1272,16 @@ def test_release_tests_preserve_linux_abi_and_translate_macos_intel_discovery() 
 def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_platform = (root / ".github/workflows/native-platform.yml").read_text(
+        encoding="utf-8"
+    )
+    workflow_with_platform = workflow + "\n" + native_platform
 
-    assert "tools/python/openapi_compat.py" not in workflow
-    assert "openapi-v1.compatibility.json" not in workflow
-    assert "pnpm contract:check" in workflow
-    assert '--package-basename-file "$root/package_basename.txt" --profile server' in workflow
-    assert '--output "$root/axklib-server.spdx.json"' in workflow
+    assert "tools/python/openapi_compat.py" not in workflow_with_platform
+    assert "openapi-v1.compatibility.json" not in workflow_with_platform
+    assert "pnpm contract:check" in workflow_with_platform
+    assert '--package-basename-file "$root/package_basename.txt" --profile server' in workflow_with_platform
+    assert '--output "$root/axklib-server.spdx.json"' in workflow_with_platform
 
 
 def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> None:

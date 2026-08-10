@@ -1,0 +1,758 @@
+name: Native platform build
+
+on:
+  workflow_call:
+    inputs:
+      debug:
+        required: true
+        type: boolean
+      name:
+        required: true
+        type: string
+      runner_labels:
+        required: true
+        type: string
+      artifact:
+        required: true
+        type: string
+      desktop_platform:
+        required: true
+        type: string
+      desktop_architecture:
+        required: true
+        type: string
+      triplet:
+        required: true
+        type: string
+      build_testing:
+        required: true
+        type: string
+      run_tests:
+        required: true
+        type: boolean
+      msvc_arch:
+        required: false
+        default: ""
+        type: string
+      msvc_component:
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: ${{ inputs.name }}
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    concurrency:
+      group: native-${{ inputs.artifact }}-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Expose Git Bash to subsequent steps
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $git = (Get-Command git.exe -ErrorAction Stop).Source
+          $gitRoot = Split-Path (Split-Path $git -Parent) -Parent
+          $bash = (Get-Item (Join-Path $gitRoot 'bin\bash.exe') -ErrorAction Stop).FullName
+          Split-Path $bash -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $bash --version
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: runner.os != 'Windows'
+        with:
+          python-version: "3.13.14"
+
+      - name: Verify preinstalled Windows Python
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: >-
+          python -c "import platform,sys;
+          assert sys.version_info[:3] == (3, 13, 14), sys.version;
+          expected='${{ inputs.desktop_architecture == 'arm64' && 'arm64' || 'amd64' }}';
+          assert platform.machine().lower() == expected, (platform.machine(), expected)"
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.10.4"
+          enable-cache: true
+
+      - name: Verify preinstalled Linux C++23 toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_CODENAME" = jammy
+          command -v clang-18
+          command -v clang++-18
+          ninja_path="$(command -v ninja)"
+          echo "CC=clang-18" >> "$GITHUB_ENV"
+          echo "CXX=clang++-18" >> "$GITHUB_ENV"
+          echo "NINJA_EXE=$ninja_path" >> "$GITHUB_ENV"
+          clang++-18 --version
+          ninja --version
+          printf '#include <expected>\nint main() { std::expected<int, int> value(1); return *value - 1; }\n' \
+            | clang++-18 -std=c++23 -stdlib=libc++ -x c++ -fsyntax-only -
+
+      - name: Verify preinstalled Linux desktop packaging toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb; do
+            command -v "$command"
+          done
+          for module in \
+            openssl \
+            gtk+-3.0 \
+            webkit2gtk-4.1 \
+            ayatana-appindicator3-0.1 \
+            librsvg-2.0; do
+            if ! pkg-config --exists "$module"; then
+              echo "Linux runner image is missing pkg-config module: $module" >&2
+              exit 1
+            fi
+          done
+          test -f /usr/include/xdo.h || {
+            echo "Linux runner image is missing libxdo development headers" >&2
+            exit 1
+          }
+
+      - name: Resolve native cache inputs
+        id: cache-inputs
+        shell: bash
+        run: |
+          echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
+          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/toolchains/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure vcpkg binary cache
+        shell: bash
+        run: |
+          echo "VCPKG_DEFAULT_BINARY_CACHE=$RUNNER_TEMP/vcpkg/archives" >> "$GITHUB_ENV"
+          cmake -E make_directory "$RUNNER_TEMP/vcpkg/archives"
+
+      - name: Restore vcpkg binary cache
+        id: vcpkg-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/vcpkg/archives
+          key: vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
+
+      - name: Locate Visual Studio 2026
+        id: vs2026
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installation = & $vswhere -version '[18.0,19.0)' -products '*' `
+            -requires '${{ inputs.msvc_component }}' `
+            -property installationPath |
+            Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($installation)) {
+            throw 'Visual Studio 18 with the C++ toolchain was not found'
+          }
+          "path=$installation" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Configure Visual Studio 2026
+        if: runner.os == 'Windows'
+        uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4
+        with:
+          arch: ${{ inputs.msvc_arch }}
+          vs-path: ${{ steps.vs2026.outputs.path }}
+
+      - name: Verify Visual Studio 2026 compiler and Ninja
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          if ($env:VisualStudioVersion -notlike '18.*') {
+            throw "Expected Visual Studio 18, found '$env:VisualStudioVersion'"
+          }
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          if ($compiler -notlike '*\Microsoft Visual Studio\18\*') {
+            throw "Expected Visual Studio 18 cl.exe, found '$compiler'"
+          }
+          $linker = Join-Path (Split-Path $compiler -Parent) 'link.exe'
+          if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) {
+            throw "MSVC linker was not found beside '$compiler'"
+          }
+          $ninja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
+          if (-not (Test-Path -LiteralPath $ninja -PathType Leaf)) {
+            throw "Visual Studio Ninja was not found at '$ninja'"
+          }
+          & $ninja --version
+          "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NINJA_EXE=$($ninja.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $cargoTarget = if ('${{ inputs.desktop_architecture }}' -eq 'arm64') {
+            'AARCH64_PC_WINDOWS_MSVC'
+          } else {
+            'X86_64_PC_WINDOWS_MSVC'
+          }
+          "CARGO_TARGET_${cargoTarget}_LINKER=$($linker.Replace('\', '/'))" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using $compiler"
+          Write-Host "Using $linker for Rust target $cargoTarget"
+
+      - name: Fingerprint native toolchain
+        id: native-toolchain
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py fingerprint
+          --triplet "${{ inputs.triplet }}"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Restore native incremental build cache
+        id: native-build-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
+          key: native-v3-${{ inputs.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
+          restore-keys: |
+            native-v3-${{ inputs.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-
+
+      - name: Prepare native incremental build cache
+        id: native-cache-state
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py prepare
+          --source-root "${{ github.workspace }}"
+          --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Bootstrap vcpkg
+        if: runner.os != 'Windows'
+        run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Bootstrap vcpkg
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\external\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Set reproducible release timestamp
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+
+      - name: Configure native build
+        id: configure-native
+        shell: bash
+        run: |
+          set -euo pipefail
+          configuration="${{ inputs.debug && 'debug' || 'release' }}"
+          workspace="$PWD"
+          if [ "$RUNNER_OS" = Windows ]; then
+            workspace="$(cygpath -m "$PWD")"
+          fi
+          build_root="$workspace/build/native/$configuration"
+          cmake_arguments=(
+            -DAXK_BUILD_SERVER=ON
+            -DBUILD_TESTING=${{ inputs.build_testing }}
+            "-DAXK_SBOM_FILE=$build_root/axklib-sdk.spdx.json"
+            "-DAXK_CLI_SBOM_FILE=$build_root/axklib-cli.spdx.json"
+            "-DAXK_SERVER_SBOM_FILE=$build_root/axklib-server.spdx.json"
+            -DVCPKG_TARGET_TRIPLET=${{ inputs.triplet }}
+            "-DVCPKG_OVERLAY_TRIPLETS=$workspace/library/cmake/triplets"
+            "-DCMAKE_MAKE_PROGRAM=$NINJA_EXE"
+          )
+          if [ "$RUNNER_OS" = Linux ]; then
+            cmake_arguments+=(
+              "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$workspace/library/cmake/toolchains/LinuxClang18Libcxx.cmake"
+            )
+          fi
+          cmake --preset "$configuration" "${cmake_arguments[@]}"
+
+      - name: Build native targets
+        shell: bash
+        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
+
+      - name: Verify source tree remains clean
+        shell: bash
+        run: |
+          status="$(git status --porcelain --untracked-files=normal)"
+          if [ -n "$status" ]; then
+            printf 'CI source tree is modified:\n%s\n' "$status" >&2
+            exit 1
+          fi
+
+      - name: Finalize native incremental build cache
+        id: finalize-native-cache
+        shell: bash
+        run: >-
+          python tools/python/native_build_cache.py finalize
+          --source-root "${{ github.workspace }}"
+          --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+
+      - name: Resolve and verify build identity
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          sha="$(git rev-parse --short=7 HEAD)"
+          test -n "$sha"
+          python tools/python/release_metadata.py resolve \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" \
+            --ref-type "${GITHUB_REF_TYPE}" \
+            --ref-name "${GITHUB_REF_NAME}" \
+            --platform "${{ inputs.artifact }}" \
+            --configuration "${{ inputs.debug && 'Debug' || 'Release' }}" \
+            --github-output "$GITHUB_OUTPUT"
+          cli="$root/apps/cli/axklib"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cli="${cli}.exe"
+          fi
+          python tools/python/release_metadata.py verify-cli \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" \
+            --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
+
+      - name: Generate component SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile sdk \
+            --output "$root/axklib-sdk.spdx.json"
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile cli \
+            --output "$root/axklib-cli.spdx.json"
+          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" --profile server \
+            --output "$root/axklib-server.spdx.json"
+
+      - name: Test native targets
+        if: inputs.run_tests
+        shell: bash
+        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }} --label-exclude server-smoke
+
+      - name: Stage and inspect native components
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          scan="build/tmp/package-scan-${{ inputs.artifact }}"
+          rm -rf "$scan"
+          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server"
+          cmake --install "$root" --prefix "$scan/sdk" --component sdk
+          cmake --install "$root" --prefix "$scan/cli" --component cli
+          cmake --install "$root" --prefix "$scan/server" --component server
+          project_version="${{ steps.package.outputs.project_version }}"
+          soversion="${{ steps.package.outputs.soversion }}"
+          library_args=(
+            --allow-library axklib.dll
+            --allow-library libaxklib.so
+            --allow-library "libaxklib.so.${soversion}"
+            --allow-library "libaxklib.so.${project_version}"
+            --allow-library libaxklib.dylib
+            --allow-library "libaxklib.${soversion}.dylib"
+            --allow-library "libaxklib.${project_version}.dylib"
+          )
+          python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
+          python tools/python/inspect_package.py "$scan/cli"
+          python tools/python/inspect_package.py "$scan/server"
+          test -f "$scan/sdk/share/axklib/axklib.spdx.json"
+          test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
+          server_binary="axklib-server"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            server_binary="${server_binary}.exe"
+          fi
+          test -f "$scan/server/bin/$server_binary"
+          test -f "$scan/server/share/axklib/axklib-server.spdx.json"
+          test -f "$scan/server/share/axklib/server/openapi-v1.json"
+          test -f "$scan/server/share/doc/axklib/server.md"
+          test -f "$scan/server/share/licenses/openssl/copyright"
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.15.1
+          # @pnpm/exe does not provide a usable native executable for Windows ARM64.
+          standalone: ${{ runner.os != 'Windows' || runner.arch != 'ARM64' }}
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
+
+      - name: Configure job-local Cargo home
+        shell: bash
+        run: |
+          cargo_home="$RUNNER_TEMP/cargo-home"
+          cmake -E make_directory "$cargo_home"
+          echo "CARGO_HOME=$cargo_home" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+          components: clippy
+
+      - name: Restore desktop Cargo download cache
+        id: desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/git/db
+          key: axkdeck-cargo-downloads-v1-${{ inputs.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Select the tested native server for axkdeck
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          server="$root/apps/server/axklib-server"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            server="${server}.exe"
+          fi
+          test -f "$server"
+          test -f "$root/version_metadata.json"
+          test -f "$root/package_basename.txt"
+          "$server" --print-version
+          echo "AXKLIB_SERVER_BINARY=$server" >> "$GITHUB_ENV"
+          echo "AXKLIB_BUILD_DIRECTORY=$root" >> "$GITHUB_ENV"
+          echo "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" >> "$GITHUB_ENV"
+          echo "AXKLIB_PACKAGE_BASENAME_FILE=$root/package_basename.txt" >> "$GITHUB_ENV"
+          echo "AXKDECK_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Test desktop Rust integration
+        if: >-
+          inputs.artifact == 'linux-x64' ||
+          inputs.artifact == 'windows-x64'
+        shell: bash
+        run: cargo test --manifest-path apps/axkdeck/src-tauri/Cargo.toml
+
+      - name: Lint desktop Rust integration
+        if: inputs.artifact == 'linux-x64'
+        shell: bash
+        run: |
+          cargo clippy --manifest-path apps/axkdeck/src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo clippy --manifest-path apps/axkdeck/src-tauri/Cargo.toml --all-targets --release -- -D warnings
+
+      - name: Generate desktop SBOM from the tested native server
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          cargo_target=$(rustc -vV | sed -n 's/^host: //p')
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform "$cargo_target" \
+            > "$root/axkdeck-cargo-metadata.json"
+          (cd apps/axkdeck && pnpm licenses list --prod --json) \
+            > "$root/axkdeck-pnpm-licenses.json"
+          uv --project tools/python run python tools/python/generate_sbom.py \
+            --axklib-root . \
+            --axkdeck-root apps/axkdeck \
+            --cargo-metadata-file "$root/axkdeck-cargo-metadata.json" \
+            --pnpm-license-file "$root/axkdeck-pnpm-licenses.json" \
+            --vcpkg-installed-root "$root/vcpkg_installed/${{ inputs.triplet }}" \
+            --license-bundle apps/axkdeck/src-tauri/resources/THIRD-PARTY-LICENSES.txt \
+            --version-metadata-file "$root/version_metadata.json" \
+            --package-basename-file "$root/package_basename.txt" \
+            --profile server \
+            --output apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Remove cached desktop bundles
+        shell: bash
+        run: rm -rf apps/axkdeck/src-tauri/target/*/bundle apps/axkdeck/src-tauri/target/*/*/bundle
+
+      - name: Build Linux desktop packages
+        if: runner.os == 'Linux'
+        working-directory: apps/axkdeck
+        shell: bash
+        run: pnpm desktop:build
+
+      - name: Build Windows desktop package
+        if: runner.os == 'Windows'
+        working-directory: apps/axkdeck
+        shell: bash
+        run: pnpm desktop:build
+
+      - name: Save desktop Cargo download cache
+        if: ${{ success() && steps.desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/git/db
+          key: axkdeck-cargo-downloads-v1-${{ inputs.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Reject nested native desktop builds
+        shell: bash
+        run: |
+          if find apps/axkdeck/src-tauri/target -type f -name CMakeCache.txt -print -quit | grep .; then
+            echo 'Cargo unexpectedly configured a nested axklib build.' >&2
+            exit 1
+          fi
+
+      - name: Inspect Linux desktop packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=apps/axkdeck/src-tauri/target/release/bundle
+          scan=build/tmp/axkdeck-package-scan-${{ inputs.artifact }}
+          rm -rf "$scan"
+          mkdir -p "$scan/deb" "$scan/rpm"
+          deb=$(find "$bundle/deb" -type f -name '*.deb' -print -quit)
+          rpm=$(find "$bundle/rpm" -type f -name '*.rpm' -print -quit)
+          test -n "$deb"
+          test -n "$rpm"
+          dpkg-deb -x "$deb" "$scan/deb"
+          rpm -Kv "$rpm"
+          bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"
+          for root in "$scan/deb" "$scan/rpm"; do
+            python tools/python/inspect_package.py "$root"
+            find "$root" -type f -name axkdeck -print -quit | grep .
+            find "$root" -type f -name axklib-server -print -quit | grep .
+            find "$root" -type f -name axkdeck.spdx.json -print -quit | grep .
+            find "$root" -type f -name LGPL-2.1-or-later.txt -print -quit | grep .
+            find "$root" -type f -name THIRD-PARTY-LICENSES.txt -print -quit | grep .
+          done
+
+      - name: Install and inspect Windows desktop package
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $bundle = Join-Path $PWD 'apps\axkdeck\src-tauri\target\release\bundle\nsis'
+          $installer = Get-ChildItem $bundle -Filter '*.exe' | Select-Object -First 1
+          if ($null -eq $installer) { throw 'NSIS installer was not generated' }
+          $install = Join-Path $env:RUNNER_TEMP `
+            "axkdeck-installed-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-${{ inputs.artifact }}"
+          $process = Start-Process $installer.FullName -ArgumentList '/S', "/D=$install" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS installation failed with $($process.ExitCode)" }
+          python tools/python/inspect_package.py $install
+          if (-not (Get-ChildItem $install -Recurse -Filter axkdeck.exe)) { throw 'axkdeck.exe missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter axklib-server.exe)) { throw 'axklib-server.exe missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter axkdeck.spdx.json)) { throw 'desktop SBOM missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter LGPL-2.1-or-later.txt)) { throw 'LGPL notice missing' }
+          if (-not (Get-ChildItem $install -Recurse -Filter THIRD-PARTY-LICENSES.txt)) { throw 'third-party license bundle missing' }
+          $uninstaller = Get-ChildItem $install -Recurse -Filter 'uninstall.exe' | Select-Object -First 1
+          if ($null -eq $uninstaller) { throw 'NSIS uninstaller missing' }
+          $process = Start-Process $uninstaller.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "NSIS uninstall failed with $($process.ExitCode)" }
+
+      - name: Stage Linux desktop release packages
+        if: runner.os == 'Linux'
+        shell: bash
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory apps/axkdeck/src-tauri/target/release/bundle
+          --extension .deb --extension .rpm
+          --output-directory build/artifacts/axkdeck-${{ inputs.artifact }}
+          --platform "${{ inputs.desktop_platform }}"
+          --architecture "${{ inputs.desktop_architecture }}"
+          --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --package-basename-file build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
+
+      - name: Stage Windows desktop release package
+        if: runner.os == 'Windows'
+        shell: bash
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory apps/axkdeck/src-tauri/target/release/bundle/nsis
+          --extension .exe
+          --output-directory build/artifacts/axkdeck-${{ inputs.artifact }}
+          --platform "${{ inputs.desktop_platform }}"
+          --architecture "${{ inputs.desktop_architecture }}"
+          --axklib-version-metadata build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json
+          --package-basename-file build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
+
+      - name: Upload Linux or Windows desktop packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-axkdeck-${{ inputs.artifact }}
+          path: build/artifacts/axkdeck-${{ inputs.artifact }}/*
+          if-no-files-found: error
+
+      - name: Package Linux or Windows SDK and CLI archives
+        shell: bash
+        env:
+          AXK_SDK_ARTIFACT_STEM: ${{ steps.package.outputs.sdk_artifact_stem }}
+          AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            archive_format=zip
+          else
+            archive_format=tar.gz
+          fi
+          python tools/python/release_metadata.py package-native \
+            --source-directory "build/tmp/package-scan-${{ inputs.artifact }}/sdk" \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_SDK_ARTIFACT_STEM" \
+            --component sdk --archive-format "$archive_format"
+          python tools/python/release_metadata.py package-native \
+            --source-directory "build/tmp/package-scan-${{ inputs.artifact }}/cli" \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
+            --component cli --archive-format "$archive_format"
+
+      - name: Verify Linux runtime dependency closure
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          cli_dependencies="$(ldd "$root/apps/cli/axklib")"
+          server_dependencies="$(ldd "$root/apps/server/axklib-server")"
+          sdk_dependencies="$(ldd "$root/library/libaxklib.so")"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$cli_dependencies"; then
+            echo "CLI has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$server_dependencies"; then
+            echo "server has a private native runtime dependency" >&2
+            exit 1
+          fi
+          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
+              <<<"$sdk_dependencies"; then
+            echo "C++ SDK has a private codec runtime dependency" >&2
+            exit 1
+          fi
+
+      - name: Verify Windows runtime dependency closure
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
+          $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
+          $server = Get-ChildItem $root -Recurse -Filter axklib-server.exe | Select-Object -First 1
+          $sdk = Get-ChildItem $root -Recurse -Filter axklib.dll | Select-Object -First 1
+          if ($null -eq $cli -or $null -eq $server -or $null -eq $sdk) {
+            throw "native runtime artifacts are missing"
+          }
+          $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
+          $serverDependencies = (dumpbin /dependents $server.FullName) -join "`n"
+          $sdkDependencies = (dumpbin /dependents $sdk.FullName) -join "`n"
+          Write-Host $cliDependencies
+          Write-Host $serverDependencies
+          Write-Host $sdkDependencies
+          $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
+          $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
+          if ($cliDependencies -match $privateCli) {
+            throw "CLI has a private native runtime dependency: $($Matches[0])"
+          }
+          if ($serverDependencies -match $privateCli) {
+            throw "server has a private native runtime dependency: $($Matches[0])"
+          }
+          if ($sdkDependencies -match $privateCodec) {
+            throw "C++ SDK has a private codec runtime dependency: $($Matches[0])"
+          }
+
+      - name: Verify Windows ARM64 output
+        if: inputs.triplet == 'arm64-windows-axk'
+        shell: powershell
+        run: |
+          $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/cli/axklib.exe
+          $machineHeaders = @($headers | Select-String -Pattern '\bmachine \(')
+          $machineHeaders | ForEach-Object { Write-Host $_.Line }
+          $arm64Headers = @($headers | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$')
+          if ($arm64Headers.Count -eq 0) {
+            $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
+            throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
+          }
+          $sdk = Get-ChildItem "build/native/${{ inputs.debug && 'debug' || 'release' }}" `
+            -Recurse -Filter axklib.dll | Select-Object -First 1
+          $sdkHeaders = dumpbin /headers $sdk.FullName
+          if (@($sdkHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
+            throw 'axklib.dll is not an ARM64 binary'
+          }
+          $serverHeaders = dumpbin /headers `
+            build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server.exe
+          if (@($serverHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
+            throw 'axklib-server.exe is not an ARM64 binary'
+          }
+
+      - name: Print native dependency failure logs
+        if: failure()
+        shell: bash
+        run: |
+          for root in external/vcpkg/buildtrees build/native; do
+            test -d "$root" || continue
+            while IFS= read -r log; do
+              echo "::group::$log"
+              tail -n 300 "$log"
+              echo "::endgroup::"
+            done < <(find "$root" -type f \
+              \( -name '*-out.log' -o -name '*-err.log' -o -name 'vcpkg-manifest-install.log' \) \
+              -print | sort)
+          done
+
+      - name: Upload native dependency failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-dependency-logs-${{ inputs.triplet }}
+          path: |
+            external/vcpkg/buildtrees/**/*-out.log
+            external/vcpkg/buildtrees/**/*-err.log
+            build/native/**/vcpkg-manifest-install.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Save vcpkg binary cache after failure
+        if: ${{ failure() && steps.configure-native.outcome == 'success' && steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/vcpkg/archives
+          key: vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
+
+      - name: Upload Linux or Windows SDK archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ steps.package.outputs.sdk_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.*
+          if-no-files-found: error
+
+      - name: Upload Linux or Windows CLI archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ steps.package.outputs.cli_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.*
+          if-no-files-found: error
+
+      - name: Save native incremental build cache after failure
+        if: ${{ failure() && steps.finalize-native-cache.outcome == 'success' && steps.native-build-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            build/native/${{ inputs.debug && 'debug' || 'release' }}
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/Testing/**
+            !build/native/${{ inputs.debug && 'debug' || 'release' }}/*.spdx.json
+          key: native-v3-${{ inputs.triplet }}-${{ inputs.debug && 'debug' || 'release' }}-${{ steps.native-toolchain.outputs.toolchain_fingerprint }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}
