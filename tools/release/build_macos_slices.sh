@@ -212,10 +212,6 @@ build_slice() {
     -DVCPKG_OVERLAY_TRIPLETS="$source_directory/library/cmake/triplets"
   cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
-  # Native CTest can launch Intel test binaries through macOS translation.
-  # Running an ARM64 Homebrew CTest itself under Rosetta fails before discovery.
-  ctest --test-dir "$build_directory" --output-on-failure
-
   python "$source_directory/tools/python/release_metadata.py" resolve \
     --version-metadata-file "$build_directory/version_metadata.json" \
     --package-basename-file "$build_directory/package_basename.txt" \
@@ -242,6 +238,10 @@ build_slice() {
     --version-metadata-file "$build_directory/version_metadata.json" \
     --package-basename-file "$build_directory/package_basename.txt" \
     --profile server --output "$build_directory/axklib-server.spdx.json"
+
+  # Native CTest can launch Intel test binaries through macOS translation.
+  # Running an ARM64 Homebrew CTest itself under Rosetta fails before discovery.
+  ctest --test-dir "$build_directory" --output-on-failure
 
   for component in sdk cli server; do
     cmake --install "$build_directory" --prefix "$stage" --component "$component"

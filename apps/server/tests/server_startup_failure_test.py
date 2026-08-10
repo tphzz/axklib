@@ -39,6 +39,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="axklib-server-startup-") as temporary:
         root = Path(temporary)
         with socket.socket() as listener:
+            exclusive_address_use = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+            if exclusive_address_use is not None:
+                listener.setsockopt(socket.SOL_SOCKET, exclusive_address_use, 1)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             port = int(listener.getsockname()[1])

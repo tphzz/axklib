@@ -147,6 +147,14 @@ write_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_read
                     }
                 }
             }
+            if (written) {
+                filesystem_error.clear();
+                static_cast<void>(std::filesystem::remove(output_directory / ".axklib-publication", filesystem_error));
+                if (filesystem_error) {
+                    written = std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                                         "could not clean volume floppy publication staging")};
+                }
+            }
         }
         if (!written) {
             if (written.error().code == ErrorCode::operation_cancelled)

@@ -146,6 +146,7 @@ TEST_F(SessionVolumeFloppyExportOperationsTest, InspectsAndPublishesRawVolumeFlo
         const auto disk_path = output / directory / "disk01.ima";
         ASSERT_TRUE(std::filesystem::is_regular_file(disk_path));
         EXPECT_EQ(std::filesystem::file_size(disk_path), 1'474'560U);
+        EXPECT_FALSE(std::filesystem::exists(output / directory / ".axklib-publication"));
     }
     EXPECT_EQ(directories.size(), 2U);
     EXPECT_FALSE(std::filesystem::exists(output / "Empty Volume"));
@@ -160,7 +161,7 @@ TEST_F(SessionVolumeFloppyExportOperationsTest, RetainsTheDirectoryAsATarForDesk
     EXPECT_EQ(exported->at("download").at("filename"), "local-floppies.tar");
     const auto retained = downloads_->open({exported->at("download").at("archiveId").get<std::string>()}, "owner");
     ASSERT_TRUE(retained) << retained.error().message;
-    EXPECT_EQ(retained->snapshot.entry_count, 7U);
+    EXPECT_EQ(retained->snapshot.entry_count, 5U);
 }
 
 TEST_F(SessionVolumeFloppyExportOperationsTest, CancellationPublishesNothing) {

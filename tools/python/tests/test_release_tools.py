@@ -919,6 +919,12 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "find_program(AXK_CLANGXX_18 clang++-18 REQUIRED)" in linux_toolchain
     assert 'set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++")' in linux_toolchain
     assert "-nostdlib++" not in linux_toolchain
+    for triplet_name in ("x64-linux-axk.cmake", "arm64-linux-axk.cmake"):
+        triplet = (
+            root / "library/cmake/triplets" / triplet_name
+        ).read_text(encoding="utf-8")
+        assert "VCPKG_CHAINLOAD_TOOLCHAIN_FILE" in triplet
+        assert "../toolchains/LinuxClang18Libcxx.cmake" in triplet
     assert "NINJA_EXE=" in native_job
     assert "& $ninja --version" in native_job
     assert 'workspace="$(cygpath -m "$PWD")"' in native_job
@@ -1042,6 +1048,9 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
     assert "build_slice arm64 arm64-osx-axk macos-arm64" in macos_helper
     assert 'ctest --test-dir "$build_directory" --output-on-failure' in macos_helper
     assert '/usr/bin/arch -x86_64 "$ctest_path"' not in macos_helper
+    assert macos_helper.index("--profile server --output") < macos_helper.index(
+        'ctest --test-dir "$build_directory" --output-on-failure'
+    )
     assert "-DAXK_BUILD_SERVER=ON" in workflow
     assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow
     assert 'python tools/python/inspect_package.py "$scan/server"' in workflow
@@ -1054,6 +1063,25 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
         "share/doc/axklib/server.md",
     ):
         assert installed_file in workflow
+
+
+def test_macos_sdk_consumer_tests_preserve_slice_configuration() -> None:
+    root = Path(__file__).resolve().parents[3]
+    library_cmake = (root / "library/CMakeLists.txt").read_text(encoding="utf-8")
+    consumer_scripts = "\n".join(
+        (root / "library/cmake" / name).read_text(encoding="utf-8")
+        for name in ("RunBuildTreeConsumerTest.cmake", "RunConsumerTest.cmake")
+    )
+
+    for variable in (
+        "OSX_ARCHITECTURES",
+        "OSX_SYSROOT",
+        "OSX_DEPLOYMENT_TARGET",
+    ):
+        assert library_cmake.count(f'"-DAXK_{variable}=${{CMAKE_{variable}}}"') == 2
+        assert consumer_scripts.count(f'"-DCMAKE_{variable}=${{AXK_{variable}}}"') == 2
+
+
 def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
