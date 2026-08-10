@@ -71,11 +71,14 @@ catalog, and empty object inventory before atomic publication.
 SFS volume conversion has a separate multi-floppy profile. A volume that fits
 on one disk remains one raw `.ima` file. A larger admitted volume becomes a ZIP
 containing two through 32 ordered `.ima` members plus `manifest.json`. This
-profile is host-verified but not yet hardware-promoted; the inspection result
-includes a nonblocking hardware-validation warning. When a Sample ends one
-member and its first-use whole Wave Data begins the next, the Wave Data logical
-catalog path carries the destination member's two-digit suffix without
-repeating the Sample. Unrelated whole-object rollover does not add that suffix.
+constrained profile has loaded and auditioned successfully on an A5000 running
+system version 1.50. Sampler save/reload validation remains pending, so inspection
+includes a nonblocking warning for that unverified operation. Every nonfinal
+boundary contains an exact Wave Data continuation. When natural object packing
+would leave an ordinary boundary, the planner may move the final 512 payload
+bytes of a complete terminal Wave Data object to the next member as a
+continuation carrier. It rejects the export when it cannot construct that proven
+topology.
 
 Axkdeck also exposes **Export volumes to floppies...** for a complete
 file-backed SFS partition. This is a batch wrapper around that same per-volume
@@ -326,19 +329,24 @@ written at first use only.
 
 When a Sample fits at the end of one member but its first-use whole Wave Data
 does not, the Wave Data starts the next member without repeating the Sample.
-Whole objects otherwise move to a later member without splitting. Only Wave
-Data larger than an empty member is segmented. Each segment repeats the source
-header and retains the complete logical payload size at `0x1c`; `0x20` is
-rewritten to the local segment size and `0x24` to its contiguous logical
-payload offset. Other object types are never split.
+Whole objects otherwise move to a later member without splitting. Wave Data
+larger than an empty member is segmented normally. If an otherwise ordinary
+rollover would occur, the planner may instead split the final 512 payload bytes
+from a complete terminal Wave Data object and place that exact same-object
+continuation first on the next member. Each segment repeats the source header
+and retains the complete logical payload size at `0x1c`; `0x20` is rewritten to
+the local segment size and `0x24` to its contiguous logical payload offset.
+Other object types are never split.
 
-Every member contains its own exact synthesized `YAMAHA.SYM`. A nonfinal member
-catalogs zero-length `A3000F.SYM` only when the current Wave Data file continues
-on the next disk. A whole-object boundary catalogs zero-length `A3000.SYM`
-instead. The final member catalogs zero-length `A3000E.SYM`. Physical object
-slots are local to each disk and may be reused on later members. Segments of one
-continued Wave Data object use its logical catalog series path, object name, and
-normalized header as their cross-member identity rather than one physical slot.
+Every member contains its own exact synthesized `YAMAHA.SYM`. Every nonfinal
+member catalogs zero-length `A3000F.SYM`, and its final Wave Data segment has an
+exact same-object continuation at the start of the next member. The final member
+catalogs zero-length `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` boundary is
+rejected because hardware testing showed that the sampler stops without asking
+for the next disk. Physical object slots are local to each disk and may be reused
+on later members. Segments of one continued Wave Data object use its logical
+catalog series path, object name, and normalized header as their cross-member
+identity rather than one physical slot.
 The ZIP manifest carries the deterministic logical disk names and exact member
 order:
 
@@ -358,9 +366,12 @@ sampler in manifest order, beginning with disk 1.
 Before publication, the writer reopens every FAT12 member, compares its exact
 object payloads and catalog, reassembles every split Wave Data object byte for
 byte, reopens the ZIP, and checks its inspected size. More than 32 required
-images is a blocking conversion issue. The profile deliberately remains marked
-`PENDING` until a physical A-series sampler loads, prompts through, and plays
-the generated dependency-ordered real-volume set.
+images is a blocking conversion issue. The manifest records
+`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. A four-member production
+set using the constrained 512-byte terminal Wave Data carrier loaded through all
+members and auditioned successfully on an A5000 running system version 1.50. That
+result validates this exact load topology; sampler save/reload and comparison
+of a returned sampler-authored save remain pending.
 
 ## Reading File Bytes
 

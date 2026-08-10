@@ -106,8 +106,9 @@ The public format pages divide the byte contracts by layer:
 
 This documentation is exact about structures that axklib reads or writes. A
 file being visible to the container reader does not imply that its inner format
-is decoded. Floppy support files such as `YAMAHA.SYM` and model-specific system
-files remain opaque, as do type-specific fields in `PRF3`. The admitted current
+is decoded. The 257-record `YAMAHA.SYM` disk/file/category catalog is decoded
+and synthesized; other model-specific floppy system files remain opaque, as do
+type-specific fields in `PRF3`. The admitted current
 `SEQU` timeline is documented in
 [Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
 recognized Yamaha object payloads; it does not silently claim support for

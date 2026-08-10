@@ -152,9 +152,18 @@ For one object, axklib records:
 
 ## Generated ISO File Layout
 
-`axklib create iso` currently emits exactly one group and one volume. The
-hardware-verified one-volume profile uses raw volume `F001`, so its group label
-is file `F002`. The complete generated ordering is deterministic:
+Hand-authored `axklib create iso` manifests currently emit one group and one
+volume. The hardware-verified one-volume profile uses raw volume `F001`, so its
+group label is file `F002`.
+
+Partition conversion uses one generated group and one raw `Fnnn` volume per
+source SFS volume, in source order. It supports at most 998 source volumes,
+requires contiguous names `F001` through `Fnnn`, and writes the group label as
+`F(n+1)`. Directory extents and both path tables grow to as many whole sectors
+as the generated tree requires. One- and four-volume conversion profiles have
+loaded on hardware; the object-heavy multi-sector profile remains pending.
+
+The complete generated ordering is deterministic:
 
 | Sector / region | Generated content |
 | --- | --- |

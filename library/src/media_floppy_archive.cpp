@@ -38,7 +38,7 @@ nlohmann::ordered_json disk_set_manifest(const FloppyDiskSetPlan &plan, std::spa
                          {"yamahaSymbolSha256", members[index].yamaha_symbol_sha256}});
     }
     return {{"schema", "axklib.floppy-disk-set.v1"}, {"format", "YAMAHA_A_SERIES_MULTI_FLOPPY"},
-            {"diskCount", plan.disks.size()},        {"hardwareValidation", "PENDING"},
+            {"diskCount", plan.disks.size()},        {"hardwareValidation", "LOAD_AND_AUDITION_VERIFIED"},
             {"yamahaSymbolMetadata", "SYNTHESIZED"}, {"disks", std::move(disks)}};
 }
 

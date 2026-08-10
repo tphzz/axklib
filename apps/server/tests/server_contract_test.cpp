@@ -817,8 +817,9 @@ TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas)
         {"volumes", nlohmann::json::array(
                         {{{"volumeDirectoryId", 17U}, {"name", "KIT"}, {"objectCount", 2U}, {"payloadBytes", 1024U}}})},
         {"issues",
-         nlohmann::json::array({{{"code", "MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING"},
-                                 {"message", "Sampler hardware validation is pending"},
+         nlohmann::json::array({{{"code", "MEDIA_CONVERSION_MULTI_FLOPPY_SAVE_RELOAD_VALIDATION_PENDING"},
+                                 {"message", "Sampler load and audition are verified; sampler save/reload validation "
+                                             "is pending"},
                                  {"blocking", false},
                                  {"measurement", {{"required", 2U}, {"available", 32U}, {"unit", "FLOPPY_IMAGES"}}}}})},
         {"defaultFilename", "disk_p00_KIT.zip"}};

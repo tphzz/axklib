@@ -255,19 +255,20 @@ the same disk set, or explicitly use the nearby-folder search. The association
 lasts only for the open image session; axkdeck does not copy, merge, or modify
 the source folders.
 
-### Create an empty hard-disk image
+### Create an empty HD or floppy image
 
 Open the disk-image browser, enter the writable workspace directory that should
-own the new file, and select **New hard disk image**. The creation dialog offers
-only server-published capacity and partition combinations. It creates the image
-in that exact directory and opens the completed file when the background job
-finishes.
+own the new file, and select **Create image**. In **Create HD/Floppy image**,
+choose **HD** or **Floppy**. HD creation offers only server-published capacity
+and partition combinations. Floppy creation asks only for a filename and always
+writes the fixed 1.44 MB Yamaha A-series FAT12 full-format profile. The
+background job publishes the image in that exact directory and opens the
+completed file.
 
-The floppy-scale and CD-R-scale capacities in this dialog create small HDS
-images. They are convenient package/import targets for later transfer
-workflows; they are not empty floppy or ISO containers. Direct empty FAT12 and
-ISO9660 creation is intentionally not offered because those media need Yamaha
-catalog and object content to be useful.
+The floppy option is a blank formatted disk with the Yamaha catalog and marker
+files, not a populated authored-volume image. Empty ISO9660 creation is not
+offered; use the ISO authoring or conversion workflows when object content is
+available.
 
 ### Import and export portable packages
 

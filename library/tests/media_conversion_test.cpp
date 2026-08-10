@@ -389,9 +389,9 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     EXPECT_EQ(floppy_plan->output_extension, ".zip");
     EXPECT_EQ(floppy_plan->floppy_image_count, 2U);
     EXPECT_GT(floppy_plan->projected_output_bytes, 2U * 1'474'560U);
-    const auto pending =
-        std::ranges::find(floppy_plan->issues, std::string{"MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING"},
-                          &axk::MediaConversionIssue::code);
+    const auto pending = std::ranges::find(floppy_plan->issues,
+                                           std::string{"MEDIA_CONVERSION_MULTI_FLOPPY_SAVE_RELOAD_VALIDATION_PENDING"},
+                                           &axk::MediaConversionIssue::code);
     ASSERT_NE(pending, floppy_plan->issues.end());
     EXPECT_FALSE(pending->blocking);
     ASSERT_TRUE(pending->measurement);
@@ -415,6 +415,7 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     const auto manifest_text =
         std::string(reinterpret_cast<const char *>(archive->front().bytes.data()), archive->front().bytes.size());
     const auto disk_set_manifest = nlohmann::json::parse(manifest_text);
+    EXPECT_EQ(disk_set_manifest.at("hardwareValidation"), "LOAD_AND_AUDITION_VERIFIED");
     EXPECT_EQ(disk_set_manifest.at("yamahaSymbolMetadata"), "SYNTHESIZED");
     EXPECT_FALSE(disk_set_manifest.contains("setMarker"));
     ASSERT_EQ(disk_set_manifest.at("disks").size(), 2U);

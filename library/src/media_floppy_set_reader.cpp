@@ -332,9 +332,10 @@ Result<FloppyDiskSet> FloppyDiskSet::open_archive(std::shared_ptr<const RandomAc
                                 : !hardware        ? hardware.error()
                                 : !symbol_metadata ? symbol_metadata.error()
                                                    : disk_count.error())};
-    if (*format != "YAMAHA_A_SERIES_MULTI_FLOPPY" || *hardware != "PENDING" || *symbol_metadata != "SYNTHESIZED" ||
-        *disk_count < 2U || *disk_count > maximum_members || !manifest.at("disks").is_array() ||
-        manifest.at("disks").size() != *disk_count || archive->entries.size() != *disk_count + 1U) {
+    if (*format != "YAMAHA_A_SERIES_MULTI_FLOPPY" || *hardware != "LOAD_AND_AUDITION_VERIFIED" ||
+        *symbol_metadata != "SYNTHESIZED" || *disk_count < 2U || *disk_count > maximum_members ||
+        !manifest.at("disks").is_array() || manifest.at("disks").size() != *disk_count ||
+        archive->entries.size() != *disk_count + 1U) {
         return std::unexpected{
             set_error(ErrorCode::container_invalid_geometry, "floppy-set manifest profile is invalid", source_name)};
     }

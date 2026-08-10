@@ -229,8 +229,9 @@ Result<void> validate_floppy_layout(detail::PreparedMediaConversion &prepared, c
                                             MediaConversionIssueUnit::bytes});
         return {};
     }
-    add_issue(summary, "MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING",
-              "Multi-floppy continuation layout is host-verified but still requires sampler hardware validation",
+    add_issue(summary, "MEDIA_CONVERSION_MULTI_FLOPPY_SAVE_RELOAD_VALIDATION_PENDING",
+              "Multi-floppy load and audition are verified on sampler hardware; sampler save/reload validation is "
+              "pending",
               MediaConversionIssueMeasurement{plan->disks.size(), maximum_floppy_images,
                                               MediaConversionIssueUnit::floppy_images},
               false);

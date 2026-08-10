@@ -148,6 +148,11 @@ axklib validate authored.ima -o reports/authored-floppy --policy strict
 The result uses the documented 1.44 MB Yamaha FAT12 profile. See [FAT12 Floppy
 Images](floppy.md) for geometry and filename rules.
 
+For a blank disk instead of a populated authored volume, axkdeck's **Create
+image** workflow can create the fixed 1.44 MB Yamaha A-series FAT12 full-format
+profile. Blank formatting and populated manifest authoring are separate writer
+contracts.
+
 ## Author An ISO Image
 
 The ISO starter is an empty staging volume:

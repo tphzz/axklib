@@ -112,15 +112,16 @@ is 1024 bytes and is followed by a duplicate copy.
 | `0x094` | 4 | u32be | Sectors per cluster. |
 | `0x098` | 4 | u32be | Header-related value; currently surfaced only as raw structure. |
 | `0x09c` | 4 | u32be | Cluster offset to the allocation bitmap. |
-| `0x0a0` | 4 | u32be | Reserved value; currently not interpreted by public APIs. |
+| `0x0a0` | 4 | u32be | Formatter capacity value. Fresh axklib images write `5012`; its exact packing semantics remain unresolved, and readers derive usable record capacity from the index geometry instead of trusting this field. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
 | `0x0a8` | 4 | u32be | Directory/file index span in clusters. |
 
 For generated images, the full primary and duplicate 1024-byte partition-header
-sectors are part of the write contract. The named fields above are sufficient
-for ordinary parsing, but hardware loading also depends on initialized metadata
-bytes in the otherwise uninterpreted header area. Do not synthesize those header
-sectors by writing only the named fields and leaving the remaining bytes zero.
+sectors are part of the write contract. The writer starts with a zero-filled
+header, writes the explicit geometry and compatibility fields documented below,
+and publishes the same completed bytes twice. Former fixed tail bytes and the
+validated residue range at `+0x1bc..+0x1e3` remain zero. Do not omit the duplicate
+copy or the explicit compatibility fields.
 
 Cluster offsets are partition-relative. Convert a cluster offset to an absolute
 byte offset with:
@@ -224,6 +225,27 @@ sfs_id = block * 14 + slot
 ```
 
 Offsets inside the 16-byte block overhead are not records.
+
+The index span also creates a finite record-slot capacity independent of payload
+free space:
+
+```text
+index_bytes = directory_index_span_clusters * sectors_per_cluster * sector_size
+index_blocks = index_bytes // 1024
+total_record_slots = index_blocks * 14
+allocatable_record_slots = total_record_slots - 3
+```
+
+SFS IDs `0`, `1`, and `2` are reserved. The fresh-image profile has 358 index
+blocks, 5,012 total record slots, and 5,009 allocatable slots. Existing images
+are not assumed to use that profile: axklib derives their capacity from the
+partition header's index span and cluster geometry.
+
+Every inserted Yamaha object consumes one record slot unless package import can
+reuse an existing object. Creating a destination volume consumes six additional
+scaffolding record slots. Consequently, a partition can have enough free payload
+clusters while having no free SFS record slots. Package planning reports both
+limits and rejects an import that would exceed either one.
 
 ## Index Record Layout
 
@@ -376,12 +398,13 @@ sampler object links.
 
 ## Generated Image Writing
 
-The writer APIs create fresh HDS/SFS images from a small typed model. The
+The fresh-image writer APIs create HDS/SFS images from a small typed model. The
 current writer creates a new hard-disk image, partitions,
 volumes, current-format `SMPL` Wave Data objects, direct single-member `SBNK`
 Sample objects, equal-format two-member stereo `SBNK` Sample objects, and one
-explicitly bounded one-to-three-member `SBAC` / Program profile. It does not modify
-existing images and does not require a template container image.
+explicitly bounded one-to-three-member `SBAC` / Program profile. These APIs do
+not require a template container image. Existing-image changes use the separate
+transactional alteration APIs described in [Writer And Alteration](write.md).
 
 The first writer scope is intentionally narrow:
 
@@ -422,9 +445,10 @@ The first writer scope is intentionally narrow:
   and unused Program tail state are zero; only the direct SBNK receives the
   corresponding Program relationship bitmap.
 
-Callers should treat this as a generated-image API, not as an image repair or
-mutation API. Use `axklib info`, `axklib validate`, and `axklib extract wav file`
-on generated images before testing them on hardware.
+Treat this subsection as the fresh-image contract; use the alteration APIs for
+transactional insertion, deletion, rename, and repair of existing images. Use
+`axklib info`, `axklib validate`, and `axklib extract wav file` on generated
+images before testing them on hardware.
 
 Hardware loading has shown that sector 2, per-partition metadata sectors, and
 full partition-header sectors are part of the loadable generated-image contract.

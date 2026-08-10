@@ -360,10 +360,11 @@ one synthesized `YAMAHA.SYM`, and the zero-length standalone-disk marker
 `A3000_SY.001`. The `authored_volume.name` value supplies the Yamaha disk label;
 axklib displays the object scope as `FAT root`.
 
-Host reopen and payload comparison are automated. Fresh floppy output has not
-been verified on physical Yamaha hardware, so a parser-valid IMA is not yet a
-hardware-compatibility guarantee. The exact FAT geometry and generated DOS 8.3
-filenames are specified in
+Host reopen and payload comparison are automated. The populated writer profile
+has not been verified on physical Yamaha hardware, so a parser-valid IMA is not
+yet a hardware-compatibility guarantee. Blank full-format images and SFS-volume
+conversion use separately bounded profiles described in the floppy format page.
+The exact FAT geometry and generated DOS 8.3 filenames are specified in
 [FAT12 Floppy Images](floppy.md#generated-floppy-file-layout).
 
 ## Convert A Floppy To An ISO
@@ -455,13 +456,14 @@ payload size, output capacity, and every blocking issue. A volume that fits one
 floppy produces a raw `.ima`; an admitted larger volume produces an ordered
 `axklib.floppy-disk-set.v1` ZIP. Multi-floppy ordering is dependency-aware:
 Programs precede Sample/first-use-Wave pairs, remaining Wave Data, Sample Banks,
-and Sequences. A whole first-use Wave Data object that moves to the next member
-does so without repeating its Sample and carries the destination member's
-two-digit suffix in its logical catalog path. Unrelated whole-object rollover
-does not gain that suffix. `A3000F.SYM` marks only a Wave Data file that
-continues across that boundary; ordinary whole-object rollover uses
-`A3000.SYM`, and the final member uses `A3000E.SYM`. A partition is never
-reduced to a subset without an explicit future selection contract. The destination chooser
+and Sequences. Every nonfinal member ends in a Wave Data segment whose exact
+same-object continuation starts the next member. Natural Wave Data splits use
+that representation directly; otherwise the planner may move the final 512
+payload bytes of a complete terminal Wave Data object to the next member as a
+continuation carrier. `A3000F.SYM` marks every nonfinal member, and the final
+member uses `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` topology is rejected.
+A partition is never reduced to a subset without an explicit future selection
+contract. The destination chooser
 matches package export:
 **Storage location** publishes to a configured workspace and **This computer**
 streams the retained result to the desktop file chooser. Suggested names use
@@ -472,6 +474,11 @@ Bank, Sample, Wave Data, and Sequence payloads are copied byte for byte from the
 selected source scope. The ISO path uses reader-backed streaming and does not
 materialize the selected payload set in memory. FAT12 members use fixed floppy
 capacity and multi-floppy output is capped at 32 images.
+
+The constrained multi-floppy topology has loaded through four members and
+auditioned successfully on an A5000 running system version 1.50. Inspection reports
+that sampler save/reload validation is still pending; it does not downgrade the
+verified load-and-audition result to a generic hardware-pending claim.
 
 Partition batch export does not define a second floppy format. It plans the
 partition once, then applies the individual volume conversion contract to each

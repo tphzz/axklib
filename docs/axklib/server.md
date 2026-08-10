@@ -358,7 +358,8 @@ identical; only oversized Wave Data is divided into exact Yamaha continuation
 segments. A `WORKSPACE` destination publishes the inspected `.iso`, `.ima`, or
 `.zip` through the sandbox. A `DOWNLOAD` destination uses the same private
 owner-scoped retained-file flow as package export. Multi-floppy inspection also
-reports that physical sampler validation remains pending.
+reports that load and audition are hardware-verified while sampler save/reload
+validation remains pending.
 
 Each WebSocket connection has bounded lifetime delivery budgets for both event
 count and serialized bytes. The defaults are 1,024 events and 4 MiB. When

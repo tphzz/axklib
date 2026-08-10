@@ -109,7 +109,7 @@ describe('MediaExportDialog', () => {
         expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it('describes an admitted multi-floppy ZIP and its hardware-pending warning', () => {
+    it('describes an admitted multi-floppy ZIP and its pending save/reload warning', () => {
         render(MediaExportDialog, {
             props: {
                 request: {
@@ -140,8 +140,9 @@ describe('MediaExportDialog', () => {
                         ],
                         issues: [
                             {
-                                code: 'MEDIA_CONVERSION_MULTI_FLOPPY_HARDWARE_VALIDATION_PENDING',
-                                message: 'Sampler hardware validation is pending.',
+                                code: 'MEDIA_CONVERSION_MULTI_FLOPPY_SAVE_RELOAD_VALIDATION_PENDING',
+                                message:
+                                    'Sampler load and audition are verified; sampler save/reload validation is pending.',
                                 blocking: false,
                                 measurement: { required: 2, available: 32, unit: 'FLOPPY_IMAGES' },
                             },
