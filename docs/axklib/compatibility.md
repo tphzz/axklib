@@ -14,15 +14,15 @@ Supported consumers use C++17 and a documented compiler/runtime combination.
 Source identities such as `main-a1b2c3d` do not change the API compatibility
 version. See [Versioning And Build Identity](versioning.md).
 
-| Package | Build toolchain | Architectures |
+| Reference build | Build toolchain | Architectures |
 | --- | --- | --- |
-| Windows SDK/CLI | Visual Studio 18 MSVC, dynamic CRT | x64, ARM64 |
-| Linux SDK/CLI | GCC 14, distribution libstdc++/glibc | x64, ARM64 |
-| macOS SDK/CLI | Apple Clang from Xcode 16.4 | universal x64 + ARM64 |
+| Windows library and CLI | Visual Studio 18 MSVC, dynamic CRT | x64, ARM64 |
+| Linux library and CLI | GCC 14, distribution libstdc++/glibc | x64, ARM64 |
+| macOS library and CLI | Apple Clang from Xcode 16.4 | universal x64 + ARM64 |
 
-A shared SDK package is compatible only with the matching compiler-family C++
-ABI and runtime generation. The CLI has no axklib runtime dependency but still
-uses the documented platform C/C++ runtime libraries.
+A shared library built from source is compatible only with the matching
+compiler-family C++ ABI and runtime generation. The CLI has no axklib runtime
+dependency but still uses the documented platform C/C++ runtime libraries.
 
 After a public release, CLI commands retain option names, structured field
 meanings, and exit categories within that major release. Human-readable

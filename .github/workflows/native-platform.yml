@@ -259,8 +259,8 @@ jobs:
           build_root="$workspace/build/native/$configuration"
           cmake_arguments=(
             -DAXK_BUILD_SERVER=ON
+            -DAXK_BUILD_SHARED_SDK=OFF
             -DBUILD_TESTING=${{ inputs.build_testing }}
-            "-DAXK_SBOM_FILE=$build_root/axklib-sdk.spdx.json"
             "-DAXK_CLI_SBOM_FILE=$build_root/axklib-cli.spdx.json"
             "-DAXK_SERVER_SBOM_FILE=$build_root/axklib-server.spdx.json"
             -DVCPKG_TARGET_TRIPLET=${{ inputs.triplet }}
@@ -327,10 +327,6 @@ jobs:
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
             --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" --profile sdk \
-            --output "$root/axklib-sdk.spdx.json"
-          uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" --profile cli \
             --output "$root/axklib-cli.spdx.json"
           uv --project tools/python run python tools/python/generate_sbom.py --axklib-root . \
@@ -350,25 +346,11 @@ jobs:
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           scan="build/tmp/package-scan-${{ inputs.artifact }}"
           rm -rf "$scan"
-          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server"
-          cmake --install "$root" --prefix "$scan/sdk" --component sdk
+          mkdir -p "$scan/cli" "$scan/server"
           cmake --install "$root" --prefix "$scan/cli" --component cli
           cmake --install "$root" --prefix "$scan/server" --component server
-          project_version="${{ steps.package.outputs.project_version }}"
-          soversion="${{ steps.package.outputs.soversion }}"
-          library_args=(
-            --allow-library axklib.dll
-            --allow-library libaxklib.so
-            --allow-library "libaxklib.so.${soversion}"
-            --allow-library "libaxklib.so.${project_version}"
-            --allow-library libaxklib.dylib
-            --allow-library "libaxklib.${soversion}.dylib"
-            --allow-library "libaxklib.${project_version}.dylib"
-          )
-          python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
           python tools/python/inspect_package.py "$scan/cli"
           python tools/python/inspect_package.py "$scan/server"
-          test -f "$scan/sdk/share/axklib/axklib.spdx.json"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
           server_binary="axklib-server"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
@@ -595,10 +577,9 @@ jobs:
           path: build/artifacts/axkdeck-${{ inputs.artifact }}/*
           if-no-files-found: error
 
-      - name: Package Linux or Windows SDK and CLI archives
+      - name: Package Linux or Windows CLI archive
         shell: bash
         env:
-          AXK_SDK_ARTIFACT_STEM: ${{ steps.package.outputs.sdk_artifact_stem }}
           AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
         run: |
           set -euo pipefail
@@ -607,11 +588,6 @@ jobs:
           else
             archive_format=tar.gz
           fi
-          python tools/python/release_metadata.py package-native \
-            --source-directory "build/tmp/package-scan-${{ inputs.artifact }}/sdk" \
-            --output-directory build/artifacts \
-            --artifact-stem "$AXK_SDK_ARTIFACT_STEM" \
-            --component sdk --archive-format "$archive_format"
           python tools/python/release_metadata.py package-native \
             --source-directory "build/tmp/package-scan-${{ inputs.artifact }}/cli" \
             --output-directory build/artifacts \
@@ -626,8 +602,7 @@ jobs:
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           cli_dependencies="$(ldd "$root/apps/cli/axklib")"
           server_dependencies="$(ldd "$root/apps/server/axklib-server")"
-          sdk_dependencies="$(ldd "$root/library/libaxklib.so")"
-          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$cli_dependencies"; then
             echo "CLI has a private native runtime dependency" >&2
@@ -638,12 +613,6 @@ jobs:
             echo "server has a private native runtime dependency" >&2
             exit 1
           fi
-          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$sdk_dependencies"; then
-            echo "C++ SDK has a private codec runtime dependency" >&2
-            exit 1
-          fi
-
       - name: Verify Windows runtime dependency closure
         if: runner.os == 'Windows'
         shell: powershell
@@ -651,28 +620,20 @@ jobs:
           $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
           $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
           $server = Get-ChildItem $root -Recurse -Filter axklib-server.exe | Select-Object -First 1
-          $sdk = Get-ChildItem $root -Recurse -Filter axklib.dll | Select-Object -First 1
-          if ($null -eq $cli -or $null -eq $server -or $null -eq $sdk) {
+          if ($null -eq $cli -or $null -eq $server) {
             throw "native runtime artifacts are missing"
           }
           $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
           $serverDependencies = (dumpbin /dependents $server.FullName) -join "`n"
-          $sdkDependencies = (dumpbin /dependents $sdk.FullName) -join "`n"
           Write-Host $cliDependencies
           Write-Host $serverDependencies
-          Write-Host $sdkDependencies
           $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
-          $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
           if ($cliDependencies -match $privateCli) {
             throw "CLI has a private native runtime dependency: $($Matches[0])"
           }
           if ($serverDependencies -match $privateCli) {
             throw "server has a private native runtime dependency: $($Matches[0])"
           }
-          if ($sdkDependencies -match $privateCodec) {
-            throw "C++ SDK has a private codec runtime dependency: $($Matches[0])"
-          }
-
       - name: Verify Windows ARM64 output
         if: inputs.triplet == 'arm64-windows-axk'
         shell: powershell
@@ -684,12 +645,6 @@ jobs:
           if ($arm64Headers.Count -eq 0) {
             $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
             throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
-          }
-          $sdk = Get-ChildItem "build/native/${{ inputs.debug && 'debug' || 'release' }}" `
-            -Recurse -Filter axklib.dll | Select-Object -First 1
-          $sdkHeaders = dumpbin /headers $sdk.FullName
-          if (@($sdkHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
-            throw 'axklib.dll is not an ARM64 binary'
           }
           $serverHeaders = dumpbin /headers `
             build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server.exe
@@ -731,13 +686,6 @@ jobs:
         with:
           path: ${{ runner.temp }}/vcpkg/archives
           key: vcpkg-v3-${{ inputs.triplet }}-${{ steps.cache-inputs.outputs.vcpkg_revision }}-${{ steps.cache-inputs.outputs.dependency_fingerprint }}
-
-      - name: Upload Linux or Windows SDK archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-${{ steps.package.outputs.sdk_artifact_stem }}
-          path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.*
-          if-no-files-found: error
 
       - name: Upload Linux or Windows CLI archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

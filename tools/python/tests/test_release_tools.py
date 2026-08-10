@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import tarfile
@@ -420,10 +421,8 @@ def test_release_metadata_uses_source_identity_and_debug_suffix(tmp_path: Path) 
         package, metadata(), "branch", "feature/audio", "windows-arm64", "Debug"
     )
     assert release.artifact_stem == "axklib-feature-audio-a1b2c3d-linux-x64"
-    assert release.sdk_artifact_stem == "axklib-sdk-feature-audio-a1b2c3d-linux-x64"
     assert release.cli_artifact_stem == "axklib-cli-feature-audio-a1b2c3d-linux-x64"
     assert debug.artifact_stem == "axklib-feature-audio-a1b2c3d-windows-arm64-debug"
-    assert debug.sdk_artifact_stem.endswith("-windows-arm64-debug")
     assert debug.cli_artifact_stem.endswith("-windows-arm64-debug")
 
 
@@ -475,15 +474,12 @@ def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
         release_metadata.draft_release_target("pull_request", "123", metadata())
 
 
-def write_native_archive(path: Path, component: str) -> None:
+def write_native_archive(path: Path) -> None:
     files = {
         "LICENSE": b"project license",
         "licenses/dependency/copyright": b"dependency license",
+        "bin/axklib": b"executable",
     }
-    if component == "sdk":
-        files.update({"include/axklib/sdk.hpp": b"header", "lib/libaxklib.so": b"library"})
-    else:
-        files["bin/axklib"] = b"executable"
 
     if path.suffix == ".zip":
         with zipfile.ZipFile(path, "w") as archive:
@@ -500,17 +496,13 @@ def write_native_archive(path: Path, component: str) -> None:
                 archive.add(item, arcname=item.relative_to(source))
 
 
-def test_native_archives_are_component_specific_and_compact(tmp_path: Path) -> None:
+def test_cli_archive_is_compact_and_sdk_packaging_is_rejected(tmp_path: Path) -> None:
     source = tmp_path / "install"
-    (source / "include/axklib").mkdir(parents=True)
-    (source / "lib").mkdir()
-    (source / "bin").mkdir()
+    (source / "bin").mkdir(parents=True)
     (source / "share/licenses/axklib").mkdir(parents=True)
     (source / "share/licenses/dependency").mkdir()
     (source / "share/axklib").mkdir(parents=True)
-    (source / "include/axklib/sdk.hpp").write_text("header", encoding="utf-8")
-    (source / "lib/libaxklib.so").write_bytes(b"library")
-    (source / "bin/axklib.dll").write_bytes(b"library")
+    (source / "bin/axklib.exe").write_bytes(b"executable")
     (source / "share/licenses/axklib/LICENSE").write_text("project", encoding="utf-8")
     (source / "share/licenses/dependency/copyright").write_text("third party", encoding="utf-8")
     (source / "share/axklib/axklib.spdx.json").write_text("{}", encoding="utf-8")
@@ -518,20 +510,27 @@ def test_native_archives_are_component_specific_and_compact(tmp_path: Path) -> N
     archive = release_metadata.package_native_component(
         source_directory=source,
         output_directory=tmp_path / "output",
-        artifact_stem="axklib-sdk-main-a1b2c3d-windows-x64",
-        component="sdk",
+        artifact_stem="axklib-cli-main-a1b2c3d-windows-x64",
+        component="cli",
         archive_format="zip",
     )
 
     with zipfile.ZipFile(archive) as package:
         names = set(package.namelist())
-    assert "include/axklib/sdk.hpp" in names
-    assert "lib/libaxklib.so" in names
-    assert "bin/axklib.dll" in names
+    assert "bin/axklib.exe" in names
     assert "LICENSE" in names
     assert "licenses/dependency/copyright" in names
     assert not any(name.startswith("share/") for name in names)
     assert "licenses/axklib/LICENSE" not in names
+
+    with pytest.raises(ValueError, match="unsupported native release component: sdk"):
+        release_metadata.package_native_component(
+            source_directory=source,
+            output_directory=tmp_path / "output",
+            artifact_stem="axklib-sdk-main-a1b2c3d-windows-x64",
+            component="sdk",
+            archive_format="zip",
+        )
 
 
 def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: Path) -> None:
@@ -539,7 +538,7 @@ def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: 
     for platform, extension in release_metadata.RELEASE_ASSET_EXTENSIONS.items():
         for component in release_metadata.NATIVE_RELEASE_COMPONENTS:
             archive = tmp_path / f"axklib-{component}-main-a1b2c3d-{platform}{extension}"
-            write_native_archive(archive, component)
+            write_native_archive(archive)
             assets.append(archive)
 
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
@@ -547,7 +546,7 @@ def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: 
         package.write_bytes(f"{platform}-{architecture}".encode())
         assets.append(package)
 
-    assert len(assets) == 17
+    assert len(assets) == 12
     assert release_metadata.verify_release_assets(tmp_path) == sorted(assets)
     unexpected = tmp_path / "unexpected.txt"
     unexpected.write_text("unexpected", encoding="utf-8")
@@ -559,7 +558,7 @@ def write_complete_release_asset_set(directory: Path) -> list[Path]:
     for platform, extension in release_metadata.RELEASE_ASSET_EXTENSIONS.items():
         for component in release_metadata.NATIVE_RELEASE_COMPONENTS:
             archive = directory / f"axklib-{component}-main-a1b2c3d-{platform}{extension}"
-            write_native_archive(archive, component)
+            write_native_archive(archive)
     packages: list[Path] = []
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
         package = directory / f"axkdeck-main-a1b2c3d-{platform}-{architecture}{extension}"
@@ -587,11 +586,20 @@ def test_release_assets_reject_desktop_identity_that_differs_from_native(tmp_pat
 
 def test_release_assets_reject_share_content(tmp_path: Path) -> None:
     write_complete_release_asset_set(tmp_path)
-    sdk = tmp_path / "axklib-sdk-main-a1b2c3d-windows-x64.zip"
-    with zipfile.ZipFile(sdk, "a") as archive:
+    cli = tmp_path / "axklib-cli-main-a1b2c3d-windows-x64.zip"
+    with zipfile.ZipFile(cli, "a") as archive:
         archive.writestr("share/axklib/axklib.spdx.json", "{}")
 
     with pytest.raises(ValueError, match="contains share/"):
+        release_metadata.verify_release_assets(tmp_path)
+
+
+def test_release_assets_reject_obsolete_sdk_archive(tmp_path: Path) -> None:
+    write_complete_release_asset_set(tmp_path)
+    obsolete = tmp_path / "axklib-sdk-main-a1b2c3d-windows-x64.zip"
+    obsolete.write_bytes(b"obsolete")
+
+    with pytest.raises(ValueError, match="unexpected release assets"):
         release_metadata.verify_release_assets(tmp_path)
 
 
@@ -630,8 +638,8 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     assert "gh release create" in workflow
     assert "--draft" in workflow
     assert "version_metadata.json" in workflow
-    assert '"libaxklib.so.${project_version}"' in workflow_with_platform
-    assert '"libaxklib.${project_version}.dylib"' in workflow_with_platform
+    assert "axklib-sdk" not in workflow_with_platform
+    assert "component sdk" not in workflow_with_platform
 
 
 def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
@@ -746,7 +754,7 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "needs:\n      - release-tools\n      - desktop-static" in workflow
     assert action_reference_count(workflow_with_platform, "astral-sh/setup-uv", "v8.3.2") == 4
     assert (
-        workflow_with_platform.count("uv --project tools/python run python tools/python/generate_sbom.py") == 5
+        workflow_with_platform.count("uv --project tools/python run python tools/python/generate_sbom.py") == 4
     )
     assert "AXKLIB_SERVER_BINARY=$server" in native_platform
     assert "AXKLIB_VERSION_METADATA_FILE=$root/version_metadata.json" in native_platform
@@ -763,8 +771,10 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert '--extension .dmg' in workflow
     assert "name: release-axkdeck-${{ inputs.artifact }}" in native_platform
     assert "name: release-axkdeck-macos-universal" in workflow
-    assert "name: release-${{ steps.package.outputs.sdk_artifact_stem }}" in workflow
+    assert "sdk_artifact_stem" not in workflow_with_platform
     assert "name: release-${{ steps.package.outputs.cli_artifact_stem }}" in workflow
+    assert "-DAXK_BUILD_SHARED_SDK=OFF" in native_platform
+    assert "-DAXK_BUILD_SHARED_SDK=OFF" in macos_helper
     assert "pattern: release-*" in workflow
     assert "SHA256SUMS" not in workflow
     assert "combined Linux or Windows distribution" not in workflow
@@ -862,7 +872,8 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
     assert "AXK_MACOS_CARGO_ROOT: ${{ runner.temp }}" in slices_job
     assert "src-tauri/resources/axkdeck.spdx.json" not in macos_helper
     assert 'local cargo_root="${AXK_MACOS_CARGO_ROOT:-' in macos_helper
-    assert "-type f -o -type l" in macos_helper
+    assert "component in cli server" in macos_helper
+    assert 'find "$stage/lib"' not in macos_helper
 
 
 def test_workflows_use_only_the_required_self_hosted_runner_labels() -> None:
@@ -1298,6 +1309,36 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     assert "mkdocs build --strict --config-file mkdocs.yml" in workflow
     assert workflow.count("actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5") == 1
     assert workflow.count("actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5") == 1
+
+
+def test_docs_publish_checked_in_openapi_with_pinned_redoc(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[3]
+    mkdocs = (root / "mkdocs.yml").read_text(encoding="utf-8")
+    package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    hook_path = root / "docs/hooks.py"
+
+    assert "hooks:\n  - docs/hooks.py" in mkdocs
+    assert "OpenAPI Reference: axklib/openapi.md" in mkdocs
+    assert package["devDependencies"]["redoc"] == "2.5.3"
+
+    module_spec = importlib.util.spec_from_file_location("axklib_docs_hooks", hook_path)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    project = tmp_path / "project"
+    source = project / "apps/server/contracts/openapi-v1.json"
+    renderer = project / "node_modules/redoc/bundles/redoc.standalone.js"
+    source.parent.mkdir(parents=True)
+    renderer.parent.mkdir(parents=True)
+    source.write_text('{"openapi":"3.1.0","info":{"title":"test"}}\n', encoding="utf-8")
+    renderer.write_text("window.Redoc = {};\n", encoding="utf-8")
+    site = tmp_path / "site"
+
+    module.publish_openapi_assets(site, project)
+
+    assert (site / "assets/openapi/openapi-v1.json").read_bytes() == source.read_bytes()
+    assert (site / "assets/openapi/redoc.standalone.js").read_bytes() == renderer.read_bytes()
 
 
 def test_privileged_workflows_pin_every_action_to_a_full_commit() -> None:

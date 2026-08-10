@@ -115,9 +115,7 @@ Manual Native CI builds use these names:
 
 | Build | Example archive stem |
 | --- | --- |
-| Branch SDK Release | `axklib-sdk-main-a1b2c3d-linux-x64` |
 | Branch CLI Debug | `axklib-cli-main-a1b2c3d-linux-x64-debug` |
-| Tagged SDK Release | `axklib-sdk-1.2.3-linux-x64` |
 | Tagged CLI prerelease | `axklib-cli-1.2.3-rc.1-linux-x64` |
 | Branch axkdeck DEB | `axkdeck-main-a1b2c3d-linux-x64.deb` |
 | Tagged axkdeck NSIS installer | `axkdeck-1.2.3-windows-x64.exe` |
@@ -131,12 +129,13 @@ while the complete semantic version and source identity remain embedded in the
 application runtime metadata.
 
 After every successful Release-configuration Native CI run, the workflow
-collects separate SDK and CLI archives for Linux x64, Linux ARM64, Windows x64,
-Windows ARM64, and universal macOS into an unpublished GitHub draft release.
-The same draft contains axkdeck DEB and RPM installers for both Linux
+collects CLI archives for Linux x64, Linux ARM64, Windows x64, Windows ARM64,
+and universal macOS into an unpublished GitHub draft release. The same draft
+contains axkdeck DEB and RPM installers for both Linux
 architectures, NSIS installers for both Windows architectures, and one universal
 macOS DMG. `axklib-server` is shipped in those desktop installers rather than as
-a standalone release asset. The Windows installers are currently unsigned;
+a standalone release asset. The C++ library is distributed as source rather
+than as a prebuilt SDK archive. The Windows installers are currently unsigned;
 Native CI does not accept or retain exportable PFX signing credentials. GitHub
 displays the digest for each asset, so the
 workflow does not attach checksum or release-manifest sidecars. Branch

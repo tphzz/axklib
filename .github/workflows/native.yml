@@ -505,34 +505,15 @@ jobs:
             build/tmp/arm64/bin/axklib-server \
             -output build/tmp/universal/bin/axklib-server
 
-          while IFS= read -r arm64_library; do
-            relative_path="${arm64_library#build/tmp/arm64/}"
-            x64_library="build/tmp/x86_64/$relative_path"
-            universal_library="build/tmp/universal/$relative_path"
-            test -f "$x64_library"
-            lipo -create "$x64_library" "$arm64_library" -output "$universal_library"
-          done < <(find build/tmp/arm64/lib -type f \
-            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
-
           lipo build/tmp/universal/bin/axklib -verify_arch x86_64 arm64
           lipo -info build/tmp/universal/bin/axklib
           lipo build/tmp/universal/bin/axklib-server -verify_arch x86_64 arm64
           lipo -info build/tmp/universal/bin/axklib-server
-          while IFS= read -r library; do
-            lipo "$library" -verify_arch x86_64 arm64
-            lipo -info "$library"
-          done < <(find build/tmp/universal/lib -type f \
-            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
-
           build/tmp/universal/bin/axklib --version
           build/tmp/universal/bin/axklib-server --print-version
           cli_dependencies="$(otool -L build/tmp/universal/bin/axklib)"
           server_dependencies="$(otool -L build/tmp/universal/bin/axklib-server)"
-          sdk_library=$(find build/tmp/universal/lib -type f \
-            -name 'libaxklib*.dylib' -print -quit)
-          test -n "$sdk_library"
-          sdk_dependencies="$(otool -L "$sdk_library")"
-          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "universal CLI has a private native runtime dependency" >&2
@@ -543,12 +524,6 @@ jobs:
             echo "universal server has a private native runtime dependency" >&2
             exit 1
           fi
-          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$sdk_dependencies")"; then
-            echo "universal C++ SDK has a private codec runtime dependency" >&2
-            exit 1
-          fi
-
       - name: Resolve and verify universal build identity
         id: package
         shell: bash
@@ -581,12 +556,6 @@ jobs:
           set -euo pipefail
           test -n "$APPLE_SIGNING_IDENTITY"
           xattr -cr build/tmp/universal
-
-          while IFS= read -r library; do
-            codesign --force --timestamp --options runtime \
-              --sign "$APPLE_SIGNING_IDENTITY" "$library"
-            codesign --verify --strict --verbose=2 "$library"
-          done < <(find build/tmp/universal/lib -type f -name '*.dylib' -print | sort)
 
           codesign --force --timestamp --options runtime \
             --sign "$APPLE_SIGNING_IDENTITY" build/tmp/universal/bin/axklib
@@ -691,37 +660,28 @@ jobs:
           --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
           --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
 
-      - name: Package signed macOS universal SDK and CLI archives
+      - name: Package signed macOS universal CLI archive
         shell: bash
         env:
-          AXK_SDK_ARTIFACT_STEM: ${{ steps.package.outputs.sdk_artifact_stem }}
           AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
         run: |
           set -euo pipefail
           python tools/python/release_metadata.py package-native \
             --source-directory build/tmp/universal \
             --output-directory build/artifacts \
-            --artifact-stem "$AXK_SDK_ARTIFACT_STEM" \
-            --component sdk --archive-format zip
-          python tools/python/release_metadata.py package-native \
-            --source-directory build/tmp/universal \
-            --output-directory build/artifacts \
             --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
             --component cli --archive-format zip
 
-      - name: Notarize macOS universal SDK and CLI archives
+      - name: Notarize macOS universal CLI archive
         if: inputs.notarize_macos
         shell: bash
         run: |
           set -euo pipefail
-          for archive in \
-            "build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.zip" \
-            "build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip"; do
-            test -f "$archive"
-            xcrun notarytool submit "$archive" \
-              --keychain-profile developer-id-notary \
-              --wait
-          done
+          archive="build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip"
+          test -f "$archive"
+          xcrun notarytool submit "$archive" \
+            --keychain-profile developer-id-notary \
+            --wait
 
       - name: Notarize and staple universal macOS desktop DMG
         if: inputs.notarize_macos
@@ -797,13 +757,6 @@ jobs:
           path: build/artifacts/axkdeck-macos-universal/*
           if-no-files-found: error
 
-      - name: Upload universal macOS SDK archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-${{ steps.package.outputs.sdk_artifact_stem }}
-          path: build/artifacts/${{ steps.package.outputs.sdk_artifact_stem }}.zip
-          if-no-files-found: error
-
       - name: Upload universal macOS CLI archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -871,7 +824,7 @@ jobs:
           - Commit: \`${GITHUB_SHA}\`
           - Configuration: \`Release\`
 
-          Review the attached SDK archives, CLI archives, and axkdeck installers before publishing this release.
+          Review the attached CLI archives and axkdeck installers before publishing this release.
           EOF
 
       - name: Replace draft release

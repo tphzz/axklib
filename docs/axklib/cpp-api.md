@@ -63,7 +63,7 @@ codec, and implementation exceptions and return an `internal` error instead.
 The pre-1.0 binary contract is compiler-family and runtime specific. Public
 facade objects contain only PIMPL ownership, but C++ standard-library values are
 part of signatures. Build consumers with a supported ABI-compatible C++17
-runtime for the downloaded SDK package.
+runtime and use a compatible toolchain when integrating the library from source.
 
 `sdk_build_info()` returns its POD value without allocation and does not call
 Git at runtime. Its string pointers refer to immutable literals owned by the

@@ -1,34 +1,42 @@
 # axklib
 
-axklib is a C++17 shared SDK and a separate native command-line application for
-Yamaha A3000, A4000, and A5000 disk images and sampler objects. Its internal
-engine is implemented in C++23.
+axklib provides **axkdeck**, a cross-platform desktop workspace for Yamaha
+A3000, A4000, and A5000 sampler disks, plus a self-contained CLI and a C++
+library for source integration.
 
-It reads SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs,
-read-only A3K `.a3k` volume archives, standalone sampler objects, and
-bounded flat AXK object directories. It can inventory object relationships,
-export exact Wave Data and rendered stereo audio, create fresh HDS images, and
-apply ordered changes to existing images. It can also build the documented
-Yamaha-supported FAT12 floppy and primary ISO9660 image profiles.
+## Start With axkdeck
 
-## Build
+Axkdeck can browse and audition Programs, Sample Banks, Samples, Wave Data, and
+Sequences across supported hard-disk, floppy, CD-ROM, and A3K archive formats.
+It can import audio and portable packages, organize Sample relationships,
+export audio and SFZ instruments, and create or alter supported sampler images.
+Planning views expose name conflicts, Program slots, storage use, and filesystem
+record capacity before a write is committed.
+
+[Download axkdeck](https://github.com/tphzz/axklib/releases)
+
+## Other Interfaces
+
+- The [CLI reference](axklib/cli.md) covers scripted and batch workflows.
+- [C++ and CLI usage](axklib/typical-usage.md) provides practical examples.
+- The [C++ API](axklib/cpp-api.md) documents the source library.
+- The [OpenAPI reference](axklib/openapi.md) renders the complete authenticated
+  server contract used by axkdeck.
+
+GitHub releases contain axkdeck installers and self-contained CLI archives for
+the supported platforms. C++ consumers build the library from source and use
+its installed CMake target, `axklib::axklib`; no prebuilt SDK archive is
+published.
+
+## Build From Source
 
 ```bash
 git submodule update --init --recursive
 ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 cmake --preset release
 cmake --build --preset release
-cmake --install build/native/release --prefix ./axklib-sdk
+cmake --install build/native/release --prefix ./axklib-install
 ```
 
-Installed consumers use `find_package(axklib CONFIG REQUIRED)`. The native CLI
-is installed as `axklib`.
-
-## First Command
-
-```bash
-axklib info HD00_512_example.hds
-```
-
-See [C++ and CLI usage](axklib/typical-usage.md) or the
-[C++ API](axklib/cpp-api.md).
+The native build requires CMake 3.22.1 or newer, Ninja, Git, and a compiler with
+C++23 support. Installed public library headers compile as C++17.

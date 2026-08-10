@@ -100,15 +100,10 @@ verify_runtime_closure() {
   local stage=$1
   local cli_dependencies
   local server_dependencies
-  local sdk_library
-  local sdk_dependencies
 
   cli_dependencies="$(otool -L "$stage/bin/axklib")"
   server_dependencies="$(otool -L "$stage/bin/axklib-server")"
-  sdk_library="$(find "$stage/lib" -type f -name 'libaxklib*.dylib' -print -quit)"
-  test -n "$sdk_library"
-  sdk_dependencies="$(otool -L "$sdk_library")"
-  printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
+  printf '%s\n' "$cli_dependencies" "$server_dependencies"
   if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
       <<< "$(tail -n +2 <<< "$cli_dependencies")"; then
     echo "CLI has a private native runtime dependency" >&2
@@ -117,11 +112,6 @@ verify_runtime_closure() {
   if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
       <<< "$(tail -n +2 <<< "$server_dependencies")"; then
     echo "server has a private native runtime dependency" >&2
-    return 1
-  fi
-  if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-      <<< "$(tail -n +2 <<< "$sdk_dependencies")"; then
-    echo "C++ SDK has a private codec runtime dependency" >&2
     return 1
   fi
 }
@@ -189,9 +179,7 @@ build_slice() {
   local build_directory="$source_directory/build/native/$platform/$configuration_lower"
   local stage="$source_directory/build/tmp/macos-slice-$platform"
   local server="$stage/bin/axklib-server"
-  local binary
   local configure_arguments=()
-  local library_arguments=()
 
   if [[ "$architecture" == "x86_64" ]]; then
     configure_arguments+=("-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/arch;-x86_64")
@@ -209,8 +197,8 @@ build_slice() {
     -DCMAKE_OSX_SYSROOT="$sdk_path" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" \
     -DAXK_BUILD_SERVER=ON \
+    -DAXK_BUILD_SHARED_SDK=OFF \
     -DBUILD_TESTING=ON \
-    -DAXK_SBOM_FILE="$build_directory/axklib-sdk.spdx.json" \
     -DAXK_CLI_SBOM_FILE="$build_directory/axklib-cli.spdx.json" \
     -DAXK_SERVER_SBOM_FILE="$build_directory/axklib-server.spdx.json" \
     -DVCPKG_TARGET_TRIPLET="$triplet" \
@@ -233,11 +221,6 @@ build_slice() {
     "$source_directory/tools/python/generate_sbom.py" --axklib-root "$source_directory" \
     --version-metadata-file "$build_directory/version_metadata.json" \
     --package-basename-file "$build_directory/package_basename.txt" \
-    --profile sdk --output "$build_directory/axklib-sdk.spdx.json"
-  uv --project "$source_directory/tools/python" run python \
-    "$source_directory/tools/python/generate_sbom.py" --axklib-root "$source_directory" \
-    --version-metadata-file "$build_directory/version_metadata.json" \
-    --package-basename-file "$build_directory/package_basename.txt" \
     --profile cli --output "$build_directory/axklib-cli.spdx.json"
   uv --project "$source_directory/tools/python" run python \
     "$source_directory/tools/python/generate_sbom.py" --axklib-root "$source_directory" \
@@ -249,26 +232,14 @@ build_slice() {
   # Running an ARM64 Homebrew CTest itself under Rosetta fails before discovery.
   ctest --test-dir "$build_directory" --output-on-failure --label-exclude server-smoke
 
-  for component in sdk cli server; do
+  for component in cli server; do
     cmake --install "$build_directory" --prefix "$stage" --component "$component"
   done
-  while IFS= read -r binary; do
-    library_arguments+=(--allow-library "$(basename "$binary")")
-  done < <(find "$stage/lib" \( -type f -o -type l \) \
-    -name 'libaxklib*.dylib' -print | sort)
-  python "$source_directory/tools/python/inspect_package.py" \
-    "$stage" "${library_arguments[@]}"
+  python "$source_directory/tools/python/inspect_package.py" "$stage"
   for binary in "$stage/bin/axklib" "$server"; do
     verify_thin_architecture "$binary" "$architecture"
     verify_deployment_target "$binary"
   done
-  while IFS= read -r binary; do
-    verify_thin_architecture "$binary" "$architecture"
-  done < <(find "$stage/lib" -type f \
-    \( -name 'libaxklib*.a' -o -name 'libaxklib*.dylib' \) -print | sort)
-  while IFS= read -r binary; do
-    verify_deployment_target "$binary"
-  done < <(find "$stage/lib" -type f -name 'libaxklib*.dylib' -print | sort)
   verify_runtime_closure "$stage"
 
   build_desktop_slice "$architecture" "$rust_target" "$build_directory" "$server"

@@ -28,7 +28,7 @@ RELEASE_ASSET_EXTENSIONS = {
     "windows-arm64": ".zip",
     "macos-universal": ".zip",
 }
-NATIVE_RELEASE_COMPONENTS = ("sdk", "cli")
+NATIVE_RELEASE_COMPONENTS = ("cli",)
 DESKTOP_RELEASE_TARGETS = (
     ("linux", "x64", ".deb"),
     ("linux", "x64", ".rpm"),
@@ -44,7 +44,6 @@ DESKTOP_RELEASE_TARGETS = (
 class ArtifactMetadata:
     package_basename: str
     artifact_stem: str
-    sdk_artifact_stem: str
     cli_artifact_stem: str
     semantic_version: str
     project_version: str
@@ -117,7 +116,6 @@ def artifact_metadata(
     return ArtifactMetadata(
         package_basename,
         artifact_stem,
-        f"axklib-sdk-{artifact_identity}",
         f"axklib-cli-{artifact_identity}",
         version.semantic_version,
         version.project_version,
@@ -171,17 +169,9 @@ def _verify_native_archive(path: Path, component: str) -> None:
         raise ValueError(f"native release archive is missing dependency licenses: {path.name}")
     if any(name == "share" or name.startswith("share/") for name in names):
         raise ValueError(f"native release archive contains share/: {path.name}")
-    if component == "sdk":
-        if not any(name.startswith("include/") for name in names) or not any(
-            name.startswith("lib/") for name in names
-        ):
-            raise ValueError(f"SDK archive is missing headers or libraries: {path.name}")
-        if any(
-            name in {"bin/axklib", "bin/axklib.exe", "bin/axklib-server", "bin/axklib-server.exe"}
-            for name in names
-        ):
-            raise ValueError(f"SDK archive contains an application binary: {path.name}")
-    elif not any(name in {"bin/axklib", "bin/axklib.exe"} for name in names):
+    if component != "cli":
+        raise ValueError(f"unsupported native release component: {component}")
+    if not any(name in {"bin/axklib", "bin/axklib.exe"} for name in names):
         raise ValueError(f"CLI archive is missing the axklib executable: {path.name}")
     elif any(name in {"bin/axklib-server", "bin/axklib-server.exe"} for name in names):
         raise ValueError(f"CLI archive contains the server: {path.name}")
@@ -194,16 +184,7 @@ def _component_archive_files(source_directory: Path, component: str) -> list[tup
         raise ValueError(f"component install directory does not exist: {source_directory}")
 
     files: list[tuple[Path, str]] = []
-    roots = ("include", "lib") if component == "sdk" else ()
-    for root_name in roots:
-        root = source_directory / root_name
-        if root.is_dir():
-            files.extend(
-                (path, path.relative_to(source_directory).as_posix())
-                for path in sorted(root.rglob("*"))
-                if path.is_file() or path.is_symlink()
-            )
-    binary_names = ("axklib.dll",) if component == "sdk" else ("axklib", "axklib.exe")
+    binary_names = ("axklib", "axklib.exe")
     for binary_name in binary_names:
         binary = source_directory / "bin" / binary_name
         if binary.is_file() or binary.is_symlink():
@@ -381,7 +362,6 @@ def write_github_outputs(path: Path, metadata: ArtifactMetadata) -> None:
     with path.open("a", encoding="utf-8", newline="\n") as output:
         output.write(f"package_basename={metadata.package_basename}\n")
         output.write(f"artifact_stem={metadata.artifact_stem}\n")
-        output.write(f"sdk_artifact_stem={metadata.sdk_artifact_stem}\n")
         output.write(f"cli_artifact_stem={metadata.cli_artifact_stem}\n")
         output.write(f"semantic_version={metadata.semantic_version}\n")
         output.write(f"project_version={metadata.project_version}\n")

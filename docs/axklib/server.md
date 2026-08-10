@@ -5,6 +5,10 @@ authenticated clients. It uses upstream Crow for JSON REST routes and the
 server-to-client job-event WebSocket. The server does not host the axkdeck web
 application and does not accept commands over WebSocket.
 
+The complete contract is available in the rendered
+[OpenAPI reference](openapi.md), including a download of the canonical OpenAPI
+3.1 JSON document used by native and frontend contract checks.
+
 ## Storage Model
 
 Disk images and durable outputs belong to the server filesystem. The server
