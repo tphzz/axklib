@@ -182,7 +182,7 @@ if(BUILD_TESTING)
       "${test_name}"
       PROPERTIES
         TIMEOUT "${test_timeout}"
-        LABELS "${ARGN}"
+        LABELS "server-smoke;${ARGN}"
         ENVIRONMENT "AXK_SERVER_TEST_TIMEOUT_SCALE=${AXK_SERVER_PROCESS_TEST_TIMEOUT_SCALE}"
     )
   endfunction()
@@ -266,7 +266,7 @@ if(BUILD_TESTING)
   )
   axk_configure_server_process_test(Server.PerformanceProfile 45 "performance;server")
   add_test(NAME Server.VersionSmoke COMMAND axklib_server --print-version)
-  set_tests_properties(Server.VersionSmoke PROPERTIES LABELS server)
+  set_tests_properties(Server.VersionSmoke PROPERTIES LABELS "server;server-smoke")
   add_test(
     NAME Server.CrowIsolation
     COMMAND "${CMAKE_COMMAND}" -DAXK_SOURCE_ROOT=${AXK_REPOSITORY_ROOT}

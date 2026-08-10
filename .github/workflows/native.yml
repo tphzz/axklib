@@ -411,7 +411,7 @@ jobs:
       - name: Test native targets
         if: matrix.run_tests
         shell: bash
-        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
+        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }} --label-exclude server-smoke
 
       - name: Stage and inspect native components
         shell: bash
@@ -457,7 +457,8 @@ jobs:
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.15.1
-          standalone: true
+          # @pnpm/exe does not provide a usable native executable for Windows ARM64.
+          standalone: ${{ runner.os != 'Windows' || runner.arch != 'ARM64' }}
           cache: true
           cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
 

@@ -555,7 +555,7 @@ if(BUILD_TESTING)
   axk_set_project_warnings(axk_core_tests)
   axk_enable_sanitizers(axk_core_tests)
   axk_enable_coverage(axk_core_tests)
-  gtest_discover_tests(axk_core_tests)
+  gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_effect_dump tests/effect_dump.cpp)
   target_compile_features(axk_effect_dump PRIVATE cxx_std_23)
   target_link_libraries(axk_effect_dump PRIVATE axklib::core nlohmann_json::nlohmann_json)
@@ -610,6 +610,7 @@ if(BUILD_TESTING)
         "-DAXK_TEST_FIXTURE=${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
         "-DAXK_BUILD_CONFIG=$<CONFIG>"
         "-DAXK_GENERATOR=${CMAKE_GENERATOR}"
+        "-DAXK_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"
         "-DAXK_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
         "-DAXK_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
         "-DAXK_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
@@ -628,6 +629,7 @@ if(BUILD_TESTING)
         "-DAXK_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
         "-DAXK_VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}"
         "-DAXK_VCPKG_OVERLAY_TRIPLETS=${VCPKG_OVERLAY_TRIPLETS}"
+        "-DAXK_VCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"
         "-DAXK_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
         "-DAXK_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
         "-DAXK_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"

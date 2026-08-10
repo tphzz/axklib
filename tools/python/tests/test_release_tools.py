@@ -958,19 +958,28 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
     assert release_tools.index(setup_python) < release_tools.index(setup_uv)
     assert release_tools.index(setup_python) < release_tools.index(raw_python)
 
-    node_then_standalone_pnpm = re.compile(
+    node_then_pnpm = re.compile(
         r"      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6\n"
         r"        with:\n"
         r"          node-version: 22\n\n?"
         r"      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6\n"
         r"        with:\n"
         r"          version: 10\.15\.1\n"
-        r"          standalone: true\n"
+        r"(?:          # @pnpm/exe does not provide a usable native executable for Windows ARM64\.\n)?"
+        r"          standalone: (?P<standalone>[^\n]+)\n"
         r"          cache: true\n"
         r"          cache_dependency_path: apps/axkdeck/pnpm-lock\.yaml"
     )
-    for desktop_job in (desktop_static, native, macos_slices, macos_universal):
-        assert len(node_then_standalone_pnpm.findall(desktop_job)) == 1
+    desktop_jobs = (
+        (desktop_static, "true"),
+        (native, "${{ runner.os != 'Windows' || runner.arch != 'ARM64' }}"),
+        (macos_slices, "true"),
+        (macos_universal, "true"),
+    )
+    for desktop_job, expected_standalone in desktop_jobs:
+        match = node_then_pnpm.search(desktop_job)
+        assert match is not None
+        assert match.group("standalone") == expected_standalone
         assert "cache: pnpm" not in desktop_job
 
 
@@ -1046,10 +1055,14 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
     assert workflow.count("run_tests: true") == 4
     assert "build_slice x86_64 x64-osx-axk macos-x64" in macos_helper
     assert "build_slice arm64 arm64-osx-axk macos-arm64" in macos_helper
-    assert 'ctest --test-dir "$build_directory" --output-on-failure' in macos_helper
+    assert (
+        'ctest --test-dir "$build_directory" --output-on-failure '
+        "--label-exclude server-smoke"
+    ) in macos_helper
     assert '/usr/bin/arch -x86_64 "$ctest_path"' not in macos_helper
     assert macos_helper.index("--profile server --output") < macos_helper.index(
-        'ctest --test-dir "$build_directory" --output-on-failure'
+        'ctest --test-dir "$build_directory" --output-on-failure '
+        "--label-exclude server-smoke"
     )
     assert "-DAXK_BUILD_SERVER=ON" in workflow
     assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow
@@ -1063,6 +1076,35 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
         "share/doc/axklib/server.md",
     ):
         assert installed_file in workflow
+
+
+def test_release_workflow_excludes_server_smoke_tests_but_keeps_them_registered() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
+        encoding="utf-8"
+    )
+    server_cmake = (root / "apps/server/CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert (
+        "ctest --preset ${{ inputs.debug && 'debug' || 'release' }} "
+        "--label-exclude server-smoke"
+    ) in workflow
+    assert (
+        'ctest --test-dir "$build_directory" --output-on-failure '
+        "--label-exclude server-smoke"
+    ) in macos_helper
+    for test_name in (
+        "Server.LoopbackIntegration",
+        "Server.ResilienceIntegration",
+        "Server.ParentProcessLifetime",
+        "Server.StartupFailure",
+        "Server.PerformanceProfile",
+        "Server.VersionSmoke",
+    ):
+        assert test_name in server_cmake
+    assert 'LABELS "server-smoke;${ARGN}"' in server_cmake
+    assert 'PROPERTIES LABELS "server;server-smoke"' in server_cmake
 
 
 def test_macos_sdk_consumer_tests_preserve_slice_configuration() -> None:
@@ -1080,6 +1122,45 @@ def test_macos_sdk_consumer_tests_preserve_slice_configuration() -> None:
     ):
         assert library_cmake.count(f'"-DAXK_{variable}=${{CMAKE_{variable}}}"') == 2
         assert consumer_scripts.count(f'"-DCMAKE_{variable}=${{AXK_{variable}}}"') == 2
+
+
+def test_release_tests_preserve_linux_abi_and_translate_macos_intel_discovery() -> None:
+    root = Path(__file__).resolve().parents[3]
+    library_cmake = (root / "library/CMakeLists.txt").read_text(encoding="utf-8")
+    build_tree_consumer = (
+        root / "library/cmake/RunBuildTreeConsumerTest.cmake"
+    ).read_text(encoding="utf-8")
+    installed_consumer = (root / "library/cmake/RunConsumerTest.cmake").read_text(
+        encoding="utf-8"
+    )
+    export_check = (root / "library/cmake/CheckSdkExports.cmake").read_text(
+        encoding="utf-8"
+    )
+    macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"-DAXK_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"' in (
+        library_cmake
+    )
+    assert '"-DCMAKE_TOOLCHAIN_FILE=${AXK_CHAINLOAD_TOOLCHAIN_FILE}"' in (
+        build_tree_consumer
+    )
+    assert (
+        '"-DAXK_VCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"'
+        in library_cmake
+    )
+    assert (
+        '"-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${AXK_VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"'
+        in installed_consumer
+    )
+    assert "(__bss_start|_edata|_end)" in export_check
+    assert "gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)" in library_cmake
+    assert 'if [[ "$architecture" == "x86_64" ]]' in macos_helper
+    assert (
+        'configure_arguments+=("-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/arch;-x86_64")'
+        in macos_helper
+    )
 
 
 def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom() -> None:

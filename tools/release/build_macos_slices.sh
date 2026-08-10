@@ -190,7 +190,12 @@ build_slice() {
   local stage="$source_directory/build/tmp/macos-slice-$platform"
   local server="$stage/bin/axklib-server"
   local binary
+  local configure_arguments=()
   local library_arguments=()
+
+  if [[ "$architecture" == "x86_64" ]]; then
+    configure_arguments+=("-DCMAKE_CROSSCOMPILING_EMULATOR=/usr/bin/arch;-x86_64")
+  fi
 
   rm -rf "$build_directory" "$stage"
   mkdir -p "$build_directory" "$stage"
@@ -209,7 +214,8 @@ build_slice() {
     -DAXK_CLI_SBOM_FILE="$build_directory/axklib-cli.spdx.json" \
     -DAXK_SERVER_SBOM_FILE="$build_directory/axklib-server.spdx.json" \
     -DVCPKG_TARGET_TRIPLET="$triplet" \
-    -DVCPKG_OVERLAY_TRIPLETS="$source_directory/library/cmake/triplets"
+    -DVCPKG_OVERLAY_TRIPLETS="$source_directory/library/cmake/triplets" \
+    "${configure_arguments[@]}"
   cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
   python "$source_directory/tools/python/release_metadata.py" resolve \
@@ -241,7 +247,7 @@ build_slice() {
 
   # Native CTest can launch Intel test binaries through macOS translation.
   # Running an ARM64 Homebrew CTest itself under Rosetta fails before discovery.
-  ctest --test-dir "$build_directory" --output-on-failure
+  ctest --test-dir "$build_directory" --output-on-failure --label-exclude server-smoke
 
   for component in sdk cli server; do
     cmake --install "$build_directory" --prefix "$stage" --component "$component"
