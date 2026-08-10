@@ -142,7 +142,10 @@ mod tests {
     fn media_destination_accepts_iso_ima_and_multi_floppy_zip_artifacts() {
         assert_eq!(supported_media_extension("Partition.iso"), Some("iso"));
         assert_eq!(supported_media_extension("Volume.IMA"), Some("ima"));
-        assert_eq!(supported_media_extension("Volume floppies.zip"), Some("zip"));
+        assert_eq!(
+            supported_media_extension("Volume floppies.zip"),
+            Some("zip")
+        );
         assert_eq!(supported_media_extension("Package.axkvol"), None);
         assert_eq!(supported_media_extension("No extension"), None);
     }
