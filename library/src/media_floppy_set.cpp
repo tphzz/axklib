@@ -154,10 +154,10 @@ Result<std::vector<std::byte>> materialize_segment(const PreparedMediaObject &ob
                                                    const CancellationToken &cancellation) {
     if (!segment.split)
         return materialize(object, cancellation);
-    if (segment.header_bytes > std::numeric_limits<std::size_t>::max() ||
-        segment.payload_bytes > std::numeric_limits<std::size_t>::max() - segment.header_bytes ||
-        segment.header_bytes > object.size() || segment.payload_offset > object.size() - segment.header_bytes ||
-        segment.payload_bytes > object.size() - segment.header_bytes - segment.payload_offset) {
+    const auto header_bytes = static_cast<std::uint64_t>(segment.header_bytes);
+    if (segment.payload_bytes > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()) - header_bytes ||
+        header_bytes > object.size() || segment.payload_offset > object.size() - header_bytes ||
+        segment.payload_bytes > object.size() - header_bytes - segment.payload_offset) {
         return std::unexpected{floppy_error("prepared Wave Data continuation segment is out of bounds")};
     }
     std::vector<std::byte> result(static_cast<std::size_t>(segment.header_bytes + segment.payload_bytes));

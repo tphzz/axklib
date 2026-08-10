@@ -192,7 +192,7 @@ jobs:
           version: "0.10.4"
           enable-cache: true
 
-      - name: Install Linux C++23 toolchain
+      - name: Verify preinstalled Linux C++23 toolchain
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -200,25 +200,16 @@ jobs:
           source /etc/os-release
           test "$ID" = ubuntu
           test "$VERSION_CODENAME" = jammy
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            ca-certificates \
-            curl
-          sudo install -d -m 0755 /etc/apt/keyrings
-          curl --fail --silent --show-error \
-            https://apt.llvm.org/llvm-snapshot.gpg.key \
-            | sudo tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null
-          echo 'deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main' \
-            | sudo tee /etc/apt/sources.list.d/llvm18.list >/dev/null
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang-18 \
-            libc++-18-dev \
-            libc++abi-18-dev \
-            libunwind-18-dev
+          command -v clang-18
+          command -v clang++-18
+          ninja_path="$(command -v ninja)"
           echo "CC=clang-18" >> "$GITHUB_ENV"
           echo "CXX=clang++-18" >> "$GITHUB_ENV"
+          echo "NINJA_EXE=$ninja_path" >> "$GITHUB_ENV"
           clang++-18 --version
+          ninja --version
+          printf '#include <expected>\nint main() { std::expected<int, int> value(1); return *value - 1; }\n' \
+            | clang++-18 -std=c++23 -stdlib=libc++ -x c++ -fsyntax-only -
 
       - name: Resolve native cache inputs
         id: cache-inputs
@@ -265,7 +256,7 @@ jobs:
           arch: ${{ matrix.msvc_arch }}
           vs-path: ${{ steps.vs2026.outputs.path }}
 
-      - name: Verify Visual Studio 2026 compiler
+      - name: Verify Visual Studio 2026 compiler and Ninja
         if: runner.os == 'Windows'
         shell: powershell
         run: |
@@ -276,8 +267,14 @@ jobs:
           if ($compiler -notlike '*\Microsoft Visual Studio\18\*') {
             throw "Expected Visual Studio 18 cl.exe, found '$compiler'"
           }
+          $ninja = Join-Path $env:VSINSTALLDIR 'Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe'
+          if (-not (Test-Path -LiteralPath $ninja -PathType Leaf)) {
+            throw "Visual Studio Ninja was not found at '$ninja'"
+          }
+          & $ninja --version
           "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NINJA_EXE=$($ninja.Replace('\', '/'))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "Using $compiler"
 
       - name: Fingerprint native toolchain
@@ -325,16 +322,30 @@ jobs:
       - name: Configure native build
         id: configure-native
         shell: bash
-        run: >-
-          cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
-          -DAXK_BUILD_SERVER=ON
-          -DBUILD_TESTING=${{ matrix.build_testing }}
-          -DAXK_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-sdk.spdx.json
-          -DAXK_CLI_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-cli.spdx.json
-          -DAXK_SERVER_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-server.spdx.json
-          -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
-          -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${{ runner.os == 'Linux' && format('{0}/library/cmake/toolchains/LinuxClang18Libcxx.cmake', github.workspace) || '' }}
+        run: |
+          set -euo pipefail
+          configuration="${{ inputs.debug && 'debug' || 'release' }}"
+          workspace="$PWD"
+          if [ "$RUNNER_OS" = Windows ]; then
+            workspace="$(cygpath -m "$PWD")"
+          fi
+          build_root="$workspace/build/native/$configuration"
+          cmake_arguments=(
+            -DAXK_BUILD_SERVER=ON
+            -DBUILD_TESTING=${{ matrix.build_testing }}
+            "-DAXK_SBOM_FILE=$build_root/axklib-sdk.spdx.json"
+            "-DAXK_CLI_SBOM_FILE=$build_root/axklib-cli.spdx.json"
+            "-DAXK_SERVER_SBOM_FILE=$build_root/axklib-server.spdx.json"
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
+            "-DVCPKG_OVERLAY_TRIPLETS=$workspace/library/cmake/triplets"
+            "-DCMAKE_MAKE_PROGRAM=$NINJA_EXE"
+          )
+          if [ "$RUNNER_OS" = Linux ]; then
+            cmake_arguments+=(
+              "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$workspace/library/cmake/toolchains/LinuxClang18Libcxx.cmake"
+            )
+          fi
+          cmake --preset "$configuration" "${cmake_arguments[@]}"
 
       - name: Build native targets
         shell: bash

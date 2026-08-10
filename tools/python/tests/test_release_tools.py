@@ -882,14 +882,17 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "& $bash --version" in native_job
     assert "$bash.Source" not in native_job
     assert "python -c \"import platform,sys;" in native_job
-    assert "name: Install Linux C++23 toolchain" in native_job
-    assert "https://apt.llvm.org/llvm-snapshot.gpg.key" in native_job
-    assert "llvm-toolchain-jammy-18 main" in native_job
+    assert "name: Verify preinstalled Linux C++23 toolchain" in native_job
+    assert "apt.llvm.org" not in native_job
+    assert "libc++-18-dev" not in native_job
+    assert "libc++abi-18-dev" not in native_job
+    assert "command -v clang-18" in native_job
+    assert "command -v clang++-18" in native_job
+    assert "command -v ninja" in native_job
+    assert "#include <expected>" in native_job
     assert "clang-18" in native_job
-    assert "libc++-18-dev" in native_job
-    assert "libc++abi-18-dev" in native_job
     assert "library/cmake/toolchains/LinuxClang18Libcxx.cmake" in native_job
-    assert native_job.index("name: Install Linux C++23 toolchain") < native_job.index(
+    assert native_job.index("name: Verify preinstalled Linux C++23 toolchain") < native_job.index(
         "name: Fingerprint native toolchain"
     )
     assert "DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer" in macos_slices
@@ -912,6 +915,12 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "find_program(AXK_CLANGXX_18 clang++-18 REQUIRED)" in linux_toolchain
     assert 'set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++")' in linux_toolchain
     assert "-nostdlib++" not in linux_toolchain
+    assert "NINJA_EXE=" in native_job
+    assert "& $ninja --version" in native_job
+    assert 'workspace="$(cygpath -m "$PWD")"' in native_job
+    assert '"-DVCPKG_OVERLAY_TRIPLETS=$workspace/library/cmake/triplets"' in native_job
+    assert '"-DCMAKE_MAKE_PROGRAM=$NINJA_EXE"' in native_job
+    assert "-DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}" not in native_job
 
 
 def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
