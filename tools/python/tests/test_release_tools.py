@@ -633,7 +633,9 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     root = Path(__file__).resolve().parents[3]
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
 
-    assert action_reference_count(workflow, "actions/cache", "v6") >= 4
+    assert action_reference_count(workflow, "actions/cache", "v6") >= 3
+    assert action_reference_count(workflow, "actions/cache/restore", "v6") >= 3
+    assert action_reference_count(workflow, "actions/cache/save", "v6") >= 5
     assert "sccache" not in workflow.lower()
     assert "cold_build" not in workflow
     assert "git rev-parse HEAD:external/vcpkg" in workflow
@@ -647,8 +649,25 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     ].split("      - name: Locate Visual Studio 2026\n", 1)[0]
     assert "restore-keys:" not in vcpkg_cache
     assert "key: native-v3-${{ matrix.triplet }}-" in workflow
-    assert "key: axkdeck-rust-v1-${{ matrix.artifact }}-" in workflow
-    assert "key: axkdeck-rust-v2-macos-universal-" in workflow
+    assert "key: axkdeck-cargo-downloads-v1-${{ matrix.artifact }}-" in workflow
+    assert "key: axkdeck-cargo-downloads-v1-macos-" in workflow
+    desktop_cargo_cache = workflow.split(
+        "      - name: Restore desktop Cargo download cache\n", 1
+    )[1].split("      - name: Install desktop dependencies\n", 1)[0]
+    assert "actions/cache/restore@" in desktop_cargo_cache
+    assert "${{ runner.temp }}/cargo-home/registry/cache" in desktop_cargo_cache
+    assert "${{ runner.temp }}/cargo-home/registry/index" in desktop_cargo_cache
+    assert "${{ runner.temp }}/cargo-home/git/db" in desktop_cargo_cache
+    assert "src-tauri/target" not in desktop_cargo_cache
+    universal_cargo_cache = workflow.split(
+        "      - name: Restore universal desktop Cargo download cache\n", 1
+    )[1].split("      - name: Install desktop dependencies\n", 1)[0]
+    assert "actions/cache/restore@" in universal_cargo_cache
+    assert "~/.cargo/registry/cache" in universal_cargo_cache
+    assert "~/.cargo/registry/index" in universal_cargo_cache
+    assert "~/.cargo/git/db" in universal_cargo_cache
+    assert "macos-universal-cargo" not in universal_cargo_cache
+    assert workflow.count("timeout-minutes: 5\n        continue-on-error: true") >= 3
     assert "${{ steps.native-toolchain.outputs.toolchain_fingerprint }}" in workflow
     assert "${{ steps.cache-inputs.outputs.dependency_fingerprint }}-${{ github.sha }}" in workflow
     assert "!build/native/${{ inputs.debug && 'debug' || 'release' }}/vcpkg_installed/**" not in workflow
@@ -681,7 +700,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
     assert workflow.index(
         "      - name: Save native incremental build cache after failure"
     ) > workflow.index("      - name: Upload Linux or Windows CLI archive")
-    assert action_reference_count(workflow, "actions/cache/save", "v6") == 2
+    assert action_reference_count(workflow, "actions/cache/save", "v6") == 5
     assert "Save vcpkg binary cache after failure" in workflow
     assert "Save native incremental build cache after failure" in workflow
     assert workflow.count("steps.configure-native.outcome == 'success'") == 1
@@ -690,7 +709,7 @@ def test_native_workflow_uses_official_dependency_and_incremental_build_caches()
         "if: ${{ failure() && steps.finalize-native-cache.outcome == 'success' "
         "&& steps.native-build-cache.outputs.cache-hit != 'true' }}"
     ) in workflow
-    assert workflow.count("continue-on-error: true") == 2
+    assert workflow.count("continue-on-error: true") == 5
 
 
 def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() -> None:
@@ -803,7 +822,11 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
     assert "retention-days: 2" in slices_job
     assert "name: slice-macos-x64-${{ github.run_id }}" in universal_job
     assert "name: slice-macos-arm64-${{ github.run_id }}" in universal_job
-    assert "actions/cache/restore" not in universal_job
+    universal_cargo_cache = universal_job.split(
+        "      - name: Restore universal desktop Cargo download cache\n", 1
+    )[1].split("      - name: Install desktop dependencies\n", 1)[0]
+    assert "actions/cache/restore@" in universal_cargo_cache
+    assert "macos-universal-cargo" not in universal_cargo_cache
     assert "macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}" not in workflow
     assert "AXK_MACOS_CARGO_ROOT: ${{ runner.temp }}" in slices_job
     assert "src-tauri/resources/axkdeck.spdx.json" not in macos_helper

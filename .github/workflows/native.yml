@@ -507,18 +507,15 @@ jobs:
           toolchain: "1.85"
           components: clippy
 
-      - name: Restore desktop Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore desktop Cargo download cache
+        id: desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            ${{ runner.temp }}/cargo-home/registry
-            ${{ runner.temp }}/cargo-home/git
-            apps/axkdeck/src-tauri/target
-            !apps/axkdeck/src-tauri/target/**/bundle/**
-          key: axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            axkdeck-rust-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
-            axkdeck-rust-v1-${{ matrix.artifact }}-
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/git/db
+          key: axkdeck-cargo-downloads-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
@@ -596,6 +593,18 @@ jobs:
         working-directory: apps/axkdeck
         shell: bash
         run: pnpm desktop:build
+
+      - name: Save desktop Cargo download cache
+        if: ${{ success() && steps.desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ${{ runner.temp }}/cargo-home/registry/cache
+            ${{ runner.temp }}/cargo-home/registry/index
+            ${{ runner.temp }}/cargo-home/git/db
+          key: axkdeck-cargo-downloads-v1-${{ matrix.artifact }}-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Reject nested native desktop builds
         shell: bash
@@ -959,16 +968,15 @@ jobs:
           toolchain: "1.85"
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
-      - name: Restore isolated macOS desktop Rust caches
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore macOS desktop Cargo download cache
+        id: macos-desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: axkdeck-rust-v2-macos-dual-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            axkdeck-rust-v2-macos-dual-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
-            axkdeck-rust-v2-macos-dual-
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
@@ -990,6 +998,18 @@ jobs:
             --deployment-target "$MACOSX_DEPLOYMENT_TARGET" \
             --ref-type "$GITHUB_REF_TYPE" \
             --ref-name "$GITHUB_REF_NAME"
+
+      - name: Save macOS desktop Cargo download cache
+        if: ${{ success() && steps.macos-desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Upload Intel macOS slice
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1265,18 +1285,15 @@ jobs:
           toolchain: "1.85"
           targets: x86_64-apple-darwin,aarch64-apple-darwin
 
-      - name: Restore universal desktop Rust cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - name: Restore universal desktop Cargo download cache
+        id: universal-desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            build/tmp/macos-universal-cargo-${{ github.run_id }}-${{ github.run_attempt }}
-            !build/tmp/macos-universal-cargo-${{ github.run_id }}-${{ github.run_attempt }}/**/bundle/**
-          key: axkdeck-rust-v2-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-${{ github.sha }}
-          restore-keys: |
-            axkdeck-rust-v2-macos-universal-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}-
-            axkdeck-rust-v2-macos-universal-
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Install desktop dependencies
         working-directory: apps/axkdeck
@@ -1322,6 +1339,18 @@ jobs:
           cp "$AXKLIB_SERVER_BINARY" \
             src-tauri/binaries/axklib-server-universal-apple-darwin
           pnpm desktop:build -- --target universal-apple-darwin
+
+      - name: Save universal desktop Cargo download cache
+        if: ${{ success() && steps.universal-desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
 
       - name: Stage universal macOS desktop release package
         run: >-
