@@ -228,13 +228,13 @@ describe('PackageImportWorkflow', () => {
 
     it('replans immediately with an explicit opaque Sequence decision', async () => {
         const source = serverFileLocation(
-            { rootId: 'workspace', relativePath: 'NordMicroDrums.axkvol' },
-            'NordMicroDrums.axkvol',
+            { rootId: 'workspace', relativePath: 'Opaque Sequence.axkvol' },
+            'Opaque Sequence.axkvol',
         );
         const undecidedPlan: ImageSessionPackageImportPlan = {
             ...programPlan(true, 5, 'opaque-plan'),
             valid: false,
-            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'Opaque Sequence', action: null }],
             conflicts: [
                 {
                     code: 'OPAQUE_SEQUENCE_DECISION_REQUIRED',
@@ -262,7 +262,7 @@ describe('PackageImportWorkflow', () => {
                 {
                     packageIndex: 0,
                     nodeId: 'sequence-1',
-                    name: 'NordMicroDrums',
+                    name: 'Opaque Sequence',
                     action: 'PRESERVE_UNCHANGED',
                 },
             ],
@@ -321,8 +321,8 @@ describe('PackageImportWorkflow', () => {
 
     it('retains an automatic Program slot assignment when skipping an opaque Sequence', async () => {
         const source = serverFileLocation(
-            { rootId: 'workspace', relativePath: 'NordMicroDrums.axkvol' },
-            'NordMicroDrums.axkvol',
+            { rootId: 'workspace', relativePath: 'Opaque Sequence.axkvol' },
+            'Opaque Sequence.axkvol',
         );
         const opaqueConflict = {
             code: 'OPAQUE_SEQUENCE_DECISION_REQUIRED',
@@ -339,18 +339,18 @@ describe('PackageImportWorkflow', () => {
         };
         const initialPlan: ImageSessionPackageImportPlan = {
             ...programPlan(false, 5, 'initial-plan'),
-            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'Opaque Sequence', action: null }],
             conflicts: [...programPlan(false, 5).conflicts, opaqueConflict],
         };
         const checkedPlan: ImageSessionPackageImportPlan = {
             ...programPlan(true, 5, 'checked-plan'),
             valid: false,
-            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }],
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'Opaque Sequence', action: null }],
             conflicts: [opaqueConflict],
         };
         const skippedPlan: ImageSessionPackageImportPlan = {
             ...programPlan(true, 5, 'skipped-plan'),
-            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: 'SKIP' }],
+            opaqueSequences: [{ packageIndex: 0, nodeId: 'sequence-1', name: 'Opaque Sequence', action: 'SKIP' }],
         };
         const planImagePackageImport = vi
             .fn()

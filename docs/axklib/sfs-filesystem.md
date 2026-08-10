@@ -478,9 +478,8 @@ partition slot placement, partition-header start/count words, partition-index
 words, leading formatter-transfer tokens, and dynamic header words, are
 generated explicitly.
 Partition headers are zero-initialized, and only the retained explicit fields
-are written. Hardware checks showed that the former fixed nonzero tail bytes
-are not required; they remain zero for generated images. The validated
-non-required residue range at `+0x1bc..+0x1e3` is also zero-generated. Sector-2
+are written. Former fixed nonzero tail bytes and the non-required residue range
+at `+0x1bc..+0x1e3` remain zero for generated images. Sector-2
 label-entry records and the `+0x30..+0x3e` range are deliberately zero-generated.
 
 
@@ -493,17 +492,16 @@ values from small formulas. It does not copy broad binary templates.
 | --- | --- |
 | Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields. |
 | Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from base `ab432100` plus the bounded three-bit partition sequence. The base is not derived from disk geometry. |
-| Prior-token residue at sector `+0x09..+0x10` | Zeroed after object-bearing hardware checks showed it is not required. |
-| Sector-2 range at `+0x30..+0x3e` | Zeroed after hardware validation showed it is not required. |
-| Former partition-header fixed tail bytes | Zeroed after object-bearing hardware checks showed they are not required. Retained tail words are written explicitly. |
-| Partition-header residue range at `+0x1bc..+0x1e3` | Zeroed after hardware validation showed it is not required. |
+| Prior-token residue at sector `+0x09..+0x10` | Zero. |
+| Sector-2 range at `+0x30..+0x3e` | Zero. |
+| Former partition-header fixed tail bytes | Zero; retained tail words are written explicitly. |
+| Partition-header residue range at `+0x1bc..+0x1e3` | Zero. |
 | Partition-header `+0x14c` | Written as total image sectors for one or two partitions; for `N >= 3`, written as total image sectors minus `N - 2`. |
 | Partition-header `+0x194` | Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts. |
 
-These fields are part of the compatibility envelope for generated images. Bytes
-that hardware validation shows are not required are deliberately zeroed.
+These fields are part of the compatibility envelope for generated images.
 Applications should use the typed writer or JSON manifest rather than
-constructing these fields manually.
+constructing them manually.
 
 ## Minimal Read Walkthrough
 

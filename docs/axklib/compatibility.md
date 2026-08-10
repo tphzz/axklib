@@ -47,8 +47,8 @@ schema; the manifest, not the filename, determines the package kind. See
 compatibility contract.
 
 SFS package imports reuse waveform objects only inside the destination volume.
-Hardware testing rejected cross-volume SMPL storage: the dependent volume was
-listed but could not load independently. The reserved partition-wide policy is
+Cross-volume Wave Data (`SMPL`) storage is unsupported because a dependent
+volume cannot load independently. The reserved partition-wide policy is
 therefore unavailable in package schema 1.0 rather than an opt-in optimization.
 
 The SDK does not ship a C interface, Python binding, or general-purpose FFI.

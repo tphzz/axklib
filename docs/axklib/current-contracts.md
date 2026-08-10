@@ -32,5 +32,4 @@ every in-repository producer, consumer, test, and summary together.
 
 Historical records and completed work items are not current contracts. They
 must be labeled as historical when retained and cannot override the
-specifications above. The repository-level write-readiness checklist applies
-these public rules to contributor and hardware-validation gates.
+specifications above.

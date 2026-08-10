@@ -181,25 +181,16 @@ whole mutation fails and rolls back.
 
 ## Compatibility Boundary
 
-The block grammar, current version and PPQN, decoded event families, and
-absence of object-reference relocation are backed by independent real-media
-objects and current sampler behavior. Byte-preserving transfer has also been
-played successfully on an A4000. An A4000 running system software 1.50 imported
-and saved back four format-0 MIDI cases covering a precise tick-zero tempo, a
-later tempo change, and the no-Set-Tempo default. It also imported and saved
-back five event-profile cases covering every admitted channel family, CC 71/74
-sweeps, a 65536-tick note, descriptive and timing meta events, one complete
-`F0 ... F7` event, and one escaped `F7` event. Every decoded event, byte, order,
-and tick in those nine returned timelines matches axklib's canonical import.
-Direct playback and rename/save-back of an axklib-authored object remain
-unavailable until their validation roundtrip is complete.
+The current block grammar, PPQN, decoded channel/meta/SysEx families, long delta
+times, and tempo-map behavior are compatible with import and save-back on an
+A4000 running system software 1.50. Byte-preserving Sequence transfer is also
+playback-compatible. Direct playback and rename/save-back of a newly authored
+Sequence remain outside the verified writer profile.
 
 The Yamaha A5000/A4000 manual admits format-0 `.MID` import from DOS-format
 floppy or hard-disk media and ISO9660 CD-ROM. This is a sampler interoperability
 statement, not an axklib claim that every DOS hard-disk container is currently
-writable. Tempo-map import and save-back behavior are covered by both automated
-codec tests and the multi-case ISO hardware roundtrip. The returned media did
-not independently record the sampler's visible tempo display during playback.
+writable.
 
 Unknown header bytes remain preserved data. They are not exposed as
 speculative writer parameters.

@@ -170,13 +170,9 @@ Match match_named_target(const ObjectSnapshot &source, std::string_view name, Ob
             const auto category = type == ObjectType::sbac ? "SBAC" : type == ObjectType::sbnk ? "SBNK" : "object";
             const auto selector = unique_basis.substr(std::string_view{"assignment-kind-"}.size(), 4U);
             return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},
-                    std::format("Input consistency: assignment name matches a "
-                                "same-scope object, and "
-                                "assignment kind byte {} selects {} in tested "
-                                "current-object corpora. "
-                                "Keep the selector below write-side quality "
-                                "until formula or validated "
-                                "saves support it.",
+                    std::format("Input consistency: assignment name and kind byte {} select one "
+                                "same-scope {} object. The selector remains read-only until its "
+                                "write-side formula is specified.",
                                 selector, category)};
         }
         return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},

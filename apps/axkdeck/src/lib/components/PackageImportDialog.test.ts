@@ -332,7 +332,9 @@ describe('PackageImportDialog', () => {
 
     it('requires an explicit preserve-or-skip decision for an undecodable Sequence', async () => {
         const undecodable = plan(false);
-        undecodable.opaqueSequences = [{ packageIndex: 0, nodeId: 'sequence-1', name: 'NordMicroDrums', action: null }];
+        undecodable.opaqueSequences = [
+            { packageIndex: 0, nodeId: 'sequence-1', name: 'Opaque Sequence', action: null },
+        ];
         undecodable.conflicts = [
             {
                 ...undecodable.conflicts[0],
@@ -359,7 +361,7 @@ describe('PackageImportDialog', () => {
             },
         });
 
-        expect(screen.getByText('Sequence “NordMicroDrums” could not be decoded')).toBeTruthy();
+        expect(screen.getByText('Sequence “Opaque Sequence” could not be decoded')).toBeTruthy();
         expect(screen.queryByText('internal parser terminology must not be shown')).toBeNull();
         const preserve = screen.getByRole('radio', { name: /Preserve unchanged/ });
         const skip = screen.getByRole('radio', { name: /Skip Sequence/ });
@@ -379,7 +381,7 @@ describe('PackageImportDialog', () => {
                 packageIndex: null,
                 nodeId: '',
                 objectType: 'SEQU',
-                objectName: 'NordMicroDrums',
+                objectName: 'Opaque Sequence',
                 partitionIndex: 0,
                 volumeName: 'Existing',
             },
@@ -402,7 +404,7 @@ describe('PackageImportDialog', () => {
 
         expect(
             screen.getByText(
-                'Existing Sequence “NordMicroDrums” in Existing could not be decoded. It is unrelated to this import and will be preserved unchanged.',
+                'Existing Sequence “Opaque Sequence” in Existing could not be decoded. It is unrelated to this import and will be preserved unchanged.',
             ),
         ).toBeTruthy();
         expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);

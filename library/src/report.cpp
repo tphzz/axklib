@@ -176,7 +176,7 @@ std::string semantic_notes(std::string_view name) {
                "and reported separately from active assignment state.";
     if (name == "active_assignment_state")
         return "Conservative Program assignment classification. "
-               "HDA/sampler-authored rows may be "
+               "SFS assignment rows may be "
                "confirmed-active, confirmed-visible-off, or "
                "confirmed-duplicate-not-active; ISO "
                "source-load-assignment rows are matched source links whose "

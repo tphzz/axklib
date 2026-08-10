@@ -1,8 +1,8 @@
 # Sampler Image Fixtures
 
 Small Yamaha A-series images used by active automated tests. These are
-versionable test fixtures, not scratch outputs and not large corpus images. Keep
-this folder minimal; replace these binaries with smaller synthetic/minimal
+versionable test fixtures, not scratch outputs and not large media collections.
+Keep this folder minimal; replace these binaries with smaller synthetic/minimal
 fixtures when practical.
 
 ## HD00_512_multi_sbnk_authored.hds
@@ -10,8 +10,7 @@ fixtures when practical.
 - Bytes: 1048576
 - SHA-256: `733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d`
 - Purpose: multi-slot current SBNK fixture for active public tests
-- Origin: sampler-authored A-series image retained from the pre-public
-  multi-slot hardware campaign; the exact authoring transcript is not retained
+- Origin: hardware-authored Yamaha A-series test image
 - Quality: known small test dependency
 - Retention reason: required by active automated tests; replace with a smaller synthetic/minimal fixture when practical
 - Expected object count: see `MANIFEST.json`
@@ -20,10 +19,10 @@ fixtures when practical.
   trailing stars and share one Wave Data object; ten Sample Bank/Sample pairs
   span zero through eight and ten trailing stars and share a second Wave Data
   object. Within each family the decoded Sample parameters are identical.
-- Verification status: this structure, the Yamaha manual, later hardware edits
-  and saves, and operator recollection support repeated Duplicate operations.
-  The missing original authoring transcript prevents a definitive claim about
-  the exact command sequence or any unidentified raw Duplicate field.
+- Verification status: decoded topology and active tests establish the starred
+  object families and their shared Wave Data relationships. The fixture does
+  not define an additional raw Duplicate flag or prescribe an exact sampler
+  command sequence.
 - Audio limitation: grouped `Sxx` members reference `SMP 252511`, whose exact
   PCM has near-zero amplitude. Use this fixture for structure and parameter
   tests, not as an audible grouped-bank control. Standalone `JSxx` rows

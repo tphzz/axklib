@@ -8,7 +8,7 @@ floppies, ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
 
-These readers implement the narrow profiles needed by maintained Yamaha
+These readers implement the supported profiles for Yamaha
 A-series media. They are not general-purpose FAT or ISO libraries. An image
 outside that compatibility scope may happen to use the accepted structures,
 but that does not make arbitrary media a supported input contract.

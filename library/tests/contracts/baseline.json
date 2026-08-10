@@ -49,8 +49,8 @@
     },
     {
       "path": "tests/fixtures/images/sampler-authored/MANIFEST.json",
-      "sha256": "b15f1e1437292eec55db42c9cb92d48698f653c0739999a7c193751ed4b9daa0",
-      "size_bytes": 1683
+      "sha256": "7623d0ac5b85f51980d2fb41280a5980764191c2951fb353b0be1a17d083d8c4",
+      "size_bytes": 1590
     }
   ],
   "writer_profiles": [

@@ -12,24 +12,14 @@ into, or repair `.a3k` archives.
 
 ## Support Status
 
-The envelope read contract is **Strong**. All 24 observed archives use the same
-header and index geometry. This status authorizes the bounded reader only; no
-writer profile is defined.
+The envelope read contract admits version 1 archives with the bounded header,
+index, and payload geometry below. This authorizes the reader only; no writer
+profile is defined.
 
 The embedded `FSFSDEV3SPLX` object headers and supported current object payloads
 use the normal shared sampler-object contract. Their type and embedded object
 name are authoritative. The archive index path is redundant placement metadata
 and cannot override an embedded object identity.
-
-The maintained corpus contains 24 archives and 2,924 objects:
-
-| Object | Count |
-| --- | ---: |
-| Program (`PROG`) | 113 |
-| Sample Bank (`SBAC`) | 160 |
-| Sample (`SBNK`) | 1,375 |
-| Wave Data (`SMPL`) | 1,270 |
-| Sequence (`SEQU`) | 6 |
 
 ## Container Layout
 
@@ -42,15 +32,14 @@ their documented object-specific byte order.
 | `0x004` | 4 | Absolute byte offset of the terminal index. |
 | `0x008` | 4 | Number of 271-byte index records, including the banner record. |
 | `0x00c` | 10 | Required fixed ASCII archive signature. |
-| `0x016` | 48 | Reserved bytes; observed corpus files use zeroes. |
+| `0x016` | 48 | Reserved bytes; the reader assigns no semantics. |
 | `0x046` | 16 | ASCII marker `XXXXXXXXXXXXXXXX`. |
-| `0x056` | 1,024 | Reserved bytes; observed corpus files use zeroes. |
+| `0x056` | 1,024 | Reserved bytes; the reader assigns no semantics. |
 | `0x456` | variable | Banner and object payload area. |
 | index offset | `count * 271` | Terminal index, which must end exactly at EOF. |
 
-The reader does not assign semantics to the reserved header bytes and does not
-use their observed zero values for writing. Archive size and every offset are
-bounded to the 32-bit profile. The index count must be between 1 and 1,024.
+Archive size and every offset are bounded to the 32-bit profile. The index
+count must be between 1 and 1,024.
 
 ## Index Records
 
@@ -75,8 +64,8 @@ Object paths normally have this form:
 Volume name \TYPE\Object name
 ```
 
-Some observed archives contain `\` instead of a complete path. Axklib reports
-an `a3k_index_path_incomplete` validation issue and uses the banner's
+An index entry may contain `\` instead of a complete path. Axklib reports an
+`a3k_index_path_incomplete` validation issue and uses the banner's
 `Volume Name` value as a navigation aid. A complete path that disagrees with
 the embedded type or name produces `a3k_index_identity_mismatch`; the embedded
 identity wins. Conflicting volume names produce a validation issue instead of
@@ -101,21 +90,14 @@ needed. A whole-volume package is exported through the normal **Export
 package...** action and receives `.axkvol`; the partition-level batch-volume
 workflow is not advertised because an archive has no multi-volume parent.
 
-Four corpus archives contain valid current Sequences whose terminal
-end-of-track block stores a nonzero unused next-tick value. Axklib accepts these
-timelines and exports them as ordinary current `SEQU` nodes. The Sequence in
-`nordmicrodrums#1.a3k` is structurally damaged and still fails semantic timeline
-decoding. Direct byte comparison confirms a duplicated 1 KiB region at Sequence
-object offset `0x9000`, followed by omitted bytes before the stored stream
-resumes. The same malformed payload SHA-256 is retained through A3K projection,
-target-image storage, and portable-package export; this is source corruption,
-not a decoder size-policy mismatch. Volume and Sequence package export preserve
-that object as an opaque node and report
+Valid current Sequences may carry a nonzero unused next-tick value in their
+terminal end-of-track block. Axklib accepts those timelines as ordinary current
+`SEQU` nodes. If a safely bounded Sequence payload cannot be decoded, package
+export preserves it as an opaque node and reports
 `SEQUENCE_PAYLOAD_PRESERVED_OPAQUE`. Import then requires an explicit preserve
 or skip decision. Preservation retains the event bytes but does not claim MIDI
-conversion, editing, or sampler playability. The malformed Sequence does not
-block the remaining Programs, Sample Banks, Samples, or Wave Data in the volume
-from being packaged or imported.
+conversion, editing, or sampler playability. An opaque Sequence does not block
+the remaining Programs, Sample Banks, Samples, or Wave Data in the package.
 
 ## Rejection And Limits
 

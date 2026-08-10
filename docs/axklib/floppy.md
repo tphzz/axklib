@@ -47,7 +47,7 @@ modifies the source folders.
 
 ## Compatibility Profile
 
-The reader supports the FAT12 profile used by maintained Yamaha
+The reader supports the FAT12 profile used by Yamaha
 A-series floppy media; it is not a general FAT implementation. It follows
 bounded FAT12 cluster chains, requires duplicated FAT copies to agree, and uses
 DOS 8.3 directory identities. Long-filename entries are ignored in favor of
@@ -61,8 +61,8 @@ before publication. This populated-media profile has not yet been promoted by
 a physical Yamaha sampler test, so parser-valid output is not a
 hardware-compatibility claim.
 
-Blank image creation is a separate exact profile derived from A5000-authored
-quick and full formats. `plan_floppy_creation()` admits the fixed 1,474,560-byte
+Blank image creation is a separate exact profile matching A5000 quick and full
+formats. `plan_floppy_creation()` admits the fixed 1,474,560-byte
 geometry and `write_formatted_floppy_image()` serializes it directly without an
 embedded image template. Axkdeck creates the full-format variant. The writer
 reopens the temporary image and requires the exact geometry, root files,
@@ -97,7 +97,7 @@ no output is published.
 
 ## FAT12 Geometry
 
-Maintained 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
+Supported 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
 column. axklib normalizes the pinned FatFs formatter output to that same media
 descriptor and CHS profile before mounting and populating the image. The reader
 still validates actual filesystem geometry rather than requiring one boot-sector
@@ -160,9 +160,8 @@ The populated-media writer has these deterministic fields:
 | `0x36` | 8 | Filesystem text `FAT12` padded with spaces; FAT type still comes from cluster count. |
 | `0x1fe` | 2 | Signature `55 aa`. |
 
-Populated-media root-directory entries use attribute `0x00`, matching the maintained
-Yamaha content-floppy corpus. Creation
-and modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
+Populated-media root-directory entries use attribute `0x00`. Creation and
+modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
 dates are zero. This fixed metadata is a reproducibility convention, not a
 sampler-facing object field.
 
@@ -321,8 +320,7 @@ filenames; it does not preserve the source directory entry or cluster chain.
 
 ## Multi-Floppy Conversion Sets
 
-Media conversion follows the dependency order observed in a two-disk save made
-by an A5000 running system software 1.50: Programs first, then each Sample (`SBNK`)
+Media conversion writes Programs first, then each Sample (`SBNK`)
 followed by its not-yet-emitted Known Wave Data dependencies, remaining Wave
 Data, Sample Banks (`SBAC`), then Sequences and `PRF3`. Shared Wave Data is
 written at first use only.
@@ -342,8 +340,8 @@ Every member contains its own exact synthesized `YAMAHA.SYM`. Every nonfinal
 member catalogs zero-length `A3000F.SYM`, and its final Wave Data segment has an
 exact same-object continuation at the start of the next member. The final member
 catalogs zero-length `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` boundary is
-rejected because hardware testing showed that the sampler stops without asking
-for the next disk. Physical object slots are local to each disk and may be reused
+rejected because it is not a valid continuation boundary. Physical object
+slots are local to each disk and may be reused
 on later members. Segments of one continued Wave Data object use its logical
 catalog series path, object name, and normalized header as their cross-member
 identity rather than one physical slot.
@@ -367,11 +365,9 @@ Before publication, the writer reopens every FAT12 member, compares its exact
 object payloads and catalog, reassembles every split Wave Data object byte for
 byte, reopens the ZIP, and checks its inspected size. More than 32 required
 images is a blocking conversion issue. The manifest records
-`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. A four-member production
-set using the constrained 512-byte terminal Wave Data carrier loaded through all
-members and auditioned successfully on an A5000 running system version 1.50. That
-result validates this exact load topology; sampler save/reload and comparison
-of a returned sampler-authored save remain pending.
+`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. The supported topology has
+loaded and auditioned through four members on an A5000 running system version
+1.50. Sampler save/reload validation remains pending.
 
 ## Reading File Bytes
 

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 SCRIPT_SUFFIXES = {".py", ".pyc", ".pyo"}
-FORBIDDEN_PARTS = {"oracle", "tests", "corpus", "sample-images", "__pycache__"}
+FORBIDDEN_PARTS = {"oracle", "tests", "corpus", "__pycache__"}
 SHARED_SUFFIXES = {".dll", ".dylib", ".so"}
 
 

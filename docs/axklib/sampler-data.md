@@ -604,13 +604,11 @@ initially has the same parameters and shares the same Wave Data. The right-side
 still uses the exact stored target name; neither package closure nor validation
 infers unresolved, off, or duplicate state from the suffix alone.
 
-The retained sampler-authored multi-slot fixture provides Strong supporting
-support for the saved-object model: successive starred Sample families keep
-identical decoded parameters and Known links to shared Wave Data, and paired
-Sample Bank/Sample families carry matching star generations. Its original
-button-by-button authoring transcript was not retained, so it does not prove an
-additional raw Duplicate flag. Starred objects use the same relationship and
-orphan rules as other exact object names.
+Successive starred Sample families can keep identical decoded parameters and
+Known links to shared Wave Data, while paired Sample Bank/Sample families carry
+matching star generations. No additional raw Duplicate flag is part of the
+public contract. Starred objects use the same relationship and orphan rules as
+other exact object names.
 
 Normal `info` output shows active Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship

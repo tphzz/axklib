@@ -23,7 +23,7 @@ flowchart TD
 The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
 sectors are 2048 bytes.
 
-This is the primary-directory profile used by maintained Yamaha
+This is the primary-directory profile used by supported Yamaha
 A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
 rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
 trees are not interpreted. A hybrid disc can still open through
@@ -31,20 +31,15 @@ its valid primary ISO9660 tree; extension-only names and metadata remain outside
 the supported contract.
 
 Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
-profile. A libarchive writer was evaluated, but its release build provides no
-supported way to override the image creation timestamp, so it could not satisfy
-the byte-reproducibility contract. The narrow writer emits deterministic path
+profile. The writer emits deterministic path
 tables, sector-aligned directory extents, Yamaha group/volume menu records, and
 single-extent object files. Directory records and path tables may occupy
-multiple sectors; files remain single-extent. It reopens the image with the production reader before publishing
-it. Physical Yamaha hardware has enumerated, loaded, and played the minimal
-generated profile containing one mono `SMPL` and one direct single-member
-`SBNK`. A second generated profile has also loaded and played one complete
-`PROG` containing both a `PROG -> SBAC -> SBNK -> SMPL` assignment and a direct
-`PROG -> SBNK -> SMPL` assignment that share the same waveform. Byte-preserving
-whole-floppy Yamaha-object transfer has likewise loaded and played its
-transferred Program and Sample Banks from a generated CD-ROM. These checks are
-intentionally narrower than every tree or object topology the reader can parse.
+multiple sectors; files remain single-extent. It reopens the image with the
+production reader before publishing it. Hardware compatibility covers the
+minimal mono `SMPL -> SBNK` profile, a complete Program using both direct Sample
+and Sample Bank assignments with shared Wave Data, and byte-preserving
+whole-floppy object transfer. This is narrower than every tree or object
+topology the reader can parse.
 
 | Field | Rule |
 | --- | --- |
@@ -292,7 +287,7 @@ Label sources:
 | Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. | `iso_group_label` |
 | Volume label | Row in a group-local compact menu table. | `iso_volume_label` |
 
-Group catalog rows and one observed category-catalog form are 32 bytes:
+Group catalog rows and the supported category-catalog form are 32 bytes:
 
 | Row offset | Size | Contents |
 | --- | ---: | --- |
@@ -360,9 +355,8 @@ The validated compatibility contract requires each Yamaha group menu to have a
 group-level `0000` file made of complete 32-byte rows. Its final row must be
 `_DSKNAME`, must reference `F(N+1)` after `N` volume directories, and that target
 must be an existing, non-empty, fixed-width 16-byte group-label file. Catalog
-hash validation is not part of this compatibility gate because hardware has not
-isolated hash rejection independently. The writer nevertheless emits the hash
-algorithm above for every group and category row.
+hash validation is not part of this compatibility gate. The writer nevertheless
+emits the hash algorithm above for every group and category row.
 
 Label precedence for display paths:
 

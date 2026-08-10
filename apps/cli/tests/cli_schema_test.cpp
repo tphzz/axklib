@@ -232,8 +232,8 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
         .target_snapshot_id = "snapshot",
         .valid = true,
         .warnings = {{"TARGET_SEQUENCE_PRESERVED_OPAQUE", "existing Sequence is preserved", "target", std::nullopt, "",
-                      "SEQU", "NordMicroDrums", 0U, "Existing"}},
-        .opaque_sequences = {{0U, "sequence-1", "NordMicroDrums", "preserve-unchanged"}},
+                      "SEQU", "Opaque Sequence", 0U, "Existing"}},
+        .opaque_sequences = {{0U, "sequence-1", "Opaque Sequence", "preserve-unchanged"}},
         .conflicts = {{"TEST", "conflict", std::nullopt, std::nullopt, "digest", "node", std::nullopt, "", "Volume", "",
                        ""}},
         .objects = {{"action",
@@ -277,7 +277,7 @@ TEST(CliSchema, PackageV1PreservesTypedKindsNullsAndUnsignedCounts) {
     const auto plan_json = nlohmann::json::parse(*serialized_plan);
     EXPECT_EQ(plan_json["warnings"][0]["origin"], "target");
     EXPECT_TRUE(plan_json["warnings"][0]["package_index"].is_null());
-    EXPECT_EQ(plan_json["warnings"][0]["object_name"], "NordMicroDrums");
+    EXPECT_EQ(plan_json["warnings"][0]["object_name"], "Opaque Sequence");
     EXPECT_EQ(plan_json["opaque_sequences"][0]["action"], "preserve-unchanged");
     EXPECT_TRUE(plan_json["conflicts"][0]["package_index"].is_null());
     EXPECT_TRUE(plan_json["conflicts"][0]["partition_index"].is_null());

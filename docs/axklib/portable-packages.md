@@ -264,7 +264,7 @@ raw volume under its raw group.
 
 An ISO manifest may create an object-empty `F001` volume for use as a package
 import staging target. Populate that image before distribution; an empty ISO is
-not a hardware-promoted standalone writer profile.
+not a standalone hardware-verified writer profile.
 
 All destinations in one import request are resolved against the input image.
 One root can create and populate a new SFS volume, but another root in the same

@@ -51,7 +51,7 @@ different starting content:
   the floppy starter cannot be object-empty.
 - `iso` is an object-empty one-group, one-volume staging definition. It can be
   populated with `axklib package import`. Object-empty ISO output is not a
-  hardware-promoted standalone disc profile; for direct audio authoring, use
+  standalone hardware-verified disc profile; for direct audio authoring, use
   the complete example below.
 
 The generated HDS document is:
@@ -288,26 +288,17 @@ axklib validate authored.iso --output-dir validation/iso
 For optical media, burn `authored.iso` as a finalized, single-session disc
 image. Do not copy the ISO file onto a data disc.
 
-The exact minimal profile above has been verified on physical Yamaha A-series
-hardware through group and volume enumeration, Sample loading, audible
-waveform playback, and pitch-correct audition. That result covers one group,
-one `F001` volume, one mono Wave Data object (`SMPL`), and one direct
-single-member Sample (`SBNK`). It does
-not establish arbitrary group-ID generation, multiple-volume output, every
-object topology, or every sampler model and system version.
+Hardware compatibility covers one group and `F001` volume with either a direct
+mono `SMPL -> SBNK` path or a complete Program containing one
+`PROG -> SBAC -> SBNK -> SMPL` assignment and one direct
+`PROG -> SBNK -> SMPL` assignment that share Wave Data. It does not establish
+arbitrary group identifiers, volume counts, Program counts, graph shapes,
+sampler models, or system versions.
 
-An adjacent fresh profile is also hardware-verified with one Program containing
-both assignment forms supported by the writer: one Sample Bank (`SBAC`) parent
-with one Sample (`SBNK`) child, plus one direct `SBNK` assignment. Both Samples
-reference one shared mono Wave Data object (`SMPL`); the Program resolved both
-channel-specific assignments, and
-both paths loaded and played. This promotes that exact complete hierarchy, not
-arbitrary group sizes, Program counts, or graph shapes.
-
-`46DEF120` is an accepted observed-form raw group identifier, not a derived
-content ID. Its generation rule is unknown. The writer accepts one to eight
-uppercase letters, digits, or underscores, but the hardware-verified profile
-uses an eight-character uppercase hexadecimal form. Use `F001` for the one
+`46DEF120` is an accepted raw group identifier, not a derived content ID. Its
+generation rule is unspecified. The writer accepts one to eight uppercase
+letters, digits, or underscores; the hardware-verified profile uses an
+eight-character uppercase hexadecimal form. Use `F001` for the one
 volume emitted by the current writer; this places the group label in `F002` as
 required by the Yamaha menu catalog.
 
@@ -429,15 +420,11 @@ attached to an SDK plan during apply. Limits may be lowered for a constrained
 host but must remain nonzero, and the object limit cannot exceed the aggregate
 payload limit.
 
-Physical Yamaha hardware has enumerated the generated group and volume, loaded
-the transferred Program, Sample Banks, and Samples, resolved their transferred
-Wave Data relationships, and produced audible playback. A byte-preserved
-transferred Sequence has also loaded and played successfully on an A4000. This
-promotes exact whole-floppy Yamaha-object transfer for the admitted Program,
-Sample Bank, Sample, Wave Data, and Sequence profiles. MIDI-authored Sequence
-creation and Sequence rename/save-back remain bounded by their current hardware
-writer profile. Non-object files and FAT filesystem metadata are not
-transferred.
+Whole-floppy transfer is hardware-compatible for the admitted Program, Sample
+Bank, Sample, Wave Data, and byte-preserved Sequence profiles, including
+relationship resolution and audible playback. Newly authored Sequences and
+Sequence rename/save-back remain outside that transfer profile. Non-object files
+and FAT filesystem metadata are not transferred.
 
 ## Convert HDA/HDS Content In axkdeck
 
@@ -475,10 +462,9 @@ selected source scope. The ISO path uses reader-backed streaming and does not
 materialize the selected payload set in memory. FAT12 members use fixed floppy
 capacity and multi-floppy output is capped at 32 images.
 
-The constrained multi-floppy topology has loaded through four members and
-auditioned successfully on an A5000 running system version 1.50. Inspection reports
-that sampler save/reload validation is still pending; it does not downgrade the
-verified load-and-audition result to a generic hardware-pending claim.
+The constrained multi-floppy topology is load-and-audition compatible through
+four members on an A5000 running system version 1.50. Sampler save/reload
+validation remains pending.
 
 Partition batch export does not define a second floppy format. It plans the
 partition once, then applies the individual volume conversion contract to each
@@ -495,13 +481,12 @@ and relationship graph across the operation. Multi-floppy members are built by
 the same member builder used by `write_media_conversion`, so corresponding raw
 images are byte-identical rather than merely semantically equivalent.
 
-Generated ISO partition conversion has hardware-promoted one-volume and
-multi-volume profiles. A four-volume conversion was enumerated, loaded, and
-auditioned completely on physical A4000 hardware. Directory extents and both
+Generated ISO partition conversion has hardware-verified one-volume and
+four-volume profiles. Directory extents and both
 path tables are planned and emitted across as many complete 2048-byte sectors
 as their deterministic records require. Multi-sector output has host reopen,
-external-tool, and exact-payload coverage; its object-heavy hardware profile is
-documented separately until that physical verification is complete.
+independent reader, and exact-payload coverage; object-heavy multi-sector
+hardware compatibility remains pending.
 
 Dependency closure remains Known-only. One bounded whole-partition exception
 does not create a dependency: an active-form Program assignment row whose exact
@@ -588,7 +573,7 @@ Top-level removable-media fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required non-empty string. Match `iso.volume_name` for clear ISO manifests. |
-| `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile. |
+| `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a standalone hardware-verified profile. |
 | `samples` | Required Sample (`SBNK`) array. |
 | `sample_banks` | Optional Sample Bank (`SBAC`) array; each bank contains 1..127 distinct Sample names. |
 | `programs` | Optional array; Program numbers are `1..128`. |
