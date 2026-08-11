@@ -1354,8 +1354,18 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     assert 'python-version: "3.13.14"' in workflow
     assert 'node-version: "24"' in workflow
     assert "npm ci" in workflow
+    assert "name: Verify Mermaid browser runtime" in workflow
+    assert "puppeteer.executablePath()" in workflow
+    assert 'ldd "$browser_path"' in workflow
+    assert "not found" in workflow
+    assert 'mmdc -i "$smoke_source" -o "$smoke_output" -b transparent' in workflow
+    assert 'test -s "$smoke_output"' in workflow
+    assert "apt-get" not in workflow
     assert 'PATH="$PWD/node_modules/.bin:$PATH"' in workflow
     assert "mkdocs build --strict --config-file mkdocs.yml" in workflow
+    assert workflow.index("name: Verify Mermaid browser runtime") < workflow.index(
+        "name: Build documentation"
+    )
     assert workflow.count("actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5") == 1
     assert workflow.count("actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5") == 1
 
