@@ -67,11 +67,16 @@ jobs:
           smoke_directory="$RUNNER_TEMP/mermaid-browser-smoke"
           smoke_source="$smoke_directory/smoke.mmd"
           smoke_output="$smoke_directory/smoke.svg"
+          puppeteer_config="$smoke_directory/puppeteer.json"
           rm -rf "$smoke_directory"
           mkdir -p "$smoke_directory"
           printf 'flowchart LR\n  runner[Runner] --> browser[Browser]\n' > "$smoke_source"
+          printf '%s\n' \
+            '{"args":["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage"]}' \
+            > "$puppeteer_config"
           PATH="$PWD/node_modules/.bin:$PATH" \
-            mmdc -i "$smoke_source" -o "$smoke_output" -b transparent
+            mmdc -i "$smoke_source" -o "$smoke_output" -b transparent \
+              -p "$puppeteer_config"
           test -s "$smoke_output"
 
       - name: Build documentation
