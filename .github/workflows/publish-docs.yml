@@ -45,6 +45,35 @@ jobs:
           uv --project docs sync --locked
           npm ci
 
+      - name: Verify Mermaid browser runtime
+        run: |
+          set -euo pipefail
+          browser_path="$(
+            node --input-type=module -e \
+              'import puppeteer from "puppeteer"; process.stdout.write(puppeteer.executablePath());'
+          )"
+          if [[ ! -x "$browser_path" ]]; then
+            echo "Puppeteer's pinned browser is missing or is not executable: $browser_path" >&2
+            exit 1
+          fi
+
+          missing_libraries="$(ldd "$browser_path" | awk '/not found/ { print }')"
+          if [[ -n "$missing_libraries" ]]; then
+            echo "The Linux runner image is missing libraries required by Puppeteer's browser:" >&2
+            printf '%s\n' "$missing_libraries" >&2
+            exit 1
+          fi
+
+          smoke_directory="$RUNNER_TEMP/mermaid-browser-smoke"
+          smoke_source="$smoke_directory/smoke.mmd"
+          smoke_output="$smoke_directory/smoke.svg"
+          rm -rf "$smoke_directory"
+          mkdir -p "$smoke_directory"
+          printf 'flowchart LR\n  runner[Runner] --> browser[Browser]\n' > "$smoke_source"
+          PATH="$PWD/node_modules/.bin:$PATH" \
+            mmdc -i "$smoke_source" -o "$smoke_output" -b transparent
+          test -s "$smoke_output"
+
       - name: Build documentation
         run: |
           mkdir -p build/docs/site
