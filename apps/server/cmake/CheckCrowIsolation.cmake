@@ -51,34 +51,53 @@ endif()
 file(GLOB_RECURSE AXK_SERVER_SOURCE_FILES
   LIST_DIRECTORIES false
   "${AXK_SOURCE_ROOT}/apps/server/src/*.cpp"
+  "${AXK_SOURCE_ROOT}/apps/server/src/*.hpp"
   "${AXK_SOURCE_ROOT}/apps/server/include/*.hpp")
 
 set(AXK_SERVER_USES_CROW FALSE)
+set(AXK_SERVER_USES_APPLICATION_REGISTRY FALSE)
 foreach(AXK_SERVER_SOURCE_FILE IN LISTS AXK_SERVER_SOURCE_FILES)
   file(READ "${AXK_SERVER_SOURCE_FILE}" AXK_SERVER_SOURCE)
   if(AXK_SERVER_SOURCE MATCHES "[#]include[ \t]*[<\"]crow")
     set(AXK_SERVER_USES_CROW TRUE)
   endif()
+  if(AXK_SERVER_SOURCE MATCHES "make_application_registry")
+    set(AXK_SERVER_USES_APPLICATION_REGISTRY TRUE)
+  endif()
+  if(AXK_SERVER_SOURCE MATCHES "bind_application_operations")
+    message(FATAL_ERROR
+      "The Crow adapter binds application operations independently: ${AXK_SERVER_SOURCE_FILE}")
+  endif()
+  if(AXK_SERVER_SOURCE MATCHES "route_dynamic|CROW_WEBSOCKET_ROUTE" AND
+     NOT AXK_SERVER_SOURCE_FILE MATCHES "/(infrastructure|file|event|operation)_routes[.]cpp$")
+    message(FATAL_ERROR
+      "Endpoint registration escaped the transport route modules: ${AXK_SERVER_SOURCE_FILE}")
+  endif()
   if(AXK_SERVER_SOURCE MATCHES "boost/beast|cpp-httplib|httplib[.]h|websocketpp|pistache|restinio")
     message(FATAL_ERROR "A second HTTP or WebSocket framework entered the Crow adapter: ${AXK_SERVER_SOURCE_FILE}")
   endif()
   if(AXK_SERVER_SOURCE MATCHES
-     "report[.](info|objects|relationships|inventory|coverage|orphans|validate)|extract[.](wav|sfz)|package[.](export|inspect|verify|plan_import|import)|create[.](hds|floppy|iso|manifest)|alter[.](hds|manifest)")
+     "auditions[.]prepare|report[.](info|objects|relationships|inventory|coverage|orphans|validate)|extract[.](wav|sfz)|package[.](export|inspect|verify|plan_import|import)|create[.](hds|floppy|iso|manifest)|alter[.](hds|manifest)")
     message(FATAL_ERROR "A domain operation ID was hard-coded in the Crow adapter: ${AXK_SERVER_SOURCE_FILE}")
   endif()
   if(AXK_SERVER_SOURCE MATCHES
-     "bind_(file|extraction|package|write)_operations|application/(file|extraction|package|write)_operations[.]hpp")
+     "bind_(audition|file|extraction|package|write)_operations|application/(audition|file|extraction|package|write)_operations[.]hpp")
     message(FATAL_ERROR "The Crow adapter knows an individual application-operation family: ${AXK_SERVER_SOURCE_FILE}")
   endif()
 endforeach()
 
-file(READ "${AXK_SOURCE_ROOT}/apps/server/src/server.cpp" AXK_SERVER_IMPLEMENTATION)
-if(NOT AXK_SERVER_IMPLEMENTATION MATCHES "make_application_registry")
+if(NOT AXK_SERVER_USES_APPLICATION_REGISTRY)
   message(FATAL_ERROR "The Crow adapter does not consume the shared application-registry factory")
 endif()
-if(AXK_SERVER_IMPLEMENTATION MATCHES "bind_application_operations")
-  message(FATAL_ERROR "The Crow adapter binds application operations independently")
-endif()
+
+foreach(AXK_ROUTE_MODULE IN ITEMS infrastructure_routes file_routes event_routes operation_routes)
+  file(READ "${AXK_SOURCE_ROOT}/apps/server/src/${AXK_ROUTE_MODULE}.cpp" AXK_ROUTE_SOURCE)
+  if(AXK_ROUTE_SOURCE MATCHES
+     "application/(alteration|audition|download|extraction|file|image|jobs|package|session|upload|write)")
+    message(FATAL_ERROR
+      "Transport route module depends on an application-domain family: ${AXK_ROUTE_MODULE}.cpp")
+  endif()
+endforeach()
 
 if(NOT AXK_SERVER_USES_CROW)
   message(FATAL_ERROR "The server adapter does not include upstream Crow")

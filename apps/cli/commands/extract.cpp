@@ -2,8 +2,7 @@
 #include <iostream>
 #include <string>
 
-#include <nlohmann/json.hpp>
-
+#include "../exit_status.hpp"
 #include "handlers.hpp"
 #include "local_operations.hpp"
 #include "requests.hpp"
@@ -16,53 +15,47 @@ int run_extract_request(const axk::cli::ExtractRequest &request) {
         std::cerr << "extract " << request.scope
                   << " requires at least one --path from `axklib info --format "
                      "paths`\n";
-        return 4;
+        return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
     }
-    auto sources = expand_cli_paths(request.paths);
+    auto expanded = expand_cli_paths(request.paths);
+    if (!expanded)
+        return report_failure(expanded.error());
+    auto sources = std::move(*expanded);
     std::vector<std::filesystem::path> runtime_paths = sources;
     runtime_paths.push_back(request.output_directory);
     auto runtime = LocalOperationRuntime::create(runtime_paths);
     if (!runtime)
         return report_application_failure(runtime.error());
 
-    auto source_refs = nlohmann::json::array();
+    std::vector<app::FileRef> source_refs;
     for (const auto &source : sources) {
         auto reference = (*runtime)->file_ref(source);
         if (!reference)
             return report_application_failure(reference.error());
-        source_refs.push_back({{"rootId", reference->root_id}, {"relativePath", reference->relative_path}});
+        source_refs.push_back(std::move(*reference));
     }
     auto destination = (*runtime)->directory_ref(request.output_directory);
     if (!destination)
         return report_application_failure(destination.error());
-    nlohmann::json input{
-        {"sources", std::move(source_refs)},
-        {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-        {"scope", request.scope},
-        {"selectors", request.selector_paths},
-        {"stereo", request.stereo},
-        {"overwrite", request.overwrite},
-        {"strict", request.strict}};
-    auto result = (*runtime)->invoke(request.sfz ? "extract.sfz" : "extract.wav", input);
+    auto result = (*runtime)->extract(request.sfz, source_refs, *destination, request.scope, request.selector_paths,
+                                      request.stereo, request.overwrite, request.strict);
     if (!result) {
         if (result.error().code == "selector_not_found" || result.error().code == "unsupported_selection_scope") {
             std::cerr << result.error().message << ". Run `axklib info --format paths` and copy the path column.\n";
-            return 4;
+            return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
         }
         std::cerr << "error: " << result.error().message << '\n';
-        return 1;
+        return axk::cli::exit_code(axk::cli::ExitStatus::operational_failure);
     }
-    for (const auto &warning : result->at("warnings")) {
-        if (warning.at("code") == "waveform_skipped")
-            std::cerr << "warning: skipped waveform " << warning.at("message").get<std::string>() << '\n';
+    for (const auto &warning : result->warnings) {
+        if (warning.code == "waveform_skipped")
+            std::cerr << "warning: skipped Wave Data " << warning.message << '\n';
     }
-    std::cout << "waveforms=" << result->at("waveformCount").get<std::size_t>()
-              << " written_files=" << result->at("writtenFileCount").get<std::size_t>()
-              << " selection_graphs=" << result->at("selectionGraphCount").get<std::size_t>()
-              << " sfz_files=" << result->at("sfzFileCount").get<std::size_t>()
-              << " decode_errors=" << result->at("decodeErrorCount").get<std::size_t>()
-              << " load_errors=" << result->at("loadErrorCount").get<std::size_t>() << '\n';
-    return result->at("loadErrorCount").get<std::size_t>() == 0U ? 0 : 1;
+    std::cout << "wave_data=" << result->waveform_count << " written_files=" << result->written_file_count
+              << " selection_graphs=" << result->selection_graph_count << " sfz_files=" << result->sfz_file_count
+              << " decode_errors=" << result->decode_error_count << " load_errors=" << result->load_error_count << '\n';
+    return axk::cli::exit_code(result->load_error_count == 0U ? axk::cli::ExitStatus::success
+                                                              : axk::cli::ExitStatus::operational_failure);
 }
 
 } // namespace axk::cli::commands

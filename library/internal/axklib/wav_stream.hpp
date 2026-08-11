@@ -23,7 +23,7 @@ using WavChunkConsumer = std::function<Result<void>(std::span<const std::byte>)>
 Result<void> stream_wav(const WavSource &source, const WavChunkConsumer &consume,
                         const CancellationToken &cancellation = {});
 Result<bool> equal_wav(const WavSource &left, const WavSource &right, const CancellationToken &cancellation = {});
-Result<void> write_wav_atomic(const std::filesystem::path &path, const WavSource &source, bool overwrite = false,
-                              const CancellationToken &cancellation = {});
+Result<PublicationOutcome> write_wav_atomic(const std::filesystem::path &path, const WavSource &source,
+                                            bool overwrite = false, const CancellationToken &cancellation = {});
 
 } // namespace axk::audio_internal

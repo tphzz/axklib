@@ -10,7 +10,7 @@ file(MAKE_DIRECTORY "${test_root}")
 file(WRITE "${manifest}"
      "{\"schema_version\":\"1.0\",\"size_bytes\":1048576,"
      "\"partitions\":[{\"name\":\"hd1\",\"volumes\":[{\"name\":\"Volume\","
-     "\"waveforms\":[],\"sample_banks\":[]}]}]}")
+     "\"waveforms\":[],\"samples\":[]}]}]}")
 
 execute_process(
   COMMAND "${AXK_CLI}" create hds "${manifest}" --output "${image}"

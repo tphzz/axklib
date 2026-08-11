@@ -45,6 +45,7 @@ enum class ErrorCode : std::uint32_t {
     allocation_invalid_extent = 300,
     allocation_cycle = 301,
     allocation_mismatch = 302,
+    allocation_cross_link = 303,
     // Object errors: 400-499.
     object_malformed = 400,
     object_missing = 401,
@@ -54,9 +55,11 @@ enum class ErrorCode : std::uint32_t {
     relationship_cycle = 502,
     // Audio errors: 600-699.
     audio_unsupported_format = 600,
+    audio_wave_data_too_large = 601,
     // Manifest and transaction errors: 700-799.
     manifest_invalid = 700,
     transaction_rejected = 750,
+    transaction_stale = 751,
     // Unsupported writer/profile errors: 800-899.
     unsupported_profile = 800,
     operation_cancelled = 900,

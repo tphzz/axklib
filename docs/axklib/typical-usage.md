@@ -3,7 +3,7 @@
 ## CMake Consumer
 
 ```cmake
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1...3.28)
 project(example LANGUAGES CXX)
 
 find_package(axklib CONFIG REQUIRED COMPONENTS axklib)
@@ -60,7 +60,7 @@ axklib extract wav file source.iso -o exports/wav
 axklib extract sfz file source.iso -o exports/sfz
 ```
 
-For one volume, Program, group, or Sample Bank, obtain stable selector paths and
+For one volume, Program, Sample Bank, or Sample, obtain stable selector paths and
 pass the matching path back to extraction:
 
 ```bash
@@ -98,7 +98,7 @@ axklib package import target.hds source-volume.axkvol \
 ```
 
 Inspect and validate `imported.hds` before use. Package imports are volume-local
-on SFS: identical physical waveform content in another volume is copied because
+on SFS: identical Wave Data content in another volume is copied because
 cross-volume waveform sharing is not a supported hardware topology.
 
 ## Author A New HDS Image
@@ -109,12 +109,16 @@ Generate the starter:
 axklib create manifest hds -o image.json
 ```
 
-The starter creates a 512 MiB image with one partition and one empty volume.
-Add authored `waveforms`, `sample_banks`, optional `sample_bank_groups`, and
+The starter creates a 512 MiB image with one partition and no volumes. Import a
+complete volume package or add an authored volume before adding sampler
+objects.
+Add authored Wave Data in `waveforms`, Samples in `samples`, optional
+Sample Banks in `sample_banks`, and
 optional `programs` using the common schema in [Writer And
 Alteration](write.md#common-authored-content), then build and check it:
 
 ```bash
+axklib create hds image.json -o HD00_512_generated.hds --dry-run
 axklib create hds image.json -o HD00_512_generated.hds
 axklib info HD00_512_generated.hds
 axklib validate HD00_512_generated.hds -o reports/generated-hds --policy strict
@@ -125,7 +129,7 @@ portable packages.
 
 ## Author A Floppy Image
 
-The generated floppy starter contains one waveform and Sample Bank skeleton:
+The generated floppy starter contains one Wave Data object and Sample skeleton:
 
 ```bash
 axklib create manifest floppy -o floppy.json
@@ -135,6 +139,7 @@ Place `tone.wav` next to the manifest or change the relative path, edit the
 sampler-facing names, then create and validate the image:
 
 ```bash
+axklib create floppy floppy.json -o authored.ima --dry-run
 axklib create floppy floppy.json -o authored.ima
 axklib info authored.ima
 axklib validate authored.ima -o reports/authored-floppy --policy strict
@@ -143,16 +148,22 @@ axklib validate authored.ima -o reports/authored-floppy --policy strict
 The result uses the documented 1.44 MB Yamaha FAT12 profile. See [FAT12 Floppy
 Images](floppy.md) for geometry and filename rules.
 
+For a blank disk instead of a populated authored volume, axkdeck's **Create
+image** workflow can create the fixed 1.44 MB Yamaha A-series FAT12 full-format
+profile. Blank formatting and populated manifest authoring are separate writer
+contracts.
+
 ## Author An ISO Image
 
 The ISO starter is an empty staging volume:
 
 ```bash
 axklib create manifest iso -o cdrom.json
+axklib create iso cdrom.json -o staging.iso --dry-run
 axklib create iso cdrom.json -o staging.iso
 ```
 
-Populate it with a package, or add authored waveform and Sample Bank entries to
+Populate it with a package, or add authored Wave Data and Sample entries to
 `cdrom.json` before creation. A package import into the existing staging volume
 uses its exact group, volume, and raw folder identifiers:
 

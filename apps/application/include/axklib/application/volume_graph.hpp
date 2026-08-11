@@ -11,9 +11,13 @@
 namespace axk::app {
 
 inline constexpr std::string_view volume_graph_schema_version{"axklib.volume_graph.v1"};
+inline constexpr std::string_view unresolved_wave_data_schema_version{"axklib.unresolved_wave_data.v1"};
 
 axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, const RelationshipGraph &graph,
                                                 const std::filesystem::path &source_path,
                                                 std::string_view container_kind = "sfs");
+axk::Result<std::string> serialize_unresolved_wave_data_graph(const UnresolvedWaveDataExport &scope,
+                                                              const std::filesystem::path &source_path,
+                                                              std::string_view container_kind = "sfs");
 
 } // namespace axk::app

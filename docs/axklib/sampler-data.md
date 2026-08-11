@@ -3,15 +3,16 @@
 Yamaha A-series containers store sampler objects as payload files. axklib reads
 the container layer first, then decodes these shared object payloads in the same
 way for SFS hard-disk images, FAT12 floppy images, CD-ROM ISO images, standalone
-object files, and directory scans.
+object files, read-only A3K volume archives, and explicit flat
+`AXK_OBJECT_DIRECTORY` sources.
 
 ```mermaid
 flowchart TD
   container[Container reader] --> object[AxklibObject]
   object --> header[Shared object header]
-  header --> smpl[SMPL waveform]
-  header --> sbnk[SBNK sample bank]
-  header --> sbac[SBAC sample bank group]
+  header --> smpl[SMPL Wave Data]
+  header --> sbnk[SBNK Sample]
+  header --> sbac[SBAC Sample Bank]
   header --> prog[PROG program]
   header --> sequ[SEQU sequence]
   header --> prf3[PRF3 profile]
@@ -38,8 +39,9 @@ Header fields used by axklib:
 | `0x10` | 4 | u32be | header_size | Object header size. For `SMPL` exact export, this is the stored waveform byte start. |
 | `0x14` | 4 | u32be | unknown_0x14 | Preserved diagnostic value. |
 | `0x18` | 4 | u32be | record_size_or_header_used | Object-specific compact-record or header-size value surfaced as a raw field. |
-| `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, exact export reads this many stored waveform bytes. |
-| `0x20` | 4 | u32be | payload_bytes_0x20 | Second object payload byte-count field surfaced for diagnostics. |
+| `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
+| `0x20` | 4 | u32be | payload_bytes_0x20 | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
+| `0x24` | 4 | u32be | payload_offset_0x24 | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
 | `0x28` | 2 | u16be | sample_rate_guess | `SMPL` sample-rate field. Empty for other types. |
 | `0x2a` | 2 | u16be | bytes_per_sample_guess | `SMPL` stored sample width. Empty for other types. |
 | `0x32` | 16 | ASCII | name_guess | Object header name, trimmed of trailing NUL and spaces. |
@@ -52,11 +54,11 @@ some helper functions and as fallback display names by user-facing renderers.
 
 | Type | Public role |
 | --- | --- |
-| `SMPL` | Physical waveform storage object. Exact mono WAV export reads this level. |
-| `SBNK` | Sample Bank or member object. Stores sampler-visible member parameters and links to physical waveform storage. |
-| `SBAC` | Sample Bank Group object. User-facing trees render it as `B <name>`. |
+| `SMPL` | Wave Data storage object. Exact mono WAV export reads this level. |
+| `SBNK` | Sampler-visible Sample object. Stores Sample parameters and links to Wave Data storage. |
+| `SBAC` | Sampler-visible Sample Bank object. User-facing trees render it as `B <name>`. |
 | `PROG` | Program object, Program display name, effects, controller data, and assignment rows. |
-| `SEQU` | Sequence object. Currently surfaced as an object identity and tree entry. |
+| `SEQU` | Sequence object. Current timeline events, timing, tempo, and MIDI conversion are decoded. |
 | `PRF3` | Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet. |
 | other known tags | Recognized by low-level helpers, but not loaded as normal public objects unless a container reader explicitly supports them. |
 
@@ -72,14 +74,17 @@ the embedded header supplies its sampler object name.
 | FAT12 floppy | DOS 8.3 name such as `AUTHORED.001` | `FSFSDEV3SPLX<type>` and embedded object name. A numeric extension is not a type code. |
 | CD-ROM ISO | `<group>/Fnnn/<type>/Fnnn`; category `0000` maps display names to files | Embedded type and name remain authoritative. The category name and catalog are independently checked placement metadata. |
 | Standalone file | Host filename chosen by the caller | Entire file begins with the shared magic and type tag. |
+| A3K archive | Terminal-index path such as `Volume \SMPL\Object` | Embedded type and name are authoritative. The index path is redundant placement metadata. |
 | SFS image | SFS directory record and object ID rather than a host filename | Embedded type and name, with SFS placement retained separately. |
 
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
 big-endian length and offset fields in the object rather than inferring payload
 boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
-`SEQU` and `PRF3` can be inventoried and transferred as complete known-type
-payloads, but their type-specific inner formats are not part of the current
-public decoder contract.
+`SEQU` can be inventoried, transferred, renamed, and decoded through the current
+timeline profile. See [Sequence Data And MIDI Conversion](sequences.md).
+`PRF3` can be inventoried and transferred as a complete known-type payload, but
+its type-specific inner format is not part of the current public decoder
+contract.
 
 ## AxklibObject Identity
 
@@ -99,11 +104,12 @@ Container-specific placement metadata is documented in the format pages:
 | SFS | partition index, SFS ID, payload offset, payload size, scope key. |
 | FAT12 floppy | FAT filename, root directory offset, first cluster, cluster count, file size, object offset. |
 | CD-ROM ISO | raw ISO path, group/volume labels, extent sector, data offset, file size, loader-quality fields. |
+| A3K archive | terminal-index path, absolute payload offset, payload size, synthetic partition index, and scope key. |
 
-## SMPL: Physical Waveform Object
+## SMPL: Wave Data Object
 
-`SMPL` objects are the physical waveform-storage level. Exact export writes one
-mono WAV per decoded physical `SMPL` object. Stereo rendering is a separate
+`SMPL` objects are the Wave Data storage level. Exact export writes one mono
+WAV per decoded `SMPL` object. Stereo rendering is a separate
 operation driven by `SBNK` relationships.
 
 Current compact metadata fields:
@@ -115,7 +121,7 @@ Current compact metadata fields:
 | `0x30` | variable | bytes | compact record, reported as `current_smpl_compact_record_hex` |
 | `0x54` | 16 | ASCII | source_wave_name_guess |
 | `0x6c` | 4 | u32be | smpl_group_id_0x06c |
-| `0x78` | 4 | u32be | smpl_link_id_0x078 |
+| `0x78` | 4 | u32be | wave_data_reference_value |
 | `0x7c` | 2 | u16be | sample_rate_duplicate_0x07c |
 | `0x7e` | 1 | u8 | root_key_midi_note_guess |
 | `0x7f` | 1 | s8 | fine_tune_cents_guess |
@@ -151,10 +157,30 @@ PCM export mapping:
 | `1` | 8-bit PCM | Copied directly to WAV frames. |
 | `2` with alternating-byte compatibility pattern | Alternating filler bytes with useful high-byte lane | Useful lane is converted to unsigned 8-bit WAV frames and remains a read/export compatibility case. |
 
-`header_size` is the start offset of stored waveform bytes inside the `SMPL`
-payload. `payload_bytes_0x1c` is the stored byte count read by exact export.
+`header_size` is the start offset of waveform bytes inside a `SMPL` file.
+Complete objects use `payload_offset_0x24 == 0` and
+`payload_bytes_0x20 == payload_bytes_0x1c`. Yamaha multi-floppy saves can split
+one logical Wave Data object across several disk files. Those files repeat the
+same header, set `payload_bytes_0x20` to the local segment size, and set
+`payload_offset_0x24` to the segment's byte offset. Axklib assembles a complete,
+contiguous set when the shared parent object directory is opened. Opening one
+leaf does not scan its siblings: the leaf remains immediately available for
+inventory, and missing companion segments are reported only when an explicit
+preview, audition, or package export needs them. An application can then attach
+selected companion disk folders to that image session. Axklib admits exact
+continuation segments with a normalized Yamaha header identity, even when
+Yamaha changes the host filename between disks, plus a Wave Data object whose
+embedded name exactly satisfies an active but unresolved Sample member lane.
+Unrelated sibling objects remain outside the session.
+
+This segment interpretation is **Confirmed**. Independent multi-disk object
+sets join exactly to `payload_bytes_0x1c`, and the primary sampler load/save
+paths use `0x20` as the physical segment size and `0x24` as the logical payload
+offset. Axklib's multi-floppy writer uses only this exact contiguous form and
+validates byte-identical reassembly before publication.
+
 Generated images may store a short compatibility tail after the logical waveform
-frames. In that case the stored byte count includes the tail, while
+frames. In that case the complete logical byte count includes the tail, while
 `wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
 sample window.
 
@@ -166,28 +192,47 @@ When the alternating-byte compatibility pattern is detected, audio APIs set
 8-bit PCM. This is a read/export compatibility path; it is not a normal
 write-support format.
 
-## SBNK: Sample Bank Or Member Object
+## SBNK: Sample Object
 
-`SBNK` objects are sampler-visible sample-bank/member objects. They link to
-physical waveform storage and carry most sample/member parameters.
+`SBNK` objects are sampler-visible Samples. They link to Wave Data storage and
+carry most Sample parameters.
 
-### Member Link Fields
+### Member Resolution Fields
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x078` | 16 | ASCII | left member sample name |
-| `0x088` | 16 | ASCII | right member sample name |
-| `0x0a0` | 4 | u32be | left SMPL link ID |
-| `0x0a4` | 4 | u32be | right SMPL link ID |
+| `0x078` | 16 | ASCII | left member Wave Data name |
+| `0x088` | 16 | ASCII | right member Wave Data name |
+| `0x098` | 4 | u32be | left runtime handle slot |
+| `0x09c` | 4 | u32be | right runtime handle slot |
+| `0x0a0` | 4 | u32be | left cached Wave Data reference value |
+| `0x0a4` | 4 | u32be | right cached Wave Data reference value |
 | `0x0c0` | 4 | u32be | linked Programs 001-032 bitmap |
 | `0x0c4` | 4 | u32be | linked Programs 033-064 bitmap |
 | `0x0c8` | 4 | u32be | linked Programs 065-096 bitmap |
 | `0x0cc` | 4 | u32be | linked Programs 097-128 bitmap |
 
-The ordinary stereo layout uses the left and right member link fields on one
+The A4000 resolves each active member by its 16-byte Wave Data name.
+After lookup it writes a runtime handle to `+0x098/+0x09c` and copies the
+resolved object's `SMPL+0x078` value into `+0x0a0/+0x0a4`. The latter fields
+are therefore cached metadata, not authoritative object identifiers. Real
+source media contains stale cached values that disagree with the local named
+target and still loads on hardware.
+
+axklib treats a unique local member-name match as `Known`, whether or not its
+cache agrees. Duplicate local names remain `Tentative`; a cached-value-only
+match is diagnostic and never creates a resolved relationship. Mutation and
+package relocation refresh the cache from the selected named Wave Data object.
+For a placed Sample, a unique same-scope name whose Wave Data placement is
+unresolved remains `Tentative`: exact recovery metadata may retain that
+candidate, but it does not project the Sample or Wave Data into a logical
+volume. Standalone objects without a placement hierarchy can still resolve by
+one unique same-scope name.
+
+The ordinary stereo layout uses the left and right member fields on one
 `SBNK`. Some source media instead stores stereo as two sibling `SBNK` objects
-under the same `SBAC` group, with sampler-facing names ending in `-L` and `-R`.
-In that layout each sibling still uses its own left-member `SMPL` link. axklib
+under the same `SBAC` Sample Bank, with sampler-facing names ending in `-L` and `-R`.
+In that layout each sibling still uses its own left-member Wave Data name. axklib
 keeps both `SBNK` objects and both physical `SMPL` exports, then writes an
 additive rendered stereo WAV when the sibling names and links are known and
 compatible.
@@ -224,6 +269,7 @@ field names currently exposed by the decoder.
 | `0x0e0` | u16be | secondary_pitch_base_word_0x0e0 |
 | `0x0e2` | u8 | key_range_high_0x0e2 |
 | `0x0e3` | u8 | key_range_low_0x0e3 |
+| `0x0e5` | u8 | loop mode |
 | `0x0e6` | u16be | loop_tempo_0x0e6 |
 
 Key-range values `0..127` are concrete MIDI key limits. The sampler also
@@ -233,7 +279,7 @@ preserves those raw values and exposes a `resolved_key_range` projection in
 volume graphs. The projection resolves `Orig` to the member root key so export
 formats with only concrete MIDI limits can emit bounded zones. Generated direct
 single-member `SBNK` objects have been hardware-tested with concrete root key
-and key-range values. For a single-member bank, an empty right member name means
+and key-range values. For a single-member Sample, an empty right member name means
 there is no active right member; the generated writer treats right-member fields
 as inactive compatibility fields rather than as a second playback region.
 
@@ -264,6 +310,22 @@ as inactive compatibility fields rather than as a second playback region.
 | `0x114` | u8 | expand_width_0x114 |
 | `0x115` | u8 | random_pitch_0x115 |
 | `0x116` | u8 | sample_level_0x116 |
+
+The member start, length, and loop fields are frame addresses in the linked
+physical Wave Data object. They define the Sample's playable window and can
+select only one segment of a larger shared `SMPL` payload. Loop Divide media is
+a common example: several Samples have different start frames while referencing
+the same Wave Data. Sample preview and audition therefore:
+
+1. resolve each active member to one confirmed `SMPL`;
+2. read `wave_length_frames` beginning at `wave_start_frame`;
+3. normalize `loop_start_frame` relative to that member start; and
+4. use the `SBNK` loop mode rather than the physical Wave Data loop selector.
+
+Direct Wave Data preview remains physical and covers the stored PCM extent.
+Sample-owned preview returns one lane per active member, including each lane's
+role, source object identifier, and frame count. Invalid member windows are
+rejected instead of being clamped to the physical payload.
 
 Generated direct single-member `SBNK` objects have been hardware-tested with
 sample level values in the normal `0..127` range. The writer also carries a
@@ -354,10 +416,10 @@ record_offset = 0x0a8 + 0xbc + (record_index - 1) * 4
 
 Each record stores `device_u8`, `function_u8`, `type_u8`, and signed `range_s8`.
 
-## SBAC: Sample Bank Group Object
+## SBAC: Sample Bank Object
 
-`SBAC` objects are shown as `B <name>` Sample Bank Groups in user-facing trees.
-They contain member rows that point by name to `SBNK` objects.
+`SBAC` objects are shown as `B <name>` Sample Banks in user-facing trees. They
+contain member rows that point by name to Sample (`SBNK`) objects.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
@@ -390,7 +452,13 @@ field. It is opaque source-local state rather than a portable object identity.
 Package export declares each active row handle as a relocation, and package
 import writes the hardware-proven zero form while preserving the row order and
 resolved member name. Target matching uses exact name, object type, and local
-placement before it emits a resolved relationship.
+placement before it emits a resolved relationship. For directory-backed ISO
+objects, a counted slot whose Sample name occurs in several source volumes
+resolves to `Known` only when exactly one exact-placement Sample is in the
+Sample Bank's raw ISO volume. Recovered or otherwise non-exact placement stays
+below package-export quality, and multiple matches inside the same raw volume
+remain ambiguous. The package builder does not admit generic `Likely`
+relationships.
 
 ## PROG: Program Object
 
@@ -499,7 +567,7 @@ Assignment kind byte mapping currently used for read-side relationship matching:
 | Kind byte | Target category |
 | ---: | --- |
 | `0x10` | `SBNK` direct assignment target |
-| `0x11` | `SBAC` Sample Bank Group target |
+| `0x11` | `SBAC` Sample Bank target |
 
 Rch Assign display family:
 
@@ -523,6 +591,25 @@ Active assignment state is separate from target matching:
 | `source-load-assignment` | CD-ROM source-load row matched to a target object. |
 | `unknown` | State is not classified beyond diagnostics. |
 
+Assignment target matching preserves the complete 16-byte sampler name. An
+exact target whose stored name ends in `*` can be active and playable, so the
+suffix alone does not classify a row as unresolved or off. If the exact target
+is absent, keep the row unresolved rather than redirecting it to a similar
+unstarred object.
+
+In the sampler UI, `*` is not merely arbitrary punctuation: Yamaha's Duplicate
+command creates a Sample named from the original name plus `*`. The new Sample
+initially has the same parameters and shares the same Wave Data. The right-side
+`E` indicator is transient edited-but-not-saved state. Relationship matching
+still uses the exact stored target name; neither package closure nor validation
+infers unresolved, off, or duplicate state from the suffix alone.
+
+Successive starred Sample families can keep identical decoded parameters and
+Known links to shared Wave Data, while paired Sample Bank/Sample families carry
+matching star generations. No additional raw Duplicate flag is part of the
+public contract. Starred objects use the same relationship and orphan rules as
+other exact object names.
+
 Normal `info` output shows active Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship
 reports keep all decoded rows, raw selector values, and inactive rows.
@@ -530,21 +617,26 @@ reports keep all decoded rows, raw selector values, and inactive rows.
 Portable-package closure has a separate preservation rule: Known named
 kind-`0x10` and kind-`0x11` targets in `confirmed-visible-off` state are retained
 because imported zero-handle assignments re-parse in that state and remain
-loadable on hardware. `confirmed-duplicate-not-active`, unresolved, and
-ambiguous rows remain diagnostic-only.
+loadable on hardware. For SFS media, a target remains Known when exactly one
+matching object is in the Program's volume, even when other volumes contain the
+same type and name. Multiple same-volume candidates, cross-volume-only matches,
+`confirmed-duplicate-not-active`, unresolved rows, and ambiguous rows remain
+diagnostic-only.
 
 Relationship target matching is reported separately from active/off state. Rows
 that are useful for diagnostics but should not become normal Program children use
 `diagnostic_category` values such as `visible-off-assignment`,
-`program-link-bitmap`, `sbnk-member-link`, or
+`program-link-bitmap`, `sbnk-member-cache`, or
 `active-assignment-missing-target`.
 
 ## SEQU And PRF3
 
 `SEQU` and `PRF3` are loaded as supported object identities when their payloads
 use the shared header. Current public behavior preserves object name, type,
-placement metadata, raw payload bytes, and report identity fields. Type-specific
-parameter sections are not currently exposed as public fields.
+placement metadata, raw payload bytes, and report identity fields. The current
+`SEQU` timeline, event model, package profile, and Standard MIDI File conversion
+are documented in [Sequence Data And MIDI Conversion](sequences.md). `PRF3`
+type-specific parameter sections are not currently exposed as public fields.
 
 ## Relationship Graph
 
@@ -552,11 +644,11 @@ The shared relationship graph connects decoded objects:
 
 | Relationship | Meaning |
 | --- | --- |
-| `PROG_ASSIGNMENT_TO_SBAC` | Program assignment to a visible `B <sample bank group>` parent. |
-| `PROG_ASSIGNMENT_TO_SBNK` | Program assignment directly to a Sample Bank or member. |
-| `SBAC_SLOT_TO_SBNK` | Sample Bank Group member row. |
-| `SBNK_LEFT_MEMBER_TO_SMPL` | Left member waveform-storage link. |
-| `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member waveform-storage link. |
+| `PROG_ASSIGNMENT_TO_SBAC` | Program assignment to a visible `B <Sample Bank>` parent. |
+| `PROG_ASSIGNMENT_TO_SBNK` | Program assignment directly to a Sample. |
+| `SBAC_SLOT_TO_SBNK` | Sample Bank-to-Sample member row. |
+| `SBNK_LEFT_MEMBER_TO_SMPL` | Left member Wave Data storage link. |
+| `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member Wave Data storage link. |
 
 Relationship row fields are documented in [Report Schemas](report-schemas.md).
 
@@ -566,7 +658,7 @@ Exact export keeps physical and rendered audio separate:
 
 | Output | Source level | Meaning |
 | --- | --- | --- |
-| `_samples/physical/*.wav` | `SMPL` | Exact mono physical waveform export. |
+| `_samples/physical/*.wav` | `SMPL` | Exact mono Wave Data export. |
 | `_samples/rendered/*.wav` | linked `SBNK` pair | Interleaved stereo render when left/right members are compatible. |
 | optional selection graph JSON | objects and relationships | Scoped graph metadata for objects, relationships, WAV references, quality labels, and diagnostics. |
 

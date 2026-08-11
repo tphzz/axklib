@@ -26,7 +26,6 @@ class UploadStoreTest : public testing::Test {
         directory_ = std::filesystem::temp_directory_path() / "axklib-upload-store-test";
         std::error_code error;
         std::filesystem::remove_all(directory_, error);
-        std::filesystem::create_directories(directory_);
     }
 
     void TearDown() override {
@@ -59,10 +58,40 @@ TEST_F(UploadStoreTest, ReceivesBoundedChunksAndFinalizesOnlyAfterHashVerificati
     const auto completed = value.complete(created->reference, "owner");
     ASSERT_TRUE(completed) << completed.error().message;
     EXPECT_EQ(completed->state, axk::app::UploadState::ready);
+    const auto repeated = value.complete(created->reference, "owner");
+    ASSERT_TRUE(repeated) << repeated.error().message;
+    EXPECT_EQ(repeated->state, axk::app::UploadState::ready);
+    EXPECT_EQ(repeated->received_size, completed->received_size);
     const auto path = value.resolve(created->reference, "owner");
     ASSERT_TRUE(path) << path.error().message;
     EXPECT_EQ(std::filesystem::file_size(*path), 3U);
+#if !defined(_WIN32)
+    EXPECT_EQ(std::filesystem::status(directory_).permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_all);
+    EXPECT_EQ(std::filesystem::status(*path).permissions() & std::filesystem::perms::all,
+              std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+#endif
 }
+
+#if !defined(_WIN32)
+TEST(UploadStorePermissions, RejectsAnUnsafePreexistingStorageDirectory) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-upload-store-unsafe";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    std::filesystem::create_directories(directory);
+    std::filesystem::permissions(directory, std::filesystem::perms::owner_all | std::filesystem::perms::group_read,
+                                 std::filesystem::perm_options::replace);
+    axk::app::UploadStore store{directory, 32U, 16U, 2U, 4U, std::chrono::seconds{60}};
+    EXPECT_FALSE(store.storage_ready());
+    EXPECT_FALSE(store.create({.owner_id = "owner",
+                               .filename = "sample.wav",
+                               .kind = axk::app::UploadKind::audio,
+                               .media_type = "audio/wav",
+                               .declared_size = 3U,
+                               .sha256 = std::nullopt}));
+    std::filesystem::remove_all(directory, error);
+}
+#endif
 
 TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
     auto value = store();
@@ -74,6 +103,17 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                     .sha256 = std::nullopt});
     ASSERT_FALSE(disk);
     EXPECT_EQ(disk.error().code, "upload_type_not_allowed");
+    EXPECT_EQ(disk.error().message, "package uploads require an axklib package file");
+
+    const auto mislabeled_audio = value.create({.owner_id = "owner",
+                                                .filename = "sample.wav",
+                                                .kind = axk::app::UploadKind::audio,
+                                                .media_type = "text/plain",
+                                                .declared_size = 3U,
+                                                .sha256 = std::nullopt});
+    ASSERT_FALSE(mislabeled_audio);
+    EXPECT_EQ(mislabeled_audio.error().code, "upload_type_not_allowed");
+    EXPECT_EQ(mislabeled_audio.error().message, "audio uploads require a WAV, FLAC, or AIFF file");
 
     const auto created = value.create({.owner_id = "owner",
                                        .filename = "object.axkvol",
@@ -82,6 +122,37 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                        .declared_size = 5U,
                                        .sha256 = std::nullopt});
     ASSERT_TRUE(created) << created.error().message;
+    const auto wave_data = value.create({.owner_id = "owner",
+                                         .filename = "wave-data.axksmpl",
+                                         .kind = axk::app::UploadKind::package,
+                                         .media_type = "application/vnd.axklib.package",
+                                         .declared_size = 1U,
+                                         .sha256 = std::nullopt});
+    ASSERT_TRUE(wave_data) << wave_data.error().message;
+    ASSERT_TRUE(value.remove(wave_data->reference, "owner"));
+    const auto sequence_package = value.create({.owner_id = "owner",
+                                                .filename = "sequence.axkseq",
+                                                .kind = axk::app::UploadKind::package,
+                                                .media_type = "application/vnd.axklib.package",
+                                                .declared_size = 1U,
+                                                .sha256 = std::nullopt});
+    ASSERT_TRUE(sequence_package) << sequence_package.error().message;
+    ASSERT_TRUE(value.remove(sequence_package->reference, "owner"));
+    const auto sequence_midi = value.create({.owner_id = "owner",
+                                             .filename = "sequence.mid",
+                                             .kind = axk::app::UploadKind::midi,
+                                             .media_type = "audio/midi",
+                                             .declared_size = 1U,
+                                             .sha256 = std::nullopt});
+    ASSERT_TRUE(sequence_midi) << sequence_midi.error().message;
+    const auto mislabeled_midi = value.create({.owner_id = "owner",
+                                               .filename = "sequence.mid",
+                                               .kind = axk::app::UploadKind::audio,
+                                               .media_type = "audio/midi",
+                                               .declared_size = 1U,
+                                               .sha256 = std::nullopt});
+    ASSERT_FALSE(mislabeled_midi);
+    EXPECT_EQ(mislabeled_midi.error().code, "upload_type_not_allowed");
     EXPECT_FALSE(value.inspect(created->reference, "other"));
     EXPECT_FALSE(value.append(created->reference, "owner", 1U, bytes("a")));
     EXPECT_FALSE(value.append(created->reference, "owner", 0U, bytes("abcde")));
@@ -127,7 +198,7 @@ TEST_F(UploadStoreTest, ConcurrentReservationsCannotExceedTheWorkspaceQuota) {
     std::atomic<std::size_t> rejected{};
     std::mutex reference_mutex;
     std::optional<axk::app::UploadRef> accepted_reference;
-    std::vector<std::jthread> threads;
+    std::vector<std::thread> threads;
     threads.reserve(contenders);
     for (std::size_t index = 0; index < contenders; ++index) {
         threads.emplace_back([&, index] {
@@ -147,7 +218,9 @@ TEST_F(UploadStoreTest, ConcurrentReservationsCannotExceedTheWorkspaceQuota) {
             }
         });
     }
-    threads.clear();
+    for (auto &thread : threads) {
+        thread.join();
+    }
 
     EXPECT_EQ(accepted, 1U);
     EXPECT_EQ(rejected, contenders - 1U);
@@ -170,6 +243,25 @@ TEST_F(UploadStoreTest, RejectsHashMismatchAndRemovesOwnedUploads) {
     ASSERT_TRUE(value.remove(created->reference, "owner"));
     EXPECT_FALSE(value.inspect(created->reference, "owner"));
 }
+
+#if !defined(_WIN32)
+TEST_F(UploadStoreTest, RejectsPhysicalSizeMismatchBeforeCompletion) {
+    auto value = store();
+    const auto created = value.create({.owner_id = "owner",
+                                       .filename = "manifest.json",
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = 3U,
+                                       .sha256 = std::nullopt});
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_TRUE(value.append(created->reference, "owner", 0U, bytes("abc")));
+    std::filesystem::resize_file(directory_ / (created->reference.upload_id + ".upload"), 4U);
+
+    const auto completed = value.complete(created->reference, "owner");
+    ASSERT_FALSE(completed);
+    EXPECT_EQ(completed.error().code, "upload_incomplete");
+}
+#endif
 
 TEST_F(UploadStoreTest, LeasePreventsExpiryAndDeletionUntilReleased) {
     auto now = std::chrono::steady_clock::now();
@@ -200,11 +292,86 @@ TEST_F(UploadStoreTest, LeasePreventsExpiryAndDeletionUntilReleased) {
 }
 
 TEST_F(UploadStoreTest, RemovesAbandonedStagingFilesAtStartup) {
+    {
+        const auto prepared = store();
+        ASSERT_TRUE(prepared.storage_ready());
+    }
     const auto abandoned = directory_ / "abandoned.upload";
     std::ofstream(abandoned) << "partial";
     ASSERT_TRUE(std::filesystem::exists(abandoned));
     auto value = store();
     EXPECT_FALSE(std::filesystem::exists(abandoned));
+}
+
+TEST_F(UploadStoreTest, RetainsExpiredUploadAndQuotaWhenRemovalFails) {
+    auto now = std::chrono::steady_clock::now();
+    bool allow_removal = false;
+    axk::app::UploadStore value{directory_,
+                                4U,
+                                4U,
+                                2U,
+                                4U,
+                                std::chrono::seconds{5},
+                                [&now] { return now; },
+                                [&allow_removal](const std::filesystem::path &path, std::error_code &error) {
+                                    if (!allow_removal) {
+                                        error = std::make_error_code(std::errc::permission_denied);
+                                        return false;
+                                    }
+                                    return std::filesystem::remove(path, error);
+                                }};
+    const auto created = value.create({.owner_id = "owner",
+                                       .filename = "manifest.json",
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = 4U,
+                                       .sha256 = std::nullopt});
+    ASSERT_TRUE(created);
+    now += std::chrono::seconds{6};
+
+    const auto failed = value.cleanup_snapshot();
+    EXPECT_FALSE(failed.healthy);
+    EXPECT_EQ(failed.failed_deletions, 1U);
+    EXPECT_EQ(failed.reserved_bytes, 4U);
+    EXPECT_TRUE(std::filesystem::exists(directory_ / (created->reference.upload_id + ".upload")));
+    EXPECT_FALSE(value.create({.owner_id = "other",
+                               .filename = "replacement.json",
+                               .kind = axk::app::UploadKind::manifest,
+                               .media_type = "application/json",
+                               .declared_size = 4U,
+                               .sha256 = std::nullopt}));
+
+    allow_removal = true;
+    const auto recovered = value.cleanup_snapshot();
+    EXPECT_TRUE(recovered.healthy);
+    EXPECT_EQ(recovered.reserved_bytes, 0U);
+}
+
+TEST_F(UploadStoreTest, RetainsUndeletableStartupOrphanAndReportsItUnhealthy) {
+    {
+        const auto prepared = store();
+        ASSERT_TRUE(prepared.storage_ready());
+    }
+    const auto abandoned = directory_ / "abandoned.upload";
+    std::ofstream(abandoned) << "partial";
+    axk::app::UploadStore value{directory_,
+                                32U,
+                                16U,
+                                2U,
+                                4U,
+                                std::chrono::seconds{60},
+                                std::chrono::steady_clock::now,
+                                [](const std::filesystem::path &, std::error_code &error) {
+                                    error = std::make_error_code(std::errc::permission_denied);
+                                    return false;
+                                }};
+
+    const auto cleanup = value.cleanup_snapshot();
+    EXPECT_FALSE(cleanup.healthy);
+    EXPECT_EQ(cleanup.orphan_count, 1U);
+    EXPECT_EQ(cleanup.orphan_bytes, 7U);
+    EXPECT_EQ(cleanup.reserved_bytes, 7U);
+    EXPECT_TRUE(std::filesystem::exists(abandoned));
 }
 
 TEST_F(UploadStoreTest, MaterializesReadyUploadAtomicallyInsideWritableSandbox) {

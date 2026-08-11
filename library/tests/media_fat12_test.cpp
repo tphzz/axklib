@@ -1,5 +1,80 @@
 #include "media_test_fixtures.hpp"
 
+#include "axklib/writer_internal.hpp"
+
+namespace {
+
+std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM") {
+    axk::detail::PreparedMediaImage image;
+    image.objects.emplace_back(axk::ObjectType::smpl, "TEST", smpl_object());
+    image.objects.back().fat_filename = "TEST____.004";
+    const auto marker_filename = axk::detail::yamaha_floppy_physical_filename(marker, 5U);
+    EXPECT_TRUE(marker_filename) << marker_filename.error().message;
+    image.retained_files.push_back({marker_filename ? *marker_filename : "MARKER.005", {}});
+    image.floppy_catalog = axk::YamahaFloppyCatalog{
+        "CATALOG DISK  01",
+        {{4U, R"(\SMPL\TEST            01)"}, {5U, "\\" + marker}},
+        {R"(\OTHERS)", R"(\SMPL)"},
+    };
+    const auto bytes = axk::detail::build_fat12_image(image, {});
+    EXPECT_TRUE(bytes) << bytes.error().message;
+    return bytes ? *bytes : std::vector<std::byte>{};
+}
+
+} // namespace
+
+TEST(Fat12Reader, ExposesTrustedYamahaCatalogAndContinuationIdentity) {
+    const auto fat =
+        axk::FatImage::open(std::make_shared<axk::MemoryReader>(catalog_fat_fixture()), "catalog-disk01.ima");
+
+    ASSERT_TRUE(fat) << fat.error().message;
+    ASSERT_TRUE(fat->yamaha_catalog());
+    EXPECT_EQ(fat->yamaha_catalog()->disk_name, "CATALOG DISK  01");
+    EXPECT_EQ(fat->disk_identity().label, "CATALOG DISK  01");
+    EXPECT_EQ(fat->disk_identity().set_name, "CATALOG DISK  ");
+    EXPECT_EQ(fat->disk_identity().index, 1U);
+    EXPECT_EQ(fat->disk_identity().marker, axk::FloppySetMarker::continuation);
+    EXPECT_TRUE(fat->disk_identity().trusted_for_disk_set);
+    EXPECT_TRUE(fat->validation_issues().empty());
+}
+
+TEST(Fat12Reader, RecognizesOrdinaryMarkerWithoutTrustingItAsDiskSetIdentity) {
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(catalog_fat_fixture("A3000.SYM")),
+                                         "ordinary-disk01.ima");
+
+    ASSERT_TRUE(fat) << fat.error().message;
+    EXPECT_EQ(fat->disk_identity().marker, axk::FloppySetMarker::ordinary);
+    EXPECT_FALSE(fat->disk_identity().trusted_for_disk_set);
+    EXPECT_TRUE(fat->validation_issues().empty());
+}
+
+TEST(Fat12Reader, KeepsMissingAndMalformedCatalogsReadableButUntrusted) {
+    const auto missing = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "missing.ima");
+    ASSERT_TRUE(missing) << missing.error().message;
+    EXPECT_FALSE(missing->yamaha_catalog());
+    EXPECT_FALSE(missing->disk_identity().trusted_for_disk_set);
+    ASSERT_EQ(missing->validation_issues().size(), 1U);
+    EXPECT_EQ(missing->validation_issues().front().code, "FLOPPY_CATALOG_MISSING");
+
+    auto bytes = catalog_fat_fixture("A3000E.SYM");
+    const auto valid = axk::FatImage::open(std::make_shared<axk::MemoryReader>(bytes), "valid.ima");
+    ASSERT_TRUE(valid) << valid.error().message;
+    const auto catalog = std::ranges::find(valid->files(), std::string{"YAMAHA.SYM"}, &axk::FatFile::path);
+    ASSERT_NE(catalog, valid->files().end());
+    bytes[static_cast<std::size_t>(catalog->first_data_offset)] = std::byte{0x7f};
+
+    const auto malformed = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(bytes)), "bad.ima");
+    ASSERT_TRUE(malformed) << malformed.error().message;
+    EXPECT_FALSE(malformed->yamaha_catalog());
+    EXPECT_FALSE(malformed->disk_identity().trusted_for_disk_set);
+    ASSERT_EQ(malformed->validation_issues().size(), 1U);
+    EXPECT_EQ(malformed->validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+
+    const axk::MediaContainer container{*malformed};
+    ASSERT_EQ(container.validation_issues().size(), 1U);
+    EXPECT_EQ(container.validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+}
+
 TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
     ASSERT_TRUE(image) << image.error().message;
@@ -27,7 +102,7 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     auto plan = axk::build_export_plan(media, *catalog, graph);
     ASSERT_TRUE(plan);
     ASSERT_EQ(plan->volumes.size(), 1U);
-    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(), "objects/FAT root");
+    EXPECT_EQ(plan->volumes[0].relative_root.generic_string(), "FAT root");
     ASSERT_EQ(plan->volumes[0].waveforms.size(), 1U);
     const auto output = std::filesystem::temp_directory_path() / "axklib-media-export-test";
     std::error_code error;
@@ -51,6 +126,34 @@ TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {
     ASSERT_EQ(tree.issues.size(), 1U);
     EXPECT_EQ(tree.issues.front().code, "REL_SBNK_MEMBER_TARGET_MISSING");
     EXPECT_EQ(tree.issues.front().severity, "warning");
+}
+
+TEST(Fat12Reader, ReadsRangesAcrossClusterBoundaries) {
+    auto fixture = fat_fixture();
+    constexpr std::size_t object_size = 700U;
+    constexpr std::size_t root_offset = 3U * 512U;
+    constexpr std::size_t first_cluster_offset = 4U * 512U;
+    for (const auto fat_offset : {512U, 1024U}) {
+        auto fat = std::span{fixture}.subspan(fat_offset, 512U);
+        set_fat12(fat, 2U, 3U);
+        set_fat12(fat, 3U, 0xfffU);
+    }
+    le32(fixture, root_offset + 0x1cU, object_size);
+    for (std::size_t index = 0U; index < object_size; ++index)
+        fixture[first_cluster_offset + index] = static_cast<std::byte>(index & 0xffU);
+
+    const auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)), "range.ima");
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_EQ(image->files().size(), 1U);
+
+    const auto range = image->read_file_range(image->files().front(), 508U, 12U);
+    ASSERT_TRUE(range) << range.error().message;
+    ASSERT_EQ(range->size(), 12U);
+    for (std::size_t index = 0U; index < range->size(); ++index)
+        EXPECT_EQ((*range)[index], static_cast<std::byte>((508U + index) & 0xffU));
+    const auto invalid = image->read_file_range(image->files().front(), object_size - 4U, 8U);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::out_of_bounds);
 }
 
 TEST(Fat12Reader, RetainsHeaderInventoryWhenOneObjectPayloadIsMalformed) {
@@ -158,6 +261,20 @@ TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
     result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(traversal)), "traversal.ima");
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
+}
+
+TEST(Fat12Reader, RejectsDataGeometryThatTheFatCannotAddress) {
+    auto undersized_fat = fat_fixture();
+    constexpr std::uint16_t total_sectors = 1000U;
+    le16(undersized_fat, 0x13U, total_sectors);
+    undersized_fat.resize(static_cast<std::size_t>(total_sectors) * 512U);
+
+    const auto result =
+        axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(undersized_fat)), "undersized-fat.ima");
+
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
+    EXPECT_NE(result.error().message.find("cannot address"), std::string::npos);
 }
 
 TEST(Fat12Reader, IgnoresLongNamesAndRequiresMatchingFatCopies) {

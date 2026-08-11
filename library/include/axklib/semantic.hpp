@@ -16,12 +16,18 @@ namespace axk {
 
 class MediaContainer;
 
+enum class ContentScopeRole : std::uint8_t {
+    contained,
+    reference,
+};
+
 struct ContentNode {
     std::string node_id;
     std::string node_type;
     std::string display_name;
     std::string object_key;
     std::string object_type;
+    ContentScopeRole scope_role{ContentScopeRole::contained};
     RelationshipQuality quality{RelationshipQuality::known};
     std::string basis;
     std::string notes;
@@ -66,9 +72,9 @@ struct WaveformOrphanRow {
     std::string waveform_name;
     std::string object_key;
     SfsId sfs_id;
-    std::uint32_t smpl_link_id{};
+    std::uint32_t wave_data_reference_value{};
     WaveformStatus status{WaveformStatus::ambiguous_or_unresolved};
-    std::vector<std::string> referencing_sample_banks;
+    std::vector<std::string> referencing_samples;
     std::string basis;
     std::string notes;
 };
@@ -118,6 +124,7 @@ AXK_API WaveformOrphanReport analyze_waveform_orphans(const Container &container
                                                       const RelationshipGraph &graph);
 AXK_API ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                             const RelationshipGraph &graph);
+AXK_API std::string_view content_scope_role_name(ContentScopeRole role) noexcept;
 AXK_API std::string_view waveform_status_name(WaveformStatus status) noexcept;
 
 } // namespace axk

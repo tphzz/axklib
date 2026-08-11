@@ -3,11 +3,22 @@
 The native implementation separates storage, sampler semantics, and host
 integration.
 
+## Public Documentation Boundary
+
+Public documentation describes supported contracts, limits, validation rules,
+and concise hardware compatibility status. It excludes local checkout paths,
+inventories of internal source material, named forensic artifacts,
+investigation tooling, and experiment-worklog narratives. Small retained test
+fixtures may document their identity, hash, topology, and active test purpose,
+but not private acquisition history. Runtime diagnostics follow the same rule:
+they explain the input contract and corrective action without referring to the
+validation history that established it.
+
 ```mermaid
 flowchart TD
     accTitle: axklib architecture dependency flow
     accDescr: Random access input flows through media readers, Yamaha enrichment, object decoders, and the catalog. The catalog provides audio export, writing, the shared SDK facade, and the CLI adapter. Native consumers use the SDK.
-    IO[Random access I/O] --> Media[SFS and narrow FAT12 / ISO9660 readers]
+    IO[Random access I/O] --> Media[SFS, FAT12, ISO9660, A3K, and object-directory readers]
     Media --> Yamaha[Yamaha media enrichment]
     Yamaha --> Objects[Object decoders]
     Objects --> Catalog[Catalog and relationships]
@@ -37,7 +48,8 @@ The source modules reflect that boundary:
   and writer/transaction command families.
 - `apps/cli/schema/` owns versioned machine-output data structures and their private
   JSON serialization.
-- `apps/cli/content_id.*` owns pooled-export identifiers and collision handling.
+- `apps/application/src/content_id.*` owns pooled-export identifiers and
+  collision handling as an application-private extraction helper.
 
 Command modules orchestrate public library services; they do not contain disk
 layout, object decoding, allocation, or audio-conversion rules. Core targets do
@@ -47,12 +59,16 @@ The media source modules preserve a separate responsibility boundary:
 
 - `media_fat12.cpp` owns the supported FAT12 container profile.
 - `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
-- `media_build.cpp` prepares authored or raw-preserving object sets independently
-  of their destination container.
+- `media_a3k_archive.cpp` owns the bounded read-only A3K archive profile.
+- `media_build.cpp` inventories metadata before loading a selected dependency
+  closure, enforces public aggregate build limits, and validates written
+  payloads through bounded range readers.
 - `media_write_fat12.cpp` adapts pinned FatFs to an in-memory 1.44 MB image.
-- `media_write_iso9660.cpp` owns the deterministic narrow ISO9660 layout writer.
+- `media_write_iso9660.cpp` owns the deterministic narrow ISO9660 layout writer
+  and writes projected sectors directly to the reserved temporary file without
+  retaining a second output-sized image buffer.
 - `media_yamaha.cpp` owns Yamaha object recognition, CD menu labels, catalog
-  placement, and structured paths.
+  placement, flat AXK object directories, and structured paths.
 - `media.cpp` owns common media dispatch and `MediaContainer` orchestration.
 
 These remain source modules in one core target. They are not separately linked
@@ -62,3 +78,21 @@ Fresh-image and alteration operations use manifests and plans. Applying a plan
 writes a temporary destination, validates the result, and then completes the
 replacement. The output path must differ from the source image. Existing source
 images therefore remain unchanged.
+
+The private write/package implementation is split by invariant ownership:
+
+- `alteration_manifest_json.cpp` owns canonical JSON serialization and typed
+  parsing, while
+  `alteration_manifest.cpp` validates a complete typed transaction before any
+  image I/O. `alteration.cpp` owns stateful planning and mutation.
+- `object_write_codec.cpp` and `sfs_write_codec.cpp` own bounded object-payload
+  and directory-index encoding. `writer_image.cpp` owns HDS geometry,
+  allocation, and publication.
+- `package_manifest.cpp` owns canonical package JSON serialization and
+  relocation bindings. `package_import_plan.cpp` owns immutable import-plan
+  identity and verification; media-specific capacity planning remains in
+  `package_import.cpp`.
+
+These are private source boundaries, not installed APIs. Binary fields are
+encoded through checked writers, and callers propagate an error instead of
+indexing past a malformed or incorrectly sized buffer.

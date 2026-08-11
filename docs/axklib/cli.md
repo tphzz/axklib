@@ -9,6 +9,7 @@ installed with your version.
 | Exit | Meaning |
 | ---: | --- |
 | 0 | Operation completed. |
+| 1 | The request was valid, but an I/O, publication, runtime, or other operational failure prevented completion. |
 | 2 | Arguments, input data, or the requested operation are invalid. |
 | 3 | The command completed its scan or plan, but reported diagnostics or blocking conflicts. |
 
@@ -31,14 +32,14 @@ naming.
 
 | Command | Purpose |
 | --- | --- |
-| `info` | Render sampler-facing partitions, groups, volumes, Programs, Sample Banks, and waveforms. |
-| `extract wav` | Export selected waveform audio into a shared WAV pool. |
+| `info` | Render sampler-facing partitions, groups, volumes, Programs (`PROG`), Sample Banks (`SBAC`), Samples (`SBNK`), and Wave Data (`SMPL`). |
+| `extract wav` | Export selected Wave Data audio into a shared WAV pool. |
 | `extract sfz` | Export WAVs and SFZ instruments for selected objects. |
 | `package export` | Export a complete portable object dependency closure. |
 | `package inspect` / `verify` | Inspect bounded package metadata or fully verify every payload. |
 | `package plan-import` / `import` | Plan or publish a portable-package import. |
 | `create manifest` | Generate an HDS, floppy, or ISO authoring starter. |
-| `create hds` / `floppy` / `iso` | Create a fresh image from a versioned JSON manifest. |
+| `create hds` / `floppy` / `iso` | Plan or create a fresh image from a versioned JSON manifest. |
 | `alter manifest` | Generate an ordered HDS alteration starter. |
 | `alter hds` | Plan or publish an ordered HDS alteration. |
 | `validate` | Validate container allocation, directories, objects, and relationships. |
@@ -46,8 +47,8 @@ naming.
 | `inventory` | Write a normalized object inventory. |
 | `relationships` | Write resolved sampler-object relationships. |
 | `coverage` | Summarize relationship coverage and unresolved classifications. |
-| `orphans` | Classify physical waveforms by resolved ownership status. |
-| `corpus audit` | Run inventory, validation, relationship, and bounded waveform checks over many inputs. |
+| `orphans` | Classify Wave Data by resolved ownership status. |
+| `corpus audit` | Run inventory, validation, relationship, and bounded Wave Data checks over many inputs. |
 
 The reporting commands write versioned JSON/CSV data plus schema sidecars to
 their required output directory. See [Report Schemas](report-schemas.md) and
@@ -60,6 +61,7 @@ Start with the sampler-facing tree:
 ```bash
 axklib info source.hds
 axklib info source.iso --show-quality --show-unresolved
+axklib info extracted-object-collection
 ```
 
 Use JSON or stable selector paths for automation:
@@ -71,6 +73,13 @@ axklib info source.hds --format paths
 
 `--show-default-programs` includes synthesized empty Program slots. They are
 navigation aids and are not stored objects.
+
+For `info` only, a directory input is searched for bounded
+`AXK_OBJECT_DIRECTORY` sources. A source may be a flat object leaf or a parent
+containing one level of related disk folders; the parent form assembles
+contiguous multi-disk Wave Data segments. Each recognized source is reported as
+one read-only medium. Other report, extraction, validation, and authoring
+commands continue to require explicit supported image or object files.
 
 ## Extract WAV And SFZ
 
@@ -100,7 +109,7 @@ axklib extract sfz program source.hds \
 ```
 
 `--stereo auto` renders confirmed compatible left/right members and is the
-default. `--stereo none` keeps physical mono waveforms only. `--strict` stops
+default. `--stereo none` keeps exact mono Wave Data exports only. `--strict` stops
 after the first load failure; `--progress always|never|auto` controls progress
 display.
 
@@ -117,16 +126,23 @@ axklib create manifest iso -o cdrom.json
 Edit sampler-facing names, geometry, and audio paths, then create the image:
 
 ```bash
+axklib create hds image.json -o HD00_512_generated.hds --dry-run
+axklib create floppy floppy.json -o authored.ima --dry-run
+axklib create iso cdrom.json -o authored.iso --dry-run
 axklib create hds image.json -o HD00_512_generated.hds
 axklib create floppy floppy.json -o authored.ima
 axklib create iso cdrom.json -o authored.iso
 ```
 
+`--dry-run` invokes the same manifest parser and application build planner as
+creation, reports the admitted format, size where applicable, partition count,
+and object count, and does not create the output file.
+
 The HDS starter is immediately buildable and object-empty. The floppy starter
 references `tone.wav` because a generated Yamaha FAT12 image must contain at
 least one object. The ISO starter is an object-empty staging volume intended to
 be populated with `package import`; the standalone hardware-tested authored ISO
-profile contains audio and a Sample Bank. See [Writer And
+profile contains Wave Data and a Sample. See [Writer And
 Alteration](write.md).
 
 ## Alter An HDS Image

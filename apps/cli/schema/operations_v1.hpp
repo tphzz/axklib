@@ -21,9 +21,12 @@ struct AudioImportOutput {
     std::uint8_t source_channels{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{};
     std::uint64_t output_frames{};
     bool resampled{};
     bool quantized{};
+    bool sample_width_converted{};
     std::string dither_algorithm;
     bool split_stereo{};
     std::uint64_t clipped_samples{};
@@ -37,6 +40,7 @@ struct OperationOutput {
     std::string object_name;
     std::vector<std::uint32_t> removed_sfs_ids;
     std::vector<std::uint32_t> inserted_sfs_ids;
+    std::vector<std::uint32_t> placed_sfs_ids;
     std::uint64_t freed_clusters{};
     std::uint64_t allocated_clusters{};
     std::optional<AudioImportOutput> audio_import;
@@ -50,6 +54,7 @@ struct AlterationOutput {
 };
 
 AlterationOutput project_alteration(const AlterationResult &altered);
+AlterationOutput project_alteration(const AlterationInspection &inspection);
 Result<std::string> serialize(const AlterationOutput &output, bool pretty);
 
 } // namespace axk::cli::schema::operations_v1

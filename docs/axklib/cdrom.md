@@ -23,7 +23,7 @@ flowchart TD
 The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
 sectors are 2048 bytes.
 
-This is the primary-directory profile used by maintained Yamaha
+This is the primary-directory profile used by supported Yamaha
 A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
 rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
 trees are not interpreted. A hybrid disc can still open through
@@ -31,19 +31,15 @@ its valid primary ISO9660 tree; extension-only names and metadata remain outside
 the supported contract.
 
 Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
-profile. A libarchive writer was evaluated, but its release build provides no
-supported way to override the image creation timestamp, so it could not satisfy
-the byte-reproducibility contract. The narrow writer emits path tables, bounded
-single-sector directories, Yamaha group/volume menu records, and single-extent
-object files. It reopens the image with the production reader before publishing
-it. Physical Yamaha hardware has enumerated, loaded, and played the minimal
-generated profile containing one mono `SMPL` and one direct single-member
-`SBNK`. A second generated profile has also loaded and played one complete
-`PROG` containing both a `PROG -> SBAC -> SBNK -> SMPL` assignment and a direct
-`PROG -> SBNK -> SMPL` assignment that share the same waveform. Byte-preserving
-whole-floppy Yamaha-object transfer has likewise loaded and played its
-transferred Program and Sample Banks from a generated CD-ROM. These checks are
-intentionally narrower than every tree or object topology the reader can parse.
+profile. The writer emits deterministic path
+tables, sector-aligned directory extents, Yamaha group/volume menu records, and
+single-extent object files. Directory records and path tables may occupy
+multiple sectors; files remain single-extent. It reopens the image with the
+production reader before publishing it. Hardware compatibility covers the
+minimal mono `SMPL -> SBNK` profile, a complete Program using both direct Sample
+and Sample Bank assignments with shared Wave Data, and byte-preserving
+whole-floppy object transfer. This is narrower than every tree or object
+topology the reader can parse.
 
 | Field | Rule |
 | --- | --- |
@@ -101,10 +97,10 @@ An ordinary one-volume tree is:
       0000                     Program catalog
       F001 ...                 Program object payloads
     SBAC/
-      0000                     Sample Bank Group catalog
+      0000                     Sample Bank catalog
       F001 ...                 SBAC object payloads
     SBNK/
-      0000                     Sample Bank catalog
+      0000                     Sample catalog
       F001 ...                 SBNK object payloads
     SMPL/
       0000                     waveform catalog
@@ -151,22 +147,31 @@ For one object, axklib records:
 
 ## Generated ISO File Layout
 
-`axklib create iso` currently emits exactly one group and one volume. The
-hardware-verified one-volume profile uses raw volume `F001`, so its group label
-is file `F002`. The complete generated ordering is deterministic:
+Hand-authored `axklib create iso` manifests currently emit one group and one
+volume. The hardware-verified one-volume profile uses raw volume `F001`, so its
+group label is file `F002`.
+
+Partition conversion uses one generated group and one raw `Fnnn` volume per
+source SFS volume, in source order. It supports at most 998 source volumes,
+requires contiguous names `F001` through `Fnnn`, and writes the group label as
+`F(n+1)`. Directory extents and both path tables grow to as many whole sectors
+as the generated tree requires. One- and four-volume conversion profiles have
+loaded on hardware; the object-heavy multi-sector profile remains pending.
+
+The complete generated ordering is deterministic:
 
 | Sector / region | Generated content |
 | --- | --- |
 | `0..15` | Zero-filled ISO system area. |
 | `16` | One Primary Volume Descriptor. |
 | `17` | Volume Descriptor Set Terminator. |
-| `18` | Little-endian Type-L path table. |
-| `19` | Big-endian Type-M path table. |
-| `20...` | Root, group, volume, and populated category directories; one 2048-byte sector each. |
+| `18...` | Little-endian Type-L path table, padded to complete 2048-byte sectors. |
+| following sectors | Big-endian Type-M path table, padded to complete 2048-byte sectors. |
+| following sectors | Root, group, volume, and populated category directory extents. |
 | following sectors | Group catalog, group label, category catalogs, then object payloads in deterministic tree order. |
 
-The writer uses 2048-byte logical blocks, one extent per file, one sector per
-directory, and both-endian ISO9660 numeric fields. It sets the PVD System
+The writer uses 2048-byte logical blocks, one extent per file, one or more
+whole sectors per directory, and both-endian ISO9660 numeric fields. It sets the PVD System
 Identifier to:
 
 ```text
@@ -196,7 +201,7 @@ fields. Unlisted optional text fields remain space-filled or zero-filled:
 | `0x80` | 4 | Logical Block Size `2048`, both-endian u16. |
 | `0x84` | 8 | Path-table byte count, both-endian u32. |
 | `0x8c` | 4 | Type-L path-table sector `18`, u32le. |
-| `0x94` | 4 | Type-M path-table sector `19`, u32be. |
+| `0x94` | 4 | Type-M path-table sector immediately following the padded Type-L table, u32be. |
 | `0x9c` | 34 | Root directory record. |
 | `0xbe` | 128 | Volume Set Identifier from `iso.volume_id`, space-padded. |
 | `0x13e`, `0x1be`, `0x23e` | 128 each | Publisher, preparer, and application identifiers: `AXKLIB`. |
@@ -205,9 +210,13 @@ fields. Unlisted optional text fields remain space-filled or zero-filled:
 
 The Type-L and Type-M path tables contain the same directory sequence in their
 respective byte order. Directory records contain `.` and `..` followed by
-children in deterministic insertion order. If all records do not fit in one
-sector, creation fails with an unsupported-profile error rather than extending
-the directory using an unverified layout.
+children in deterministic insertion order. A record never crosses a logical
+sector boundary: the remaining bytes in that sector are zero-filled and the
+record begins in the next sector. Each directory extent is padded to a complete
+logical sector. Type-L and Type-M tables use the same deterministic directory
+order and each receives the number of whole sectors required by its byte size.
+The planner and serializer share this allocation result, so inspection reports
+the same projected image size that publication writes.
 
 Each generated path-table record has this shape; a zero pad byte follows an odd
 identifier length so the next record starts on an even boundary:
@@ -278,7 +287,7 @@ Label sources:
 | Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. | `iso_group_label` |
 | Volume label | Row in a group-local compact menu table. | `iso_volume_label` |
 
-Group catalog rows and one observed category-catalog form are 32 bytes:
+Group catalog rows and the supported category-catalog form are 32 bytes:
 
 | Row offset | Size | Contents |
 | --- | ---: | --- |
@@ -346,9 +355,8 @@ The validated compatibility contract requires each Yamaha group menu to have a
 group-level `0000` file made of complete 32-byte rows. Its final row must be
 `_DSKNAME`, must reference `F(N+1)` after `N` volume directories, and that target
 must be an existing, non-empty, fixed-width 16-byte group-label file. Catalog
-hash validation is not part of this compatibility gate because hardware has not
-isolated hash rejection independently. The writer nevertheless emits the hash
-algorithm above for every group and category row.
+hash validation is not part of this compatibility gate. The writer nevertheless
+emits the hash algorithm above for every group and category row.
 
 Label precedence for display paths:
 
@@ -390,21 +398,27 @@ Public behavior:
 The raw selector bytes in Program rows are diagnostic fields. They are not used
 as public target IDs.
 
+Sample (`SBNK`) member names can repeat across different raw `Fnnn` volumes.
+The sampler resolves members by name, so exact placement that leaves one
+matching Wave Data object in the Sample's own raw volume produces a `Known`
+relationship. Matching objects in other raw volumes remain recorded as
+candidates. Multiple matching objects inside one raw volume remain
+`Tentative`.
+
 CD-ROM visible/off rows with missing local SBAC targets stay relationship
-diagnostics, not Program children. A CD-ROM SBNK member link that selects one
-physical waveform in another ISO object folder but whose member name does not
-confirm the target stays `Tentative` and is reported as an `sbnk-member-link`
-diagnostic.
+diagnostics, not Program children. The cached SBNK member reference can be
+stale; when it matches Wave Data that the member name does not select, axklib
+keeps it as a `sbnk-member-cache` diagnostic and does not create a relationship.
 
 ## Paired Sample-Member Stereo
 
 Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
-members in one `SBAC` group. The left and right members have matching names with
+Samples in one `SBAC` Sample Bank. The left and right Samples have matching names with
 terminal `-L` and `-R`, and each member links to its own physical `SMPL` object.
 Structured waveform export keeps the physical mono `SMPL` files and writes an
 additional `_samples/rendered/` stereo WAV when the pair is known and audio-compatible.
-For rendered stereo names, duplicate-marked paired members can use the owning
-sample-bank or group label so the output path remains sampler-facing instead of
+For rendered stereo names, duplicate-marked paired Samples can use the owning
+Sample Bank label so the output path remains sampler-facing instead of
 only numeric.
 
 ## Path Mapping

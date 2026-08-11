@@ -12,6 +12,7 @@
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
 #include "axklib/media.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk {
 
@@ -21,6 +22,7 @@ enum class PackageKind : std::uint8_t { volume, program, sbac, sbnk, smpl, seque
 struct PackageRootSelector {
     PackageRootKind kind{PackageRootKind::volume};
     std::optional<std::uint8_t> partition_index;
+    std::optional<std::uint32_t> volume_directory_id;
     std::string group_name;
     std::string volume_name;
     std::string object_name;
@@ -59,6 +61,7 @@ struct PackageNode {
     std::optional<std::string> audio_sha256;
     PackagePlacementHint placement_hint;
     std::vector<PackageRelocation> relocations;
+    std::uint64_t payload_size_bytes{};
     std::vector<std::byte> raw_payload;
 
     friend bool operator==(const PackageNode &, const PackageNode &) = default;
@@ -108,11 +111,27 @@ struct PackageBuild {
     std::vector<std::byte> archive;
 };
 
+struct PackageBatchItem {
+    std::size_t selector_index{};
+    PackageBuild build;
+};
+
+struct PackageBatchFailure {
+    std::size_t selector_index{};
+    Error error;
+};
+
+struct PackageBatchBuild {
+    std::vector<PackageBatchItem> packages;
+    std::vector<PackageBatchFailure> failures;
+};
+
 struct PackagePublication {
     std::filesystem::path output_path;
     std::string package_id;
     PackageKind kind{PackageKind::bundle};
     std::uint64_t size_bytes{};
+    PublicationOutcome publication;
 };
 
 enum class PackageImportObjectAction : std::uint8_t {
@@ -121,6 +140,15 @@ enum class PackageImportObjectAction : std::uint8_t {
     relocate,
     insert,
     conflict,
+};
+
+enum class PackageProgramAssignmentOrigin : std::uint8_t {
+    imported_program,
+    existing_program,
+};
+
+enum class PackageProgramAssignmentDisposition : std::uint8_t {
+    clear_assignment,
 };
 
 struct PackageRootDestination {
@@ -144,10 +172,70 @@ struct PackageNodeRename {
     friend bool operator==(const PackageNodeRename &, const PackageNodeRename &) = default;
 };
 
+struct PackageProgramSlotAssignment {
+    std::size_t package_index{};
+    std::string node_id;
+    std::uint8_t destination_slot{};
+
+    friend bool operator==(const PackageProgramSlotAssignment &, const PackageProgramSlotAssignment &) = default;
+};
+
+enum class PackageOpaqueSequenceAction : std::uint8_t { preserve_unchanged, skip };
+
+struct PackageOpaqueSequenceDecision {
+    std::size_t package_index{};
+    std::string node_id;
+    PackageOpaqueSequenceAction action{PackageOpaqueSequenceAction::preserve_unchanged};
+
+    friend bool operator==(const PackageOpaqueSequenceDecision &, const PackageOpaqueSequenceDecision &) = default;
+};
+
 struct PackageImportPolicy {
     std::vector<PackageNodeRename> renames;
+    std::vector<PackageProgramSlotAssignment> program_slot_assignments;
+    std::vector<PackageOpaqueSequenceDecision> opaque_sequence_decisions;
 
     friend bool operator==(const PackageImportPolicy &, const PackageImportPolicy &) = default;
+};
+
+enum class PackageProgramSlotPlacementMode : std::uint8_t {
+    contiguous,
+    fragmented,
+    unavailable,
+};
+
+struct PackageProgramSlotRange {
+    std::uint8_t first{};
+    std::uint8_t last{};
+
+    friend bool operator==(const PackageProgramSlotRange &, const PackageProgramSlotRange &) = default;
+};
+
+struct PackageProgramSlotMapping {
+    std::size_t package_index{};
+    std::string node_id;
+    std::uint8_t source_slot{};
+    std::uint8_t destination_slot{};
+    bool requires_user_action{};
+
+    friend bool operator==(const PackageProgramSlotMapping &, const PackageProgramSlotMapping &) = default;
+};
+
+struct PackageProgramSlotPlacement {
+    std::string placement_id;
+    std::uint8_t partition_index{};
+    std::string volume_name;
+    PackageProgramSlotPlacementMode mode{PackageProgramSlotPlacementMode::unavailable};
+    bool applied{};
+    std::optional<std::uint8_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint16_t available_slot_count{};
+    std::vector<PackageProgramSlotRange> occupied_ranges;
+    std::vector<PackageProgramSlotRange> source_ranges;
+    std::vector<PackageProgramSlotRange> destination_ranges;
+    std::vector<PackageProgramSlotMapping> mappings;
+
+    friend bool operator==(const PackageProgramSlotPlacement &, const PackageProgramSlotPlacement &) = default;
 };
 
 struct PackageImportRequest {
@@ -173,6 +261,68 @@ struct PackageImportConflict {
     friend bool operator==(const PackageImportConflict &, const PackageImportConflict &) = default;
 };
 
+enum class PackageImportWarningOrigin : std::uint8_t { package, target };
+
+struct PackageImportWarning {
+    std::string code;
+    std::string message;
+    PackageImportWarningOrigin origin{PackageImportWarningOrigin::package};
+    std::optional<std::size_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint8_t> partition_index;
+    std::string volume_name;
+
+    friend bool operator==(const PackageImportWarning &, const PackageImportWarning &) = default;
+};
+
+struct PackageOpaqueSequenceChoice {
+    std::size_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<PackageOpaqueSequenceAction> action;
+
+    friend bool operator==(const PackageOpaqueSequenceChoice &, const PackageOpaqueSequenceChoice &) = default;
+};
+
+struct PackagePreservedTargetObject {
+    std::string object_key;
+    std::uint8_t partition_index{};
+    std::uint32_t sfs_id{};
+    std::string object_type;
+    std::string object_name;
+    std::string volume_name;
+    std::string category_name;
+    std::string entry_name;
+    std::string payload_sha256;
+
+    friend bool operator==(const PackagePreservedTargetObject &, const PackagePreservedTargetObject &) = default;
+};
+
+struct PackageProgramAssignmentAdjustment {
+    std::string adjustment_id;
+    PackageProgramAssignmentOrigin origin{PackageProgramAssignmentOrigin::imported_program};
+    std::optional<std::size_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint32_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint8_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    PackageProgramAssignmentDisposition disposition{PackageProgramAssignmentDisposition::clear_assignment};
+
+    friend bool operator==(const PackageProgramAssignmentAdjustment &,
+                           const PackageProgramAssignmentAdjustment &) = default;
+};
+
 struct PlannedPackageObject {
     std::string action_id;
     std::size_t package_index{};
@@ -192,9 +342,9 @@ struct PlannedPackageObject {
     std::optional<std::string> canonical_action_id;
     std::optional<std::string> existing_object_key;
     std::optional<std::uint32_t> target_sfs_id;
-    std::optional<std::uint32_t> target_link_id;
+    std::optional<std::uint32_t> target_wave_data_reference_value;
     std::vector<std::uint8_t> target_program_numbers;
-    bool target_grouped{};
+    bool target_sample_bank_member{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
@@ -210,16 +360,53 @@ struct PackageAllocationDelta {
     std::string raw_volume;
     std::uint64_t inserted_object_count{};
     std::uint64_t reused_object_count{};
+    std::uint64_t blocked_object_count{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
     std::uint64_t directory_growth_bytes{};
+    std::uint64_t directory_growth_clusters{};
+    std::uint64_t directory_continuation_clusters{};
+    std::uint64_t infrastructure_clusters{};
+    std::uint64_t additional_allocated_bytes{};
     std::uint64_t remaining_object_ids{};
     std::uint64_t remaining_clusters{};
     std::uint64_t projected_image_sectors{};
     std::uint64_t projected_image_size_bytes{};
 
     friend bool operator==(const PackageAllocationDelta &, const PackageAllocationDelta &) = default;
+};
+
+struct PackageSfsRecordUsage {
+    std::size_t package_index{};
+    std::uint64_t effective_object_record_slots{};
+    std::uint64_t volume_scaffolding_record_slots{};
+    std::uint64_t standalone_required_record_slots{};
+    std::uint64_t planned_object_record_slots{};
+    std::uint64_t planned_record_slots{};
+    std::uint64_t reused_object_count{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+
+    friend bool operator==(const PackageSfsRecordUsage &, const PackageSfsRecordUsage &) = default;
+};
+
+struct SfsIndexCapacityEstimate {
+    std::uint8_t partition_index{};
+    std::uint64_t index_block_count{};
+    std::uint64_t records_per_index_block{};
+    std::uint64_t total_record_slots{};
+    std::uint64_t reserved_record_slots{};
+    std::uint64_t allocatable_record_slots{};
+    std::uint64_t used_record_slots{};
+    std::uint64_t free_record_slots{};
+    std::uint64_t required_record_slots{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+    std::uint64_t remaining_record_slots{};
+    std::vector<PackageSfsRecordUsage> packages;
+
+    friend bool operator==(const SfsIndexCapacityEstimate &, const SfsIndexCapacityEstimate &) = default;
 };
 
 struct PlannedPackageDestination {
@@ -243,10 +430,15 @@ struct PackageImportPlan {
     std::string policy_digest;
     std::string plan_id;
     std::vector<std::string> package_ids;
-    std::vector<PackageIssue> warnings;
+    std::vector<PackageImportWarning> warnings;
+    std::vector<PackageOpaqueSequenceChoice> opaque_sequences;
+    std::vector<PackagePreservedTargetObject> preserved_target_objects;
     std::vector<PlannedPackageDestination> destinations;
     std::vector<PlannedPackageObject> objects;
+    std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
+    std::vector<PackageProgramSlotPlacement> program_slot_placements;
     std::vector<PackageAllocationDelta> allocation;
+    std::vector<SfsIndexCapacityEstimate> sfs_index_capacity;
     std::vector<PackageImportConflict> conflicts;
 
     [[nodiscard]] bool valid() const noexcept { return conflicts.empty(); }
@@ -260,13 +452,21 @@ struct PackageImportReport {
     std::string output_snapshot_id;
     bool applied{};
     std::vector<PlannedPackageObject> objects;
+    std::vector<PackageProgramAssignmentAdjustment> program_assignment_adjustments;
     std::vector<PackageAllocationDelta> allocation;
+    PublicationOutcome publication;
 };
 
 AXK_API std::string_view package_root_kind_name(PackageRootKind kind) noexcept;
 AXK_API std::string_view package_kind_name(PackageKind kind) noexcept;
 AXK_API std::string_view required_package_extension(PackageKind kind) noexcept;
 AXK_API std::string_view package_import_action_name(PackageImportObjectAction action) noexcept;
+AXK_API std::string_view package_opaque_sequence_action_name(PackageOpaqueSequenceAction action) noexcept;
+AXK_API std::string_view package_import_warning_origin_name(PackageImportWarningOrigin origin) noexcept;
+AXK_API std::string_view package_program_slot_placement_mode_name(PackageProgramSlotPlacementMode mode) noexcept;
+AXK_API std::string_view package_program_assignment_origin_name(PackageProgramAssignmentOrigin origin) noexcept;
+AXK_API std::string_view
+package_program_assignment_disposition_name(PackageProgramAssignmentDisposition disposition) noexcept;
 
 AXK_API Result<void> verify_portable_package(const PortablePackage &package);
 AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);
@@ -274,6 +474,10 @@ AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);
 AXK_API Result<PackageBuild> build_portable_package(const MediaContainer &source,
                                                     std::span<const PackageRootSelector> roots,
                                                     const CancellationToken &cancellation = {});
+
+AXK_API Result<PackageBatchBuild> build_portable_packages(const MediaContainer &source,
+                                                          std::span<const PackageRootSelector> roots,
+                                                          const CancellationToken &cancellation = {});
 
 AXK_API Result<PackagePublication> publish_portable_package(const PackageBuild &build,
                                                             const std::filesystem::path &output_path,
@@ -289,6 +493,9 @@ AXK_API Result<PackagePublication> export_portable_package(const MediaContainer 
 AXK_API Result<PortablePackage> open_portable_package(std::span<const std::byte> archive,
                                                       std::string_view filename = {});
 
+AXK_API Result<PortablePackage> open_portable_package(const RandomAccessReader &reader, std::string_view filename,
+                                                      const CancellationToken &cancellation = {});
+
 AXK_API Result<PortablePackage> open_portable_package(const std::filesystem::path &path,
                                                       const CancellationToken &cancellation = {});
 
@@ -301,7 +508,15 @@ AXK_API Result<PortablePackage> inspect_portable_package(const std::filesystem::
 AXK_API Result<PortablePackage> inspect_portable_package(const std::filesystem::path &path, std::string_view filename,
                                                          const CancellationToken &cancellation = {});
 
+AXK_API Result<PortablePackage> inspect_portable_package(const RandomAccessReader &reader, std::string_view filename,
+                                                         const CancellationToken &cancellation = {});
+
 AXK_API Result<PackageImportPlan> plan_package_import(const std::filesystem::path &target_path,
+                                                      std::span<const PortablePackage> packages,
+                                                      const PackageImportRequest &request,
+                                                      const CancellationToken &cancellation = {});
+AXK_API Result<PackageImportPlan> plan_package_import(std::shared_ptr<const RandomAccessReader> target_reader,
+                                                      std::filesystem::path target_path,
                                                       std::span<const PortablePackage> packages,
                                                       const PackageImportRequest &request,
                                                       const CancellationToken &cancellation = {});

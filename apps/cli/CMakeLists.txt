@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1...3.28)
 
 get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkVcpkgDefaults.cmake")
@@ -46,6 +46,7 @@ add_library(
   STATIC
   app.cpp
   command_line.cpp
+  local_operation_projection.cpp
   local_operations.cpp
   commands/analysis.cpp
   commands/extract.cpp
@@ -79,6 +80,15 @@ add_executable(axk_cli ALIAS axklib_cli)
 set_target_properties(axklib_cli PROPERTIES OUTPUT_NAME axklib CXX_EXTENSIONS OFF)
 target_compile_features(axklib_cli PRIVATE cxx_std_23)
 target_link_libraries(axklib_cli PRIVATE axk_cli_adapter)
+if(WIN32)
+  set(_axk_cli_windows_manifest "${CMAKE_CURRENT_SOURCE_DIR}/windows-utf8.manifest")
+  target_link_options(
+    axklib_cli
+    PRIVATE "/MANIFESTINPUT:${_axk_cli_windows_manifest}"
+  )
+  set_property(TARGET axklib_cli APPEND PROPERTY LINK_DEPENDS "${_axk_cli_windows_manifest}")
+  unset(_axk_cli_windows_manifest)
+endif()
 axk_set_project_warnings(axklib_cli)
 axk_enable_sanitizers(axklib_cli)
 axk_enable_coverage(axklib_cli)
@@ -86,7 +96,7 @@ axk_enable_coverage(axklib_cli)
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(axk_cli_tests tests/cli_parser_test.cpp tests/cli_schema_test.cpp)
+  add_executable(axk_cli_tests tests/cli_parser_test.cpp tests/cli_schema_test.cpp schema/objects_v1.cpp)
   target_compile_features(axk_cli_tests PRIVATE cxx_std_23)
   target_compile_definitions(axk_cli_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
   target_include_directories(axk_cli_tests PRIVATE "${AXK_REPOSITORY_ROOT}/library/internal")

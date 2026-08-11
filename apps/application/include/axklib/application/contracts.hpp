@@ -23,6 +23,16 @@ struct DirectoryRef {
     friend bool operator==(const DirectoryRef &, const DirectoryRef &) = default;
 };
 
+enum class ImageSourceKind : std::uint8_t { file, axk_object_directory };
+
+struct ImageSourceRef {
+    std::string root_id;
+    std::string relative_path;
+    ImageSourceKind kind{ImageSourceKind::file};
+
+    friend bool operator==(const ImageSourceRef &, const ImageSourceRef &) = default;
+};
+
 struct UploadRef {
     std::string upload_id;
 
@@ -40,6 +50,7 @@ struct ErrorContext {
     std::optional<std::string> volume_name;
     std::optional<std::string> object_type;
     std::optional<std::string> object_name;
+    std::optional<std::string> object_id;
     std::optional<std::string> relative_path;
 };
 

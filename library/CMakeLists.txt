@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1...3.28)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkVcpkgDefaults.cmake")
 
@@ -95,26 +95,55 @@ add_library(
   STATIC
   src/audio.cpp
   src/audio_export.cpp
+  src/audio_export_support.cpp
+  src/audio_sfz_export.cpp
   src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
   src/error.cpp
   src/effects.cpp
+  src/export_paths.cpp
   src/file_publication.cpp
   src/io.cpp
   src/media.cpp
+  src/media_a3k_archive.cpp
+  src/media_catalog.cpp
   src/media_fat12.cpp
+  src/media_fat12_catalog.cpp
+  src/media_floppy_catalog.cpp
+  src/media_floppy_set_reader.cpp
   src/media_iso9660.cpp
+  src/media_object_directory.cpp
   src/media_yamaha.cpp
   src/object.cpp
   src/package.cpp
   src/package_archive.cpp
+  src/package_build.cpp
   src/package_import.cpp
+  src/package_import_fat12.cpp
+  src/package_import_iso9660.cpp
+  src/package_import_opaque_sequences.cpp
+  src/package_import_plan.cpp
+  src/package_import_program_slots.cpp
+  src/package_program_adjustment.cpp
+  src/package_import_sfs.cpp
+  src/package_import_sfs_capacity.cpp
+  src/package_import_support.cpp
+  src/package_manifest.cpp
+  src/package_object.cpp
+  src/package_parse.cpp
   src/package_relocation.cpp
+  src/package_support.cpp
   src/relationship.cpp
+  src/relationship_policy.cpp
   src/report.cpp
   src/semantic.cpp
+  src/semantic_analysis.cpp
+  src/sequence.cpp
+  src/sequence_diagnostics.cpp
   src/sfs.cpp
+  src/sfs_container.cpp
+  src/sfs_directory.cpp
   src/utf8.cpp
   src/version.cpp
   "${AXK_BUILD_INFO_CPP}"
@@ -159,6 +188,9 @@ axk_enable_coverage(axk_core)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(utf8cpp CONFIG REQUIRED)
 target_link_libraries(axk_core PRIVATE nlohmann_json::nlohmann_json utf8::cpp)
+if(WIN32)
+  target_link_libraries(axk_core PRIVATE ntdll)
+endif()
 
 add_library(
   axk_audio
@@ -168,12 +200,42 @@ add_library(
   adapters/audio_import.cpp
   adapters/audio_resample_soxr.cpp
   adapters/pcm16_quantizer.cpp
+  adapters/wav_sampler_metadata.cpp
   src/alteration.cpp
+  src/alteration_manifest.cpp
+  src/alteration_manifest_json.cpp
+  src/alteration_manifest_program.cpp
+  src/alteration_manifest_sample_bank.cpp
+  src/alteration_manifest_placement.cpp
+  src/alteration_manifest_sequence.cpp
+  src/alteration_operation.cpp
+    src/alteration_package_flat.cpp
+    src/alteration_package_adjustment.cpp
+    src/alteration_package_sfs.cpp
+  src/alteration_program.cpp
+  src/alteration_sample_bank_assignment.cpp
+  src/alteration_publication.cpp
+  src/alteration_placement.cpp
+  src/alteration_sample.cpp
+  src/alteration_sequence.cpp
+  src/alteration_support.cpp
+  src/alteration_validation.cpp
+  src/alteration_volume.cpp
+  src/deletion.cpp
   src/media_build.cpp
+  src/media_conversion.cpp
+  src/media_floppy_set.cpp
+  src/media_floppy_archive.cpp
+  src/volume_floppy_export.cpp
+  src/media_iso9660_layout.cpp
+  src/media_format_fat12.cpp
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
+  src/object_write_codec.cpp
+  src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
+  src/writer_profiles.cpp
 )
 add_library(axklib::audio ALIAS axk_audio)
 target_compile_features(axk_audio PUBLIC cxx_std_23)
@@ -201,12 +263,34 @@ target_link_libraries(
   PUBLIC axklib::core
   PRIVATE SndFile::sndfile SOXR::soxr FatFs::FatFs
 )
+if(WIN32)
+  target_compile_definitions(axk_audio PRIVATE NOMINMAX)
+endif()
 axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
 axk_enable_coverage(axk_audio)
 
+include(cmake/AxkHeaderSelfContainment.cmake)
+file(GLOB_RECURSE AXK_LIBRARY_PUBLIC_HEADERS CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/include/axklib/*.hpp")
+axk_add_header_self_containment_target(
+  axk_library_header_self_containment
+  CXX_STANDARD 23
+  HEADERS ${AXK_LIBRARY_PUBLIC_HEADERS}
+  INCLUDE_DIRECTORIES
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
+  LINK_LIBRARIES axklib::audio
+)
+
 if(AXK_BUILD_SHARED_SDK)
-  add_library(axklib_shared SHARED src/sdk.cpp)
+  add_library(
+    axklib_shared SHARED
+    src/sdk.cpp
+    src/sdk_image.cpp
+    src/sdk_package.cpp
+    src/sdk_writer.cpp
+  )
   add_library(axklib::axklib ALIAS axklib_shared)
   target_compile_features(axklib_shared PRIVATE cxx_std_23)
   target_compile_definitions(axklib_shared PRIVATE AXK_SDK_EXPORTS)
@@ -268,10 +352,16 @@ if(AXK_BUILD_FUZZERS)
     message(FATAL_ERROR "AXK_BUILD_FUZZERS requires a Clang compiler with libFuzzer")
   endif()
   function(axk_add_fuzzer name source)
+    set(options CORE_ONLY)
+    cmake_parse_arguments(AXK_FUZZ "${options}" "" "" ${ARGN})
     add_executable(axk_${name}_fuzz fuzz/${source})
     set_property(GLOBAL APPEND PROPERTY AXK_FUZZ_TARGETS axk_${name}_fuzz)
     target_compile_features(axk_${name}_fuzz PRIVATE cxx_std_23)
-    target_link_libraries(axk_${name}_fuzz PRIVATE axklib::audio)
+    if(AXK_FUZZ_CORE_ONLY)
+      target_link_libraries(axk_${name}_fuzz PRIVATE axklib::core)
+    else()
+      target_link_libraries(axk_${name}_fuzz PRIVATE axklib::audio)
+    endif()
     target_compile_options(axk_${name}_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     target_link_options(axk_${name}_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
     axk_set_project_warnings(axk_${name}_fuzz)
@@ -282,7 +372,12 @@ if(AXK_BUILD_FUZZERS)
   target_link_libraries(axk_sfs_seed_builder PRIVATE axklib::audio)
   axk_set_project_warnings(axk_sfs_seed_builder)
 
+  add_executable(axk_a3k_seed_builder fuzz/a3k_seed_builder.cpp)
+  target_compile_features(axk_a3k_seed_builder PRIVATE cxx_std_23)
+  axk_set_project_warnings(axk_a3k_seed_builder)
+
   axk_add_fuzzer(bytes bytes_fuzz.cpp)
+  axk_add_fuzzer(a3k_archive a3k_archive_fuzz.cpp CORE_ONLY)
   axk_add_fuzzer(sfs_image sfs_image_fuzz.cpp)
   axk_add_fuzzer(object_header object_header_fuzz.cpp)
   foreach(object_type smpl sbnk sbac prog sequ prf3)
@@ -294,6 +389,7 @@ if(AXK_BUILD_FUZZERS)
   endforeach()
   axk_add_fuzzer(fat_record media_record_fuzz.cpp)
   target_compile_definitions(axk_fat_record_fuzz PRIVATE AXK_FUZZ_MEDIA_KIND=0)
+  axk_add_fuzzer(fat_image fat_image_fuzz.cpp)
   axk_add_fuzzer(iso_record media_record_fuzz.cpp)
   target_compile_definitions(axk_iso_record_fuzz PRIVATE AXK_FUZZ_MEDIA_KIND=1)
   axk_add_fuzzer(build_manifest manifest_parser_fuzz.cpp)
@@ -311,6 +407,9 @@ if(AXK_BUILD_FUZZERS)
     if(corpus_name STREQUAL "sfs_image")
       list(APPEND seed_command
            COMMAND "$<TARGET_FILE:axk_sfs_seed_builder>" "${working_corpus}/valid_minimal.hds")
+    elseif(corpus_name STREQUAL "a3k_archive")
+      list(APPEND seed_command
+           COMMAND "$<TARGET_FILE:axk_a3k_seed_builder>" "${working_corpus}/valid_minimal.a3k")
     endif()
     add_custom_command(
       TARGET fuzz-local
@@ -326,7 +425,7 @@ if(AXK_BUILD_FUZZERS)
     )
     add_dependencies(fuzz-local ${target})
   endforeach()
-  add_dependencies(fuzz-local axk_sfs_seed_builder)
+  add_dependencies(fuzz-local axk_sfs_seed_builder axk_a3k_seed_builder)
 endif()
 
 if(BUILD_TESTING)
@@ -402,24 +501,36 @@ if(BUILD_TESTING)
     tests/audio_test.cpp
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
+    tests/deletion_test.cpp
     tests/effects_test.cpp
     tests/file_publication_test.cpp
+    tests/formatted_floppy_test.cpp
     tests/io_test.cpp
     tests/hardening_test.cpp
+    tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
     tests/media_iso9660_test.cpp
+    tests/media_conversion_test.cpp
+    tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/package_archive_test.cpp
+    tests/package_program_slot_test.cpp
     tests/package_test.cpp
     tests/report_test.cpp
+    tests/sequence_test.cpp
     tests/sfs_test.cpp
+    tests/sfs_write_codec_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
   )
   target_compile_features(axk_core_tests PRIVATE cxx_std_23)
+  target_compile_definitions(
+    axk_core_tests
+    PRIVATE AXK_TEST_EXPECTED_SEMANTIC_VERSION="${AXK_SEMANTIC_VERSION}"
+  )
   target_include_directories(
     axk_core_tests
     PRIVATE
@@ -448,7 +559,7 @@ if(BUILD_TESTING)
   axk_set_project_warnings(axk_core_tests)
   axk_enable_sanitizers(axk_core_tests)
   axk_enable_coverage(axk_core_tests)
-  gtest_discover_tests(axk_core_tests)
+  gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_effect_dump tests/effect_dump.cpp)
   target_compile_features(axk_effect_dump PRIVATE cxx_std_23)
   target_link_libraries(axk_effect_dump PRIVATE axklib::core nlohmann_json::nlohmann_json)
@@ -472,6 +583,14 @@ if(BUILD_TESTING)
     axk_set_project_warnings(axk_large_image_memory_test)
     add_test(NAME Hardening.LargeImageMemory COMMAND axk_large_image_memory_test)
     set_tests_properties(Hardening.LargeImageMemory PROPERTIES TIMEOUT 120)
+
+    add_executable(axk_large_media_memory_test tests/large_media_memory_test.cpp)
+    target_compile_features(axk_large_media_memory_test PRIVATE cxx_std_23)
+    target_include_directories(axk_large_media_memory_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
+    target_link_libraries(axk_large_media_memory_test PRIVATE axklib::audio)
+    axk_set_project_warnings(axk_large_media_memory_test)
+    add_test(NAME Hardening.LargeMediaMemory COMMAND axk_large_media_memory_test)
+    set_tests_properties(Hardening.LargeMediaMemory PROPERTIES TIMEOUT 120)
   endif()
   # A sanitizer-instrumented static archive requires sanitizer runtime flags in
   # downstream executables. Package consumption is covered by the normal build;
@@ -495,6 +614,10 @@ if(BUILD_TESTING)
         "-DAXK_TEST_FIXTURE=${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
         "-DAXK_BUILD_CONFIG=$<CONFIG>"
         "-DAXK_GENERATOR=${CMAKE_GENERATOR}"
+        "-DAXK_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"
+        "-DAXK_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+        "-DAXK_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
+        "-DAXK_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunBuildTreeConsumerTest.cmake"
     )
     add_test(
@@ -510,6 +633,10 @@ if(BUILD_TESTING)
         "-DAXK_VCPKG_INSTALLED_DIR=${VCPKG_INSTALLED_DIR}"
         "-DAXK_VCPKG_TARGET_TRIPLET=${VCPKG_TARGET_TRIPLET}"
         "-DAXK_VCPKG_OVERLAY_TRIPLETS=${VCPKG_OVERLAY_TRIPLETS}"
+        "-DAXK_VCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}"
+        "-DAXK_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}"
+        "-DAXK_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
+        "-DAXK_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}"
         "-DAXK_TEST_FIXTURE=${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunConsumerTest.cmake"
     )

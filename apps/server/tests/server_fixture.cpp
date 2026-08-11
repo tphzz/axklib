@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     }
     const auto result = axk::server::run(command_line->config, std::move(registry));
     if (!result) {
-        std::cerr << result.error().message << '\n';
+        std::cerr << result.error().code << ": " << result.error().message << '\n';
         return 2;
     }
     return *result;

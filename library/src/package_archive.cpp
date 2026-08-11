@@ -101,6 +101,7 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
     std::set<std::string, std::less<>> paths;
     std::uint64_t total{};
     std::uint64_t archive_size = end_header_size;
+    std::uint64_t directory_size{};
     std::string previous;
     for (const auto &entry : entries) {
         if (!safe_archive_path(entry.path) || !fits_u16(entry.path.size()))
@@ -112,6 +113,8 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
             return std::unexpected{archive_error("package archive contains a duplicate entry path")};
         if (entry.bytes.size() > limits.maximum_entry_bytes || !fits_u32(entry.bytes.size()))
             return std::unexpected{archive_error("package archive entry exceeds the configured size limit")};
+        if (entry.path == "manifest.json" && entry.bytes.size() > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         if (entry.bytes.size() > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
         total += entry.bytes.size();
@@ -120,6 +123,10 @@ Result<void> validate_entries(const std::vector<ArchiveEntry> &entries, const Ar
         if (entry_archive_size > limits.maximum_archive_bytes - archive_size)
             return std::unexpected{archive_error("package archive exceeds the configured archive limit")};
         archive_size += entry_archive_size;
+        const auto directory_entry_size = static_cast<std::uint64_t>(central_header_size) + entry.path.size();
+        if (directory_entry_size > limits.maximum_directory_bytes - directory_size)
+            return std::unexpected{archive_error("package archive central directory exceeds the configured limit")};
+        directory_size += directory_entry_size;
     }
     return {};
 }
@@ -175,56 +182,46 @@ void compress_sha256_block(std::array<std::uint32_t, 8> &state, const std::array
     state[7] += h;
 }
 
-class Sha256State {
-  public:
-    void update(std::span<const std::byte> bytes) {
-        total_bytes_ += bytes.size();
-        while (!bytes.empty()) {
-            const auto count = std::min(bytes.size(), block_.size() - block_size_);
-            std::ranges::copy(bytes.first(count), block_.begin() + static_cast<std::ptrdiff_t>(block_size_));
-            block_size_ += count;
-            bytes = bytes.subspan(count);
-            if (block_size_ == block_.size()) {
-                compress_sha256_block(state_, block_);
-                block_.fill(std::byte{});
-                block_size_ = 0U;
-            }
-        }
-    }
+} // namespace
 
-    [[nodiscard]] Sha256Digest finish() {
-        const auto bit_length = total_bytes_ * 8U;
-        block_[block_size_++] = std::byte{0x80};
-        if (block_size_ > 56U) {
-            std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.end(), std::byte{});
+void Sha256State::update(std::span<const std::byte> bytes) {
+    total_bytes_ += bytes.size();
+    while (!bytes.empty()) {
+        const auto count = std::min(bytes.size(), block_.size() - block_size_);
+        std::ranges::copy(bytes.first(count), block_.begin() + static_cast<std::ptrdiff_t>(block_size_));
+        block_size_ += count;
+        bytes = bytes.subspan(count);
+        if (block_size_ == block_.size()) {
             compress_sha256_block(state_, block_);
             block_.fill(std::byte{});
             block_size_ = 0U;
         }
-        std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.begin() + 56, std::byte{});
-        for (std::size_t index = 0; index < 8U; ++index)
-            block_[63U - index] = static_cast<std::byte>(bit_length >> (index * 8U));
-        compress_sha256_block(state_, block_);
-
-        Sha256Digest result{};
-        for (std::size_t index = 0; index < state_.size(); ++index) {
-            result[index * 4U] = static_cast<std::byte>(state_[index] >> 24U);
-            result[index * 4U + 1U] = static_cast<std::byte>(state_[index] >> 16U);
-            result[index * 4U + 2U] = static_cast<std::byte>(state_[index] >> 8U);
-            result[index * 4U + 3U] = static_cast<std::byte>(state_[index]);
-        }
-        return result;
     }
+}
 
-  private:
-    std::array<std::uint32_t, 8> state_{0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
-                                        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U};
-    std::array<std::byte, 64> block_{};
-    std::size_t block_size_{};
-    std::uint64_t total_bytes_{};
-};
+Sha256Digest Sha256State::finish() {
+    const auto bit_length = total_bytes_ * 8U;
+    block_[block_size_++] = std::byte{0x80};
+    if (block_size_ > 56U) {
+        std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.end(), std::byte{});
+        compress_sha256_block(state_, block_);
+        block_.fill(std::byte{});
+        block_size_ = 0U;
+    }
+    std::fill(block_.begin() + static_cast<std::ptrdiff_t>(block_size_), block_.begin() + 56, std::byte{});
+    for (std::size_t index = 0; index < 8U; ++index)
+        block_[63U - index] = static_cast<std::byte>(bit_length >> (index * 8U));
+    compress_sha256_block(state_, block_);
 
-} // namespace
+    Sha256Digest result{};
+    for (std::size_t index = 0; index < state_.size(); ++index) {
+        result[index * 4U] = static_cast<std::byte>(state_[index] >> 24U);
+        result[index * 4U + 1U] = static_cast<std::byte>(state_[index] >> 16U);
+        result[index * 4U + 2U] = static_cast<std::byte>(state_[index] >> 8U);
+        result[index * 4U + 3U] = static_cast<std::byte>(state_[index]);
+    }
+    return result;
+}
 
 Sha256Digest sha256(std::span<const std::byte> bytes) {
     Sha256State state;
@@ -456,6 +453,8 @@ Result<ArchiveInspection> inspect_archive(const RandomAccessReader &reader, cons
             return std::unexpected{archive_error("package archive local entries are not contiguous")};
         if (item.size > limits.maximum_entry_bytes || item.size > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
+        if (item.path == "manifest.json" && item.size > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         total += item.size;
 
         auto local = read_bytes(item.local_offset, local_header_size);
@@ -532,6 +531,8 @@ Result<std::vector<ArchiveEntry>> read_archive(std::span<const std::byte> archiv
     }
     if (*total_entries == 0U || *total_entries > limits.maximum_entries)
         return std::unexpected{archive_error("package archive entry count exceeds the configured limit")};
+    if (*central_size > limits.maximum_directory_bytes)
+        return std::unexpected{archive_error("package archive central directory exceeds the configured limit")};
     if (static_cast<std::uint64_t>(*central_offset) + *central_size != end_offset)
         return std::unexpected{archive_error("package archive central directory bounds are invalid")};
 
@@ -598,6 +599,8 @@ Result<std::vector<ArchiveEntry>> read_archive(std::span<const std::byte> archiv
             return std::unexpected{archive_error("package archive local entries are not contiguous")};
         if (item.size > limits.maximum_entry_bytes || item.size > limits.maximum_total_bytes - total)
             return std::unexpected{archive_error("package archive expanded size exceeds the configured limit")};
+        if (item.path == "manifest.json" && item.size > limits.maximum_manifest_bytes)
+            return std::unexpected{archive_error("package manifest exceeds the configured size limit")};
         total += item.size;
         const auto local = static_cast<std::size_t>(item.local_offset);
         if (local > *central_offset || local_header_size > *central_offset - local)

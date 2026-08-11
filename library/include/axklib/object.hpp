@@ -49,6 +49,7 @@ struct ObjectHeader {
     std::uint32_t record_size_or_header_used{};
     std::uint32_t payload_bytes_0x1c{};
     std::uint32_t payload_bytes_0x20{};
+    std::uint32_t payload_offset_0x24{};
     std::array<std::byte, 64> raw_prefix{};
 };
 
@@ -57,7 +58,7 @@ struct CurrentSmpl {
     FieldValue<std::uint16_t> stored_sample_width_bytes;
     FieldValue<std::string> source_wave_name;
     FieldValue<std::uint32_t> group_id;
-    FieldValue<std::uint32_t> link_id;
+    FieldValue<std::uint32_t> wave_data_reference_value;
     FieldValue<std::uint16_t> duplicate_sample_rate;
     FieldValue<std::uint8_t> root_key;
     FieldValue<std::int8_t> fine_tune_cents;
@@ -70,6 +71,8 @@ struct CurrentSmpl {
     std::optional<std::uint64_t> loop_end_frame_exclusive;
     std::uint32_t stored_pcm_offset{};
     std::uint32_t stored_pcm_bytes{};
+    std::uint32_t stored_segment_offset{};
+    std::uint32_t stored_segment_bytes{};
     std::array<std::byte, 0x7c> compact_record{};
 };
 
@@ -78,12 +81,13 @@ struct GenericObject {
 };
 
 struct CurrentSbnkMember {
-    std::string sample_name;
-    std::uint32_t smpl_link_id{};
+    std::string wave_data_name;
+    std::uint32_t cached_wave_data_reference_value{};
     std::uint8_t root_key{};
     std::uint16_t sample_rate{};
     std::int8_t fine_tune_cents{};
     std::uint16_t pitch_base_word{};
+    std::uint32_t wave_start_frame{};
     std::uint32_t wave_length_frames{};
     std::uint32_t loop_start_frame{};
     std::uint32_t loop_length_frames{};
@@ -103,7 +107,7 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
-    std::string bank_name;
+    std::string sample_name;
     std::string instrument_name;
     bool right_slot_present{};
     std::string right_link_role;
@@ -120,6 +124,8 @@ struct CurrentSbnk {
     std::int8_t pan{};
     std::uint8_t velocity_range_high{};
     std::uint8_t velocity_range_low{};
+    std::uint8_t loop_mode{};
+    std::string loop_mode_label;
     std::vector<SbnkControlRecord> control_records;
     std::vector<NumericField> numeric_fields;
     std::vector<std::byte> raw_parameter_window;
@@ -168,8 +174,38 @@ struct CurrentProg {
     std::vector<ProgAssignment> assignments;
 };
 
+enum class SequenceEventKind : std::uint8_t {
+    channel,
+    system_exclusive,
+    meta,
+};
+
+struct SequenceEvent {
+    std::uint32_t tick{};
+    SequenceEventKind kind{SequenceEventKind::channel};
+    std::vector<std::byte> message;
+
+    friend bool operator==(const SequenceEvent &, const SequenceEvent &) = default;
+};
+
+struct SequenceTempoEvent {
+    std::uint32_t tick{};
+    std::uint32_t microseconds_per_quarter_note{};
+
+    friend bool operator==(const SequenceTempoEvent &, const SequenceTempoEvent &) = default;
+};
+
 struct CurrentSequence {
     std::vector<std::byte> raw_payload;
+    std::uint16_t format_version{};
+    std::uint16_t ticks_per_quarter_note{};
+    std::uint32_t first_tick{};
+    std::uint32_t end_tick{};
+    std::uint64_t event_count{};
+    std::optional<std::uint16_t> header_tempo_bpm;
+    std::uint32_t effective_initial_tempo_microseconds_per_quarter_note{500'000U};
+    std::vector<SequenceTempoEvent> tempo_events;
+    std::vector<SequenceEvent> events;
 };
 
 struct CurrentProfile {

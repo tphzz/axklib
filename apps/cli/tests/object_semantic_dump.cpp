@@ -30,10 +30,16 @@ std::string media_kind(axk::MediaKind kind) {
     switch (kind) {
     case axk::MediaKind::fat12_floppy:
         return "fat12_floppy";
+    case axk::MediaKind::fat12_floppy_set:
+        return "fat12_floppy_set";
     case axk::MediaKind::iso9660:
         return "iso9660";
     case axk::MediaKind::standalone_object:
         return "standalone_object";
+    case axk::MediaKind::axk_object_directory:
+        return "axk_object_directory";
+    case axk::MediaKind::a3k_archive:
+        return "a3k_archive";
     case axk::MediaKind::sfs:
         return "sfs";
     }

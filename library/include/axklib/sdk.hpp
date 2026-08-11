@@ -53,7 +53,7 @@ class AXK_SDK_API operation_context final {
     friend class build_plan;
     friend class portable_package;
     friend class package_import_plan;
-    friend class transaction;
+    friend class alteration;
 };
 
 struct content_node {
@@ -62,6 +62,7 @@ struct content_node {
     std::string display_name;
     std::string object_key;
     std::string object_type;
+    std::string scope_role;
     std::string quality;
     std::uint64_t child_count{};
 };
@@ -151,7 +152,13 @@ struct plan_summary {
     bool applies_changes{};
 };
 
-enum class package_root_kind : std::uint8_t { volume, program, bank_group, sample_bank, sample };
+enum class package_root_kind : std::uint8_t {
+    volume = 0,
+    program = 1,
+    sample_bank = 2,
+    sample = 3,
+    wave_data = 4,
+};
 
 struct package_root_selector {
     package_root_kind kind{package_root_kind::volume};
@@ -206,9 +213,44 @@ struct package_node_rename {
     std::string destination_name;
 };
 
+struct package_program_slot_assignment {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t destination_slot{};
+};
+
+enum class package_opaque_sequence_action : std::uint8_t { preserve_unchanged, skip };
+
+struct package_opaque_sequence_decision {
+    std::uint64_t package_index{};
+    std::string node_id;
+    package_opaque_sequence_action action{package_opaque_sequence_action::preserve_unchanged};
+};
+
 struct package_import_request {
     std::vector<package_root_destination> root_destinations;
     std::vector<package_node_rename> renames;
+    std::vector<package_program_slot_assignment> program_slot_assignments;
+    std::vector<package_opaque_sequence_decision> opaque_sequence_decisions;
+};
+
+struct package_import_warning_info {
+    std::string code;
+    std::string message;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint32_t> partition_index;
+    std::string volume_name;
+};
+
+struct package_opaque_sequence_choice_info {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<package_opaque_sequence_action> action;
 };
 
 struct package_conflict_info {
@@ -242,7 +284,55 @@ struct package_action_info {
     std::vector<std::string> actions;
     std::optional<std::string> canonical_action_id;
     std::optional<std::uint32_t> target_sfs_id;
-    std::optional<std::uint32_t> target_link_id;
+    std::optional<std::uint32_t> target_wave_data_reference_value;
+};
+
+struct package_program_assignment_adjustment_info {
+    std::string adjustment_id;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint32_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint32_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    std::string disposition;
+};
+
+struct package_program_slot_range_info {
+    std::uint32_t first{};
+    std::uint32_t last{};
+};
+
+struct package_program_slot_mapping_info {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t source_slot{};
+    std::uint32_t destination_slot{};
+    bool requires_user_action{};
+};
+
+struct package_program_slot_placement_info {
+    std::string placement_id;
+    std::uint32_t partition_index{};
+    std::string volume_name;
+    std::string mode;
+    bool applied{};
+    std::optional<std::uint32_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint64_t available_slot_count{};
+    std::vector<package_program_slot_range_info> occupied_ranges;
+    std::vector<package_program_slot_range_info> source_ranges;
+    std::vector<package_program_slot_range_info> destination_ranges;
+    std::vector<package_program_slot_mapping_info> mappings;
 };
 
 struct package_allocation_info {
@@ -253,14 +343,47 @@ struct package_allocation_info {
     std::string raw_volume;
     std::uint64_t inserted_object_count{};
     std::uint64_t reused_object_count{};
+    std::uint64_t blocked_object_count{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
     std::uint64_t directory_growth_bytes{};
+    std::uint64_t directory_growth_clusters{};
+    std::uint64_t directory_continuation_clusters{};
+    std::uint64_t infrastructure_clusters{};
+    std::uint64_t additional_allocated_bytes{};
     std::uint64_t remaining_object_ids{};
     std::uint64_t remaining_clusters{};
     std::uint64_t projected_image_sectors{};
     std::uint64_t projected_image_size_bytes{};
+};
+
+struct package_sfs_record_usage_info {
+    std::uint64_t package_index{};
+    std::uint64_t effective_object_record_slots{};
+    std::uint64_t volume_scaffolding_record_slots{};
+    std::uint64_t standalone_required_record_slots{};
+    std::uint64_t planned_object_record_slots{};
+    std::uint64_t planned_record_slots{};
+    std::uint64_t reused_object_count{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+};
+
+struct sfs_index_capacity_info {
+    std::uint32_t partition_index{};
+    std::uint64_t index_block_count{};
+    std::uint64_t records_per_index_block{};
+    std::uint64_t total_record_slots{};
+    std::uint64_t reserved_record_slots{};
+    std::uint64_t allocatable_record_slots{};
+    std::uint64_t used_record_slots{};
+    std::uint64_t free_record_slots{};
+    std::uint64_t required_record_slots{};
+    std::uint64_t allocated_record_slots{};
+    std::uint64_t shortfall_record_slots{};
+    std::uint64_t remaining_record_slots{};
+    std::vector<package_sfs_record_usage_info> packages;
 };
 
 struct package_import_summary {
@@ -271,6 +394,7 @@ struct package_import_summary {
     std::uint64_t package_count{};
     std::uint64_t destination_count{};
     std::uint64_t object_count{};
+    std::uint64_t adjustment_count{};
     std::uint64_t conflict_count{};
     std::uint64_t warning_count{};
     bool valid{};
@@ -282,6 +406,7 @@ struct package_import_result {
     std::string source_snapshot_id;
     std::string output_snapshot_id;
     std::uint64_t object_count{};
+    std::uint64_t adjustment_count{};
     bool applied{};
 };
 
@@ -357,10 +482,14 @@ class AXK_SDK_API package_import_plan final {
                                               const std::vector<std::string> &utf8_package_paths,
                                               const package_import_request &request, operation_context &context);
     result<package_import_summary> summary() const;
-    result<std::vector<package_issue_info>> warnings() const;
+    result<std::vector<package_import_warning_info>> warnings() const;
+    result<std::vector<package_opaque_sequence_choice_info>> opaque_sequences() const;
     result<std::vector<package_conflict_info>> conflicts() const;
     result<std::vector<package_action_info>> actions() const;
+    result<std::vector<package_program_assignment_adjustment_info>> adjustments() const;
+    result<std::vector<package_program_slot_placement_info>> program_slot_placements() const;
     result<std::vector<package_allocation_info>> allocation() const;
+    result<std::vector<sfs_index_capacity_info>> sfs_index_capacity() const;
     result<package_import_result> apply(const std::string &utf8_output_path, const write_options &options,
                                         operation_context &context);
 
@@ -391,6 +520,12 @@ class AXK_SDK_API snapshot final {
     friend class image;
 };
 
+struct media_build_limits {
+    std::uint64_t maximum_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_aggregate_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_output_bytes{737'280'000ULL};
+};
+
 class AXK_SDK_API build_plan final {
   public:
     build_plan();
@@ -401,6 +536,8 @@ class AXK_SDK_API build_plan final {
     build_plan &operator=(const build_plan &) = delete;
 
     static result<build_plan> from_manifest(const std::string &utf8_manifest_path, operation_context &context);
+    static result<build_plan> from_manifest(const std::string &utf8_manifest_path, const media_build_limits &limits,
+                                            operation_context &context);
     plan_summary summary() const noexcept;
     result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
 
@@ -409,23 +546,13 @@ class AXK_SDK_API build_plan final {
     std::unique_ptr<impl> impl_;
 };
 
-class AXK_SDK_API transaction final {
+class AXK_SDK_API alteration final {
   public:
-    transaction();
-    ~transaction();
-    transaction(transaction &&) noexcept;
-    transaction &operator=(transaction &&) noexcept;
-    transaction(const transaction &) = delete;
-    transaction &operator=(const transaction &) = delete;
-
-    static result<transaction> from_manifest(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
-                                             operation_context &context);
-    plan_summary summary() const noexcept;
-    result<void> apply(const std::string &utf8_output_path, const write_options &options, operation_context &context);
-
-  private:
-    struct impl;
-    std::unique_ptr<impl> impl_;
+    static result<plan_summary> inspect(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                                        operation_context &context);
+    static result<void> apply(const std::string &utf8_source_path, const std::string &utf8_manifest_path,
+                              const std::string &utf8_output_path, const write_options &options,
+                              operation_context &context);
 };
 
 AXK_SDK_API std::string sdk_version();

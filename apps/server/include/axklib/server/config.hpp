@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/contracts.hpp"
 
 namespace axk::server {
@@ -20,6 +21,7 @@ struct Config {
     std::string bearer_token;
     std::vector<TokenHash> token_hashes;
     std::vector<std::string> allowed_origins;
+    bool allow_insecure_remote_http{};
     std::filesystem::path workspace_store;
     std::filesystem::path state_directory;
     std::filesystem::path connection_file;
@@ -39,17 +41,25 @@ struct Config {
     std::size_t maximum_event_tickets{1024U};
     std::uint32_t event_ticket_ttl_seconds{30U};
     std::uint32_t job_retention_seconds{900U};
+    std::uint64_t maximum_alteration_journal_bytes{app::default_maximum_alteration_journal_bytes};
     std::uint64_t maximum_upload_bytes{4ULL * 1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_upload_total_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
-    std::size_t maximum_uploads{64U};
+    std::size_t maximum_uploads{1024U};
     std::size_t maximum_upload_chunk_bytes{1024U * 1024U};
     std::size_t maximum_download_range_bytes{8U * 1024U * 1024U};
+    std::uint64_t maximum_audition_bundle_bytes{128ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_download_archive_bytes{4ULL * 1024ULL * 1024ULL * 1024ULL};
     std::uint64_t maximum_download_archive_total_bytes{8ULL * 1024ULL * 1024ULL * 1024ULL};
     std::size_t maximum_download_archive_entries{100000U};
+    std::size_t maximum_download_archive_depth{64U};
+    std::size_t maximum_download_archive_path_bytes{32U * 1024U * 1024U};
+    std::size_t maximum_concurrent_archive_downloads{1U};
     std::uint32_t download_archive_retention_seconds{300U};
     std::uint32_t upload_retention_seconds{3600U};
     std::size_t maximum_image_sessions{32U};
+    std::uint64_t maximum_media_build_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_media_build_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_media_build_output_bytes{737'280'000ULL};
     std::size_t maximum_page_size{500U};
     std::uint32_t image_idle_seconds{900U};
     std::uint16_t worker_threads{2};

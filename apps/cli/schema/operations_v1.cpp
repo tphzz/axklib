@@ -24,9 +24,12 @@ OrderedJson audio_json(const AudioImportOutput &audio) {
         {"source_channels", audio.source_channels},
         {"source_sample_rate", audio.source_sample_rate},
         {"output_sample_rate", audio.output_sample_rate},
+        {"source_sample_width_bits", audio.source_sample_width_bits},
+        {"output_sample_width_bits", audio.output_sample_width_bits},
         {"output_frames", audio.output_frames},
         {"resampled", audio.resampled},
         {"quantized", audio.quantized},
+        {"sample_width_converted", audio.sample_width_converted},
         {"dither_algorithm", audio.dither_algorithm},
         {"split_stereo", audio.split_stereo},
         {"clipped_samples", audio.clipped_samples},
@@ -53,6 +56,7 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
             .object_name = operation.object_name,
             .removed_sfs_ids = {},
             .inserted_sfs_ids = {},
+            .placed_sfs_ids = {},
             .freed_clusters = operation.freed_clusters,
             .allocated_clusters = operation.allocated_clusters,
             .audio_import = std::nullopt,
@@ -60,6 +64,8 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
         std::ranges::transform(operation.removed_sfs_ids, std::back_inserter(projected.removed_sfs_ids),
                                [](SfsId id) { return id.value; });
         std::ranges::transform(operation.inserted_sfs_ids, std::back_inserter(projected.inserted_sfs_ids),
+                               [](SfsId id) { return id.value; });
+        std::ranges::transform(operation.placed_sfs_ids, std::back_inserter(projected.placed_sfs_ids),
                                [](SfsId id) { return id.value; });
         if (operation.audio_import) {
             const auto &audio = *operation.audio_import;
@@ -70,9 +76,12 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
                 .source_channels = audio.source_channels,
                 .source_sample_rate = audio.source_sample_rate,
                 .output_sample_rate = audio.output_sample_rate,
+                .source_sample_width_bits = audio.source_sample_width_bits,
+                .output_sample_width_bits = audio.output_sample_width_bits,
                 .output_frames = audio.output_frames,
                 .resampled = audio.resampled,
                 .quantized = audio.quantized,
+                .sample_width_converted = audio.sample_width_converted,
                 .dither_algorithm = audio.dither_algorithm,
                 .split_stereo = audio.split_stereo,
                 .clipped_samples = audio.clipped_samples,
@@ -81,6 +90,10 @@ AlterationOutput project_alteration(const AlterationResult &altered) {
         result.operations.push_back(std::move(projected));
     }
     return result;
+}
+
+AlterationOutput project_alteration(const AlterationInspection &inspection) {
+    return project_alteration(AlterationResult{inspection.source_path, std::nullopt, false, inspection.operations, {}});
 }
 
 Result<std::string> serialize(const AlterationOutput &output, bool pretty) {
@@ -95,6 +108,7 @@ Result<std::string> serialize(const AlterationOutput &output, bool pretty) {
                 {"object_name", operation.object_name},
                 {"removed_sfs_ids", operation.removed_sfs_ids},
                 {"inserted_sfs_ids", operation.inserted_sfs_ids},
+                {"placed_sfs_ids", operation.placed_sfs_ids},
                 {"freed_clusters", operation.freed_clusters},
                 {"allocated_clusters", operation.allocated_clusters},
                 {"audio_import", operation.audio_import ? audio_json(*operation.audio_import) : OrderedJson(nullptr)},

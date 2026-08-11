@@ -1,5 +1,7 @@
 #include "app.hpp"
 
+#include "exit_status.hpp"
+
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -100,7 +102,7 @@ int axk::cli::run(int argc, char **argv) {
     for (int index = 0; index < argc; ++index) {
         if (argv[index] == nullptr || !axk::text::is_valid_utf8(argv[index])) {
             std::cerr << "error: command-line argument is not valid UTF-8\n";
-            return 2;
+            return exit_code(ExitStatus::invalid_request);
         }
     }
     auto registry = axk::app::make_operation_registry();
@@ -167,15 +169,15 @@ int axk::cli::run(int argc, char **argv) {
     axk::cli::CorpusAuditRequest corpus_request;
     auto *corpus = app.add_subcommand("corpus", "run corpus-level workflows");
     auto *corpus_audit =
-        corpus->add_subcommand("audit", "run inventory, validation, relationship, and waveform smoke checks");
+        corpus->add_subcommand("audit", "run inventory, validation, relationship, and Wave Data smoke checks");
     corpus_audit->add_option("paths", corpus_request.paths, "input files or directories")->required()->expected(1, -1);
     corpus_audit->add_option("-o,--output-dir", corpus_request.output_directory, "directory for corpus audit reports")
         ->required();
     corpus_audit->add_option("--policy", corpus_request.policy, "validation policy")
         ->check(CLI::IsMember({"normal", "strict", "salvage-aware"}));
     corpus_audit->add_option("--wave-smoke-limit", corpus_request.wave_smoke_limit,
-                             "maximum decoded waveforms counted per container");
-    corpus_audit->add_flag("--skip-wave-smoke", corpus_request.skip_wave_smoke, "skip waveform decode checks");
+                             "maximum decoded Wave Data objects counted per container");
+    corpus_audit->add_flag("--skip-wave-smoke", corpus_request.skip_wave_smoke, "skip Wave Data decode checks");
     corpus_audit->add_flag("--overwrite", corpus_request.overwrite, "allow writing into a non-empty output directory");
 
     axk::cli::ExtractRequest extract_wav_request;
@@ -185,7 +187,7 @@ int axk::cli::run(int argc, char **argv) {
     const auto configure_extract = [](CLI::App &command, axk::cli::ExtractRequest &request) {
         command.add_option("scope", request.scope, "selection scope")
             ->required()
-            ->check(CLI::IsMember({"file", "volume", "program", "sbac", "sbnk"}));
+            ->check(CLI::IsMember({"file", "volume", "program", "sbac", "sbnk", "sequence"}));
         command.add_option("paths", request.paths, "input files or directories")->required()->expected(1, -1);
         command.add_option("-o,--output-dir", request.output_directory, "export output directory")->required();
         command.add_option("--path", request.selector_paths, "selector path from info --format paths");
@@ -210,7 +212,8 @@ int axk::cli::run(int argc, char **argv) {
     auto *package_export = package->add_subcommand("export", "export one portable package");
     package_export->add_option("source", package_export_request.source, "source sampler image")->required();
     package_export
-        ->add_option("--root", package_export_request.roots, "root selector: volume or program|sbac|sbnk|smpl=NAME")
+        ->add_option("--root", package_export_request.roots,
+                     "root selector: volume or program|sbac|sbnk|smpl|sequence=NAME")
         ->required()
         ->expected(1, -1);
     package_export->add_option("--partition", package_export_request.partition_index, "numeric source partition index");
@@ -241,6 +244,10 @@ int axk::cli::run(int argc, char **argv) {
             ->required()
             ->expected(1, -1);
         command.add_option("--rename-map", request.rename_map, "JSON array of explicit node renames");
+        command.add_option("--program-slot-map", request.program_slot_map,
+                           "JSON array of explicit Program slot assignments");
+        command.add_option("--opaque-sequence-map", request.opaque_sequence_map,
+                           "JSON array of preserve-or-skip decisions for undecodable Sequences");
         command.add_option("--format", request.format, "summary or json")->check(CLI::IsMember({"summary", "json"}));
     };
     auto *package_plan = package->add_subcommand("plan-import", "plan a package import");
@@ -252,7 +259,7 @@ int axk::cli::run(int argc, char **argv) {
                              "atomically replace an existing output image");
 
     axk::cli::OrphansRequest orphans_request;
-    auto *orphans = app.add_subcommand("orphans", "classify physical waveform ownership as JSON");
+    auto *orphans = app.add_subcommand("orphans", "classify Wave Data (SMPL) ownership as JSON");
     orphans->add_option("paths", orphans_request.paths, "input HDS image paths")->required()->expected(1, -1);
     orphans->add_option("-o,--output-dir", orphans_request.output_directory, "directory for orphan reports")
         ->required();
@@ -274,13 +281,14 @@ int axk::cli::run(int argc, char **argv) {
 
     if (const auto mismatch = validate_cli_operation_catalogue(app, registry)) {
         std::cerr << "error: " << *mismatch << '\n';
-        return 2;
+        return exit_code(ExitStatus::invalid_request);
     }
 
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError &error) {
-        return app.exit(error);
+        const auto parser_status = app.exit(error);
+        return exit_code(parser_status == 0 ? ExitStatus::success : ExitStatus::invalid_request);
     }
     if (*info) {
         return run_info_request(info_request);
@@ -318,15 +326,15 @@ int axk::cli::run(int argc, char **argv) {
     }
     if (*writer_commands.create_hds) {
         return run_create_hds(writer_commands.create_manifest, writer_commands.create_output,
-                              writer_commands.create_overwrite, writer_commands.create_pretty);
+                              writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_floppy) {
         return run_create_media(writer_commands.create_manifest, writer_commands.create_output, "fat12_floppy",
-                                writer_commands.create_overwrite, writer_commands.create_pretty);
+                                writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_iso) {
         return run_create_media(writer_commands.create_manifest, writer_commands.create_output, "iso9660",
-                                writer_commands.create_overwrite, writer_commands.create_pretty);
+                                writer_commands.create_overwrite, writer_commands.create_dry_run);
     }
     if (*writer_commands.create_manifest_command)
         return run_create_manifest(registry, writer_commands.create_manifest_kind,
@@ -342,5 +350,5 @@ int axk::cli::run(int argc, char **argv) {
                              writer_commands.alter_pretty);
     }
     std::cout << app.help();
-    return 0;
+    return exit_code(ExitStatus::success);
 }

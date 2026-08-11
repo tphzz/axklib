@@ -8,19 +8,20 @@ void axk::cli::register_writer_commands(CLI::App &app, WriterCommandState &state
     state.create_hds->add_option("manifest", state.create_manifest, "HDS build manifest JSON")->required();
     state.create_hds->add_option("-o,--output", state.create_output, "output HDS path")->required();
     state.create_hds->add_flag("--overwrite", state.create_overwrite, "replace an existing output");
-    state.create_hds->add_flag("--pretty", state.create_pretty, "indent JSON output");
+    state.create_hds->add_flag("--dry-run", state.create_dry_run, "validate and report the build plan without writing");
 
     state.create_floppy = create->add_subcommand("floppy", "create a fresh FAT12 floppy image");
     state.create_floppy->add_option("manifest", state.create_manifest, "media build manifest JSON")->required();
     state.create_floppy->add_option("-o,--output", state.create_output, "output IMA path")->required();
     state.create_floppy->add_flag("--overwrite", state.create_overwrite, "replace an existing output");
-    state.create_floppy->add_flag("--pretty", state.create_pretty, "indent JSON output");
+    state.create_floppy->add_flag("--dry-run", state.create_dry_run,
+                                  "validate and report the build plan without writing");
 
     state.create_iso = create->add_subcommand("iso", "create a fresh ISO9660 image");
     state.create_iso->add_option("manifest", state.create_manifest, "media build manifest JSON")->required();
     state.create_iso->add_option("-o,--output", state.create_output, "output ISO path")->required();
     state.create_iso->add_flag("--overwrite", state.create_overwrite, "replace an existing output");
-    state.create_iso->add_flag("--pretty", state.create_pretty, "indent JSON output");
+    state.create_iso->add_flag("--dry-run", state.create_dry_run, "validate and report the build plan without writing");
 
     state.create_manifest_command = create->add_subcommand("manifest", "write a starter build manifest");
     state.create_manifest_command->add_option("kind", state.create_manifest_kind, "hds, floppy, or iso")

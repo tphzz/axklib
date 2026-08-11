@@ -1,8 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <format>
 #include <fstream>
 #include <limits>
+#include <map>
+#include <string>
 #include <tuple>
+#include <vector>
 
 #if defined(__unix__)
 #include <csignal>
@@ -17,6 +21,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
+#include "axklib/writer_internal.hpp"
 
 namespace {
 
@@ -27,8 +32,11 @@ constexpr std::string_view manifest = R"json({
     "name":"P1",
     "volumes":[{
       "name":"V1",
-      "waveforms":[{"id":"tone","name":"Tone","path":"audio/tone.wav","root_key":60}],
-      "sample_banks":[{"name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]
+      "waveforms":[{"id":"tone","name":"Tone","path":"audio/tone.wav","root_key":60,
+                    "fine_tune_cents":-17,"loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}],
+      "samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":12,"key_high":96,
+                  "fine_tune_cents":-17,"velocity_low":8,"velocity_high":110,
+                  "loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}]
     }]
   }]
 })json";
@@ -38,23 +46,23 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     volume.name = "Graph Volume";
     volume.waveforms.push_back({"wave", "Graph Wave", audio_path, 60U, {}});
 
-    axk::SampleBankSpec grouped;
-    grouped.name = "Grouped Bank";
-    grouped.waveform_id = "wave";
-    grouped.root_key = 60U;
-    grouped.key_low = 0U;
-    grouped.key_high = 127U;
-    volume.sample_banks.push_back(std::move(grouped));
+    axk::SampleSpec banked;
+    banked.name = "Grouped Sample";
+    banked.waveform_id = "wave";
+    banked.root_key = 60U;
+    banked.key_low = 0U;
+    banked.key_high = 127U;
+    volume.samples.push_back(std::move(banked));
 
-    axk::SampleBankSpec direct;
-    direct.name = "Direct Bank";
+    axk::SampleSpec direct;
+    direct.name = "Direct Sample";
     direct.waveform_id = "wave";
     direct.root_key = 60U;
     direct.key_low = 0U;
     direct.key_high = 127U;
-    volume.sample_banks.push_back(std::move(direct));
-    volume.sample_bank_groups.push_back({"Graph Group", {"Grouped Bank"}});
-    volume.programs.push_back({1U, {{"SBAC", "Graph Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
+    volume.samples.push_back(std::move(direct));
+    volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
     return volume;
 }
 
@@ -65,11 +73,90 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
     ASSERT_TRUE(parsed) << parsed.error().message;
     ASSERT_EQ(parsed->partitions.size(), 1U);
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].path, "/project/audio/tone.wav");
+    EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].fine_tune_cents, -17);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].loop_start_frame, 4U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].level, 100U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_low, 8U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_high, 110U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].loop_length_frames, 80U);
+    const axk::detail::PreparedWaveformMember member{"Tone", 0x100U, 44'100U, 100U};
+    const auto parsed_payload = axk::detail::prepare_sbnk_payload(parsed->partitions[0].volumes[0].samples[0], member);
+    ASSERT_TRUE(parsed_payload) << parsed_payload.error().message;
+    EXPECT_EQ(std::to_integer<std::uint8_t>((*parsed_payload)[0x116U]), 100U);
+
+    axk::SampleSpec direct;
+    direct.name = "Direct";
+    const auto direct_payload = axk::detail::prepare_sbnk_payload(direct, member);
+    ASSERT_TRUE(direct_payload) << direct_payload.error().message;
+    EXPECT_EQ(std::to_integer<std::uint8_t>((*direct_payload)[0x116U]), 100U);
     const auto geometry = axk::plan_hds_geometry(*parsed);
     ASSERT_TRUE(geometry);
     ASSERT_EQ(geometry->size(), 1U);
     EXPECT_EQ((*geometry)[0].start_sector, 3U);
     EXPECT_EQ((*geometry)[0].first_payload_cluster, 488U);
+}
+
+TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
+    constexpr std::string_view empty = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[]}]
+    })json";
+    const auto parsed = axk::parse_hds_build_manifest(empty);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    ASSERT_EQ(parsed->partitions.size(), 1U);
+    EXPECT_TRUE(parsed->partitions.front().volumes.empty());
+}
+
+TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
+    constexpr std::string_view obsolete = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"V1",
+        "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "sample_banks":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "sample_bank_groups":[{"name":"Bank","member_sample_banks":["Sample"]}],
+        "programs":[{"number":1,"assignments":[
+          {"sample_bank_group":"Bank","receive_channel":1},
+          {"sample_bank":"Sample","receive_channel":2}
+        ]}]
+      }]}]
+    })json";
+    EXPECT_FALSE(axk::parse_hds_build_manifest(obsolete, "/project"));
+
+    constexpr std::string_view singular_member = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"V1",
+        "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "sample_banks":[{"name":"Bank","member_sample":"Sample"}]
+      }]}]
+    })json";
+    EXPECT_FALSE(axk::parse_hds_build_manifest(singular_member, "/project"));
+
+    constexpr std::string_view canonical_single_member = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"V1",
+        "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "sample_banks":[{"name":"Bank","member_samples":["Sample"]}]
+      }]}]
+    })json";
+    EXPECT_TRUE(axk::parse_hds_build_manifest(canonical_single_member, "/project"));
+
+    constexpr std::string_view unsupported_version = R"json({
+      "schema_version":"1.1",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[]}]
+    })json";
+    const auto rejected = axk::parse_hds_build_manifest(unsupported_version);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().message, "manifest.schema_version must be '1.0'");
 }
 
 TEST(HdsManifest, RejectsUnknownFieldsReferencesAndInvalidGeometry) {
@@ -91,16 +178,16 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     ASSERT_TRUE(hds) << hds.error().message;
     const auto parsed_hds = axk::parse_hds_build_manifest(*hds);
     ASSERT_TRUE(parsed_hds) << parsed_hds.error().message;
+    EXPECT_EQ(parsed_hds->schema_version, axk::build_manifest_schema_version);
     ASSERT_EQ(parsed_hds->partitions.size(), 1U);
-    ASSERT_EQ(parsed_hds->partitions.front().volumes.size(), 1U);
+    EXPECT_TRUE(parsed_hds->partitions.front().volumes.empty());
     EXPECT_EQ(parsed_hds->size_bytes, 536'870'912U);
-    EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().waveforms.empty());
-    EXPECT_TRUE(parsed_hds->partitions.front().volumes.front().sample_banks.empty());
 
     const auto floppy = axk::serialize_build_manifest_template(axk::BuildManifestKind::fat12_floppy);
     ASSERT_TRUE(floppy) << floppy.error().message;
     const auto parsed_floppy = axk::parse_media_build_manifest(*floppy, "manifest-root");
     ASSERT_TRUE(parsed_floppy) << parsed_floppy.error().message;
+    EXPECT_EQ(parsed_floppy->schema_version, axk::build_manifest_schema_version);
     ASSERT_TRUE(parsed_floppy->authored_volume);
     EXPECT_EQ(parsed_floppy->format, axk::MediaImageFormat::fat12_floppy);
     ASSERT_EQ(parsed_floppy->authored_volume->waveforms.size(), 1U);
@@ -110,10 +197,11 @@ TEST(BuildManifestTemplate, EmitsParseableHdsFloppyAndIsoStarters) {
     ASSERT_TRUE(iso) << iso.error().message;
     const auto parsed_iso = axk::parse_media_build_manifest(*iso);
     ASSERT_TRUE(parsed_iso) << parsed_iso.error().message;
+    EXPECT_EQ(parsed_iso->schema_version, axk::build_manifest_schema_version);
     ASSERT_TRUE(parsed_iso->authored_volume);
     EXPECT_EQ(parsed_iso->format, axk::MediaImageFormat::iso9660);
     EXPECT_TRUE(parsed_iso->authored_volume->waveforms.empty());
-    EXPECT_TRUE(parsed_iso->authored_volume->sample_banks.empty());
+    EXPECT_TRUE(parsed_iso->authored_volume->samples.empty());
 
     EXPECT_FALSE(axk::serialize_build_manifest_template(
         static_cast<axk::BuildManifestKind>(std::numeric_limits<std::uint8_t>::max())));
@@ -150,6 +238,63 @@ TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
     }
 }
 
+TEST(HdsCreationProfiles, PublishExactCapacitiesDefaultsAndAdmittedPartitionCounts) {
+    const auto &profiles = axk::hds_creation_profiles();
+    ASSERT_EQ(profiles.size(), 5U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[0].id), "floppy-scale");
+    EXPECT_EQ(profiles[0].size_bytes, 1'474'560U);
+    EXPECT_EQ(profiles[0].default_partition_count, 1U);
+    ASSERT_EQ(profiles[0].partition_options.size(), 1U);
+    EXPECT_EQ(profiles[0].partition_options[0].partition_count, 1U);
+
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[1].id), "cd-r-650");
+    EXPECT_EQ(profiles[1].size_bytes, 681'984'000U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[2].id), "cd-r-700");
+    EXPECT_EQ(profiles[2].size_bytes, 737'280'000U);
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[3].id), "hds-1-gib");
+    EXPECT_EQ(profiles[3].size_bytes, 1'073'741'824U);
+    for (std::size_t index = 1; index <= 3; ++index) {
+        EXPECT_EQ(profiles[index].default_partition_count, 1U);
+        ASSERT_EQ(profiles[index].partition_options.size(), 8U);
+        for (std::size_t option = 0; option < 8U; ++option)
+            EXPECT_EQ(profiles[index].partition_options[option].partition_count, option + 1U);
+    }
+
+    EXPECT_EQ(axk::hds_creation_profile_id(profiles[4].id), "hds-2-gib");
+    EXPECT_EQ(profiles[4].size_bytes, 2'147'483'648U);
+    EXPECT_EQ(profiles[4].default_partition_count, 2U);
+    ASSERT_EQ(profiles[4].partition_options.size(), 7U);
+    for (std::size_t option = 0; option < 7U; ++option)
+        EXPECT_EQ(profiles[4].partition_options[option].partition_count, option + 2U);
+
+    for (const auto &profile : profiles) {
+        const auto parsed = axk::parse_hds_creation_profile_id(axk::hds_creation_profile_id(profile.id));
+        ASSERT_TRUE(parsed);
+        EXPECT_EQ(*parsed, profile.id);
+    }
+    EXPECT_FALSE(axk::parse_hds_creation_profile_id("unknown"));
+}
+
+TEST(HdsCreationProfiles, PlanCanonicalEmptyPartitionsThroughTheRegularWriterPlanner) {
+    const auto planned = axk::plan_hds_creation({axk::HdsCreationProfileId::cd_r_700, 3U});
+    ASSERT_TRUE(planned) << planned.error().message;
+    EXPECT_EQ(planned->manifest.size_bytes, 737'280'000U);
+    ASSERT_EQ(planned->manifest.partitions.size(), 3U);
+    ASSERT_EQ(planned->summary.partitions.size(), 3U);
+    EXPECT_EQ(planned->summary.object_count, 0U);
+    EXPECT_EQ(planned->summary.size_bytes, planned->manifest.size_bytes);
+    for (std::size_t index = 0; index < planned->manifest.partitions.size(); ++index) {
+        const auto &partition = planned->manifest.partitions[index];
+        EXPECT_EQ(partition.name, "PARTITION " + std::to_string(index + 1U));
+        EXPECT_TRUE(partition.volumes.empty());
+    }
+
+    EXPECT_FALSE(axk::plan_hds_creation({axk::HdsCreationProfileId::floppy_scale, 2U}));
+    EXPECT_FALSE(axk::plan_hds_creation({axk::HdsCreationProfileId::hds_2_gib, 1U}));
+    EXPECT_TRUE(axk::plan_hds_creation({axk::HdsCreationProfileId::hds_2_gib, 2U}));
+    EXPECT_FALSE(axk::plan_hds_creation({static_cast<axk::HdsCreationProfileId>(255U), 1U}));
+}
+
 TEST(AudioImport, PreservesNativePcm16AndChoosesOnlyHardwareRates) {
     axk::Waveform source;
     source.format = {1, 2, 48000};
@@ -174,6 +319,118 @@ TEST(AudioImport, PreservesNativePcm16AndChoosesOnlyHardwareRates) {
     std::filesystem::remove(path, error);
 }
 
+TEST(AudioImport, SmplSerializationRejectsWaveDataPastTheHardwareAddressLimit) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_frames = axk::maximum_wave_data_frames_per_channel + 1U;
+    audio.pcm_channels = {{std::byte{}, std::byte{}}};
+    axk::WaveformSpec waveform;
+    waveform.name = "Too Large";
+
+    const auto payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_FALSE(payload);
+    EXPECT_EQ(payload.error().code, axk::ErrorCode::audio_wave_data_too_large);
+
+    audio.output_frames = 1U;
+    audio.pcm_channels = {
+        std::vector<std::byte>(static_cast<std::size_t>(axk::maximum_wave_data_pcm16_bytes_per_channel + 2U))};
+    const auto oversized_pcm = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_FALSE(oversized_pcm);
+    EXPECT_EQ(oversized_pcm.error().code, axk::ErrorCode::audio_wave_data_too_large);
+}
+
+TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 400U;
+    audio.pcm_channels = {std::vector<std::byte>(800U)};
+
+    axk::WaveformSpec waveform;
+    waveform.name = "Mapped Wave";
+    waveform.root_key = 64U;
+    waveform.fine_tune_cents = 25;
+    waveform.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    waveform.loop_start_frame = 17U;
+    waveform.loop_length_frames = 335U;
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
+    const auto decoded_waveform = axk::decode_object(*waveform_payload);
+    ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
+    const auto *smpl = std::get_if<axk::CurrentSmpl>(&decoded_waveform->payload);
+    ASSERT_NE(smpl, nullptr);
+    EXPECT_EQ(smpl->root_key.value, 64U);
+    EXPECT_EQ(smpl->fine_tune_cents.value, 25);
+    EXPECT_EQ(smpl->loop_mode.value, 1U);
+    EXPECT_EQ(smpl->wave_length_frames.value, 400U);
+    EXPECT_EQ(smpl->loop_start_frame.value, 17U);
+    EXPECT_EQ(smpl->loop_length_frames.value, 335U);
+
+    axk::SampleSpec sample;
+    sample.name = "Mapped Sample";
+    sample.root_key = 64U;
+    sample.fine_tune_cents = 25;
+    sample.key_low = 24U;
+    sample.key_high = 96U;
+    sample.velocity_low = 10U;
+    sample.velocity_high = 110U;
+    sample.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.loop_start_frame = 17U;
+    sample.loop_length_frames = 335U;
+    const axk::detail::PreparedWaveformMember member{"Mapped Wave", 0x100U, 44'100U, 400U};
+    const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(sample_payload) << sample_payload.error().message;
+    const auto decoded_sample = axk::decode_object(*sample_payload);
+    ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
+    const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
+    ASSERT_NE(sbnk, nullptr);
+    EXPECT_EQ(sbnk->left.root_key, 64U);
+    EXPECT_EQ(sbnk->left.fine_tune_cents, 25);
+    EXPECT_EQ(sbnk->key_range_low, 24U);
+    EXPECT_EQ(sbnk->key_range_high, 96U);
+    EXPECT_EQ(sbnk->velocity_range_low, 10U);
+    EXPECT_EQ(sbnk->velocity_range_high, 110U);
+    EXPECT_EQ(sbnk->loop_mode, 1U);
+    EXPECT_EQ(sbnk->left.wave_start_frame, 0U);
+    EXPECT_EQ(sbnk->left.wave_length_frames, 400U);
+    EXPECT_EQ(sbnk->left.loop_start_frame, 17U);
+    EXPECT_EQ(sbnk->left.loop_length_frames, 335U);
+}
+
+TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 400U;
+    audio.pcm_channels = {std::vector<std::byte>(800U)};
+
+    axk::WaveformSpec waveform;
+    waveform.name = "One Shot Wave";
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
+    const auto decoded_waveform = axk::decode_object(*waveform_payload);
+    ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
+    const auto *smpl = std::get_if<axk::CurrentSmpl>(&decoded_waveform->payload);
+    ASSERT_NE(smpl, nullptr);
+    EXPECT_EQ(smpl->loop_mode.value, 4U);
+    EXPECT_EQ(smpl->loop_start_frame.value, 0U);
+    EXPECT_EQ(smpl->loop_length_frames.value, 400U);
+
+    axk::SampleSpec sample;
+    sample.name = "One Shot Sample";
+    const axk::detail::PreparedWaveformMember member{"One Shot Wave", 0x100U, 44'100U, 400U};
+    const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(sample_payload) << sample_payload.error().message;
+    const auto decoded_sample = axk::decode_object(*sample_payload);
+    ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
+    const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
+    ASSERT_NE(sbnk, nullptr);
+    EXPECT_EQ(sbnk->loop_mode, 4U);
+    EXPECT_EQ(sbnk->left.wave_start_frame, 0U);
+    EXPECT_EQ(sbnk->left.loop_start_frame, 0U);
+    EXPECT_EQ(sbnk->left.loop_length_frames, 400U);
+}
+
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
@@ -193,30 +450,177 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     std::filesystem::remove(path, error);
 }
 
-TEST(HdsWriter, WritesMonoSampleBankAndRoundTripsExactPhysicalPcm) {
+TEST(HdsWriter, SizesDirectoryIndexFromRecordIdsAndEnforcesFixedCapacity) {
+    const auto record = [](std::uint32_t id) {
+        return axk::detail::PreparedRecord{id, {}, axk::detail::RecordKind::directory};
+    };
+    const std::array first_page{record(0U), record(13U)};
+    const auto first_size = axk::detail::checked_directory_index_size(first_page);
+    ASSERT_TRUE(first_size) << first_size.error().message;
+    EXPECT_EQ(*first_size, 1024U);
+
+    const std::array second_page{record(0U), record(14U)};
+    const auto second_size = axk::detail::checked_directory_index_size(second_page);
+    ASSERT_TRUE(second_size) << second_size.error().message;
+    EXPECT_EQ(*second_size, 2048U);
+
+    const std::array boundary{record(0U), record(5011U)};
+    const auto boundary_size = axk::detail::checked_directory_index_size(boundary);
+    ASSERT_TRUE(boundary_size) << boundary_size.error().message;
+    EXPECT_EQ(*boundary_size, 358U * 1024U);
+
+    const std::array outside{record(0U), record(5012U)};
+    EXPECT_FALSE(axk::detail::checked_directory_index_size(outside));
+    const std::array duplicate{record(1U), record(1U)};
+    EXPECT_FALSE(axk::detail::checked_directory_index_size(duplicate));
+}
+
+TEST(HdsWriter, RejectsAValidTypedManifestThatExceedsTheFixedDirectoryIndex) {
+    axk::HdsBuildManifest value{"1.0", axk::maximum_hds_size, {{"hd1", {}}}};
+    for (std::size_t index = 0; index < 835U; ++index)
+        value.partitions.front().volumes.push_back({"V" + std::to_string(index), {}, {}, {}, {}});
+    const auto geometry = axk::plan_hds_geometry(value);
+    ASSERT_TRUE(geometry) << geometry.error().message;
+    const auto records = axk::detail::prepare_partition_records(value.partitions.front(), geometry->front(), 1U, {});
+    ASSERT_FALSE(records);
+    EXPECT_EQ(records.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUniqueMembers) {
+    std::map<std::string, axk::SampleSpec> samples;
+    std::vector<std::string> member_names;
+    for (std::size_t index = 1U; index <= 128U; ++index) {
+        auto name = std::format("Sample {}", index);
+        axk::SampleSpec sample;
+        sample.name = name;
+        samples.emplace(name, std::move(sample));
+        member_names.push_back(std::move(name));
+    }
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Empty", {}}, samples));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Duplicate", {"Sample 1", "Sample 1"}}, samples));
+
+    const std::vector<std::string> eight_members{member_names.begin(), member_names.begin() + 8};
+    const auto eight = axk::detail::prepare_sbac_payload({"Eight", eight_members}, samples);
+    ASSERT_TRUE(eight) << eight.error().message;
+    EXPECT_EQ(eight->size(), 0x210U);
+
+    const std::vector<std::string> nine_members{member_names.begin(), member_names.begin() + 9};
+    const auto nine = axk::detail::prepare_sbac_payload({"Nine", nine_members}, samples);
+    ASSERT_TRUE(nine) << nine.error().message;
+    EXPECT_EQ(nine->size(), 0x224U);
+
+    member_names.resize(127U);
+    const auto maximum = axk::detail::prepare_sbac_payload({"Maximum", member_names}, samples);
+    ASSERT_TRUE(maximum) << maximum.error().message;
+    EXPECT_EQ(maximum->size(), 0xb5cU);
+    const auto decoded = axk::decode_object(*maximum);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    EXPECT_EQ(decoded->header.record_size_or_header_used, 0xb08U);
+    EXPECT_EQ(decoded->header.payload_bytes_0x1c, 0xb2cU);
+    const auto *sample_bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
+    ASSERT_NE(sample_bank, nullptr);
+    ASSERT_EQ(sample_bank->slots.size(), 127U);
+    EXPECT_EQ(sample_bank->slots.front().name, "Sample 1");
+    EXPECT_EQ(sample_bank->slots.back().name, "Sample 127");
+
+    member_names.push_back("Sample 128");
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Oversized", member_names}, samples));
+}
+
+TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 1U;
+    audio.pcm_channels = {{std::byte{}, std::byte{}}};
+    axk::WaveformSpec waveform;
+    waveform.name = "Wave Data";
+    const auto low_link = axk::detail::prepare_smpl_payload(waveform, audio, 0xb9U);
+    ASSERT_FALSE(low_link);
+    EXPECT_EQ(low_link.error().code, axk::ErrorCode::internal_invariant);
+    audio.output_sample_rate = 0U;
+    EXPECT_FALSE(axk::detail::prepare_smpl_payload(waveform, audio, 0x100U));
+    audio.output_sample_rate = 44'100U;
+
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    const axk::detail::PreparedWaveformMember member{"Wave Data", 0x100U, 44'100U, 1U};
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, member, {}, false, {0U}));
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, member, {}, false, {129U}));
+
+    axk::ProgramSpec program;
+    program.number = 1U;
+    program.name = "Program";
+    program.assignments.resize(12U);
+    const auto oversized_program = axk::detail::prepare_prog_payload(program);
+    ASSERT_FALSE(oversized_program);
+    EXPECT_EQ(oversized_program.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {
+    axk::ProgramSpec program;
+    program.number = 7U;
+    program.name = "Bass";
+    program.assignments.push_back({"SBAC", "Bass Bank", 0U, axk::ProgramReceiveMode::sample});
+
+    const auto payload = axk::detail::prepare_prog_payload(program);
+    ASSERT_TRUE(payload) << payload.error().message;
+    const auto decoded = axk::decode_object(*payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *current = std::get_if<axk::CurrentProg>(&decoded->payload);
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->program_name, "Bass");
+    ASSERT_EQ(std::ranges::count_if(current->assignments, [](const auto &row) { return !row.name.empty(); }), 1U);
+    EXPECT_EQ(current->assignments.front().name, "Bass Bank");
+    EXPECT_EQ(current->assignments.front().kind, 0x11U);
+    EXPECT_EQ(current->assignments.front().flags, 0xffU);
+    EXPECT_EQ(current->assignments.front().raw_row[0x28], std::byte{0xff});
+}
+
+TEST(HdsWriter, AtomicallyWritesAndReopensPartitionWithoutVolumes) {
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {{"hd1", {}}}};
+    const auto path = std::filesystem::temp_directory_path() / "axklib-native-empty-partition.hds";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const auto written = axk::write_hds_image(manifest_value, path);
+    ASSERT_TRUE(written) << written.error().message;
+    const auto reopened = axk::open_image(path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->partitions().size(), 1U);
+    const auto &root = *std::ranges::find(reopened->partitions()[0].records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    EXPECT_EQ(std::ranges::count_if(root.directory_entries,
+                                    [](const auto &entry) {
+                                        return entry.name != "." && entry.name != ".." && entry.name != "sfserrlog" &&
+                                               entry.name != "sfserram";
+                                    }),
+              0U);
+    std::filesystem::remove(path, error);
+}
+
+TEST(HdsWriter, WritesMonoSampleAndRoundTripsExactPhysicalPcm) {
     axk::Waveform source;
     source.format = {1, 2, 44100};
     source.frame_count = 3;
     source.pcm = {std::byte{}, std::byte{}, std::byte{0xe8}, std::byte{0x03}, std::byte{0x18}, std::byte{0xfc}};
-    const auto audio_path = std::filesystem::temp_directory_path() / "axklib-writer-bank.wav";
-    const auto image_path = std::filesystem::temp_directory_path() / "axklib-writer-bank.hds";
+    const auto audio_path = std::filesystem::temp_directory_path() / "axklib-writer-sample.wav";
+    const auto image_path = std::filesystem::temp_directory_path() / "axklib-writer-sample.hds";
     std::error_code error;
     std::filesystem::remove(audio_path, error);
     std::filesystem::remove(image_path, error);
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
 
     axk::WaveformSpec waveform{"wave", "Wave", audio_path, 60, {}};
-    axk::SampleBankSpec bank;
-    bank.name = "Bank";
-    bank.waveform_id = "wave";
-    bank.root_key = 60;
-    bank.key_low = 48;
-    bank.key_high = 72;
-    bank.level = 96;
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60;
+    sample.key_low = 48;
+    sample.key_high = 72;
+    sample.level = 96;
     axk::VolumeSpec volume;
     volume.name = "Volume";
     volume.waveforms.push_back(std::move(waveform));
-    volume.sample_banks.push_back(std::move(bank));
+    volume.samples.push_back(std::move(sample));
     axk::HdsBuildManifest manifest_value{"1.0", 4U * 1024U * 1024U, {}};
     manifest_value.partitions.push_back({"hd1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest_value, image_path));
@@ -227,9 +631,9 @@ TEST(HdsWriter, WritesMonoSampleBankAndRoundTripsExactPhysicalPcm) {
     const auto type = [](const axk::ObjectSnapshot &item) { return item.object.header.type; };
     EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::smpl, type), 1U);
     EXPECT_EQ(std::ranges::count(catalog->objects, axk::ObjectType::sbnk, type), 1U);
-    const auto sample = std::ranges::find(catalog->objects, axk::ObjectType::smpl, type);
-    ASSERT_NE(sample, catalog->objects.end());
-    const auto decoded = axk::decode_waveform(*reopened, *sample);
+    const auto wave_data = std::ranges::find(catalog->objects, axk::ObjectType::smpl, type);
+    ASSERT_NE(wave_data, catalog->objects.end());
+    const auto decoded = axk::decode_waveform(*reopened, *wave_data);
     ASSERT_TRUE(decoded);
     EXPECT_TRUE(std::ranges::equal(source.pcm, std::span<const std::byte>{decoded->pcm}.first(source.pcm.size())));
     std::filesystem::remove(audio_path, error);
@@ -326,8 +730,8 @@ TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {
     "authored_volume":{
       "name":"Test Volume",
       "waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],
-      "sample_banks":[{
-        "name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127
+      "samples":[{
+        "name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127
       }]
     }
   })json";
@@ -381,15 +785,15 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
     ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
 
     axk::WaveformSpec waveform{"wave", "Wave", audio_path, 60, {}};
-    axk::SampleBankSpec bank;
-    bank.name = "Bank";
-    bank.waveform_id = "wave";
-    bank.root_key = 60;
-    bank.key_high = 127;
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60;
+    sample.key_high = 127;
     axk::VolumeSpec volume;
     volume.name = "Volume";
     volume.waveforms.push_back(std::move(waveform));
-    volume.sample_banks.push_back(std::move(bank));
+    volume.samples.push_back(std::move(sample));
 
     for (const auto format : {axk::MediaImageFormat::fat12_floppy, axk::MediaImageFormat::iso9660}) {
         axk::MediaBuildManifest manifest_value;
@@ -480,7 +884,7 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
 
             for (const auto &[path, name, expected_hash] :
                  std::array{std::tuple{"GROUP/F001/SMPL/0000", "Wave", std::byte{0xfa}},
-                            std::tuple{"GROUP/F001/SBNK/0000", "Bank", std::byte{0xc7}}}) {
+                            std::tuple{"GROUP/F001/SBNK/0000", "Sample", std::byte{0xc9}}}) {
                 const auto catalog_file = find_file(path);
                 ASSERT_NE(catalog_file, iso->files().end());
                 const auto catalog_bytes = iso->read_file(*catalog_file);
@@ -492,14 +896,14 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
             EXPECT_EQ(find_file("GROUP/F001/SMPL/F000"), iso->files().end());
 
             auto damaged_bytes = first_bytes;
-            const auto sample_catalog = find_file("GROUP/F001/SMPL/0000");
-            ASSERT_NE(sample_catalog, iso->files().end());
-            const auto catalog_offset = static_cast<std::size_t>(sample_catalog->extent_sector) * 2048U;
+            const auto wave_data_catalog = find_file("GROUP/F001/SMPL/0000");
+            ASSERT_NE(wave_data_catalog, iso->files().end());
+            const auto catalog_offset = static_cast<std::size_t>(wave_data_catalog->extent_sector) * 2048U;
 
-            const auto sample_object = find_file("GROUP/F001/SMPL/F001");
-            ASSERT_NE(sample_object, iso->files().end());
+            const auto wave_data_object = find_file("GROUP/F001/SMPL/F001");
+            ASSERT_NE(wave_data_object, iso->files().end());
             auto missing_tail_bytes = first_bytes;
-            missing_tail_bytes.resize(static_cast<std::size_t>(sample_object->extent_sector) * 2048U);
+            missing_tail_bytes.resize(static_cast<std::size_t>(wave_data_object->extent_sector) * 2048U);
             const auto missing_tail_path = root / "missing-object-tail.iso";
             std::ofstream missing_tail_output{missing_tail_path, std::ios::binary | std::ios::trunc};
             missing_tail_output.write(missing_tail_bytes.data(),
@@ -545,10 +949,10 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
         ASSERT_TRUE(media) << media.error().message;
         const auto objects = media->objects();
         ASSERT_TRUE(objects) << objects.error().message;
-        const auto sample = std::ranges::find(objects->begin(), objects->end(), axk::ObjectType::smpl,
-                                              [](const auto &object) { return object.decoded.header.type; });
-        ASSERT_NE(sample, objects->end());
-        const auto decoded = axk::decode_waveform(*sample);
+        const auto wave_data = std::ranges::find(objects->begin(), objects->end(), axk::ObjectType::smpl,
+                                                 [](const auto &object) { return object.decoded.header.type; });
+        ASSERT_NE(wave_data, objects->end());
+        const auto decoded = axk::decode_waveform(*wave_data);
         ASSERT_TRUE(decoded) << decoded.error().message;
         EXPECT_TRUE(std::ranges::equal(source.pcm, std::span<const std::byte>{decoded->pcm}.first(source.pcm.size())));
     }
@@ -639,7 +1043,50 @@ TEST(MediaWriter, AllowsObjectEmptyIsoPackageStagingTargetOnly) {
     std::filesystem::remove_all(root, error);
 }
 
-TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
+TEST(MediaWriter, EnforcesAggregatePayloadAndProjectedOutputLimits) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-media-limits";
+    const auto iso_path = root / "limited.iso";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    axk::VolumeSpec empty_volume;
+    empty_volume.name = "Empty";
+    axk::MediaBuildManifest empty_iso;
+    empty_iso.schema_version = "1.0";
+    empty_iso.format = axk::MediaImageFormat::iso9660;
+    empty_iso.authored_volume = empty_volume;
+    empty_iso.iso_volume_id = "AXK_LIMIT";
+    empty_iso.raw_group = "GROUP";
+    empty_iso.group_name = "Limits";
+    empty_iso.raw_volume = "F001";
+    empty_iso.volume_name = "Empty";
+    axk::MediaBuildLimits output_limited;
+    output_limited.maximum_output_bytes = 4096U;
+    const auto oversized_output = axk::write_media_image(empty_iso, iso_path, false, output_limited);
+    ASSERT_FALSE(oversized_output);
+    EXPECT_EQ(oversized_output.error().code, axk::ErrorCode::io_unsupported_size);
+    EXPECT_FALSE(std::filesystem::exists(iso_path));
+
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44100};
+    waveform.frame_count = 4U;
+    waveform.pcm.resize(8U);
+    const auto wav_path = root / "tone.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(wav_path, waveform));
+    auto authored = empty_iso;
+    authored.authored_volume->waveforms.push_back({"wave", "Wave", wav_path, 60U, {}});
+    axk::MediaBuildLimits aggregate_limited;
+    aggregate_limited.maximum_object_bytes = 128U;
+    aggregate_limited.maximum_aggregate_payload_bytes = 128U;
+    const auto oversized_payload = axk::plan_media_build(authored, aggregate_limited);
+    ASSERT_FALSE(oversized_payload);
+    EXPECT_EQ(oversized_payload.error().code, axk::ErrorCode::io_unsupported_size);
+
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(MediaWriter, SavedObjectTransferAddsKnownSampleDependencies) {
     axk::Waveform source;
     source.format = {1, 2, 44100};
     source.frame_count = 1;
@@ -660,14 +1107,14 @@ TEST(MediaWriter, SavedObjectTransferAddsKnownSampleBankDependencies) {
     ASSERT_TRUE(source_media);
     const auto source_objects = source_media->objects();
     ASSERT_TRUE(source_objects);
-    const auto bank_object = std::ranges::find(*source_objects, axk::ObjectType::sbnk,
-                                               [](const auto &object) { return object.decoded.header.type; });
-    ASSERT_NE(bank_object, source_objects->end());
+    const auto sample_object = std::ranges::find(*source_objects, axk::ObjectType::sbnk,
+                                                 [](const auto &object) { return object.decoded.header.type; });
+    ASSERT_NE(sample_object, source_objects->end());
 
     axk::MediaBuildManifest transfer;
     transfer.schema_version = "1.0";
     transfer.format = axk::MediaImageFormat::fat12_floppy;
-    transfer.transfer = axk::SavedObjectTransferSpec{source_path, {bank_object->key}};
+    transfer.transfer = axk::SavedObjectTransferSpec{source_path, {sample_object->key}};
     const auto written = axk::write_media_image(transfer, output_path);
     ASSERT_TRUE(written) << written.error().message;
     EXPECT_EQ(written->object_count, 2U);
@@ -756,7 +1203,7 @@ TEST(HdsWriter, DiskFullRemovesTemporaryOutputAndPublishesNothing) {
 
     ASSERT_FALSE(written);
     EXPECT_FALSE(std::filesystem::exists(output));
-    EXPECT_TRUE(std::filesystem::is_empty(root));
+    EXPECT_TRUE(std::filesystem::is_empty(root / ".axklib-publication"));
     std::filesystem::remove_all(root, error);
 }
 

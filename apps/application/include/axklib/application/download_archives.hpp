@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -20,9 +21,25 @@ struct DownloadArchiveRef {
 struct DownloadArchiveSnapshot {
     DownloadArchiveRef reference;
     std::string filename;
+    std::string media_type;
     std::uint64_t size_bytes{};
     std::size_t entry_count{};
     std::uint64_t expires_in_seconds{};
+};
+
+struct DownloadArchiveContent {
+    DownloadArchiveSnapshot snapshot;
+    std::filesystem::path path;
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::shared_ptr<void> lease;
+};
+
+struct DownloadArchiveLimits {
+    std::uint64_t maximum_total_bytes{};
+    std::uint64_t maximum_archive_bytes{};
+    std::size_t maximum_entries{};
+    std::size_t maximum_depth{64U};
+    std::size_t maximum_path_bytes{32U * 1024U * 1024U};
 };
 
 class DownloadArchiveStore {
@@ -32,6 +49,8 @@ class DownloadArchiveStore {
     DownloadArchiveStore(std::filesystem::path staging_directory, std::uint64_t maximum_total_bytes,
                          std::uint64_t maximum_archive_bytes, std::size_t maximum_entries,
                          std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now);
+    DownloadArchiveStore(std::filesystem::path staging_directory, DownloadArchiveLimits limits,
+                         std::chrono::seconds retention, Clock clock = std::chrono::steady_clock::now);
     ~DownloadArchiveStore();
     DownloadArchiveStore(DownloadArchiveStore &&) noexcept;
     DownloadArchiveStore &operator=(DownloadArchiveStore &&) noexcept;
@@ -39,12 +58,22 @@ class DownloadArchiveStore {
     DownloadArchiveStore &operator=(const DownloadArchiveStore &) = delete;
 
     [[nodiscard]] Result<DownloadArchiveSnapshot> create(std::string owner_id, const Sandbox &sandbox,
-                                                         const DirectoryRef &source);
+                                                         const DirectoryRef &source,
+                                                         CancellationToken cancellation = {},
+                                                         ProgressSink *progress = nullptr);
+    [[nodiscard]] Result<DownloadArchiveSnapshot>
+    create_owned_directory(std::string owner_id, const std::filesystem::path &source, std::string filename);
+    [[nodiscard]] Result<DownloadArchiveSnapshot>
+    retain_owned_file(std::string owner_id, const std::filesystem::path &source, std::string filename,
+                      std::string media_type, CancellationToken cancellation = {}, ProgressSink *progress = nullptr);
+    [[nodiscard]] Result<DownloadArchiveSnapshot> retain(std::string owner_id, std::string filename,
+                                                         std::string media_type, std::span<const std::byte> content);
     [[nodiscard]] Result<DownloadArchiveSnapshot> inspect(const DownloadArchiveRef &reference,
                                                           std::string_view owner_id);
-    [[nodiscard]] Result<std::filesystem::path> resolve(const DownloadArchiveRef &reference, std::string_view owner_id);
+    [[nodiscard]] Result<DownloadArchiveContent> open(const DownloadArchiveRef &reference, std::string_view owner_id);
     [[nodiscard]] Result<void> remove(const DownloadArchiveRef &reference, std::string_view owner_id);
     void cleanup();
+    [[nodiscard]] bool storage_ready() const noexcept;
 
   private:
     struct Implementation;

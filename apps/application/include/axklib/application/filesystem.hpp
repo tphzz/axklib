@@ -3,13 +3,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
+#include "axklib/io.hpp"
 
 namespace axk::app {
 
@@ -27,6 +31,7 @@ struct RootInfo {
 };
 
 enum class DirectoryEntryKind : std::uint8_t { file, directory };
+enum class DirectoryMediaSourceKind : std::uint8_t { axk_object_directory };
 
 struct DirectoryEntry {
     std::string name;
@@ -42,6 +47,12 @@ struct DirectoryListing {
     std::optional<std::string> next_cursor;
 };
 
+struct MediaSourceInspection {
+    std::optional<DirectoryMediaSourceKind> kind;
+    std::size_t entries_visited{};
+    std::size_t prefixes_read{};
+};
+
 struct EntryMetadata {
     std::string root_id;
     std::string relative_path;
@@ -50,12 +61,93 @@ struct EntryMetadata {
     bool writable{};
 };
 
+struct SandboxFile {
+    FileRef reference;
+    std::string filename;
+    std::uint64_t size{};
+    std::string revision;
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::function<Result<void>()> verify_unchanged;
+};
+
+class SandboxMutation final : public axk::RandomAccessReader {
+  public:
+    ~SandboxMutation() override;
+    SandboxMutation(const SandboxMutation &) = delete;
+    SandboxMutation &operator=(const SandboxMutation &) = delete;
+
+    [[nodiscard]] std::uint64_t size() const noexcept override;
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override;
+    [[nodiscard]] Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> source);
+    [[nodiscard]] Result<void> flush();
+    [[nodiscard]] Result<void> verify_bound() const;
+    [[nodiscard]] const FileRef &reference() const noexcept;
+    [[nodiscard]] std::string stable_identity() const;
+
+  private:
+    struct Implementation;
+    explicit SandboxMutation(std::unique_ptr<Implementation> implementation);
+
+    std::unique_ptr<Implementation> implementation_;
+    friend class Sandbox;
+};
+
+enum class SandboxTreeEntryKind : std::uint8_t { file, directory };
+
+struct SandboxTreeEntry {
+    std::string relative_path;
+    SandboxTreeEntryKind kind{SandboxTreeEntryKind::file};
+    std::uint64_t size{};
+};
+
+struct OpenedSandboxTreeFile {
+    std::shared_ptr<const axk::RandomAccessReader> reader;
+    std::function<Result<void>()> verify_unchanged;
+};
+
+struct SandboxTreeLimits {
+    std::size_t maximum_entries{};
+    std::uint64_t maximum_total_file_bytes{};
+    std::size_t maximum_depth{64U};
+    std::size_t maximum_path_bytes{32U * 1024U * 1024U};
+};
+
+class SandboxTree {
+  public:
+    SandboxTree();
+    ~SandboxTree();
+    SandboxTree(SandboxTree &&) noexcept;
+    SandboxTree &operator=(SandboxTree &&) noexcept;
+    SandboxTree(const SandboxTree &) = delete;
+    SandboxTree &operator=(const SandboxTree &) = delete;
+
+    [[nodiscard]] std::span<const SandboxTreeEntry> entries() const noexcept;
+    [[nodiscard]] Result<OpenedSandboxTreeFile> open_file(std::size_t index) const;
+
+  private:
+    struct Implementation;
+    explicit SandboxTree(std::unique_ptr<Implementation> implementation);
+
+    std::unique_ptr<Implementation> implementation_;
+    friend class Sandbox;
+};
+
 class Sandbox {
   public:
-    [[nodiscard]] static Result<Sandbox> create(std::vector<RootDefinition> roots);
+    [[nodiscard]] static Result<Sandbox> create(std::vector<RootDefinition> roots,
+                                                std::vector<std::filesystem::path> protected_paths = {});
     [[nodiscard]] Result<void> replace_roots(std::vector<RootDefinition> roots);
 
     [[nodiscard]] std::vector<RootInfo> roots() const;
+    [[nodiscard]] Result<SandboxFile> open_file(const FileRef &reference) const;
+    [[nodiscard]] Result<std::shared_ptr<SandboxMutation>> open_mutation(const FileRef &reference) const;
+    [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits) const;
+    [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
+                                            const axk::RandomAccessReader &source) const;
+    [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;
+    [[nodiscard]] Result<void> publish_directory(const DirectoryRef &destination, bool overwrite,
+                                                 const std::filesystem::path &staging) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_file(const FileRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_directory(const DirectoryRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_output_file(const FileRef &reference, bool overwrite) const;
@@ -64,23 +156,37 @@ class Sandbox {
     [[nodiscard]] Result<EntryMetadata> metadata(std::string_view root_id, std::string_view relative_path) const;
     [[nodiscard]] Result<DirectoryListing> list_directory(const DirectoryRef &reference, std::size_t limit,
                                                           std::optional<std::string_view> cursor = std::nullopt) const;
+    [[nodiscard]] Result<MediaSourceInspection> inspect_media_source(const DirectoryRef &reference) const;
+    [[nodiscard]] Result<EntryMetadata> create_directory(const DirectoryRef &parent, std::string_view name) const;
+    [[nodiscard]] Result<EntryMetadata> rename_entry(const FileRef &reference, std::string_view name) const;
+    [[nodiscard]] Result<void> delete_entry(const FileRef &reference) const;
     [[nodiscard]] Result<void> require_distinct(const FileRef &source, const FileRef &destination) const;
     [[nodiscard]] Result<std::size_t> cleanup_abandoned_publications() const;
 
   private:
+    struct NativeRoot;
+
     struct Root {
         RootInfo info;
         std::filesystem::path canonical_path;
+        std::shared_ptr<NativeRoot> native;
     };
 
     struct State {
         mutable std::shared_mutex mutex;
+        mutable std::mutex mutation_mutex;
         std::vector<Root> roots;
+        std::vector<std::filesystem::path> protected_paths;
     };
 
-    explicit Sandbox(std::vector<Root> roots) : state_(std::make_shared<State>()) { state_->roots = std::move(roots); }
+    explicit Sandbox(std::vector<Root> roots, std::vector<std::filesystem::path> protected_paths)
+        : state_(std::make_shared<State>()) {
+        state_->roots = std::move(roots);
+        state_->protected_paths = std::move(protected_paths);
+    }
 
-    [[nodiscard]] static Result<std::vector<Root>> validate_roots(std::vector<RootDefinition> roots);
+    [[nodiscard]] static Result<std::vector<Root>>
+    validate_roots(std::vector<RootDefinition> roots, std::span<const std::filesystem::path> protected_paths);
     [[nodiscard]] std::optional<Root> find_root(std::string_view root_id) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_existing(std::string_view root_id,
                                                                  std::string_view relative_path) const;
@@ -89,5 +195,6 @@ class Sandbox {
 };
 
 [[nodiscard]] std::string_view directory_entry_kind_name(DirectoryEntryKind kind) noexcept;
+[[nodiscard]] std::string_view directory_media_source_kind_name(DirectoryMediaSourceKind kind) noexcept;
 
 } // namespace axk::app

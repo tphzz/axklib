@@ -10,6 +10,6 @@ include source, target or candidates, relationship type, quality, basis,
 assignment state, and sampler-facing location. Validation rows include stable
 issue code, severity, message, sampler path, and technical object key.
 
-Exact exports also write a selection graph that links physical waveform files,
-rendered stereo files, sample banks, bank groups, Programs, parameters, and any
+Exact exports also write a selection graph that links Wave Data files, rendered
+stereo files, Samples, Sample Banks, Programs, parameters, and any
 unresolved decisions.

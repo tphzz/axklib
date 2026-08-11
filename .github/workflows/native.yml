@@ -17,21 +17,46 @@ on:
 permissions:
   contents: read
 
+# A manual dispatch should have one authoritative run per branch and release
+# mode. The platform lanes below serialize each host's workloads within that
+# run; this prevents overlapping workflow runs from making them appear parallel.
 concurrency:
-  group: native-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  group: native-workflow-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
   cancel-in-progress: true
 
 jobs:
-  release-tools:
-    name: Release tools
-    runs-on: ubuntu-24.04
+  architecture:
+    name: Architecture
+    runs-on: [self-hosted, Linux, X64, jammy, docker]
+    concurrency:
+      group: native-architecture-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      cancel-in-progress: true
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.14"
+      - name: Enforce architecture budgets
+        run: cmake -DAXK_SOURCE_ROOT="${GITHUB_WORKSPACE}" -P cmake/ArchitectureCheck.cmake
+
+  release-tools:
+    name: Release tools
+    needs: architecture
+    runs-on: [self-hosted, Linux, X64, jammy, docker]
+    concurrency:
+      group: native-release-tools-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13.14"
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.4"
           enable-cache: true
@@ -49,632 +74,435 @@ jobs:
           python tools/python/release_metadata.py release-target \
             --version-metadata-file build/version_metadata.json \
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
-      - name: Validate checked-in server contract compatibility
-        run: >-
-          python tools/python/openapi_compat.py check
-          --baseline apps/server/contracts/openapi-v1.compatibility.json
-          --candidate apps/server/contracts/openapi-v1.json
-
-  server-off:
-    name: Server-off isolation
-    needs: release-tools
-    runs-on: ubuntu-24.04
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+  desktop-static:
+    name: Desktop static checks
+    needs: architecture
+    runs-on: [self-hosted, Linux, X64, jammy, docker]
+    concurrency:
+      group: native-desktop-static-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      cancel-in-progress: true
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.15.1
+          standalone: true
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
+      - name: Validate desktop sources
+        working-directory: apps/axkdeck
+        run: |
+          pnpm version:check
+          pnpm version:test
+          pnpm contract:check
+          pnpm format:check
+          pnpm test
+          pnpm check
+          pnpm build
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+          components: rustfmt
+      - name: Validate Rust formatting
+        run: cargo fmt --manifest-path apps/axkdeck/src-tauri/Cargo.toml -- --check
+
+  native-linux-x64:
+    name: Linux x64
+    needs:
+      - release-tools
+      - desktop-static
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Linux x64
+      runner_labels: '["self-hosted","Linux","X64","jammy","docker"]'
+      artifact: linux-x64
+      desktop_platform: linux
+      desktop_architecture: x64
+      triplet: x64-linux-axk
+      build_testing: "ON"
+      run_tests: true
+
+  native-windows-x64:
+    name: Windows x64
+    needs: native-linux-x64
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Windows x64
+      runner_labels: '["self-hosted","Windows","X64"]'
+      artifact: windows-x64
+      desktop_platform: windows
+      desktop_architecture: x64
+      triplet: x64-windows-axk
+      build_testing: "ON"
+      run_tests: true
+      msvc_arch: x64
+      msvc_component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+
+  native-linux-arm64:
+    name: Linux ARM64
+    needs:
+      - release-tools
+      - desktop-static
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Linux ARM64
+      runner_labels: '["self-hosted","Linux","ARM64","jammy","docker"]'
+      artifact: linux-arm64
+      desktop_platform: linux
+      desktop_architecture: arm64
+      triplet: arm64-linux-axk
+      build_testing: "ON"
+      run_tests: true
+
+  native-windows-arm64:
+    name: Windows ARM64
+    needs: native-linux-arm64
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Windows ARM64
+      runner_labels: '["self-hosted","Windows","ARM64"]'
+      artifact: windows-arm64
+      desktop_platform: windows
+      desktop_architecture: arm64
+      triplet: arm64-windows-axk
+      build_testing: "ON"
+      run_tests: true
+      msvc_arch: arm64
+      msvc_component: Microsoft.VisualStudio.Component.VC.Tools.ARM64
+
+  macos-slices:
+    name: macOS ARM64 and Intel slices
+    needs:
+      # Linux ARM64 runs in a VMware guest on this same Apple Silicon host.
+      # Start macOS only after the ARM64 lane has finished, while the x64 lane
+      # remains independent and can run on its separate machines.
+      - native-windows-arm64
+    runs-on: [self-hosted, macOS, ARM64]
+    concurrency:
+      group: native-macos-slices-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      cancel-in-progress: true
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: "13.3"
+    steps:
+      - name: Checkout axklib
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
           fetch-depth: 0
-      - name: Restore vcpkg binary cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-f87344cac031-server-off-${{ hashFiles('vcpkg.json') }}
-      - name: Bootstrap vcpkg
-        run: |
-          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
-          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Build without server dependencies
-        run: |
-          cmake -S . -B build/native/server-off -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="${GITHUB_WORKSPACE}/external/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-            -DVCPKG_TARGET_TRIPLET=x64-linux-axk \
-            -DVCPKG_OVERLAY_TRIPLETS="${GITHUB_WORKSPACE}/library/cmake/triplets" \
-            -DAXK_BUILD_SERVER=OFF -DAXK_BUILD_CLI=ON -DBUILD_TESTING=OFF
-          cmake --build build/native/server-off
-          test ! -e build/native/server-off/apps/server
-          test ! -e build/native/server-off/vcpkg_installed/x64-linux-axk/share/crow
-          test ! -e build/native/server-off/vcpkg_installed/x64-linux-axk/share/asio
 
-  server-sanitizers:
-    name: Server ${{ matrix.name }}
-    needs: release-tools
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: ASan and UBSan
-            preset: asan
-          - name: TSan
-            preset: tsan
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          submodules: recursive
-          fetch-depth: 0
-      - uses: actions/setup-python@v6
+          python-version: "3.13.14"
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          python-version: "3.13"
-      - name: Restore vcpkg binary cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-f87344cac031-server-${{ matrix.preset }}-${{ hashFiles('vcpkg.json') }}
-      - name: Bootstrap vcpkg
-        run: |
-          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
-          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Configure instrumented server build
-        run: >-
-          cmake --preset ${{ matrix.preset }}
-          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
-      - name: Build instrumented server tests
-        run: >-
-          cmake --build --preset ${{ matrix.preset }} --target
-          axk_application_tests axk_server_tests axk_server_fixture
-          axk_server_direct_benchmark axklib_server
-      - name: Run instrumented application and server tests
+          version: "0.10.4"
+          enable-cache: true
+
+      - name: Verify selected Xcode toolchain and Rosetta
+        shell: bash
         env:
-          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:suppressions=${{ github.workspace }}/apps/server/sanitizers/ubsan.supp
-          TSAN_OPTIONS: halt_on_error=1:history_size=7
-        run: >-
-          ctest --test-dir build/native/${{ matrix.preset }}
-          --output-on-failure -L '^(application|server)$'
-
-  server-fuzz:
-    name: Server request fuzz smoke
-    needs: release-tools
-    runs-on: ubuntu-24.04
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Install Clang with libFuzzer
+          DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes clang
-      - name: Restore vcpkg binary cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-f87344cac031-server-fuzz-${{ hashFiles('vcpkg.json') }}
-      - name: Bootstrap vcpkg
-        run: |
-          cmake -E make_directory "${VCPKG_DEFAULT_BINARY_CACHE}"
-          ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-      - name: Configure server fuzz target
-        run: >-
-          cmake --preset fuzz-local
-          -DBUILD_TESTING=OFF
-          -DVCPKG_TARGET_TRIPLET=x64-linux-axk
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
-      - name: Run bounded server fuzz smoke
-        run: >-
-          cmake --build --preset fuzz-local
-          --target axk_server_request_validation_fuzz_smoke
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+          clang_path="$(xcrun --sdk macosx --find clang)"
+          test -d "$sdk_path"
+          test -x "$clang_path"
 
-  native:
-    name: ${{ matrix.name }}
-    needs: release-tools
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux x64
-            runner: ubuntu-24.04
-            artifact: linux-x64
-            triplet: x64-linux-axk
-            build_testing: "ON"
-            run_tests: true
-          - name: Linux ARM64
-            runner: ubuntu-24.04-arm
-            artifact: linux-arm64
-            triplet: arm64-linux-axk
-            build_testing: "ON"
-            run_tests: true
-          - name: Windows x64
-            runner: windows-2025-vs2026
-            artifact: windows-x64
-            triplet: x64-windows-axk
-            build_testing: "ON"
-            run_tests: true
-            msvc_arch: x64
-            msvc_component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
-          - name: Windows ARM64
-            runner: windows-11-vs2026-arm
-            artifact: windows-arm64
-            triplet: arm64-windows-axk
-            build_testing: "ON"
-            run_tests: true
-            msvc_arch: arm64
-            msvc_component: Microsoft.VisualStudio.Component.VC.Tools.ARM64
-          - name: macOS x64 slice
-            runner: macos-15-intel
-            artifact: macos-x64
-            triplet: x64-osx-axk
-            build_testing: "ON"
-            run_tests: true
-            macos_slice: x86_64
-          - name: macOS ARM64 slice
-            runner: macos-15
-            artifact: macos-arm64
-            triplet: arm64-osx-axk
-            build_testing: "ON"
-            run_tests: true
-            macos_slice: arm64
-    runs-on: ${{ matrix.runner }}
-    env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/../.cache/vcpkg/archives
+          verification_directory="$RUNNER_TEMP/axklib-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/macos-rosetta-verification"
+          verification_binary="$verification_directory/verification"
+          rm -rf "$verification_directory"
+          mkdir -p "$verification_directory"
+          printf 'int main(void) { return 0; }\n' > "$verification_directory/verification.c"
+          xcrun --sdk macosx clang -arch x86_64 \
+            -isysroot "$sdk_path" \
+            "-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+            "$verification_directory/verification.c" -o "$verification_binary"
+          lipo "$verification_binary" -verify_arch x86_64
+          /usr/bin/arch -x86_64 "$verification_binary"
 
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-
-      - name: Restore vcpkg binary cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
-          key: vcpkg-f87344cac031-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
-
-      - name: Prepare vcpkg binary cache directory
-        run: cmake -E make_directory "${{ env.VCPKG_DEFAULT_BINARY_CACHE }}"
-
-      - name: Locate Visual Studio 2026
-        id: vs2026
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $installation = & $vswhere -version '[18.0,19.0)' -products '*' `
-            -requires '${{ matrix.msvc_component }}' `
-            -property installationPath |
-            Select-Object -First 1
-          if ([string]::IsNullOrWhiteSpace($installation)) {
-            throw 'Visual Studio 18 with the C++ toolchain was not found'
+          printf 'AXK_MACOS_SDK=%s\n' "$sdk_path" >> "$GITHUB_ENV"
+          {
+            printf 'developer_dir=%s\n' "$DEVELOPER_DIR"
+            printf 'sdk_path=%s\n' "$sdk_path"
+            printf 'deployment_target=%s\n' "$MACOSX_DEPLOYMENT_TARGET"
+            printf 'host_architecture=%s\n' "$(uname -m)"
+            "$clang_path" --version
+            cmake --version
+            python --version
           }
-          "path=$installation" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Configure Visual Studio 2026
-        if: runner.os == 'Windows'
-        uses: TheMrMilchmann/setup-msvc-dev@v4
-        with:
-          arch: ${{ matrix.msvc_arch }}
-          vs-path: ${{ steps.vs2026.outputs.path }}
-
-      - name: Verify Visual Studio 2026 compiler
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Resolve macOS cache inputs
+        id: macos-cache-inputs
+        shell: bash
         run: |
-          if ($env:VisualStudioVersion -notlike '18.*') {
-            throw "Expected Visual Studio 18, found '$env:VisualStudioVersion'"
-          }
-          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
-          if ($compiler -notlike '*\Microsoft Visual Studio\18\*') {
-            throw "Expected Visual Studio 18 cl.exe, found '$compiler'"
-          }
-          "CC=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Using $compiler"
+          echo "vcpkg_revision=$(git rev-parse HEAD:external/vcpkg)" >> "$GITHUB_OUTPUT"
+          echo "dependency_fingerprint=${{ hashFiles('vcpkg.json', 'CMakeLists.txt', 'CMakePresets.json', 'library/CMakeLists.txt', 'library/cmake/triplets/**', 'library/cmake/toolchains/**', 'library/cmake/ports/**') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure run-scoped macOS vcpkg binary cache
+        shell: bash
+        run: |
+          cache="$RUNNER_TEMP/axklib-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/vcpkg/archives"
+          mkdir -p "$cache"
+          printf 'VCPKG_DEFAULT_BINARY_CACHE=%s\n' "$cache" >> "$GITHUB_ENV"
+
+      - name: Restore macOS dual-architecture vcpkg cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/axklib-${{ github.run_id }}-${{ github.run_attempt }}/vcpkg/archives
+          key: vcpkg-v3-macos-dual-${{ steps.macos-cache-inputs.outputs.vcpkg_revision }}-${{ steps.macos-cache-inputs.outputs.dependency_fingerprint }}
+          restore-keys: |
+            vcpkg-v3-macos-dual-${{ steps.macos-cache-inputs.outputs.vcpkg_revision }}-
+            vcpkg-v3-macos-dual-
 
       - name: Bootstrap vcpkg
-        if: runner.os != 'Windows'
+        shell: bash
         run: ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
 
-      - name: Bootstrap vcpkg
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: .\external\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.15.1
+          standalone: true
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Restore macOS desktop Cargo download cache
+        id: macos-desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
 
       - name: Set reproducible release timestamp
         shell: bash
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
 
-      - name: Configure native build
-        run: >-
-          cmake --preset ${{ inputs.debug && 'debug' || 'release' }}
-          -DAXK_BUILD_SERVER=ON
-          -DBUILD_TESTING=${{ matrix.build_testing }}
-          -DAXK_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-sdk.spdx.json
-          -DAXK_CLI_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-cli.spdx.json
-          -DAXK_SERVER_SBOM_FILE=${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}/axklib-server.spdx.json
-          -DVCPKG_TARGET_TRIPLET=${{ matrix.triplet }}
-          -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/library/cmake/triplets
-
-      - name: Build native targets
-        run: cmake --build --preset ${{ inputs.debug && 'debug' || 'release' }}
-
-      - name: Resolve and verify build identity
-        id: package
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          status="$(git status --porcelain --untracked-files=normal)"
-          if [ -n "$status" ]; then
-            printf 'CI source tree is modified:\n%s\n' "$status" >&2
-            exit 1
-          fi
-          sha="$(git rev-parse --short=7 HEAD)"
-          test -n "$sha"
-          python tools/python/release_metadata.py resolve \
-            --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" \
-            --ref-type "${GITHUB_REF_TYPE}" \
-            --ref-name "${GITHUB_REF_NAME}" \
-            --platform "${{ matrix.artifact }}" \
-            --configuration "${{ inputs.debug && 'Debug' || 'Release' }}" \
-            --github-output "$GITHUB_OUTPUT"
-          cli="$root/apps/cli/axklib"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cli="${cli}.exe"
-          fi
-          python tools/python/release_metadata.py verify-cli \
-            --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" \
-            --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
-
-      - name: Generate component SBOMs
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" --profile sdk \
-            --output "$root/axklib-sdk.spdx.json"
-          python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" --profile cli \
-            --output "$root/axklib-cli.spdx.json"
-          python tools/python/generate_sbom.py --axklib-root . \
-            --version-metadata-file "$root/version_metadata.json" \
-            --package-basename-file "$root/package_basename.txt" --profile server \
-            --output "$root/axklib-server.spdx.json"
-
-      - name: Test native targets
-        if: matrix.run_tests
-        run: ctest --preset ${{ inputs.debug && 'debug' || 'release' }}
-
-      - name: Stage and inspect combined distribution
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          scan="build/tmp/package-scan-${{ matrix.artifact }}"
-          distribution="build/tmp/distribution-${{ matrix.artifact }}"
-          rm -rf "$scan"
-          rm -rf "$distribution"
-          mkdir -p "$scan/sdk" "$scan/cli" "$scan/server" "$distribution"
-          cmake --install "$root" --prefix "$scan/sdk" --component sdk
-          cmake --install "$root" --prefix "$scan/cli" --component cli
-          cmake --install "$root" --prefix "$scan/server" --component server
-          cmake --install "$root" --prefix "$distribution" --component sdk
-          cmake --install "$root" --prefix "$distribution" --component cli
-          cmake --install "$root" --prefix "$distribution" --component server
-          project_version="${{ steps.package.outputs.project_version }}"
-          soversion="${{ steps.package.outputs.soversion }}"
-          library_args=(
-            --allow-library axklib.dll
-            --allow-library libaxklib.so
-            --allow-library "libaxklib.so.${soversion}"
-            --allow-library "libaxklib.so.${project_version}"
-            --allow-library libaxklib.dylib
-            --allow-library "libaxklib.${soversion}.dylib"
-            --allow-library "libaxklib.${project_version}.dylib"
-          )
-          python tools/python/inspect_package.py "$scan/sdk" "${library_args[@]}"
-          python tools/python/inspect_package.py "$scan/cli"
-          python tools/python/inspect_package.py "$scan/server"
-          python tools/python/inspect_package.py "$distribution" "${library_args[@]}"
-          test -f "$scan/sdk/share/axklib/axklib.spdx.json"
-          test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
-          server_binary="axklib-server"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            server_binary="${server_binary}.exe"
-          fi
-          test -f "$scan/server/bin/$server_binary"
-          test -f "$scan/server/share/axklib/axklib-server.spdx.json"
-          test -f "$scan/server/share/axklib/server/openapi-v1.json"
-          test -f "$scan/server/share/doc/axklib/server.md"
-          test -f "$distribution/share/axklib/axklib.spdx.json"
-          test -f "$distribution/share/axklib/axklib-cli.spdx.json"
-          test -f "$distribution/share/axklib/axklib-server.spdx.json"
-          test -f "$distribution/share/doc/axklib/server.md"
-
-      - name: Smoke-test installed server
-        if: matrix.run_tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          server="build/tmp/package-scan-${{ matrix.artifact }}/server/bin/axklib-server"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            server="${server}.exe"
-          fi
-          python tools/python/release_server_smoke.py \
-            --server "$server" \
-            --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
-
-      - name: Package combined Linux or Windows distribution
-        if: runner.os != 'macOS'
+      - name: Build, test, and package both macOS slices
         shell: bash
         env:
-          AXK_ARTIFACT_STEM: ${{ steps.package.outputs.artifact_stem }}
+          AXK_MACOS_CARGO_ROOT: ${{ runner.temp }}/axklib-${{ github.run_id }}-${{ github.run_attempt }}/cargo
         run: |
-          set -euo pipefail
-          distribution="build/tmp/distribution-${{ matrix.artifact }}"
-          stem="$AXK_ARTIFACT_STEM"
-          test -n "$stem"
-          mkdir -p build/artifacts
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            archive="build/artifacts/${stem}.zip"
-            python - "$distribution" "$archive" <<'PY'
-          import pathlib, sys, zipfile
+          bash tools/release/build_macos_slices.sh \
+            --source-directory "$PWD" \
+            --configuration "${{ inputs.debug && 'Debug' || 'Release' }}" \
+            --sdk-path "$AXK_MACOS_SDK" \
+            --deployment-target "$MACOSX_DEPLOYMENT_TARGET" \
+            --ref-type "$GITHUB_REF_TYPE" \
+            --ref-name "$GITHUB_REF_NAME"
 
-          source, output = map(pathlib.Path, sys.argv[1:])
-          with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-              for path in sorted(source.rglob("*")):
-                  if path.is_file():
-                      archive.write(path, path.relative_to(source))
-          PY
-          else
-            archive="build/artifacts/${stem}.tar.gz"
-            tar -czf "$archive" -C "$distribution" .
-          fi
-          checksum="build/artifacts/${stem}-SHA256SUMS"
-          python - "$archive" "$checksum" <<'PY'
-          import hashlib, pathlib, sys
-
-          archive, output = map(pathlib.Path, sys.argv[1:])
-          output.write_text(
-              f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n"
-          )
-          PY
-          echo "AXK_DISTRIBUTION_ARCHIVE=$archive" >> "$GITHUB_ENV"
-          echo "AXK_DISTRIBUTION_CHECKSUM=$checksum" >> "$GITHUB_ENV"
-
-      - name: Verify Linux runtime dependency closure
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          cli_dependencies="$(ldd "$root/apps/cli/axklib")"
-          server_dependencies="$(ldd "$root/apps/server/axklib-server")"
-          sdk_dependencies="$(ldd "$root/library/libaxklib.so")"
-          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
-          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$cli_dependencies"; then
-            echo "CLI has a private native runtime dependency" >&2
-            exit 1
-          fi
-          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$server_dependencies"; then
-            echo "server has a private native runtime dependency" >&2
-            exit 1
-          fi
-          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$sdk_dependencies"; then
-            echo "C++ SDK has a private codec runtime dependency" >&2
-            exit 1
-          fi
-
-      - name: Verify macOS runtime dependency closure
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          cli_dependencies="$(otool -L "$root/apps/cli/axklib")"
-          server_dependencies="$(otool -L "$root/apps/server/axklib-server")"
-          sdk_dependencies="$(otool -L "$root/library/libaxklib.${{ steps.package.outputs.project_version }}.dylib")"
-          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
-          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
-            echo "CLI has a private native runtime dependency" >&2
-            exit 1
-          fi
-          if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$server_dependencies")"; then
-            echo "server has a private native runtime dependency" >&2
-            exit 1
-          fi
-          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$sdk_dependencies")"; then
-            echo "C++ SDK has a private codec runtime dependency" >&2
-            exit 1
-          fi
-
-      - name: Verify Windows runtime dependency closure
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $root = "build/native/${{ inputs.debug && 'debug' || 'release' }}"
-          $cli = Get-ChildItem $root -Recurse -Filter axklib.exe | Select-Object -First 1
-          $server = Get-ChildItem $root -Recurse -Filter axklib-server.exe | Select-Object -First 1
-          $sdk = Get-ChildItem $root -Recurse -Filter axklib.dll | Select-Object -First 1
-          if ($null -eq $cli -or $null -eq $server -or $null -eq $sdk) {
-            throw "native runtime artifacts are missing"
-          }
-          $cliDependencies = (dumpbin /dependents $cli.FullName) -join "`n"
-          $serverDependencies = (dumpbin /dependents $server.FullName) -join "`n"
-          $sdkDependencies = (dumpbin /dependents $sdk.FullName) -join "`n"
-          Write-Host $cliDependencies
-          Write-Host $serverDependencies
-          Write-Host $sdkDependencies
-          $privateCli = '(?im)^\s+(?:lib)?(?:axk|sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
-          $privateCodec = '(?im)^\s+(?:lib)?(?:sndfile|soxr|flac|ogg|vorbis|opus|mpg123|mp3lame)[^\s]*\.dll\s*$'
-          if ($cliDependencies -match $privateCli) {
-            throw "CLI has a private native runtime dependency: $($Matches[0])"
-          }
-          if ($serverDependencies -match $privateCli) {
-            throw "server has a private native runtime dependency: $($Matches[0])"
-          }
-          if ($sdkDependencies -match $privateCodec) {
-            throw "C++ SDK has a private codec runtime dependency: $($Matches[0])"
-          }
-
-      - name: Verify Windows ARM64 output
-        if: matrix.triplet == 'arm64-windows-axk'
-        shell: pwsh
-        run: |
-          $headers = dumpbin /headers build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/cli/axklib.exe
-          $machineHeaders = @($headers | Select-String -Pattern '\bmachine \(')
-          $machineHeaders | ForEach-Object { Write-Host $_.Line }
-          $arm64Headers = @($headers | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$')
-          if ($arm64Headers.Count -eq 0) {
-            $detected = ($machineHeaders | ForEach-Object { $_.Line.Trim() }) -join '; '
-            throw "axklib.exe is not an ARM64 binary; detected headers: $detected"
-          }
-          $sdk = Get-ChildItem "build/native/${{ inputs.debug && 'debug' || 'release' }}" `
-            -Recurse -Filter axklib.dll | Select-Object -First 1
-          $sdkHeaders = dumpbin /headers $sdk.FullName
-          if (@($sdkHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
-            throw 'axklib.dll is not an ARM64 binary'
-          }
-          $serverHeaders = dumpbin /headers `
-            build/native/${{ inputs.debug && 'debug' || 'release' }}/apps/server/axklib-server.exe
-          if (@($serverHeaders | Select-String -Pattern '^\s*AA64 machine \(ARM64\)\s*$').Count -eq 0) {
-            throw 'axklib-server.exe is not an ARM64 binary'
-          }
-
-      - name: Print native dependency failure logs
-        if: failure()
-        shell: bash
-        run: |
-          for root in external/vcpkg/buildtrees build/native; do
-            test -d "$root" || continue
-            while IFS= read -r log; do
-              echo "::group::$log"
-              tail -n 300 "$log"
-              echo "::endgroup::"
-            done < <(find "$root" -type f \
-              \( -name '*-out.log' -o -name '*-err.log' -o -name 'vcpkg-manifest-install.log' \) \
-              -print | sort)
-          done
-
-      - name: Upload native dependency failure logs
-        if: failure()
-        uses: actions/upload-artifact@v7
+      - name: Save macOS desktop Cargo download cache
+        if: ${{ success() && steps.macos-desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
-          name: native-dependency-logs-${{ matrix.triplet }}
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Upload Intel macOS slice
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: slice-macos-x64-${{ github.run_id }}
+          path: build/macos-slices/macos-x64/*
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload ARM64 macOS slice
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: slice-macos-arm64-${{ github.run_id }}
+          path: build/macos-slices/macos-arm64/*
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Upload macOS slice failure logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: native-dependency-logs-macos-${{ github.run_id }}
           path: |
             external/vcpkg/buildtrees/**/*-out.log
             external/vcpkg/buildtrees/**/*-err.log
-            build/native/**/vcpkg-manifest-install.log
+            build/native/macos-*/**/vcpkg-manifest-install.log
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Package macOS slice for universal assembly
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          tar -czf "build/tmp/macos-${{ matrix.macos_slice }}.tar.gz" \
-            -C "build/tmp/distribution-${{ matrix.artifact }}" .
-          cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/package_basename.txt" \
-            "build/tmp/macos-${{ matrix.macos_slice }}-package-basename.txt"
-          cp "build/native/${{ inputs.debug && 'debug' || 'release' }}/version_metadata.json" \
-            "build/tmp/macos-${{ matrix.macos_slice }}-version-metadata.json"
-
-      - name: Cache macOS slice for universal assembly
-        if: runner.os == 'macOS'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            build/tmp/macos-${{ matrix.macos_slice }}.tar.gz
-            build/tmp/macos-${{ matrix.macos_slice }}-package-basename.txt
-            build/tmp/macos-${{ matrix.macos_slice }}-version-metadata.json
-          key: macos-${{ matrix.macos_slice }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Upload combined Linux or Windows distribution
-        if: runner.os != 'macOS'
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ steps.package.outputs.artifact_stem }}
-          path: |
-            ${{ env.AXK_DISTRIBUTION_ARCHIVE }}
-            ${{ env.AXK_DISTRIBUTION_CHECKSUM }}
-          if-no-files-found: error
-
   macos-universal:
     name: macOS universal
-    needs: native
-    runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch'
+    needs:
+      - macos-slices
+    runs-on: [self-hosted, macOS, ARM64]
+    concurrency:
+      group: native-macos-signing
+      cancel-in-progress: false
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: "13.3"
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          submodules: recursive
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
 
-      - name: Restore x64 slice
-        uses: actions/cache/restore@v6
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          path: |
-            build/tmp/macos-x86_64.tar.gz
-            build/tmp/macos-x86_64-package-basename.txt
-            build/tmp/macos-x86_64-version-metadata.json
-          key: macos-x86_64-${{ github.run_id }}-${{ github.run_attempt }}
-          fail-on-cache-miss: true
+          version: "0.10.4"
+          enable-cache: true
 
-      - name: Restore ARM64 slice
-        uses: actions/cache/restore@v6
+      - name: Download Intel slice
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          path: |
-            build/tmp/macos-arm64.tar.gz
-            build/tmp/macos-arm64-package-basename.txt
-            build/tmp/macos-arm64-version-metadata.json
-          key: macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
-          fail-on-cache-miss: true
+          name: slice-macos-x64-${{ github.run_id }}
+          path: build/tmp
 
-      - name: Import macOS code signing certificate
-        uses: apple-actions/import-codesign-certs@v7.0.0
+      - name: Download ARM64 slice
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          p12-file-base64: ${{ secrets.P12_BASE64 }}
-          p12-password: ${{ secrets.P12_PASSWORD }}
+          name: slice-macos-arm64-${{ github.run_id }}
+          path: build/tmp
 
-      - name: Assemble and verify universal distribution
+      - name: Preflight persistent macOS signing keychain
+        id: signing
         shell: bash
         run: |
           set -euo pipefail
-          cmp build/tmp/macos-x86_64-package-basename.txt \
+          signing_keychain="$HOME/Library/Keychains/login.keychain-db"
+          password_file="$HOME/.config/developer-id-signing/login-keychain-password"
+          runner_user="$(id -un)"
+
+          if [[ ! -f "$signing_keychain" ]]; then
+            echo "Signing keychain is missing: $signing_keychain" >&2
+            exit 1
+          fi
+          if [[ ! -f "$password_file" ]]; then
+            echo "Signing keychain password file is missing: $password_file" >&2
+            exit 1
+          fi
+          password_owner="$(stat -f '%Su' "$password_file")"
+          password_mode="$(stat -f '%Lp' "$password_file")"
+          if [[ "$password_owner" != "$runner_user" || "$password_mode" != 600 ]]; then
+            echo "Signing keychain password file must be owned by $runner_user with mode 600." >&2
+            printf 'Found owner=%s mode=%s.\n' "$password_owner" "$password_mode" >&2
+            exit 1
+          fi
+          keychain_password="$(<"$password_file")"
+          if [[ -z "$keychain_password" || "$keychain_password" == *$'\n'* ||
+                "$keychain_password" == *$'\r'* ]]; then
+            echo "Signing keychain password file must contain one nonempty line." >&2
+            exit 1
+          fi
+          echo "::add-mask::$keychain_password"
+          security unlock-keychain -p "$keychain_password" "$signing_keychain"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: -s \
+            -k "$keychain_password" "$signing_keychain" >/dev/null
+          security list-keychains -d user -s \
+            "$signing_keychain" \
+            /Library/Keychains/System.keychain \
+            /System/Library/Keychains/SystemRootCertificates.keychain
+          unset keychain_password
+
+          identity_record="$(
+            security find-identity -v -p codesigning "$signing_keychain" 2>&1 |
+              python tools/python/macos_signing.py
+          )" || {
+            echo "expected exactly one Developer ID Application identity." >&2
+            security find-identity -v -p codesigning "$signing_keychain" >&2 || true
+            exit 1
+          }
+          IFS='|' read -r fingerprint team_id <<< "$identity_record"
+          if [[ -z "$fingerprint" || -z "$team_id" ]]; then
+            echo "expected exactly one Developer ID Application identity." >&2
+            exit 1
+          fi
+
+          verification_directory="$RUNNER_TEMP/axklib-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/macos-signing-verification"
+          verification_binary="$verification_directory/verification"
+          rm -rf "$verification_directory"
+          mkdir -p "$verification_directory"
+          printf 'int main(void) { return 0; }\n' > "$verification_directory/verification.c"
+          xcrun --sdk macosx clang \
+            -isysroot "$(xcrun --sdk macosx --show-sdk-path)" \
+            "-mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET" \
+            "$verification_directory/verification.c" -o "$verification_binary"
+          codesign --force --timestamp --options runtime \
+            --sign "$fingerprint" "$verification_binary"
+          codesign --verify --strict --verbose=2 "$verification_binary"
+          "$verification_binary"
+
+          printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'team_id=%s\n' "$team_id" >> "$GITHUB_OUTPUT"
+          printf 'keychain=%s\n' "$signing_keychain" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight persistent macOS notarization profile
+        if: inputs.notarize_macos
+        shell: bash
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
+        run: |
+          set -euo pipefail
+          verification_directory="$RUNNER_TEMP/axklib-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/macos-signing-verification"
+          if ! xcrun notarytool history \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
+            --output-format json \
+            > "$verification_directory/notary-history.json"; then
+            echo "Notarization profile '$NOTARY_PROFILE' is unavailable in keychain '$SIGNING_KEYCHAIN' on runner '${RUNNER_NAME:-unknown}' for user '$(id -un)'." >&2
+            exit 1
+          fi
+
+      - name: Assemble and verify universal native binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp build/tmp/macos-x64-package-basename.txt \
             build/tmp/macos-arm64-package-basename.txt
-          cmp build/tmp/macos-x86_64-version-metadata.json \
+          cmp build/tmp/macos-x64-version-metadata.json \
             build/tmp/macos-arm64-version-metadata.json
           mkdir -p build/tmp/{x86_64,arm64,universal} build/artifacts
-          tar -xzf build/tmp/macos-x86_64.tar.gz -C build/tmp/x86_64
+          tar -xzf build/tmp/macos-x64.tar.gz -C build/tmp/x86_64
           tar -xzf build/tmp/macos-arm64.tar.gz -C build/tmp/arm64
           cp -R build/tmp/arm64/. build/tmp/universal/
 
@@ -687,34 +515,15 @@ jobs:
             build/tmp/arm64/bin/axklib-server \
             -output build/tmp/universal/bin/axklib-server
 
-          while IFS= read -r arm64_library; do
-            relative_path="${arm64_library#build/tmp/arm64/}"
-            x64_library="build/tmp/x86_64/$relative_path"
-            universal_library="build/tmp/universal/$relative_path"
-            test -f "$x64_library"
-            lipo -create "$x64_library" "$arm64_library" -output "$universal_library"
-          done < <(find build/tmp/arm64/lib -type f \
-            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
-
           lipo build/tmp/universal/bin/axklib -verify_arch x86_64 arm64
           lipo -info build/tmp/universal/bin/axklib
           lipo build/tmp/universal/bin/axklib-server -verify_arch x86_64 arm64
           lipo -info build/tmp/universal/bin/axklib-server
-          while IFS= read -r library; do
-            lipo "$library" -verify_arch x86_64 arm64
-            lipo -info "$library"
-          done < <(find build/tmp/universal/lib -type f \
-            \( -name 'libaxk*.a' -o -name 'libaxk*.dylib' \) -print | sort)
-
           build/tmp/universal/bin/axklib --version
           build/tmp/universal/bin/axklib-server --print-version
           cli_dependencies="$(otool -L build/tmp/universal/bin/axklib)"
           server_dependencies="$(otool -L build/tmp/universal/bin/axklib-server)"
-          sdk_library=$(find build/tmp/universal/lib -type f \
-            -name 'libaxklib*.dylib' -print -quit)
-          test -n "$sdk_library"
-          sdk_dependencies="$(otool -L "$sdk_library")"
-          printf '%s\n' "$cli_dependencies" "$server_dependencies" "$sdk_dependencies"
+          printf '%s\n' "$cli_dependencies" "$server_dependencies"
           if grep -Eqi 'lib(axk|sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
               <<<"$(tail -n +2 <<<"$cli_dependencies")"; then
             echo "universal CLI has a private native runtime dependency" >&2
@@ -725,12 +534,6 @@ jobs:
             echo "universal server has a private native runtime dependency" >&2
             exit 1
           fi
-          if grep -Eqi 'lib(sndfile|soxr|FLAC|ogg|vorbis|opus|mpg123|mp3lame)' \
-              <<<"$(tail -n +2 <<<"$sdk_dependencies")"; then
-            echo "universal C++ SDK has a private codec runtime dependency" >&2
-            exit 1
-          fi
-
       - name: Resolve and verify universal build identity
         id: package
         shell: bash
@@ -755,123 +558,257 @@ jobs:
             --cli build/tmp/universal/bin/axklib \
             --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
 
-      - name: Smoke-test universal installed server
-        run: >-
-          python tools/python/release_server_smoke.py
-          --server build/tmp/universal/bin/axklib-server
-          --fixture tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds
-
-      - name: Sign macOS universal distribution
+      - name: Sign macOS universal native binaries
         shell: bash
         env:
-          MACOS_DEV_ID_CERT_NAME: ${{ secrets.MACOS_DEV_ID_CERT_NAME }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.fingerprint }}
         run: |
           set -euo pipefail
-
-          if [ -z "$MACOS_DEV_ID_CERT_NAME" ]; then
-            echo "MACOS_DEV_ID_CERT_NAME secret is required for macOS signing." >&2
-            exit 1
-          fi
-
+          test -n "$APPLE_SIGNING_IDENTITY"
           xattr -cr build/tmp/universal
 
-          while IFS= read -r library; do
-            codesign --force --timestamp --options runtime \
-              --sign "$MACOS_DEV_ID_CERT_NAME" "$library"
-            codesign --verify --strict --verbose=2 "$library"
-          done < <(find build/tmp/universal/lib -type f -name '*.dylib' -print | sort)
-
           codesign --force --timestamp --options runtime \
-            --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib
+            --sign "$APPLE_SIGNING_IDENTITY" build/tmp/universal/bin/axklib
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib
           codesign --force --timestamp --options runtime \
-            --sign "$MACOS_DEV_ID_CERT_NAME" build/tmp/universal/bin/axklib-server
+            --sign "$APPLE_SIGNING_IDENTITY" build/tmp/universal/bin/axklib-server
           codesign --verify --strict --verbose=2 build/tmp/universal/bin/axklib-server
 
-      - name: Package signed macOS universal distribution
-        shell: bash
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.15.1
+          standalone: true
+          cache: true
+          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: "1.85"
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Restore universal desktop Cargo download cache
+        id: universal-desktop-cargo-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Install desktop dependencies
+        working-directory: apps/axkdeck
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate universal desktop SBOM
+        run: |
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform aarch64-apple-darwin \
+            > build/tmp/axkdeck-cargo-arm64-metadata.json
+          cargo metadata --manifest-path apps/axkdeck/src-tauri/Cargo.toml \
+            --locked --format-version 1 --filter-platform x86_64-apple-darwin \
+            > build/tmp/axkdeck-cargo-x64-metadata.json
+          (cd apps/axkdeck && pnpm licenses list --prod --json) \
+            > build/tmp/axkdeck-pnpm-licenses.json
+          uv --project tools/python run python tools/python/generate_sbom.py \
+            --axklib-root . \
+            --axkdeck-root apps/axkdeck \
+            --cargo-metadata-file build/tmp/axkdeck-cargo-arm64-metadata.json \
+            --cargo-metadata-file build/tmp/axkdeck-cargo-x64-metadata.json \
+            --pnpm-license-file build/tmp/axkdeck-pnpm-licenses.json \
+            --vcpkg-installed-root build/tmp/arm64/share/licenses \
+            --license-bundle apps/axkdeck/src-tauri/resources/THIRD-PARTY-LICENSES.txt \
+            --version-metadata-file build/tmp/macos-arm64-version-metadata.json \
+            --package-basename-file build/tmp/macos-arm64-package-basename.txt \
+            --profile server \
+            --output apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+
+      - name: Build signed universal macOS desktop DMG
+        working-directory: apps/axkdeck
         env:
-          AXK_ARTIFACT_STEM: ${{ steps.package.outputs.artifact_stem }}
+          APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.fingerprint }}
+          AXKLIB_SERVER_BINARY: ${{ github.workspace }}/build/tmp/universal/bin/axklib-server
+          AXKLIB_VERSION_METADATA_FILE: ${{ github.workspace }}/build/tmp/macos-arm64-version-metadata.json
+          AXKLIB_PACKAGE_BASENAME_FILE: ${{ github.workspace }}/build/tmp/macos-arm64-package-basename.txt
+          AXKDECK_BUILD_NUMBER: ${{ github.run_number }}
+          CARGO_TARGET_DIR: ${{ github.workspace }}/build/tmp/macos-universal-cargo-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          stem="$AXK_ARTIFACT_STEM"
-          test -n "$stem"
-          archive="build/artifacts/${stem}.zip"
-          (cd build/tmp/universal && /usr/bin/zip -qry \
-            "../../artifacts/$(basename "$archive")" .)
-          (cd build/artifacts && shasum -a 256 "$(basename "$archive")" \
-            > "${stem}-SHA256SUMS")
+          test -n "$APPLE_SIGNING_IDENTITY"
+          rm -rf "$CARGO_TARGET_DIR/universal-apple-darwin/release/bundle"
+          mkdir -p src-tauri/binaries
+          cp "$AXKLIB_SERVER_BINARY" \
+            src-tauri/binaries/axklib-server-universal-apple-darwin
+          pnpm desktop:build -- --target universal-apple-darwin
 
-      - name: Notarize macOS universal distribution
+      - name: Save universal desktop Cargo download cache
+        if: ${{ success() && steps.universal-desktop-cargo-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+          key: axkdeck-cargo-downloads-v1-macos-${{ hashFiles('apps/axkdeck/src-tauri/Cargo.lock') }}
+
+      - name: Stage universal macOS desktop release package
+        run: >-
+          python tools/python/desktop_release.py
+          --bundle-directory build/tmp/macos-universal-cargo-${{ github.run_id }}-${{ github.run_attempt }}/universal-apple-darwin/release/bundle/dmg
+          --extension .dmg
+          --output-directory build/artifacts/axkdeck-macos-universal
+          --platform macos
+          --architecture universal
+          --axklib-version-metadata build/tmp/macos-arm64-version-metadata.json
+          --package-basename-file build/tmp/macos-arm64-package-basename.txt
+          --sbom apps/axkdeck/src-tauri/resources/axkdeck.spdx.json
+          --configuration "${{ inputs.debug && 'Debug' || 'Release' }}"
+
+      - name: Package signed macOS universal CLI archive
+        shell: bash
+        env:
+          AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
+        run: |
+          set -euo pipefail
+          python tools/python/release_metadata.py package-native \
+            --source-directory build/tmp/universal \
+            --output-directory build/artifacts \
+            --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
+            --component cli --archive-format zip
+
+      - name: Notarize macOS universal CLI archive
         if: inputs.notarize_macos
         shell: bash
         env:
-          APPLE_NOTARY_USER: ${{ secrets.APPLE_NOTARY_USER }}
-          APPLE_NOTARY_APP_PASSWORD: ${{ secrets.APPLE_NOTARY_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
         run: |
           set -euo pipefail
-
-          missing=0
-          for name in APPLE_NOTARY_USER APPLE_NOTARY_APP_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!name:-}" ]; then
-              echo "$name secret is required for macOS notarization." >&2
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
-
-          archive=$(find build/artifacts -maxdepth 1 -type f \
-            -name 'axklib-*-macos-universal*.zip' -print -quit)
-          if [ -z "$archive" ]; then
-            echo "Expected macOS universal ZIP not found." >&2
-            exit 1
-          fi
-
+          archive="build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip"
+          test -f "$archive"
           xcrun notarytool submit "$archive" \
-            --apple-id "$APPLE_NOTARY_USER" \
-            --password "$APPLE_NOTARY_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
             --wait
 
-      - name: Upload universal macOS distribution
-        uses: actions/upload-artifact@v7
+      - name: Notarize and staple universal macOS desktop DMG
+        if: inputs.notarize_macos
+        shell: bash
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
+        run: |
+          set -euo pipefail
+          dmg=$(find build/artifacts/axkdeck-macos-universal \
+            -type f -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          xcrun notarytool submit "$dmg" \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
+            --wait
+          xcrun stapler staple "$dmg"
+
+      - name: Verify staged universal macOS desktop DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find build/artifacts/axkdeck-macos-universal \
+            -type f -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          codesign --verify --strict --verbose=2 "$dmg"
+
+          mount_dir=$(mktemp -d)
+          mounted=0
+          cleanup() {
+            if [ "$mounted" -eq 1 ]; then
+              hdiutil detach "$mount_dir" >/dev/null || true
+            fi
+            rmdir "$mount_dir" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          mounted=1
+          app=$(find "$mount_dir" -type d -name '*.app' -print -quit)
+          test -n "$app"
+          main="$app/Contents/MacOS/axkdeck"
+          sidecar="$app/Contents/MacOS/axklib-server"
+          test -f "$main"
+          test -f "$sidecar"
+          lipo "$main" -verify_arch x86_64 arm64
+          lipo "$sidecar" -verify_arch x86_64 arm64
+          minimum_system_version=$(
+            /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+              "$app/Contents/Info.plist"
+          )
+          test "$minimum_system_version" = "$MACOSX_DEPLOYMENT_TARGET"
+          for binary in "$main" "$sidecar"; do
+            for architecture in x86_64 arm64; do
+              xcrun vtool -show-build -arch "$architecture" "$binary" \
+                | grep -Eq "minos[[:space:]]+$MACOSX_DEPLOYMENT_TARGET([[:space:]]|$)"
+            done
+          done
+          test -f "$app/Contents/Resources/licenses/axkdeck.spdx.json"
+          test -f "$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"
+          test -f "$app/Contents/Resources/licenses/THIRD-PARTY-LICENSES.txt"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 "$main"
+          codesign --verify --strict --verbose=2 "$sidecar"
+
+          if [ "${{ inputs.notarize_macos }}" = "true" ]; then
+            xcrun stapler validate "$dmg"
+            spctl --assess --type open --context context:primary-signature \
+              --verbose=4 "$dmg"
+            spctl --assess --type execute --verbose=4 "$app"
+          fi
+
+      - name: Upload universal macOS desktop DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ steps.package.outputs.artifact_stem }}
-          path: |
-            build/artifacts/axklib-*-macos-universal*.zip
-            build/artifacts/axklib-*-macos-universal*-SHA256SUMS
+          name: release-axkdeck-macos-universal
+          path: build/artifacts/axkdeck-macos-universal/*
+          if-no-files-found: error
+
+      - name: Upload universal macOS CLI archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ steps.package.outputs.cli_artifact_stem }}
+          path: build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip
           if-no-files-found: error
 
   draft-release:
     name: Draft release
-    if: ${{ !inputs.debug }}
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}
     needs:
-      - native
+      - native-windows-x64
       - macos-universal
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, Linux, X64, jammy, docker]
     permissions:
       actions: read
       contents: write
     concurrency:
-      group: native-draft-release-${{ github.ref }}
+      group: native-draft-release
       cancel-in-progress: false
     steps:
       - name: Checkout axklib
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
 
-      - name: Download distributions
-        uses: actions/download-artifact@v8
+      - name: Download release deliverables
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: axklib-*
+          pattern: release-*
           path: build/release-assets
           merge-multiple: true
 
@@ -902,7 +839,7 @@ jobs:
           - Commit: \`${GITHUB_SHA}\`
           - Configuration: \`Release\`
 
-          Review the attached distributions and checksums before publishing this release.
+          Review the attached CLI archives and axkdeck installers before publishing this release.
           EOF
 
       - name: Replace draft release

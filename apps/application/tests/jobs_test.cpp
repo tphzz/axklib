@@ -1,13 +1,18 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <mutex>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "axklib/application/jobs.hpp"
+#include "jobs_test_access.hpp"
 
 namespace {
 
@@ -28,6 +33,23 @@ axk::app::OperationRegistry test_registry(
                                   operation_class,
                                   requires_idempotency}));
     EXPECT_TRUE(registry.bind("test.job", std::move(handler)));
+    EXPECT_TRUE(registry.bind_path_accesses(
+        "test.job",
+        [](const nlohmann::json &request,
+           const axk::app::OperationContext &) -> axk::app::Result<std::vector<axk::app::PathAccess>> {
+            std::vector<axk::app::PathAccess> result;
+            if (const auto source = request.find("source"); source != request.end() && source->is_object()) {
+                result.push_back(
+                    {{source->at("rootId").get<std::string>(), source->at("relativePath").get<std::string>()},
+                     axk::app::PathAccessMode::shared});
+            }
+            if (const auto output = request.find("output"); output != request.end() && output->is_object()) {
+                result.push_back(
+                    {{output->at("rootId").get<std::string>(), output->at("relativePath").get<std::string>()},
+                     axk::app::PathAccessMode::exclusive});
+            }
+            return result;
+        }));
     return registry;
 }
 
@@ -122,23 +144,313 @@ TEST(JobManager, CancelsQueuedWorkAndEnforcesOwnership) {
     EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
 }
 
-TEST(JobManager, TracksWorkspaceReferencesOnlyWhileJobsAreActive) {
+TEST(JobManager, CancellationAfterQueuePopPreventsOperationExecution) {
+    std::atomic_uint32_t calls{};
+    auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &) {
+        calls.fetch_add(1U);
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U};
+    std::mutex mutex;
+    std::condition_variable condition;
+    bool worker_waiting{};
+    bool release_worker{};
+    axk::app::JobManagerTestAccess::set_before_running_claim(jobs, [&] {
+        std::unique_lock lock{mutex};
+        worker_waiting = true;
+        condition.notify_all();
+        condition.wait(lock, [&] { return release_worker; });
+    });
+
+    const auto submitted = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "race", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(submitted);
+    {
+        std::unique_lock lock{mutex};
+        condition.wait(lock, [&] { return worker_waiting; });
+    }
+    ASSERT_TRUE(jobs.cancel(submitted->job_id, "owner"));
+    {
+        const std::scoped_lock lock{mutex};
+        release_worker = true;
+    }
+    condition.notify_all();
+
+    EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_EQ(calls.load(), 0U);
+}
+
+TEST(JobManager, QueuedSubscriberCanSubmitAnotherJobReentrantly) {
+    std::atomic_uint32_t calls{};
+    auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &) {
+        calls.fetch_add(1U);
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U};
+    std::optional<axk::app::JobSnapshot> nested;
+    bool submitted_nested{};
+    const auto subscription = jobs.subscribe([&](const axk::app::JobEvent &event) {
+        if (event.type != "queued" || submitted_nested)
+            return;
+        submitted_nested = true;
+        auto result = jobs.submit(
+            "test.job", {},
+            {.owner_id = "owner", .request_id = "nested", .cancellation = {}, .progress = nullptr, .display_path = {}});
+        ASSERT_TRUE(result) << result.error().message;
+        nested = *result;
+    });
+
+    const auto outer = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "outer", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(outer);
+    ASSERT_TRUE(nested);
+    EXPECT_EQ(wait_terminal(jobs, outer->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(wait_terminal(jobs, nested->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(calls.load(), 2U);
+    jobs.unsubscribe(subscription);
+}
+
+TEST(JobManager, RetainsReferencedUploadsWhileWorkWaitsInTheQueue) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-job-upload-lease-test";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    auto upload_now = std::chrono::steady_clock::now();
+    axk::app::UploadStore uploads{directory, 32U, 16U, 2U, 16U, 5s, [&] { return upload_now; }};
+    const std::string manifest{"{}"};
+    const auto created = uploads.create({.owner_id = "owner",
+                                         .filename = "manifest.json",
+                                         .kind = axk::app::UploadKind::manifest,
+                                         .media_type = "application/json",
+                                         .declared_size = manifest.size(),
+                                         .sha256 = std::nullopt});
+    ASSERT_TRUE(created) << created.error().message;
+    ASSERT_TRUE(uploads.append(created->reference, "owner", 0U, std::as_bytes(std::span{manifest})));
+    ASSERT_TRUE(uploads.complete(created->reference, "owner"));
+
+    std::atomic_bool first_running{};
+    std::atomic_bool release_first{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &) {
+        if (request.value("block", false)) {
+            first_running = true;
+            while (!release_first.load())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U, 2048U, 15min, [] { return axk::app::JobManager::Clock::now(); },
+                              &uploads};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto first = jobs.submit("test.job", {{"block", true}}, context);
+    ASSERT_TRUE(first);
+    while (!first_running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto queued =
+        jobs.submit("test.job", {{"manifest", {{"uploadRef", {{"uploadId", created->reference.upload_id}}}}}}, context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    upload_now += 6s;
+    uploads.cleanup();
+    EXPECT_TRUE(uploads.inspect(created->reference, "owner"));
+
+    release_first = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::completed);
+    EXPECT_TRUE(uploads.remove(created->reference, "owner"));
+    jobs.shutdown();
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST(JobManager, ReleasesUploadLeasesForFailureAndBothCancellationPaths) {
+    const auto directory = std::filesystem::temp_directory_path() / "axklib-job-terminal-upload-lease-test";
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
+    axk::app::UploadStore uploads{directory, 64U, 16U, 4U, 16U, 5min};
+    const std::string payload{"{}"};
+    const auto create_upload = [&](std::string filename) {
+        auto created = uploads.create({.owner_id = "owner",
+                                       .filename = std::move(filename),
+                                       .kind = axk::app::UploadKind::manifest,
+                                       .media_type = "application/json",
+                                       .declared_size = payload.size(),
+                                       .sha256 = std::nullopt});
+        EXPECT_TRUE(created) << created.error().message;
+        if (!created)
+            return axk::app::UploadRef{};
+        EXPECT_TRUE(uploads.append(created->reference, "owner", 0U, std::as_bytes(std::span{payload})));
+        EXPECT_TRUE(uploads.complete(created->reference, "owner"));
+        return created->reference;
+    };
+    const auto failed_upload = create_upload("failed.json");
+    const auto running_upload = create_upload("running.json");
+    const auto queued_upload = create_upload("queued.json");
+
+    std::atomic_bool running{};
+    std::atomic_bool occupying{};
+    std::atomic_bool release_occupier{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+        const auto mode = request.value("mode", "");
+        if (mode == "fail")
+            return axk::app::Result<nlohmann::json>{std::unexpected(axk::app::Error{"injected", "failed"})};
+        if (mode == "cancel") {
+            running = true;
+            while (!context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+            return axk::app::Result<nlohmann::json>{
+                std::unexpected(axk::app::Error{"operation_cancelled", "cancelled"})};
+        }
+        if (mode == "occupy") {
+            occupying = true;
+            while (!release_occupier.load())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U, 16U, 15min, [] { return axk::app::JobManager::Clock::now(); },
+                              &uploads};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto upload_request = [](std::string mode, const axk::app::UploadRef &reference) {
+        return nlohmann::json{{"mode", std::move(mode)},
+                              {"manifest", {{"uploadRef", {{"uploadId", reference.upload_id}}}}}};
+    };
+
+    const auto failed = jobs.submit("test.job", upload_request("fail", failed_upload), context);
+    ASSERT_TRUE(failed) << failed.error().message;
+    EXPECT_EQ(wait_terminal(jobs, failed->job_id).state, axk::app::JobState::failed);
+    EXPECT_TRUE(uploads.remove(failed_upload, "owner"));
+
+    const auto cancelled = jobs.submit("test.job", upload_request("cancel", running_upload), context);
+    ASSERT_TRUE(cancelled) << cancelled.error().message;
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+    ASSERT_TRUE(jobs.cancel(cancelled->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, cancelled->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(uploads.remove(running_upload, "owner"));
+
+    const auto occupier = jobs.submit("test.job", {{"mode", "occupy"}}, context);
+    ASSERT_TRUE(occupier) << occupier.error().message;
+    while (!occupying.load())
+        std::this_thread::sleep_for(1ms);
+    const auto queued = jobs.submit("test.job", upload_request("queued", queued_upload), context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    ASSERT_TRUE(jobs.cancel(queued->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(uploads.remove(queued_upload, "owner"));
+    release_occupier = true;
+    EXPECT_EQ(wait_terminal(jobs, occupier->job_id).state, axk::app::JobState::completed);
+
+    jobs.shutdown();
+    std::filesystem::remove_all(directory, error);
+}
+
+TEST(JobManager, PathReservationLinearizesAdmissionWithMutationsInBothOrders) {
+    std::atomic_bool running{};
     std::atomic_bool release{};
     auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &context) {
+        running = true;
         while (!release.load() && !context.cancellation.is_cancelled())
             std::this_thread::sleep_for(1ms);
         return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
     });
-    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U};
-    auto submitted = jobs.submit(
-        "test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
-        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+
+    auto mutation = reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive});
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    const auto blocked =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, context);
+    ASSERT_FALSE(blocked);
+    EXPECT_EQ(blocked.error().code, "entry_in_use");
+    mutation = {};
+
+    const auto submitted =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, context);
     ASSERT_TRUE(submitted) << submitted.error().message;
-    EXPECT_TRUE(jobs.root_in_use("workspace"));
-    EXPECT_FALSE(jobs.root_in_use("other"));
-    release.store(true);
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+    EXPECT_FALSE(
+        reservations.try_acquire(axk::app::PathAccess{{"workspace", ""}, axk::app::PathAccessMode::exclusive}));
+    release = true;
     EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
-    EXPECT_FALSE(jobs.root_in_use("workspace"));
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive}));
+}
+
+TEST(JobManager, QueuedCancellationReleasesItsPathReservation) {
+    std::atomic_bool first_running{};
+    std::atomic_bool release_first{};
+    auto registry = test_registry([&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+        if (request.value("block", false)) {
+            first_running = true;
+            while (!release_first.load() && !context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto first = jobs.submit(
+        "test.job", {{"block", true}, {"source", {{"rootId", "workspace"}, {"relativePath", "first.hds"}}}}, context);
+    ASSERT_TRUE(first) << first.error().message;
+    while (!first_running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto queued =
+        jobs.submit("test.job", {{"source", {{"rootId", "workspace"}, {"relativePath", "second.hds"}}}}, context);
+    ASSERT_TRUE(queued) << queued.error().message;
+    EXPECT_FALSE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "second.hds"}, axk::app::PathAccessMode::exclusive}));
+    ASSERT_TRUE(jobs.cancel(queued->job_id, "owner"));
+    EXPECT_EQ(wait_terminal(jobs, queued->job_id).state, axk::app::JobState::cancelled);
+    EXPECT_TRUE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "second.hds"}, axk::app::PathAccessMode::exclusive}));
+
+    release_first = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
+}
+
+TEST(JobManager, IdempotentReplayDoesNotReacquireAnActiveExclusiveReservation) {
+    std::atomic_bool running{};
+    std::atomic_bool release{};
+    auto registry = test_registry(
+        [&](const nlohmann::json &request, const axk::app::OperationContext &context) {
+            running = true;
+            while (!release.load() && !context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+            return axk::app::Result<nlohmann::json>{request};
+        },
+        axk::app::OperationClass::write, true);
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::JobManager jobs{registry, 1U,           1U,    2U,
+                              8U,       2048U,        15min, [] { return axk::app::JobManager::Clock::now(); },
+                              nullptr,  &reservations};
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const auto request = nlohmann::json{{"output", {{"rootId", "workspace"}, {"relativePath", "result.hds"}}}};
+    const auto first = jobs.submit("test.job", request, context, "same-request");
+    ASSERT_TRUE(first) << first.error().message;
+    while (!running.load())
+        std::this_thread::sleep_for(1ms);
+
+    const auto replay = jobs.submit("test.job", request, context, "same-request");
+    ASSERT_TRUE(replay) << replay.error().message;
+    EXPECT_EQ(replay->job_id, first->job_id);
+    EXPECT_FALSE(reservations.try_acquire(
+        axk::app::PathAccess{{"workspace", "result.hds"}, axk::app::PathAccessMode::exclusive}));
+    release = true;
+    EXPECT_EQ(wait_terminal(jobs, first->job_id).state, axk::app::JobState::completed);
 }
 
 TEST(JobManager, RejectsQueueOverflowAndNonJobOperations) {
@@ -393,11 +705,13 @@ TEST(JobManager, ConcurrentCancellationOfRunningWorkPublishesOneImmutableTermina
     while (!entered.load())
         std::this_thread::sleep_for(1ms);
 
-    std::vector<std::jthread> callers;
+    std::vector<std::thread> callers;
     for (std::size_t index = 0; index < 16U; ++index) {
         callers.emplace_back([&] { EXPECT_TRUE(jobs.cancel(submitted->job_id, "owner")); });
     }
-    callers.clear();
+    for (auto &caller : callers) {
+        caller.join();
+    }
     const auto terminal = wait_terminal(jobs, submitted->job_id);
     ASSERT_EQ(terminal.state, axk::app::JobState::cancelled);
     const auto replay = jobs.replay(submitted->job_id, "owner", 0U);

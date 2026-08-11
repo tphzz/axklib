@@ -18,6 +18,7 @@ from server_test_harness import (
     process_file_descriptors,
     process_resident_bytes,
     request,
+    scaled_timeout,
     wait_for_connection_file,
     wait_for_job,
     write_workspace_store,
@@ -47,13 +48,30 @@ def create_upload(port: int, token: str, size: int = 12) -> str:
         "/api/v1/uploads",
         {
             "filename": "input.json",
-            "kind": "manifest",
+            "kind": "MANIFEST",
             "mediaType": "application/json",
             "size": size,
         },
     )
     assert response.status == 201, response.content
     return str(response.json()["data"]["uploadId"])
+
+
+def rejected_raw_request(port: int, payload: bytes) -> bytes:
+    with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+        connection.settimeout(2)
+        connection.sendall(payload)
+        connection.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            try:
+                chunk = connection.recv(4096)
+            except ConnectionResetError:
+                break
+            if not chunk:
+                break
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None:
@@ -139,7 +157,30 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         limits = capabilities.json()["data"]["limits"]
         assert limits["maximumJsonBytes"] == 512
         assert limits["maximumUploadTotalBytes"] == 20
+        assert limits["maximumUploads"] == 2
         assert limits["maximumImageSessions"] == 1
+
+        fixed_length_rejection = rejected_raw_request(
+            port,
+            b"POST /api/v1/files/metadata HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: 513\r\n\r\n",
+        )
+        assert not fixed_length_rejection.startswith(b"HTTP/1.1 2")
+
+        chunked_rejection = rejected_raw_request(
+            port,
+            b"POST /api/v1/files/metadata HTTP/1.1\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Content-Type: application/json\r\n\r\n"
+            b"201\r\n"
+            + (b"x" * 513)
+            + b"\r\n0\r\n\r\n",
+        )
+        assert not chunked_rejection.startswith(b"HTTP/1.1 2")
+        assert request(port, None, "GET", "/api/v1/system/health/live").status == 204
 
         malformed_cases = [
             b"{",
@@ -183,7 +224,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             "/api/v1/uploads",
             {
                 "filename": "other.json",
-                "kind": "manifest",
+                "kind": "MANIFEST",
                 "mediaType": "application/json",
                 "size": 12,
             },
@@ -220,12 +261,23 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         assert completed.status == 200, completed.content
 
         sparse_query = urlencode({"rootId": "workspace", "relativePath": "sparse.bin"})
+        inspected = request(
+            port,
+            TOKEN_A,
+            "HEAD",
+            f"/api/v1/files/content?{sparse_query}",
+        )
+        assert inspected.status == 200, inspected.content
+        revision = inspected.headers["etag"]
         tail = request(
             port,
             TOKEN_A,
             "GET",
             f"/api/v1/files/content?{sparse_query}",
-            headers={"Range": f"bytes={sparse.stat().st_size - 4}-"},
+            headers={
+                "Range": f"bytes={sparse.stat().st_size - 4}-",
+                "If-Match": revision,
+            },
         )
         assert tail.status == 206 and tail.content == b"tail", tail
         excessive_range = request(
@@ -233,7 +285,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_A,
             "GET",
             f"/api/v1/files/content?{sparse_query}",
-            headers={"Range": "bytes=0-4"},
+            headers={"Range": "bytes=0-4", "If-Match": revision},
         )
         assert excessive_range.status == 416, excessive_range.content
 
@@ -242,7 +294,12 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_A,
             "POST",
             "/api/v1/images",
-            {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+            {
+                "source": {
+                    "kind": "FILE",
+                    "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
+                }
+            },
         )
         assert opened.status == 201, opened.content
         image_id = str(opened.json()["data"]["imageId"])
@@ -252,7 +309,12 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             TOKEN_B,
             "POST",
             "/api/v1/images",
-            {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+            {
+                "source": {
+                    "kind": "FILE",
+                    "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
+                }
+            },
         )
         assert full_sessions.status == 429, full_sessions.content
         assert full_sessions.headers["retry-after"] == "1"
@@ -294,7 +356,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             connection.close()
 
         def read_version(_: int) -> int:
-            deadline = time.monotonic() + 8.0
+            deadline = time.monotonic() + scaled_timeout(8.0)
             while True:
                 try:
                     return request(
@@ -370,8 +432,15 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
     uploads = state / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     (uploads / "abandoned.upload").write_bytes(b"partial")
+
+    # State recovery is independent of whether the OS can immediately reuse the
+    # listener endpoint after the preceding process exits.
+    restart_port = choose_port()
     with ServerProcess(
-        server, ["--config", str(config_path)], port, root / "restart.log"
+        server,
+        ["--config", str(config_path), "--port", str(restart_port)],
+        restart_port,
+        root / "restart.log",
     ):
         assert not any(uploads.iterdir())
         assert (workspace / "durable-output.bin").read_bytes() == b"published"
@@ -383,6 +452,7 @@ def exercise_sidecar_shutdown(server: Path, root: Path) -> None:
     durable = workspace / "completed.bin"
     durable.write_bytes(b"complete")
     connection_file = root / "sidecar" / "connection.json"
+    connection_file.parent.mkdir(mode=0o700)
     workspace_store = root / "sidecar-workspaces.json"
     write_workspace_store(workspace_store, workspace)
     port = choose_port()
@@ -416,9 +486,9 @@ def exercise_sidecar_shutdown(server: Path, root: Path) -> None:
         started = time.monotonic()
         shutdown = request(port, token, "POST", "/api/v1/system/shutdown")
         assert shutdown.status == 202, shutdown.content
-        running.process.wait(timeout=5)
+        running.process.wait(timeout=scaled_timeout(5.0))
         assert running.process.returncode == 0
-        assert time.monotonic() - started < 5.0
+        assert time.monotonic() - started < scaled_timeout(5.0)
         assert not connection_file.exists()
         assert durable.read_bytes() == b"complete"
 

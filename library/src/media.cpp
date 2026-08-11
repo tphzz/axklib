@@ -5,6 +5,7 @@
 #include <format>
 #include <ranges>
 
+#include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
 #include "media_internal.hpp"
 
@@ -83,6 +84,57 @@ bool unsafe_component(std::string_view value) {
            std::ranges::any_of(value, [](unsigned char ch) { return ch < 0x20 || ch == 0x7f; });
 }
 
+Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size) {
+    auto decoded = decode_object(bytes);
+    if (decoded) {
+        std::optional<Error> issue;
+        if (std::holds_alternative<CurrentSmpl>(decoded->payload)) {
+            const auto stored_end = checked_add(decoded->header.header_size, decoded->header.payload_bytes_0x20);
+            const auto logical_end =
+                checked_add(decoded->header.payload_offset_0x24, decoded->header.payload_bytes_0x20);
+            if (!stored_end || *stored_end > stored_size) {
+                issue = make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                   "SMPL stored segment range exceeds the object payload");
+            } else if (!logical_end || *logical_end > decoded->header.payload_bytes_0x1c) {
+                issue = make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                   "SMPL segment range exceeds the declared Wave Data payload");
+            } else if (decoded->header.payload_offset_0x24 != 0U ||
+                       decoded->header.payload_bytes_0x20 != decoded->header.payload_bytes_0x1c) {
+                issue =
+                    make_error(ErrorCode::object_missing, ErrorCategory::object,
+                               "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory");
+            }
+        }
+        return MediaDecode{std::move(*decoded), std::move(issue)};
+    }
+    auto header = decode_object_header(bytes);
+    if (!header)
+        return std::unexpected{header.error()};
+    std::vector<std::byte> raw{bytes.begin(), bytes.end()};
+    return MediaDecode{DecodedObject{std::move(*header), ObjectFormat::unknown, GenericObject{std::move(raw)}},
+                       decoded.error()};
+}
+
+std::string object_category(ObjectType type) {
+    switch (type) {
+    case ObjectType::smpl:
+        return "SMPL";
+    case ObjectType::sbnk:
+        return "SBNK";
+    case ObjectType::sbac:
+        return "SBAC";
+    case ObjectType::prog:
+        return "PROG";
+    case ObjectType::sequ:
+        return "SEQU";
+    case ObjectType::prf3:
+        return "PRF3";
+    case ObjectType::unknown:
+        return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
 } // namespace detail
 
 namespace {
@@ -98,9 +150,15 @@ MediaKind MediaContainer::kind() const noexcept {
         return MediaKind::sfs;
     if (std::holds_alternative<FatImage>(storage_))
         return MediaKind::fat12_floppy;
+    if (std::holds_alternative<FloppyDiskSet>(storage_))
+        return MediaKind::fat12_floppy_set;
     if (std::holds_alternative<IsoImage>(storage_))
         return MediaKind::iso9660;
-    return MediaKind::standalone_object;
+    if (std::holds_alternative<A3kArchive>(storage_))
+        return MediaKind::a3k_archive;
+    if (std::holds_alternative<StandaloneObject>(storage_))
+        return MediaKind::standalone_object;
+    return MediaKind::axk_object_directory;
 }
 
 std::filesystem::path MediaContainer::source_path() const {
@@ -108,16 +166,28 @@ std::filesystem::path MediaContainer::source_path() const {
         return sfs->source_path();
     if (const auto *fat = std::get_if<FatImage>(&storage_))
         return fat->source_name();
+    if (const auto *set = std::get_if<FloppyDiskSet>(&storage_))
+        return set->source_name();
     if (const auto *iso = std::get_if<IsoImage>(&storage_))
         return iso->source_name();
-    return std::get<StandaloneObject>(storage_).object().logical_path;
+    if (const auto *archive = std::get_if<A3kArchive>(&storage_))
+        return archive->source_name();
+    if (const auto *standalone = std::get_if<StandaloneObject>(&storage_))
+        return standalone->object().logical_path;
+    return std::get<AxkObjectDirectory>(storage_).source_name();
 }
 
 const MediaStorage &MediaContainer::storage() const noexcept { return storage_; }
 
 std::span<const MediaValidationIssue> MediaContainer::validation_issues() const noexcept {
+    if (const auto *fat = variant_ptr<FatImage>(storage_))
+        return fat->validation_issues();
+    if (const auto *set = variant_ptr<FloppyDiskSet>(storage_))
+        return set->validation_issues();
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->validation_issues();
+    if (const auto *archive = variant_ptr<A3kArchive>(storage_))
+        return archive->validation_issues();
     return {};
 }
 
@@ -130,10 +200,16 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
                                                          const CancellationToken &cancellation) const {
     if (const auto *fat = variant_ptr<FatImage>(storage_))
         return fat->objects(mode, maximum_object_bytes, cancellation);
+    if (const auto *set = variant_ptr<FloppyDiskSet>(storage_))
+        return set->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *iso = variant_ptr<IsoImage>(storage_))
         return iso->objects(mode, maximum_object_bytes, cancellation);
+    if (const auto *archive = variant_ptr<A3kArchive>(storage_))
+        return archive->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *standalone = variant_ptr<StandaloneObject>(storage_))
         return std::vector{standalone->object()};
+    if (const auto *directory = variant_ptr<AxkObjectDirectory>(storage_))
+        return directory->objects(mode, cancellation);
     const auto *sfs = variant_ptr<Container>(storage_);
     auto catalog = build_object_catalog(*sfs, maximum_object_bytes, cancellation);
     if (!catalog)
@@ -144,6 +220,9 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
         auto bytes = sfs->read_record_data(item.partition, item.sfs_id, maximum_object_bytes, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
+        auto decoded = detail::decode_media_object(*bytes, bytes->size());
+        if (!decoded)
+            return std::unexpected{decoded.error()};
         result.push_back(
             {item.key,
              placement
@@ -156,46 +235,78 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
              {placement ? placement->volume_name : std::string{}, LabelStatus::confirmed, "SFS volume directory"},
              0,
              bytes->size(),
-             item.object,
+             std::move(decoded->object),
              std::move(*bytes),
-             {}});
+             std::move(decoded->issue)});
     }
     return result;
 }
 
 Result<MediaContainer> open_media(const std::filesystem::path &path, const CancellationToken &cancellation) {
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(path, error);
+    if (!error && std::filesystem::is_directory(status)) {
+        auto directory = AxkObjectDirectory::open(path, cancellation);
+        if (!directory)
+            return std::unexpected{directory.error()};
+        return MediaContainer{std::move(*directory)};
+    }
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};
-    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>((*reader)->size(), 0x9000U));
-    auto prefix = detail::read_bytes(**reader, 0, prefix_size, cancellation);
+    return open_media(std::move(*reader), path, cancellation);
+}
+
+Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader, std::filesystem::path source_path,
+                                  const CancellationToken &cancellation) {
+    if (!reader) {
+        return std::unexpected{detail::media_error(ErrorCode::invalid_argument, "media reader is required",
+                                                   text::path_to_utf8(source_path), std::nullopt)};
+    }
+    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(reader->size(), 0x9000U));
+    auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
     if (!prefix)
         return std::unexpected{prefix.error()};
     if (detail::object_prefix(*prefix)) {
-        auto object = StandaloneObject::open(std::move(*reader), text::path_to_utf8(path));
+        auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
         if (!object)
             return std::unexpected{object.error()};
         return MediaContainer{std::move(*object)};
+    }
+    if (prefix->size() >= 22U && detail::clean_ascii(std::span{*prefix}.subspan(12U, 10U)) == "A3k"
+                                                                                              "Dis"
+                                                                                              "kyPC") {
+        auto archive = A3kArchive::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!archive)
+            return std::unexpected{archive.error()};
+        return MediaContainer{std::move(*archive)};
+    }
+    if (prefix->size() >= 4U && (*prefix)[0] == std::byte{'P'} && (*prefix)[1] == std::byte{'K'} &&
+        (*prefix)[2] == std::byte{0x03} && (*prefix)[3] == std::byte{0x04}) {
+        auto set = FloppyDiskSet::open_archive(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!set)
+            return std::unexpected{set.error()};
+        return MediaContainer{std::move(*set)};
     }
     if (prefix->size() >= detail::iso_pvd_sector * detail::iso_sector_size + 6U &&
         std::to_integer<std::uint8_t>((*prefix)[detail::iso_pvd_sector * detail::iso_sector_size]) == 1U &&
         detail::clean_ascii(std::span{*prefix}.subspan(detail::iso_pvd_sector * detail::iso_sector_size + 1U, 5)) ==
             "CD001") {
-        auto iso = IsoImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
+        auto iso = IsoImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
         if (!iso)
             return std::unexpected{iso.error()};
         return MediaContainer{std::move(*iso)};
     }
     if (prefix->size() >= 512U && detail::le16(*prefix, 0x0b) >= 512U &&
         std::to_integer<std::uint8_t>((*prefix)[0x0d]) != 0U) {
-        auto fat = FatImage::open(std::move(*reader), text::path_to_utf8(path), cancellation);
+        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
         if (!fat)
             return std::unexpected{fat.error()};
         return MediaContainer{std::move(*fat)};
     }
     OpenOptions options;
     options.cancellation = cancellation;
-    auto sfs = open_image(path, options);
+    auto sfs = open_image(std::move(reader), std::move(source_path), options);
     if (!sfs)
         return std::unexpected{sfs.error()};
     return MediaContainer{std::move(*sfs)};

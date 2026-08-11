@@ -16,12 +16,13 @@ using OrderedJson = nlohmann::ordered_json;
 namespace {
 
 OrderedJson member_json(const CurrentSbnkMember &member) {
-    return {{"sample_name", member.sample_name},
-            {"smpl_link_id", member.smpl_link_id},
+    return {{"wave_data_name", member.wave_data_name},
+            {"cached_wave_data_reference_value", member.cached_wave_data_reference_value},
             {"root_key", member.root_key},
             {"sample_rate", member.sample_rate},
             {"fine_tune_cents", member.fine_tune_cents},
             {"pitch_base_word", member.pitch_base_word},
+            {"wave_start_frame", member.wave_start_frame},
             {"wave_length_frames", member.wave_length_frames},
             {"loop_start_frame", member.loop_start_frame},
             {"loop_length_frames", member.loop_length_frames}};
@@ -36,11 +37,20 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
         OrderedJson smpl = OrderedJson::array();
         for (const auto &waveform : volume.waveforms) {
             const auto &audio = waveform.waveform;
+            OrderedJson aliases = OrderedJson::array();
+            for (const auto &alias : waveform.user_facing_aliases) {
+                aliases.push_back({
+                    {"sample_object_key", alias.sample_object_key},
+                    {"display_name", alias.display_name},
+                    {"relationship_quality", axk::relationship_quality_name(alias.relationship_quality)},
+                });
+            }
             smpl.push_back({
                 {"id", waveform.object_key},
                 {"object_key", waveform.object_key},
                 {"display_name", waveform.display_name},
                 {"wav_path", axk::text::path_to_utf8(waveform.relative_wav_path)},
+                {"user_facing_aliases", std::move(aliases)},
                 {"audio",
                  {{"channels", audio.format.channels},
                   {"sample_rate", audio.format.sample_rate},
@@ -75,9 +85,9 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
             });
         }
         OrderedJson sbnk = OrderedJson::array();
-        for (const auto &bank : volume.sample_banks) {
+        for (const auto &sample : volume.samples) {
             OrderedJson members = OrderedJson::array();
-            for (const auto &member : bank.members) {
+            for (const auto &member : sample.members) {
                 members.push_back({
                     {"role", member.role},
                     {"smpl_id", member.waveform_key},
@@ -86,18 +96,18 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 });
             }
             OrderedJson rendered = nullptr;
-            if (bank.rendered_wav_path) {
+            if (sample.rendered_wav_path) {
                 rendered = {
-                    {"wav_path", axk::text::path_to_utf8(*bank.rendered_wav_path)},
+                    {"wav_path", axk::text::path_to_utf8(*sample.rendered_wav_path)},
                     {"channels", 2},
-                    {"frames", bank.stereo_decision ? bank.stereo_decision->output_frame_count : 0},
+                    {"frames", sample.stereo_decision ? sample.stereo_decision->output_frame_count : 0},
                     {"padding",
-                     {{"left_frames", bank.stereo_decision ? bank.stereo_decision->left_padding_frames : 0},
-                      {"right_frames", bank.stereo_decision ? bank.stereo_decision->right_padding_frames : 0}}},
+                     {{"left_frames", sample.stereo_decision ? sample.stereo_decision->left_padding_frames : 0},
+                      {"right_frames", sample.stereo_decision ? sample.stereo_decision->right_padding_frames : 0}}},
                 };
             }
             OrderedJson parameter_contexts = OrderedJson::array();
-            for (const auto &context : bank.parameter_contexts) {
+            for (const auto &context : sample.parameter_contexts) {
                 OrderedJson numeric_fields = OrderedJson::object();
                 numeric_fields["sample_parameter_base_0x0a8"] = 0xa8;
                 for (const auto &field : context.decoded.numeric_fields) {
@@ -118,25 +128,25 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 }
                 numeric_fields["sample_control_records"] = std::move(controls);
                 parameter_contexts.push_back({
-                    {"sample_bank_object_key", context.object_key},
-                    {"sample_bank_name", context.display_name},
+                    {"sample_object_key", context.object_key},
+                    {"sample_name", context.display_name},
                     {"relationship_type", context.relationship_type},
                     {"member_parameters", std::move(numeric_fields)},
                     {"left_member", member_json(context.decoded.left)},
                     {"right_member",
                      context.decoded.right ? member_json(*context.decoded.right) : OrderedJson(nullptr)},
                     {"selected_member", member_json(context.decoded.left)},
-                    {"bank_topology", context.decoded.right ? "two-member" : "single-member"},
+                    {"sample_topology", context.decoded.right ? "two-member" : "single-member"},
                     {"linked_program_numbers", context.decoded.linked_program_numbers},
                 });
             }
-            const auto &range_bank =
-                bank.parameter_contexts.empty() ? bank.decoded : bank.parameter_contexts.front().decoded;
-            const auto range_low = range_bank.key_range_low;
-            const auto range_high = range_bank.key_range_high;
+            const auto &range_sample =
+                sample.parameter_contexts.empty() ? sample.decoded : sample.parameter_contexts.front().decoded;
+            const auto range_low = range_sample.key_range_low;
+            const auto range_high = range_sample.key_range_high;
             OrderedJson resolved_range = {
-                {"low_midi", range_low == 255U ? OrderedJson(range_bank.left.root_key) : OrderedJson(range_low)},
-                {"high_midi", range_high == 128U ? OrderedJson(range_bank.left.root_key) : OrderedJson(range_high)},
+                {"low_midi", range_low == 255U ? OrderedJson(range_sample.left.root_key) : OrderedJson(range_low)},
+                {"high_midi", range_high == 128U ? OrderedJson(range_sample.left.root_key) : OrderedJson(range_high)},
                 {"low_raw", range_low},
                 {"high_raw", range_high},
                 {"low_display", range_low == 255U ? OrderedJson("Orig") : OrderedJson(range_low)},
@@ -144,9 +154,9 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 {"basis", range_low == 255U || range_high == 128U ? "sampler-orig-key-limit" : "decoded-key-range"},
             };
             sbnk.push_back({
-                {"id", bank.object_key},
-                {"object_key", bank.object_key},
-                {"display_name", bank.display_name},
+                {"id", sample.object_key},
+                {"object_key", sample.object_key},
+                {"display_name", sample.display_name},
                 {"physical_waveforms", std::move(members)},
                 {"rendered_audio", std::move(rendered)},
                 {"parameters",
@@ -155,16 +165,16 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
             });
         }
         OrderedJson sbac = OrderedJson::array();
-        for (const auto &group : volume.sample_bank_groups) {
+        for (const auto &sample_bank : volume.sample_banks) {
             OrderedJson members = OrderedJson::array();
-            for (const auto &key : group.member_bank_keys)
+            for (const auto &key : sample_bank.member_sample_keys)
                 members.push_back({{"sbnk_id", key}});
             sbac.push_back({
-                {"id", group.object_key},
-                {"object_key", group.object_key},
-                {"display_name", group.display_name},
+                {"id", sample_bank.object_key},
+                {"object_key", sample_bank.object_key},
+                {"display_name", sample_bank.display_name},
                 {"members", std::move(members)},
-                {"relationship_bank_keys", group.relationship_bank_keys},
+                {"relationship_sample_keys", sample_bank.relationship_sample_keys},
             });
         }
         OrderedJson prog = OrderedJson::array();
@@ -182,16 +192,16 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
         std::set<std::pair<std::string, std::string>> relationship_edges;
         for (const auto &row : volume.waveforms)
             volume_keys.insert(row.object_key);
-        for (const auto &row : volume.sample_banks) {
+        for (const auto &row : volume.samples) {
             volume_keys.insert(row.object_key);
             for (const auto &member : row.members)
                 volume_edges.emplace(row.object_key, member.waveform_key);
         }
-        for (const auto &row : volume.sample_bank_groups) {
+        for (const auto &row : volume.sample_banks) {
             volume_keys.insert(row.object_key);
-            for (const auto &member : row.member_bank_keys)
+            for (const auto &member : row.member_sample_keys)
                 volume_edges.emplace(row.object_key, member);
-            for (const auto &target : row.relationship_bank_keys)
+            for (const auto &target : row.relationship_sample_keys)
                 relationship_edges.emplace(row.object_key, target);
         }
         for (const auto &row : volume.programs) {
@@ -202,35 +212,46 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
         for (const auto &row : graph.relationships) {
             if (!volume_keys.contains(row.source_key))
                 continue;
-            if (!row.target_key)
-                continue;
-            const auto retained_relationship = relationship_edges.contains({row.source_key, *row.target_key});
-            if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
-                continue;
             if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG") {
                 continue;
+            }
+            if (row.target_key) {
+                const auto retained_relationship = relationship_edges.contains({row.source_key, *row.target_key});
+                if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
+                    continue;
+            } else {
+                const auto scoped_dependency = row.type == "SBAC_SLOT_TO_SBNK" ||
+                                               row.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
+                                               row.type == "SBNK_RIGHT_MEMBER_TO_SMPL" ||
+                                               (row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+                                                (row.assignment_state == axk::AssignmentState::active ||
+                                                 row.assignment_state == axk::AssignmentState::source_load));
+                if (!scoped_dependency)
+                    continue;
             }
             relationships.push_back({
                 {"relationship_type", row.type},
                 {"source_key", row.source_key},
-                {"target_key", row.target_key ? *row.target_key : ""},
+                {"target_key", row.target_key ? OrderedJson(*row.target_key) : OrderedJson(nullptr)},
+                {"candidate_keys", row.candidate_keys},
                 {"quality", axk::relationship_quality_name(row.quality)},
                 {"basis", row.basis},
                 {"active_assignment_state", axk::assignment_state_name(row.assignment_state)},
             });
         }
         OrderedJson decisions = OrderedJson::array();
-        for (const auto &bank : volume.sample_banks) {
-            if (!bank.stereo_decision)
+        for (const auto &sample : volume.samples) {
+            if (!sample.stereo_decision)
                 continue;
             decisions.push_back({
-                {"sbnk_object_key", bank.object_key},
-                {"sample_name", bank.display_name},
-                {"decision", bank.stereo_decision->renderable ? "interleaved_stereo_written" : "physical_members_only"},
-                {"reason_code", bank.stereo_decision->reason_code},
-                {"output_frame_count", bank.stereo_decision->output_frame_count},
-                {"left_padding_frames", bank.stereo_decision->left_padding_frames},
-                {"right_padding_frames", bank.stereo_decision->right_padding_frames},
+                {"sbnk_object_key", sample.object_key},
+                {"sample_name", sample.display_name},
+                {"decision",
+                 sample.stereo_decision->renderable ? "interleaved_stereo_written" : "physical_members_only"},
+                {"reason_code", sample.stereo_decision->reason_code},
+                {"output_frame_count", sample.stereo_decision->output_frame_count},
+                {"left_padding_frames", sample.stereo_decision->left_padding_frames},
+                {"right_padding_frames", sample.stereo_decision->right_padding_frames},
             });
         }
         return OrderedJson{
@@ -258,6 +279,76 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
     } catch (const nlohmann::json::exception &error) {
         return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
                                           std::string{"could not serialize volume graph JSON: "} + error.what())};
+    }
+}
+
+axk::Result<std::string> serialize_unresolved_wave_data_graph(const UnresolvedWaveDataExport &scope,
+                                                              const std::filesystem::path &source_path,
+                                                              std::string_view container_kind) {
+    try {
+        OrderedJson waveforms = OrderedJson::array();
+        for (const auto &waveform : scope.waveforms) {
+            OrderedJson candidates = OrderedJson::array();
+            for (const auto &candidate : waveform.placement_candidates) {
+                candidates.push_back({
+                    {"partition_index", candidate.partition.value},
+                    {"partition_name", candidate.partition_name},
+                    {"volume_directory_sfs_id", candidate.volume_directory.value},
+                    {"volume_name", candidate.volume_name},
+                    {"category_name", candidate.category_name},
+                    {"entry_name", candidate.entry_name},
+                    {"container_directory", candidate.container_directory},
+                });
+            }
+            const auto &audio = waveform.waveform;
+            OrderedJson aliases = OrderedJson::array();
+            for (const auto &alias : waveform.user_facing_aliases) {
+                aliases.push_back({
+                    {"sample_object_key", alias.sample_object_key},
+                    {"display_name", alias.display_name},
+                    {"relationship_quality", axk::relationship_quality_name(alias.relationship_quality)},
+                });
+            }
+            waveforms.push_back({
+                {"id", waveform.object_key},
+                {"object_key", waveform.object_key},
+                {"display_name", waveform.display_name},
+                {"wav_path", text::path_to_utf8(waveform.relative_wav_path)},
+                {"user_facing_aliases", std::move(aliases)},
+                {"placement",
+                 {{"resolution", placement_resolution_name(waveform.placement_resolution)},
+                  {"quality",
+                   waveform.placement_resolution == PlacementResolution::exact ? "authoritative" : "unresolved"},
+                  {"basis", waveform.placement_resolution == PlacementResolution::ambiguous
+                                ? "multiple directory placement candidates"
+                                : "no authoritative directory placement"},
+                  {"candidates", std::move(candidates)}}},
+                {"audio",
+                 {{"channels", audio.format.channels},
+                  {"sample_rate", audio.format.sample_rate},
+                  {"sample_width_bytes", audio.format.sample_width_bytes},
+                  {"frames", audio.frame_count},
+                  {"stored_payload_size", audio.stored_payload_size},
+                  {"decoded_pcm_size", audio.pcm.size()},
+                  {"exactness_status", audio.alternating_byte_payload_detected ? "alternating-byte-compatibility-export"
+                                                                               : "exact-current-mono"}}},
+            });
+        }
+        return OrderedJson{
+            {"schema", unresolved_wave_data_schema_version},
+            {"source", {{"container", text::path_to_utf8(source_path)}, {"container_kind", container_kind}}},
+            {"scope",
+             {{"kind", "unresolved_physical_wave_data"},
+              {"path", text::path_to_utf8(scope.relative_root)},
+              {"partition_index", scope.partition.value},
+              {"partition_name", scope.partition_name}}},
+            {"objects", {{"smpl", std::move(waveforms)}}},
+        }
+            .dump(2);
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{
+            make_error(ErrorCode::invalid_argument, ErrorCategory::internal,
+                       std::string{"could not serialize unresolved Wave Data JSON: "} + error.what())};
     }
 }
 

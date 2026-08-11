@@ -1,21 +1,34 @@
 #include "axklib/server/workspaces.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/utf8.hpp"
+#include "environment.hpp"
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #else
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -25,12 +38,78 @@ using Json = nlohmann::json;
 
 axk::app::Error workspace_error(std::string code, std::string message) { return {std::move(code), std::move(message)}; }
 
-bool can_write(const std::filesystem::path &path) {
-#if defined(_WIN32)
-    return _waccess(path.c_str(), 2) == 0;
-#else
-    return ::access(path.c_str(), W_OK) == 0;
+std::string path_component_key(const std::filesystem::path &component) {
+    auto result = axk::text::path_to_utf8(component);
+#if defined(_WIN32) || defined(__APPLE__)
+    std::ranges::transform(result, result.begin(), [](char value) {
+        return static_cast<char>(std::tolower(static_cast<unsigned char>(value)));
+    });
 #endif
+    return result;
+}
+
+std::vector<std::string> workspace_path_components(const std::filesystem::path &path) {
+    std::error_code error;
+    auto normalized = std::filesystem::weakly_canonical(path, error);
+    if (error)
+        normalized = path.lexically_normal();
+    std::vector<std::string> result;
+    for (const auto &component : normalized)
+        result.push_back(path_component_key(component));
+    return result;
+}
+
+bool workspace_paths_overlap(const std::filesystem::path &left, const std::filesystem::path &right) {
+    const auto left_components = workspace_path_components(left);
+    const auto right_components = workspace_path_components(right);
+    const auto is_prefix = [](const auto &prefix, const auto &value) {
+        return prefix.size() <= value.size() && std::equal(prefix.begin(), prefix.end(), value.begin());
+    };
+    return is_prefix(left_components, right_components) || is_prefix(right_components, left_components);
+}
+
+axk::app::Result<void>
+validate_non_overlapping_workspaces(const std::vector<axk::server::WorkspaceDefinition> &definitions,
+                                    std::span<const std::filesystem::path> protected_paths) {
+    for (const auto &definition : definitions) {
+        if (std::ranges::any_of(protected_paths, [&definition](const auto &protected_path) {
+                return workspace_paths_overlap(definition.path, protected_path);
+            })) {
+            return std::unexpected(workspace_error("workspace_protected_path",
+                                                   "workspace directories must not overlap protected server state"));
+        }
+    }
+    for (std::size_t left = 0U; left < definitions.size(); ++left) {
+        for (std::size_t right = left + 1U; right < definitions.size(); ++right) {
+            if (workspace_paths_overlap(definitions[left].path, definitions[right].path)) {
+                return std::unexpected(
+                    workspace_error("workspace_path_overlap", "workspace directories must not overlap"));
+            }
+        }
+    }
+    return {};
+}
+
+bool can_write(const std::filesystem::path &path) {
+    auto suffix = axk::app::secure_random_hex(16U);
+    if (!suffix)
+        return false;
+    const auto check_path = path / (".axkdeck-write-check-" + *suffix);
+    {
+        std::ofstream output{check_path, std::ios::binary | std::ios::trunc};
+        if (!output)
+            return false;
+        output.put('\0');
+        output.flush();
+        output.close();
+        if (!output) {
+            std::error_code cleanup_error;
+            std::filesystem::remove(check_path, cleanup_error);
+            return false;
+        }
+    }
+    std::error_code error;
+    return std::filesystem::remove(check_path, error) && !error;
 }
 
 axk::server::WorkspaceInfo inspect(const axk::server::WorkspaceDefinition &definition) {
@@ -81,6 +160,65 @@ Json serialize(std::uint64_t revision, const std::vector<axk::server::WorkspaceD
     return {{"schemaVersion", 1U}, {"revision", revision}, {"workspaces", std::move(values)}};
 }
 
+axk::app::Result<void> write_exclusive_file(const std::filesystem::path &path, std::string_view contents) {
+#if defined(_WIN32)
+    const auto handle = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                                    FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const auto error = GetLastError();
+        return std::unexpected(workspace_error(error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS
+                                                   ? "workspace_store_staging_collision"
+                                                   : "workspace_store_write_failed",
+                                               "workspace store staging file cannot be created"));
+    }
+    auto remaining = std::as_bytes(std::span{contents});
+    bool written_successfully = true;
+    while (!remaining.empty()) {
+        const auto count =
+            static_cast<DWORD>(std::min<std::size_t>(remaining.size(), std::numeric_limits<DWORD>::max()));
+        DWORD written{};
+        if (WriteFile(handle, remaining.data(), count, &written, nullptr) == 0 || written == 0U) {
+            written_successfully = false;
+            break;
+        }
+        remaining = remaining.subspan(static_cast<std::size_t>(written));
+    }
+    if (written_successfully)
+        written_successfully = FlushFileBuffers(handle) != 0;
+    const auto closed = CloseHandle(handle) != 0;
+    if (!written_successfully || !closed)
+        return std::unexpected(
+            workspace_error("workspace_store_write_failed", "workspace store write did not complete"));
+#else
+    const auto descriptor =
+        ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, S_IRUSR | S_IWUSR);
+    if (descriptor < 0) {
+        return std::unexpected(
+            workspace_error(errno == EEXIST ? "workspace_store_staging_collision" : "workspace_store_write_failed",
+                            "workspace store staging file cannot be created"));
+    }
+    auto remaining = std::as_bytes(std::span{contents});
+    bool written_successfully = true;
+    while (!remaining.empty()) {
+        const auto written = ::write(descriptor, remaining.data(), remaining.size());
+        if (written < 0 && errno == EINTR)
+            continue;
+        if (written <= 0) {
+            written_successfully = false;
+            break;
+        }
+        remaining = remaining.subspan(static_cast<std::size_t>(written));
+    }
+    if (written_successfully)
+        written_successfully = ::fsync(descriptor) == 0;
+    const auto closed = ::close(descriptor) == 0;
+    if (!written_successfully || !closed)
+        return std::unexpected(
+            workspace_error("workspace_store_write_failed", "workspace store write did not complete"));
+#endif
+    return {};
+}
+
 axk::app::Result<void> publish(const std::filesystem::path &path, std::uint64_t revision,
                                const std::vector<axk::server::WorkspaceDefinition> &workspaces) {
     std::error_code error;
@@ -88,17 +226,14 @@ axk::app::Result<void> publish(const std::filesystem::path &path, std::uint64_t 
     if (error)
         return std::unexpected(
             workspace_error("workspace_store_write_failed", "workspace store directory cannot be created"));
-    const auto temporary = path.parent_path() / (path.filename().string() + ".tmp");
-    {
-        std::ofstream output{temporary, std::ios::binary | std::ios::trunc};
-        if (!output)
-            return std::unexpected(
-                workspace_error("workspace_store_write_failed", "workspace store cannot be written"));
-        output << serialize(revision, workspaces).dump(2) << '\n';
-        output.flush();
-        if (!output)
-            return std::unexpected(
-                workspace_error("workspace_store_write_failed", "workspace store write did not complete"));
+    auto identifier = axk::app::secure_random_hex(16U);
+    if (!identifier)
+        return std::unexpected(identifier.error());
+    const auto temporary = path.parent_path() / (path.filename().string() + "." + *identifier + ".tmp");
+    const auto contents = serialize(revision, workspaces).dump(2) + '\n';
+    if (auto written = write_exclusive_file(temporary, contents); !written) {
+        std::filesystem::remove(temporary, error);
+        return std::unexpected(written.error());
     }
 #if defined(_WIN32)
     if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
@@ -113,6 +248,15 @@ axk::app::Result<void> publish(const std::filesystem::path &path, std::uint64_t 
         return std::unexpected(
             workspace_error("workspace_store_write_failed", "workspace store cannot be replaced atomically"));
     }
+    const auto parent = ::open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent < 0)
+        return std::unexpected(
+            workspace_error("workspace_store_write_failed", "workspace store directory cannot be synchronized"));
+    const auto synchronized = ::fsync(parent);
+    const auto closed = ::close(parent);
+    if (synchronized != 0 || closed != 0)
+        return std::unexpected(
+            workspace_error("workspace_store_write_failed", "workspace store directory cannot be synchronized"));
 #endif
     return {};
 }
@@ -123,12 +267,14 @@ struct axk::server::WorkspaceStore::State {
     std::mutex mutex;
     std::filesystem::path path;
     app::Sandbox sandbox;
+    std::vector<std::filesystem::path> protected_paths;
     std::uint64_t revision{};
     std::vector<WorkspaceDefinition> definitions;
     std::optional<std::string> configuration_issue;
 
-    explicit State(std::filesystem::path value, app::Sandbox sandbox_value)
-        : path(std::move(value)), sandbox(std::move(sandbox_value)) {}
+    explicit State(std::filesystem::path value, app::Sandbox sandbox_value,
+                   std::vector<std::filesystem::path> protected_values)
+        : path(std::move(value)), sandbox(std::move(sandbox_value)), protected_paths(std::move(protected_values)) {}
 };
 
 std::string_view axk::server::workspace_status_name(WorkspaceStatus status) noexcept {
@@ -161,26 +307,27 @@ std::string_view axk::server::workspace_configuration_state_name(WorkspaceConfig
 
 axk::app::Result<std::filesystem::path> axk::server::WorkspaceStore::default_path() {
 #if defined(_WIN32)
-    const auto *base = std::getenv("APPDATA");
-    if (base == nullptr || *base == '\0')
+    const auto base = detail::environment_variable("APPDATA");
+    if (!base || base->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "APPDATA is not available"));
-    return std::filesystem::path{base} / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
 #elif defined(__APPLE__)
-    const auto *home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0')
+    const auto home = detail::environment_variable("HOME");
+    if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{home} / "Library" / "Application Support" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / "Library" / "Application Support" / "axkdeck" / "workspaces.json";
 #else
-    if (const auto *base = std::getenv("XDG_CONFIG_HOME"); base != nullptr && *base != '\0')
-        return std::filesystem::path{base} / "axkdeck" / "workspaces.json";
-    const auto *home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0')
+    if (const auto base = detail::environment_variable("XDG_CONFIG_HOME"); base && !base->empty())
+        return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
+    const auto home = detail::environment_variable("HOME");
+    if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{home} / ".config" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / ".config" / "axkdeck" / "workspaces.json";
 #endif
 }
 
-axk::app::Result<axk::server::WorkspaceStore> axk::server::WorkspaceStore::open(std::filesystem::path path) {
+axk::app::Result<axk::server::WorkspaceStore>
+axk::server::WorkspaceStore::open(std::filesystem::path path, std::vector<std::filesystem::path> protected_paths) {
     if (path.empty()) {
         auto resolved = default_path();
         if (!resolved)
@@ -189,10 +336,18 @@ axk::app::Result<axk::server::WorkspaceStore> axk::server::WorkspaceStore::open(
     }
     if (!path.is_absolute())
         return std::unexpected(workspace_error("workspace_store_invalid", "workspace store path must be absolute"));
-    auto sandbox = app::Sandbox::create({});
+    for (auto &protected_path : protected_paths) {
+        std::error_code error;
+        protected_path = std::filesystem::weakly_canonical(protected_path, error);
+        if (error) {
+            return std::unexpected(
+                workspace_error("workspace_store_invalid", "protected server path cannot be canonicalized"));
+        }
+    }
+    auto sandbox = app::Sandbox::create({}, protected_paths);
     if (!sandbox)
         return std::unexpected(sandbox.error());
-    auto state = std::make_shared<State>(std::move(path), std::move(*sandbox));
+    auto state = std::make_shared<State>(std::move(path), std::move(*sandbox), std::move(protected_paths));
     std::error_code error;
     if (!std::filesystem::exists(state->path, error))
         return WorkspaceStore{std::move(state)};
@@ -222,6 +377,9 @@ axk::app::Result<axk::server::WorkspaceStore> axk::server::WorkspaceStore::open(
             }
             state->definitions.push_back(std::move(definition));
         }
+        if (auto validated = validate_non_overlapping_workspaces(state->definitions, state->protected_paths);
+            !validated)
+            state->configuration_issue = validated.error().message;
     } catch (const std::exception &) {
         state->configuration_issue = "workspace store is unreadable or has an unsupported schema";
     }
@@ -290,11 +448,17 @@ axk::app::Result<axk::server::WorkspaceInfo> axk::server::WorkspaceStore::add(st
                                    .display_name = std::move(display_name),
                                    .path = std::move(path),
                                    .writable = writable};
+    if (auto protected_path = validate_non_overlapping_workspaces({definition}, state_->protected_paths);
+        !protected_path) {
+        return std::unexpected(protected_path.error());
+    }
     const auto info = inspect(definition);
     if (info.status != WorkspaceStatus::available && info.status != WorkspaceStatus::read_only)
         return std::unexpected(workspace_error("invalid_workspace", info.issue.value_or("workspace is unavailable")));
     auto updated = state_->definitions;
-    updated.push_back(definition);
+    updated.push_back(info.definition);
+    if (auto validated = validate_non_overlapping_workspaces(updated, state_->protected_paths); !validated)
+        return std::unexpected(validated.error());
     if (auto written = publish(state_->path, state_->revision + 1U, updated); !written)
         return std::unexpected(written.error());
     state_->definitions = std::move(updated);
@@ -324,7 +488,13 @@ axk::server::WorkspaceStore::update(std::string_view id, std::optional<std::stri
         found->writable = *writable;
     if (found->display_name.empty() || !found->path.is_absolute())
         return std::unexpected(workspace_error("invalid_workspace", "workspace name and absolute path are required"));
+    if (auto protected_path = validate_non_overlapping_workspaces({*found}, state_->protected_paths); !protected_path) {
+        return std::unexpected(protected_path.error());
+    }
     const auto info = inspect(*found);
+    *found = info.definition;
+    if (auto validated = validate_non_overlapping_workspaces(updated, state_->protected_paths); !validated)
+        return std::unexpected(validated.error());
     if (auto written = publish(state_->path, state_->revision + 1U, updated); !written)
         return std::unexpected(written.error());
     state_->definitions = std::move(updated);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -14,15 +15,22 @@ namespace axk::server {
 
 struct EventDispatcherSnapshot {
     std::uint64_t delivered_events{};
+    std::uint64_t failed_events{};
     std::uint64_t dropped_events{};
     std::size_t pending_events{};
+};
+
+struct EventDispatcherHooks {
+    std::function<void()> before_sink;
+    std::function<void()> after_sink;
 };
 
 class EventDispatcher {
   public:
     using Sink = std::function<void(const app::JobEvent &)>;
 
-    EventDispatcher(std::size_t maximum_pending_events, Sink sink);
+    EventDispatcher(std::size_t maximum_pending_events, Sink sink,
+                    std::shared_ptr<const EventDispatcherHooks> hooks = {});
     ~EventDispatcher();
 
     EventDispatcher(const EventDispatcher &) = delete;
@@ -39,10 +47,12 @@ class EventDispatcher {
 
     const std::size_t maximum_pending_events_;
     Sink sink_;
+    std::shared_ptr<const EventDispatcherHooks> hooks_;
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::deque<app::JobEvent> pending_;
     std::uint64_t delivered_events_{};
+    std::uint64_t failed_events_{};
     std::uint64_t dropped_events_{};
     bool stopping_{};
     std::thread worker_;

@@ -1,9 +1,11 @@
 # Portable Object Packages
 
 The axklib portable-package format moves complete Yamaha A-series object graphs
-between supported SFS/HDS, Yamaha FAT12 floppy, and Yamaha ISO9660 media. A
-package contains original Yamaha object payloads and a source-neutral graph. It
-is not a disk image, a WAV collection, or a general backup format.
+from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
+A3K media into portable packages and imports packages into admitted
+writable targets. A package contains original Yamaha object payloads and a
+source-neutral graph. It is not a disk image, a WAV collection, or a general
+backup format.
 
 All package files use the same version 1 deterministic ZIP container and
 manifest schema. The filename extension communicates the selected root to a
@@ -13,25 +15,76 @@ person; it does not select a parser or override the manifest.
 
 | Selected roots | Manifest `package_kind` | Extension | Meaning |
 | --- | --- | --- | --- |
-| One complete volume | `volume` | `.axkvol` | Every admitted object placed in the volume and its complete known closure |
-| One Program | `program` | `.axkprg` | The Program, assigned banks or groups, and required waveforms |
-| One bank group | `sbac` | `.axksbac` | One sampler-visible `B <name>` group, member banks, and waveforms |
-| One member bank/sample | `sbnk` | `.axksbnk` | One SBNK and its physical waveform dependencies |
-| One physical waveform | `smpl` | `.axksmpl` | One SMPL storage object |
-| One admitted sequence | `sequence` | `.axkseq` | Reserved for a future admitted SEQU dependency profile |
-| Two or more roots | `bundle` | `.axkpkg` | A same-type or mixed-type collection of explicitly selected roots |
+| One or more complete volumes | `volume` | `.axkvol` | Every admitted object placed in each volume and its complete known closure |
+| One or more Programs | `program` | `.axkprg` | The Programs, assigned Sample Banks or Samples, and required Wave Data |
+| One or more Sample Banks | `sbac` | `.axksbac` | Sampler-visible `B <name>` Sample Banks, their Samples, and required Wave Data |
+| One or more Samples | `sbnk` | `.axksbnk` | Samples (`SBNK`) and their Wave Data dependencies |
+| One or more Wave Data objects | `smpl` | `.axksmpl` | Wave Data (`SMPL`) storage objects |
+| One or more Sequences | `sequence` | `.axkseq` | Byte-preserved Sequence (`SEQU`) objects with no external dependency edges |
+| Different root kinds | `bundle` | `.axkpkg` | A mixed-type collection of explicitly selected roots |
 
 Dependencies never change the extension. A Program containing SBAC, SBNK, and
-SMPL nodes remains `.axkprg`; two selected Programs form `.axkpkg`. Version 1
-currently admits current-format `PROG`, `SBAC`, `SBNK`, and `SMPL` objects.
-`SEQU`, `PRF3`, unknown types, and non-current object profiles are rejected
-because their portable dependency and relocation contracts are not admitted.
-Consequently `.axkseq` is reserved but cannot currently be produced.
+SMPL nodes remains `.axkprg`, as do two selected Programs. A Program and a
+Sample selected together form `.axkpkg`. Version 1 currently admits
+current-format `PROG`, `SBAC`, `SBNK`, `SMPL`, and `SEQU` objects. `PRF3`,
+unknown types, and non-current object profiles are rejected because their
+portable dependency and relocation contracts are not admitted. The one narrow
+exception is a header-valid but semantically undecodable `SEQU`. Sequences have
+no external object dependencies, so the raw payload can be preserved as an
+opaque node with format `unknown`, no relationships, and no relocation
+descriptors. The package carries the nonfatal
+`SEQUENCE_PAYLOAD_PRESERVED_OPAQUE` issue. Full verification and import repeat
+that restriction; an opaque Sequence owning an edge, declaring a relocation, or
+changing bytes outside an explicit object-name rename is rejected.
+
+A normally decoded or opaque Sequence therefore remains eligible for `.axkseq`
+and complete `.axkvol` export. Package import has no implicit policy for an
+opaque Sequence: each node must be explicitly preserved unchanged or skipped.
+Preservation copies the original event bytes; optional Sequence rename changes
+only its object-name field and preserves the internal track/lane label. Skipping
+omits the standalone Sequence without discarding lower-level audio objects in
+the package. Opaque preservation does not make MIDI conversion, editing, or
+sampler playability verified; clients must surface both the choice and its
+warning to the user.
+
+An unrelated malformed Sequence already stored in an SFS target does not block
+otherwise valid imports. The plan warns that it will remain untouched and
+captures its exact object placement and payload SHA-256. Apply verifies that
+invariant after the write and rolls back rather than publishing an image if the
+target Sequence changed.
 
 Writers append the derived extension to a suffix-free output stem. A different
 recognized package extension or an unrelated extension is rejected. Readers
 derive the kind from `manifest.json`; renaming a valid package produces the
 nonfatal `PACKAGE_EXTENSION_MISMATCH` issue without changing its kind or ID.
+
+## Axkdeck Batch Volume Export
+
+Axkdeck can export all immediate volumes under one SFS partition or Yamaha
+CD-ROM group with **Export volume packages...**. Each nonempty volume is built
+as an independent, complete `.axkvol`; the command never combines volumes into
+one root selection. Each package still follows the normal complete known
+dependency closure, so a required object placed elsewhere may be copied into
+more than one self-contained package. The selected partition or group and every
+child volume are resolved by their opaque content IDs, so duplicate visible
+names remain distinct.
+
+The destination is one new directory containing the packages directly plus
+`volume-packages.axklib.json`. Empty volumes are skipped. A package-closure
+failure for one volume is recorded in the report while other valid volumes are
+retained. If no volume succeeds, no destination directory or download archive
+is published. Package filenames are deterministic, use filesystem-safe visible
+volume names, and add a stable storage-derived suffix when sanitized names
+collide. Workspace export creates the directory without overwriting an existing
+entry. Desktop export downloads the same directory as a retained TAR and then
+removes the temporary retained resource.
+
+This batch command is an application workflow over the same version 1 package
+builder and validation rules as individual package export. FAT12 and AXK object
+directory sessions retain their existing single-volume package export. An
+A3K archive likewise exports its one whole volume directly as `.axkvol`.
+These sources do not advertise partition-level batch export because they have
+no equivalent multi-volume parent scope.
 
 ## CLI Workflow
 
@@ -48,16 +101,29 @@ The suffix-free output becomes `Stage Piano.axkprg`. Root grammar is:
 ```text
 volume
 program=NAME
-sbac=NAME
-sbnk=NAME
-smpl=NAME
+sample-bank=NAME
+sample=NAME
+wave-data=NAME
+sequence=NAME
 ```
 
-`prog` and `sample` are accepted aliases. `--partition`, `--group`, and
+The raw object selectors `sbac`, `sbnk`, and `smpl` remain supported. `prog` is
+an alias for `program`. `sample-bank` always selects an `SBAC` Sample Bank; use
+`sample` or `sbnk` for an `SBNK` Sample, and `sequence` for a `SEQU` object.
+Obsolete pre-release selector names are rejected. `--partition`, `--group`, and
 `--volume` constrain all roots in one export command. Repeat `--root` to create
-a multi-root `.axkpkg`. A selector must resolve exactly once and every required
-active relationship must be known and unambiguous; otherwise no archive is
-published. Ambiguous inactive Program diagnostic rows are not package content.
+a multi-root package. Homogeneous roots keep their typed extension; mixed root
+kinds use `.axkpkg`.
+A selector must resolve exactly once and every required active relationship
+must be known and unambiguous; otherwise no archive is published. Ambiguous
+inactive Program diagnostic rows are not package content.
+
+For an ISO Sample Bank, duplicate Sample names in other raw volumes do not make
+the package ambiguous when the selected bank and exactly one matching Sample
+are exact ISO9660 directory entries in the same raw volume. The closure remains
+volume-local. Recovered placement, no local match, or more than one matching
+Sample in the selected raw volume blocks export; package construction never
+widens the closure gate to accept every `Likely` relationship.
 
 Inspection validates the archive profile, canonical manifest, graph, declared
 entry sizes, and package ID while reading only bounded metadata and the
@@ -77,6 +143,10 @@ axklib package verify "Stage Piano.axkprg" --format json
 
 Successful full verification reports `"payloads_verified":true`. Import always
 performs full verification even when the caller previously inspected a file.
+Inspection reports the exact uncompressed object total as
+`total_payload_bytes` in CLI JSON and `totalPayloadBytes` through the server
+contract. This is package content size, not the amount a target image will
+allocate.
 
 Plan before applying:
 
@@ -86,6 +156,52 @@ axklib package plan-import target.hds "Stage Piano.axkprg" \
   --format json
 ```
 
+Each plan allocation reports `additional_allocated_bytes` in CLI JSON and
+`additionalAllocatedBytes` through the server contract. That value includes
+payload rounding, continuation metadata, category-directory growth, and other
+target-format infrastructure. It is the authoritative space estimate shown by
+axkdeck. Category directories grow during a valid SFS import; physical cluster
+or object-ID exhaustion remains a blocking conflict.
+
+Plans also report `program_assignment_adjustments` in CLI JSON and
+`programAssignmentAdjustments` through the server contract. These are
+nonblocking, row-specific decisions for unresolved Program assignments that
+would otherwise acquire an exact type-and-name target in the destination. Each
+entry identifies the imported or existing Program, assignment ordinal, target
+type and name, destination scope, reason, and `clear-assignment` disposition.
+Axkdeck shows these decisions before enabling import.
+
+Program slot collisions are planned separately from object-name collisions.
+For each destination volume, `program_slot_placements` in CLI JSON and
+`programSlotPlacements` through the server contract report the occupied source
+and proposed destination ranges plus every source-to-destination Program slot
+mapping. Exact reusable Programs do not consume another slot. When placement is
+needed, the planner proposes the first contiguous free block large enough for
+all imported Programs; if no such block exists but enough slots remain, it
+proposes the lowest free fragmented slots. If the volume lacks enough of its
+128 Program slots, placement is unavailable and the plan remains blocked.
+
+Suggested placement is advisory until the caller replans with explicit Program
+slot assignments. This makes the accepted plan identity cover the final slot
+mapping and prevents a later object rename from changing which Program occupies
+which slot. Axkdeck seeds its assignment controls from the suggestion and uses
+the same explicit replan step for automatic and user-edited placement.
+
+The CLI accepts the proposed or edited mapping through
+`--program-slot-map program-slots.json`. Each entry identifies one Program node
+from the plan and its final slot:
+
+```json
+[
+  {"package": 0, "node_id": "n-<lowercase-sha256>", "slot": 5},
+  {"package": 0, "node_id": "n-<lowercase-sha256>", "slot": 6}
+]
+```
+
+Submit the complete proposed mapping, not only the Programs whose original
+slots collided. Slots must be unique, between 1 and 128, and unused in the
+destination unless that existing Program is an exact reusable object.
+
 Apply the exact plan through the same request:
 
 ```bash
@@ -94,10 +210,38 @@ axklib package import target.hds "Stage Piano.axkprg" \
   -o imported.hds --format json
 ```
 
-Import never edits the source image. It builds and validates a complete
-temporary image, then publishes atomically. Existing output paths are refused
-unless `--overwrite` is explicit. A plan with conflicts is reported with exit
-code 3 and is not applied.
+The CLI import shown above never edits the source image. It builds and validates
+a complete temporary image, then publishes atomically. Existing output paths
+are refused unless `--overwrite` is explicit. A plan with conflicts is reported
+with exit code 3 and is not applied.
+
+An authenticated writable SFS image session has a separate in-place workflow
+for axkdeck. `images.package_import.plan` fully verifies an ordered set of one
+to 256 packages and returns an owner-bound, expiring plan tied to the current
+image revision and retained package identities. The destination is either one
+existing volume shared by every package root or one new volume per `.axkvol`
+package. New-volume mode reads the exact Volume root placement hint, proposes a
+unique 1-16 character Yamaha volume name, and accepts explicit indexed name
+overrides when the user edits that proposal. The plan response reports each
+package's source hint, final volume name, payload size, total object count, and
+Program, Sample Bank, Sample, Wave Data, and Sequence counts.
+
+`images.package_import` applies the complete retained package set through one
+alteration journal, validates the resulting image, and refreshes the retained
+session once. A failure rolls back the whole set; a partial batch is never
+published. `images.package_import.release` explicitly discards an unused plan.
+This session workflow preserves crash recovery and atomic rollback guarantees;
+it is not the CLI's separate-output publication model.
+
+`images.package_export` exports one to 1,024 exact roots from any readable
+image session. A root is either a selected volume or an opaque session object
+ID with kind `PROGRAM`, `SBAC`, `SBNK`, or `SMPL`. Homogeneous roots use their
+specific package extension regardless of count; mixed root kinds use `.axkpkg`.
+Shared dependencies are included once. A workspace destination publishes
+through the sandbox. A
+download destination creates a short-lived, owner-scoped retained file for a
+native client to stream and explicitly delete. The package contents and
+identity are identical in both cases.
 
 ### Destination Objects
 
@@ -120,7 +264,7 @@ raw volume under its raw group.
 
 An ISO manifest may create an object-empty `F001` volume for use as a package
 import staging target. Populate that image before distribution; an empty ISO is
-not a hardware-promoted standalone writer profile.
+not a standalone hardware-verified writer profile.
 
 All destinations in one import request are resolved against the input image.
 One root can create and populate a new SFS volume, but another root in the same
@@ -186,7 +330,8 @@ Conflicts block the complete plan.
 | `DESTINATION_ROOT_INVALID`, `DESTINATION_ROOT_MISSING`, `DESTINATION_ROOT_DUPLICATE` | Correct the package/root indexes and supply exactly one mapping per root. |
 | `PACKAGE_RENAME_INVALID`, `RENAME_NODE_INVALID`, `RENAME_NODE_DUPLICATE`, `RENAME_NAME_INVALID` | Correct the rename-map node, uniqueness, or 1-to-16-byte ASCII destination name. |
 | `SFS_DESTINATION_INVALID`, `SFS_DESTINATION_PARTITION_MISSING`, `SFS_DESTINATION_MISSING`, `SFS_DESTINATION_ALREADY_EXISTS`, `SFS_DESTINATION_POLICY_CONFLICT` | Correct the SFS partition, volume, and `create` policy. |
-| `SFS_OBJECT_NAME_INVALID`, `SFS_PROGRAM_SLOT_INVALID`, `SFS_TARGET_NAME_AMBIGUOUS`, `SFS_NAME_CONFLICT` | Correct names, disambiguate target content, or provide an explicit rename. |
+| `SFS_OBJECT_NAME_INVALID`, `SFS_PROGRAM_SLOT_INVALID`, `SFS_TARGET_NAME_AMBIGUOUS`, `SFS_NAME_CONFLICT` | Correct names or disambiguate target content. Use Program slot assignments, not generic renames, for Program conflicts. |
+| `SFS_PROGRAM_SLOT_RENAME_UNSUPPORTED`, `SFS_PROGRAM_SLOT_ASSIGNMENTS_INCOMPLETE`, `SFS_PROGRAM_SLOT_CAPACITY_EXHAUSTED` | Submit one explicit slot assignment for every non-reused Program, or choose a destination volume with enough free Program slots. |
 | `SFS_OBJECT_ID_EXHAUSTED`, `SFS_CLUSTER_EXHAUSTED`, `SFS_ROOT_DIRECTORY_MISSING`, `SFS_ROOT_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_CATEGORY_MISSING`, `SFS_DIRECTORY_CAPACITY_EXHAUSTED`, `SFS_ALLOCATION_INVALID` | Select a target with valid SFS metadata and sufficient IDs, clusters, and directory capacity. |
 | `FAT12_DESTINATION_INVALID`, `FAT12_PROFILE_UNSUPPORTED` | Use partition 0 and `FAT root` on an admitted root-only Yamaha FAT12 image. |
 | `FAT12_OBJECT_NAME_INVALID`, `FAT12_PROGRAM_SLOT_INVALID`, `FAT12_TARGET_NAME_AMBIGUOUS`, `FAT12_NAME_CONFLICT` | Correct names, ambiguity, or collisions. |
@@ -279,9 +424,37 @@ identity-significant.
 Program closure retains Known target rows classified as active, source-load,
 or visible-off. The visible-off case is required because an imported zero
 destination handle re-parses in that state even though the sampler can still
-load the named assignment. Ambiguous visible-off diagnostics, duplicate
-inactive rows, unresolved targets, and ambiguous targets remain outside the
-portable closure.
+load the named assignment. Known Program edges remain required dependencies.
+On SFS, duplicate type-and-name targets in other volumes do not make that edge
+ambiguous when exactly one candidate shares the Program's volume. Multiple
+same-volume candidates and cross-volume-only matches remain non-portable
+diagnostics rather than invented dependencies.
+Ambiguous visible-off diagnostics, duplicate inactive rows, unresolved targets,
+and ambiguous targets do not become dependency edges.
+
+Any package containing a Program may preserve a stored active assignment row
+whose exact same-volume target is absent. The complete row remains
+identity-significant, its source-local `PROG_ASSIGNMENT_HANDLE` is normalized to
+zero, and it has no relationship edge. This records source state without
+inventing a dependency. It does not prevent exporting one Program, a partial
+Program selection, every Program in a volume, or a complete volume.
+
+Import never promotes that edge-less row merely because an exact type-and-name
+target exists or is introduced in the destination. Instead, the plan emits one
+`UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION` adjustment and atomically clears the
+complete 0x38-byte assignment row. This applies both to a Program arriving in
+the package and to a zero-handle unresolved row in an existing destination
+Program when the import introduces the matching lower-level object. The Sample
+Bank, Sample, and Wave Data import remains valid and is not blocked by the
+higher-level inconsistency. Other Program rows are unchanged. Apply verifies
+the cleared row before publication or in-place journal commit on SFS/HDS,
+FAT12, and ISO9660 targets.
+
+Package closure does not use a trailing `*` alone as a relationship-state
+signal: when an exact target including the suffix exists, that exact object is
+the dependency. This rule does not define Yamaha Duplicate state. Yamaha uses
+`*` when naming duplicated Samples, but the name alone is not a portable
+relationship-state flag.
 
 ## SDK Surface
 
@@ -289,8 +462,12 @@ Include `axklib/sdk.hpp`. `portable_package::export_from` exports and atomically
 publishes one package. `portable_package::open` performs bounded manifest
 inspection; call `verify` before treating payloads as trusted.
 `package_import_plan::create` fully verifies every package and returns owned
-warnings, conflicts, actions, allocation deltas, and a stable plan ID. `apply`
-rejects invalid or stale plans and publishes a separate output image.
+warnings, conflicts, actions, Program-assignment adjustments, allocation
+deltas, and a stable plan ID. `apply` rejects invalid or stale plans and
+publishes a separate output image. `package_import_summary::adjustment_count`,
+`package_import_plan::adjustments()`, and
+`package_import_result::adjustment_count` expose the same decisions without
+requiring JSON.
 
 The installed SDK uses owned C++17 values and PIMPL handles. It does not expose
 CLI11, JSON, ZIP, Yamaha parser, or allocation-engine types. Package handles and

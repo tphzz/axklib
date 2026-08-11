@@ -14,6 +14,8 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/secure_random.hpp"
+#include "axklib/writer.hpp"
+#include "environment.hpp"
 
 namespace {
 
@@ -58,20 +60,28 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         return std::unexpected(argument_error("server config file must contain one JSON object"));
 
     static const std::set<std::string, std::less<>> known_keys{
+        "allowInsecureRemoteHttp",
         "allowedOrigins",
         "bearerToken",
         "bindAddress",
-        "connectionFile",
         "eventTicketTtlSeconds",
         "imageIdleSeconds",
         "jobRetentionSeconds",
         "jobWorkerThreads",
+        "maximumAlterationJournalBytes",
+        "maximumAuditionBundleBytes",
         "maximumDownloadRangeBytes",
         "maximumDownloadArchiveBytes",
+        "maximumConcurrentArchiveDownloads",
         "maximumDownloadArchiveEntries",
+        "maximumDownloadArchiveDepth",
+        "maximumDownloadArchivePathBytes",
         "maximumDownloadArchiveTotalBytes",
         "maximumEventTickets",
         "maximumImageSessions",
+        "maximumMediaBuildObjectBytes",
+        "maximumMediaBuildPayloadBytes",
+        "maximumMediaBuildOutputBytes",
         "maximumJsonBytes",
         "maximumJsonContainerItems",
         "maximumJsonDepth",
@@ -112,8 +122,8 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("bindAddress", config.bind_address);
         assign("port", config.port);
         assign("bearerToken", config.bearer_token);
+        assign("allowInsecureRemoteHttp", config.allow_insecure_remote_http);
         assign("stateDirectory", config.state_directory);
-        assign("connectionFile", config.connection_file);
         assign("workspaceStore", config.workspace_store);
         assign("maximumJsonBytes", config.maximum_json_bytes);
         assign("maximumJsonDepth", config.maximum_json_depth);
@@ -130,17 +140,25 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
         assign("maximumEventTickets", config.maximum_event_tickets);
         assign("eventTicketTtlSeconds", config.event_ticket_ttl_seconds);
         assign("jobRetentionSeconds", config.job_retention_seconds);
+        assign("maximumAlterationJournalBytes", config.maximum_alteration_journal_bytes);
         assign("maximumUploadBytes", config.maximum_upload_bytes);
         assign("maximumUploadTotalBytes", config.maximum_upload_total_bytes);
         assign("maximumUploads", config.maximum_uploads);
         assign("maximumUploadChunkBytes", config.maximum_upload_chunk_bytes);
         assign("maximumDownloadRangeBytes", config.maximum_download_range_bytes);
+        assign("maximumAuditionBundleBytes", config.maximum_audition_bundle_bytes);
         assign("maximumDownloadArchiveBytes", config.maximum_download_archive_bytes);
         assign("maximumDownloadArchiveTotalBytes", config.maximum_download_archive_total_bytes);
         assign("maximumDownloadArchiveEntries", config.maximum_download_archive_entries);
+        assign("maximumDownloadArchiveDepth", config.maximum_download_archive_depth);
+        assign("maximumDownloadArchivePathBytes", config.maximum_download_archive_path_bytes);
+        assign("maximumConcurrentArchiveDownloads", config.maximum_concurrent_archive_downloads);
         assign("downloadArchiveRetentionSeconds", config.download_archive_retention_seconds);
         assign("uploadRetentionSeconds", config.upload_retention_seconds);
         assign("maximumImageSessions", config.maximum_image_sessions);
+        assign("maximumMediaBuildObjectBytes", config.maximum_media_build_object_bytes);
+        assign("maximumMediaBuildPayloadBytes", config.maximum_media_build_payload_bytes);
+        assign("maximumMediaBuildOutputBytes", config.maximum_media_build_output_bytes);
         assign("maximumPageSize", config.maximum_page_size);
         assign("imageIdleSeconds", config.image_idle_seconds);
         assign("workerThreads", config.worker_threads);
@@ -163,10 +181,10 @@ axk::app::Result<void> apply_config_file(axk::server::Config &config, const std:
 }
 
 template <typename Value> axk::app::Result<void> apply_integer_environment(std::string_view name, Value &target) {
-    const auto *raw = std::getenv(std::string{name}.c_str());
-    if (raw == nullptr)
+    const auto raw = axk::server::detail::environment_variable(name);
+    if (!raw)
         return {};
-    auto parsed = parse_integer<Value>(raw, name);
+    auto parsed = parse_integer<Value>(*raw, name);
     if (!parsed)
         return std::unexpected(parsed.error());
     target = *parsed;
@@ -175,13 +193,12 @@ template <typename Value> axk::app::Result<void> apply_integer_environment(std::
 
 axk::app::Result<void> apply_environment(axk::server::Config &config) {
     const auto assign_text = [](const char *name, auto &target) {
-        if (const auto *value = std::getenv(name); value != nullptr)
-            target = value;
+        if (const auto value = axk::server::detail::environment_variable(name))
+            target = *value;
     };
     assign_text("AXKLIB_SERVER_BIND", config.bind_address);
     assign_text("AXKLIB_SERVER_TOKEN", config.bearer_token);
     assign_text("AXKLIB_SERVER_STATE_DIRECTORY", config.state_directory);
-    assign_text("AXKLIB_SERVER_CONNECTION_FILE", config.connection_file);
     for (auto result : {apply_integer_environment("AXKLIB_SERVER_PORT", config.port),
                         apply_integer_environment("AXKLIB_SERVER_WORKERS", config.worker_threads),
                         apply_integer_environment("AXKLIB_SERVER_JOB_WORKERS", config.job_worker_threads),
@@ -215,9 +232,11 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
         config_path = std::filesystem::path{argv[++index]};
     }
     if (!informational) {
+        if (sidecar_mode_requested && config_path)
+            return std::unexpected(argument_error("--config is not permitted in sidecar connection-file mode"));
         if (!sidecar_mode_requested && !config_path) {
-            if (const auto *configured = std::getenv("AXKLIB_SERVER_CONFIG"); configured != nullptr)
-                config_path = std::filesystem::path{configured};
+            if (const auto configured = detail::environment_variable("AXKLIB_SERVER_CONFIG"))
+                config_path = std::filesystem::path{*configured};
         }
         if (config_path) {
             if (auto loaded = apply_config_file(command_line.config, *config_path); !loaded)
@@ -263,11 +282,17 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
             auto value = value_after(argument);
             if (!value)
                 return std::unexpected(value.error());
+            if (sidecar_mode_requested)
+                return std::unexpected(argument_error("--token is not permitted in sidecar connection-file mode"));
             command_line.config.bearer_token = *value;
         } else if (argument == "--token-sha256") {
             auto value = value_after(argument);
             if (!value)
                 return std::unexpected(value.error());
+            if (sidecar_mode_requested) {
+                return std::unexpected(
+                    argument_error("--token-sha256 is not permitted in sidecar connection-file mode"));
+            }
             const auto separator = value->find('=');
             if (separator == std::string_view::npos || separator == 0U || separator + 1U == value->size())
                 return std::unexpected(argument_error("--token-sha256 must use PRINCIPAL=LOWERCASE_SHA256"));
@@ -286,6 +311,12 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
                 replaced_origins = true;
             }
             command_line.config.allowed_origins.emplace_back(*value);
+        } else if (argument == "--allow-insecure-remote-http") {
+            if (sidecar_mode_requested) {
+                return std::unexpected(
+                    argument_error("--allow-insecure-remote-http is not permitted in sidecar connection-file mode"));
+            }
+            command_line.config.allow_insecure_remote_http = true;
         } else if (argument == "--workspace-store") {
             auto value = value_after(argument);
             if (!value)
@@ -401,7 +432,9 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
             return std::unexpected(argument_error("unknown option: " + std::string{argument}));
         }
     }
-    if (!command_line.config.connection_file.empty() && command_line.config.bearer_token.empty()) {
+    if (sidecar_mode_requested) {
+        command_line.config.bearer_token.clear();
+        command_line.config.token_hashes.clear();
         auto token = app::secure_random_hex(32U);
         if (!token)
             return std::unexpected(argument_error(token.error().message));
@@ -424,6 +457,8 @@ std::string axk::server::command_line_help() {
            "  --token TOKEN           bearer token (generated in sidecar mode)\n"
            "  --token-sha256 ID=HASH named LAN bearer-token SHA-256; repeatable\n"
            "  --allow-origin ORIGIN   exact permitted browser origin; repeatable\n"
+           "  --allow-insecure-remote-http\n"
+           "                         explicitly permit cleartext non-loopback HTTP\n"
            "  --workspace-store PATH persisted per-user workspace registry\n"
            "  --state-directory PATH private upload and sidecar state directory\n"
            "  --connection-file PATH atomically publish sidecar connection metadata\n"
@@ -469,6 +504,10 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
             return std::unexpected(argument_error("non-loopback listening requires at least one hashed bearer token"));
         if (config.allowed_origins.empty())
             return std::unexpected(argument_error("non-loopback listening requires at least one exact allowed origin"));
+        if (!config.allow_insecure_remote_http) {
+            return std::unexpected(argument_error(
+                "non-loopback HTTP is unsafe; pass --allow-insecure-remote-http only behind a trusted TLS terminator"));
+        }
     }
     if (std::ranges::any_of(config.allowed_origins,
                             [](const auto &origin) { return origin.empty() || origin == "*"; })) {
@@ -478,6 +517,10 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
         return std::unexpected(argument_error("sidecar connection files require a loopback listen address"));
     if (!config.connection_file.empty() && !config.token_hashes.empty())
         return std::unexpected(argument_error("sidecar mode does not accept LAN token hashes"));
+    if (!config.connection_file.empty() && config.allow_insecure_remote_http) {
+        return std::unexpected(
+            argument_error("--allow-insecure-remote-http is not permitted in sidecar connection-file mode"));
+    }
     if (config.maximum_json_bytes == 0U || config.maximum_json_depth == 0U || config.maximum_json_depth > 256U ||
         config.maximum_json_nodes == 0U || config.maximum_json_container_items == 0U ||
         config.maximum_json_string_bytes == 0U || config.stream_threshold_bytes == 0U) {
@@ -508,17 +551,35 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
         config.event_ticket_ttl_seconds == 0U || config.event_ticket_ttl_seconds > 300U) {
         return std::unexpected(argument_error("event ticket limits are invalid"));
     }
+    if (config.maximum_alteration_journal_bytes == 0U ||
+        config.maximum_alteration_journal_bytes > 8ULL * 1024ULL * 1024ULL * 1024ULL) {
+        return std::unexpected(argument_error("alteration journal byte limit must be between 1 byte and 8 GiB"));
+    }
     if (config.maximum_upload_bytes == 0U || config.maximum_upload_total_bytes < config.maximum_upload_bytes ||
-        config.maximum_uploads == 0U || config.maximum_upload_chunk_bytes == 0U ||
+        config.maximum_uploads == 0U || config.maximum_uploads > 10000U || config.maximum_upload_chunk_bytes == 0U ||
         config.maximum_upload_chunk_bytes > config.maximum_upload_bytes || config.maximum_download_range_bytes == 0U ||
+        config.maximum_audition_bundle_bytes < 45U ||
+        config.maximum_audition_bundle_bytes > 4ULL * 1024ULL * 1024ULL * 1024ULL ||
         config.upload_retention_seconds == 0U || config.upload_retention_seconds > 86400U) {
         return std::unexpected(argument_error("upload and download limits are invalid"));
     }
     if (config.maximum_download_archive_bytes == 0U ||
         config.maximum_download_archive_total_bytes < config.maximum_download_archive_bytes ||
         config.maximum_download_archive_entries == 0U || config.maximum_download_archive_entries > 1000000U ||
-        config.download_archive_retention_seconds == 0U || config.download_archive_retention_seconds > 86400U) {
+        config.maximum_download_archive_depth == 0U || config.maximum_download_archive_depth > 1024U ||
+        config.maximum_download_archive_path_bytes == 0U || config.maximum_concurrent_archive_downloads == 0U ||
+        config.maximum_concurrent_archive_downloads > 64U || config.download_archive_retention_seconds == 0U ||
+        config.download_archive_retention_seconds > 86400U) {
         return std::unexpected(argument_error("download archive limits are invalid"));
+    }
+    constexpr axk::MediaBuildLimits public_media_limits{};
+    if (config.maximum_media_build_object_bytes == 0U ||
+        config.maximum_media_build_object_bytes > config.maximum_media_build_payload_bytes ||
+        config.maximum_media_build_payload_bytes == 0U || config.maximum_media_build_output_bytes == 0U ||
+        config.maximum_media_build_object_bytes > public_media_limits.maximum_object_bytes ||
+        config.maximum_media_build_payload_bytes > public_media_limits.maximum_aggregate_payload_bytes ||
+        config.maximum_media_build_output_bytes > public_media_limits.maximum_output_bytes) {
+        return std::unexpected(argument_error("media build limits are invalid"));
     }
     if (config.maximum_image_sessions == 0U || config.maximum_image_sessions > 1024U ||
         config.maximum_page_size == 0U || config.maximum_page_size > 5000U || config.image_idle_seconds == 0U ||

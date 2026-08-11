@@ -1,7 +1,7 @@
 [project]
 name = "axklib-documentation"
 version = "0.1.0"
-description = "Documentation toolchain for the native axklib SDK and CLI."
+description = "Documentation toolchain for axkdeck, the CLI, and the source library."
 requires-python = ">=3.13"
 dependencies = [
   "mkdocs>=1.6.1",

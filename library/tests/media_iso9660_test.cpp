@@ -1,3 +1,5 @@
+#include <format>
+
 #include "media_test_fixtures.hpp"
 
 namespace {
@@ -29,6 +31,32 @@ class CountingReader final : public axk::RandomAccessReader {
     mutable std::uint64_t bytes_read_{};
 };
 
+class SparseIsoReader final : public axk::RandomAccessReader {
+  public:
+    SparseIsoReader(std::vector<std::byte> prefix, std::uint64_t size) : prefix_{std::move(prefix)}, size_{size} {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept override { return size_; }
+
+    [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
+                                                  std::span<std::byte> destination) const override {
+        if (offset > size_ || destination.size() > size_ - offset)
+            return std::unexpected{axk::make_error(axk::ErrorCode::io_short_read, axk::ErrorCategory::io,
+                                                   "sparse test read exceeds its declared size")};
+        std::ranges::fill(destination, std::byte{});
+        if (offset < prefix_.size()) {
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(destination.size(), prefix_.size() - offset));
+            std::ranges::copy_n(prefix_.begin() + static_cast<std::ptrdiff_t>(offset),
+                                static_cast<std::ptrdiff_t>(count), destination.begin());
+        }
+        return {};
+    }
+
+  private:
+    std::vector<std::byte> prefix_;
+    std::uint64_t size_{};
+};
+
 } // namespace
 
 TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
@@ -53,6 +81,71 @@ TEST(Iso9660Reader, LoadsYamahaScopeLabelsObjectsAndStructuredPaths) {
     ASSERT_TRUE(catalog) << catalog.error().message;
     ASSERT_EQ(catalog->objects.size(), 1U);
     EXPECT_EQ(catalog->objects.front().raw_payload, object.raw_payload);
+}
+
+TEST(Iso9660Reader, ReadsBoundedFileRanges) {
+    const auto image = axk::IsoImage::open(std::make_shared<axk::MemoryReader>(iso_fixture()), "range.iso");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto file = std::ranges::find(image->files(), "GROUP/F001/F000", &axk::IsoFile::path);
+    ASSERT_NE(file, image->files().end());
+
+    const auto range = image->read_file_range(*file, 0xacU, 4U);
+    ASSERT_TRUE(range) << range.error().message;
+    EXPECT_EQ(*range, (std::vector<std::byte>{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}}));
+    const auto invalid = image->read_file_range(*file, file->size - 2U, 4U);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::out_of_bounds);
+}
+
+TEST(Iso9660Reader, RejectsOversizedDirectoryBeforeReadingItsExtent) {
+    constexpr std::uint32_t declared_sectors = 20'000U;
+    constexpr std::uint32_t oversized_directory = 16U * 1024U * 1024U + 1U;
+    auto fixture = iso_fixture();
+    auto pvd = std::span{fixture}.subspan(16U * 2048U, 2048U);
+    le32(pvd, 80U, declared_sectors);
+    be32(pvd, 84U, declared_sectors);
+    le32(pvd, 156U + 10U, oversized_directory);
+    be32(pvd, 156U + 14U, oversized_directory);
+    auto reader =
+        std::make_shared<SparseIsoReader>(std::move(fixture), static_cast<std::uint64_t>(declared_sectors) * 2048U);
+
+    const auto image = axk::IsoImage::open(reader, "oversized-directory.iso");
+
+    ASSERT_FALSE(image);
+    EXPECT_EQ(image.error().code, axk::ErrorCode::container_invalid_geometry);
+    EXPECT_NE(image.error().message.find("directory extent exceeds"), std::string::npos);
+}
+
+TEST(Iso9660Reader, RejectsExcessiveDirectoryRecordCountWithinTheByteBudget) {
+    constexpr std::size_t record_count = 100'001U;
+    constexpr std::size_t sector_size = 2'048U;
+    constexpr std::uint32_t root_extent = 18U;
+    const auto example = iso_record("F000000", 1U, 0U, 0U);
+    const auto records_per_sector = sector_size / example.size();
+    const auto directory_sectors = (record_count + records_per_sector - 1U) / records_per_sector;
+    const auto directory_size = static_cast<std::uint32_t>(directory_sectors * sector_size);
+    const auto declared_sectors = root_extent + static_cast<std::uint32_t>(directory_sectors);
+    auto fixture = iso_fixture();
+    fixture.resize(static_cast<std::size_t>(declared_sectors) * sector_size);
+    auto pvd = std::span{fixture}.subspan(16U * sector_size, sector_size);
+    le32(pvd, 80U, declared_sectors);
+    be32(pvd, 84U, declared_sectors);
+    le32(pvd, 156U + 10U, directory_size);
+    be32(pvd, 156U + 14U, directory_size);
+    for (std::size_t index = 0U; index < record_count; ++index) {
+        const auto sector = index / records_per_sector;
+        const auto offset = index % records_per_sector * example.size();
+        const auto record = iso_record(std::format("F{:06}", index), 1U, 0U, 0U);
+        std::ranges::copy(record,
+                          fixture.begin() + static_cast<std::ptrdiff_t>((root_extent + sector) * sector_size + offset));
+    }
+
+    const auto image =
+        axk::IsoImage::open(std::make_shared<axk::MemoryReader>(std::move(fixture)), "excessive-directory-records.iso");
+
+    ASSERT_FALSE(image);
+    EXPECT_EQ(image.error().code, axk::ErrorCode::container_invalid_geometry);
+    EXPECT_NE(image.error().message.find("file record count exceeds"), std::string::npos);
 }
 
 TEST(Iso9660Reader, MetadataInventorySkipsPcmAndMatchesCompleteCatalog) {
@@ -257,34 +350,34 @@ TEST(Iso9660Reader, MarksOnlyUnknownActiveSampleBankMembersAsVolumeErrors) {
     ASSERT_TRUE(catalog) << catalog.error().message;
     ASSERT_EQ(catalog->objects.size(), 1U);
 
-    auto bank = catalog->objects.front();
-    bank.key = "bank";
-    bank.object.header.type = axk::ObjectType::sbnk;
-    bank.object.header.name = "BANK";
-    bank.object.payload = axk::CurrentSbnk{};
-    auto program = bank;
+    auto sample = catalog->objects.front();
+    sample.key = "sample";
+    sample.object.header.type = axk::ObjectType::sbnk;
+    sample.object.header.name = "SAMPLE";
+    sample.object.payload = axk::CurrentSbnk{};
+    auto program = sample;
     program.key = "program";
     program.object.header.type = axk::ObjectType::prog;
     program.object.header.name = "001";
     program.object.payload = axk::CurrentProg{};
-    catalog->objects.push_back(std::move(bank));
+    catalog->objects.push_back(std::move(sample));
     catalog->objects.push_back(std::move(program));
 
     axk::RelationshipGraph graph;
     axk::Relationship assignment;
     assignment.key = "assignment";
     assignment.source_key = "program";
-    assignment.target_key = "bank";
+    assignment.target_key = "sample";
     assignment.type = "PROG_ASSIGNMENT_TO_SBNK";
     assignment.quality = axk::RelationshipQuality::known;
     assignment.basis = "test";
     assignment.assignment_index = 0U;
-    assignment.assignment_name = "BANK";
+    assignment.assignment_name = "SAMPLE";
     assignment.assignment_state = axk::AssignmentState::active;
     graph.relationships.push_back(std::move(assignment));
     axk::Relationship member;
     member.key = "member";
-    member.source_key = "bank";
+    member.source_key = "sample";
     member.type = "SBNK_LEFT_MEMBER_TO_SMPL";
     member.quality = axk::RelationshipQuality::likely;
     member.basis = "test";

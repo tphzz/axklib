@@ -1,184 +1,144 @@
 # axklib
 
-axklib is native tooling for Yamaha A3000, A4000, and A5000 disk images and
-sampler objects. It provides a C++17 shared SDK, a self-contained command-line
-application, and a Crow-based REST and WebSocket server backed by a C++23
-implementation.
+axklib is a cross-platform toolkit for working with Yamaha A3000, A4000, and
+A5000 sampler disks. Its main application is **axkdeck**, a desktop workspace
+for browsing, auditioning, organizing, importing, exporting, and basic authoring
+of sampler media.
 
-The project reads SFS HDA/HDS images, Yamaha-supported FAT12 floppy and ISO9660
-sample CD-ROM profiles, and standalone sampler objects. It can inspect and
-validate media, export exact waveform audio and rendered SFZ instruments,
-transfer dependency-complete object packages, create supported HDS/floppy/ISO
-images, and apply ordered changes to existing HDS images.
+The repository also provides a self-contained `axklib` command-line tool and
+the C++ library source used by both applications.
 
-Documentation is published at <https://tphzz.github.io/axklib/>.
+- [Download axkdeck or the CLI](https://github.com/tphzz/axklib/releases)
+- [Read the documentation](https://tphzz.github.io/axklib/)
+- [Browse the CLI reference](https://tphzz.github.io/axklib/axklib/cli.html)
+- [Use the C++ library](https://tphzz.github.io/axklib/axklib/cpp-api.html)
+- [Browse the OpenAPI reference](https://tphzz.github.io/axklib/axklib/openapi.html)
 
-## Native Build
+## axkdeck
 
-Building requires CMake 3.28 or newer, Ninja, Git, and a compiler with C++23
-support. Dependencies, FatFs source, and the vcpkg tool are pinned by the
-repository.
+axkdeck presents sampler media as Programs, Sample Banks, Samples, Wave Data,
+and Sequences using the same object hierarchy across hard disks, floppies, and
+CD-ROMs.
+
+### Browse And Audition
+
+- Open SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, A3K
+  `.a3k` volume archives, and supported standalone sampler objects 
+  (e.g. from extracted floppy images).
+- Browse partitions, volumes, Programs (`PROG`), Sample Banks (`SBAC`), Samples
+  (`SBNK`), Wave Data (`SMPL`), and Sequences.
+- Inspect relationships and sampler parameters without losing the visible
+  parent and volume context.
+- Audition individual Samples, Sample Banks, and their playable audio directly
+  from the desktop.
+
+### Import And Organize
+
+- Import WAV/FLAC files as Samples or collect them into a new Sample Bank in one
+  operation, including compatible WAV sampler metadata (SMPL chunks) and loops.
+- Create Sample Banks from selected Samples or relink existing Samples to a
+  chosen Sample Bank.
+- Import portable Program or volume packages with dependency planning, Program
+  slot suggestions, conflict checking, and SFS record-capacity feedback.
+- Batch-import volume packages into a partition using their placement hints.
+- Create and rename volumes / rename sampler objects.
+- Clean up unused wave data.
+- Generate simple Programs for otherwise unreferenced Sample Banks and Samples
+  so they can be played immediately on compatible A-series instruments.
+
+### Export And Author Media
+
+- Export exact audio, rendered SFZ instruments (needs more work), individual 
+  object packages, and dependency-complete volume packages.
+- Batch-export every volume in a partition as packages or as per-volume floppy
+  sets.
+- Create formatted multi-partition HDS images and 1.44 MB Yamaha-compatible
+  floppy images.
+- Export Yamaha-compatible multi-floppy sets and ISO9660 CD-ROM images.
+- Insert, delete, rename, and repair supported image content through planned,
+  transactional alterations with rollback protection.
+
+See the [axkdeck development guide](apps/axkdeck/README.md) when building the
+desktop application from source.
+
+## Downloads
+
+The [GitHub releases](https://github.com/tphzz/axklib/releases) provide:
+
+- axkdeck DEB and RPM packages for Linux x64 and ARM64;
+- axkdeck NSIS installers for Windows x64 and ARM64;
+- one universal axkdeck DMG for Apple silicon and Intel macOS; and
+- self-contained CLI archives for Linux x64/ARM64, Windows x64/ARM64, and
+  universal macOS.
+
+The release does not include a prebuilt C++ SDK archive. Library consumers use
+the source tree and its CMake package, keeping the compiler, standard library,
+and dependency choices under their own control. The local `axklib-server` is an
+axkdeck sidecar and is not published as a standalone download.
+
+## Command Line
+
+The CLI exposes the same image and object operations for scripts and batch
+workflows. For example:
+
+```bash
+axklib info HD00_512_example.hds
+axklib validate -o validation HD00_512_example.hds
+axklib extract wav file -o wav HD00_512_example.hds
+```
+
+Use `axklib --help` to discover commands. The
+[CLI reference](https://tphzz.github.io/axklib/axklib/cli.html) documents the
+complete command surface, output contracts, and write-safety behavior.
+
+## C++ Library
+
+Library users build from the repository source. CMake 3.22.1 or newer, Ninja,
+Git, and a compiler with C++23 support are required to build the implementation;
+installed public headers compile as C++17.
 
 ```bash
 git clone --recurse-submodules https://github.com/tphzz/axklib.git
 cd axklib
-```
-
-On Linux or macOS:
-
-```bash
 ./external/vcpkg/bootstrap-vcpkg.sh -disableMetrics
-cmake --preset debug
-cmake --build --preset debug
-ctest --preset debug
-```
-
-For an existing checkout, initialize or update the pinned dependency submodules
-with `git submodule update --init --recursive` before configuring.
-
-On Windows PowerShell, use an out-of-tree build directory:
-
-```powershell
-.\external\vcpkg\bootstrap-vcpkg.bat -disableMetrics
-$buildDir = Join-Path $env:TEMP "axklib-build\debug"
-cmake --preset debug -B $buildDir
-cmake --build $buildDir --parallel
-ctest --test-dir $buildDir --output-on-failure
-```
-
-Installed CMake consumers link the single target `axklib::axklib`. Its headers
-compile as C++17; parser, allocation, codec, JSON, and C++23 implementation types
-are private. The shared library embeds its non-system dependencies statically.
-See [C++ and CLI usage](docs/axklib/typical-usage.md) for a complete consumer
-example.
-
-The CLI lives under `apps/cli`, links the private engine statically, and does not
-load the shared SDK. Official builds use the `*-axk` overlay triplets under
-`library/cmake/triplets`.
-
-The server lives under `apps/server`, links the private application services
-statically, and uses upstream Crow for both HTTP and WebSocket transport. Crow
-does not enter the SDK or CLI link interfaces. Domain routes are generated from
-the shared operation registry; adding an operation does not require a Crow
-route or server-owned capability entry.
-
-The two source projects also configure independently:
-
-```bash
-cmake -S library -B build/library -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/external/vcpkg/scripts/buildsystems/vcpkg.cmake"
-cmake -S apps/cli -B build/cli -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$PWD/external/vcpkg/scripts/buildsystems/vcpkg.cmake"
-```
-
-The library-only manifest profile does not resolve CLI11, hash-library, or
-GoogleTest when `BUILD_TESTING=OFF`.
-
-Install the shared SDK, CLI, headers, licenses, and CMake package metadata from
-a release build:
-
-```bash
 cmake --preset release
 cmake --build --preset release
 cmake --install build/native/release --prefix ./axklib-install
 ```
 
-## CLI
+Installed CMake consumers use:
 
-Show the native CLI help:
-
-```bash
-build/native/debug/apps/cli/axklib --help
+```cmake
+find_package(axklib CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE axklib::axklib)
 ```
 
-Summarize an image, directory, or glob input:
+The [C++ API](https://tphzz.github.io/axklib/axklib/cpp-api.html),
+[usage guide](https://tphzz.github.io/axklib/axklib/typical-usage.html), and
+[native dependency policy](https://tphzz.github.io/axklib/native-dependencies.html)
+describe the supported interface and build contract.
 
-```bash
-build/native/debug/apps/cli/axklib info <image-or-directory>
-```
+## Documentation And API Contracts
 
-Export waveform data:
+The [documentation site](https://tphzz.github.io/axklib/) covers media formats,
+sampler data structures, package transfer, image writing, compatibility, and
+the public library and CLI contracts. The bundled server contract is available
+as a rendered [OpenAPI reference](https://tphzz.github.io/axklib/axklib/openapi.html)
+and as downloadable OpenAPI JSON from that page.
 
-```bash
-build/native/debug/apps/cli/axklib extract wav file -o build/exports/wav <image-or-directory>
-```
-
-Write validation reports:
-
-```bash
-build/native/debug/apps/cli/axklib validate -o build/reports/validation <image-or-directory>
-```
-
-Create separate SDK and CLI archives:
-
-```bash
-cmake --preset release
-cmake --build --preset release
-cd build/native/release && cpack
-```
-
-The presets select axklib's static-dependency vcpkg triplet for the host
-architecture. After changing triplets or updating an existing checkout, use
-`cmake --fresh --preset release` once to discard the previous vcpkg selection.
-
-The native GitHub workflow combines those components into one distribution per
-target. Windows publishes a ZIP, Linux publishes a compressed tar archive, and
-macOS publishes one universal ZIP containing both the self-contained CLI and
-the shared SDK development files. Development archives use a Git-derived source
-identity such as `axklib-main-a1b2c3d-linux-x64`; validated `v1.2.3` tag builds
-use the concise `axklib-1.2.3-linux-x64` form while retaining the tag and commit
-inside the binaries. Debug archives add `-debug`. See
-[Versioning and build identity](docs/axklib/versioning.md) for the complete
-contract.
-
-## Documentation
-
-The documentation is an independent, locked environment and does not depend on
-the native build. Install [uv](https://docs.astral.sh/uv/) and Node.js 24, then
-build the MkDocs site from the repository root. The pinned Mermaid CLI renders
-diagram fences to static SVG during the build:
+To build the documentation locally:
 
 ```bash
 uv --project docs sync --locked
 npm ci
-cmake -E make_directory build/docs/site
 PATH="$PWD/node_modules/.bin:$PATH" \
   uv --project docs run mkdocs build --strict --config-file mkdocs.yml
 ```
 
-The generated site is written to `build/docs/site`. For a local preview:
-
-```bash
-uv --project docs run python -m http.server --directory build/docs/site 8000
-```
-
-Start with the [typical usage guide](docs/axklib/typical-usage.md) for image
-inspection, extraction, package transfer, image authoring, and alteration. The
-[CLI reference](docs/axklib/cli.md) lists the full command surface and safety
-behavior.
-
-## Server
-
-Start an authenticated loopback server:
-
-```bash
-build/native/debug/apps/server/axklib-server \
-  --token 0123456789abcdef0123456789abcdef
-```
-
-The API is rooted at `http://127.0.0.1:7331/api/v1`. On first use, add one or
-more named workspaces through the authenticated workspace API or axkdeck's
-workspace selector. Disk images and durable outputs remain ordinary files below
-those persisted workspaces. Browser-selected
-audio, package, and manifest files use temporary uploads; images are not
-uploaded into memory. See [REST and WebSocket server](docs/axklib/server.md) for
-workspace setup, configuration, filesystem references, downloads, jobs, LAN
-deployment, and the OpenAPI contract.
+The generated site is written to `build/docs/site`.
 
 ## License
 
-This project is licensed under the Mozilla Public License 2.0.
-Third-party dependencies retain their own licenses. In particular,
-`external/fatfs` is a separate BSD-1-Clause-licensed Git submodule; see
-[Native dependency policy](docs/native-dependencies.md) for the dependency and
-distribution summary.
+axklib is licensed under the Mozilla Public License 2.0. Third-party
+dependencies retain their own licenses; see the
+[native dependency policy](docs/native-dependencies.md).

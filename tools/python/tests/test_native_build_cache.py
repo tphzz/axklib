@@ -1,0 +1,273 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+import native_build_cache
+
+
+def entry(object_id: str, mode: str = "100644") -> native_build_cache.IndexEntry:
+    return native_build_cache.IndexEntry(mode, object_id)
+
+
+def owned_build_directory(source: Path) -> Path:
+    build = source / "build" / "native" / "release"
+    native_build_cache.create_ownership_marker(build)
+    return build
+
+
+def test_prepare_reuses_unchanged_inputs_and_marks_changed_inputs_newer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    unchanged = source / "unchanged.cpp"
+    changed = source / "changed.cpp"
+    added = source / "added.hpp"
+    for path in (unchanged, changed, added):
+        path.write_text(path.name, encoding="utf-8")
+    (build / "cached.o").write_bytes(b"cached")
+    native_build_cache.write_state(
+        build / native_build_cache.STATE_FILENAME,
+        {
+            "deleted.cpp": entry("deleted"),
+            "changed.cpp": entry("old"),
+            "unchanged.cpp": entry("same"),
+        },
+    )
+    current = {
+        "added.hpp": entry("added"),
+        "changed.cpp": entry("new"),
+        "unchanged.cpp": entry("same"),
+    }
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+
+    report = native_build_cache.prepare_build_cache(source, build)
+
+    assert report == native_build_cache.PreparationReport(True, 1, 3)
+    assert unchanged.stat().st_mtime_ns == native_build_cache.NORMALIZED_MTIME_NS
+    assert changed.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
+    assert added.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
+    assert (build / "cached.o").read_bytes() == b"cached"
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == {
+        "deleted.cpp": entry("deleted"),
+        "changed.cpp": entry("old"),
+        "unchanged.cpp": entry("same"),
+    }
+
+
+@pytest.mark.parametrize("state_contents", [None, "not-json", '{"schema_version": 999}'])
+def test_prepare_discards_build_tree_without_valid_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state_contents: str | None,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    tracked = source / "tracked.cpp"
+    tracked.write_text("source", encoding="utf-8")
+    sentinel = build / "stale.o"
+    sentinel.write_bytes(b"stale")
+    if state_contents is not None:
+        (build / native_build_cache.STATE_FILENAME).write_text(state_contents, encoding="utf-8")
+    current = {"tracked.cpp": entry("current")}
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+    original_mtime = tracked.stat().st_mtime_ns
+
+    report = native_build_cache.prepare_build_cache(source, build)
+
+    assert report == native_build_cache.PreparationReport(False, 0, 1)
+    assert not sentinel.exists()
+    assert tracked.stat().st_mtime_ns == original_mtime
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) is None
+
+
+def test_prepare_creates_a_marker_for_a_new_owned_build_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = source / "build" / "native" / "release"
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    report = native_build_cache.prepare_build_cache(source, build)
+
+    assert report == native_build_cache.PreparationReport(False, 0, 0)
+    assert native_build_cache.has_valid_ownership_marker(build)
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) is None
+
+
+def test_failed_build_does_not_claim_changed_inputs_are_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    header = source / "interface.hpp"
+    header.write_text("new interface", encoding="utf-8")
+    previous = {"interface.hpp": entry("old")}
+    current = {"interface.hpp": entry("new")}
+    native_build_cache.write_state(
+        build / native_build_cache.STATE_FILENAME, previous
+    )
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+
+    first = native_build_cache.prepare_build_cache(source, build)
+    first_mtime = header.stat().st_mtime_ns
+    second = native_build_cache.prepare_build_cache(source, build)
+
+    assert first == native_build_cache.PreparationReport(True, 0, 1)
+    assert second == native_build_cache.PreparationReport(True, 0, 1)
+    assert first_mtime > native_build_cache.NORMALIZED_MTIME_NS
+    assert header.stat().st_mtime_ns > native_build_cache.NORMALIZED_MTIME_NS
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == previous
+
+
+def test_finalize_records_inputs_only_after_a_successful_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = owned_build_directory(source)
+    current = {
+        "CMakeLists.txt": entry("cmake"),
+        "library/source.cpp": entry("source"),
+    }
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: current)
+
+    input_count = native_build_cache.finalize_build_cache(source, build)
+
+    assert input_count == 2
+    assert native_build_cache.read_state(build / native_build_cache.STATE_FILENAME) == current
+
+
+def test_prepare_refuses_to_delete_an_unowned_build_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    build = source / "build" / "native" / "release"
+    build.mkdir(parents=True)
+    sentinel = build / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="ownership marker"):
+        native_build_cache.prepare_build_cache(source, build)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.parametrize("target", ["source", "native-root", "outside"])
+def test_prepare_rejects_unsafe_build_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    native_root = source / "build" / "native"
+    native_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    build = {"source": source, "native-root": native_root, "outside": outside}[target]
+    sentinel = build / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="build directory"):
+        native_build_cache.prepare_build_cache(source, build)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_prepare_rejects_a_symlinked_build_component_without_touching_its_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    native_root = source / "build" / "native"
+    native_root.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    link = native_root / "release"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    monkeypatch.setattr(native_build_cache, "read_git_index", lambda _: {})
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        native_build_cache.prepare_build_cache(source, link)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_read_state_rejects_malformed_entries(tmp_path: Path) -> None:
+    state = tmp_path / "state.json"
+    state.write_text(
+        json.dumps(
+            {
+                "schema_version": native_build_cache.STATE_SCHEMA_VERSION,
+                "entries": {"source.cpp": {"mode": 100644}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert native_build_cache.read_state(state) is None
+
+
+def test_toolchain_fingerprint_is_stable_and_covers_runner_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        native_build_cache,
+        "_command_identity",
+        lambda command: {"command": list(command), "output": "stable"},
+    )
+    monkeypatch.setattr(native_build_cache.platform, "platform", lambda: "test-platform")
+    monkeypatch.setattr(native_build_cache.platform, "machine", lambda: "test-machine")
+    monkeypatch.setattr(native_build_cache.platform, "system", lambda: "Linux")
+    first_environment = {"CXX": "c++", "ImageVersion": "20260701.1"}
+    second_environment = {"CXX": "c++", "ImageVersion": "20260708.1"}
+    different_flags_environment = {
+        "CXX": "c++",
+        "CXXFLAGS": "-stdlib=libc++",
+        "ImageVersion": "20260701.1",
+    }
+    moved_environment = {
+        "CXX": "c++",
+        "GITHUB_WORKSPACE": "/different/workspace",
+        "ImageVersion": "20260701.1",
+    }
+
+    first = native_build_cache.toolchain_fingerprint("x64-linux-axk", first_environment)
+
+    assert first == native_build_cache.toolchain_fingerprint(
+        "x64-linux-axk", first_environment
+    )
+    assert first != native_build_cache.toolchain_fingerprint(
+        "x64-linux-axk", second_environment
+    )
+    assert first != native_build_cache.toolchain_fingerprint(
+        "x64-linux-axk", different_flags_environment
+    )
+    assert first != native_build_cache.toolchain_fingerprint(
+        "arm64-linux-axk", first_environment
+    )
+    assert first != native_build_cache.toolchain_fingerprint(
+        "x64-linux-axk", moved_environment
+    )
+
+
+def test_append_github_output_appends_values(tmp_path: Path) -> None:
+    output = tmp_path / "github-output"
+    output.write_text("existing=value\n", encoding="utf-8")
+
+    native_build_cache.append_github_output(output, {"cache": "ready", "count": "2"})
+
+    assert output.read_text(encoding="utf-8") == "existing=value\ncache=ready\ncount=2\n"

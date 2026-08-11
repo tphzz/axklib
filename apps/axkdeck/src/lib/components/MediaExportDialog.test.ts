@@ -1,0 +1,230 @@
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
+import MediaExportDialog from './MediaExportDialog.svelte';
+
+const item = {
+    id: 'partition-0',
+    name: 'DRUMS',
+    kind: 'partition' as const,
+    childCount: 1,
+    partitionIndex: 0,
+};
+
+describe('MediaExportDialog', () => {
+    it('uses the shared destination choices for an admitted CD-ROM export', async () => {
+        const onworkspace = vi.fn();
+        const onlocal = vi.fn();
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item,
+                    selection: { format: 'ISO9660', partitionIndex: 0 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'ISO9660',
+                        scope: 'PARTITION',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.iso',
+                        floppyImageCount: 0,
+                        partitionIndex: 0,
+                        partitionName: 'DRUMS',
+                        canExport: true,
+                        objectCount: 12,
+                        payloadBytes: 2_048,
+                        projectedOutputBytes: 65_536,
+                        capacityBytes: 700_000_000,
+                        volumes: [{ volumeDirectoryId: 17, name: 'KIT', objectCount: 12, payloadBytes: 2_048 }],
+                        issues: [],
+                        defaultFilename: 'disk_p00_DRUMS.iso',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace,
+                onlocal,
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText(/12 objects/)).toBeTruthy();
+        await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
+        await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
+        expect(onworkspace).toHaveBeenCalledOnce();
+        expect(onlocal).toHaveBeenCalledOnce();
+    });
+
+    it('blocks destinations and explains required capacity', () => {
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item: { ...item, kind: 'volume', volumeDirectoryId: 17 },
+                    selection: { format: 'FAT12_FLOPPY', partitionIndex: 0, volumeDirectoryId: 17 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'FAT12_FLOPPY',
+                        scope: 'VOLUME',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.ima',
+                        floppyImageCount: 1,
+                        partitionIndex: 0,
+                        partitionName: 'DRUMS',
+                        canExport: false,
+                        objectCount: 12,
+                        payloadBytes: 2_000_000,
+                        projectedOutputBytes: 1_474_560,
+                        capacityBytes: 1_457_664,
+                        volumes: [{ volumeDirectoryId: 17, name: 'KIT', objectCount: 12, payloadBytes: 2_000_000 }],
+                        issues: [
+                            {
+                                code: 'floppy_capacity_exceeded',
+                                message: 'The volume does not fit on one floppy disk.',
+                                blocking: true,
+                                measurement: { required: 2_000_000, available: 1_457_664, unit: 'BYTES' },
+                            },
+                        ],
+                        defaultFilename: 'disk_p00_KIT.ima',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('alert').textContent).toContain('does not fit');
+        expect(screen.getByText(/Required 1.9 MiB/)).toBeTruthy();
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('describes an admitted multi-floppy ZIP and its pending save/reload warning', () => {
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item: { ...item, kind: 'volume', volumeDirectoryId: 17 },
+                    selection: { format: 'FAT12_FLOPPY', partitionIndex: 0, volumeDirectoryId: 17 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'FAT12_FLOPPY',
+                        scope: 'VOLUME',
+                        artifactKind: 'FLOPPY_DISK_SET',
+                        outputExtension: '.zip',
+                        floppyImageCount: 2,
+                        partitionIndex: 0,
+                        partitionName: 'Don Solaris',
+                        canExport: true,
+                        objectCount: 335,
+                        payloadBytes: 268_000,
+                        projectedOutputBytes: 2_950_000,
+                        capacityBytes: 47_185_920,
+                        volumes: [
+                            {
+                                volumeDirectoryId: 17,
+                                name: 'Analog Update',
+                                objectCount: 335,
+                                payloadBytes: 268_000,
+                            },
+                        ],
+                        issues: [
+                            {
+                                code: 'MEDIA_CONVERSION_MULTI_FLOPPY_SAVE_RELOAD_VALIDATION_PENDING',
+                                message:
+                                    'Sampler load and audition are verified; sampler save/reload validation is pending.',
+                                blocking: false,
+                                measurement: { required: 2, available: 32, unit: 'FLOPPY_IMAGES' },
+                            },
+                        ],
+                        defaultFilename: 'disk_p00_Analog_Update.zip',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Export floppy disk set' })).toBeTruthy();
+        expect(screen.getByText(/2 ordered Yamaha-compatible 1.44 MB floppy images/)).toBeTruthy();
+        expect(screen.getByText(/Required 2 floppy images/)).toBeTruthy();
+        expect(screen.getByText(/Available 32 floppy images/)).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('shows retained Program rows as a nonblocking warning', () => {
+        render(MediaExportDialog, {
+            props: {
+                request: {
+                    item,
+                    selection: { format: 'ISO9660', partitionIndex: 0 },
+                    inspection: {
+                        imageId: 'image-one',
+                        revision: 4,
+                        format: 'ISO9660',
+                        scope: 'PARTITION',
+                        artifactKind: 'IMAGE',
+                        outputExtension: '.iso',
+                        floppyImageCount: 0,
+                        partitionIndex: 0,
+                        partitionName: 'Don Solaris',
+                        canExport: true,
+                        objectCount: 335,
+                        payloadBytes: 268_000,
+                        projectedOutputBytes: 900_000,
+                        capacityBytes: 700_000_000,
+                        volumes: [
+                            {
+                                volumeDirectoryId: 17,
+                                name: 'Analog Update',
+                                objectCount: 335,
+                                payloadBytes: 268_000,
+                            },
+                        ],
+                        issues: [
+                            {
+                                code: 'MEDIA_CONVERSION_RETAINED_DISABLED_PROGRAM_ROWS',
+                                message: 'Retained 5 disabled Program assignment rows without inventing targets.',
+                                blocking: false,
+                                measurement: null,
+                            },
+                        ],
+                        defaultFilename: 'disk_p00_Don_Solaris.iso',
+                    },
+                    loading: false,
+                    busy: false,
+                    jobId: null,
+                    progressLabel: '',
+                    error: '',
+                },
+                desktop: true,
+                onworkspace: vi.fn(),
+                onlocal: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText(/Retained 5 disabled Program assignment rows/)).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: /This computer/ }) as HTMLButtonElement).disabled).toBe(false);
+    });
+});

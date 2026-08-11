@@ -1,0 +1,980 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { AxklibApiError } from '../httpApiClient';
+import type { AuditionBundleDescriptor, ImageTransport } from '../transport';
+import { AuditionController, type AuditionState } from './auditionController';
+
+class MockAudioBuffer {
+    readonly duration: number;
+    private readonly channelData: Float32Array[];
+
+    constructor(
+        readonly length = 48_000,
+        readonly numberOfChannels = 1,
+        readonly sampleRate = 48_000,
+        values?: number[],
+    ) {
+        this.duration = length / sampleRate;
+        this.channelData = Array.from(
+            { length: numberOfChannels },
+            () => new Float32Array(values ?? Array.from({ length }, () => 0)),
+        );
+    }
+
+    getChannelData(channel: number): Float32Array {
+        return this.channelData[channel]!;
+    }
+}
+
+class MockAudioParam {
+    value = 1;
+    cancelScheduledValues = vi.fn();
+    setValueAtTime = vi.fn((value: number, _startTime: number) => {
+        this.value = value;
+        return this;
+    });
+    linearRampToValueAtTime = vi.fn((value: number, _endTime: number) => {
+        this.value = value;
+        return this;
+    });
+}
+
+class MockGainNode {
+    readonly gain = new MockAudioParam();
+    connect = vi.fn(() => this);
+    disconnect = vi.fn();
+}
+
+class MockAudioBufferSourceNode {
+    static instances: MockAudioBufferSourceNode[] = [];
+    buffer: AudioBuffer | null = null;
+    loop = false;
+    loopStart = 0;
+    loopEnd = 0;
+    readonly playbackRate = new MockAudioParam();
+    onended: (() => void) | null = null;
+    connect = vi.fn(() => this);
+    disconnect = vi.fn();
+    start = vi.fn();
+    stop = vi.fn();
+
+    constructor() {
+        MockAudioBufferSourceNode.instances.push(this);
+    }
+}
+
+class MockAudioContext {
+    static instances: MockAudioContext[] = [];
+    static nextBuffers: MockAudioBuffer[] = [];
+    static initialState: AudioContextState = 'suspended';
+    static resumeFailuresRemaining = 0;
+    static closeFailuresRemaining = 0;
+    readonly destination = {};
+    readonly sampleRate = 48_000;
+    readonly baseLatency = 0.01;
+    readonly outputLatency = 0.02;
+    readonly sources: MockAudioBufferSourceNode[] = [];
+    readonly gains: MockGainNode[] = [];
+    currentTime = 1;
+    onstatechange: (() => void) | null = null;
+    state: AudioContextState;
+    readonly decodeAudioData = vi.fn(async () => {
+        events.push('decode');
+        return (MockAudioContext.nextBuffers.shift() ?? new MockAudioBuffer()) as unknown as AudioBuffer;
+    });
+
+    constructor(options?: AudioContextOptions) {
+        expect(options).toBeUndefined();
+        this.state = MockAudioContext.initialState;
+        MockAudioContext.instances.push(this);
+        events.push('context');
+    }
+
+    readonly resume = vi.fn(async (): Promise<void> => {
+        events.push('resume');
+        if (MockAudioContext.resumeFailuresRemaining > 0) {
+            MockAudioContext.resumeFailuresRemaining -= 1;
+            throw new Error('Audio output is not available yet');
+        }
+        this.state = 'running';
+    });
+
+    readonly close = vi.fn(async (): Promise<void> => {
+        events.push('close');
+        if (MockAudioContext.closeFailuresRemaining > 0) {
+            MockAudioContext.closeFailuresRemaining -= 1;
+            throw new Error('Audio output could not be closed');
+        }
+        this.state = 'closed';
+    });
+
+    createBufferSource(): AudioBufferSourceNode {
+        const source = new MockAudioBufferSourceNode();
+        this.sources.push(source);
+        return source as unknown as AudioBufferSourceNode;
+    }
+
+    createGain(): GainNode {
+        const gain = new MockGainNode();
+        this.gains.push(gain);
+        return gain as unknown as GainNode;
+    }
+
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer {
+        return new MockAudioBuffer(length, numberOfChannels, sampleRate) as unknown as AudioBuffer;
+    }
+
+    getOutputTimestamp(): AudioTimestamp {
+        return { contextTime: this.currentTime, performanceTime: performance.now() };
+    }
+}
+
+class MockOfflineAudioContext {
+    static instances: MockOfflineAudioContext[] = [];
+    readonly sampleRate: number;
+    readonly decodeAudioData = vi.fn(async () => {
+        events.push('offline-decode');
+        return (MockAudioContext.nextBuffers.shift() ?? new MockAudioBuffer()) as unknown as AudioBuffer;
+    });
+
+    constructor(
+        readonly numberOfChannels: number,
+        readonly length: number,
+        sampleRate: number,
+    ) {
+        this.sampleRate = sampleRate;
+        MockOfflineAudioContext.instances.push(this);
+        events.push('offline-context');
+    }
+
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer {
+        return new MockAudioBuffer(length, numberOfChannels, sampleRate) as unknown as AudioBuffer;
+    }
+}
+
+const events: string[] = [];
+const animationCallbacks: FrameRequestCallback[] = [];
+
+interface TestAuditionDescriptor {
+    auditionId: string;
+    objectId: string;
+    sampleRate: number;
+    channels: number;
+    sampleWidthBytes: number;
+    frameCount: number;
+    wavSizeBytes: number;
+    loopMode: number;
+    loopModeLabel: string;
+    loopStartFrame: number;
+    loopLengthFrames: number;
+    warnings: string[];
+}
+
+function descriptor(overrides: Partial<TestAuditionDescriptor> = {}): TestAuditionDescriptor {
+    return {
+        auditionId: 'audition-1',
+        objectId: 'SMPL-1',
+        sampleRate: 48_000,
+        channels: 1,
+        sampleWidthBytes: 2,
+        frameCount: 48_000,
+        wavSizeBytes: 96_044,
+        loopMode: 0,
+        loopModeLabel: 'off',
+        loopStartFrame: 0,
+        loopLengthFrames: 0,
+        warnings: [],
+        ...overrides,
+    };
+}
+
+function auditionBundle(value: TestAuditionDescriptor, objectIds: readonly string[]): AuditionBundleDescriptor {
+    return {
+        auditionId: value.auditionId,
+        contentSizeBytes: value.wavSizeBytes * objectIds.length,
+        clips: objectIds.map((objectId, index) => ({
+            objectId,
+            loopMode: value.loopMode,
+            loopModeLabel: value.loopModeLabel,
+            warnings: value.warnings,
+            lanes: [
+                {
+                    role: 'MONO',
+                    sourceObjectId: `${objectId}-SMPL`,
+                    sampleRate: value.sampleRate,
+                    sampleWidthBytes: value.sampleWidthBytes,
+                    frameCount: value.frameCount,
+                    contentOffsetBytes: value.wavSizeBytes * index,
+                    wavSizeBytes: value.wavSizeBytes,
+                    loopStartFrame: value.loopStartFrame,
+                    loopLengthFrames: value.loopLengthFrames,
+                },
+            ],
+        })),
+    };
+}
+
+function transportFor(value: TestAuditionDescriptor): ImageTransport {
+    return {
+        prepareAuditionBundle: vi.fn(async (_sessionId: number, objectIds: readonly string[]) => {
+            events.push('prepare');
+            return auditionBundle(value, objectIds);
+        }),
+        readAuditionContent: vi.fn(async (_auditionId: string, contentSizeBytes: number) => {
+            events.push('read');
+            return new ArrayBuffer(contentSizeBytes);
+        }),
+        deleteAudition: vi.fn(async () => {
+            events.push('delete');
+        }),
+    } as unknown as ImageTransport;
+}
+
+describe('AuditionController', () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    function installAudio(): void {
+        events.length = 0;
+        animationCallbacks.length = 0;
+        MockAudioContext.instances = [];
+        MockAudioContext.nextBuffers = [];
+        MockAudioContext.initialState = 'suspended';
+        MockAudioContext.resumeFailuresRemaining = 0;
+        MockAudioContext.closeFailuresRemaining = 0;
+        MockOfflineAudioContext.instances = [];
+        MockAudioBufferSourceNode.instances = [];
+        vi.stubGlobal('AudioContext', MockAudioContext);
+        vi.stubGlobal('OfflineAudioContext', MockOfflineAudioContext);
+        vi.stubGlobal(
+            'requestAnimationFrame',
+            vi.fn((callback: FrameRequestCallback) => {
+                animationCallbacks.push(callback);
+                return animationCallbacks.length;
+            }),
+        );
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    }
+
+    it('creates and closes one output context per audition while reusing decoded audio', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(events.indexOf('resume')).toBeLessThan(events.indexOf('prepare'));
+        expect(events.indexOf('read')).toBeLessThan(events.indexOf('decode'));
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01, 0);
+        const gain = MockAudioContext.instances[0]?.gains[0]?.gain;
+        expect(gain?.setValueAtTime).toHaveBeenNthCalledWith(1, 0, 1);
+        expect(gain?.setValueAtTime).toHaveBeenNthCalledWith(2, 0, 1.01);
+        expect(gain?.linearRampToValueAtTime).toHaveBeenCalledWith(1, 1.015);
+        expect(updates.at(-1)).toEqual({ objectId: 'SMPL-1', status: 'playing', playheadFrame: 0 });
+
+        await controller.stop();
+        await controller.play(1, 'SMPL-1');
+
+        expect(MockAudioContext.instances).toHaveLength(2);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        expect(MockAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalledTimes(1);
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(2);
+
+        MockAudioBufferSourceNode.instances[1]?.onended?.();
+        await vi.waitFor(() => expect(MockAudioContext.instances[1]?.state).toBe('closed'));
+
+        await controller.dispose();
+        expect(MockAudioContext.instances[0]?.close).toHaveBeenCalledTimes(1);
+        expect(MockAudioContext.instances[1]?.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('resumes each explicit audition from its initiating user action', async () => {
+        installAudio();
+        MockAudioContext.initialState = 'running';
+        const transport = transportFor(descriptor());
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(MockAudioContext.instances[0]?.resume).toHaveBeenCalledTimes(1);
+        await controller.dispose();
+    });
+
+    it('closes a newly created context when output resume fails', async () => {
+        installAudio();
+        MockAudioContext.resumeFailuresRemaining = 1;
+        const transport = transportFor(descriptor());
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.resume).toHaveBeenCalledTimes(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(updates.at(-1)?.status).toBe('failed');
+        await controller.dispose();
+    });
+
+    it('does not let a pending stop close the next audition context', async () => {
+        installAudio();
+        vi.useFakeTimers();
+        const transport = transportFor(descriptor());
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.play(1, 'SMPL-1');
+        const stopping = controller.stop();
+        const replaying = controller.play(1, 'SMPL-1');
+        await vi.advanceTimersByTimeAsync(5);
+        await Promise.all([stopping, replaying]);
+
+        expect(MockAudioContext.instances).toHaveLength(2);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        const disposing = controller.dispose();
+        await vi.advanceTimersByTimeAsync(5);
+        await disposing;
+    });
+
+    it('replaces an active audition only after closing its context', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.play(1, 'SMPL-1');
+        await controller.play(1, 'SMPL-2');
+
+        expect(MockAudioContext.instances).toHaveLength(2);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        expect(events.indexOf('close')).toBeLessThan(events.lastIndexOf('context'));
+        await controller.dispose();
+    });
+
+    it('closes the output context after playback preparation fails', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(new Error('Preparation failed'));
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(updates.at(-1)?.status).toBe('failed');
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('preserves the companion-disk error code for an explicit audition failure', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(
+            new AxklibApiError(
+                'companion_disks_required',
+                'Wave Data continues on another sampler disk. Add companion disk folders to audition it.',
+                422,
+            ),
+        );
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(updates.at(-1)).toMatchObject({
+            objectId: 'SMPL-1',
+            status: 'failed',
+            errorCode: 'companion_disks_required',
+        });
+        await controller.dispose();
+    });
+
+    it('uses native forward loop points and recreates the source when seeking', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+                loopMode: 1,
+                loopStartFrame: 10,
+                loopLengthFrames: 20,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(48_000)];
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.play(1, 'SMPL-1');
+        controller.seek(15);
+
+        expect(MockAudioBufferSourceNode.instances[0]).toMatchObject({ loop: true, loopStart: 0.1, loopEnd: 0.3 });
+        expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(1.01, 0.15);
+        await controller.dispose();
+    });
+
+    it('repeats a short forward one-shot for 500 ms with bounded fades', async () => {
+        installAudio();
+        const frameCount = 260;
+        const sampleRate = 44_100;
+        const transport = transportFor(
+            descriptor({ frameCount, sampleRate, wavSizeBytes: 44 + frameCount * 2, loopMode: 0 }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(frameCount, 1, sampleRate)];
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            () => undefined,
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        await controller.play(1, 'SMPL-1');
+
+        const source = MockAudioBufferSourceNode.instances[0]!;
+        expect(source).toMatchObject({ loop: true, loopStart: 0, loopEnd: frameCount / sampleRate });
+        expect(source.start).toHaveBeenCalledWith(1.01, 0);
+        expect(source.stop).toHaveBeenCalledWith(1.51);
+        const gain = MockAudioContext.instances[0]!.gains[0]!.gain;
+        expect(gain.setValueAtTime.mock.calls.at(-1)?.[0]).toBe(1);
+        expect(gain.setValueAtTime.mock.calls.at(-1)?.[1]).toBeCloseTo(1.505);
+        expect(gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 1.51);
+        expect(diagnostics.find((event) => event.event === 'playback_scheduled')).toMatchObject({
+            previewMode: 'short-one-shot-repeat',
+            naturalDurationSeconds: frameCount / sampleRate,
+            scheduledDurationSeconds: 0.5,
+            loop: true,
+        });
+        await controller.dispose();
+    });
+
+    it('schedules Sample Bank members gaplessly on one temporary output context', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(50, 1, 100)];
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.sources).toHaveLength(2);
+        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(false);
+        expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(false);
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(2.51);
+        expect(MockAudioContext.instances[0]?.gains).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
+
+        MockAudioBufferSourceNode.instances[1]?.onended?.();
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith({ status: 'completed', playedCount: 2, skippedCount: 0 }),
+        );
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], expect.any(AbortSignal));
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('holds floor-resampled short forward-loop Sample Bank members for 500 ms', async () => {
+        installAudio();
+        const sourceSampleRate = 44_100;
+        const outputSampleRate = 48_000;
+        const frameCounts = [1_800, 900, 450, 225, 225, 225, 225];
+        const objectIds = frameCounts.map((_, index) => `SBNK-${index + 1}`);
+        const value = descriptor({
+            frameCount: frameCounts[0],
+            sampleRate: sourceSampleRate,
+            wavSizeBytes: 44 + frameCounts[0]! * 2,
+            loopMode: 1,
+            loopStartFrame: 0,
+            loopLengthFrames: frameCounts[0],
+        });
+        const transport = transportFor(value);
+        const bundle = auditionBundle(value, objectIds);
+        bundle.clips.forEach((clip, index) => {
+            const frameCount = frameCounts[index]!;
+            clip.lanes[0]!.frameCount = frameCount;
+            clip.lanes[0]!.loopLengthFrames = frameCount;
+            clip.lanes[0]!.wavSizeBytes = 44 + frameCount * 2;
+            clip.lanes[0]!.contentOffsetBytes = bundle.clips
+                .slice(0, index)
+                .reduce((total, candidate) => total + candidate.lanes[0]!.wavSizeBytes, 0);
+        });
+        bundle.contentSizeBytes = bundle.clips.reduce((total, clip) => total + clip.lanes[0]!.wavSizeBytes, 0);
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce(bundle);
+        const decodedFrameCounts = frameCounts.map((frameCount) =>
+            Math.floor((frameCount * outputSampleRate) / sourceSampleRate),
+        );
+        MockAudioContext.nextBuffers = decodedFrameCounts.map(
+            (frameCount) => new MockAudioBuffer(frameCount, 1, outputSampleRate),
+        );
+        const updates: AuditionState[] = [];
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            (state) => updates.push(state),
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        controller.playSequence(1, objectIds);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(frameCounts.length));
+
+        for (const [index, source] of MockAudioBufferSourceNode.instances.entries()) {
+            const startTime = 1.01 + index * 0.5;
+            expect(source.loop).toBe(true);
+            expect(source.loopStart).toBe(0);
+            expect(source.loopEnd).toBeCloseTo(decodedFrameCounts[index]! / outputSampleRate);
+            expect(source.start).toHaveBeenCalledWith(startTime);
+            expect(source.stop).toHaveBeenCalledTimes(1);
+            expect(source.stop.mock.calls[0]?.[0]).toBeCloseTo(startTime + 0.5);
+        }
+
+        MockAudioContext.instances[0]!.currentTime = 1.26;
+        animationCallbacks.at(-1)?.(0);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-1', status: 'playing' });
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(frameCounts[0]!);
+
+        MockAudioContext.instances[0]!.currentTime = 1.76;
+        animationCallbacks.at(-1)?.(0);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-2', status: 'playing' });
+        expect(updates.at(-1)?.playheadFrame).toBeLessThan(frameCounts[1]!);
+
+        expect(diagnostics.find((event) => event.event === 'sequence_scheduled')).toMatchObject({
+            memberCount: 7,
+            naturalDurationSeconds: expect.closeTo(
+                decodedFrameCounts.reduce((total, value) => total + value, 0) / outputSampleRate,
+            ),
+            scheduledDurationSeconds: 3.5,
+            loopedMemberCount: 7,
+            extendedMemberCount: 7,
+        });
+        await controller.dispose();
+    });
+
+    it('holds mixed short one-shot and declared-loop Sample Bank members for 500 ms', async () => {
+        installAudio();
+        const sampleRate = 48_000;
+        const frameCounts = [260, 320, 380, 440, 500, 560, 620];
+        const objectIds = frameCounts.map((_, index) => `SBNK-${index + 1}`);
+        const value = descriptor({
+            frameCount: frameCounts[0],
+            sampleRate,
+            wavSizeBytes: 44 + frameCounts[0]! * 2,
+        });
+        const transport = transportFor(value);
+        const bundle = auditionBundle(value, objectIds);
+        bundle.clips.forEach((clip, index) => {
+            const frameCount = frameCounts[index]!;
+            clip.lanes[0]!.frameCount = frameCount;
+            clip.lanes[0]!.wavSizeBytes = 44 + frameCount * 2;
+            clip.lanes[0]!.contentOffsetBytes = bundle.clips
+                .slice(0, index)
+                .reduce((total, candidate) => total + candidate.lanes[0]!.wavSizeBytes, 0);
+            if (index === bundle.clips.length - 1) {
+                clip.loopMode = 1;
+                clip.loopModeLabel = 'forward';
+                clip.lanes[0]!.loopStartFrame = 10;
+                clip.lanes[0]!.loopLengthFrames = 100;
+            }
+        });
+        bundle.contentSizeBytes = bundle.clips.reduce((total, clip) => total + clip.lanes[0]!.wavSizeBytes, 0);
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce(bundle);
+        MockAudioContext.nextBuffers = frameCounts.map((frameCount) => new MockAudioBuffer(frameCount, 1, sampleRate));
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            () => undefined,
+            (event) => diagnostics.push(event),
+            () => true,
+        );
+
+        controller.playSequence(1, objectIds);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(frameCounts.length));
+
+        for (const [index, source] of MockAudioBufferSourceNode.instances.entries()) {
+            const startTime = 1.01 + index * 0.5;
+            expect(source.loop).toBe(true);
+            expect(source.loopStart).toBeCloseTo((index === frameCounts.length - 1 ? 10 : 0) / sampleRate);
+            expect(source.loopEnd).toBeCloseTo(
+                (index === frameCounts.length - 1 ? 110 : frameCounts[index]!) / sampleRate,
+            );
+            expect(source.start).toHaveBeenCalledWith(startTime);
+            expect(source.stop.mock.calls[0]?.[0]).toBeCloseTo(startTime + 0.5);
+        }
+        expect(diagnostics.find((event) => event.event === 'sequence_scheduled')).toMatchObject({
+            memberCount: 7,
+            scheduledDurationSeconds: 3.5,
+            loopedMemberCount: 7,
+            extendedMemberCount: 7,
+        });
+        await controller.dispose();
+    });
+
+    it('keeps the natural duration of forward-loop Sample Bank members longer than 500 ms', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+                loopMode: 1,
+                loopStartFrame: 10,
+                loopLengthFrames: 20,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(75, 1, 100)];
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+
+        expect(MockAudioBufferSourceNode.instances[0]?.loop).toBe(true);
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01);
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.loop).toBe(true);
+        expect(MockAudioBufferSourceNode.instances[1]?.start).toHaveBeenCalledWith(2.01);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(2.76);
+        await controller.dispose();
+    });
+
+    it('normalizes mixed-rate and mixed-width stereo lanes inside one bundle', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce({
+            auditionId: 'audition-mixed',
+            contentSizeBytes: 488,
+            clips: [
+                {
+                    objectId: 'SBNK-MIXED',
+                    loopMode: 0,
+                    loopModeLabel: 'off',
+                    warnings: ['Sample member formats differ'],
+                    lanes: [
+                        {
+                            role: 'LEFT',
+                            sourceObjectId: 'SMPL-LEFT',
+                            sampleRate: 31_000,
+                            sampleWidthBytes: 2,
+                            frameCount: 100,
+                            contentOffsetBytes: 0,
+                            wavSizeBytes: 244,
+                            loopStartFrame: 0,
+                            loopLengthFrames: 0,
+                        },
+                        {
+                            role: 'RIGHT',
+                            sourceObjectId: 'SMPL-RIGHT',
+                            sampleRate: 32_000,
+                            sampleWidthBytes: 1,
+                            frameCount: 100,
+                            contentOffsetBytes: 244,
+                            wavSizeBytes: 244,
+                            loopStartFrame: 0,
+                            loopLengthFrames: 0,
+                        },
+                    ],
+                },
+            ],
+        });
+        vi.mocked(transport.readAuditionContent).mockResolvedValueOnce(new ArrayBuffer(488));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(155, 1, 48_000), new MockAudioBuffer(150, 1, 48_000)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        controller.playSequence(1, ['SBNK-MIXED']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+
+        expect(MockAudioBufferSourceNode.instances[0]?.buffer).toMatchObject({
+            numberOfChannels: 2,
+            length: 155,
+            sampleRate: 48_000,
+        });
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SBNK-MIXED', status: 'playing' });
+        await controller.dispose();
+    });
+
+    it('moves Sample Bank state and playhead at the audible scheduled boundary', async () => {
+        installAudio();
+        const transport = transportFor(
+            descriptor({
+                frameCount: 100,
+                sampleRate: 100,
+                wavSizeBytes: 244,
+            }),
+        );
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(100, 1, 100), new MockAudioBuffer(100, 1, 100)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2']);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        expect(updates.at(-1)).toEqual({ objectId: 'SBNK-1', status: 'playing', playheadFrame: 0 });
+
+        MockAudioContext.instances[0]!.currentTime = 2.26;
+        animationCallbacks.at(-1)?.(0);
+
+        expect(updates.at(-1)).toEqual({ objectId: 'SBNK-2', status: 'playing', playheadFrame: 25 });
+        await controller.dispose();
+    });
+
+    it('does not let an ending sequence settle the completion callback of its replacement', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const firstCompleted = vi.fn();
+        const secondCompleted = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1'], firstCompleted);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        MockAudioBufferSourceNode.instances[0]?.onended?.();
+
+        controller.playSequence(1, ['SBNK-2'], secondCompleted);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        await Promise.resolve();
+
+        expect(firstCompleted).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 1 });
+        expect(secondCompleted).not.toHaveBeenCalled();
+
+        MockAudioBufferSourceNode.instances[1]?.onended?.();
+        await vi.waitFor(() =>
+            expect(secondCompleted).toHaveBeenCalledWith({ status: 'completed', playedCount: 1, skippedCount: 0 }),
+        );
+        await controller.dispose();
+    });
+
+    it('aborts the complete Sample Bank sequence when one member cannot be prepared', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.prepareAuditionBundle).mockRejectedValueOnce(new Error('Unsupported Sample'));
+        const updates: AuditionState[] = [];
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+
+        controller.playSequence(1, ['SBNK-BROKEN', 'SBNK-OK'], completed);
+
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith({
+                status: 'failed',
+                playedCount: 0,
+                skippedCount: 2,
+                error: 'Unsupported Sample',
+                failedObjectId: 'SBNK-BROKEN',
+            }),
+        );
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(updates.at(-1)).toEqual({
+            objectId: 'SBNK-BROKEN',
+            status: 'failed',
+            playheadFrame: 0,
+            error: 'Unsupported Sample',
+        });
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('rejects a Sample Bank above its aggregate decoded working-set budget before scheduling audio', async () => {
+        installAudio();
+        const transport = transportFor(descriptor({ frameCount: 4, wavSizeBytes: 52 }));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(4), new MockAudioBuffer(4)];
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined, undefined, undefined, {
+            maximumSequenceWorkingSetBytes: 80,
+        });
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+
+        await vi.waitFor(() =>
+            expect(completed).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    status: 'failed',
+                    playedCount: 0,
+                    skippedCount: 2,
+                    error: 'Sample Bank audio is too large to audition safely',
+                    failedObjectId: 'SBNK-1',
+                }),
+            ),
+        );
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('stops every scheduled Sample Bank member before closing the sequence context', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(2));
+        await controller.stop();
+
+        expect(MockAudioBufferSourceNode.instances[0]?.stop).toHaveBeenCalledWith(1.005);
+        expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(1.005);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('cancels Sample Bank preparation and settles without scheduling audio', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        vi.mocked(transport.readAuditionContent).mockImplementation(
+            async (_auditionId, _contentSizeBytes, signal): Promise<ArrayBuffer> =>
+                new Promise<ArrayBuffer>((_resolve, reject) => {
+                    signal?.addEventListener(
+                        'abort',
+                        () => {
+                            const error = new Error('cancelled');
+                            error.name = 'AbortError';
+                            reject(error);
+                        },
+                        { once: true },
+                    );
+                }),
+        );
+        const completed = vi.fn();
+        const controller = new AuditionController(transport, () => undefined);
+
+        controller.playSequence(1, ['SBNK-1', 'SBNK-2'], completed);
+        await vi.waitFor(() => expect(transport.readAuditionContent).toHaveBeenCalledOnce());
+        await controller.stop();
+
+        expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
+        expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        await controller.dispose();
+    });
+
+    it('reverses reverse-mode buffers once and plays them from the beginning', async () => {
+        installAudio();
+        const buffer = new MockAudioBuffer(3, 1, 3, [1, 2, 3]);
+        MockAudioContext.nextBuffers = [buffer];
+        const transport = transportFor(
+            descriptor({ frameCount: 3, sampleRate: 3, wavSizeBytes: 50, loopMode: 3, loopModeLabel: 'reverse' }),
+        );
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(Array.from(buffer.getChannelData(0))).toEqual([3, 2, 1]);
+        expect(MockAudioBufferSourceNode.instances[0]?.start).toHaveBeenCalledWith(1.01, 0);
+        await controller.dispose();
+    });
+
+    it('skips oversized speculative audio but permits an explicit transient play', async () => {
+        installAudio();
+        const value = descriptor({ frameCount: 4, wavSizeBytes: 52 });
+        const transport = transportFor(value);
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(4)];
+        const controller = new AuditionController(transport, () => undefined, undefined, undefined, {
+            cacheBudgetBytes: 8,
+            maximumCacheEntries: 1,
+        });
+
+        await controller.prefetch(1, 'SMPL-1');
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
+
+        await controller.play(1, 'SMPL-1');
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        await controller.stop();
+        await controller.play(1, 'SMPL-1');
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(2);
+        await controller.dispose();
+    });
+
+    it('rejects explicit playback above the encoded and decoded working-set budget before fetching', async () => {
+        installAudio();
+        const transport = transportFor(descriptor({ frameCount: 4, wavSizeBytes: 52 }));
+        const states: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => states.push(state), undefined, undefined, {
+            maximumWorkingSetBytes: 60,
+        });
+
+        await controller.play(1, 'SMPL-1');
+
+        expect(transport.readAuditionContent).not.toHaveBeenCalled();
+        expect(states.at(-1)).toMatchObject({
+            objectId: 'SMPL-1',
+            status: 'failed',
+            error: 'Audio is too large to audition safely',
+        });
+        await controller.dispose();
+    });
+
+    it('reuses selected-object prefetches and invalidates them when the image session closes', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.prefetch(7, 'SMPL-1');
+        await controller.play(7, 'SMPL-1');
+        await controller.stop();
+
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+
+        await controller.invalidateSession(7);
+        await controller.play(7, 'SMPL-1');
+
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(2);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(2);
+        expect(MockAudioContext.instances).toHaveLength(2);
+        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        await controller.dispose();
+    });
+
+    it('does not create the output AudioContext during speculative prefetch', async () => {
+        installAudio();
+        const transport = transportFor(descriptor());
+        const controller = new AuditionController(transport, () => undefined);
+
+        await controller.prefetch(7, 'SMPL-1');
+
+        expect(MockAudioContext.instances).toHaveLength(0);
+        expect(MockOfflineAudioContext.instances).toHaveLength(1);
+
+        await controller.play(7, 'SMPL-1');
+
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
+        expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
+        await controller.dispose();
+    });
+
+    it('sizes speculative offline decoding for the complete clip', async () => {
+        installAudio();
+        const frameCount = 7_048;
+        const transport = transportFor(descriptor({ frameCount, wavSizeBytes: 44 + frameCount * 2 }));
+        const controller = new AuditionController(transport, () => undefined);
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(frameCount, 1, 48_000)];
+
+        await controller.prefetch(7, 'SMPL-1');
+
+        expect(MockOfflineAudioContext.instances).toHaveLength(1);
+        expect(MockOfflineAudioContext.instances[0]?.length).toBe(frameCount);
+        await controller.dispose();
+    });
+});

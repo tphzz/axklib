@@ -53,6 +53,9 @@ else()
          "axk::(build_plan|package_import_plan|portable_package|sdk_build_info|sdk_version|transaction|render_error|progress_sink|operation_context|image|snapshot)")
         message(FATAL_ERROR "shared SDK exports a non-facade axklib symbol: ${line}")
       endif()
+    elseif(line MATCHES " [BD] (__bss_start|_edata|_end)$")
+      # GNU-compatible ELF linkers may publish these image-boundary symbols.
+      # They describe the shared object layout and are not axklib API.
     elseif(line MATCHES " [VvWwu] .*std::")
       # Toolchain-emitted weak C++ runtime template and RTTI symbols are not
       # axklib API and do not name any private engine or dependency facility.

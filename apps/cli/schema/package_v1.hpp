@@ -24,6 +24,7 @@ struct NodeOutput {
     std::string node_id;
     std::string object_type;
     std::string name;
+    std::uint64_t payload_size_bytes{};
     std::string payload_sha256;
     std::string normalized_sha256;
     std::optional<std::string> semantic_sha256;
@@ -36,6 +37,25 @@ struct IssueOutput {
     bool fatal{};
 };
 
+struct ImportWarningOutput {
+    std::string code;
+    std::string message;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::string node_id;
+    std::string object_type;
+    std::string object_name;
+    std::optional<std::uint32_t> partition_index;
+    std::string volume_name;
+};
+
+struct OpaqueSequenceChoiceOutput {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::string name;
+    std::optional<std::string> action;
+};
+
 struct PackageOutput {
     std::string path_utf8;
     std::string package_id;
@@ -44,6 +64,7 @@ struct PackageOutput {
     std::string source_media_kind;
     bool valid{};
     bool payloads_verified{};
+    std::uint64_t total_payload_bytes{};
     std::uint64_t relationship_count{};
     std::vector<RootOutput> roots;
     std::vector<NodeOutput> objects;
@@ -81,7 +102,55 @@ struct ActionOutput {
     std::vector<std::string> actions;
     std::optional<std::string> canonical_action_id;
     std::optional<std::uint32_t> target_sfs_id;
-    std::optional<std::uint32_t> target_link_id;
+    std::optional<std::uint32_t> target_wave_data_reference_value;
+};
+
+struct ProgramAssignmentAdjustmentOutput {
+    std::string adjustment_id;
+    std::string origin;
+    std::optional<std::uint64_t> package_index;
+    std::optional<std::string> action_id;
+    std::optional<std::string> existing_object_key;
+    std::string program_slot;
+    std::string program_name;
+    std::uint64_t assignment_ordinal{};
+    std::string target_object_type;
+    std::string target_name;
+    std::uint32_t partition_index{};
+    std::string group_name;
+    std::string volume_name;
+    std::string raw_group;
+    std::string raw_volume;
+    std::string reason_code;
+    std::string disposition;
+};
+
+struct ProgramSlotRangeOutput {
+    std::uint32_t first{};
+    std::uint32_t last{};
+};
+
+struct ProgramSlotMappingOutput {
+    std::uint64_t package_index{};
+    std::string node_id;
+    std::uint32_t source_slot{};
+    std::uint32_t destination_slot{};
+    bool requires_user_action{};
+};
+
+struct ProgramSlotPlacementOutput {
+    std::string placement_id;
+    std::uint32_t partition_index{};
+    std::string volume_name;
+    std::string mode;
+    bool applied{};
+    std::optional<std::uint32_t> suggested_start_slot;
+    std::uint64_t required_slot_count{};
+    std::uint64_t available_slot_count{};
+    std::vector<ProgramSlotRangeOutput> occupied_ranges;
+    std::vector<ProgramSlotRangeOutput> source_ranges;
+    std::vector<ProgramSlotRangeOutput> destination_ranges;
+    std::vector<ProgramSlotMappingOutput> mappings;
 };
 
 struct AllocationOutput {
@@ -92,10 +161,15 @@ struct AllocationOutput {
     std::string raw_volume;
     std::uint64_t inserted_object_count{};
     std::uint64_t reused_object_count{};
+    std::uint64_t blocked_object_count{};
     std::uint64_t payload_clusters{};
     std::uint64_t payload_sectors{};
     std::uint64_t continuation_clusters{};
     std::uint64_t directory_growth_bytes{};
+    std::uint64_t directory_growth_clusters{};
+    std::uint64_t directory_continuation_clusters{};
+    std::uint64_t infrastructure_clusters{};
+    std::uint64_t additional_allocated_bytes{};
     std::uint64_t remaining_object_ids{};
     std::uint64_t remaining_clusters{};
     std::uint64_t projected_image_sectors{};
@@ -116,9 +190,12 @@ struct PlanOutput {
     std::string target_kind;
     std::string target_snapshot_id;
     bool valid{};
-    std::vector<IssueOutput> warnings;
+    std::vector<ImportWarningOutput> warnings;
+    std::vector<OpaqueSequenceChoiceOutput> opaque_sequences;
     std::vector<ConflictOutput> conflicts;
     std::vector<ActionOutput> objects;
+    std::vector<ProgramAssignmentAdjustmentOutput> program_assignment_adjustments;
+    std::vector<ProgramSlotPlacementOutput> program_slot_placements;
     std::vector<AllocationOutput> allocation;
     std::optional<ImportResultOutput> result;
 };

@@ -50,10 +50,10 @@ TEST(Error, RendersSamplerContextBeforeOptionalTechnicalTrace) {
     context.object_name = "Stereo Pad";
     context.source_path = "disk.hds";
     context.raw_offset = 4096;
-    const auto error = axk::make_error(axk::ErrorCode::object_malformed, axk::ErrorCategory::object,
-                                       "sample bank is malformed", context);
+    const auto error =
+        axk::make_error(axk::ErrorCode::object_malformed, axk::ErrorCategory::object, "Sample is malformed", context);
 
-    EXPECT_EQ(axk::render_error(error, false), "object[400]: sample bank is malformed [partition=3, volume=Strings, "
+    EXPECT_EQ(axk::render_error(error, false), "object[400]: Sample is malformed [partition=3, volume=Strings, "
                                                "object_type=SBNK, object=Stereo Pad]");
     EXPECT_NE(axk::render_error(error).find("source=disk.hds"), std::string::npos);
     EXPECT_NE(axk::render_error(error).find("offset=4096"), std::string::npos);

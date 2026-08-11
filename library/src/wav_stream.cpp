@@ -5,6 +5,7 @@
 #include <fstream>
 #include <limits>
 
+#include "axklib/file_publication.hpp"
 #include "axklib/utf8.hpp"
 
 namespace axk::audio_internal {
@@ -219,8 +220,8 @@ Result<bool> equal_wav(const WavSource &left, const WavSource &right, const Canc
     return true;
 }
 
-Result<void> write_wav_atomic(const std::filesystem::path &path, const WavSource &source, bool overwrite,
-                              const CancellationToken &cancellation) {
+Result<PublicationOutcome> write_wav_atomic(const std::filesystem::path &path, const WavSource &source, bool overwrite,
+                                            const CancellationToken &cancellation) {
     if (!overwrite && std::filesystem::exists(path)) {
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "refusing to replace an existing WAV")};
@@ -234,42 +235,15 @@ Result<void> write_wav_atomic(const std::filesystem::path &path, const WavSource
         return std::unexpected{
             make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not create WAV output directory")};
     }
-    const auto temporary = text::temporary_sibling(path);
+    auto temporary = detail::TemporaryPublication::create(
+        path, [&](const detail::TemporaryFileSink &sink) { return stream_wav(source, sink, cancellation); });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        if (!output) {
-            std::filesystem::remove(*temporary, error);
-            return std::unexpected{
-                make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open temporary WAV")};
-        }
-        const auto written = stream_wav(
-            source,
-            [&](std::span<const std::byte> bytes) -> Result<void> {
-                output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-                if (!output) {
-                    return std::unexpected{
-                        make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary WAV")};
-                }
-                return {};
-            },
-            cancellation);
-        if (!written) {
-            output.close();
-            std::filesystem::remove(*temporary, error);
-            return std::unexpected{written.error()};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(path, error);
-    std::filesystem::rename(*temporary, path, error);
-    if (error) {
-        std::filesystem::remove(*temporary, error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish WAV atomically")};
-    }
-    return {};
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
+        return std::unexpected{published.error()};
+    return std::move(*published);
 }
 
 } // namespace axk::audio_internal

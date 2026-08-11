@@ -1,5 +1,13 @@
 #include "axklib/server/server.hpp"
 
+namespace {
+
+constexpr unsigned char openapi_document[] = {
+@AXK_SERVER_OPENAPI_BYTES@    0x00,
+};
+
+} // namespace
+
 std::string_view axk::server::embedded_openapi() noexcept {
-    return R"AXK_OPENAPI(@AXK_SERVER_OPENAPI_JSON@)AXK_OPENAPI";
+    return {reinterpret_cast<const char *>(openapi_document), @AXK_SERVER_OPENAPI_SIZE@U};
 }

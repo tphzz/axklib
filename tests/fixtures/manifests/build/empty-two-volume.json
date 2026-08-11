@@ -5,8 +5,8 @@
     {
       "name": "hd1",
       "volumes": [
-        {"name": "Keep Volume", "waveforms": [], "sample_banks": []},
-        {"name": "Delete Volume", "waveforms": [], "sample_banks": []}
+        {"name": "Keep Volume", "waveforms": [], "samples": []},
+        {"name": "Delete Volume", "waveforms": [], "samples": []}
       ]
     }
   ]

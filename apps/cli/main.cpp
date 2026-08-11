@@ -1,5 +1,6 @@
 #include "app.hpp"
 #include "command_line.hpp"
+#include "exit_status.hpp"
 
 #ifdef _WIN32
 #include <iostream>
@@ -9,7 +10,7 @@ int wmain(int argc, wchar_t **argv) {
     auto utf8 = axk::cli::platform::normalize_windows_command_line({argv, static_cast<std::size_t>(argc)});
     if (!utf8) {
         std::cerr << "error: " << utf8.error().message << '\n';
-        return 2;
+        return axk::cli::exit_code(axk::cli::ExitStatus::invalid_request);
     }
     std::vector<char *> pointers;
     pointers.reserve(utf8->size());

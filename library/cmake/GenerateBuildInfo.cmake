@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1...3.28)
 
 foreach(required_variable IN ITEMS AXK_VERSION_SOURCE_DIR AXK_VERSION_PRODUCT_NAME
                                    AXK_VERSION_MODULE AXK_VERSION_PROJECT_MODULE

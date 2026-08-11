@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.22.1...3.25)
+
+if(NOT DEFINED AXK_SOURCE_ROOT)
+  message(FATAL_ERROR "AXK_SOURCE_ROOT must name the axklib source directory")
+endif()
+
+cmake_path(ABSOLUTE_PATH AXK_SOURCE_ROOT NORMALIZE OUTPUT_VARIABLE AXK_SOURCE_ROOT)
+set(AXK_ARCHITECTURE_POLICY
+    "${AXK_SOURCE_ROOT}/cmake/architecture-line-budget.json")
+set(AXK_ARCHITECTURE_SCRIPT
+    "${AXK_SOURCE_ROOT}/tools/python/architecture_check.py")
+
+find_program(AXK_ARCHITECTURE_PYTHON NAMES python3 python REQUIRED)
+execute_process(
+  COMMAND
+    "${AXK_ARCHITECTURE_PYTHON}" "${AXK_ARCHITECTURE_SCRIPT}"
+    "${AXK_SOURCE_ROOT}" --policy "${AXK_ARCHITECTURE_POLICY}"
+  RESULT_VARIABLE AXK_ARCHITECTURE_RESULT
+  OUTPUT_VARIABLE AXK_ARCHITECTURE_STDOUT
+  ERROR_VARIABLE AXK_ARCHITECTURE_STDERR)
+if(NOT AXK_ARCHITECTURE_RESULT EQUAL 0)
+  message(FATAL_ERROR
+    "Architecture check failed\n"
+    "${AXK_ARCHITECTURE_STDOUT}${AXK_ARCHITECTURE_STDERR}")
+endif()
+
+message(STATUS "Architecture check passed")

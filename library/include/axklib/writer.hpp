@@ -1,19 +1,44 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/error.hpp"
 #include "axklib/io.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk {
 
+inline constexpr std::string_view build_manifest_schema_version = "1.0";
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
 inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
+inline constexpr std::uint64_t formatted_floppy_size_bytes = 1'474'560;
+inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
+inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum_wave_data_frames_per_channel;
+inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
+    maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
+inline constexpr std::size_t maximum_sample_bank_members = 127U;
+inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
+    4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
+inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;
+inline constexpr std::uint8_t sampler_output_sample_width_bits = 16U;
+inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_widths_bits{
+    sampler_output_sample_width_bits};
+inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
+
+enum class AudioSamplerLoopMode : std::uint8_t {
+    forward_loop = 1,
+    forward_one_shot = 4,
+};
 
 struct WaveformSpec {
     std::string id;
@@ -21,9 +46,13 @@ struct WaveformSpec {
     std::filesystem::path path;
     std::uint8_t root_key{};
     std::optional<std::uint32_t> target_sample_rate;
+    std::int8_t fine_tune_cents{};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
-struct SampleBankSpec {
+struct SampleSpec {
     std::string name;
     std::optional<std::string> waveform_id;
     std::optional<std::string> right_waveform_id;
@@ -34,30 +63,43 @@ struct SampleBankSpec {
     std::uint8_t root_key{};
     std::uint8_t key_low{};
     std::uint8_t key_high{};
-    std::uint8_t level{127};
+    std::uint8_t level{100};
+    std::int8_t fine_tune_cents{};
+    std::uint8_t velocity_low{};
+    std::uint8_t velocity_high{127};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
-struct SampleBankGroupSpec {
+struct SampleBankSpec {
     std::string name;
-    std::vector<std::string> member_sample_banks;
+    std::vector<std::string> member_samples;
+};
+
+enum class ProgramReceiveMode : std::uint8_t {
+    midi_channel,
+    sample,
 };
 
 struct ProgramAssignmentSpec {
     std::string target_kind;
     std::string target_name;
     std::uint8_t receive_channel{};
+    ProgramReceiveMode receive_mode{ProgramReceiveMode::midi_channel};
 };
 
 struct ProgramSpec {
     std::uint8_t number{};
+    std::string name;
     std::vector<ProgramAssignmentSpec> assignments;
 };
 
 struct VolumeSpec {
     std::string name;
     std::vector<WaveformSpec> waveforms;
+    std::vector<SampleSpec> samples;
     std::vector<SampleBankSpec> sample_banks;
-    std::vector<SampleBankGroupSpec> sample_bank_groups;
     std::vector<ProgramSpec> programs;
 };
 
@@ -73,6 +115,7 @@ struct HdsBuildManifest {
 };
 
 enum class MediaImageFormat : std::uint8_t { fat12_floppy, iso9660 };
+enum class MediaConversionScope : std::uint8_t { partition, volume };
 enum class SavedObjectSelection : std::uint8_t { roots, all };
 enum class BuildManifestKind : std::uint8_t { hds, fat12_floppy, iso9660 };
 
@@ -99,6 +142,50 @@ struct AudioImportOptions {
     std::optional<std::uint32_t> target_sample_rate;
 };
 
+struct AudioImportIssue {
+    std::string code;
+    std::string message;
+    bool fatal{true};
+};
+
+struct AudioSamplerSettings {
+    std::uint8_t root_key{60};
+    std::int8_t fine_tune_cents{};
+    std::uint8_t key_low{};
+    std::uint8_t key_high{127};
+    std::uint8_t velocity_low{};
+    std::uint8_t velocity_high{127};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint64_t loop_start_frame{};
+    std::uint64_t loop_length_frames{};
+    std::string pitch_source{"DEFAULT"};
+    std::string range_source{"DEFAULT"};
+    std::string loop_source{"DEFAULT"};
+};
+
+struct AudioSourceInfo {
+    std::string source_format;
+    std::string source_subtype;
+    std::uint8_t channels{};
+    std::uint64_t frame_count{};
+    std::uint32_t source_sample_rate{};
+    std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{sampler_output_sample_width_bits};
+    bool resampled{};
+    bool quantized{};
+    bool sample_width_converted{};
+    std::string dither_algorithm;
+    std::uint64_t projected_output_frame_count{};
+    std::uint64_t projected_output_bytes_per_channel{};
+    std::uint64_t projected_output_bytes_total{};
+    std::uint64_t maximum_output_frame_count_per_channel{maximum_wave_data_frames_per_channel};
+    std::uint64_t maximum_output_bytes_per_channel{maximum_wave_data_pcm16_bytes_per_channel};
+    AudioSamplerSettings sampler_defaults;
+    bool valid{true};
+    std::vector<AudioImportIssue> issues;
+};
+
 struct ImportedAudio {
     std::filesystem::path source_path;
     std::string source_format;
@@ -106,12 +193,15 @@ struct ImportedAudio {
     std::uint8_t source_channels{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{sampler_output_sample_width_bits};
     std::uint64_t output_frames{};
     std::vector<std::vector<std::byte>> pcm_channels;
     bool resampled{};
     bool quantized{};
-    // Empty for exact PCM16 imports; otherwise identifies the reproducible
-    // policy used.
+    bool sample_width_converted{};
+    // Empty for exact PCM16 imports and exact PCM8 expansion; otherwise
+    // identifies the reproducible policy used.
     std::string dither_algorithm;
     std::uint64_t clipped_samples{};
 };
@@ -142,13 +232,19 @@ struct WrittenImageLayout {
     std::uint64_t size_bytes{};
     std::vector<WrittenPartitionLayout> partitions;
     std::uint64_t unused_tail_sectors{};
+    PublicationOutcome publication;
 };
+
+enum class MediaConversionArtifactKind : std::uint8_t { image, floppy_disk_set };
 
 struct WrittenMediaImage {
     std::filesystem::path path;
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::uint64_t size_bytes{};
     std::size_t object_count{};
+    PublicationOutcome publication;
+    MediaConversionArtifactKind artifact_kind{MediaConversionArtifactKind::image};
+    std::size_t floppy_image_count{};
 };
 
 struct HdsBuildPlanSummary {
@@ -158,9 +254,152 @@ struct HdsBuildPlanSummary {
     std::vector<PartitionGeometry> partitions;
 };
 
+enum class HdsCreationProfileId : std::uint8_t { floppy_scale, cd_r_650, cd_r_700, hds_1_gib, hds_2_gib };
+
+struct HdsCreationPartitionOption {
+    std::uint8_t partition_count{};
+    std::vector<PartitionGeometry> partitions;
+    std::uint64_t unused_tail_sectors{};
+};
+
+struct HdsCreationProfile {
+    HdsCreationProfileId id{HdsCreationProfileId::floppy_scale};
+    std::uint64_t size_bytes{};
+    std::uint8_t default_partition_count{};
+    std::vector<HdsCreationPartitionOption> partition_options;
+};
+
+struct HdsCreationRequest {
+    HdsCreationProfileId profile_id{HdsCreationProfileId::floppy_scale};
+    std::uint8_t partition_count{};
+};
+
+struct HdsCreationPlan {
+    HdsCreationProfileId profile_id{HdsCreationProfileId::floppy_scale};
+    HdsBuildManifest manifest;
+    HdsBuildPlanSummary summary;
+    std::uint64_t unused_tail_sectors{};
+};
+
+enum class FloppyFormatMode : std::uint8_t { quick, full };
+
+struct FloppyCreationPlan {
+    FloppyFormatMode mode{FloppyFormatMode::full};
+    std::uint64_t size_bytes{formatted_floppy_size_bytes};
+    std::size_t object_count{};
+};
+
 struct MediaBuildPlanSummary {
     MediaImageFormat format{MediaImageFormat::fat12_floppy};
     std::size_t object_count{};
+};
+
+struct MediaBuildLimits {
+    std::uint64_t maximum_object_bytes{64ULL * 1024ULL * 1024ULL};
+    std::uint64_t maximum_aggregate_payload_bytes{737'280'000ULL};
+    std::uint64_t maximum_output_bytes{737'280'000ULL};
+};
+
+struct MediaConversionRequest {
+    MediaImageFormat format{MediaImageFormat::fat12_floppy};
+    MediaConversionScope scope{MediaConversionScope::volume};
+    std::uint32_t partition_index{};
+    std::optional<std::uint32_t> volume_directory_id;
+    std::string iso_volume_id{"AXKLIB"};
+};
+
+enum class MediaConversionIssueUnit {
+    bytes,
+    directory_entries,
+    floppy_images,
+};
+
+struct MediaConversionIssueMeasurement {
+    std::uint64_t required{};
+    std::uint64_t available{};
+    MediaConversionIssueUnit unit{MediaConversionIssueUnit::bytes};
+};
+
+struct MediaConversionIssue {
+    std::string code;
+    std::string message;
+    bool blocking{true};
+    std::optional<MediaConversionIssueMeasurement> measurement;
+};
+
+struct MediaConversionVolumeSummary {
+    std::uint32_t directory_id{};
+    std::string name;
+    std::string raw_volume;
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+};
+
+struct MediaConversionPlanSummary {
+    MediaImageFormat format{MediaImageFormat::fat12_floppy};
+    MediaConversionScope scope{MediaConversionScope::volume};
+    std::uint32_t partition_index{};
+    std::string partition_name;
+    bool can_export{};
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+    std::uint64_t projected_output_bytes{};
+    std::uint64_t capacity_bytes{};
+    MediaConversionArtifactKind artifact_kind{MediaConversionArtifactKind::image};
+    std::string output_extension;
+    std::size_t floppy_image_count{};
+    std::vector<MediaConversionVolumeSummary> volumes;
+    std::vector<MediaConversionIssue> issues;
+};
+
+struct VolumeFloppyExportRequest {
+    std::uint32_t partition_index{};
+};
+
+struct VolumeFloppyExportVolumeSummary {
+    std::uint32_t directory_id{};
+    std::string name;
+    bool can_export{};
+    std::size_t object_count{};
+    std::uint64_t payload_bytes{};
+    std::size_t floppy_image_count{};
+    std::uint64_t projected_disk_bytes{};
+    std::vector<MediaConversionIssue> issues;
+};
+
+struct VolumeFloppyExportPlanSummary {
+    std::uint32_t partition_index{};
+    std::string partition_name;
+    std::vector<VolumeFloppyExportVolumeSummary> volumes;
+};
+
+struct VolumeFloppyExportTarget {
+    std::uint32_t directory_id{};
+    std::filesystem::path directory_name;
+};
+
+struct WrittenFloppyDiskImage {
+    std::size_t index{};
+    std::filesystem::path path;
+    std::uint64_t size_bytes{};
+    std::string sha256;
+};
+
+enum class VolumeFloppyExportStatus : std::uint8_t { exported, skipped_empty, blocked, failed };
+
+struct WrittenVolumeFloppyExport {
+    std::uint32_t directory_id{};
+    std::string name;
+    VolumeFloppyExportStatus status{VolumeFloppyExportStatus::failed};
+    std::filesystem::path directory_path;
+    std::uint64_t size_bytes{};
+    std::vector<WrittenFloppyDiskImage> disks;
+    std::optional<Error> error;
+};
+
+struct WrittenVolumeFloppyExportBatch {
+    VolumeFloppyExportPlanSummary plan;
+    std::vector<WrittenVolumeFloppyExport> volumes;
 };
 
 AXK_AUDIO_API Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json,
@@ -170,16 +409,40 @@ AXK_AUDIO_API Result<MediaBuildManifest> parse_media_build_manifest(std::string_
                                                                     const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<MediaBuildManifest> load_media_build_manifest(const std::filesystem::path &path);
 AXK_AUDIO_API Result<std::string> serialize_build_manifest_template(BuildManifestKind kind);
-AXK_AUDIO_API Result<void>
+AXK_AUDIO_API Result<PublicationOutcome>
 write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path, bool overwrite = false);
 AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest);
+AXK_AUDIO_API std::string_view hds_creation_profile_id(HdsCreationProfileId id);
+AXK_AUDIO_API Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id);
+AXK_AUDIO_API const std::vector<HdsCreationProfile> &hds_creation_profiles();
+AXK_AUDIO_API Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request,
+                                                        const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<FloppyCreationPlan> plan_floppy_creation(FloppyFormatMode mode = FloppyFormatMode::full,
+                                                              const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest,
                                                          const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
                                                              const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<MediaBuildPlanSummary> plan_media_build(const MediaBuildManifest &manifest,
+                                                             const MediaBuildLimits &limits,
+                                                             const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<MediaConversionPlanSummary>
+plan_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader, const std::filesystem::path &source_path,
+                      const MediaConversionRequest &request, const MediaBuildLimits &limits = {},
+                      const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<VolumeFloppyExportPlanSummary>
+plan_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                          const std::filesystem::path &source_path, const VolumeFloppyExportRequest &request,
+                          const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<std::uint32_t> choose_sampler_sample_rate(std::uint32_t source_rate,
                                                                std::optional<std::uint32_t> target_sample_rate = {});
+AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const std::filesystem::path &path,
+                                                            std::optional<std::uint32_t> target_sample_rate = {});
+AXK_AUDIO_API Result<AudioSourceInfo> inspect_sampler_audio(const RandomAccessReader &reader,
+                                                            std::optional<std::uint32_t> target_sample_rate = {});
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path,
+                                                         const AudioImportOptions &options);
+AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const RandomAccessReader &reader,
                                                          const AudioImportOptions &options);
 AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
                                                          const std::filesystem::path &output_path,
@@ -189,5 +452,23 @@ AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManife
                                                           const std::filesystem::path &output_path,
                                                           bool overwrite = false,
                                                           const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage> write_formatted_floppy_image(const FloppyCreationPlan &plan,
+                                                                     const std::filesystem::path &output_path,
+                                                                     bool overwrite = false,
+                                                                     const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
+                                                          const std::filesystem::path &output_path, bool overwrite,
+                                                          const MediaBuildLimits &limits,
+                                                          const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenMediaImage>
+write_media_conversion(std::shared_ptr<const RandomAccessReader> source_reader,
+                       const std::filesystem::path &source_path, const MediaConversionRequest &request,
+                       const std::filesystem::path &output_path, bool overwrite = false,
+                       const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenVolumeFloppyExportBatch>
+write_volume_floppy_export(std::shared_ptr<const RandomAccessReader> source_reader,
+                           const std::filesystem::path &source_path, const VolumeFloppyExportRequest &request,
+                           const std::filesystem::path &output_root, std::span<const VolumeFloppyExportTarget> targets,
+                           const MediaBuildLimits &limits = {}, const CancellationToken &cancellation = {});
 
 } // namespace axk

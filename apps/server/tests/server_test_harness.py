@@ -12,12 +12,33 @@ from pathlib import Path
 from typing import Any
 
 
-def startup_timeout() -> float:
+def timeout_scale() -> float:
+    configured = os.environ.get("AXK_SERVER_TEST_TIMEOUT_SCALE")
+    if configured is not None:
+        try:
+            scale = float(configured)
+        except ValueError as error:
+            raise AssertionError(
+                "AXK_SERVER_TEST_TIMEOUT_SCALE must be a positive number"
+            ) from error
+        if scale <= 0:
+            raise AssertionError(
+                "AXK_SERVER_TEST_TIMEOUT_SCALE must be a positive number"
+            )
+        return scale
     instrumented = any(
         os.environ.get(name)
         for name in ("ASAN_OPTIONS", "UBSAN_OPTIONS", "TSAN_OPTIONS")
     )
-    return 20.0 if instrumented else 8.0
+    return 5.0 if instrumented else 1.0
+
+
+def scaled_timeout(seconds: float) -> float:
+    return seconds * timeout_scale()
+
+
+def startup_timeout() -> float:
+    return scaled_timeout(8.0)
 
 
 def choose_port() -> int:
@@ -134,7 +155,7 @@ def wait_for_job(
     process: subprocess.Popen[bytes],
     timeout: float = 8.0,
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + scaled_timeout(timeout)
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(
@@ -202,6 +223,7 @@ class ServerProcess:
         if self.process is None or self.process.poll() is not None:
             return
         self.process.terminate()
+        timeout = scaled_timeout(timeout)
         try:
             self.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

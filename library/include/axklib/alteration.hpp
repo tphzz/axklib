@@ -8,10 +8,14 @@
 #include <vector>
 
 #include "axklib/io.hpp"
+#include "axklib/publication.hpp"
+#include "axklib/sequence.hpp"
 #include "axklib/types.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk {
+
+inline constexpr std::string_view alteration_manifest_schema_version = "1.0";
 
 struct OperationReference {
     std::string operation_id;
@@ -24,6 +28,10 @@ struct InsertWaveformSpec {
     std::vector<std::string> waveform_names;
     std::uint8_t root_key{};
     std::optional<std::uint32_t> target_sample_rate;
+    std::int8_t fine_tune_cents{};
+    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
+    std::uint32_t loop_start_frame{};
+    std::uint32_t loop_length_frames{};
 };
 
 struct DeleteVolumeOperation {
@@ -36,16 +44,16 @@ struct InsertVolumeOperation {
     VolumeSpec volume;
 };
 
-struct DeleteSampleBankOperation {
+struct DeleteSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
-    std::string sample_bank_name;
+    std::string sample_name;
 };
 
-struct InsertSampleBankOperation {
+struct InsertSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
-    SampleBankSpec sample_bank;
+    SampleSpec sample;
 };
 
 struct InsertWaveformOperation {
@@ -67,30 +75,37 @@ struct RenameWaveformOperation {
     std::string new_waveform_name;
 };
 
+struct RenameSampleOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    std::string new_sample_name;
+};
+
+struct DeleteSampleBankOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+};
+
+struct InsertSampleBankOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    SampleBankSpec sample_bank;
+};
+
+struct AssignSampleBankMembersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    std::vector<std::string> sample_names;
+};
+
 struct RenameSampleBankOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::string sample_bank_name;
     std::string new_sample_bank_name;
-};
-
-struct DeleteSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    std::string sample_bank_group_name;
-};
-
-struct InsertSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    SampleBankGroupSpec sample_bank_group;
-};
-
-struct RenameSampleBankGroupOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    std::string sample_bank_group_name;
-    std::string new_sample_bank_group_name;
 };
 
 struct DeleteProgramOperation {
@@ -105,11 +120,63 @@ struct InsertProgramOperation {
     ProgramSpec program;
 };
 
+struct RenameProgramOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    std::string new_program_name;
+};
+
+struct SequenceSpec {
+    std::string name;
+    std::filesystem::path midi_path;
+    SequenceSystemExclusivePolicy system_exclusive_policy;
+};
+
+struct DeleteSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sequence_name;
+};
+
+struct InsertSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    SequenceSpec sequence;
+};
+
+struct RenameSequenceOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sequence_name;
+    std::string new_sequence_name;
+};
+
+struct RenameVolumeOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string new_volume_name;
+};
+
+struct RenamePartitionOperation {
+    PartitionSelector partition;
+    std::string partition_name;
+    std::string new_partition_name;
+};
+
+struct RepairObjectPlacementsOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::vector<SfsId> object_sfs_ids;
+};
+
 using AlterationOperationData =
-    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
-                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleBankOperation,
-                 DeleteSampleBankGroupOperation, InsertSampleBankGroupOperation, RenameSampleBankGroupOperation,
-                 DeleteProgramOperation, InsertProgramOperation>;
+    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
+                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
+                 DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
+                 RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
+                 DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
+                 RenamePartitionOperation, RepairObjectPlacementsOperation>;
 
 struct AlterationOperation {
     std::string id;
@@ -124,8 +191,8 @@ struct AlterationManifest {
 };
 
 AXK_AUDIO_API Result<std::string> serialize_alteration_manifest_template();
-AXK_AUDIO_API Result<void> write_alteration_manifest_template(const std::filesystem::path &output_path,
-                                                              bool overwrite = false);
+AXK_AUDIO_API Result<PublicationOutcome> write_alteration_manifest_template(const std::filesystem::path &output_path,
+                                                                            bool overwrite = false);
 
 struct AudioImportSummary {
     std::filesystem::path source_path;
@@ -134,9 +201,12 @@ struct AudioImportSummary {
     std::uint8_t source_channels{};
     std::uint32_t source_sample_rate{};
     std::uint32_t output_sample_rate{};
+    std::uint8_t source_sample_width_bits{};
+    std::uint8_t output_sample_width_bits{};
     std::uint64_t output_frames{};
     bool resampled{};
     bool quantized{};
+    bool sample_width_converted{};
     bool split_stereo{};
     std::string dither_algorithm;
     std::uint64_t clipped_samples{};
@@ -150,6 +220,7 @@ struct OperationReport {
     std::string object_name;
     std::vector<SfsId> removed_sfs_ids;
     std::vector<SfsId> inserted_sfs_ids;
+    std::vector<SfsId> placed_sfs_ids;
     std::uint64_t freed_clusters{};
     std::uint64_t allocated_clusters{};
     std::optional<AudioImportSummary> audio_import;
@@ -160,9 +231,10 @@ struct AlterationResult {
     std::optional<std::filesystem::path> output_path;
     bool applied{};
     std::vector<OperationReport> operations;
+    PublicationOutcome publication;
 };
 
-struct TransactionPlan {
+struct AlterationInspection {
     std::filesystem::path source_path;
     std::vector<OperationReport> operations;
 };
@@ -172,12 +244,12 @@ AXK_AUDIO_API Result<AlterationManifest> parse_alteration_manifest(std::string_v
 AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
 AXK_AUDIO_API Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
                                                  const AlterationManifest &manifest,
-                                                 const std::optional<std::filesystem::path> &output_path = {},
+                                                 const std::filesystem::path &output_path,
                                                  const CancellationToken &cancellation = {},
                                                  ProgressSink *progress = nullptr, bool overwrite = false);
-AXK_AUDIO_API Result<TransactionPlan> plan_hds_alteration(const std::filesystem::path &source_path,
-                                                          const AlterationManifest &manifest,
-                                                          const CancellationToken &cancellation = {},
-                                                          ProgressSink *progress = nullptr);
+AXK_AUDIO_API Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
+                                                                  const AlterationManifest &manifest,
+                                                                  const CancellationToken &cancellation = {},
+                                                                  ProgressSink *progress = nullptr);
 
 } // namespace axk

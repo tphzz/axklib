@@ -1,22 +1,19 @@
 #include "axklib/sfs.hpp"
 
+#include "sfs_internal.hpp"
+
 #include <algorithm>
-#include <array>
-#include <functional>
+#include <format>
 #include <limits>
 #include <span>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 
 #include "axklib/bytes.hpp"
-#include "axklib/utf8.hpp"
 
-namespace axk {
-namespace {
+namespace axk::sfs_detail {
 
 constexpr std::string_view magic{"YAMAHA_dev3"};
-constexpr std::string_view object_magic{"FSFSDEV3SPLX"};
 constexpr std::uint64_t partition_header_size = 1024;
 constexpr std::uint64_t index_block_size = 1024;
 constexpr std::uint64_t index_record_size = 72;
@@ -67,7 +64,7 @@ bool begins_with(std::span<const std::byte> bytes, std::string_view value) {
     });
 }
 
-Error partition_error(ErrorCode code, std::string message, PartitionIndex index, std::uint64_t offset = 0) {
+Error partition_error(ErrorCode code, std::string message, PartitionIndex index, std::uint64_t offset) {
     ErrorContext context;
     context.partition_index = index.value;
     if (offset != 0) {
@@ -118,13 +115,51 @@ std::uint32_t count_bitmap_bits(std::span<const std::byte> bitmap, std::uint32_t
 }
 
 bool bitmap_test(std::span<const std::byte> bitmap, std::uint32_t cluster) {
-    return (std::to_integer<std::uint8_t>(bitmap[cluster / 8U]) & static_cast<std::uint8_t>(0x80U >> (cluster & 7U))) !=
-           0;
+    const auto index = static_cast<std::size_t>(cluster / 8U);
+    return index < bitmap.size() &&
+           (std::to_integer<std::uint8_t>(bitmap[index]) & static_cast<std::uint8_t>(0x80U >> (cluster & 7U))) != 0;
 }
 
-void bitmap_set(std::span<std::byte> bitmap, std::uint32_t cluster) {
-    const auto index = cluster / 8U;
+bool bitmap_set(std::span<std::byte> bitmap, std::uint32_t cluster) {
+    const auto index = static_cast<std::size_t>(cluster / 8U);
+    if (index >= bitmap.size()) {
+        return false;
+    }
     bitmap[index] |= static_cast<std::byte>(0x80U >> (cluster & 7U));
+    return true;
+}
+
+constexpr std::uint32_t owner_conflict_bit = 0x8000'0000U;
+constexpr std::uint32_t reserved_owner = 1U;
+
+std::uint32_t record_owner(SfsId record, AllocationClaimKind kind) {
+    return 2U + record.value * 2U + (kind == AllocationClaimKind::continuation ? 1U : 0U);
+}
+
+AllocationClaim decode_owner(std::uint32_t encoded) {
+    encoded &= ~owner_conflict_bit;
+    if (encoded == reserved_owner)
+        return {AllocationClaimKind::reserved, std::nullopt};
+    const auto kind = (encoded & 1U) == 0U ? AllocationClaimKind::data : AllocationClaimKind::continuation;
+    return {kind, SfsId{(encoded - 2U) / 2U}};
+}
+
+void claim_cluster(std::span<std::uint32_t> owners, std::uint32_t cluster, SfsId record, AllocationClaimKind kind,
+                   AllocationSummary &summary, std::size_t conflict_limit) {
+    const auto claimed = record_owner(record, kind);
+    auto &existing = owners[cluster];
+    if (existing == 0U) {
+        existing = claimed;
+        return;
+    }
+    if ((existing & owner_conflict_bit) == 0U)
+        ++summary.conflicting_cluster_count;
+    if (summary.conflicts.size() < conflict_limit) {
+        summary.conflicts.push_back({cluster, decode_owner(existing), {kind, record}});
+    } else {
+        summary.conflicts_truncated = true;
+    }
+    existing |= owner_conflict_bit;
 }
 
 std::vector<AllocationMismatchRange> mismatch_ranges(std::span<const std::byte> left, std::span<const std::byte> right,
@@ -278,160 +313,50 @@ Result<std::vector<std::byte>> read_logical_prefix(const RandomAccessReader &ima
     return result;
 }
 
-std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> payload) {
-    std::vector<DirectoryEntry> result;
-    const ByteReader reader{payload};
-    for (std::size_t offset = 0; offset + 32U <= payload.size(); offset += 32U) {
-        const auto prefix = reader.be32(offset);
-        const auto link = reader.be32(offset + 4U);
-        if (!prefix || !link || (*prefix == 0 && *link == 0)) {
-            break;
+Result<std::vector<std::byte>> read_logical_range(const RandomAccessReader &image, const Partition &partition,
+                                                  std::uint32_t sector_size, const IndexRecord &record,
+                                                  std::uint64_t requested_offset, std::size_t requested_size,
+                                                  const OpenOptions &options) {
+    if (requested_offset > record.data_size || requested_size > record.data_size - requested_offset) {
+        return std::unexpected{make_error(ErrorCode::out_of_bounds, ErrorCategory::object,
+                                          "logical SFS record range exceeds its declared size")};
+    }
+    std::vector<std::byte> result;
+    result.reserve(requested_size);
+    std::uint64_t logical_offset{};
+    for (const auto &extent : record.extents) {
+        const auto capacity = checked_multiply(extent.cluster_count,
+                                               static_cast<std::uint64_t>(sector_size) * partition.sectors_per_cluster);
+        if (!capacity || extent.byte_count > *capacity || extent.cluster_offset >= partition.cluster_count ||
+            extent.cluster_count > partition.cluster_count - extent.cluster_offset) {
+            return std::unexpected{make_error(ErrorCode::allocation_invalid_extent, ErrorCategory::allocation,
+                                              "data extent exceeds its allocation or partition")};
         }
-        const auto flags = reader.be16(offset);
-        const auto name_size = reader.be16(offset + 2U);
-        if (!flags || !name_size || *name_size == 0 || *name_size > 24U) {
-            break;
+        const auto extent_end = logical_offset + extent.byte_count;
+        if (requested_offset < extent_end && result.size() < requested_size) {
+            const auto within_extent = requested_offset > logical_offset ? requested_offset - logical_offset : 0U;
+            const auto available = extent.byte_count - within_extent;
+            const auto count =
+                static_cast<std::size_t>(std::min<std::uint64_t>(available, requested_size - result.size()));
+            const auto physical = cluster_offset(partition.start_sector, sector_size, partition.sectors_per_cluster,
+                                                 extent.cluster_offset);
+            if (!physical)
+                return std::unexpected{physical.error()};
+            auto part = read_bytes(image, *physical + within_extent, count, options.cancellation);
+            if (!part)
+                return std::unexpected{part.error()};
+            result.insert(result.end(), part->begin(), part->end());
+            requested_offset += count;
         }
-        const auto name = reader.ascii_field(offset + 8U, *name_size, false);
-        if (!name) {
+        logical_offset = extent_end;
+        if (result.size() == requested_size)
             break;
-        }
-        result.push_back({*flags, LinkId{*link}, *name, offset});
+    }
+    if (result.size() != requested_size) {
+        return std::unexpected{
+            make_error(ErrorCode::io_short_read, ErrorCategory::io, "logical SFS record range is truncated")};
     }
     return result;
-}
-
-void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
-    if (begins_with(payload, object_magic) && payload.size() >= 0x42U) {
-        const ByteReader reader{payload};
-        const auto type = reader.ascii_field(0x0c, 4);
-        const auto name = reader.ascii_field(0x32, 16);
-        if (type && name) {
-            record.payload_kind = PayloadKind::object;
-            record.object_type = *type;
-            record.object_name = *name;
-        }
-        return;
-    }
-    if (payload.size() >= 16U) {
-        bool marker_lane = true;
-        for (std::size_t offset = 1; offset < 16U; offset += 2U) {
-            const auto expected = offset % 4U == 1U ? 0x55U : 0xaaU;
-            marker_lane &= std::to_integer<std::uint8_t>(payload[offset]) == expected;
-        }
-        constexpr std::array<std::byte, 6> even_magic{std::byte{'F'}, std::byte{'F'}, std::byte{'D'},
-                                                      std::byte{'V'}, std::byte{'S'}, std::byte{'L'}};
-        for (std::size_t index = 0; index < even_magic.size(); ++index) {
-            marker_lane &= payload[index * 2U] == even_magic[index];
-        }
-        if (marker_lane) {
-            const std::array type_code{payload[12], payload[14]};
-            constexpr std::array mappings{
-                std::pair{std::array{std::byte{'S'}, std::byte{'P'}}, std::string_view{"SMPL"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'N'}}, std::string_view{"SBNK"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'A'}}, std::string_view{"SBAC"}},
-                std::pair{std::array{std::byte{'P'}, std::byte{'O'}}, std::string_view{"PROG"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'Q'}}, std::string_view{"SEQU"}},
-                std::pair{std::array{std::byte{'P'}, std::byte{'F'}}, std::string_view{"PRF3"}},
-            };
-            const auto mapping = std::find_if(mappings.begin(), mappings.end(),
-                                              [&](const auto &item) { return item.first == type_code; });
-            if (mapping != mappings.end()) {
-                record.payload_kind = PayloadKind::alternating_byte_object;
-                record.object_type = mapping->second;
-                return;
-            }
-        }
-    }
-    auto entries = parse_directory_entries(payload);
-    if (entries.size() >= 2U && entries[0].name == "." && entries[1].name == "..") {
-        record.payload_kind = PayloadKind::directory;
-        record.directory_id = entries[0].link_id;
-        record.parent_directory_id = entries[1].link_id;
-        record.directory_entries = std::move(entries);
-    }
-}
-
-void validate_directory_graph(Partition &partition, const OpenOptions &options) {
-    std::unordered_map<std::uint32_t, const IndexRecord *> records_by_id;
-    std::unordered_map<std::uint32_t, const IndexRecord *> directories_by_id;
-    for (const auto &record : partition.records) {
-        records_by_id.emplace(record.sfs_id.value, &record);
-        if (!record.directory_id) {
-            continue;
-        }
-        const bool inserted = directories_by_id.emplace(record.directory_id->value, &record).second;
-        if (!inserted) {
-            ErrorContext context;
-            context.partition_index = partition.index.value;
-            context.raw_offset = record.record_offset.value;
-            partition.diagnostics.push_back(make_error(ErrorCode::relationship_ambiguous, ErrorCategory::relationship,
-                                                       "multiple SFS directory records claim the same directory ID",
-                                                       std::move(context)));
-        }
-        if (record.data_size > options.max_directory_bytes) {
-            ErrorContext context;
-            context.partition_index = partition.index.value;
-            context.raw_offset = record.record_offset.value;
-            partition.diagnostics.push_back(make_error(ErrorCode::object_malformed, ErrorCategory::object,
-                                                       "directory payload exceeds the configured traversal bound",
-                                                       std::move(context)));
-        }
-    }
-
-    for (const auto &[directory_id, directory] : directories_by_id) {
-        static_cast<void>(directory_id);
-        for (const auto &entry : directory->directory_entries) {
-            if (entry.name == ".") {
-                continue;
-            }
-            if (!records_by_id.contains(entry.link_id.value)) {
-                ErrorContext context;
-                context.partition_index = partition.index.value;
-                context.object_type = "directory-entry";
-                context.object_name = entry.name;
-                context.raw_offset = directory->record_offset.value + entry.payload_relative_offset;
-                partition.diagnostics.push_back(
-                    make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                               "directory entry references a missing SFS record", std::move(context)));
-            }
-        }
-    }
-
-    std::unordered_map<std::uint32_t, std::uint8_t> colors;
-    std::function<void(std::uint32_t)> visit = [&](std::uint32_t directory_id) {
-        colors[directory_id] = 1;
-        const auto found = directories_by_id.find(directory_id);
-        if (found == directories_by_id.end()) {
-            colors[directory_id] = 2;
-            return;
-        }
-        for (const auto &entry : found->second->directory_entries) {
-            if (entry.name == "." || entry.name == ".." || !directories_by_id.contains(entry.link_id.value)) {
-                continue;
-            }
-            const auto color = colors[entry.link_id.value];
-            if (color == 1) {
-                ErrorContext context;
-                context.partition_index = partition.index.value;
-                context.object_type = "directory-entry";
-                context.object_name = entry.name;
-                context.raw_offset = found->second->record_offset.value + entry.payload_relative_offset;
-                partition.diagnostics.push_back(make_error(ErrorCode::relationship_cycle, ErrorCategory::relationship,
-                                                           "directory child links contain a cycle",
-                                                           std::move(context)));
-            } else if (color == 0) {
-                visit(entry.link_id.value);
-            }
-        }
-        colors[directory_id] = 2;
-    };
-    for (const auto &item : directories_by_id) {
-        const auto directory_id = item.first;
-        if (colors[directory_id] == 0) {
-            visit(directory_id);
-        }
-    }
 }
 
 Result<Partition> parse_partition(const RandomAccessReader &image, const PartitionEntry &table_entry,
@@ -490,6 +415,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     result.directory_index_span_clusters = *index_span;
     std::copy_n(header->begin() + 0xac, result.unresolved_header_tail.size(), result.unresolved_header_tail.begin());
 
+    const auto physical_cluster_capacity = static_cast<std::uint64_t>(result.sector_count) / result.sectors_per_cluster;
+    if (result.cluster_count > physical_cluster_capacity) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition cluster count exceeds its physical sector capacity",
+                                               result.index, *start + 0x90U)};
+    }
+
     const auto cluster_bytes = checked_multiply(sector_size, result.sectors_per_cluster);
     const auto raw_index_bytes = cluster_bytes ? checked_multiply(*cluster_bytes, result.directory_index_span_clusters)
                                                : Result<std::uint64_t>{std::unexpected{cluster_bytes.error()}};
@@ -498,6 +430,39 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
                                                "partition index span exceeds configured bounds", result.index,
                                                *start + 0xa8U)};
+    }
+    const auto index_end = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
+    if (!index_end || *index_end > result.cluster_count) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition index extends beyond the cluster range", result.index,
+                                               *start + 0xa4U)};
+    }
+    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
+    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max() ||
+        bitmap_bytes_u64 > options.max_allocation_bitmap_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap exceeds the configured memory bound", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto rounded_bitmap_bytes = checked_add(bitmap_bytes_u64, *cluster_bytes - 1U);
+    if (!rounded_bitmap_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap extent arithmetic overflowed", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto bitmap_span_clusters = *rounded_bitmap_bytes / *cluster_bytes;
+    const auto bitmap_end = checked_add(result.bitmap_cluster, bitmap_span_clusters);
+    if (bitmap_span_clusters == 0U || !bitmap_end || *bitmap_end > result.cluster_count) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap extends beyond the cluster range", result.index,
+                                               *start + 0x9cU)};
+    }
+    const auto allocation_regions_are_disjoint =
+        *bitmap_end <= result.directory_index_cluster || *index_end <= result.bitmap_cluster;
+    if (!allocation_regions_are_disjoint) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition bitmap overlaps the directory index", result.index,
+                                               *start + 0x9cU)};
     }
     const auto index_offset =
         cluster_offset(result.start_sector, sector_size, result.sectors_per_cluster, result.directory_index_cluster);
@@ -510,7 +475,18 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         return std::unexpected{index_data.error()};
     }
 
-    std::vector<std::byte> reconstructed((result.cluster_count + 7U) / 8U);
+    std::vector<std::byte> reconstructed(static_cast<std::size_t>(bitmap_bytes_u64));
+    const auto owner_bytes = checked_multiply(result.cluster_count, sizeof(std::uint32_t));
+    if (!owner_bytes || *owner_bytes > std::numeric_limits<std::size_t>::max() ||
+        *owner_bytes > options.max_allocation_owner_bytes) {
+        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                               "partition allocation ownership exceeds the configured memory bound",
+                                               result.index)};
+    }
+    const auto first_payload_u64 = index_end;
+    const auto first_payload = static_cast<std::uint32_t>(*first_payload_u64);
+    std::vector<std::uint32_t> owners(result.cluster_count);
+    std::ranges::fill(std::span{owners}.first(first_payload), reserved_owner);
     for (std::size_t block = 0; block + index_block_size <= index_data->size(); block += index_block_size) {
         if (const auto check = options.cancellation.check(); !check) {
             return std::unexpected{check.error()};
@@ -561,7 +537,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             std::uint64_t extent_cluster_sum{};
             for (const auto list_cluster : record.continuation_clusters) {
                 if (list_cluster < result.cluster_count) {
-                    bitmap_set(reconstructed, list_cluster);
+                    claim_cluster(owners, list_cluster, record.sfs_id, AllocationClaimKind::continuation,
+                                  result.allocation, options.max_allocation_conflicts);
+                    if (!bitmap_set(reconstructed, list_cluster)) {
+                        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                                               "continuation cluster exceeds the partition bitmap",
+                                                               result.index, record.record_offset.value)};
+                    }
                 }
             }
             for (const auto &extent : record.extents) {
@@ -576,7 +558,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                 }
                 for (std::uint32_t cluster = extent.cluster_offset;
                      cluster < extent.cluster_offset + extent.cluster_count; ++cluster) {
-                    bitmap_set(reconstructed, cluster);
+                    claim_cluster(owners, cluster, record.sfs_id, AllocationClaimKind::data, result.allocation,
+                                  options.max_allocation_conflicts);
+                    if (!bitmap_set(reconstructed, cluster)) {
+                        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
+                                                               "data cluster exceeds the partition bitmap",
+                                                               result.index, record.record_offset.value)};
+                    }
                 }
             }
             if (extent_cluster_sum != record.cluster_count) {
@@ -608,12 +596,15 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         }
     }
 
-    validate_directory_graph(result, options);
+    if (result.allocation.conflicting_cluster_count != 0U) {
+        result.diagnostics.push_back(partition_error(
+            ErrorCode::allocation_cross_link,
+            std::format("{} cluster(s) have multiple allocation owners", result.allocation.conflicting_cluster_count),
+            result.index));
+    }
 
-    const auto bitmap_bytes_u64 = (static_cast<std::uint64_t>(result.cluster_count) + 7U) / 8U;
-    if (bitmap_bytes_u64 > std::numeric_limits<std::size_t>::max()) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap exceeds the supported memory range", result.index)};
+    if (const auto directories = validate_directory_graph(result, options); !directories) {
+        return std::unexpected{directories.error()};
     }
     const auto bitmap_offset =
         cluster_offset(result.start_sector, sector_size, result.sectors_per_cluster, result.bitmap_cluster);
@@ -631,7 +622,6 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
         mismatch_ranges(*stored, reconstructed, result.cluster_count, options.max_mismatch_ranges);
     result.allocation.reconstructed_not_stored =
         mismatch_ranges(reconstructed, *stored, result.cluster_count, options.max_mismatch_ranges);
-    const auto first_payload_u64 = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
     if (first_payload_u64 && *first_payload_u64 <= std::numeric_limits<std::uint32_t>::max() &&
         *cluster_bytes <= std::numeric_limits<std::uint32_t>::max()) {
         const auto free = calculate_sfs_free_space(result.cluster_count, static_cast<std::uint32_t>(*first_payload_u64),
@@ -646,161 +636,4 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     return result;
 }
 
-} // namespace
-
-const std::filesystem::path &Container::source_path() const noexcept { return source_path_; }
-std::uint64_t Container::image_size_bytes() const noexcept { return reader_->size(); }
-const Superblock &Container::superblock() const noexcept { return superblock_; }
-bool Container::backup_superblock_matches() const noexcept { return backup_superblock_matches_; }
-const std::vector<Partition> &Container::partitions() const noexcept { return partitions_; }
-const std::vector<Error> &Container::diagnostics() const noexcept { return diagnostics_; }
-
-Result<std::vector<std::byte>> Container::read_record_data(PartitionIndex partition_index, SfsId record_id,
-                                                           std::size_t maximum_bytes,
-                                                           const CancellationToken &cancellation) const {
-    const auto partition = std::find_if(partitions_.begin(), partitions_.end(),
-                                        [&](const Partition &item) { return item.index == partition_index; });
-    if (partition == partitions_.end()) {
-        ErrorContext context;
-        context.partition_index = partition_index.value;
-        return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
-                                          "partition is not available in the open image", std::move(context))};
-    }
-    const auto record = std::find_if(partition->records.begin(), partition->records.end(),
-                                     [&](const IndexRecord &item) { return item.sfs_id == record_id; });
-    if (record == partition->records.end()) {
-        ErrorContext context;
-        context.partition_index = partition_index.value;
-        context.object_name = "SFS ID " + std::to_string(record_id.value);
-        return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
-                                          "SFS record is not available in the partition", std::move(context))};
-    }
-    if (record->data_size > maximum_bytes) {
-        ErrorContext context;
-        context.partition_index = partition_index.value;
-        context.object_type = record->object_type;
-        context.object_name = record->object_name;
-        context.raw_offset = record->record_offset.value;
-        return std::unexpected{make_error(ErrorCode::out_of_bounds, ErrorCategory::object,
-                                          "object payload exceeds the caller's read limit", std::move(context))};
-    }
-    OpenOptions options;
-    options.cancellation = cancellation;
-    const auto data =
-        read_logical_prefix(*reader_, *partition, superblock_.sector_size_bytes, *record, record->data_size, options);
-    if (!data) {
-        auto error = data.error();
-        error.context.partition_index = partition_index.value;
-        error.context.object_type = record->object_type;
-        error.context.object_name = record->object_name;
-        error.context.raw_offset = record->record_offset.value;
-        return std::unexpected{std::move(error)};
-    }
-    if (data->size() != record->data_size) {
-        return std::unexpected{make_error(ErrorCode::io_short_read, ErrorCategory::io,
-                                          "logical SFS record read did not produce its declared size")};
-    }
-    return std::move(*data);
-}
-
-Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::uint32_t first_payload_cluster,
-                                              std::uint32_t allocated_cluster_count, std::uint32_t cluster_size_bytes) {
-    if (first_payload_cluster > cluster_count || cluster_size_bytes == 0) {
-        return std::unexpected{make_error(ErrorCode::container_invalid_geometry, ErrorCategory::allocation,
-                                          "free-space geometry has an invalid "
-                                          "reserved prefix or cluster size")};
-    }
-    const auto available = cluster_count - first_payload_cluster;
-    if (allocated_cluster_count > available) {
-        return std::unexpected{make_error(ErrorCode::allocation_mismatch, ErrorCategory::allocation,
-                                          "allocated clusters exceed the payload cluster range")};
-    }
-    const auto free_clusters = available - allocated_cluster_count;
-    const auto free_bytes = checked_multiply(free_clusters, cluster_size_bytes);
-    if (!free_bytes) {
-        return std::unexpected{free_bytes.error()};
-    }
-    return SfsFreeSpace{cluster_count,      first_payload_cluster, allocated_cluster_count, free_clusters,
-                        cluster_size_bytes, *free_bytes,           *free_bytes / 1024U};
-}
-
-Result<Container> open_image(const std::filesystem::path &path, const OpenOptions &options) {
-    const auto reader = FileReader::open(path);
-    if (!reader) {
-        return std::unexpected{reader.error()};
-    }
-    return open_image(*reader, path, options);
-}
-
-Result<Container> open_image(std::shared_ptr<const RandomAccessReader> image, std::filesystem::path source_path,
-                             const OpenOptions &options) {
-    if (!image) {
-        return std::unexpected{
-            make_error(ErrorCode::invalid_argument, ErrorCategory::io, "image reader must not be null")};
-    }
-    if (options.progress) {
-        options.progress->report({ProgressPhase::opening, 0, std::nullopt, text::path_to_utf8(source_path), {}});
-    }
-    const auto primary_bytes = read_bytes(*image, 0, sfs_default_sector_size, options.cancellation);
-    if (!primary_bytes) {
-        return std::unexpected{primary_bytes.error()};
-    }
-    const auto primary = parse_superblock(*primary_bytes);
-    if (!primary) {
-        auto error = primary.error();
-        error.context.source_path = text::path_to_utf8(source_path);
-        return std::unexpected{std::move(error)};
-    }
-    if (primary->sector_size_bytes == 0 || primary->sector_size_bytes > 65536U) {
-        return std::unexpected{make_error(ErrorCode::container_invalid_geometry, ErrorCategory::container,
-                                          "SFS sector size is outside the supported range")};
-    }
-    const auto backup_bytes =
-        read_bytes(*image, primary->sector_size_bytes, sfs_default_sector_size, options.cancellation);
-    if (!backup_bytes) {
-        return std::unexpected{backup_bytes.error()};
-    }
-    Container result;
-    result.source_path_ = std::move(source_path);
-    result.reader_ = std::move(image);
-    result.superblock_ = *primary;
-    result.backup_superblock_matches_ = *primary_bytes == *backup_bytes;
-    if (!result.backup_superblock_matches_) {
-        ErrorContext context;
-        context.source_path = text::path_to_utf8(result.source_path_);
-        context.raw_offset = primary->sector_size_bytes;
-        result.diagnostics_.push_back(make_error(ErrorCode::container_backup_mismatch, ErrorCategory::container,
-                                                 "backup superblock differs from primary", std::move(context)));
-    }
-    for (const auto &entry : primary->partition_entries) {
-        if (!entry.active()) {
-            continue;
-        }
-        const auto end_sector = checked_add(entry.start_sector, entry.sector_count);
-        const auto end_offset = end_sector ? checked_multiply(*end_sector, primary->sector_size_bytes)
-                                           : Result<std::uint64_t>{std::unexpected{end_sector.error()}};
-        if (!end_sector || !end_offset || *end_offset > result.reader_->size()) {
-            auto error = partition_error(ErrorCode::container_partition_out_of_range,
-                                         "partition extends beyond the input image", entry.index);
-            error.context.source_path = text::path_to_utf8(result.source_path_);
-            result.diagnostics_.push_back(std::move(error));
-            continue;
-        }
-        const auto partition = parse_partition(*result.reader_, entry, primary->sector_size_bytes, options);
-        if (!partition) {
-            auto error = partition.error();
-            error.context.source_path = text::path_to_utf8(result.source_path_);
-            error.context.partition_index = entry.index.value;
-            result.diagnostics_.push_back(std::move(error));
-            continue;
-        }
-        result.partitions_.push_back(*partition);
-        if (options.progress) {
-            options.progress->report(
-                {ProgressPhase::reading, result.partitions_.size(), std::nullopt, result.partitions_.back().name, {}});
-        }
-    }
-    return result;
-}
-
-} // namespace axk
+} // namespace axk::sfs_detail

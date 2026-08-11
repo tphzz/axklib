@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from server_test_harness import write_workspace_store
+from server_test_harness import (
+    scaled_timeout,
+    startup_timeout,
+    write_workspace_store,
+)
 
 
 TOKEN = "0123456789abcdef0123456789abcdef"
@@ -137,7 +141,7 @@ def send_text(connection: socket.socket, message: str) -> None:
 
 
 def wait_until_ready(port: int, process: subprocess.Popen[bytes]) -> None:
-    deadline = time.monotonic() + 8
+    deadline = time.monotonic() + startup_timeout()
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(
@@ -160,7 +164,7 @@ def wait_until_ready(port: int, process: subprocess.Popen[bytes]) -> None:
 def wait_for_connection_file(
     path: Path, process: subprocess.Popen[bytes]
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + startup_timeout()
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(f"server exited with {process.returncode}")
@@ -173,7 +177,7 @@ def wait_for_connection_file(
 def wait_for_job(
     port: int, job_id: str, process: subprocess.Popen[bytes]
 ) -> dict[str, Any]:
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + scaled_timeout(20.0)
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(
@@ -292,13 +296,18 @@ def canonical_package_summary(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def canonical_package_plan(value: dict[str, Any]) -> dict[str, Any]:
+    def normalized_value(value: Any, key: str = "") -> Any:
+        if key == "actions" and isinstance(value, list):
+            return [str(entry).lower() for entry in value]
+        if isinstance(value, dict):
+            return normalized_item(value)
+        if isinstance(value, list):
+            return [normalized_value(entry) for entry in value]
+        return value
+
     def normalized_item(item: dict[str, Any]) -> dict[str, Any]:
         return {
-            key.replace("_", "").lower(): (
-                [str(entry).lower() for entry in item[key]]
-                if key in {"actions"}
-                else item[key]
-            )
+            key.replace("_", "").lower(): normalized_value(item[key], key)
             for key in sorted(item)
         }
 
@@ -315,6 +324,19 @@ def canonical_package_plan(value: dict[str, Any]) -> dict[str, Any]:
         "warnings": value["warnings"],
         "conflicts": [normalized_item(item) for item in value["conflicts"]],
         "actions": [normalized_item(item) for item in actions],
+        "programAssignmentAdjustments": [
+            normalized_item(item)
+            for item in value.get(
+                "programAssignmentAdjustments",
+                value.get("program_assignment_adjustments", []),
+            )
+        ],
+        "programSlotPlacements": [
+            normalized_item(item)
+            for item in value.get(
+                "programSlotPlacements", value.get("program_slot_placements", [])
+            )
+        ],
         "allocation": [normalized_item(item) for item in value["allocation"]],
     }
 
@@ -338,6 +360,15 @@ def canonical_alteration_operation(value: dict[str, Any]) -> dict[str, Any]:
             ),
             "outputSampleRate": field_from(
                 raw_audio, "outputSampleRate", "output_sample_rate"
+            ),
+            "sourceSampleWidthBits": field_from(
+                raw_audio, "sourceSampleWidthBits", "source_sample_width_bits"
+            ),
+            "outputSampleWidthBits": field_from(
+                raw_audio, "outputSampleWidthBits", "output_sample_width_bits"
+            ),
+            "sampleWidthConverted": field_from(
+                raw_audio, "sampleWidthConverted", "sample_width_converted"
             ),
             "outputFrames": field_from(raw_audio, "outputFrames", "output_frames"),
             "resampled": raw_audio["resampled"],
@@ -380,7 +411,7 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
         "/api/v1/uploads",
         {
             "filename": filename,
-            "kind": kind,
+            "kind": kind.upper(),
             "mediaType": media_types[kind],
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
@@ -399,7 +430,7 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
     status, completed = http_request(
         port, "POST", f"/api/v1/uploads/{upload_id}/complete"
     )
-    assert status == 200 and completed["data"]["state"] == "ready", completed
+    assert status == 200 and completed["data"]["state"] == "READY", completed
     return upload_id
 
 
@@ -420,9 +451,9 @@ def prepare_cross_format_sources(root: Path, cli: Path, sfs_fixture: Path) -> li
         "waveforms": [
             {"id": "tone", "name": "Tone", "path": "tone.wav", "root_key": 60}
         ],
-        "sample_banks": [
+        "samples": [
             {
-                "name": "Tone Bank",
+                "name": "Tone Sample",
                 "waveform_id": "tone",
                 "root_key": 60,
                 "key_low": 0,
@@ -514,17 +545,17 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
             "root_key": 60,
         },
     ]
-    bank_names = [
-        "Delete Bank",
-        "Old Bank",
-        "Bank A",
-        "Bank B",
-        "Del Group Bank",
+    sample_names = [
+        "Delete Sample",
+        "Old Sample",
+        "Sample A",
+        "Sample B",
+        "Del Bank Sample",
         "Delete Direct",
-        "Old Group Bank",
+        "Old Bank Sample",
         "Old Direct",
     ]
-    sample_banks = [
+    samples = [
         {
             "name": name,
             "waveform_id": "wave",
@@ -532,7 +563,7 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
             "key_low": 0,
             "key_high": 127,
         }
-        for name in bank_names
+        for name in sample_names
     ]
     source_manifest = {
         "schema_version": "1.0",
@@ -544,47 +575,53 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                     {
                         "name": "Volume",
                         "waveforms": waveforms,
-                        "sample_banks": sample_banks,
-                        "sample_bank_groups": [
+                        "samples": samples,
+                        "sample_banks": [
                             {
-                                "name": "Delete Group",
-                                "member_sample_banks": ["Del Group Bank"],
+                                "name": "Delete Bank",
+                                "member_samples": ["Del Bank Sample"],
                             },
                             {
-                                "name": "Old Group",
-                                "member_sample_banks": ["Old Group Bank"],
+                                "name": "Old Bank",
+                                "member_samples": ["Old Bank Sample"],
                             },
                         ],
                         "programs": [
                             {
                                 "number": 128,
+                                "name": "Delete P",
                                 "assignments": [
                                     {
-                                        "sample_bank_group": "Delete Group",
+                                        "sample_bank": "Delete Bank",
                                         "receive_channel": 1,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                     {
-                                        "sample_bank": "Delete Direct",
+                                        "sample": "Delete Direct",
                                         "receive_channel": 2,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                 ],
                             },
                             {
                                 "number": 127,
+                                "name": "Old Pgm",
                                 "assignments": [
                                     {
-                                        "sample_bank_group": "Old Group",
+                                        "sample_bank": "Old Bank",
                                         "receive_channel": 1,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                     {
-                                        "sample_bank": "Old Direct",
+                                        "sample": "Old Direct",
                                         "receive_channel": 2,
+                                        "receive_mode": "MIDI_CHANNEL",
                                     },
                                 ],
                             },
                         ],
                     },
-                    {"name": "Delete Volume", "waveforms": [], "sample_banks": []},
+                    {"name": "Delete Volume", "waveforms": [], "samples": []},
                 ],
             }
         ],
@@ -605,23 +642,23 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "volume": {
                     "name": "Insert Volume",
                     "waveforms": [],
-                    "sample_banks": [],
+                    "samples": [],
                 },
             },
             {
-                "id": "delete-bank",
+                "id": "delete-sample",
                 "type": "delete_sbnk",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_name": "Delete Bank",
+                "sample_name": "Delete Sample",
             },
             {
-                "id": "insert-bank",
+                "id": "insert-sample",
                 "type": "insert_sbnk",
-                "partition_index": {"operation_ref": "delete-bank"},
+                "partition_index": {"operation_ref": "delete-sample"},
                 "volume_name": "Volume",
-                "sample_bank": {
-                    "name": "Insert Bank",
+                "sample": {
+                    "name": "Insert Sample",
                     "waveform_name": "Wave",
                     "root_key": 60,
                     "key_low": 0,
@@ -655,12 +692,12 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "new_waveform_name": "New Wave",
             },
             {
-                "id": "rename-bank",
+                "id": "rename-sample",
                 "type": "rename_sbnk",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_name": "Old Bank",
-                "new_sample_bank_name": "New Bank",
+                "sample_name": "Old Sample",
+                "new_sample_name": "New Sample",
             },
             {
                 "id": "delete-program",
@@ -670,45 +707,59 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "program_number": 128,
             },
             {
-                "id": "delete-group",
+                "id": "delete-sample-bank",
                 "type": "delete_sbac",
                 "partition_index": {"operation_ref": "delete-program"},
                 "volume_name": "Volume",
-                "sample_bank_group_name": "Delete Group",
+                "sample_bank_name": "Delete Bank",
             },
             {
-                "id": "insert-group",
+                "id": "insert-sample-bank",
                 "type": "insert_sbac",
-                "partition_index": {"operation_ref": "delete-group"},
+                "partition_index": {"operation_ref": "delete-sample-bank"},
                 "volume_name": "Volume",
-                "sample_bank_group": {
-                    "name": "Insert Group",
-                    "member_sample_banks": ["Bank A", "Bank B"],
+                "sample_bank": {
+                    "name": "Insert Bank",
+                    "member_samples": ["Sample A", "Sample B"],
                 },
             },
             {
-                "id": "rename-group",
+                "id": "rename-sample-bank",
                 "type": "rename_sbac",
                 "partition_index": 0,
                 "volume_name": "Volume",
-                "sample_bank_group_name": "Old Group",
-                "new_sample_bank_group_name": "New Group",
+                "sample_bank_name": "Old Bank",
+                "new_sample_bank_name": "New Bank",
             },
             {
                 "id": "insert-program",
                 "type": "insert_program",
-                "partition_index": {"operation_ref": "rename-group"},
+                "partition_index": {"operation_ref": "rename-sample-bank"},
                 "volume_name": "Volume",
                 "program": {
                     "number": 128,
+                    "name": "Inserted",
                     "assignments": [
                         {
-                            "sample_bank_group": "Insert Group",
+                            "sample_bank": "Insert Bank",
                             "receive_channel": 1,
+                            "receive_mode": "MIDI_CHANNEL",
                         },
-                        {"sample_bank": "Delete Direct", "receive_channel": 2},
+                        {
+                            "sample": "Delete Direct",
+                            "receive_channel": 2,
+                            "receive_mode": "MIDI_CHANNEL",
+                        },
                     ],
                 },
+            },
+            {
+                "id": "rename-program",
+                "type": "rename_program",
+                "partition_index": 0,
+                "volume_name": "Volume",
+                "program_number": 127,
+                "new_program_name": "Renamed",
             },
         ],
     }
@@ -749,12 +800,19 @@ def cli_version(cli: Path) -> dict[str, str]:
 
 
 def exercise(server: Path, cli: Path, fixture: Path) -> None:
+    global TOKEN
     server = server.resolve()
     cli = cli.resolve()
     fixture = fixture.resolve()
-    with tempfile.TemporaryDirectory(prefix="axklib-server-test-") as root:
+    with (
+        tempfile.TemporaryDirectory(prefix="axklib-server-test-") as root,
+        tempfile.TemporaryDirectory(prefix="axklib-server-external-test-") as external,
+    ):
         root_path = Path(root)
-        connection_path = root_path / "state" / "connection.json"
+        external_path = Path(external)
+        state_directory = external_path / "server-state"
+        connection_path = external_path / "connection" / "connection.json"
+        connection_path.parent.mkdir(mode=0o700)
         (root_path / "download.bin").write_bytes(b"abcdef")
         (root_path / "archive-source" / "nested").mkdir(parents=True)
         (root_path / "reports" / "server").mkdir(parents=True)
@@ -786,7 +844,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                                 {
                                     "name": "Imported",
                                     "waveforms": [],
-                                    "sample_banks": [],
+                                    "samples": [],
                                 }
                             ],
                         }
@@ -823,8 +881,15 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
         (abandoned_publication / "partial.wav").write_bytes(b"partial")
         ordinary_temporary_file = root_path / ".export.tmp"
         ordinary_temporary_file.write_bytes(b"ordinary")
+        media_sources = root_path / "media-sources"
+        object_directory = media_sources / "objects"
+        ordinary_directory = media_sources / "ordinary"
+        object_directory.mkdir(parents=True)
+        ordinary_directory.mkdir()
+        (object_directory / "SMP00001").write_bytes(b"FSFSDEV3SPLX")
+        (ordinary_directory / "readme.txt").write_text("ordinary", encoding="utf-8")
         server_log_path = root_path / "server.log"
-        workspace_store = root_path / "workspaces.json"
+        workspace_store = external_path / "configuration" / "workspaces.json"
         write_workspace_store(workspace_store, root_path)
         server_log = server_log_path.open("wb")
         process = subprocess.Popen(
@@ -832,12 +897,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 str(server),
                 "--port",
                 "0",
-                "--token",
-                TOKEN,
                 "--workspace-store",
                 str(workspace_store),
                 "--state-directory",
-                str(root_path / "state"),
+                str(state_directory),
                 "--connection-file",
                 str(connection_path),
                 "--allow-origin",
@@ -859,7 +922,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 assert stat.S_IMODE(connection_path.stat().st_mode) == 0o600
             assert connection_metadata["schemaVersion"] == 1
             assert connection_metadata["apiVersion"] == "v1"
-            assert connection_metadata["bearerToken"] == TOKEN
+            generated_token = connection_metadata["bearerToken"]
+            assert len(generated_token) == 64
+            assert all(character in "0123456789abcdef" for character in generated_token)
+            TOKEN = generated_token
             assert connection_metadata["pid"] == process.pid
             port = int(connection_metadata["baseUrl"].split(":")[-1].split("/")[0])
             assert connection_metadata["baseUrl"] == f"http://127.0.0.1:{port}/api/v1"
@@ -868,7 +934,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == f"ws://127.0.0.1:{port}/api/v1/events"
             )
             wait_until_ready(port, process)
-            assert not abandoned_publication.exists()
+            assert (abandoned_publication / "partial.wav").read_bytes() == b"partial"
             assert ordinary_temporary_file.read_bytes() == b"ordinary"
             status, denied_body, _ = raw_http_request(
                 port,
@@ -888,6 +954,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     "sandbox": "READY",
                     "startupCleanup": "READY",
                     "stateStorage": "READY",
+                    "uploadCleanup": "READY",
                     "workspaceConfiguration": "READY",
                 },
             }
@@ -912,9 +979,28 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"path": str(root_path), "limit": 10},
             )
             assert status == 200
-            assert host_listing["data"]["path"] == str(root_path.resolve())
-            secondary_workspace = root_path / "secondary-workspace"
+            assert host_listing["data"]["path"] == root_path.resolve().as_posix()
+            secondary_workspace = external_path / "secondary-workspace"
             secondary_workspace.mkdir()
+            status, misspelled_workspace = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Misspelled read only",
+                    "path": str(secondary_workspace),
+                    "writeable": False,
+                    "revision": 1,
+                },
+            )
+            assert status == 400, misspelled_workspace
+            assert misspelled_workspace["error"]["code"] == "invalid_request"
+            status, unchanged_workspaces = http_request(
+                port, "GET", "/api/v1/workspaces"
+            )
+            assert status == 200
+            assert unchanged_workspaces["data"]["revision"] == 1
+            assert len(unchanged_workspaces["data"]["workspaces"]) == 1
             status, added_workspace = http_request(
                 port,
                 "POST",
@@ -955,6 +1041,103 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 {"rootId": "workspace", "relativePath": "download.bin"},
             )
             assert status == 200 and metadata["data"]["size"] == 6
+            status, ordinary_listing = http_request(
+                port,
+                "POST",
+                "/api/v1/files/list",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources",
+                    }
+                },
+            )
+            assert status == 200, ordinary_listing
+            assert {entry["name"] for entry in ordinary_listing["data"]["entries"]} == {
+                "objects",
+                "ordinary",
+            }
+            status, object_inspection = http_request(
+                port,
+                "POST",
+                "/api/v1/files/media-source/inspect",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources/objects",
+                    }
+                },
+            )
+            assert status == 200, object_inspection
+            assert object_inspection["data"]["mediaSourceKind"] == "AXK_OBJECT_DIRECTORY"
+            status, ordinary_inspection = http_request(
+                port,
+                "POST",
+                "/api/v1/files/media-source/inspect",
+                {
+                    "directory": {
+                        "rootId": "workspace",
+                        "relativePath": "media-sources/ordinary",
+                    }
+                },
+            )
+            assert status == 200, ordinary_inspection
+            assert ordinary_inspection["data"]["mediaSourceKind"] is None
+            status, created_directory = http_request(
+                port,
+                "POST",
+                "/api/v1/filesystem/directories",
+                {
+                    "parent": {"rootId": "workspace", "relativePath": ""},
+                    "name": "managed",
+                },
+            )
+            assert status == 201, created_directory
+            assert created_directory["data"] == {
+                "rootId": "workspace",
+                "relativePath": "managed",
+                "kind": "DIRECTORY",
+                "size": None,
+                "writable": True,
+            }
+            managed_file = root_path / "managed" / "before.txt"
+            managed_file.write_text("managed", encoding="utf-8")
+            status, renamed_entry = http_request(
+                port,
+                "PATCH",
+                "/api/v1/filesystem/entries",
+                {
+                    "entry": {
+                        "rootId": "workspace",
+                        "relativePath": "managed/before.txt",
+                    },
+                    "name": "after.txt",
+                },
+            )
+            assert status == 200, renamed_entry
+            assert renamed_entry["data"]["relativePath"] == "managed/after.txt"
+            assert not managed_file.exists()
+            assert (root_path / "managed" / "after.txt").read_text(
+                encoding="utf-8"
+            ) == "managed"
+            delete_query = urlencode({"rootId": "workspace", "relativePath": "managed"})
+            status, nonempty = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert status == 409, nonempty
+            assert nonempty["error"]["code"] == "directory_not_empty"
+            delete_query = urlencode(
+                {"rootId": "workspace", "relativePath": "managed/after.txt"}
+            )
+            status, deleted_file = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert status == 200 and deleted_file["data"]["deleted"] is True
+            delete_query = urlencode({"rootId": "workspace", "relativePath": "managed"})
+            status, deleted_directory = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{delete_query}"
+            )
+            assert status == 200 and deleted_directory["data"]["deleted"] is True
             for traversal in (
                 "../download.bin",
                 "%2e%2e/download.bin",
@@ -1021,24 +1204,52 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 200
             assert capabilities["meta"]["requestId"]
+            assert capabilities["data"]["audioImport"] == {
+                "supportedSampleRates": [
+                    4000,
+                    5512,
+                    6000,
+                    8000,
+                    11025,
+                    12000,
+                    16000,
+                    22050,
+                    24000,
+                    32000,
+                    44100,
+                    48000,
+                ],
+                "defaultUnsupportedSampleRate": 44100,
+                "supportedOutputSampleWidthsBits": [16],
+                "sampleWidthPolicy": "PRESERVE_PCM16_EXPAND_PCM8",
+            }
             assert capabilities["data"]["limits"] == {
                 "maximumJsonBytes": 1024 * 1024,
                 "maximumJsonDepth": 32,
                 "maximumJsonNodes": 100000,
                 "maximumJsonContainerItems": 10000,
                 "maximumJsonStringBytes": 256 * 1024,
+                "maximumAlterationJournalBytes": 2 * 2_147_483_648 + 64 * 1024 * 1024,
                 "maximumUploadBytes": 4 * 1024 * 1024 * 1024,
                 "maximumUploadTotalBytes": 8 * 1024 * 1024 * 1024,
+                "maximumUploads": 1024,
                 "maximumUploadChunkBytes": 1024 * 1024,
                 "maximumDownloadRangeBytes": 8 * 1024 * 1024,
                 "maximumDownloadArchiveBytes": 4 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveTotalBytes": 8 * 1024 * 1024 * 1024,
                 "maximumDownloadArchiveEntries": 100000,
+                "maximumDownloadArchiveDepth": 64,
+                "maximumDownloadArchivePathBytes": 32 * 1024 * 1024,
+                "maximumConcurrentArchiveDownloads": 1,
                 "downloadArchiveRetentionSeconds": 300,
                 "maximumWebsocketDeliveryEvents": 1024,
                 "maximumWebsocketDeliveryBytes": 4 * 1024 * 1024,
                 "maximumQueuedJobs": 64,
                 "maximumImageSessions": 32,
+                "maximumAuditionBundleBytes": 128 * 1024 * 1024,
+                "maximumMediaBuildObjectBytes": 64 * 1024 * 1024,
+                "maximumMediaBuildPayloadBytes": 737280000,
+                "maximumMediaBuildOutputBytes": 737280000,
                 "maximumPageSize": 500,
             }
             status, metrics = http_request(port, "GET", "/api/v1/system/metrics")
@@ -1155,6 +1366,33 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 status == 204
                 and headers["access-control-allow-origin"] == "https://allowed.example"
             )
+            assert headers["access-control-max-age"] == "600"
+            vary = {value.strip() for value in headers["vary"].split(",")}
+            assert {
+                "Origin",
+                "Access-Control-Request-Method",
+                "Access-Control-Request-Headers",
+            } <= vary
+            for patch_path in (
+                "/api/v1/workspaces/workspace-test",
+                "/api/v1/filesystem/entries",
+            ):
+                status, _, headers = raw_http_request(
+                    port,
+                    "OPTIONS",
+                    patch_path,
+                    headers={
+                        "Origin": "https://allowed.example",
+                        "Access-Control-Request-Method": "PATCH",
+                        "Access-Control-Request-Headers": "authorization, content-type",
+                    },
+                )
+                assert status == 204, (patch_path, status, headers)
+                allowed_methods = {
+                    value.strip()
+                    for value in headers["access-control-allow-methods"].split(",")
+                }
+                assert "PATCH" in allowed_methods, (patch_path, headers)
 
             status, created = http_request(
                 port,
@@ -1162,7 +1400,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "/api/v1/uploads",
                 {
                     "filename": "manifest.json",
-                    "kind": "manifest",
+                    "kind": "MANIFEST",
                     "mediaType": "application/json",
                     "size": 2,
                 },
@@ -1190,7 +1428,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, completed = http_request(
                 port, "POST", f"/api/v1/uploads/{upload_id}/complete"
             )
-            assert status == 200 and completed["data"]["state"] == "ready"
+            assert status == 200 and completed["data"]["state"] == "READY"
             status, materialized = http_request(
                 port,
                 "POST",
@@ -1212,12 +1450,46 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             query = urlencode({"rootId": "workspace", "relativePath": "download.bin"})
             status, content, headers = raw_http_request(
                 port,
+                "HEAD",
+                f"/api/v1/files/content?{query}",
+            )
+            assert status == 200 and content == b"", (status, content)
+            assert headers["content-length"] == "6"
+            revision = headers["etag"]
+
+            status, content, headers = raw_http_request(
+                port,
+                "HEAD",
+                "/api/v1/files/content",
+            )
+            assert status == 400 and content == b"", (status, content)
+            assert int(headers["content-length"]) > 0
+
+            status, content, headers = raw_http_request(
+                port,
                 "GET",
                 f"/api/v1/files/content?{query}",
                 headers={"Range": "bytes=1-3"},
             )
+            assert status == 428, (status, content)
+
+            status, content, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/files/content?{query}",
+                headers={"Range": "bytes=1-3", "If-Match": '"stale"'},
+            )
+            assert status == 412, (status, content)
+
+            status, content, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/files/content?{query}",
+                headers={"Range": "bytes=1-3", "If-Match": revision},
+            )
             assert status == 206 and content == b"bcd", (status, content)
             assert headers["content-range"] == "bytes 1-3/6"
+            assert headers["etag"] == revision
             assert (root_path / "download.bin").read_bytes() == b"abcdef"
 
             status, archive = http_request(
@@ -1230,17 +1502,25 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                         "relativePath": "archive-source",
                     }
                 },
+                headers={"Idempotency-Key": "integration-directory-archive"},
             )
-            assert status == 201, archive
-            assert archive["data"]["filename"] == "archive-source.tar"
-            assert archive["data"]["entryCount"] == 2
-            archive_path = str(archive["data"]["contentPath"])
+            assert status == 202, archive
+            archive_job = wait_for_job(port, str(archive["data"]["jobId"]), process)
+            assert archive_job["state"] == "COMPLETED", archive_job
+            archive_result = archive_job["result"]
+            assert archive_result["filename"] == "archive-source.tar"
+            assert archive_result["entryCount"] == 3
+            archive_path = str(archive_result["contentPath"])
             status, content, headers = raw_http_request(port, "GET", archive_path)
             assert status == 200 and headers["content-type"].startswith(
                 "application/x-tar"
             ), headers
             with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as downloaded:
-                assert downloaded.getnames() == ["alpha.txt", "nested/beta.bin"]
+                assert downloaded.getnames() == [
+                    "alpha.txt",
+                    "nested",
+                    "nested/beta.bin",
+                ]
                 alpha = downloaded.extractfile("alpha.txt")
                 beta = downloaded.extractfile("nested/beta.bin")
                 assert alpha is not None and alpha.read() == b"alpha"
@@ -1250,21 +1530,104 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, _, _ = raw_http_request(port, "GET", archive_path)
             assert status == 404
 
+            session_fixture = root_path / "session-fixture.hds"
+            session_fixture.write_bytes((root_path / "fixture.hds").read_bytes())
             status, opened = http_request(
                 port,
                 "POST",
                 "/api/v1/images",
-                {"source": {"rootId": "workspace", "relativePath": "fixture.hds"}},
+                {
+                    "source": {
+                        "kind": "FILE",
+                        "file": {
+                            "rootId": "workspace",
+                            "relativePath": session_fixture.name,
+                        },
+                    }
+                },
             )
             assert status == 201, opened
             image_id = str(opened["data"]["imageId"])
+            status, workspace_snapshot = http_request(
+                port, "GET", "/api/v1/workspaces"
+            )
+            assert status == 200, workspace_snapshot
+            active_workspace_revision = workspace_snapshot["data"]["revision"]
+            active_secondary = external_path / "active-secondary"
+            active_secondary.mkdir()
+            status, active_added = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Active secondary",
+                    "path": str(active_secondary),
+                    "writable": True,
+                    "revision": active_workspace_revision,
+                },
+            )
+            assert status == 201, active_added
+            active_secondary_id = active_added["data"]["id"]
+            status, active_removed = http_request(
+                port,
+                "DELETE",
+                f"/api/v1/workspaces/{active_secondary_id}",
+                {"revision": active_workspace_revision + 1},
+            )
+            assert status == 204 and active_removed is None
+            status, active_root_removal = http_request(
+                port,
+                "DELETE",
+                "/api/v1/workspaces/workspace",
+                {"revision": active_workspace_revision + 2},
+            )
+            assert status == 409, active_root_removal
+            assert active_root_removal["error"]["code"] == "workspace_in_use"
+            status, overlapping_workspace = http_request(
+                port,
+                "POST",
+                "/api/v1/workspaces",
+                {
+                    "displayName": "Overlapping",
+                    "path": str(root_path / "archive-source"),
+                    "writable": True,
+                    "revision": active_workspace_revision + 2,
+                },
+            )
+            assert status == 422, overlapping_workspace
+            assert (
+                overlapping_workspace["error"]["code"] == "workspace_path_overlap"
+            )
+            fixture_query = urlencode(
+                {"rootId": "workspace", "relativePath": session_fixture.name}
+            )
+            status, in_use = http_request(
+                port, "DELETE", f"/api/v1/filesystem/entries?{fixture_query}"
+            )
+            assert status == 409, in_use
+            assert in_use["error"]["code"] == "entry_in_use"
             assert opened["data"]["format"] == "sfs"
+            assert opened["data"]["revision"] == 1
             assert opened["data"]["availableOperations"] == [
                 "images.content",
                 "images.objects",
                 "images.relationships",
                 "images.validation.issues",
                 "images.preview",
+                "auditions.prepare",
+                "images.package.export",
+                "images.audio_export",
+                "images.sequence_export",
+                "images.volume_package_export",
+                "images.volume_floppy_export",
+                "images.media_conversion",
+                "images.alter.volumes",
+                "images.alter.partitions",
+                "images.alter.objects",
+                "images.package.import",
+                "images.deletion.orphans.inspect",
+                "images.programs.generate.inspect",
+                "images.programs.generate",
             ]
             assert opened["data"]["objectCount"] > 0
             status, objects = http_request(
@@ -1279,6 +1642,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert all(
                 item["id"].startswith("object-") for item in objects["data"]["items"]
             )
+            assert all(item["sizeBytes"] > 0 for item in objects["data"]["items"])
             assert root not in json.dumps(objects)
             status, waveforms = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/objects?limit=100&type=SMPL"
@@ -1299,7 +1663,47 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, preview = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"
             )
-            assert status == 200 and len(preview["data"]["bins"]) == 16, preview
+            assert status == 200 and preview["data"]["frameCount"] > 0, preview
+            assert len(preview["data"]["lanes"]) == 1, preview
+            assert preview["data"]["lanes"][0]["role"] == "MONO", preview
+            assert len(preview["data"]["lanes"][0]["bins"]) == 16, preview
+            status, submitted = http_request(
+                port,
+                "POST",
+                "/api/v1/auditions",
+                {"imageId": image_id, "objectIds": [waveform["id"]]},
+            )
+            assert status == 202, submitted
+            audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
+            assert audition_job["state"] == "COMPLETED", audition_job
+            audition = audition_job["result"]
+            audition_id = str(audition["auditionId"])
+            assert audition["clips"][0]["objectId"] == waveform["id"]
+            assert audition["clips"][0]["lanes"][0]["contentOffsetBytes"] == 0
+            assert audition["contentSizeBytes"] == audition["clips"][0]["lanes"][0][
+                "wavSizeBytes"
+            ]
+            status, wav_header, headers = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/auditions/{audition_id}/content",
+                headers={"Range": "bytes=0-43"},
+            )
+            assert status == 206 and len(wav_header) == 44, (status, headers)
+            assert wav_header[:4] == b"RIFF" and wav_header[8:12] == b"WAVE"
+            assert headers["accept-ranges"] == "bytes"
+            assert headers["content-range"].startswith("bytes 0-43/")
+            status, _, _ = raw_http_request(
+                port, "DELETE", f"/api/v1/auditions/{audition_id}"
+            )
+            assert status == 204
+            status, _, _ = raw_http_request(
+                port,
+                "GET",
+                f"/api/v1/auditions/{audition_id}/content",
+                headers={"Range": "bytes=0-43"},
+            )
+            assert status == 404
             status, content_page = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/content?limit=2"
             )
@@ -1310,6 +1714,11 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert all(
                 item["parentId"] is None for item in content_page["data"]["items"]
             ), content_page
+            partition_item = content_page["data"]["items"][0]
+            assert partition_item["name"], partition_item
+            assert partition_item["displayName"].endswith(
+                f": {partition_item['name']}"
+            ), partition_item
             parent_id = content_page["data"]["items"][0]["id"]
             child_query = urlencode({"limit": 100, "parentId": parent_id})
             status, child_page = http_request(
@@ -1326,10 +1735,183 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "GET", f"/api/v1/images/{image_id}/relationships?limit=2"
             )
             assert status == 200 and relationships["data"]["items"], relationships
+            assert all(
+                "receiveChannelDisplay" in item
+                for item in relationships["data"]["items"]
+            ), relationships
+            first_relationship = relationships["data"]["items"][0]
+            relationship_query = urlencode(
+                {
+                    "limit": 100,
+                    "sourceObjectId": first_relationship["sourceObjectId"],
+                    "type": first_relationship["type"],
+                }
+            )
+            status, filtered_relationships = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/relationships?{relationship_query}",
+            )
+            assert status == 200 and filtered_relationships["data"]["items"], (
+                filtered_relationships
+            )
+            assert all(
+                item["sourceObjectId"] == first_relationship["sourceObjectId"]
+                and item["type"] == first_relationship["type"]
+                for item in filtered_relationships["data"]["items"]
+            ), filtered_relationships
             status, validation = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/validation/issues?limit=2"
             )
             assert status == 200 and "items" in validation["data"], validation
+
+            original_object_ids = {
+                (item["type"], item["name"]): item["id"]
+                for item in objects["data"]["items"]
+            }
+            session_alteration = {
+                "imageId": image_id,
+                "expectedRevision": 1,
+                "manifest": {
+                    "inline": {
+                        "schema_version": "1.0",
+                        "operations": [
+                            {
+                                "id": "rename-session-volume",
+                                "type": "rename_volume",
+                                "partition_index": 0,
+                                "volume_name": "New Volume",
+                                "new_volume_name": "Session Renamed",
+                            }
+                        ],
+                    }
+                },
+            }
+            status, submitted_alteration = http_request(
+                port,
+                "POST",
+                "/api/v1/image-session-alterations",
+                session_alteration,
+                {"Idempotency-Key": "session-alteration"},
+            )
+            assert status == 202, submitted_alteration
+            alteration_job = wait_for_job(
+                port, str(submitted_alteration["data"]["jobId"]), process
+            )
+            assert alteration_job["state"] == "COMPLETED", alteration_job
+            assert alteration_job["result"]["imageId"] == image_id, alteration_job
+            assert alteration_job["result"]["revision"] == 2, alteration_job
+            assert alteration_job["result"]["applied"] is True, alteration_job
+
+            status, refreshed = http_request(port, "GET", f"/api/v1/images/{image_id}")
+            assert status == 200 and refreshed["data"]["revision"] == 2, refreshed
+            status, refreshed_objects = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+            )
+            assert status == 200, refreshed_objects
+            assert {
+                (item["type"], item["name"]): item["id"]
+                for item in refreshed_objects["data"]["items"]
+            } == original_object_ids, refreshed_objects
+            assert all(
+                item["volumeName"] == "Session Renamed"
+                for item in refreshed_objects["data"]["items"]
+            ), refreshed_objects
+            status, refreshed_roots = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/content?limit=100"
+            )
+            assert status == 200 and refreshed_roots["data"]["items"], refreshed_roots
+            refreshed_parent = refreshed_roots["data"]["items"][0]["id"]
+            refreshed_child_query = urlencode(
+                {"limit": 100, "parentId": refreshed_parent}
+            )
+            status, refreshed_children = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/content?{refreshed_child_query}",
+            )
+            assert status == 200, refreshed_children
+            assert any(
+                item["name"] == "Session Renamed"
+                for item in refreshed_children["data"]["items"]
+            ), refreshed_children
+
+            sample = next(
+                item
+                for item in refreshed_objects["data"]["items"]
+                if item["type"] == "SBNK"
+            )
+            deletion_request = {
+                "imageId": image_id,
+                "expectedRevision": 2,
+                "targetObjectIds": [sample["id"]],
+                "cleanupObjectIds": [],
+            }
+            status, deletion_inspection = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletion-inspections",
+                deletion_request,
+            )
+            assert status == 200 and deletion_inspection["data"]["canApply"], (
+                deletion_inspection
+            )
+            optional_wave_data = [
+                impact["objectId"]
+                for impact in deletion_inspection["data"]["impacts"]
+                if impact["objectType"] == "SMPL" and impact["status"] == "OPTIONAL"
+            ]
+            assert optional_wave_data, deletion_inspection
+            deletion_request["cleanupObjectIds"] = optional_wave_data
+            status, reviewed_deletion = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletion-inspections",
+                deletion_request,
+            )
+            assert status == 200 and reviewed_deletion["data"]["canApply"], (
+                reviewed_deletion
+            )
+            status, submitted_deletion = http_request(
+                port,
+                "POST",
+                "/api/v1/image-object-deletions",
+                deletion_request,
+                {"Idempotency-Key": "session-object-deletion"},
+            )
+            assert status == 202, submitted_deletion
+            deletion_job = wait_for_job(
+                port, str(submitted_deletion["data"]["jobId"]), process
+            )
+            assert deletion_job["state"] == "COMPLETED", deletion_job
+            assert deletion_job["result"]["imageId"] == image_id, deletion_job
+            assert deletion_job["result"]["revision"] == 3, deletion_job
+            deleted_object_ids = {sample["id"], *optional_wave_data}
+            assert set(deletion_job["result"]["deletedObjectIds"]) == (
+                deleted_object_ids
+            ), deletion_job
+            status, after_deletion = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+            )
+            assert status == 200, after_deletion
+            assert deleted_object_ids.isdisjoint(
+                item["id"] for item in after_deletion["data"]["items"]
+            ), after_deletion
+
+            status, stale_alteration = http_request(
+                port,
+                "POST",
+                "/api/v1/image-session-alterations",
+                session_alteration,
+                {"Idempotency-Key": "stale-session-alteration"},
+            )
+            assert status == 202, stale_alteration
+            stale_job = wait_for_job(
+                port, str(stale_alteration["data"]["jobId"]), process
+            )
+            assert stale_job["state"] == "FAILED", stale_job
+            assert stale_job["error"]["code"] == "image_revision_stale", stale_job
+
             status, closed = http_request(port, "DELETE", f"/api/v1/images/{image_id}")
             assert status == 200 and closed["data"]["closed"] is True
             status, closed_again = http_request(
@@ -1359,7 +1941,15 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 if source["relativePath"] != "malformed.bin"
             ]
             report_requests = (
-                ("report.info", "/api/v1/reports/info", {"sources": sources}),
+                (
+                    "report.info",
+                    "/api/v1/reports/info",
+                    {
+                        "sources": [
+                            {"kind": "FILE", "file": source} for source in sources
+                        ]
+                    },
+                ),
                 (
                     "report.objects",
                     "/api/v1/reports/objects",
@@ -1499,7 +2089,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 partial_exit_codes = {
                     "report.objects": 3,
                     "report.relationships": 3,
-                    "report.inventory": 1,
+                    "report.inventory": 3,
                     "report.coverage": 3,
                     "corpus.audit": 3,
                 }
@@ -1595,7 +2185,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 capture_output=True,
                 text=True,
             )
-            assert cli_info_result.returncode == 1, cli_info_result.stderr
+            assert cli_info_result.returncode == 3, cli_info_result.stderr
             cli_info = json.loads(cli_info_result.stdout)
             assert report_results["report.info"]["loadedCount"] == len(
                 cli_info["trees"]
@@ -1619,7 +2209,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     canonical_info_node(node) for node in cli_tree["roots"]
                 ]
 
-            cli_package_path = Path("packages/cli/bank.axksbnk")
+            cli_package_path = Path("packages/cli/sample.axksbnk")
             cli_export = subprocess.run(
                 [
                     str(cli),
@@ -1633,7 +2223,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     "--volume",
                     "New Volume",
                     "-o",
-                    "packages/cli/bank",
+                    "packages/cli/sample",
                     "--format",
                     "json",
                 ],
@@ -1648,7 +2238,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "source": {"rootId": "workspace", "relativePath": "fixture.hds"},
                 "output": {
                     "rootId": "workspace",
-                    "relativePath": "packages/server/bank",
+                    "relativePath": "packages/server/sample",
                 },
                 "roots": [
                     {
@@ -1683,7 +2273,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             export_result = export_job["result"]
             assert export_result["output"] == {
                 "rootId": "workspace",
-                "relativePath": "packages/server/bank.axksbnk",
+                "relativePath": "packages/server/sample.axksbnk",
             }
             server_package_path = Path(export_result["output"]["relativePath"])
             assert (root_path / server_package_path).read_bytes() == (
@@ -2135,7 +2725,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 cli_dry_run.stderr,
             )
             cli_dry = json.loads(cli_dry_run.stdout)
-            assert cli_dry["applied"] is False and len(cli_dry["operations"]) == 13
+            assert cli_dry["applied"] is False and len(cli_dry["operations"]) == 14
 
             cli_apply = subprocess.run(
                 [
@@ -2161,7 +2751,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "manifest",
                 (root_path / "all-actions.json").read_bytes(),
             )
-            alteration_plan_request = {
+            alteration_inspection_request = {
                 "source": {
                     "rootId": "workspace",
                     "relativePath": "all-actions-source.hds",
@@ -2173,25 +2763,21 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                         "input": {"uploadRef": {"uploadId": tone_upload}},
                     }
                 ],
-                "output": {
-                    "rootId": "workspace",
-                    "relativePath": "builds/server/all-actions.hds",
-                },
             }
             status, response = http_request(
                 port,
                 "POST",
-                "/api/v1/image-alteration-plans",
-                alteration_plan_request,
+                "/api/v1/image-alteration-inspections",
+                alteration_inspection_request,
             )
             assert status == 200, response
-            alteration_plan = response["data"]
-            assert alteration_plan["valid"] is True
-            assert alteration_plan["kind"] == "ALTERATION"
-            assert alteration_plan["summary"]["operationCount"] == 13
-            assert alteration_plan.get("warnings") == [], alteration_plan
-            assert alteration_plan["validation"]["valid"] is True
-            assert str(root_path) not in json.dumps(alteration_plan)
+            alteration_inspection = response["data"]
+            assert alteration_inspection["valid"] is True
+            assert alteration_inspection["kind"] == "ALTERATION"
+            assert alteration_inspection["summary"]["operationCount"] == 14
+            assert alteration_inspection.get("warnings") == [], alteration_inspection
+            assert alteration_inspection["validation"]["valid"] is True
+            assert str(root_path) not in json.dumps(alteration_inspection)
             expected_types = {
                 "delete_volume",
                 "insert_volume",
@@ -2206,14 +2792,15 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "rename_sbac",
                 "delete_program",
                 "insert_program",
+                "rename_program",
             }
             assert {
                 str(operation["type"]).lower()
-                for operation in alteration_plan["operations"]
+                for operation in alteration_inspection["operations"]
             } == expected_types
             assert [
                 canonical_alteration_operation(operation)
-                for operation in alteration_plan["operations"]
+                for operation in alteration_inspection["operations"]
             ] == [
                 canonical_alteration_operation(operation)
                 for operation in cli_dry["operations"]
@@ -2223,7 +2810,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port,
                 "POST",
                 "/api/v1/image-alterations",
-                {"planToken": alteration_plan["planToken"]},
+                {
+                    **alteration_inspection_request,
+                    "output": {
+                        "rootId": "workspace",
+                        "relativePath": "builds/server/all-actions.hds",
+                    },
+                },
                 {"Idempotency-Key": "all-action-alteration"},
             )
             assert status == 202, submitted
@@ -2233,8 +2826,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert altered["schemaVersion"] == "1.0"
             assert altered["kind"] == "ALTERATION"
             assert altered["applied"] is True
-            assert altered["operations"] == alteration_plan["operations"]
-            assert altered["summary"] == alteration_plan["summary"]
+            assert altered["operations"] == alteration_inspection["operations"]
+            assert altered["summary"] == alteration_inspection["summary"]
             assert altered["warnings"] == []
             assert altered["validation"]["valid"] is True
             assert [
@@ -2256,26 +2849,29 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == source_before
             )
 
+            direct_request = {
+                **alteration_inspection_request,
+                "output": {
+                    "rootId": "workspace",
+                    "relativePath": "builds/server/all-actions.hds",
+                },
+            }
             status, refused = http_request(
                 port,
                 "POST",
-                "/api/v1/image-alteration-plans",
-                alteration_plan_request,
+                "/api/v1/image-alterations",
+                direct_request,
+                {"Idempotency-Key": "all-action-alteration-refused"},
             )
-            assert status == 409, refused
-            overwrite_request = {**alteration_plan_request, "overwrite": True}
-            status, response = http_request(
-                port,
-                "POST",
-                "/api/v1/image-alteration-plans",
-                overwrite_request,
-            )
-            assert status == 200, response
+            assert status == 202, refused
+            refused_job = wait_for_job(port, str(refused["data"]["jobId"]), process)
+            assert refused_job["state"] == "FAILED", refused_job
+            assert refused_job["error"]["code"] == "output_exists", refused_job
             status, submitted = http_request(
                 port,
                 "POST",
                 "/api/v1/image-alterations",
-                {"planToken": response["data"]["planToken"]},
+                {**direct_request, "overwrite": True},
                 {"Idempotency-Key": "all-action-alteration-overwrite"},
             )
             assert status == 202, submitted
@@ -2371,7 +2967,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     root_path / server_destination
                 ) == artifact_hashes(root_path / cli_destination)
 
-            selector = "partition_00_New_Partition/New Volume/Sample Banks/sine wave"
+            selector = "partition_00_New_Partition/New Volume/Sample Banks and Samples/sine wave"
             selected_server = Path("extractions/server/selected")
             selected_cli = Path("extractions/cli/selected")
             selected = run_extraction(
@@ -2623,6 +3219,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert counters["progressJobEvents"] >= 1, counters
             assert counters["websocketEventsDelivered"] >= len(events), counters
+            assert counters["uploadCleanupHealthy"] is True, counters
             for name in (
                 "queuedJobs",
                 "runningJobs",
@@ -2634,6 +3231,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "websocketEventsDropped",
                 "websocketEventsPending",
                 "websocketClientsEvicted",
+                "uploadCleanupFailedDeletions",
+                "uploadOrphanFiles",
+                "uploadOrphanBytes",
+                "uploadReservedBytes",
             ):
                 assert isinstance(counters[name], int) and counters[name] >= 0, (
                     name,
@@ -2642,7 +3243,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, shutdown = http_request(port, "POST", "/api/v1/system/shutdown")
             assert status == 202 and shutdown["data"]["accepted"] is True, shutdown
             shutdown_requested = True
-            process.wait(timeout=5)
+            process.wait(timeout=scaled_timeout(5.0))
             assert process.returncode == 0
             assert not connection_path.exists()
             server_log.flush()
@@ -2659,6 +3260,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 entry["path"] == "/api/v1/system/metrics" for entry in request_logs
             )
             assert all("?" not in entry["path"] for entry in request_logs)
+            preflight_logs = [
+                entry for entry in request_logs if entry["method"] == "OPTIONS"
+            ]
+            assert preflight_logs
+            assert all(0 <= entry["durationMs"] < 10_000 for entry in preflight_logs), (
+                preflight_logs
+            )
             audit_logs = [
                 json.loads(line)
                 for line in server_output.splitlines()
@@ -2684,10 +3292,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             if process.poll() is None:
                 process.terminate()
                 try:
-                    process.wait(timeout=5)
+                    process.wait(timeout=scaled_timeout(5.0))
                 except subprocess.TimeoutExpired:
                     process.kill()
-                    process.wait(timeout=5)
+                    process.wait(timeout=scaled_timeout(5.0))
             if sys.exc_info()[0] is not None:
                 server_log.flush()
                 print(

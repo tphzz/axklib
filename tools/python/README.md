@@ -21,3 +21,8 @@ source-derived archive name for a platform and build configuration, and checks
 that a staged native CLI reports the expected commit and ref. It also resolves
 branch-preview and version-tag draft release targets and verifies the complete
 release asset set against its SHA-256 checksum files.
+
+`native_configure.py` runs CI CMake configuration and permits one narrowly
+scoped retry when vcpkg reports a stale auxiliary-tool extraction directory.
+It preserves each failed manifest while leaving package archives and installed
+dependencies intact.

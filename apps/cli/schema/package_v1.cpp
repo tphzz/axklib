@@ -33,6 +33,76 @@ OrderedJson issue_json(const IssueOutput &issue) {
     return {{"code", issue.code}, {"message", issue.message}, {"fatal", issue.fatal}};
 }
 
+OrderedJson import_warning_json(const ImportWarningOutput &warning) {
+    return {{"code", warning.code},
+            {"message", warning.message},
+            {"origin", warning.origin},
+            {"package_index", optional_number(warning.package_index)},
+            {"node_id", warning.node_id},
+            {"object_type", warning.object_type},
+            {"object_name", warning.object_name},
+            {"partition_index", optional_number(warning.partition_index)},
+            {"volume_name", warning.volume_name}};
+}
+
+ProgramSlotPlacementOutput project_program_slot_placement(const PackageProgramSlotPlacement &placement) {
+    ProgramSlotPlacementOutput result;
+    result.placement_id = placement.placement_id;
+    result.partition_index = placement.partition_index;
+    result.volume_name = placement.volume_name;
+    result.mode = package_program_slot_placement_mode_name(placement.mode);
+    result.applied = placement.applied;
+    if (placement.suggested_start_slot)
+        result.suggested_start_slot = *placement.suggested_start_slot;
+    result.required_slot_count = placement.required_slot_count;
+    result.available_slot_count = placement.available_slot_count;
+    const auto project_ranges = [](const auto &ranges) {
+        std::vector<ProgramSlotRangeOutput> projected;
+        projected.reserve(ranges.size());
+        std::ranges::transform(ranges, std::back_inserter(projected),
+                               [](const auto &range) { return ProgramSlotRangeOutput{range.first, range.last}; });
+        return projected;
+    };
+    result.occupied_ranges = project_ranges(placement.occupied_ranges);
+    result.source_ranges = project_ranges(placement.source_ranges);
+    result.destination_ranges = project_ranges(placement.destination_ranges);
+    result.mappings.reserve(placement.mappings.size());
+    std::ranges::transform(placement.mappings, std::back_inserter(result.mappings), [](const auto &mapping) {
+        return ProgramSlotMappingOutput{mapping.package_index, mapping.node_id, mapping.source_slot,
+                                        mapping.destination_slot, mapping.requires_user_action};
+    });
+    return result;
+}
+
+ProgramSlotPlacementOutput project_program_slot_placement(const nlohmann::json &placement) {
+    ProgramSlotPlacementOutput result;
+    result.placement_id = placement.at("placementId").get<std::string>();
+    result.partition_index = placement.at("partitionIndex").get<std::uint32_t>();
+    result.volume_name = placement.at("volumeName").get<std::string>();
+    result.mode = placement.at("mode").get<std::string>();
+    result.applied = placement.at("applied").get<bool>();
+    result.suggested_start_slot = optional_value<std::uint32_t>(placement.at("suggestedStartSlot"));
+    result.required_slot_count = placement.at("requiredSlotCount").get<std::uint64_t>();
+    result.available_slot_count = placement.at("availableSlotCount").get<std::uint64_t>();
+    const auto project_ranges = [](const nlohmann::json &ranges) {
+        std::vector<ProgramSlotRangeOutput> projected;
+        projected.reserve(ranges.size());
+        for (const auto &range : ranges)
+            projected.push_back({range.at("first").get<std::uint32_t>(), range.at("last").get<std::uint32_t>()});
+        return projected;
+    };
+    result.occupied_ranges = project_ranges(placement.at("occupiedRanges"));
+    result.source_ranges = project_ranges(placement.at("sourceRanges"));
+    result.destination_ranges = project_ranges(placement.at("destinationRanges"));
+    for (const auto &mapping : placement.at("mappings")) {
+        result.mappings.push_back(
+            {mapping.at("packageIndex").get<std::uint64_t>(), mapping.at("nodeId").get<std::string>(),
+             mapping.at("sourceSlot").get<std::uint32_t>(), mapping.at("destinationSlot").get<std::uint32_t>(),
+             mapping.at("requiresUserAction").get<bool>()});
+    }
+    return result;
+}
+
 } // namespace
 
 PackageOutput project_package(const std::filesystem::path &path, const PortablePackage &package) {
@@ -51,8 +121,10 @@ PackageOutput project_package(const std::filesystem::path &path, const PortableP
     }
     result.objects.reserve(package.nodes.size());
     for (const auto &node : package.nodes) {
-        result.objects.push_back({node.node_id, node.object_type, node.name, node.payload_sha256,
-                                  node.normalized_sha256, node.semantic_sha256, node.audio_sha256});
+        result.total_payload_bytes += node.payload_size_bytes;
+        result.objects.push_back({node.node_id, node.object_type, node.name, node.payload_size_bytes,
+                                  node.payload_sha256, node.normalized_sha256, node.semantic_sha256,
+                                  node.audio_sha256});
     }
     result.issues.reserve(package.issues.size());
     std::ranges::transform(package.issues, std::back_inserter(result.issues), [](const PackageIssue &issue) {
@@ -71,6 +143,7 @@ Result<PackageOutput> project_package(const std::filesystem::path &path, const n
         result.source_media_kind = service_result.at("sourceMediaKind").get<std::string>();
         result.valid = service_result.at("valid").get<bool>();
         result.payloads_verified = service_result.at("payloadsVerified").get<bool>();
+        result.total_payload_bytes = service_result.at("totalPayloadBytes").get<std::uint64_t>();
         result.relationship_count = service_result.at("relationshipCount").get<std::uint64_t>();
         for (const auto &root : service_result.at("roots")) {
             result.roots.push_back({root.at("kind").get<std::string>(), root.at("displayName").get<std::string>(),
@@ -79,8 +152,8 @@ Result<PackageOutput> project_package(const std::filesystem::path &path, const n
         for (const auto &node : service_result.at("objects")) {
             result.objects.push_back(
                 {node.at("nodeId").get<std::string>(), node.at("objectType").get<std::string>(),
-                 node.at("name").get<std::string>(), node.at("payloadSha256").get<std::string>(),
-                 node.at("normalizedSha256").get<std::string>(),
+                 node.at("name").get<std::string>(), node.at("payloadSizeBytes").get<std::uint64_t>(),
+                 node.at("payloadSha256").get<std::string>(), node.at("normalizedSha256").get<std::string>(),
                  node.at("semanticSha256").is_null() ? std::nullopt
                                                      : std::optional{node.at("semanticSha256").get<std::string>()},
                  node.at("audioSha256").is_null() ? std::nullopt
@@ -111,9 +184,28 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
     std::ranges::transform(package_paths, std::back_inserter(result.package_paths_utf8),
                            [](const auto &path) { return text::path_to_utf8(path); });
     result.warnings.reserve(plan.warnings.size());
-    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings), [](const PackageIssue &issue) {
-        return IssueOutput{issue.code, issue.message, issue.fatal};
+    std::ranges::transform(plan.warnings, std::back_inserter(result.warnings), [](const PackageImportWarning &warning) {
+        return ImportWarningOutput{warning.code,
+                                   warning.message,
+                                   std::string{package_import_warning_origin_name(warning.origin)},
+                                   warning.package_index,
+                                   warning.node_id,
+                                   warning.object_type,
+                                   warning.object_name,
+                                   warning.partition_index,
+                                   warning.volume_name};
     });
+    result.opaque_sequences.reserve(plan.opaque_sequences.size());
+    std::ranges::transform(
+        plan.opaque_sequences, std::back_inserter(result.opaque_sequences), [](const auto &sequence) {
+            return OpaqueSequenceChoiceOutput{
+                sequence.package_index,
+                sequence.node_id,
+                sequence.name,
+                sequence.action ? std::optional{std::string{package_opaque_sequence_action_name(*sequence.action)}}
+                                : std::nullopt,
+            };
+        });
     result.conflicts.reserve(plan.conflicts.size());
     for (const auto &conflict : plan.conflicts) {
         result.conflicts.push_back({
@@ -148,13 +240,38 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
         projected.raw_volume = object.raw_volume;
         projected.canonical_action_id = object.canonical_action_id;
         projected.target_sfs_id = object.target_sfs_id;
-        projected.target_link_id = object.target_link_id;
+        projected.target_wave_data_reference_value = object.target_wave_data_reference_value;
         projected.actions.reserve(object.actions.size());
         std::ranges::transform(
             object.actions, std::back_inserter(projected.actions),
             [](PackageImportObjectAction action) { return std::string{package_import_action_name(action)}; });
         result.objects.push_back(std::move(projected));
     }
+    result.program_assignment_adjustments.reserve(plan.program_assignment_adjustments.size());
+    for (const auto &adjustment : plan.program_assignment_adjustments) {
+        result.program_assignment_adjustments.push_back({
+            adjustment.adjustment_id,
+            std::string{package_program_assignment_origin_name(adjustment.origin)},
+            adjustment.package_index,
+            adjustment.action_id,
+            adjustment.existing_object_key,
+            adjustment.program_slot,
+            adjustment.program_name,
+            adjustment.assignment_ordinal,
+            adjustment.target_object_type,
+            adjustment.target_name,
+            adjustment.partition_index,
+            adjustment.group_name,
+            adjustment.volume_name,
+            adjustment.raw_group,
+            adjustment.raw_volume,
+            adjustment.reason_code,
+            std::string{package_program_assignment_disposition_name(adjustment.disposition)},
+        });
+    }
+    result.program_slot_placements.reserve(plan.program_slot_placements.size());
+    std::ranges::transform(plan.program_slot_placements, std::back_inserter(result.program_slot_placements),
+                           [](const auto &placement) { return project_program_slot_placement(placement); });
     result.allocation.reserve(plan.allocation.size());
     for (const auto &allocation : plan.allocation) {
         result.allocation.push_back({
@@ -165,10 +282,15 @@ PlanOutput project_plan(const std::filesystem::path &target, const std::vector<s
             allocation.raw_volume,
             allocation.inserted_object_count,
             allocation.reused_object_count,
+            allocation.blocked_object_count,
             allocation.payload_clusters,
             allocation.payload_sectors,
             allocation.continuation_clusters,
             allocation.directory_growth_bytes,
+            allocation.directory_growth_clusters,
+            allocation.directory_continuation_clusters,
+            allocation.infrastructure_clusters,
+            allocation.additional_allocated_bytes,
             allocation.remaining_object_ids,
             allocation.remaining_clusters,
             allocation.projected_image_sectors,
@@ -202,8 +324,25 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
         result.target_snapshot_id = service_plan.at("targetSnapshotId").get<std::string>();
         result.valid = service_plan.at("valid").get<bool>();
         for (const auto &warning : service_plan.at("warnings")) {
-            result.warnings.push_back({warning.at("code").get<std::string>(), warning.at("message").get<std::string>(),
-                                       warning.at("fatal").get<bool>()});
+            result.warnings.push_back({
+                warning.at("code").get<std::string>(),
+                warning.at("message").get<std::string>(),
+                warning.at("origin").get<std::string>(),
+                optional_value<std::uint64_t>(warning.at("packageIndex")),
+                warning.at("nodeId").get<std::string>(),
+                warning.at("objectType").get<std::string>(),
+                warning.at("objectName").get<std::string>(),
+                optional_value<std::uint32_t>(warning.at("partitionIndex")),
+                warning.at("volumeName").get<std::string>(),
+            });
+        }
+        for (const auto &sequence : service_plan.at("opaqueSequences")) {
+            result.opaque_sequences.push_back({
+                sequence.at("packageIndex").get<std::uint64_t>(),
+                sequence.at("nodeId").get<std::string>(),
+                sequence.at("name").get<std::string>(),
+                optional_value<std::string>(sequence.at("action")),
+            });
         }
         for (const auto &conflict : service_plan.at("conflicts")) {
             result.conflicts.push_back({
@@ -238,9 +377,32 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 object.at("actions").get<std::vector<std::string>>(),
                 optional_value<std::string>(object.at("canonicalActionId")),
                 optional_value<std::uint32_t>(object.at("targetSfsId")),
-                optional_value<std::uint32_t>(object.at("targetLinkId")),
+                optional_value<std::uint32_t>(object.at("targetWaveDataReferenceValue")),
             });
         }
+        for (const auto &adjustment : service_plan.at("programAssignmentAdjustments")) {
+            result.program_assignment_adjustments.push_back({
+                adjustment.at("adjustmentId").get<std::string>(),
+                adjustment.at("origin").get<std::string>(),
+                optional_value<std::uint64_t>(adjustment.at("packageIndex")),
+                optional_value<std::string>(adjustment.at("actionId")),
+                optional_value<std::string>(adjustment.at("existingObjectKey")),
+                adjustment.at("programSlot").get<std::string>(),
+                adjustment.at("programName").get<std::string>(),
+                adjustment.at("assignmentOrdinal").get<std::uint64_t>(),
+                adjustment.at("targetObjectType").get<std::string>(),
+                adjustment.at("targetName").get<std::string>(),
+                adjustment.at("partitionIndex").get<std::uint32_t>(),
+                adjustment.at("groupName").get<std::string>(),
+                adjustment.at("volumeName").get<std::string>(),
+                adjustment.at("rawGroup").get<std::string>(),
+                adjustment.at("rawVolume").get<std::string>(),
+                adjustment.at("reasonCode").get<std::string>(),
+                adjustment.at("disposition").get<std::string>(),
+            });
+        }
+        for (const auto &placement : service_plan.at("programSlotPlacements"))
+            result.program_slot_placements.push_back(project_program_slot_placement(placement));
         for (const auto &allocation : service_plan.at("allocation")) {
             result.allocation.push_back({
                 allocation.at("partitionIndex").get<std::uint32_t>(),
@@ -250,10 +412,15 @@ Result<PlanOutput> project_plan(const std::filesystem::path &target,
                 allocation.at("rawVolume").get<std::string>(),
                 allocation.at("insertedObjectCount").get<std::uint64_t>(),
                 allocation.at("reusedObjectCount").get<std::uint64_t>(),
+                allocation.at("blockedObjectCount").get<std::uint64_t>(),
                 allocation.at("payloadClusters").get<std::uint64_t>(),
                 allocation.at("payloadSectors").get<std::uint64_t>(),
                 allocation.at("continuationClusters").get<std::uint64_t>(),
                 allocation.at("directoryGrowthBytes").get<std::uint64_t>(),
+                allocation.at("directoryGrowthClusters").get<std::uint64_t>(),
+                allocation.at("directoryContinuationClusters").get<std::uint64_t>(),
+                allocation.at("infrastructureClusters").get<std::uint64_t>(),
+                allocation.at("additionalAllocatedBytes").get<std::uint64_t>(),
                 allocation.at("remainingObjectIds").get<std::uint64_t>(),
                 allocation.at("remainingClusters").get<std::uint64_t>(),
                 allocation.at("projectedImageSectors").get<std::uint64_t>(),
@@ -285,6 +452,7 @@ Result<std::string> serialize(const PackageOutput &output, bool pretty) {
                 {"node_id", object.node_id},
                 {"object_type", object.object_type},
                 {"name", object.name},
+                {"payload_size_bytes", object.payload_size_bytes},
                 {"payload_sha256", object.payload_sha256},
                 {"normalized_sha256", object.normalized_sha256},
                 {"semantic_sha256", optional_string(object.semantic_sha256)},
@@ -303,6 +471,7 @@ Result<std::string> serialize(const PackageOutput &output, bool pretty) {
             {"source_media_kind", output.source_media_kind},
             {"valid", output.valid},
             {"payloads_verified", output.payloads_verified},
+            {"total_payload_bytes", output.total_payload_bytes},
             {"roots", std::move(roots)},
             {"objects", std::move(objects)},
             {"relationship_count", output.relationship_count},
@@ -318,7 +487,16 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
     try {
         auto warnings = OrderedJson::array();
         for (const auto &warning : output.warnings)
-            warnings.push_back(issue_json(warning));
+            warnings.push_back(import_warning_json(warning));
+        auto opaque_sequences = OrderedJson::array();
+        for (const auto &sequence : output.opaque_sequences) {
+            opaque_sequences.push_back({
+                {"package_index", sequence.package_index},
+                {"node_id", sequence.node_id},
+                {"name", sequence.name},
+                {"action", optional_string(sequence.action)},
+            });
+        }
         auto conflicts = OrderedJson::array();
         for (const auto &conflict : output.conflicts) {
             conflicts.push_back({
@@ -354,7 +532,7 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"actions", object.actions},
                 {"canonical_action_id", optional_string(object.canonical_action_id)},
                 {"target_sfs_id", optional_number(object.target_sfs_id)},
-                {"target_link_id", optional_number(object.target_link_id)},
+                {"target_wave_data_reference_value", optional_number(object.target_wave_data_reference_value)},
             });
         }
         auto allocation = OrderedJson::array();
@@ -367,14 +545,74 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
                 {"raw_volume", item.raw_volume},
                 {"inserted_object_count", item.inserted_object_count},
                 {"reused_object_count", item.reused_object_count},
+                {"blocked_object_count", item.blocked_object_count},
                 {"payload_clusters", item.payload_clusters},
                 {"payload_sectors", item.payload_sectors},
                 {"continuation_clusters", item.continuation_clusters},
                 {"directory_growth_bytes", item.directory_growth_bytes},
+                {"directory_growth_clusters", item.directory_growth_clusters},
+                {"directory_continuation_clusters", item.directory_continuation_clusters},
+                {"infrastructure_clusters", item.infrastructure_clusters},
+                {"additional_allocated_bytes", item.additional_allocated_bytes},
                 {"remaining_object_ids", item.remaining_object_ids},
                 {"remaining_clusters", item.remaining_clusters},
                 {"projected_image_sectors", item.projected_image_sectors},
                 {"projected_image_size_bytes", item.projected_image_size_bytes},
+            });
+        }
+        auto program_assignment_adjustments = OrderedJson::array();
+        for (const auto &adjustment : output.program_assignment_adjustments) {
+            program_assignment_adjustments.push_back({
+                {"adjustment_id", adjustment.adjustment_id},
+                {"origin", adjustment.origin},
+                {"package_index", optional_number(adjustment.package_index)},
+                {"action_id", optional_string(adjustment.action_id)},
+                {"existing_object_key", optional_string(adjustment.existing_object_key)},
+                {"program_slot", adjustment.program_slot},
+                {"program_name", adjustment.program_name},
+                {"assignment_ordinal", adjustment.assignment_ordinal},
+                {"target_object_type", adjustment.target_object_type},
+                {"target_name", adjustment.target_name},
+                {"partition_index", adjustment.partition_index},
+                {"group_name", adjustment.group_name},
+                {"volume_name", adjustment.volume_name},
+                {"raw_group", adjustment.raw_group},
+                {"raw_volume", adjustment.raw_volume},
+                {"reason_code", adjustment.reason_code},
+                {"disposition", adjustment.disposition},
+            });
+        }
+        auto program_slot_placements = OrderedJson::array();
+        for (const auto &placement : output.program_slot_placements) {
+            const auto range_json = [](const auto &ranges) {
+                auto result = OrderedJson::array();
+                for (const auto &range : ranges)
+                    result.push_back({{"first", range.first}, {"last", range.last}});
+                return result;
+            };
+            auto mappings = OrderedJson::array();
+            for (const auto &mapping : placement.mappings) {
+                mappings.push_back({
+                    {"package_index", mapping.package_index},
+                    {"node_id", mapping.node_id},
+                    {"source_slot", mapping.source_slot},
+                    {"destination_slot", mapping.destination_slot},
+                    {"requires_user_action", mapping.requires_user_action},
+                });
+            }
+            program_slot_placements.push_back({
+                {"placement_id", placement.placement_id},
+                {"partition_index", placement.partition_index},
+                {"volume_name", placement.volume_name},
+                {"mode", placement.mode},
+                {"applied", placement.applied},
+                {"suggested_start_slot", optional_number(placement.suggested_start_slot)},
+                {"required_slot_count", placement.required_slot_count},
+                {"available_slot_count", placement.available_slot_count},
+                {"occupied_ranges", range_json(placement.occupied_ranges)},
+                {"source_ranges", range_json(placement.source_ranges)},
+                {"destination_ranges", range_json(placement.destination_ranges)},
+                {"mappings", std::move(mappings)},
             });
         }
         const auto result = output.result ? OrderedJson{{"output_path", output.result->output_path_utf8},
@@ -391,8 +629,11 @@ Result<std::string> serialize(const PlanOutput &output, bool pretty) {
             {"target_snapshot_id", output.target_snapshot_id},
             {"valid", output.valid},
             {"warnings", std::move(warnings)},
+            {"opaque_sequences", std::move(opaque_sequences)},
             {"conflicts", std::move(conflicts)},
             {"objects", std::move(objects)},
+            {"program_assignment_adjustments", std::move(program_assignment_adjustments)},
+            {"program_slot_placements", std::move(program_slot_placements)},
             {"allocation", std::move(allocation)},
             {"result", result},
         }

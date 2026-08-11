@@ -5,6 +5,7 @@
 #include <optional>
 #include <string_view>
 
+#include "../exit_status.hpp"
 #include "requests.hpp"
 
 namespace axk::app {
@@ -26,9 +27,9 @@ int run_package_import(const PackageImportRequest &request);
 int run_orphans_request(const OrphansRequest &request);
 int run_validate_request(const ValidateRequest &request);
 int run_create_hds(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path, bool overwrite,
-                   bool pretty);
+                   bool dry_run);
 int run_create_media(const std::filesystem::path &manifest_path, const std::filesystem::path &output_path,
-                     std::string_view expected_format, bool overwrite, bool pretty);
+                     std::string_view expected_format, bool overwrite, bool dry_run);
 int run_create_manifest(const axk::app::OperationRegistry &registry, std::string_view kind,
                         const std::filesystem::path &output_path, bool overwrite);
 int run_alter_manifest(const axk::app::OperationRegistry &registry, const std::filesystem::path &output_path,

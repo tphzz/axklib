@@ -6,13 +6,21 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+
+def create_owner_only_directory(path: Path) -> None:
+    path.mkdir(mode=stat.S_IRWXU)
+    if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) != stat.S_IRWXU:
+        raise RuntimeError("could not create an owner-only server state directory")
 
 
 def wait_for_connection(path: Path, process: subprocess.Popen[bytes]) -> dict[str, Any]:
@@ -60,6 +68,17 @@ def require_status(actual: tuple[int, Any], expected: int, context: str) -> Any:
     return document
 
 
+def info_request_for_file(root_id: str, relative_path: str) -> dict[str, Any]:
+    return {
+        "sources": [
+            {
+                "kind": "FILE",
+                "file": {"rootId": root_id, "relativePath": relative_path},
+            }
+        ]
+    }
+
+
 def wait_for_job(client: Client, job_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -75,18 +94,39 @@ def wait_for_job(client: Client, job_id: str) -> dict[str, Any]:
 
 def exercise(server: Path, fixture: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="axklib-installed-server-") as temporary:
-        workspace = Path(temporary)
+        root = Path(temporary)
+        workspace = root / "workspace"
+        workspace.mkdir()
         fixture_name = "fixture.hds"
         shutil.copyfile(fixture, workspace / fixture_name)
-        state = workspace / "state"
+        state = root / "state"
+        create_owner_only_directory(state)
+        workspace_store = root / "workspaces.json"
         connection_file = state / "connection.json"
+        workspace_store.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "revision": 1,
+                    "workspaces": [
+                        {
+                            "id": "workspace",
+                            "displayName": "Workspace",
+                            "path": str(workspace.resolve()),
+                            "writable": True,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         process = subprocess.Popen(
             [
                 str(server),
                 "--port",
                 "0",
-                "--root",
-                f"workspace={workspace}",
+                "--workspace-store",
+                str(workspace_store),
                 "--state-directory",
                 str(state),
                 "--connection-file",
@@ -117,9 +157,7 @@ def exercise(server: Path, fixture: Path) -> None:
                 client.request(
                     "POST",
                     "/reports/info",
-                    {
-                        "sources": [{"rootId": "workspace", "relativePath": fixture_name}],
-                    },
+                    info_request_for_file("workspace", fixture_name),
                 ),
                 202,
                 "fixture report submission",

@@ -26,24 +26,78 @@ cluster, or zero sectors per FAT.
 A floppy image can contain `FSFSDEV3SPLX` object files without being an SFS
 hard-disk image. Keep those layers separate.
 
+An external tool may expose only the object files from a floppy. Axklib can
+open one flat leaf directory, or a parent containing one level of related disk
+folders, explicitly as an `AXK_OBJECT_DIRECTORY`. The parent form assembles
+complete contiguous Wave Data that Yamaha split across several floppies. This
+provides read-only object inventory, relationships, preview, audition, and
+package export, but it is not a floppy image: FAT geometry, allocation chains,
+directory ordering, labels, support files, and deleted entries cannot be
+reconstructed from the object set. Higher collection directories remain browser
+or CLI navigation scopes. Opening one flat disk folder does not inspect its
+siblings. If an explicit preview, audition, or package export needs a missing
+Wave Data segment, an application can attach selected extracted companion disk
+folders to the current image session or explicitly request a bounded
+immediate-sibling search. Direct attachment of another raw `.ima` image is not
+part of this session API. Companion matching admits exact continuation segments with a normalized
+Yamaha header identity, even when Yamaha changes the host filename between
+disks, plus Wave Data objects whose embedded names exactly satisfy active
+unresolved Sample member lanes. It neither merges other sibling objects nor
+modifies the source folders.
+
 ## Compatibility Profile
 
-The reader supports the FAT12 profile used by maintained Yamaha
+The reader supports the FAT12 profile used by Yamaha
 A-series floppy media; it is not a general FAT implementation. It follows
 bounded FAT12 cluster chains, requires duplicated FAT copies to agree, and uses
 DOS 8.3 directory identities. Long-filename entries are ignored in favor of
 their 8.3 aliases. FAT16, FAT32, exFAT, filesystem repair, and filesystem
 alteration are unsupported.
 
-Fresh image creation uses pinned FatFs code behind axklib's target-neutral
+Populated image creation uses pinned FatFs code behind axklib's target-neutral
 object build plan. It is limited to a deterministic 1.44 MB superfloppy and
 root-directory object files. The generated image is reopened by this reader
-before publication. This profile has not yet been promoted by a physical Yamaha
-sampler test, so parser-valid output is not a hardware-compatibility claim.
+before publication. This populated-media profile has not yet been promoted by
+a physical Yamaha sampler test, so parser-valid output is not a
+hardware-compatibility claim.
+
+Blank image creation is a separate exact profile matching A5000 quick and full
+formats. `plan_floppy_creation()` admits the fixed 1,474,560-byte
+geometry and `write_formatted_floppy_image()` serializes it directly without an
+embedded image template. Axkdeck creates the full-format variant. The writer
+reopens the temporary image and requires the exact geometry, root files,
+catalog, and empty object inventory before atomic publication.
+
+SFS volume conversion has a separate multi-floppy profile. A volume that fits
+on one disk remains one raw `.ima` file. A larger admitted volume becomes a ZIP
+containing two through 32 ordered `.ima` members plus `manifest.json`. This
+constrained profile has loaded and auditioned successfully on an A5000 running
+system version 1.50. Sampler save/reload validation remains pending, so inspection
+includes a nonblocking warning for that unverified operation. Every nonfinal
+boundary contains an exact Wave Data continuation. When natural object packing
+would leave an ordinary boundary, the planner may move the final 512 payload
+bytes of a complete terminal Wave Data object to the next member as a
+continuation carrier. It rejects the export when it cannot construct that proven
+topology.
+
+Axkdeck also exposes **Export volumes to floppies...** for a complete
+file-backed SFS partition. This is a batch wrapper around that same per-volume
+profile, not a different disk topology. The selected destination has one
+collision-safe subdirectory per successful nonempty volume, and each
+subdirectory contains raw `disk01.ima`, `disk02.ima`, and subsequent members.
+The batch intentionally omits the individual export's ZIP wrapper so the
+result can be copied directly to physical media one member at a time. Matching
+batch and individual members are byte-identical.
+
+The root `volume-floppies.axklib.json` report records the partition identity,
+per-volume outcome, member paths, sizes, and SHA-256 digests. Empty and blocked
+volumes are recorded without a directory. Runtime failure removes only the
+affected volume directory; successful siblings remain. If nothing succeeds,
+no output is published.
 
 ## FAT12 Geometry
 
-Maintained 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
+Supported 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
 column. axklib normalizes the pinned FatFs formatter output to that same media
 descriptor and CHS profile before mounting and populating the image. The reader
 still validates actual filesystem geometry rather than requiring one boot-sector
@@ -76,7 +130,24 @@ cluster_size     = bytes_per_sector * sectors_per_cluster
 
 For the common 1.44 MB layout, `data_offset` is `0x4200`.
 
-The generated boot sector also has these deterministic fields:
+Sampler-authored blank media and populated axklib media intentionally use
+different deterministic boot metadata. Blank media has these Confirmed fields:
+
+| Offset | Size | Quick format | Full format |
+| --- | ---: | --- | --- |
+| `0x00` | 3 | `eb 44 90` | `eb 44 90` |
+| `0x03` | 8 | `YAMAHA  ` | `YAMAHA  ` |
+| `0x2b` | 11 | Eleven spaces | Zero |
+| `0x1fe` | 2 | Zero; no signature | Zero; no signature |
+
+Both blank formats contain `YAMAHA.SYM` at cluster 2 with size 9,766 and a
+zero-length `A3000_SY.002`. Their blank root label entry has attribute `0x28`
+for quick format and `0x08` for full format. Full format additionally stores
+write time `0x2000` and initializes unused bytes after catalog offset `0x6826`
+to `0xe5`; quick format leaves them zero. Exact output hashes are regression
+tested against the two sampler-formatted reference images.
+
+The populated-media writer has these deterministic fields:
 
 | Offset | Size | Generated bytes/value |
 | --- | ---: | --- |
@@ -89,8 +160,8 @@ The generated boot sector also has these deterministic fields:
 | `0x36` | 8 | Filesystem text `FAT12` padded with spaces; FAT type still comes from cluster count. |
 | `0x1fe` | 2 | Signature `55 aa`. |
 
-Generated object directory entries use the archive attribute `0x20`. Creation
-and modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
+Populated-media root-directory entries use attribute `0x00`. Creation and
+modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
 dates are zero. This fixed metadata is a reproducibility convention, not a
 sampler-facing object field.
 
@@ -180,8 +251,9 @@ Supported Yamaha floppy images commonly contain these root-file classes:
 | File class | Typical name | Contents and handling |
 | --- | --- | --- |
 | Sampler object | `SINE____.003`, `SMP_2555.004` | Complete `FSFSDEV3SPLX<type>` payload. The embedded type and name are authoritative. |
-| Symbol/support metadata | `YAMAHA.SYM` | Non-object Yamaha support data. It is preserved by the source image but ignored by normal object inventory. |
-| Model/system metadata | names such as `A3000_SY.002` | Non-object support data observed on some media. Its payload is not part of the public object decoder. |
+| Symbol/support metadata | `YAMAHA.SYM` | A 9,766-byte disk/file/category catalog. Readers exclude it from object inventory; writers synthesize it from the output image. |
+| Standalone-disk marker | `A3000_SY.001` | Zero-length physical file cataloged as `\A3000.SYM` in slot 1. Readers exclude it from object inventory. |
+| Model/system metadata | names such as `A3000_SY.002` | Other non-object support data observed on some media. Its payload is not part of the public object decoder. |
 | Other DOS file | any valid DOS 8.3 name | Readable through the FAT layer, but ignored by object inventory unless it begins with a supported object signature. |
 
 Object stems often resemble an uppercase, DOS-compatible projection of the
@@ -198,8 +270,19 @@ from filename or FAT allocation length.
 ## Generated Floppy File Layout
 
 `axklib create floppy` writes exactly one root-directory file for each prepared
-Yamaha object. It does not create `YAMAHA.SYM`, model-specific system metadata,
-subdirectories, a root-directory FAT volume-label entry, or long filenames.
+Yamaha object, one synthesized `YAMAHA.SYM`, and the zero-length physical
+standalone-disk marker `A3000_SY.001`. It does not create unrelated model-specific
+system metadata, subdirectories, a root-directory FAT volume-label entry, or
+long filenames.
+
+`YAMAHA.SYM` is exactly 257 records of 38 bytes: one disk-name record, 224
+physical-file slot records, and 32 category records. A live record begins with
+`0x00`, stores a NUL-terminated logical path, and has a zero-filled tail. An
+unused record begins with `0xff`. Slot 1 catalogs `\A3000.SYM`; generated object
+slots begin at 2 and slot 0 remains unused. The catalog is written last in
+deterministic root-directory order. Rebuilding an existing image preserves a
+valid catalog's disk-name record while regenerating its file and category
+records from the output.
 
 Objects are sorted deterministically by object type, embedded name, and payload
 size. Known types sort as `SMPL`, `SBNK`, `SBAC`, `PROG`, `SEQU`, then `PRF3`.
@@ -207,33 +290,84 @@ Each DOS filename is generated as follows:
 
 ```text
 stem:
-  scan the embedded object name from left to right
-  keep ASCII letters, digits, and underscore
-  uppercase retained characters
-  stop after 8 characters
-  use OBJECT if no character remains
+  take the first 8 embedded-name byte positions
+  uppercase ASCII letters and preserve digits and underscore
+  replace every other byte position with underscore
+  pad a shorter name to 8 positions with underscore
 
 extension:
-  one-based position in the complete sorted object list
-  formatted as three decimal digits: 001, 002, ... 224
+  Yamaha catalog slot in the complete sorted object list
+  formatted as three decimal digits: 002, 003, ... 223
 ```
 
-If two stems collide, the later stem is shortened and its one-based global
-position is appended. If that still collides, image creation fails rather than
-silently replacing a file. The writer supports at most 224 objects because the
-fixed root directory has 224 entries.
+Object stems may repeat because the three-digit catalog-slot extension is unique.
+If a complete physical filename still collides with a retained root file, image
+creation fails rather than silently replacing it. The writer supports at most
+222 generated objects: the Yamaha file catalog reserves slots 0 and 1, while
+`A3000_SY.001` and `YAMAHA.SYM` occupy two of the 224 FAT root entries.
 
-For example, a freshly authored waveform and Sample Bank both named
+For example, freshly authored Wave Data and a Sample both named
 `Authored Tone` are sorted as `SMPL` then `SBNK` and become:
 
 ```text
-AUTHORED.001   FSFSDEV3SPLXSMPL...
-AUTHORE2.002   FSFSDEV3SPLXSBNK...
+AUTHORED.002   FSFSDEV3SPLXSMPL...
+AUTHORED.003   FSFSDEV3SPLXSBNK...
 ```
 
 The filename algorithm is a generated-container convention. Transferring an
 existing object preserves every object payload byte but generates new DOS
 filenames; it does not preserve the source directory entry or cluster chain.
+
+## Multi-Floppy Conversion Sets
+
+Media conversion writes Programs first, then each Sample (`SBNK`)
+followed by its not-yet-emitted Known Wave Data dependencies, remaining Wave
+Data, Sample Banks (`SBAC`), then Sequences and `PRF3`. Shared Wave Data is
+written at first use only.
+
+When a Sample fits at the end of one member but its first-use whole Wave Data
+does not, the Wave Data starts the next member without repeating the Sample.
+Whole objects otherwise move to a later member without splitting. Wave Data
+larger than an empty member is segmented normally. If an otherwise ordinary
+rollover would occur, the planner may instead split the final 512 payload bytes
+from a complete terminal Wave Data object and place that exact same-object
+continuation first on the next member. Each segment repeats the source header
+and retains the complete logical payload size at `0x1c`; `0x20` is rewritten to
+the local segment size and `0x24` to its contiguous logical payload offset.
+Other object types are never split.
+
+Every member contains its own exact synthesized `YAMAHA.SYM`. Every nonfinal
+member catalogs zero-length `A3000F.SYM`, and its final Wave Data segment has an
+exact same-object continuation at the start of the next member. The final member
+catalogs zero-length `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` boundary is
+rejected because it is not a valid continuation boundary. Physical object
+slots are local to each disk and may be reused
+on later members. Segments of one continued Wave Data object use its logical
+catalog series path, object name, and normalized header as their cross-member
+identity rather than one physical slot.
+The ZIP manifest carries the deterministic logical disk names and exact member
+order:
+
+```text
+manifest.json
+payloads/disk01.ima
+payloads/disk02.ima
+...
+```
+
+The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
+logical name, member path, fixed image size, image and `YAMAHA.SYM` SHA-256
+digests, exact member marker, and hardware-validation state. ZIP is a host
+transport container only: extract the `.ima` members and present them to the
+sampler in manifest order, beginning with disk 1.
+
+Before publication, the writer reopens every FAT12 member, compares its exact
+object payloads and catalog, reassembles every split Wave Data object byte for
+byte, reopens the ZIP, and checks its inspected size. More than 32 required
+images is a blocking conversion issue. The manifest records
+`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. The supported topology has
+loaded and auditioned through four members on an A5000 running system version
+1.50. Sampler save/reload validation remains pending.
 
 ## Reading File Bytes
 

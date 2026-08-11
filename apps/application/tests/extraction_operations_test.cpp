@@ -6,10 +6,18 @@
 #include <set>
 #include <string>
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/extraction_operations.hpp"
+#include "axklib/application/extraction_selection.hpp"
+#include "axklib/application/volume_graph.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/writer.hpp"
 
@@ -46,6 +54,30 @@ bool has_publication_temporary(const std::filesystem::path &root) {
     });
 }
 
+int current_process_id() noexcept {
+#if defined(_WIN32)
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
+std::set<std::filesystem::path> extraction_staging_directories() {
+    std::set<std::filesystem::path> result;
+    std::error_code error;
+    const auto temporary_root = std::filesystem::temp_directory_path(error);
+    if (error)
+        return result;
+    const auto expected_prefix = "axklib-extraction.axklib-publication.p" + std::to_string(current_process_id()) + ".";
+    for (std::filesystem::directory_iterator iterator{temporary_root, error}, end; iterator != end && !error;
+         iterator.increment(error)) {
+        const auto name = iterator->path().filename().string();
+        if (name.starts_with(expected_prefix))
+            result.insert(iterator->path());
+    }
+    return result;
+}
+
 void write_program_iso(const std::filesystem::path &root) {
     axk::Waveform waveform;
     waveform.format = {1, 2, 44100};
@@ -58,10 +90,10 @@ void write_program_iso(const std::filesystem::path &root) {
     axk::VolumeSpec volume;
     volume.name = "Graph Volume";
     volume.waveforms.push_back({"wave", "Graph Wave", audio_path, 60U, {}});
-    volume.sample_banks.push_back({"Grouped Bank", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
-    volume.sample_banks.push_back({"Direct Bank", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
-    volume.sample_bank_groups.push_back({"Graph Group", {"Grouped Bank"}});
-    volume.programs.push_back({1U, {{"SBAC", "Graph Group", 1U}, {"SBNK", "Direct Bank", 2U}}});
+    volume.samples.push_back({"Banked Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
+    volume.samples.push_back({"Direct Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
+    volume.sample_banks.push_back({"Graph Bank", {"Banked Sample"}});
+    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
 
     axk::MediaBuildManifest manifest;
     manifest.schema_version = "1.0";
@@ -79,7 +111,8 @@ void write_program_iso(const std::filesystem::path &root) {
 class ExtractionOperationsTest : public testing::Test {
   protected:
     void SetUp() override {
-        root_ = std::filesystem::temp_directory_path() / "axklib-extraction-operations-test";
+        root_ = std::filesystem::temp_directory_path() /
+                ("axklib-extraction-operations-test-" + std::to_string(current_process_id()));
         std::error_code error;
         std::filesystem::remove_all(root_, error);
         std::filesystem::create_directories(root_);
@@ -106,7 +139,187 @@ class ExtractionOperationsTest : public testing::Test {
     axk::app::OperationRegistry registry_;
 };
 
+TEST(ExtractionSelection, RetainsUnresolvedWaveDataOnlyForWholeImageOrConfirmedDependency) {
+    axk::ExportPlan source;
+    axk::UnresolvedWaveDataExport unresolved;
+    unresolved.partition = axk::PartitionIndex{0};
+    unresolved.relative_root = "partition_00_Test/Unresolved Wave Data";
+    unresolved.waveforms.push_back({"wave", "Wave", "SMPL/Wave.wav", {}});
+    source.unresolved_wave_data.push_back(std::move(unresolved));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship relationship;
+    relationship.source_key = "sample";
+    relationship.target_key = "wave";
+    relationship.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    relationship.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(std::move(relationship));
+
+    auto selected = source;
+    axk::app::filter_export_plan(selected, graph, "sbnk", "Sample", "sample");
+    ASSERT_EQ(selected.unresolved_wave_data.size(), 1U);
+    EXPECT_EQ(selected.unresolved_wave_data.front().waveforms.size(), 1U);
+
+    graph.relationships.front().quality = axk::RelationshipQuality::likely;
+    selected = source;
+    axk::app::filter_export_plan(selected, graph, "sbnk", "Sample", "sample");
+    EXPECT_TRUE(selected.unresolved_wave_data.empty());
+
+    selected = source;
+    axk::app::filter_export_plan(selected, graph, "volume", "partition_00_Test/Volume", "volume");
+    EXPECT_TRUE(selected.unresolved_wave_data.empty());
+}
+
+TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelationships) {
+    axk::ExportPlan source;
+    axk::VolumeExport volume;
+    volume.partition = axk::PartitionIndex{0};
+    volume.relative_root = "partition_00_Test/Volume";
+    volume.waveforms.push_back({"wave", "Wave", "SMPL/Wave.wav", {}});
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    sample.members.push_back({"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::known});
+    volume.samples.push_back(std::move(sample));
+    volume.sample_banks.push_back({"bank", "Bank", {"sample"}, {"sample"}});
+    volume.programs.push_back({"program", "Program", {"bank"}});
+    source.volumes.push_back(std::move(volume));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship program_to_bank;
+    program_to_bank.source_key = "program";
+    program_to_bank.target_key = "bank";
+    program_to_bank.type = "PROG_ASSIGNMENT_TO_SBAC";
+    program_to_bank.quality = axk::RelationshipQuality::likely;
+    program_to_bank.assignment_state = axk::AssignmentState::active;
+    graph.relationships.push_back(program_to_bank);
+
+    axk::Relationship bank_to_sample;
+    bank_to_sample.source_key = "bank";
+    bank_to_sample.target_key = "sample";
+    bank_to_sample.type = "SBAC_SLOT_TO_SBNK";
+    bank_to_sample.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(bank_to_sample);
+
+    axk::Relationship sample_to_wave;
+    sample_to_wave.source_key = "sample";
+    sample_to_wave.target_key = "wave";
+    sample_to_wave.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    sample_to_wave.quality = axk::RelationshipQuality::known;
+    graph.relationships.push_back(sample_to_wave);
+
+    auto selected = source;
+    auto excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+    EXPECT_EQ(excluded.front().reason, "exact export requires a Known relationship");
+    ASSERT_TRUE(excluded.front().target_key);
+    EXPECT_EQ(*excluded.front().target_key, "bank");
+
+    graph.relationships.front().quality = axk::RelationshipQuality::known;
+    graph.relationships[1].quality = axk::RelationshipQuality::likely;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBAC_SLOT_TO_SBNK");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+
+    graph.relationships[1].quality = axk::RelationshipQuality::known;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    ASSERT_EQ(selected.volumes.size(), 1U);
+    EXPECT_TRUE(excluded.empty());
+    EXPECT_EQ(selected.volumes.front().sample_banks.size(), 1U);
+    EXPECT_EQ(selected.volumes.front().samples.size(), 1U);
+    EXPECT_EQ(selected.volumes.front().waveforms.size(), 1U);
+
+    graph.relationships[2].quality = axk::RelationshipQuality::likely;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+
+    graph.relationships[2].target_key.reset();
+    graph.relationships[2].candidate_keys = {"wave", "other-wave"};
+    graph.relationships[2].basis = "ambiguous Wave Data candidates";
+    graph.relationships[2].assignment_state = axk::AssignmentState::unknown;
+    selected = source;
+    excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
+    EXPECT_TRUE(selected.volumes.empty());
+    ASSERT_EQ(excluded.size(), 1U);
+    EXPECT_EQ(excluded.front().type, "SBNK_LEFT_MEMBER_TO_SMPL");
+    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
+    EXPECT_FALSE(excluded.front().target_key);
+    EXPECT_EQ(excluded.front().candidate_keys, (std::vector<std::string>{"wave", "other-wave"}));
+    EXPECT_EQ(excluded.front().basis, "ambiguous Wave Data candidates");
+    EXPECT_EQ(excluded.front().assignment_state, axk::AssignmentState::unknown);
+    EXPECT_EQ(excluded.front().reason, "exact export requires a concrete Known relationship target");
+}
+
+TEST(VolumeGraph, SerializesUnresolvedPlacementCandidatesAndResolutionQuality) {
+    axk::UnresolvedWaveDataExport scope;
+    scope.partition = axk::PartitionIndex{2};
+    scope.partition_name = "Disk 3";
+    scope.relative_root = "partition_02_Disk_3/Unresolved Wave Data";
+    axk::PhysicalWaveformExport waveform;
+    waveform.object_key = "p2:sfs9";
+    waveform.display_name = "Hidden Wave";
+    waveform.relative_wav_path = "SMPL/Hidden Wave.wav";
+    waveform.placement_resolution = axk::PlacementResolution::ambiguous;
+    waveform.placement_candidates.push_back(
+        {axk::PartitionIndex{2}, "Disk 3", axk::SfsId{4}, "Vol A", "SMPL", "Hidden Wave", {}});
+    waveform.placement_candidates.push_back(
+        {axk::PartitionIndex{2}, "Disk 3", axk::SfsId{5}, "Vol B", "SMPL", "Hidden Wave", {}});
+    scope.waveforms.push_back(std::move(waveform));
+
+    const auto serialized = axk::app::serialize_unresolved_wave_data_graph(scope, "fixture.hds");
+    ASSERT_TRUE(serialized) << serialized.error().message;
+    const auto json = nlohmann::json::parse(*serialized);
+    EXPECT_EQ(json.at("schema"), "axklib.unresolved_wave_data.v1");
+    const auto &placement = json.at("objects").at("smpl").at(0).at("placement");
+    EXPECT_EQ(placement.at("resolution"), "ambiguous");
+    EXPECT_EQ(placement.at("quality"), "unresolved");
+    EXPECT_EQ(placement.at("candidates").size(), 2U);
+}
+
+TEST(VolumeGraph, RetainsTargetlessExactDependencyDiagnostics) {
+    axk::VolumeExport volume;
+    volume.partition = axk::PartitionIndex{0};
+    volume.partition_name = "Disk 1";
+    volume.volume_name = "Volume";
+    volume.relative_root = "partition_00_Disk_1/Volume";
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    volume.samples.push_back(std::move(sample));
+
+    axk::RelationshipGraph graph;
+    axk::Relationship relationship;
+    relationship.source_key = "sample";
+    relationship.type = "SBNK_LEFT_MEMBER_TO_SMPL";
+    relationship.quality = axk::RelationshipQuality::tentative;
+    relationship.candidate_keys = {"wave-a", "wave-b"};
+    relationship.basis = "ambiguous Wave Data candidates";
+    graph.relationships.push_back(std::move(relationship));
+
+    const auto serialized = axk::app::serialize_volume_graph(volume, graph, "fixture.hds");
+    ASSERT_TRUE(serialized) << serialized.error().message;
+    const auto json = nlohmann::json::parse(*serialized);
+    ASSERT_EQ(json.at("relationships").size(), 1U);
+    const auto &serialized_relationship = json.at("relationships").at(0);
+    EXPECT_TRUE(serialized_relationship.at("target_key").is_null());
+    EXPECT_EQ(serialized_relationship.at("candidate_keys"), (nlohmann::json::array({"wave-a", "wave-b"})));
+    EXPECT_EQ(serialized_relationship.at("quality"), "Tentative");
+    EXPECT_EQ(serialized_relationship.at("basis"), "ambiguous Wave Data candidates");
+}
+
 TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddressedResult) {
+    const auto staging_before = extraction_staging_directories();
     const auto extracted = registry_.invoke("extract.sfz",
                                             {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
                                              {"destination", {{"rootId", "workspace"}, {"relativePath", "export"}}},
@@ -145,6 +358,7 @@ TEST_F(ExtractionOperationsTest, SfzPublishesPersistentCollectionAndContentAddre
         ASSERT_TRUE(std::filesystem::is_regular_file(path)) << path;
         EXPECT_EQ(std::filesystem::file_size(path), artifact.at("sizeBytes"));
     }
+    EXPECT_EQ(extraction_staging_directories(), staging_before);
 
     const auto refused = registry_.invoke("extract.wav",
                                           {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
@@ -281,36 +495,43 @@ TEST_F(ExtractionOperationsTest, VolumeSelectionRejectsMissingVolumeWithoutPubli
 }
 
 TEST_F(ExtractionOperationsTest, SbnkPathSelectionRetainsOnlyTheSelectedDependencyClosure) {
-    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks/sine wave";
+    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks and Samples/sine wave";
     const auto extracted = registry_.invoke("extract.wav",
                                             {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
-                                             {"destination", {{"rootId", "workspace"}, {"relativePath", "bank"}}},
+                                             {"destination", {{"rootId", "workspace"}, {"relativePath", "sample"}}},
                                              {"scope", "sbnk"},
                                              {"selectors", {{{"path", selector}}}}},
                                             context());
     ASSERT_TRUE(extracted) << extracted.error().message;
-    const auto graph_path = root_ / "bank" / "sbnk" / "partition_00_New_Partition" / "New Volume" / "Sample Banks" /
-                            "sine wave" / "volume.axklib.json";
+    const auto graph_path = root_ / "sample" / "sbnk" / "partition_00_New_Partition" / "New Volume" /
+                            "Sample Banks and Samples" / "sine wave" / "volume.axklib.json";
     ASSERT_TRUE(std::filesystem::is_regular_file(graph_path));
     const auto graph = nlohmann::json::parse(read_text(graph_path));
     ASSERT_EQ(graph.at("objects").at("sbnk").size(), 1U);
     EXPECT_EQ(graph.at("objects").at("sbnk").front().at("display_name"), "sine wave");
     EXPECT_EQ(graph.at("objects").at("sbac").size(), 0U);
     EXPECT_EQ(graph.at("objects").at("prog").size(), 0U);
-    EXPECT_EQ(graph.at("objects").at("smpl").size(), 1U);
+    ASSERT_EQ(graph.at("objects").at("smpl").size(), 1U);
+    const auto &aliases = graph.at("objects").at("smpl").front().at("user_facing_aliases");
+    ASSERT_EQ(aliases.size(), 1U);
+    EXPECT_EQ(aliases.front().at("display_name"), "sine wave");
+    EXPECT_EQ(aliases.front().at("relationship_quality"), "Known");
+    EXPECT_FALSE(aliases.front().at("sample_object_key").get<std::string>().empty());
 }
 
-TEST_F(ExtractionOperationsTest, SbacPathSelectionRetainsItsMemberBankAndWaveform) {
-    constexpr std::string_view selector = "partition_00_New_Partition/New Volume/Sample Banks/B New SmpBank";
-    const auto extracted = registry_.invoke("extract.sfz",
-                                            {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
-                                             {"destination", {{"rootId", "workspace"}, {"relativePath", "group"}}},
-                                             {"scope", "sbac"},
-                                             {"selectors", {selector}}},
-                                            context());
+TEST_F(ExtractionOperationsTest, SbacPathSelectionRetainsItsMemberSampleAndWaveData) {
+    constexpr std::string_view selector =
+        "partition_00_New_Partition/New Volume/Sample Banks and Samples/B New SmpBank";
+    const auto extracted =
+        registry_.invoke("extract.sfz",
+                         {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
+                          {"destination", {{"rootId", "workspace"}, {"relativePath", "sample-bank"}}},
+                          {"scope", "sbac"},
+                          {"selectors", {selector}}},
+                         context());
     ASSERT_TRUE(extracted) << extracted.error().message;
-    const auto graph_path = root_ / "group" / "sbac" / "partition_00_New_Partition" / "New Volume" / "Sample Banks" /
-                            "B New SmpBank" / "volume.axklib.json";
+    const auto graph_path = root_ / "sample-bank" / "sbac" / "partition_00_New_Partition" / "New Volume" /
+                            "Sample Banks and Samples" / "B New SmpBank" / "volume.axklib.json";
     ASSERT_TRUE(std::filesystem::is_regular_file(graph_path));
     const auto graph = nlohmann::json::parse(read_text(graph_path));
     ASSERT_EQ(graph.at("objects").at("sbac").size(), 1U);

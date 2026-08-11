@@ -1,5 +1,6 @@
 #include "handlers.hpp"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -30,10 +31,6 @@ namespace {
 
 using Json = nlohmann::json;
 
-Json file_ref_json(const app::FileRef &reference) {
-    return {{"rootId", reference.root_id}, {"relativePath", reference.relative_path}};
-}
-
 Error argument_error(std::string message) {
     return make_error(ErrorCode::invalid_argument, ErrorCategory::internal, std::move(message));
 }
@@ -43,14 +40,16 @@ Result<PackageRootKind> parse_root_kind(std::string_view value) {
         return PackageRootKind::volume;
     if (value == "program" || value == "prog")
         return PackageRootKind::prog;
-    if (value == "sbac")
+    if (value == "sbac" || value == "sample-bank")
         return PackageRootKind::sbac;
-    if (value == "sbnk")
+    if (value == "sbnk" || value == "sample")
         return PackageRootKind::sbnk;
-    if (value == "smpl" || value == "sample")
+    if (value == "smpl" || value == "wave-data")
         return PackageRootKind::smpl;
-    return std::unexpected{argument_error("package root kind must be volume, program, sbac, sbnk, "
-                                          "or smpl")};
+    if (value == "sequence" || value == "sequ")
+        return PackageRootKind::sequ;
+    return std::unexpected{argument_error("package root kind must be volume, program, sample-bank, sample, "
+                                          "wave-data, sequence, sbac, sbnk, smpl, or sequ")};
 }
 
 Result<PackageRootSelector> parse_root(const std::string &value, const axk::cli::PackageExportRequest &request) {
@@ -154,10 +153,88 @@ Result<std::vector<PackageNodeRename>> load_renames(const std::filesystem::path 
     }
 }
 
+Result<std::vector<PackageProgramSlotAssignment>> load_program_slot_assignments(const std::filesystem::path &path) {
+    std::ifstream input{path};
+    if (!input)
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open Program slot map")};
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    if (!input && !input.eof())
+        return std::unexpected{
+            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read Program slot map")};
+    const auto text_value = buffer.str();
+    if (!text::is_valid_utf8(text_value))
+        return std::unexpected{argument_error("Program slot map is not valid UTF-8")};
+    try {
+        const auto array = Json::parse(text_value);
+        if (!array.is_array())
+            return std::unexpected{argument_error("Program slot map must be a JSON array")};
+        std::vector<PackageProgramSlotAssignment> result;
+        result.reserve(array.size());
+        static const std::set<std::string, std::less<>> fields{"package", "node_id", "slot"};
+        for (const auto &item : array) {
+            if (!has_only_fields(item, fields) || !item.contains("package") || !item.contains("node_id") ||
+                !item.contains("slot")) {
+                return std::unexpected{
+                    argument_error("each Program slot assignment must contain only package, node_id, and slot")};
+            }
+            const auto slot = item.at("slot").get<std::uint32_t>();
+            if (slot < 1U || slot > 128U)
+                return std::unexpected{argument_error("Program destination slots must be between 1 and 128")};
+            result.push_back({item.at("package").get<std::size_t>(), item.at("node_id").get<std::string>(),
+                              static_cast<std::uint8_t>(slot)});
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{argument_error(std::string{"invalid Program slot map JSON: "} + error.what())};
+    }
+}
+
+Result<std::vector<PackageOpaqueSequenceDecision>> load_opaque_sequence_decisions(const std::filesystem::path &path) {
+    std::ifstream input{path};
+    if (!input)
+        return std::unexpected{
+            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not open opaque Sequence map")};
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    if (!input && !input.eof())
+        return std::unexpected{
+            make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read opaque Sequence map")};
+    const auto text_value = buffer.str();
+    if (!text::is_valid_utf8(text_value))
+        return std::unexpected{argument_error("opaque Sequence map is not valid UTF-8")};
+    try {
+        const auto array = Json::parse(text_value);
+        if (!array.is_array())
+            return std::unexpected{argument_error("opaque Sequence map must be a JSON array")};
+        std::vector<PackageOpaqueSequenceDecision> result;
+        result.reserve(array.size());
+        static const std::set<std::string, std::less<>> fields{"package", "node_id", "action"};
+        for (const auto &item : array) {
+            if (!has_only_fields(item, fields) || !item.contains("package") || !item.contains("node_id") ||
+                !item.contains("action")) {
+                return std::unexpected{
+                    argument_error("each opaque Sequence decision must contain only package, node_id, and action")};
+            }
+            const auto action = item.at("action").get<std::string>();
+            if (action != "preserve-unchanged" && action != "skip")
+                return std::unexpected{argument_error("opaque Sequence action must be preserve-unchanged or skip")};
+            result.push_back({item.at("package").get<std::size_t>(), item.at("node_id").get<std::string>(),
+                              action == "preserve-unchanged" ? PackageOpaqueSequenceAction::preserve_unchanged
+                                                             : PackageOpaqueSequenceAction::skip});
+        }
+        return result;
+    } catch (const nlohmann::json::exception &error) {
+        return std::unexpected{argument_error(std::string{"invalid opaque Sequence map JSON: "} + error.what())};
+    }
+}
+
 void print_package_summary(const schema::package_v1::PackageOutput &output, bool verify_only) {
     std::cout << output.path_utf8 << '\t' << (output.valid ? "valid" : "invalid") << "\tkind=" << output.package_kind
               << "\tpackage_id=" << output.package_id << "\troots=" << output.roots.size()
-              << "\tobjects=" << output.objects.size() << "\trelationships=" << output.relationship_count;
+              << "\tobjects=" << output.objects.size() << "\tpayload_bytes=" << output.total_payload_bytes
+              << "\trelationships=" << output.relationship_count;
     std::cout << "\tverification=" << (output.payloads_verified ? "full" : "manifest");
     if (!verify_only)
         std::cout << "\textension=" << output.required_extension;
@@ -170,6 +247,12 @@ void print_plan_summary(const schema::package_v1::PlanOutput &output) {
     std::cout << output.target_path_utf8 << '\t' << (output.valid ? "valid" : "conflicts")
               << "\ttarget=" << output.target_kind << "\tplan_id=" << output.plan_id
               << "\tobjects=" << output.objects.size() << "\tconflicts=" << output.conflicts.size() << '\n';
+    for (const auto &allocation : output.allocation) {
+        std::cout << "allocation\tpartition=" << allocation.partition_index << "\tvolume=" << allocation.volume_name
+                  << "\tinsert=" << allocation.inserted_object_count << "\treuse=" << allocation.reused_object_count
+                  << "\tblocked=" << allocation.blocked_object_count
+                  << "\tadditional_bytes=" << allocation.additional_allocated_bytes << '\n';
+    }
     for (const auto &warning : output.warnings)
         std::cout << "warning\t" << warning.code << '\t' << warning.message << '\n';
     for (const auto &conflict : output.conflicts)
@@ -202,41 +285,18 @@ int run_package_export(const axk::cli::PackageExportRequest &request) {
     if (!output_ref)
         return report_application_failure(output_ref.error());
 
-    auto service_roots = Json::array();
-    for (const auto &root : roots) {
-        Json value{{"kind", std::string{package_root_kind_name(root.kind)}},
-                   {"groupName", root.group_name},
-                   {"volumeName", root.volume_name},
-                   {"objectName", root.object_name}};
-        if (root.partition_index)
-            value["partitionIndex"] = static_cast<std::uint32_t>(*root.partition_index);
-        service_roots.push_back(std::move(value));
-    }
-    const Json input{{"source", file_ref_json(*source_ref)},
-                     {"output", file_ref_json(*output_ref)},
-                     {"roots", std::move(service_roots)},
-                     {"overwrite", request.overwrite}};
-    auto result = (*runtime)->invoke("package.export", input);
+    auto result = (*runtime)->package_export(*source_ref, *output_ref, roots, request.overwrite);
     if (!result)
         return report_application_failure(result.error());
-    const auto &output = result->at("output");
-    const app::FileRef effective_output{output.at("rootId").get<std::string>(),
-                                        output.at("relativePath").get<std::string>()};
-    auto output_path = (*runtime)->resolve_file(effective_output);
-    if (!output_path)
-        return report_application_failure(output_path.error());
-    auto projected = schema::package_v1::project_package(*output_path, *result);
-    if (!projected)
-        return report_failure(projected.error());
     if (request.format == "json") {
-        auto serialized = schema::package_v1::serialize(*projected, false);
+        auto serialized = schema::package_v1::serialize(*result, false);
         if (!serialized)
             return report_failure(serialized.error());
         std::cout << *serialized << '\n';
     } else {
-        print_package_summary(*projected, false);
+        print_package_summary(*result, false);
     }
-    return 0;
+    return exit_code(ExitStatus::success);
 }
 
 int run_package_inspect(const axk::cli::PackageReadRequest &request, bool verify_only) {
@@ -247,23 +307,18 @@ int run_package_inspect(const axk::cli::PackageReadRequest &request, bool verify
     auto package_ref = (*runtime)->file_ref(request.package);
     if (!package_ref)
         return report_application_failure(package_ref.error());
-    const auto operation = verify_only ? "package.verify" : "package.inspect";
-    const Json input{{"package", {{"fileRef", file_ref_json(*package_ref)}}}};
-    auto result = (*runtime)->invoke(operation, input);
+    auto result = (*runtime)->package_inspect(request.package, *package_ref, verify_only);
     if (!result)
         return report_application_failure(result.error());
-    auto projected = schema::package_v1::project_package(request.package, *result);
-    if (!projected)
-        return report_failure(projected.error());
     if (request.format == "json") {
-        auto serialized = schema::package_v1::serialize(*projected, false);
+        auto serialized = schema::package_v1::serialize(*result, false);
         if (!serialized)
             return report_failure(serialized.error());
         std::cout << *serialized << '\n';
     } else {
-        print_package_summary(*projected, verify_only);
+        print_package_summary(*result, verify_only);
     }
-    return projected->valid ? 0 : 3;
+    return exit_code(result->valid ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 int run_package_import(const axk::cli::PackageImportRequest &request) {
@@ -280,6 +335,18 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         if (!renames)
             return report_failure(renames.error());
         internal_request.policy.renames = std::move(*renames);
+    }
+    if (request.program_slot_map) {
+        auto assignments = load_program_slot_assignments(*request.program_slot_map);
+        if (!assignments)
+            return report_failure(assignments.error());
+        internal_request.policy.program_slot_assignments = std::move(*assignments);
+    }
+    if (request.opaque_sequence_map) {
+        auto decisions = load_opaque_sequence_decisions(*request.opaque_sequence_map);
+        if (!decisions)
+            return report_failure(decisions.error());
+        internal_request.policy.opaque_sequence_decisions = std::move(*decisions);
     }
 
     std::vector<std::filesystem::path> paths{request.target};
@@ -302,57 +369,20 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
         output_ref = (*runtime)->scratch_file_ref("package-plan-output.tmp");
     }
 
-    auto package_inputs = Json::array();
+    std::vector<app::FileRef> package_inputs;
     for (const auto &path : request.packages) {
         auto package_ref = (*runtime)->file_ref(path);
         if (!package_ref)
             return report_application_failure(package_ref.error());
-        package_inputs.push_back({{"fileRef", file_ref_json(*package_ref)}});
-    }
-    auto destinations = Json::array();
-    for (const auto &destination : internal_request.root_destinations) {
-        Json value{{"packageIndex", destination.package_index}, {"rootIndex", destination.root_index},
-                   {"groupName", destination.group_name},       {"volumeName", destination.volume_name},
-                   {"rawGroup", destination.raw_group},         {"rawVolume", destination.raw_volume},
-                   {"create", destination.create_destination}};
-        if (destination.partition_index)
-            value["partitionIndex"] = static_cast<std::uint32_t>(*destination.partition_index);
-        destinations.push_back(std::move(value));
-    }
-    auto renames = Json::array();
-    for (const auto &rename : internal_request.policy.renames) {
-        renames.push_back({{"packageIndex", rename.package_index},
-                           {"nodeId", rename.node_id},
-                           {"destinationName", rename.destination_name}});
-    }
-    const Json input{{"target", file_ref_json(*target_ref)},  {"output", file_ref_json(output_ref)},
-                     {"packages", std::move(package_inputs)}, {"destinations", std::move(destinations)},
-                     {"renames", std::move(renames)},         {"overwrite", request.overwrite}};
-    auto plan = (*runtime)->invoke("package.plan_import", input);
-    if (!plan)
-        return report_application_failure(plan.error());
-
-    std::optional<std::filesystem::path> output_path;
-    std::optional<Json> application_result;
-    if (request.apply && plan->at("valid").get<bool>()) {
-        if (!request.output)
-            return report_failure(argument_error("package import output path is required"));
-        auto applied = (*runtime)->invoke("package.import", {{"planToken", plan->at("planToken").get<std::string>()}});
-        if (!applied)
-            return report_application_failure(applied.error());
-        application_result = std::move(*applied);
-        const auto &output = application_result->at("output");
-        auto resolved = (*runtime)->resolve_file(
-            {output.at("rootId").get<std::string>(), output.at("relativePath").get<std::string>()});
-        if (!resolved)
-            return report_application_failure(resolved.error());
-        output_path = std::move(*resolved);
+        package_inputs.push_back(std::move(*package_ref));
     }
 
-    auto projected = schema::package_v1::project_plan(request.target, request.packages, *plan, output_path,
-                                                      application_result ? &*application_result : nullptr);
+    if (request.apply && !request.output)
+        return report_failure(argument_error("package import output path is required"));
+    auto projected = (*runtime)->package_import(request.target, request.packages, *target_ref, output_ref,
+                                                package_inputs, internal_request, request.apply, request.overwrite);
     if (!projected)
-        return report_failure(projected.error());
+        return report_application_failure(projected.error());
     if (request.format == "json") {
         auto serialized = schema::package_v1::serialize(*projected, false);
         if (!serialized)
@@ -361,7 +391,7 @@ int run_package_import(const axk::cli::PackageImportRequest &request) {
     } else {
         print_plan_summary(*projected);
     }
-    return projected->valid ? 0 : 3;
+    return exit_code(projected->valid ? ExitStatus::success : ExitStatus::diagnostics);
 }
 
 } // namespace axk::cli::commands

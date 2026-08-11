@@ -55,6 +55,11 @@ std::int32_t sample_value(const Waveform &waveform, std::uint64_t frame, std::ui
 static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std::string object_key,
                                                 std::filesystem::path source_path, PartitionIndex partition,
                                                 SfsId sfs_id, std::string name, std::span<const std::byte> payload) {
+    if (decoded.stored_segment_offset != 0U || decoded.stored_segment_bytes != decoded.stored_pcm_bytes) {
+        return std::unexpected{
+            make_error(ErrorCode::object_missing, ErrorCategory::audio,
+                       "SMPL Wave Data is an incomplete multi-disk segment; open its parent object directory")};
+    }
     const auto start = decoded.stored_pcm_offset;
     const auto size = decoded.stored_pcm_bytes;
     if (start > payload.size() || size > payload.size() - start) {
@@ -111,8 +116,8 @@ static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std:
         result.stored_payload_transform = "raw";
         result.pcm.assign(stored.begin(), stored.end());
     } else {
-        return std::unexpected{
-            make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio, "SMPL sample width is unsupported")};
+        return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
+                                          "Wave Data (SMPL) sample width is unsupported")};
     }
     result.frame_count = result.pcm.size() / result.format.sample_width_bytes;
     return result;
@@ -189,7 +194,8 @@ Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform) {
     return result;
 }
 
-Result<void> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform, bool overwrite) {
+Result<PublicationOutcome> write_wav_atomic(const std::filesystem::path &path, const Waveform &waveform,
+                                            bool overwrite) {
     return audio_internal::write_wav_atomic(path, audio_internal::WavSource::from_physical(waveform), overwrite);
 }
 

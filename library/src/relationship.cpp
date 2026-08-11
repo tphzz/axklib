@@ -23,7 +23,7 @@ struct Match {
 struct ScopeIndex {
     std::map<std::pair<ObjectType, std::string>, std::vector<const ObjectSnapshot *>> typed_names;
     std::map<std::string, std::vector<const ObjectSnapshot *>> names;
-    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> sample_links;
+    std::unordered_map<std::uint32_t, std::vector<const ObjectSnapshot *>> wave_data_reference_values;
     std::unordered_map<std::string, const ObjectSnapshot *> keys;
 };
 
@@ -33,8 +33,8 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
         index.typed_names[{item->object.header.type, item->object.header.name}].push_back(item);
         index.names[item->object.header.name].push_back(item);
         index.keys.emplace(item->key, item);
-        if (const auto *sample = std::get_if<CurrentSmpl>(&item->object.payload)) {
-            index.sample_links[sample->link_id.value].push_back(item);
+        if (const auto *wave_data = std::get_if<CurrentSmpl>(&item->object.payload)) {
+            index.wave_data_reference_values[wave_data->wave_data_reference_value.value].push_back(item);
         } else if (item->object.header.type == ObjectType::smpl) {
             const auto *generic = std::get_if<GenericObject>(&item->object.payload);
             if (generic != nullptr && generic->raw_payload.size() >= 0x7cU) {
@@ -43,7 +43,7 @@ ScopeIndex index_scope(const std::vector<const ObjectSnapshot *> &scope) {
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x79U])) << 16U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7aU])) << 8U |
                                   static_cast<std::uint32_t>(std::to_integer<std::uint8_t>(raw[0x7bU]));
-                index.sample_links[link].push_back(item);
+                index.wave_data_reference_values[link].push_back(item);
             }
         }
     }
@@ -66,6 +66,12 @@ bool same_volume(const ObjectSnapshot &left, const ObjectSnapshot &right) {
 bool same_container_folder(const ObjectSnapshot &left, const ObjectSnapshot &right) {
     return left.placement && right.placement && !left.placement->container_directory.empty() &&
            left.placement->container_directory == right.placement->container_directory;
+}
+
+bool exact_iso_colocation(const ObjectSnapshot &source, const ObjectSnapshot &target) {
+    return source.scope_key.starts_with("iso:") && source.scope_key == target.scope_key &&
+           source.placement_resolution == PlacementResolution::exact &&
+           target.placement_resolution == PlacementResolution::exact && same_container_folder(source, target);
 }
 
 std::vector<const ObjectSnapshot *> named(const ScopeIndex &index, ObjectType type, std::string_view name) {
@@ -98,53 +104,53 @@ std::string local_suffix(const ObjectSnapshot &source) {
 }
 
 Match match_member(const ObjectSnapshot &source, const CurrentSbnkMember &member, const ScopeIndex &index) {
-    const auto link_entry = index.sample_links.find(member.smpl_link_id);
-    const auto by_link =
-        link_entry == index.sample_links.end() ? std::vector<const ObjectSnapshot *>{} : link_entry->second;
-    std::vector<const ObjectSnapshot *> exact;
-    for (const auto *item : by_link) {
-        if (item->object.header.name == member.sample_name)
-            exact.push_back(item);
-    }
-    if (exact.size() == 1) {
-        return {exact.front(), exact, RelationshipQuality::known, "sbnk-member-link+name",
-                "member name and link ID match one SMPL object"};
-    }
-    if (exact.size() > 1) {
-        if (const auto *local = unique_local(source, exact); local != nullptr) {
-            return {local, exact, RelationshipQuality::likely,
-                    std::format("sbnk-member-link+name+{}", local_suffix(source)),
-                    "duplicate member identities have one same-volume candidate"};
+    const auto link_entry = index.wave_data_reference_values.find(member.cached_wave_data_reference_value);
+    const auto by_link = link_entry == index.wave_data_reference_values.end() ? std::vector<const ObjectSnapshot *>{}
+                                                                              : link_entry->second;
+    auto by_name = named(index, ObjectType::smpl, member.wave_data_name);
+    if (!by_name.empty()) {
+        std::vector<const ObjectSnapshot *> local_names;
+        if (source.placement) {
+            std::ranges::copy_if(by_name, std::back_inserter(local_names), [&](const auto *candidate) {
+                return !source.placement->container_directory.empty() ? same_container_folder(source, *candidate)
+                                                                      : same_volume(source, *candidate);
+            });
         }
-        return {nullptr, exact, RelationshipQuality::tentative, "sbnk-member-link+name-ambiguous",
-                "member name and link ID match multiple SMPL objects"};
-    }
-    auto by_name = named(index, ObjectType::smpl, member.sample_name);
-    if (by_name.size() == 1) {
-        return {by_name.front(), by_name, RelationshipQuality::likely, "sbnk-member-name-only",
-                "member name uniquely matches but link ID does not confirm it"};
-    }
-    if (by_link.size() == 1) {
-        const bool iso_cross_folder = source.scope_key.starts_with("iso:") && source.placement &&
-                                      by_link.front()->placement && !same_container_folder(source, *by_link.front());
-        return {by_link.front(), by_link, RelationshipQuality::tentative,
-                iso_cross_folder ? "sbnk-member-link-id-only-iso-cross-folder-name-mismatch"
-                                 : "sbnk-member-link-id-only-name-mismatch",
-                "member link ID uniquely matches but name does not confirm it"};
-    }
-    if (by_name.size() > 1) {
-        if (const auto *local = unique_local(source, by_name); local != nullptr) {
-            return {local, by_name, RelationshipQuality::likely,
+
+        if (local_names.size() == 1U) {
+            const auto cache_matches = std::ranges::find(by_link, local_names.front()) != by_link.end();
+            return {local_names.front(), by_name, RelationshipQuality::known,
                     std::format("sbnk-member-name+{}", local_suffix(source)),
-                    "duplicate member names have one local container candidate"};
+                    cache_matches ? "authoritative member name resolves one local SMPL object and the cached "
+                                    "reference value agrees"
+                                  : "authoritative member name resolves one local SMPL object; the cached "
+                                    "reference value is stale or alternate"};
         }
+        if (local_names.size() > 1U) {
+            return {nullptr, local_names, RelationshipQuality::tentative, "sbnk-member-name-ambiguous-local",
+                    "authoritative member name matches multiple local SMPL objects"};
+        }
+        if (!source.placement && by_name.size() == 1U) {
+            const auto cache_matches = std::ranges::find(by_link, by_name.front()) != by_link.end();
+            return {by_name.front(), by_name, RelationshipQuality::known, "sbnk-member-name",
+                    cache_matches ? "authoritative member name uniquely resolves one same-scope SMPL object "
+                                    "and the cached reference value agrees"
+                                  : "authoritative member name uniquely resolves one same-scope SMPL object; "
+                                    "the cached reference value is stale or alternate"};
+        }
+        if (by_name.size() == 1U && !by_name.front()->placement) {
+            return {by_name.front(), by_name, RelationshipQuality::tentative,
+                    "sbnk-member-name-target-placement-unresolved",
+                    "authoritative member name identifies one same-scope SMPL object whose physical "
+                    "placement is unresolved"};
+        }
+        return {nullptr, by_name, RelationshipQuality::tentative, "sbnk-member-name-nonlocal-or-ambiguous",
+                "member name has no unique local SMPL object"};
     }
-    if (!by_name.empty())
-        return {nullptr, by_name, RelationshipQuality::tentative, "sbnk-member-name-ambiguous",
-                "member name matches multiple SMPL objects"};
-    if (!by_link.empty())
-        return {nullptr, by_link, RelationshipQuality::tentative, "sbnk-member-link-ambiguous",
-                "member link ID matches multiple SMPL objects"};
+    if (!by_link.empty()) {
+        return {nullptr, by_link, RelationshipQuality::tentative, "sbnk-member-cache-only-name-mismatch",
+                "cached reference value matches SMPL metadata, but the authoritative member name does not"};
+    }
     return {nullptr, {}, RelationshipQuality::unknown, "sbnk-member-unmatched", "member does not match a SMPL object"};
 }
 
@@ -152,20 +158,24 @@ Match match_named_target(const ObjectSnapshot &source, std::string_view name, Ob
                          std::string_view unique_basis, std::string_view ambiguous_basis, bool use_same_volume) {
     auto candidates = named(index, type, name);
     if (candidates.size() == 1) {
+        const auto *candidate = candidates.front();
+        const bool local = !source.placement ||
+                           (source.placement->container_directory.empty() ? same_volume(source, *candidate)
+                                                                          : same_container_folder(source, *candidate));
+        if (!local) {
+            return {nullptr, candidates, RelationshipQuality::tentative, std::format("{}-nonlocal", unique_basis),
+                    "name matches an object outside the source volume"};
+        }
         if (unique_basis.starts_with("assignment-kind-0x")) {
             const auto category = type == ObjectType::sbac ? "SBAC" : type == ObjectType::sbnk ? "SBNK" : "object";
             const auto selector = unique_basis.substr(std::string_view{"assignment-kind-"}.size(), 4U);
-            return {candidates.front(), candidates, RelationshipQuality::known, std::string{unique_basis},
-                    std::format("Input consistency: assignment name matches a "
-                                "same-scope object, and "
-                                "assignment kind byte {} selects {} in tested "
-                                "current-object corpora. "
-                                "Keep the selector below write-side quality "
-                                "until formula or validated "
-                                "saves support it.",
+            return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},
+                    std::format("Input consistency: assignment name and kind byte {} select one "
+                                "same-scope {} object. The selector remains read-only until its "
+                                "write-side formula is specified.",
                                 selector, category)};
         }
-        return {candidates.front(), candidates, RelationshipQuality::known, std::string{unique_basis},
+        return {candidate, candidates, RelationshipQuality::known, std::string{unique_basis},
                 "name and target category match one object"};
     }
     if (candidates.size() > 1 && use_same_volume) {
@@ -291,23 +301,28 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
         static_cast<void>(scope_key);
         const auto scope_index = index_scope(scope);
         for (const auto *item : scope) {
-            if (const auto *bank = std::get_if<CurrentSbnk>(&item->object.payload)) {
-                if (!bank->left.sample_name.empty()) {
+            if (const auto *sample = std::get_if<CurrentSbnk>(&item->object.payload)) {
+                if (!sample->left.wave_data_name.empty()) {
                     result.relationships.push_back(
-                        edge(*item, "SBNK_LEFT_MEMBER_TO_SMPL", match_member(*item, bank->left, scope_index)));
+                        edge(*item, "SBNK_LEFT_MEMBER_TO_SMPL", match_member(*item, sample->left, scope_index)));
                 }
-                if (bank->right && !bank->right->sample_name.empty()) {
+                if (sample->right && !sample->right->wave_data_name.empty()) {
                     result.relationships.push_back(
-                        edge(*item, "SBNK_RIGHT_MEMBER_TO_SMPL", match_member(*item, *bank->right, scope_index)));
+                        edge(*item, "SBNK_RIGHT_MEMBER_TO_SMPL", match_member(*item, *sample->right, scope_index)));
                 }
-            } else if (const auto *group = std::get_if<CurrentSbac>(&item->object.payload)) {
-                for (const auto &slot : group->slots) {
+            } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&item->object.payload)) {
+                for (const auto &slot : sample_bank->slots) {
                     if (slot.name.empty())
                         continue;
-                    result.relationships.push_back(
-                        edge(*item, "SBAC_SLOT_TO_SBNK",
-                             match_named_target(*item, slot.name, ObjectType::sbnk, scope_index,
-                                                "active-sbac-slot-name", "active-sbac-slot-name-ambiguous", true)));
+                    auto match = match_named_target(*item, slot.name, ObjectType::sbnk, scope_index,
+                                                    "active-sbac-slot-name", "active-sbac-slot-name-ambiguous", true);
+                    if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
+                        exact_iso_colocation(*item, *match.target)) {
+                        match.quality = RelationshipQuality::known;
+                        match.notes = "counted Sample Bank slot name resolves exactly one directory-backed Sample "
+                                      "in the same ISO volume";
+                    }
+                    result.relationships.push_back(edge(*item, "SBAC_SLOT_TO_SBNK", match));
                 }
             } else if (const auto *program = std::get_if<CurrentProg>(&item->object.payload)) {
                 const auto first_program_edge = result.relationships.size();
@@ -316,13 +331,16 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     if (row.name.empty())
                         continue;
                     const auto type = expected_type(row.kind);
+                    const auto decoded_state = assignment_state(row);
                     auto match = match_named_target(
                         *item, row.name, type, scope_index,
                         type == ObjectType::unknown ? "assignment-name-unique"
                                                     : std::format("assignment-kind-0x{:02x}+name", row.kind),
                         type == ObjectType::unknown ? "assignment-name-ambiguous"
                                                     : std::format("assignment-kind-0x{:02x}+name-ambiguous", row.kind),
-                        assignment_state(row) == AssignmentState::active || item->scope_key.starts_with("iso:"));
+                        decoded_state == AssignmentState::active ||
+                            (decoded_state == AssignmentState::visible_off && type != ObjectType::unknown) ||
+                            item->scope_key.starts_with("iso:"));
                     if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
                         type != ObjectType::unknown) {
                         match.quality = RelationshipQuality::known;
@@ -343,9 +361,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                                      "match the assignment name"};
                         }
                     }
-                    const auto decoded_state = assignment_state(row);
-                    if (match.quality == RelationshipQuality::unknown &&
-                        (row.raw_handle == 0U || decoded_state == AssignmentState::unknown))
+                    if (match.quality == RelationshipQuality::unknown && decoded_state == AssignmentState::unknown)
                         continue;
                     const auto rel_type = type == ObjectType::sbac   ? "PROG_ASSIGNMENT_TO_SBAC"
                                           : type == ObjectType::sbnk ? "PROG_ASSIGNMENT_TO_SBNK"
@@ -438,7 +454,8 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     if (relationship.quality != RelationshipQuality::unknown)
                         continue;
                     if (relationship.assignment_state == AssignmentState::active &&
-                        relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
+                        (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" ||
+                         relationship.type == "PROG_ASSIGNMENT_TO_SBAC")) {
                         relationship.basis = "assignment-active-missing-local-target";
                     } else if (relationship.assignment_state == AssignmentState::visible_off &&
                                relationship.type == "PROG_ASSIGNMENT_TO_SBAC") {
@@ -473,11 +490,11 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
             }
         }
 
-        std::unordered_map<std::string, std::vector<std::string>> group_banks;
+        std::unordered_map<std::string, std::vector<std::string>> sample_bank_members;
         for (const auto &row : result.relationships) {
             if (row.scope_key == scope_key && row.type == "SBAC_SLOT_TO_SBNK" && row.target_key &&
                 row.quality == RelationshipQuality::known) {
-                group_banks[row.source_key].push_back(*row.target_key);
+                sample_bank_members[row.source_key].push_back(*row.target_key);
             }
         }
         std::unordered_map<std::string, std::vector<std::uint8_t>> direct_programs;
@@ -510,21 +527,21 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 for (const auto &candidate : row.candidate_keys)
                     ambiguous_programs[candidate].push_back(*number);
             } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC" && row.target_key) {
-                const auto members = group_banks.find(*row.target_key);
-                if (members == group_banks.end())
+                const auto members = sample_bank_members.find(*row.target_key);
+                if (members == sample_bank_members.end())
                     continue;
-                for (const auto &bank_key : members->second)
-                    indirect_programs[bank_key].push_back(*number);
+                for (const auto &sample_key : members->second)
+                    indirect_programs[sample_key].push_back(*number);
             }
         }
 
         for (const auto *item : scope) {
-            const auto *bank = std::get_if<CurrentSbnk>(&item->object.payload);
-            if (bank == nullptr)
+            const auto *sample = std::get_if<CurrentSbnk>(&item->object.payload);
+            if (sample == nullptr)
                 continue;
             BitmapComparison comparison;
             comparison.sbnk_key = item->key;
-            comparison.bitmap_programs = bank->linked_program_numbers;
+            comparison.bitmap_programs = sample->linked_program_numbers;
             comparison.direct_assignment_programs = direct_programs[item->key];
             comparison.indirect_assignment_programs = indirect_programs[item->key];
             comparison.direct_assignment_programs = sorted_unique(comparison.direct_assignment_programs);

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <ranges>
 #include <span>
@@ -57,7 +58,223 @@ bool write_sndfile(const std::filesystem::path &path, int format, std::uint32_t 
     return sf_close(file) == 0 && written == frames;
 }
 
+bool write_pcm_u8_wav(const std::filesystem::path &path, std::uint32_t sample_rate,
+                      std::span<const std::uint8_t> samples) {
+    const auto write_u16 = [](std::ostream &stream, std::uint16_t value) {
+        const std::array bytes{static_cast<char>(value & 0xffU), static_cast<char>((value >> 8U) & 0xffU)};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto write_u32 = [](std::ostream &stream, std::uint32_t value) {
+        const std::array bytes{static_cast<char>(value & 0xffU), static_cast<char>((value >> 8U) & 0xffU),
+                               static_cast<char>((value >> 16U) & 0xffU), static_cast<char>((value >> 24U) & 0xffU)};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    if (!output)
+        return false;
+    output.write("RIFF", 4);
+    write_u32(output, 36U + static_cast<std::uint32_t>(samples.size()));
+    output.write("WAVEfmt ", 8);
+    write_u32(output, 16U);
+    write_u16(output, 1U);
+    write_u16(output, 1U);
+    write_u32(output, sample_rate);
+    write_u32(output, sample_rate);
+    write_u16(output, 1U);
+    write_u16(output, 8U);
+    output.write("data", 4);
+    write_u32(output, static_cast<std::uint32_t>(samples.size()));
+    output.write(reinterpret_cast<const char *>(samples.data()), static_cast<std::streamsize>(samples.size()));
+    return output.good();
+}
+
+bool write_pcm_s8_aiff(const std::filesystem::path &path, std::span<const std::uint8_t> samples) {
+    const auto write_u16 = [](std::ostream &stream, std::uint16_t value) {
+        const std::array bytes{static_cast<char>((value >> 8U) & 0xffU), static_cast<char>(value & 0xffU)};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto write_u32 = [](std::ostream &stream, std::uint32_t value) {
+        const std::array bytes{static_cast<char>((value >> 24U) & 0xffU), static_cast<char>((value >> 16U) & 0xffU),
+                               static_cast<char>((value >> 8U) & 0xffU), static_cast<char>(value & 0xffU)};
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    std::ofstream output{path, std::ios::binary | std::ios::trunc};
+    if (!output)
+        return false;
+    const auto padded_size = samples.size() + (samples.size() % 2U);
+    output.write("FORM", 4);
+    write_u32(output, static_cast<std::uint32_t>(4U + 8U + 18U + 8U + 8U + padded_size));
+    output.write("AIFFCOMM", 8);
+    write_u32(output, 18U);
+    write_u16(output, 1U);
+    write_u32(output, static_cast<std::uint32_t>(samples.size()));
+    write_u16(output, 8U);
+    constexpr std::array<char, 10> sample_rate_44100{static_cast<char>(0x40),
+                                                     static_cast<char>(0x0e),
+                                                     static_cast<char>(0xac),
+                                                     static_cast<char>(0x44),
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0,
+                                                     0};
+    output.write(sample_rate_44100.data(), static_cast<std::streamsize>(sample_rate_44100.size()));
+    output.write("SSND", 4);
+    write_u32(output, static_cast<std::uint32_t>(8U + samples.size()));
+    write_u32(output, 0U);
+    write_u32(output, 0U);
+    output.write(reinterpret_cast<const char *>(samples.data()), static_cast<std::streamsize>(samples.size()));
+    if (padded_size != samples.size())
+        output.put(0);
+    return output.good();
+}
+
+void append_u32(std::vector<std::byte> &bytes, std::uint32_t value, bool big_endian = false) {
+    for (std::size_t index = 0; index < 4U; ++index) {
+        const auto shift = big_endian ? (3U - index) * 8U : index * 8U;
+        bytes.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
+    }
+}
+
+void append_fourcc(std::vector<std::byte> &bytes, std::string_view value) {
+    ASSERT_EQ(value.size(), 4U);
+    for (const auto character : value)
+        bytes.push_back(static_cast<std::byte>(character));
+}
+
+void append_chunk(std::vector<std::byte> &bytes, std::string_view id, std::span<const std::byte> payload,
+                  bool big_endian = false) {
+    append_fourcc(bytes, id);
+    append_u32(bytes, static_cast<std::uint32_t>(payload.size()), big_endian);
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    if (payload.size() % 2U != 0U)
+        bytes.push_back(std::byte{});
+}
+
+std::vector<std::byte> sampler_wav(std::uint32_t unity_note, std::uint32_t pitch_fraction,
+                                   std::span<const std::array<std::uint32_t, 4>> loops,
+                                   std::optional<std::array<std::int8_t, 7>> instrument = {}, bool big_endian = false) {
+    std::vector<std::byte> smpl(28U);
+    append_u32(smpl, static_cast<std::uint32_t>(loops.size()), big_endian);
+    append_u32(smpl, 0U, big_endian);
+    const auto overwrite = [&](std::size_t offset, std::uint32_t value) {
+        for (std::size_t index = 0; index < 4U; ++index) {
+            const auto shift = big_endian ? (3U - index) * 8U : index * 8U;
+            smpl[offset + index] = static_cast<std::byte>((value >> shift) & 0xffU);
+        }
+    };
+    overwrite(12U, unity_note);
+    overwrite(16U, pitch_fraction);
+    for (std::size_t index = 0; index < loops.size(); ++index) {
+        append_u32(smpl, static_cast<std::uint32_t>(index + 1U), big_endian);
+        append_u32(smpl, loops[index][0], big_endian);
+        append_u32(smpl, loops[index][1], big_endian);
+        append_u32(smpl, loops[index][2], big_endian);
+        append_u32(smpl, 0U, big_endian);
+        append_u32(smpl, loops[index][3], big_endian);
+    }
+
+    std::vector<std::byte> bytes;
+    append_fourcc(bytes, big_endian ? "RIFX" : "RIFF");
+    append_u32(bytes, 0U, big_endian);
+    append_fourcc(bytes, "WAVE");
+    append_chunk(bytes, "smpl", smpl, big_endian);
+    if (instrument) {
+        std::vector<std::byte> inst;
+        inst.reserve(instrument->size());
+        for (const auto value : *instrument)
+            inst.push_back(static_cast<std::byte>(static_cast<std::uint8_t>(value)));
+        append_chunk(bytes, "inst", inst, big_endian);
+    }
+    const auto riff_size = static_cast<std::uint32_t>(bytes.size() - 8U);
+    for (std::size_t index = 0; index < 4U; ++index) {
+        const auto shift = big_endian ? (3U - index) * 8U : index * 8U;
+        bytes[4U + index] = static_cast<std::byte>((riff_size >> shift) & 0xffU);
+    }
+    return bytes;
+}
+
 } // namespace
+
+TEST(WavSamplerMetadata, MapsInfiniteForwardSmplLoopAndPitchToResampledAseriesSettings) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 1> loops{{{0U, 4U, 83U, 0U}}};
+    axk::MemoryReader reader{sampler_wav(64U, 0x40000000U, loops)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 92U, 10'512U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.root_key, 64U);
+    EXPECT_EQ(metadata->settings.fine_tune_cents, 25);
+    EXPECT_EQ(metadata->settings.pitch_source, "WAV_SMPL");
+    EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(metadata->settings.loop_start_frame, 17U);
+    EXPECT_EQ(metadata->settings.loop_length_frames, 335U);
+    EXPECT_EQ(metadata->settings.loop_source, "WAV_SMPL");
+    EXPECT_TRUE(metadata->issues.empty());
+}
+
+TEST(WavSamplerMetadata, NormalizesFiniteForwardSmplLoopToAseriesForwardPlayback) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 1> loops{{{0U, 0U, 599U, 1U}}};
+    axk::MemoryReader reader{sampler_wav(60U, 0U, loops)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 600U, 44'100U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(metadata->settings.loop_start_frame, 0U);
+    EXPECT_EQ(metadata->settings.loop_length_frames, 600U);
+    EXPECT_EQ(metadata->settings.loop_source, "WAV_SMPL");
+    ASSERT_EQ(metadata->issues.size(), 1U);
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_loop_repeat_count_normalized");
+    EXPECT_FALSE(metadata->issues.front().fatal);
+}
+
+TEST(WavSamplerMetadata, UsesInstPitchAndRangesWhenSmplPitchIsUnavailable) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 0> loops{};
+    constexpr std::array<std::int8_t, 7> instrument{57, -12, 3, 24, 96, 10, 110};
+    axk::MemoryReader reader{sampler_wav(200U, 0U, loops, instrument, true)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 100U, 44'100U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.root_key, 57U);
+    EXPECT_EQ(metadata->settings.fine_tune_cents, -12);
+    EXPECT_EQ(metadata->settings.key_low, 24U);
+    EXPECT_EQ(metadata->settings.key_high, 96U);
+    EXPECT_EQ(metadata->settings.velocity_low, 10U);
+    EXPECT_EQ(metadata->settings.velocity_high, 110U);
+    EXPECT_EQ(metadata->settings.pitch_source, "WAV_INST");
+    EXPECT_EQ(metadata->settings.range_source, "WAV_INST");
+    EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_one_shot);
+}
+
+TEST(WavSamplerMetadata, KeepsSmplPitchWhenInstDisagreesAndReportsTheConflict) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 0> loops{};
+    constexpr std::array<std::int8_t, 7> instrument{57, -12, 0, 0, 127, 0, 127};
+    axk::MemoryReader reader{sampler_wav(64U, 0U, loops, instrument)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 100U, 44'100U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.root_key, 64U);
+    EXPECT_EQ(metadata->settings.fine_tune_cents, 0);
+    EXPECT_EQ(metadata->settings.pitch_source, "WAV_SMPL");
+    ASSERT_EQ(metadata->issues.size(), 1U);
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_pitch_conflict");
+    EXPECT_FALSE(metadata->issues.front().fatal);
+}
+
+TEST(WavSamplerMetadata, RejectsUnsupportedLoopSemanticsWithoutApproximatingThem) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 2> loops{{{1U, 4U, 83U, 0U}, {0U, 8U, 40U, 2U}}};
+    axk::MemoryReader reader{sampler_wav(60U, 0U, loops)};
+
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 92U, 10'512U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_one_shot);
+    EXPECT_EQ(metadata->settings.loop_start_frame, 0U);
+    EXPECT_EQ(metadata->settings.loop_length_frames, 0U);
+    EXPECT_EQ(metadata->settings.loop_source, "DEFAULT");
+    ASSERT_EQ(metadata->issues.size(), 1U);
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_loop_unsupported");
+    EXPECT_FALSE(metadata->issues.front().fatal);
+}
 
 TEST(Pcm16Quantizer, UsesStableAxkTpdfPcg32V1Sequence) {
     const std::array<double, 32> silence{};
@@ -147,12 +364,43 @@ TEST(AudioResampler, CoversIntegerNonIntegerShortAndLongRatiosDeterministically)
     }
 }
 
+TEST(AudioImportLimits, ProjectsConvertedPcm16PerPhysicalChannelAtExactBoundaries) {
+    const auto exact =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel, 2U, 44'100U, 44'100U);
+    ASSERT_TRUE(exact) << exact.error().message;
+    EXPECT_EQ(exact->output_frames, axk::maximum_wave_data_frames_per_channel);
+    EXPECT_EQ(exact->bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_EQ(exact->total_bytes, 2U * axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_TRUE(exact->valid);
+
+    const auto over =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel + 1U, 1U, 44'100U, 44'100U);
+    ASSERT_TRUE(over) << over.error().message;
+    EXPECT_EQ(over->output_frames, axk::maximum_wave_data_frames_per_channel + 1U);
+    EXPECT_EQ(over->bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel + 2U);
+    EXPECT_FALSE(over->valid);
+
+    const auto resampled =
+        detail::project_sampler_audio_size(axk::maximum_wave_data_frames_per_channel / 2U + 1U, 1U, 22'050U, 44'100U);
+    ASSERT_TRUE(resampled) << resampled.error().message;
+    EXPECT_EQ(resampled->output_frames, axk::maximum_wave_data_frames_per_channel + 2U);
+    EXPECT_FALSE(resampled->valid);
+}
+
+TEST(AudioImportPolicy, PublishesTheSingleAuthoritativeRateAndWidthPolicy) {
+    EXPECT_EQ(axk::supported_sampler_sample_rates,
+              (std::array<std::uint32_t, 12>{4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U,
+                                             24'000U, 32'000U, 44'100U, 48'000U}));
+    EXPECT_EQ(axk::default_sampler_sample_rate, 44'100U);
+    EXPECT_EQ(axk::sampler_output_sample_width_bits, 16U);
+    EXPECT_EQ(axk::supported_sampler_output_sample_widths_bits, (std::array<std::uint8_t, 1>{16U}));
+    EXPECT_EQ(axk::sampler_sample_width_policy, "PRESERVE_PCM16_EXPAND_PCM8");
+}
+
 TEST(AudioImport, PreservesPcm16AtEverySupportedSamplerRate) {
-    constexpr std::array rates{4'000U,  5'512U,  6'000U,  8'000U,  11'025U, 12'000U,
-                               16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
     const std::vector<std::byte> pcm{std::byte{0x00}, std::byte{0x80}, std::byte{0x34},
                                      std::byte{0x12}, std::byte{0xff}, std::byte{0x7f}};
-    for (const auto rate : rates) {
+    for (const auto rate : axk::supported_sampler_sample_rates) {
         const auto path =
             std::filesystem::temp_directory_path() / ("axklib-audio-import-" + std::to_string(rate) + ".wav");
         std::error_code error;
@@ -169,10 +417,81 @@ TEST(AudioImport, PreservesPcm16AtEverySupportedSamplerRate) {
         EXPECT_EQ(imported->output_sample_rate, rate);
         EXPECT_FALSE(imported->resampled);
         EXPECT_FALSE(imported->quantized);
+        EXPECT_EQ(imported->source_sample_width_bits, 16U);
+        EXPECT_EQ(imported->output_sample_width_bits, 16U);
+        EXPECT_FALSE(imported->sample_width_converted);
+        EXPECT_TRUE(imported->dither_algorithm.empty());
         ASSERT_EQ(imported->pcm_channels.size(), 1U);
         EXPECT_EQ(imported->pcm_channels.front(), pcm);
         std::filesystem::remove(path, error);
     }
+}
+
+TEST(AudioImport, ExpandsNativePcm8ToPcm16ExactlyWithoutDither) {
+    const auto path = std::filesystem::temp_directory_path() / "axklib-audio-import-pcm-u8.wav";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    constexpr std::array<std::uint8_t, 7> source{0U, 1U, 127U, 128U, 129U, 254U, 255U};
+    ASSERT_TRUE(write_pcm_u8_wav(path, 44'100U, source));
+
+    const auto inspected = axk::inspect_sampler_audio(path);
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->source_sample_width_bits, 8U);
+    EXPECT_EQ(inspected->output_sample_width_bits, 16U);
+    EXPECT_TRUE(inspected->sample_width_converted);
+    EXPECT_FALSE(inspected->quantized);
+    EXPECT_TRUE(inspected->dither_algorithm.empty());
+
+    axk::AudioImportOptions options;
+    options.expected_channels = 1U;
+    const auto imported = axk::import_sampler_audio(path, options);
+    ASSERT_TRUE(imported) << imported.error().message;
+    const auto retained = axk::FileReader::open(path);
+    ASSERT_TRUE(retained) << retained.error().message;
+    const auto retained_inspection = axk::inspect_sampler_audio(**retained);
+    ASSERT_TRUE(retained_inspection) << retained_inspection.error().message;
+    EXPECT_EQ(retained_inspection->source_sample_width_bits, inspected->source_sample_width_bits);
+    const auto retained_import = axk::import_sampler_audio(**retained, options);
+    ASSERT_TRUE(retained_import) << retained_import.error().message;
+    EXPECT_EQ(retained_import->pcm_channels, imported->pcm_channels);
+    EXPECT_EQ(imported->source_sample_width_bits, 8U);
+    EXPECT_EQ(imported->output_sample_width_bits, 16U);
+    EXPECT_TRUE(imported->sample_width_converted);
+    EXPECT_FALSE(imported->quantized);
+    EXPECT_TRUE(imported->dither_algorithm.empty());
+    ASSERT_EQ(imported->pcm_channels.size(), 1U);
+    EXPECT_EQ(
+        imported->pcm_channels.front(),
+        (std::vector<std::byte>{std::byte{0x00}, std::byte{0x80}, std::byte{0x00}, std::byte{0x81}, std::byte{0x00},
+                                std::byte{0xff}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01},
+                                std::byte{0x00}, std::byte{0x7e}, std::byte{0x00}, std::byte{0x7f}}));
+    std::filesystem::remove(path, error);
+}
+
+TEST(AudioImport, ExpandsSignedPcm8AiffToPcm16ExactlyWithoutDither) {
+    const auto path = std::filesystem::temp_directory_path() / "axklib-audio-import-pcm-s8.aiff";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    constexpr std::array<std::uint8_t, 6> source{0x80U, 0xffU, 0x00U, 0x01U, 0x7eU, 0x7fU};
+    ASSERT_TRUE(write_pcm_s8_aiff(path, source));
+
+    axk::AudioImportOptions options;
+    options.expected_channels = 1U;
+    const auto imported = axk::import_sampler_audio(path, options);
+    ASSERT_TRUE(imported) << imported.error().message;
+    EXPECT_EQ(imported->source_format, "AIFF");
+    EXPECT_EQ(imported->source_subtype, "PCM_S8");
+    EXPECT_EQ(imported->source_sample_width_bits, 8U);
+    EXPECT_EQ(imported->output_sample_width_bits, 16U);
+    EXPECT_TRUE(imported->sample_width_converted);
+    EXPECT_FALSE(imported->quantized);
+    EXPECT_TRUE(imported->dither_algorithm.empty());
+    ASSERT_EQ(imported->pcm_channels.size(), 1U);
+    EXPECT_EQ(imported->pcm_channels.front(),
+              (std::vector<std::byte>{std::byte{0x00}, std::byte{0x80}, std::byte{0x00}, std::byte{0xff},
+                                      std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x01},
+                                      std::byte{0x00}, std::byte{0x7e}, std::byte{0x00}, std::byte{0x7f}}));
+    std::filesystem::remove(path, error);
 }
 
 TEST(AudioImport, DecodesPcm24AiffFlacAndFloatWaveWithStablePolicyMetadata) {
@@ -206,12 +525,83 @@ TEST(AudioImport, DecodesPcm24AiffFlacAndFloatWaveWithStablePolicyMetadata) {
         EXPECT_EQ(first->source_subtype, item.expected_subtype);
         EXPECT_EQ(first->resampled, item.resampled);
         EXPECT_TRUE(first->quantized);
+        EXPECT_GT(first->source_sample_width_bits, first->output_sample_width_bits);
+        EXPECT_TRUE(first->sample_width_converted);
         EXPECT_EQ(first->dither_algorithm, detail::dither_algorithm);
         EXPECT_EQ(first->pcm_channels, second->pcm_channels);
         ASSERT_EQ(first->pcm_channels.size(), 2U);
         EXPECT_EQ(first->pcm_channels[0].size(), first->pcm_channels[1].size());
         std::filesystem::remove(path, error);
     }
+}
+
+TEST(AudioImport, InspectsMonoAndStereoWithoutDecodingPcm) {
+    const auto mono_path = std::filesystem::temp_directory_path() / "axklib-audio-inspect-mono.wav";
+    const auto stereo_path = std::filesystem::temp_directory_path() / "axklib-audio-inspect-stereo.flac";
+    std::error_code error;
+    std::filesystem::remove(mono_path, error);
+    std::filesystem::remove(stereo_path, error);
+
+    ASSERT_TRUE(
+        write_sndfile(mono_path, SF_FORMAT_WAV | SF_FORMAT_PCM_16, 44'100U, 1U, deterministic_signal(441U, 1U)));
+    ASSERT_TRUE(
+        write_sndfile(stereo_path, SF_FORMAT_FLAC | SF_FORMAT_PCM_24, 96'000U, 2U, deterministic_signal(960U, 2U)));
+
+    const auto mono = axk::inspect_sampler_audio(mono_path);
+    ASSERT_TRUE(mono) << mono.error().message;
+    EXPECT_EQ(mono->source_format, "WAV");
+    EXPECT_EQ(mono->source_subtype, "PCM_16");
+    EXPECT_EQ(mono->channels, 1U);
+    EXPECT_EQ(mono->frame_count, 441U);
+    EXPECT_EQ(mono->source_sample_rate, 44'100U);
+    EXPECT_EQ(mono->output_sample_rate, 44'100U);
+    EXPECT_FALSE(mono->resampled);
+    EXPECT_FALSE(mono->quantized);
+    EXPECT_EQ(mono->source_sample_width_bits, 16U);
+    EXPECT_EQ(mono->output_sample_width_bits, 16U);
+    EXPECT_FALSE(mono->sample_width_converted);
+    EXPECT_TRUE(mono->dither_algorithm.empty());
+    EXPECT_EQ(mono->projected_output_frame_count, 441U);
+    EXPECT_EQ(mono->projected_output_bytes_per_channel, 882U);
+    EXPECT_EQ(mono->projected_output_bytes_total, 882U);
+    EXPECT_EQ(mono->maximum_output_bytes_per_channel, axk::maximum_wave_data_pcm16_bytes_per_channel);
+    EXPECT_TRUE(mono->valid);
+    EXPECT_TRUE(mono->issues.empty());
+
+    const auto stereo = axk::inspect_sampler_audio(stereo_path);
+    ASSERT_TRUE(stereo) << stereo.error().message;
+    EXPECT_EQ(stereo->source_format, "FLAC");
+    EXPECT_EQ(stereo->source_subtype, "PCM_24");
+    EXPECT_EQ(stereo->channels, 2U);
+    EXPECT_EQ(stereo->frame_count, 960U);
+    EXPECT_EQ(stereo->source_sample_rate, 96'000U);
+    EXPECT_EQ(stereo->output_sample_rate, 44'100U);
+    EXPECT_TRUE(stereo->resampled);
+    EXPECT_TRUE(stereo->quantized);
+    EXPECT_EQ(stereo->source_sample_width_bits, 24U);
+    EXPECT_EQ(stereo->output_sample_width_bits, 16U);
+    EXPECT_TRUE(stereo->sample_width_converted);
+    EXPECT_EQ(stereo->dither_algorithm, detail::dither_algorithm);
+    EXPECT_EQ(stereo->projected_output_frame_count, 441U);
+    EXPECT_EQ(stereo->projected_output_bytes_per_channel, 882U);
+    EXPECT_EQ(stereo->projected_output_bytes_total, 1'764U);
+    EXPECT_TRUE(stereo->valid);
+    EXPECT_TRUE(stereo->issues.empty());
+
+    std::filesystem::remove(mono_path, error);
+    std::filesystem::remove(stereo_path, error);
+}
+
+TEST(AudioImport, RejectsCompressedAndUnknownSamplerInputSubtypes) {
+    const auto path = std::filesystem::temp_directory_path() / "axklib-audio-import-ulaw.wav";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    ASSERT_TRUE(write_sndfile(path, SF_FORMAT_WAV | SF_FORMAT_ULAW, 44'100U, 1U, deterministic_signal(32U, 1U)));
+    const auto inspected = axk::inspect_sampler_audio(path);
+    ASSERT_FALSE(inspected);
+    EXPECT_EQ(inspected.error().code, axk::ErrorCode::audio_unsupported_format);
+    EXPECT_NE(inspected.error().message.find("compressed or unsupported"), std::string::npos);
+    std::filesystem::remove(path, error);
 }
 
 TEST(AudioImport, RejectsEmptyChannelMismatchAndSurroundSources) {
@@ -238,4 +628,22 @@ TEST(AudioImport, RejectsEmptyChannelMismatchAndSurroundSources) {
 
     for (const auto &path : {mono_path, surround_path, empty_path})
         std::filesystem::remove(path, error);
+}
+
+TEST(AudioImport, RejectsOversizedDecodedSourceMetadataBeforeAllocation) {
+    detail::SourceAudioInfo source{.format = "WAV",
+                                   .subtype = "DOUBLE",
+                                   .channels = 2U,
+                                   .frames =
+                                       static_cast<std::size_t>(axk::maximum_audio_source_frames_per_channel + 1U),
+                                   .sample_rate = 192'000U,
+                                   .sample_width_bits = 64U,
+                                   .reduces_precision = true};
+
+    const auto rejected = detail::validate_source_resource_limits(source, sizeof(double));
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, axk::ErrorCode::audio_wave_data_too_large);
+
+    source.frames = static_cast<std::size_t>(axk::maximum_audio_source_frames_per_channel);
+    EXPECT_TRUE(detail::validate_source_resource_limits(source, sizeof(double)));
 }

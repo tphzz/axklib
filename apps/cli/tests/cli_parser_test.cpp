@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -14,7 +15,8 @@
 
 #include "app.hpp"
 #include "commands/package_projection.hpp"
-#include "content_id.hpp"
+#include "commands/support.hpp"
+#include "exit_status.hpp"
 #include "local_operations.hpp"
 #include "schema/operations_v1.hpp"
 #include "schema/package_v1.hpp"
@@ -23,15 +25,16 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/media.hpp"
 #include "axklib/package.hpp"
+#include "axklib/sequence.hpp"
+#include "axklib/utf8.hpp"
 #include "axklib/version.hpp"
 #include "axklib/wav_stream.hpp"
 
 #ifdef AXK_TEST_SHARED_SDK
 #include "axklib/sdk.hpp"
 #endif
-
-namespace detail = axk::cli::detail;
 
 namespace {
 
@@ -67,6 +70,23 @@ std::map<std::string, std::string> read_artifact_tree(const std::filesystem::pat
     return result;
 }
 
+void write_sequence_object(const std::filesystem::path &path, std::string_view name) {
+    const std::array smf{
+        std::byte{'M'}, std::byte{'T'},  std::byte{'h'},  std::byte{'d'},  std::byte{0},   std::byte{0},
+        std::byte{0},   std::byte{6},    std::byte{0},    std::byte{0},    std::byte{0},   std::byte{1},
+        std::byte{0},   std::byte{96},   std::byte{'M'},  std::byte{'T'},  std::byte{'r'}, std::byte{'k'},
+        std::byte{0},   std::byte{0},    std::byte{0},    std::byte{12},   std::byte{0},   std::byte{0x90},
+        std::byte{60},  std::byte{100},  std::byte{96},   std::byte{0x80}, std::byte{60},  std::byte{0},
+        std::byte{0},   std::byte{0xff}, std::byte{0x2f}, std::byte{0},
+    };
+    const auto sequence = axk::smf0_to_current_sequence(smf, name, axk::SequenceSystemExclusivePolicy::reject);
+    ASSERT_TRUE(sequence) << sequence.error().message;
+    std::ofstream output{path, std::ios::binary};
+    ASSERT_TRUE(output);
+    output.write(reinterpret_cast<const char *>(sequence->data()), static_cast<std::streamsize>(sequence->size()));
+    ASSERT_TRUE(output);
+}
+
 class CurrentPathGuard {
   public:
     explicit CurrentPathGuard(const std::filesystem::path &path) : original_(std::filesystem::current_path()) {
@@ -83,49 +103,43 @@ class CurrentPathGuard {
 
 } // namespace
 
-TEST(ContentId, MatchesPublishedSha1VectorsAndStablePooledName) {
-    const std::vector<std::byte> empty;
-    EXPECT_EQ(detail::sha1_content_id(empty).digest_hex, "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-    const std::array bytes{std::byte{'a'}, std::byte{'b'}, std::byte{'c'}};
-    EXPECT_EQ(detail::sha1_content_id(bytes).digest_hex, "a9993e364706816aba3e25717850c26c9cd0d89d");
+TEST(CliPathExpansion, RejectsInputsThatCannotBeInspected) {
+    const auto missing = std::filesystem::temp_directory_path() / "axklib-cli-missing-scan-root";
+    std::error_code error;
+    std::filesystem::remove_all(missing, error);
 
-    axk::Waveform waveform;
-    waveform.format = {.channels = 1U, .sample_width_bytes = 1U, .sample_rate = 44'100U};
-    waveform.frame_count = bytes.size();
-    waveform.pcm.assign(bytes.begin(), bytes.end());
-    const auto wav = axk::wav_bytes(waveform);
-    ASSERT_TRUE(wav);
-    const auto wav_id = detail::sha1_content_id(*wav);
-    detail::PooledPathAllocator paths;
-    const auto pooled =
-        paths.allocate("file", "physical", "Sample", axk::audio_internal::WavSource::from_physical(waveform));
-    ASSERT_TRUE(pooled);
-    EXPECT_EQ(pooled->filename(), "Sample__" + wav_id.digest_hex.substr(0U, 12U) + ".wav");
+    const auto expanded = axk::cli::commands::expand_cli_paths({missing});
+    ASSERT_FALSE(expanded);
+    EXPECT_EQ(expanded.error().code, axk::ErrorCode::io_read_failed);
 }
 
-TEST(ContentId, ReusesEqualContentAndRejectsInjectedShortPrefixCollision) {
-    const auto fake = [](const axk::audio_internal::WavSource &source) -> axk::Result<detail::ContentId> {
-        const auto tail = source.physical->pcm.front() == std::byte{1} ? std::string(28U, '0') : std::string(28U, '1');
-        return detail::ContentId{"sha1", "aaaaaaaaaaaa" + tail};
-    };
-    detail::PooledPathAllocator paths{fake};
-    axk::Waveform first;
-    first.format = {.channels = 1U, .sample_width_bytes = 1U, .sample_rate = 44'100U};
-    first.frame_count = 1U;
-    first.pcm = {std::byte{1}};
-    auto second = first;
-    second.pcm = {std::byte{2}};
-    const auto initial =
-        paths.allocate("file", "physical", "Sample", axk::audio_internal::WavSource::from_physical(first));
-    ASSERT_TRUE(initial);
-    const auto reused =
-        paths.allocate("file", "physical", "Sample", axk::audio_internal::WavSource::from_physical(first));
-    ASSERT_TRUE(reused);
-    EXPECT_EQ(*reused, *initial);
-    const auto collision =
-        paths.allocate("file", "physical", "Sample", axk::audio_internal::WavSource::from_physical(second));
-    ASSERT_FALSE(collision);
-    EXPECT_NE(collision.error().message.find("distinct WAV contents"), std::string::npos);
+TEST(CliPathExpansion, TreatsAxkObjectDirectoriesAsMediaLeaves) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-object-directory";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    ASSERT_TRUE(std::filesystem::create_directories(root / "collection" / "volume"));
+
+    const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
+                         "HD00_512_single_sbnk_authored.hds";
+    const auto source = axk::open_media(fixture);
+    ASSERT_TRUE(source) << source.error().message;
+    const auto objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        std::ofstream output{root / "collection" / "volume" / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    }
+
+    const auto expanded = axk::cli::commands::expand_cli_paths({root / "collection"}, true);
+    ASSERT_TRUE(expanded) << expanded.error().message;
+    ASSERT_EQ(expanded->size(), 1U);
+    EXPECT_EQ(expanded->front(), root / "collection" / "volume");
+    EXPECT_EQ(run_cli({"axklib", "info", (root / "collection").string(), "--format", "summary"}), 0);
+
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(Cli11Adapter, ReturnsParserExitCodesWithoutProcessExitMacros) {
@@ -134,6 +148,34 @@ TEST(Cli11Adapter, ReturnsParserExitCodesWithoutProcessExitMacros) {
 
     std::array invalid{const_cast<char *>("axklib"), const_cast<char *>("--not-an-option")};
     EXPECT_NE(axk::cli::run(static_cast<int>(invalid.size()), invalid.data()), 0);
+}
+
+TEST(Cli11Adapter, PublicExitCategoriesRemainCentralizedAndComplete) {
+    using axk::cli::ExitStatus;
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::success), 0);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::operational_failure), 1);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::invalid_request), 2);
+    EXPECT_EQ(axk::cli::exit_code(ExitStatus::diagnostics), 3);
+    EXPECT_EQ(axk::cli::application_error_status("invalid_request"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("selector_not_found"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("package_extension_mismatch"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("write_plan_not_found"), ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::application_error_status("operation_cancelled"), ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::application_error_status("publication_failed"), ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::container_invalid_geometry, axk::ErrorCategory::container, "bad")),
+              ExitStatus::invalid_request);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "unreadable")),
+              ExitStatus::operational_failure);
+    EXPECT_EQ(axk::cli::core_error_status(
+                  axk::make_error(axk::ErrorCode::internal_invariant, axk::ErrorCategory::internal, "broken")),
+              ExitStatus::operational_failure);
+}
+
+TEST(Cli11Adapter, MissingExtractionSelectorUsesTheDocumentedInvalidRequestStatus) {
+    EXPECT_EQ(run_cli({"axklib", "extract", "wav", "--scope", "sbnk", "missing.hds", "-o", "out"}),
+              axk::cli::exit_code(axk::cli::ExitStatus::invalid_request));
 }
 
 TEST(Cli11Adapter, ReportsSemanticAndSourceVersionsSeparately) {
@@ -206,25 +248,70 @@ TEST(Cli11Adapter, ExposesCompletePortablePackageCommandFamily) {
         EXPECT_NE(output.find(command), std::string::npos) << command;
 }
 
-TEST(Cli11Adapter, HidesUnavailablePortablePackageChoices) {
+TEST(Cli11Adapter, ExposesSequencePackageRootsAndHidesUnavailableReuseScope) {
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "export", "--help"}), 0);
     const auto export_help = testing::internal::GetCapturedStdout();
-    EXPECT_EQ(export_help.find("sequence"), std::string::npos);
+    EXPECT_NE(export_help.find("sequence"), std::string::npos);
 
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "plan-import", "--help"}), 0);
     const auto import_help = testing::internal::GetCapturedStdout();
     EXPECT_EQ(import_help.find("--reuse-scope"), std::string::npos);
 
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-sequence-package";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    write_sequence_object(root / "sequence.bin", "Sequence");
+    testing::internal::CaptureStdout();
+    EXPECT_EQ(run_cli({"axklib", "package", "export", (root / "sequence.bin").string(), "--root", "sequence=Sequence",
+                       "-o", (root / "sequence").string(), "--format", "json"}),
+              0);
+    const auto result = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(result.at("package_kind"), "sequence");
+    EXPECT_TRUE(std::filesystem::exists(root / "sequence.axkseq"));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Cli11Adapter, UsesCanonicalSampleBankSampleAndWaveDataPackageSelectors) {
     const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
                          "sampler-authored/HD00_512_single_sbnk_authored.hds";
-    testing::internal::CaptureStderr();
-    EXPECT_NE(run_cli({"axklib", "package", "export", fixture.string(), "--root", "sequence=001", "--partition", "0",
-                       "--group", "New Partition", "--volume", "New Volume", "-o", "unused.axkseq"}),
+    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-package-terminology";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample=sine wave", "--partition",
+                       "0", "--volume", "New Volume", "-o", (root / "sample").string(), "--format", "json"}),
               0);
-    const auto error = testing::internal::GetCapturedStderr();
-    EXPECT_NE(error.find("package root kind must be"), std::string::npos);
+    const auto sample_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(sample_output.at("package_kind"), "sbnk");
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "package", "export", fixture.string(), "--root", "wave-data=sine wave", "--partition",
+                       "0", "--volume", "New Volume", "-o", (root / "wave-data").string(), "--format", "json"}),
+              0);
+    const auto wave_data_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(wave_data_output.at("package_kind"), "smpl");
+
+    testing::internal::CaptureStdout();
+    ASSERT_EQ(
+        run_cli({"axklib", "package", "export", fixture.string(), "--root", "sample-bank=New SmpBank", "--partition",
+                 "0", "--volume", "New Volume", "-o", (root / "sample-bank").string(), "--format", "json"}),
+        0);
+    const auto sample_bank_output = nlohmann::json::parse(testing::internal::GetCapturedStdout());
+    EXPECT_EQ(sample_bank_output.at("package_kind"), "sbac");
+
+    testing::internal::CaptureStderr();
+    EXPECT_NE(
+        run_cli({"axklib", "package", "export", fixture.string(), "--root", "bank-group=New SmpBank", "--partition",
+                 "0", "--volume", "New Volume", "-o", (root / "bank-group").string(), "--format", "json"}),
+        0);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("package root kind must be"), std::string::npos);
+
+    std::filesystem::remove_all(root, error);
 }
 
 TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
@@ -240,15 +327,20 @@ TEST(Cli11Adapter, WritesStarterBuildManifestsWithoutSilentReplacement) {
     const auto parsed = nlohmann::json::parse(read_bytes(output));
     EXPECT_EQ(parsed.at("schema_version"), "1.0");
     EXPECT_EQ(parsed.at("size_bytes"), 536'870'912U);
-    EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").at(0).at("waveforms").empty());
+    EXPECT_TRUE(parsed.at("partitions").at(0).at("volumes").empty());
 
     testing::internal::CaptureStderr();
-    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 2);
+    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string()}), 1);
     EXPECT_NE(testing::internal::GetCapturedStderr().find("refusing to replace"), std::string::npos);
 
     EXPECT_EQ(run_cli({"axklib", "create", "manifest", "iso", "-o", output.string(), "--overwrite"}), 0);
     const auto replaced = nlohmann::json::parse(read_bytes(output));
     EXPECT_EQ(replaced.at("format"), "iso9660");
+    const auto blocked_parent = root / "not-a-directory";
+    std::ofstream{blocked_parent} << "file";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "create", "manifest", "hds", "-o", (blocked_parent / "image.json").string()}), 1);
+    EXPECT_FALSE(testing::internal::GetCapturedStderr().empty());
     std::filesystem::remove_all(root, error);
 }
 
@@ -263,7 +355,7 @@ TEST(Cli11Adapter, WritesStarterAlterationManifestWithoutSilentReplacement) {
     const auto parsed = axk::load_alteration_manifest(output);
     ASSERT_TRUE(parsed) << parsed.error().message;
 
-    EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 2);
+    EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string()}), 1);
     EXPECT_EQ(run_cli({"axklib", "alter", "manifest", "-o", output.string(), "--overwrite"}), 0);
 
     std::filesystem::remove_all(root, error);
@@ -296,9 +388,10 @@ TEST(Cli11Adapter, WritesExactCanonicalManifestBytesFromSharedOperations) {
 TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     const auto fixture = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images" /
                          "sampler-authored/HD00_512_single_sbnk_authored.hds";
-    const auto root = std::filesystem::temp_directory_path() / "axklib-cli-package-round-trip";
-    const auto package_stem = root / "sine-bank";
-    const auto package = root / "sine-bank.axksbnk";
+    const auto root =
+        std::filesystem::canonical(std::filesystem::temp_directory_path()) / "axklib-cli-package-round-trip";
+    const auto package_stem = root / "sine-sample";
+    const auto package = root / "sine-sample.axksbnk";
     const auto manifest = root / "target.json";
     const auto target = root / "target.hds";
     const auto imported = root / "imported.hds";
@@ -327,13 +420,13 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     const auto cli_export_json = nlohmann::json::parse(export_output);
     axk::operation_context sdk_context;
     axk::package_root_selector sdk_selector;
-    sdk_selector.kind = axk::package_root_kind::sample_bank;
+    sdk_selector.kind = axk::package_root_kind::sample;
     sdk_selector.partition_index = 0U;
     sdk_selector.group_name = "New Partition";
     sdk_selector.volume_name = "New Volume";
     sdk_selector.object_name = "sine wave";
     const auto sdk_export = axk::portable_package::export_from(fixture.string(), {sdk_selector},
-                                                               (root / "sdk-sine-bank").string(), {}, sdk_context);
+                                                               (root / "sdk-sine-sample").string(), {}, sdk_context);
     ASSERT_TRUE(sdk_export) << sdk_export.error().message;
     EXPECT_EQ(sdk_export->package_id, cli_export_json.at("package_id").get<std::string>());
     EXPECT_EQ(sdk_export->required_extension, ".axksbnk");
@@ -363,7 +456,7 @@ TEST(Cli11Adapter, PortablePackageRoundTripPlansAndImportsAtomically) {
     }
 
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest.string(), "-o", target.string()}), 0);
     ASSERT_TRUE(std::filesystem::is_regular_file(target));
     const std::string destination = R"({"package":0,"root":0,"partition":0,"volume":"Imported"})";
@@ -446,6 +539,8 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
     const auto package = root / "sine.axksbnk";
     const auto target = root / "target.hds";
     const auto manifest = root / "target.json";
+    const auto program_slot_map = root / "program-slots.json";
+    const auto opaque_sequence_map = root / "opaque-sequences.json";
     const auto output = root / "must-not-exist.hds";
     std::error_code error;
     std::filesystem::remove_all(root, error);
@@ -462,7 +557,7 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
                        "--group", "New Partition", "--volume", "New Volume", "-o", package.string()}),
               0);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest.string(), "-o", target.string()}), 0);
 
     testing::internal::CaptureStderr();
@@ -470,6 +565,22 @@ TEST(Cli11Adapter, PortablePackageRejectsBadSelectorsMappingsAndConflictsCleanly
         run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination", "not-json"}),
         2);
     EXPECT_NE(testing::internal::GetCapturedStderr().find("destination JSON"), std::string::npos);
+
+    std::ofstream{program_slot_map} << R"([{"package":0,"node_id":"not-a-program","slot":129}])";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination",
+                       R"({"package":0,"root":0,"partition":0,"volume":"Imported"})", "--program-slot-map",
+                       program_slot_map.string()}),
+              2);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("between 1 and 128"), std::string::npos);
+
+    std::ofstream{opaque_sequence_map} << R"([{"package":0,"node_id":"sequence-1","action":"repair-automatically"}])";
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "package", "plan-import", target.string(), package.string(), "--destination",
+                       R"({"package":0,"root":0,"partition":0,"volume":"Imported"})", "--opaque-sequence-map",
+                       opaque_sequence_map.string()}),
+              2);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("preserve-unchanged or skip"), std::string::npos);
 
     testing::internal::CaptureStdout();
     EXPECT_EQ(run_cli({"axklib", "package", "import", target.string(), package.string(), "--destination",
@@ -502,7 +613,7 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     std::filesystem::remove_all(root, error);
     ASSERT_TRUE(std::filesystem::create_directory(root, error));
     const auto manifest_text =
-        R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Parity","volumes":[{"name":"Empty","waveforms":[],"sample_banks":[]}]}]})";
+        R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Parity","volumes":[{"name":"Empty","waveforms":[],"samples":[]}]}]})";
     std::ofstream{manifest_path, std::ios::binary} << manifest_text;
     const auto manifest = axk::parse_hds_build_manifest(manifest_text);
     ASSERT_TRUE(manifest) << axk::render_error(manifest.error());
@@ -510,10 +621,19 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     ASSERT_TRUE(direct) << axk::render_error(direct.error());
 
     testing::internal::CaptureStdout();
+    ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string(), "--dry-run"}), 0);
+    const auto plan_output = testing::internal::GetCapturedStdout();
+    EXPECT_NE(plan_output.find("plan=create kind=HDS"), std::string::npos);
+    EXPECT_NE(plan_output.find("size_bytes=1048576"), std::string::npos);
+    EXPECT_NE(plan_output.find("partitions=1"), std::string::npos);
+    EXPECT_NE(plan_output.find("valid=true"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(cli_path));
+
+    testing::internal::CaptureStdout();
     ASSERT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string()}), 0);
     const auto output = testing::internal::GetCapturedStdout();
     std::ostringstream expected;
-    expected << "image=" << cli_path.string() << " size_bytes=" << direct->size_bytes
+    expected << "image=" << axk::text::path_to_utf8(cli_path) << " size_bytes=" << direct->size_bytes
              << " partitions=" << direct->partitions.size()
              << " objects=0 unused_tail_sectors=" << direct->unused_tail_sectors << '\n';
     for (const auto &partition : direct->partitions) {
@@ -525,6 +645,9 @@ TEST(Cli11Adapter, CreateHdsInvokesSharedPlanAndMatchesDirectWriter) {
     }
     EXPECT_EQ(output, expected.str());
     EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path));
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(run_cli({"axklib", "create", "hds", manifest_path.string(), "-o", cli_path.string()}), 1);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("output file already exists"), std::string::npos);
     std::filesystem::remove_all(root, error);
 }
 
@@ -558,7 +681,7 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
                {{"name", "FAT ROOT"},
                 {"waveforms",
                  {{{"id", "tone"}, {"name", "Authored Tone"}, {"path", tone_path.string()}, {"root_key", 60}}}},
-                {"sample_banks",
+                {"samples",
                  {{{"name", "Authored Tone"},
                    {"waveform_id", "tone"},
                    {"root_key", 60},
@@ -579,7 +702,7 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
                          {"authored_volume",
                           {{"name", "NEW VOLUME"},
                            {"waveforms", nlohmann::json::array()},
-                           {"sample_banks", nlohmann::json::array()}}}}}}};
+                           {"samples", nlohmann::json::array()}}}}}}};
 
     for (const auto &test_case : cases) {
         const auto kind = test_case.at("kind").get<std::string>();
@@ -593,18 +716,27 @@ TEST(Cli11Adapter, CreateFloppyAndIsoInvokeSharedPlanAndMatchDirectWriter) {
         ASSERT_TRUE(direct) << kind << ": " << axk::render_error(direct.error());
 
         testing::internal::CaptureStdout();
+        ASSERT_EQ(run_cli({"axklib", "create", kind, manifest_path.string(), "-o", cli_path.string(), "--dry-run"}), 0)
+            << kind;
+        const auto plan_output = testing::internal::GetCapturedStdout();
+        EXPECT_NE(plan_output.find("plan=create"), std::string::npos) << kind;
+        EXPECT_NE(plan_output.find("objects=" + std::to_string(direct->object_count)), std::string::npos) << kind;
+        EXPECT_NE(plan_output.find("valid=true"), std::string::npos) << kind;
+        EXPECT_FALSE(std::filesystem::exists(cli_path)) << kind;
+
+        testing::internal::CaptureStdout();
         ASSERT_EQ(run_cli({"axklib", "create", kind, manifest_path.string(), "-o", cli_path.string()}), 0) << kind;
         const auto output = testing::internal::GetCapturedStdout();
-        const auto expected = std::format("image={} format={} size_bytes={} objects={}\n", cli_path.string(),
-                                          test_case.at("format").get_ref<const std::string &>(), direct->size_bytes,
-                                          direct->object_count);
+        const auto expected = std::format(
+            "image={} format={} size_bytes={} objects={}\n", axk::text::path_to_utf8(cli_path),
+            test_case.at("format").get_ref<const std::string &>(), direct->size_bytes, direct->object_count);
         EXPECT_EQ(output, expected) << kind;
         EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path)) << kind;
     }
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransaction) {
+TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedInspectionAndDirectAlteration) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-cli-alter-hds-parity-test";
     const auto source_path = root / "source.hds";
     const auto manifest_path = root / "alteration.json";
@@ -615,7 +747,7 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransacti
     ASSERT_TRUE(std::filesystem::create_directory(root, error));
 
     const auto build_text =
-        R"({"schema_version":"1.0","size_bytes":4194304,"partitions":[{"name":"Parity","volumes":[{"name":"Keep","waveforms":[],"sample_banks":[]},{"name":"Remove","waveforms":[],"sample_banks":[]}]}]})";
+        R"({"schema_version":"1.0","size_bytes":4194304,"partitions":[{"name":"Parity","volumes":[{"name":"Keep","waveforms":[],"samples":[]},{"name":"Remove","waveforms":[],"samples":[]}]}]})";
     const auto build = axk::parse_hds_build_manifest(build_text);
     ASSERT_TRUE(build) << axk::render_error(build.error());
     ASSERT_TRUE(axk::write_hds_image(*build, source_path, false));
@@ -624,7 +756,7 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransacti
     std::ofstream{manifest_path, std::ios::binary} << alteration_text;
     const auto manifest = axk::parse_alteration_manifest(alteration_text);
     ASSERT_TRUE(manifest) << axk::render_error(manifest.error());
-    const auto direct_dry = axk::alter_hds(source_path, *manifest);
+    const auto direct_dry = axk::inspect_hds_alteration(source_path, *manifest);
     ASSERT_TRUE(direct_dry) << axk::render_error(direct_dry.error());
 
     testing::internal::CaptureStdout();
@@ -642,9 +774,13 @@ TEST(Cli11Adapter, AlterHdsDryRunAndApplyInvokeSharedPlanAndMatchDirectTransacti
     auto cli_result = nlohmann::json::parse(testing::internal::GetCapturedStdout());
     auto expected = nlohmann::json::parse(*axk::cli::schema::operations_v1::serialize(
         axk::cli::schema::operations_v1::project_alteration(*direct), false));
-    expected["output_path"] = cli_path.string();
+    expected["output_path"] = axk::text::path_to_utf8(cli_path);
     EXPECT_EQ(cli_result, expected);
     EXPECT_EQ(read_bytes(cli_path), read_bytes(direct_path));
+    testing::internal::CaptureStderr();
+    EXPECT_EQ(
+        run_cli({"axklib", "alter", "hds", source_path.string(), manifest_path.string(), "-o", cli_path.string()}), 1);
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("output file already exists"), std::string::npos);
     std::filesystem::remove_all(root, error);
 }
 
@@ -666,7 +802,7 @@ TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
     testing::internal::CaptureStdout();
     ASSERT_EQ(axk::cli::run(static_cast<int>(argv.size()), argv.data()), 0);
     EXPECT_EQ(testing::internal::GetCapturedStdout(),
-              "waveforms=2 written_files=23 selection_graphs=1 sfz_files=20 decode_errors=0 load_errors=0\n");
+              "wave_data=2 written_files=23 selection_graphs=1 sfz_files=20 decode_errors=0 load_errors=0\n");
 
     const std::array runtime_paths{fixture, service_output};
     auto runtime = axk::cli::LocalOperationRuntime::create(runtime_paths);
@@ -675,28 +811,22 @@ TEST(Cli11Adapter, ExtractSfzWritesAudioInstrumentsAndVolumeGraph) {
     ASSERT_TRUE(source) << source.error().message;
     auto destination = (*runtime)->directory_ref(service_output);
     ASSERT_TRUE(destination) << destination.error().message;
-    auto result = (*runtime)->invoke(
-        "extract.sfz",
-        {{"sources", {{{"rootId", source->root_id}, {"relativePath", source->relative_path}}}},
-         {"destination", {{"rootId", destination->root_id}, {"relativePath", destination->relative_path}}},
-         {"scope", "file"},
-         {"stereo", "auto"},
-         {"overwrite", false},
-         {"strict", false}});
+    const std::array sources{*source};
+    auto result = (*runtime)->extract(true, sources, *destination, "file", {}, "auto", false, false);
     ASSERT_TRUE(result) << result.error().message;
 
     const auto &summary = baseline.at("summary");
-    EXPECT_EQ(result->at("waveformCount"), summary.at("waveform_count"));
-    EXPECT_EQ(result->at("writtenFileCount"), summary.at("written_file_count"));
-    EXPECT_EQ(result->at("selectionGraphCount"), summary.at("selection_graph_count"));
-    EXPECT_EQ(result->at("sfzFileCount"), summary.at("sfz_file_count"));
-    EXPECT_EQ(result->at("decodeErrorCount"), summary.at("decode_error_count"));
-    EXPECT_EQ(result->at("loadErrorCount"), summary.at("load_error_count"));
-    ASSERT_EQ(result->at("artifacts").size(), baseline.at("artifacts").size());
+    EXPECT_EQ(result->waveform_count, summary.at("waveform_count"));
+    EXPECT_EQ(result->written_file_count, summary.at("written_file_count"));
+    EXPECT_EQ(result->selection_graph_count, summary.at("selection_graph_count"));
+    EXPECT_EQ(result->sfz_file_count, summary.at("sfz_file_count"));
+    EXPECT_EQ(result->decode_error_count, summary.at("decode_error_count"));
+    EXPECT_EQ(result->load_error_count, summary.at("load_error_count"));
+    ASSERT_EQ(result->artifacts.size(), baseline.at("artifacts").size());
     for (std::size_t index = 0; index < baseline.at("artifacts").size(); ++index) {
-        EXPECT_EQ(result->at("artifacts").at(index).at("relativePath"),
-                  baseline.at("artifacts").at(index).at("relative_path"));
-        EXPECT_EQ(result->at("artifacts").at(index).at("sha256"), baseline.at("artifacts").at(index).at("sha256"));
+        EXPECT_EQ(result->artifacts[index].relative_path,
+                  baseline.at("artifacts").at(index).at("relative_path").get<std::string>());
+        EXPECT_EQ(result->artifacts[index].sha256, baseline.at("artifacts").at(index).at("sha256").get<std::string>());
     }
     EXPECT_EQ(read_artifact_tree(output), read_artifact_tree(service_output));
     std::filesystem::remove_all(root, error);
@@ -716,14 +846,17 @@ TEST(Cli11Adapter, InfoUsesCanonicalServiceDataForEveryRenderingMode) {
     ASSERT_EQ(run_cli({"axklib", "info", fixture.string(), "--format", "tree"}), 0);
     const auto tree = testing::internal::GetCapturedStdout();
     EXPECT_TRUE(tree.starts_with(fixture.string() + " [sfs]\n`-- partition 0: New Partition [PARTITION] (1)\n"));
-    EXPECT_NE(tree.find("B New SmpBank [SAMPLE BANK GROUP]"), std::string::npos);
-    EXPECT_NE(tree.find("_NewSample [SAMPLE BANK]"), std::string::npos);
+    EXPECT_NE(tree.find("Sample Banks/Samples (SBAC/SBNK) [CATEGORY]"), std::string::npos);
+    EXPECT_NE(tree.find("B New SmpBank [SAMPLE BANK (SBAC)]"), std::string::npos);
+    EXPECT_NE(tree.find("_NewSample [SAMPLE (SBNK)]"), std::string::npos);
+    EXPECT_NE(tree.find("Wave Data (SMPL) [CATEGORY]"), std::string::npos);
+    EXPECT_NE(tree.find("SMP 252511 [WAVE DATA (SMPL)]"), std::string::npos);
 
     testing::internal::CaptureStdout();
     ASSERT_EQ(run_cli({"axklib", "info", fixture.string(), "--format", "paths"}), 0);
     const auto paths = testing::internal::GetCapturedStdout();
     EXPECT_TRUE(paths.starts_with("source_path\tscope\tpath\tdisplay_name\tobject_type\tobject_key\n"));
-    EXPECT_NE(paths.find("\tsbac\tpartition_00_New_Partition/New Volume/Sample Banks/B New SmpBank\tB New "
+    EXPECT_NE(paths.find("\tsbac\tpartition_00_New_Partition/New Volume/Sample Banks and Samples/B New SmpBank\tB New "
                          "SmpBank\tSBAC\tp0:sfs23\n"),
               std::string::npos);
 
@@ -762,10 +895,10 @@ TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
     EXPECT_NE(info_handler.find("LocalOperationRuntime::create"), std::string::npos);
     EXPECT_EQ(info_handler.find("load_cli_paths(request.paths"), std::string::npos);
     const auto coverage_begin = analysis.find("int run_coverage_request");
-    const auto info_projection_begin = analysis.find("info_node_output");
     ASSERT_NE(coverage_begin, std::string::npos);
-    ASSERT_NE(info_projection_begin, std::string::npos);
-    const auto coverage_handler = analysis.substr(coverage_begin, info_projection_begin - coverage_begin);
+    const auto tree_rendering_begin = analysis.find("tree_type_label");
+    ASSERT_NE(tree_rendering_begin, std::string::npos);
+    const auto coverage_handler = analysis.substr(coverage_begin, tree_rendering_begin - coverage_begin);
     EXPECT_NE(coverage_handler.find("LocalOperationRuntime::create"), std::string::npos);
     EXPECT_EQ(coverage_handler.find("load_cli_paths(request.paths"), std::string::npos);
     const auto relationships_handler_begin = analysis.find("int run_relationships_request");
@@ -804,5 +937,13 @@ TEST(CliArchitecture, KeepsCli11AndJsonAtTheirOwnedBoundaries) {
         if (entry.path().extension() == ".hpp") {
             EXPECT_EQ(read(entry.path()).find("nlohmann"), std::string::npos) << entry.path();
         }
+    }
+    const auto local_interface = read(root / "local_operations.hpp");
+    EXPECT_EQ(local_interface.find("nlohmann"), std::string::npos);
+    EXPECT_EQ(local_interface.find("Result<nlohmann::json>"), std::string::npos);
+    for (const auto filename : {"analysis.cpp", "extract.cpp", "reports.cpp", "writer.cpp"}) {
+        const auto source = read(root / "commands" / filename);
+        EXPECT_EQ(source.find("nlohmann"), std::string::npos) << filename;
+        EXPECT_EQ(source.find("->invoke("), std::string::npos) << filename;
     }
 }

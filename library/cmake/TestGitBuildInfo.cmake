@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.22.1...3.28)
 
 foreach(required_variable IN ITEMS AXK_BUILD_INFO_MODULE AXK_TEST_ROOT)
   if(NOT DEFINED ${required_variable})

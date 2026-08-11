@@ -18,6 +18,16 @@ Manifest-relative input paths are resolved relative to the manifest file, not
 the current working directory. Output publication is atomic. Existing output
 files are refused unless `--overwrite` is supplied.
 
+Run any create command with `--dry-run` first to validate the complete manifest
+and its bound inputs through the canonical build planner without creating the
+output:
+
+```bash
+axklib create hds image.json --output HD00_512_generated.hds --dry-run
+axklib create floppy floppy.json --output generated.ima --dry-run
+axklib create iso cdrom.json --output generated.iso --dry-run
+```
+
 ## Generate A Starter Manifest
 
 Generate a canonical starter instead of writing the schema from memory:
@@ -33,15 +43,15 @@ unless `--overwrite` is supplied. The generated documents have deliberately
 different starting content:
 
 - `hds` is an immediately buildable 512 MiB image definition with one empty
-  partition and one empty volume. It is suitable as a target for
-  `axklib package import` or as the start of a hand-authored manifest.
-- `floppy` contains one waveform and Sample Bank skeleton referring to
+  partition and no volumes. Add authored volume entries to the manifest or
+  insert/import volumes after creation.
+- `floppy` contains one Wave Data object and Sample skeleton referring to
   `tone.wav`. Replace that path and the sampler-facing names as needed. A
   Yamaha FAT12 image with no Yamaha objects is not a valid writer target, so
   the floppy starter cannot be object-empty.
 - `iso` is an object-empty one-group, one-volume staging definition. It can be
   populated with `axklib package import`. Object-empty ISO output is not a
-  hardware-promoted standalone disc profile; for direct audio authoring, use
+  standalone hardware-verified disc profile; for direct audio authoring, use
   the complete example below.
 
 The generated HDS document is:
@@ -53,13 +63,7 @@ The generated HDS document is:
   "partitions": [
     {
       "name": "New Partition",
-      "volumes": [
-        {
-          "name": "New Volume",
-          "waveforms": [],
-          "sample_banks": []
-        }
-      ]
+      "volumes": []
     }
   ]
 }
@@ -72,6 +76,57 @@ axklib create hds image.json --output HD00_512_generated.hds
 axklib info HD00_512_generated.hds
 axklib validate HD00_512_generated.hds --output-dir validation/hds
 ```
+
+## Quick Empty HDS Profiles
+
+Applications that need an empty import target do not have to duplicate HDS
+geometry rules or synthesize a manifest. `hds_creation_profiles()` publishes
+the currently admitted capacities and partition counts, and
+`plan_hds_creation()` turns one of those selections into the same validated
+`HdsBuildManifest` used by the regular writer:
+
+| Profile ID | Image size | Default partitions | Available partitions |
+| --- | ---: | ---: | --- |
+| `floppy-scale` | 1,474,560 bytes | 1 | 1 |
+| `cd-r-650` | 681,984,000 bytes | 1 | 1 through 8 |
+| `cd-r-700` | 737,280,000 bytes | 1 | 1 through 8 |
+| `hds-1-gib` | 1,073,741,824 bytes | 1 | 1 through 8 |
+| `hds-2-gib` | 2,147,483,648 bytes | 2 | 2 through 8 |
+
+Every partition starts without volumes. The 2 GiB profile does not offer one
+partition because one SFS partition cannot represent that capacity. Callers
+must use the published options instead of inferring valid partition counts
+from the total byte size. Add a named volume explicitly before authoring or
+importing sampler objects.
+
+`axklib-server` exposes the same data through
+`GET /api/v1/hard-disk-creation-profiles`. A client submits the chosen profile,
+partition count, and sandboxed output file to
+`POST /api/v1/hard-disk-build-plans`, then applies the returned plan token with
+the regular image-build operation. Planning reserves and validates the output;
+publication remains atomic. The HTTP contract expresses profile IDs as wire
+enums such as `FLOPPY_SCALE` and `CD_R_700`.
+
+The floppy-scale and CD-R-scale choices are still HDS containers. They are
+useful small or removable-media-sized workspaces that can later receive
+packages and be converted through a supported transfer workflow. They are not
+FAT12 floppy images or ISO9660 disc images.
+
+## Quick Blank Floppy Profile
+
+Applications can create a genuinely blank, sampler-formatted floppy without a
+content manifest. `plan_floppy_creation()` returns the fixed 1,474,560-byte
+plan, and `write_formatted_floppy_image()` writes either the A5000-authored
+quick-format or full-format byte profile. Both outputs contain the blank Yamaha
+catalog and `A3000_SY.002` marker but no sampler objects. The serializer does
+not embed a template image.
+
+`axklib-server` exposes the desktop profile through
+`POST /api/v1/floppy-build-plans`; applying the returned token with
+`create.floppy` writes the full-format variant. Axkdeck presents this as Type
+**Floppy** in **Create HD/Floppy image** and always uses `.ima`. Type **HD**
+continues to expose the HDS capacity and partition controls, including the
+distinct `1.44 MB` HD profile.
 
 Generate an alteration starter separately:
 
@@ -88,7 +143,7 @@ against an existing HDS image.
 Fresh HDS, floppy, and ISO images share the same authored volume fields. HDS
 places those fields inside each `partitions[].volumes[]` entry; removable-media
 manifests place them in `authored_volume`. The smallest useful topology is one
-physical waveform (`SMPL`) and one Sample Bank (`SBNK`) that references it:
+Wave Data object (`SMPL`) and one Sample (`SBNK`) that references it:
 
 ```json
 "authored_volume": {
@@ -101,9 +156,9 @@ physical waveform (`SMPL`) and one Sample Bank (`SBNK`) that references it:
       "root_key": 60
     }
   ],
-  "sample_banks": [
+  "samples": [
     {
-      "name": "Tone Bank",
+      "name": "Tone Sample",
       "waveform_id": "tone",
       "root_key": 60,
       "key_low": 0,
@@ -115,11 +170,20 @@ physical waveform (`SMPL`) and one Sample Bank (`SBNK`) that references it:
 ```
 
 Native PCM16 at a supported sampler rate preserves its exact PCM sample
-sequence without resampling or requantization. The source container and byte
-order still change when those samples are serialized as a Yamaha `SMPL` object.
-WAV, FLAC, and AIFF input is accepted. Unsupported rates are converted with
-pinned libsoxr VHQ processing; higher-precision input is converted to PCM16
-with the versioned `axk-tpdf-pcg32-v1` dither policy. See
+sequence without resampling or requantization. Linear PCM8 is expanded exactly
+to PCM16 without dither; current writer profiles do not emit one-byte `SMPL`
+Wave Data. The source container and byte order still change when samples are
+serialized as a Yamaha `SMPL` object.
+
+WAV, FLAC, and AIFF input is accepted when it contains linear 8-, 16-, 24-, or
+32-bit integer PCM, or 32-/64-bit floating-point PCM. Compressed and unknown
+subtypes are rejected. Higher-precision input is reduced to PCM16 with the
+versioned `axk-tpdf-pcg32-v1` dither policy. The supported output rates are
+4,000, 5,512, 6,000, 8,000, 11,025, 12,000, 16,000, 22,050, 24,000, 32,000,
+44,100, and 48,000 Hz. A supported source rate is preserved by default; an
+unsupported source rate defaults to 44,100 Hz. Explicit conversion to any
+supported rate uses pinned libsoxr VHQ processing and the same deterministic
+dither policy. See
 [Sampler Data Structures](sampler-data.md) for the generated object fields and
 stored PCM representation.
 
@@ -127,14 +191,52 @@ Names written into Yamaha object and menu fields must be ASCII and at most 16
 bytes. Manifest IDs such as waveform `id` are manifest-local references and do
 not become sampler-facing names.
 
-!!! warning "Current loop policy"
+### Wave Data Size Limit
 
-    Authored waveforms currently use forward loop mode over the complete
-    logical waveform: start frame `0`, loop length equal to the imported frame
-    count. The manifest does not yet expose one-shot mode or explicit loop
-    points. Use source audio designed for a full-sample loop, or treat the
-    resulting loop behavior as experimental. This limitation applies equally
-    to HDS, floppy, and ISO authored output.
+Each physical `SMPL` Wave Data channel may contain at most 16,777,216 logical
+PCM16 frames, or 32 MiB after conversion. A mono Sample may reference one such
+channel. A stereo Sample may reference two channels, for at most 64 MiB total,
+but its maximum duration is unchanged because each channel is checked
+separately.
+
+The limit applies to the converted sampler data, not the source file size.
+Resampling can therefore move a source across the boundary. Audio inspection
+reports source/output widths, the selected output rate, dither policy,
+`projectedOutputFrameCount`, `projectedOutputBytesPerChannel`,
+`projectedOutputBytesTotal`, `maximumOutputFrameCountPerChannel`,
+`maximumOutputBytesPerChannel`, `valid`, and structured `issues` before an
+import is applied. Creation and alteration reject oversized audio before
+decoding its full payload, and the low-level writer rechecks the limit before
+serializing an `SMPL` object.
+
+Source decoding is separately bounded to 16,777,216 frames per channel and
+256 MiB of decoded intermediate samples. This bound is checked from container
+metadata before allocating the decode buffer, including when downsampling would
+produce a much smaller Yamaha Wave Data object.
+
+### WAV Sampler Metadata
+
+Audio inspection reports `samplerDefaults` in addition to storage projections.
+For WAV input, axklib maps a usable `smpl` unity note, pitch fraction, and
+single forward loop to the A-series root key, fine tune, and forward-loop
+window. Loop endpoints in `smpl` are inclusive; axklib converts them to the
+A-series start/length representation and rescales the boundaries when the
+audio is resampled. A nonzero `smpl` repeat count is normalized to the A-series
+indefinite forward-loop mode and reported as the non-fatal
+`wav_sampler_loop_repeat_count_normalized` adjustment. The range is retained
+because A-series Samples cannot represent a finite repeat count but can safely
+represent the forward loop itself.
+
+A WAV `inst` chunk supplies root key and fine tune only when `smpl` does not,
+and supplies the Sample key and velocity ranges. `smpl` wins a pitch conflict.
+Multiple, backward, alternating, malformed, out-of-range, or resampling-empty
+loops are not approximated: inspection reports a non-fatal issue and defaults
+to the hardware-proven forward one-shot mode.
+
+Files without usable sampler metadata also default to forward one-shot. The
+inspection result records `pitchSource`, `rangeSource`, and `loopSource`, so a
+client can distinguish WAV-authored values from A-series defaults before
+writing. Explicit manifest values remain authoritative after inspection.
 
 ## Create A Hand-Authored CD-ROM ISO
 
@@ -161,7 +263,7 @@ Place `tone.wav` next to `cdrom.json` and write:
         "root_key": 60
       }
     ],
-    "sample_banks": [
+    "samples": [
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
@@ -186,24 +288,17 @@ axklib validate authored.iso --output-dir validation/iso
 For optical media, burn `authored.iso` as a finalized, single-session disc
 image. Do not copy the ISO file onto a data disc.
 
-The exact minimal profile above has been verified on physical Yamaha A-series
-hardware through group and volume enumeration, Sample Bank loading, audible
-waveform playback, and pitch-correct audition. That result covers one group,
-one `F001` volume, one mono `SMPL`, and one direct single-member `SBNK`. It does
-not establish arbitrary group-ID generation, multiple-volume output, every
-object topology, or every sampler model and system version.
+Hardware compatibility covers one group and `F001` volume with either a direct
+mono `SMPL -> SBNK` path or a complete Program containing one
+`PROG -> SBAC -> SBNK -> SMPL` assignment and one direct
+`PROG -> SBNK -> SMPL` assignment that share Wave Data. It does not establish
+arbitrary group identifiers, volume counts, Program counts, graph shapes,
+sampler models, or system versions.
 
-An adjacent fresh profile is also hardware-verified with one Program containing
-both assignment forms supported by the writer: one `SBAC` parent with one
-`SBNK` child, plus one direct `SBNK` assignment. Both Sample Banks reference one
-shared mono `SMPL`; the Program resolved both channel-specific assignments, and
-both paths loaded and played. This promotes that exact complete hierarchy, not
-arbitrary group sizes, Program counts, or graph shapes.
-
-`46DEF120` is an accepted observed-form raw group identifier, not a derived
-content ID. Its generation rule is unknown. The writer accepts one to eight
-uppercase letters, digits, or underscores, but the hardware-verified profile
-uses an eight-character uppercase hexadecimal form. Use `F001` for the one
+`46DEF120` is an accepted raw group identifier, not a derived content ID. Its
+generation rule is unspecified. The writer accepts one to eight uppercase
+letters, digits, or underscores; the hardware-verified profile uses an
+eight-character uppercase hexadecimal form. Use `F001` for the one
 volume emitted by the current writer; this places the group label in `F002` as
 required by the Yamaha menu catalog.
 
@@ -228,7 +323,7 @@ Place `tone.wav` next to `floppy.json` and write:
         "root_key": 60
       }
     ],
-    "sample_banks": [
+    "samples": [
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
@@ -251,15 +346,16 @@ axklib validate authored.ima --output-dir validation/floppy
 ```
 
 The output is always a deterministic 1,474,560-byte FAT12 superfloppy with two
-FAT copies, a 224-entry root directory, and one DOS 8.3 root file per Yamaha
-object. The `authored_volume.name` value is required by the shared schema but a
-floppy has no ISO-style group or volume menu catalog; axklib displays its scope
-as `FAT root`.
+FAT copies, a 224-entry root directory, one DOS 8.3 root file per Yamaha object,
+one synthesized `YAMAHA.SYM`, and the zero-length standalone-disk marker
+`A3000_SY.001`. The `authored_volume.name` value supplies the Yamaha disk label;
+axklib displays the object scope as `FAT root`.
 
-Host reopen and payload comparison are automated. Fresh floppy output has not
-been verified on physical Yamaha hardware, so a parser-valid IMA is not yet a
-hardware-compatibility guarantee. The exact FAT geometry and generated DOS 8.3
-filenames are specified in
+Host reopen and payload comparison are automated. The populated writer profile
+has not been verified on physical Yamaha hardware, so a parser-valid IMA is not
+yet a hardware-compatibility guarantee. Blank full-format images and SFS-volume
+conversion use separately bounded profiles described in the floppy format page.
+The exact FAT geometry and generated DOS 8.3 filenames are specified in
 [FAT12 Floppy Images](floppy.md#generated-floppy-file-layout).
 
 ## Convert A Floppy To An ISO
@@ -311,12 +407,105 @@ Non-object files such as `YAMAHA.SYM` or model-specific system metadata are
 therefore outside whole-source transfer. This is deliberately described as a
 byte-preserving Yamaha-object transfer, not a sector-level floppy clone.
 
-Physical Yamaha hardware has enumerated the generated group and volume, loaded
-the transferred Program and Sample Banks, resolved their transferred waveform
-relationships, and produced audible playback. The transferred Sequence was
-also visible. This promotes the exact whole-floppy Yamaha-object transfer
-profile through loading and audition, while retaining the boundary above:
-non-object files and FAT filesystem metadata are not transferred.
+Transfer planning inventories object metadata and relationships before it
+loads payloads. For `selection: "roots"`, only the selected dependency closure
+is loaded. The C++ engine's `MediaBuildLimits` and the shared SDK's
+`media_build_limits` bound each object, all prepared payloads together, and the
+completed output. Their defaults are 64 MiB per object and 737,280,000 bytes
+for both aggregate payloads and output. Supplying a limits object to
+`plan_media_build()` or `build_plan::from_manifest()` makes object and aggregate
+payload admission part of planning; the output limit is checked against the ISO
+projection before the temporary file is resized. The same limits remain
+attached to an SDK plan during apply. Limits may be lowered for a constrained
+host but must remain nonzero, and the object limit cannot exceed the aggregate
+payload limit.
+
+Whole-floppy transfer is hardware-compatible for the admitted Program, Sample
+Bank, Sample, Wave Data, and byte-preserved Sequence profiles, including
+relationship resolution and audible playback. Newly authored Sequences and
+Sequence rename/save-back remain outside that transfer profile. Non-object files
+and FAT filesystem metadata are not transferred.
+
+## Convert HDA/HDS Content In axkdeck
+
+Axkdeck exposes container conversion on file-backed SFS images through the
+object tree context menu:
+
+- Right-click a partition and choose **Export CD-ROM image...** to convert the
+  complete partition to an ISO9660 image.
+- Right-click a partition and choose **Export volumes to floppies...** to
+  convert every immediate volume in one batch.
+- Right-click a volume and choose **Export floppy image...** to convert the
+  complete volume to a 1,474,560-byte FAT12 image.
+
+Both workflows first show a bounded inspection with selected object counts,
+payload size, output capacity, and every blocking issue. A volume that fits one
+floppy produces a raw `.ima`; an admitted larger volume produces an ordered
+`axklib.floppy-disk-set.v1` ZIP. Multi-floppy ordering is dependency-aware:
+Programs precede Sample/first-use-Wave pairs, remaining Wave Data, Sample Banks,
+and Sequences. Every nonfinal member ends in a Wave Data segment whose exact
+same-object continuation starts the next member. Natural Wave Data splits use
+that representation directly; otherwise the planner may move the final 512
+payload bytes of a complete terminal Wave Data object to the next member as a
+continuation carrier. `A3000F.SYM` marks every nonfinal member, and the final
+member uses `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` topology is rejected.
+A partition is never reduced to a subset without an explicit future selection
+contract. The destination chooser
+matches package export:
+**Storage location** publishes to a configured workspace and **This computer**
+streams the retained result to the desktop file chooser. Suggested names use
+the zero-based partition index and the selected partition or volume name.
+
+Conversion rebuilds only the destination container. Yamaha Program, Sample
+Bank, Sample, Wave Data, and Sequence payloads are copied byte for byte from the
+selected source scope. The ISO path uses reader-backed streaming and does not
+materialize the selected payload set in memory. FAT12 members use fixed floppy
+capacity and multi-floppy output is capped at 32 images.
+
+The constrained multi-floppy topology is load-and-audition compatible through
+four members on an A5000 running system version 1.50. Sampler save/reload
+validation remains pending.
+
+Partition batch export does not define a second floppy format. It plans the
+partition once, then applies the individual volume conversion contract to each
+immediate volume. Each successful volume receives a collision-safe directory
+containing raw `diskNN.ima` files. Thus a single-floppy volume has
+`disk01.ima`, while a multi-floppy volume has `disk01.ima` through its final
+member without an inner ZIP. The root `volume-floppies.axklib.json` report
+records every exported, empty, blocked, or failed volume. Failures are isolated
+per volume and zero-success runs publish no directory or download.
+
+The public native entry points are `plan_volume_floppy_export` and
+`write_volume_floppy_export`. They share one source parse, inventory, catalog,
+and relationship graph across the operation. Multi-floppy members are built by
+the same member builder used by `write_media_conversion`, so corresponding raw
+images are byte-identical rather than merely semantically equivalent.
+
+Generated ISO partition conversion has hardware-verified one-volume and
+four-volume profiles. Directory extents and both
+path tables are planned and emitted across as many complete 2048-byte sectors
+as their deterministic records require. Multi-sector output has host reopen,
+independent reader, and exact-payload coverage; object-heavy multi-sector
+hardware compatibility remains pending.
+
+Dependency closure remains Known-only. One bounded whole-partition exception
+does not create a dependency: an active-form Program assignment row whose exact
+named Sample or Sample Bank target is absent from the complete source partition
+is copied byte for byte and reported as a nonblocking retained-disabled-row
+warning. This preserves sampler-saved Program bytes without redirecting the row
+to a similarly named object. An exact candidate with non-Known quality,
+source-load row, out-of-scope target, or cross-volume target remains blocking.
+Inspection admits conversion only when no blocking issue remains; nonblocking
+retention warnings stay visible in the destination dialog.
+
+Multi-volume output remains subject to exact placement, the relationship rules
+above, object identifier counts, payload limits, and the 700 MB capacity check
+reported by inspection.
+Generated floppy output is host-reopened and payload-compared, but fresh FAT12
+authoring still retains the hardware-validation qualification documented above.
+Multi-floppy output also validates dependency-derived order, absence of
+unintended complete-object duplication, and byte-exact reassembly of all split
+Wave Data.
 
 ## Transfer Selected Saved Objects
 
@@ -336,7 +525,7 @@ Then reference one or more reported object keys:
   "transfer": {
     "source_path": "source.hds",
     "selection": "roots",
-    "root_object_keys": ["<sample-bank-object-key>"]
+    "root_object_keys": ["<sample-object-key>"]
   }
 }
 ```
@@ -354,7 +543,7 @@ Top-level HDS fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; currently exactly `"1.0"`. |
+| `schema_version` | Required; the only accepted value is `"1.0"`. |
 | `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
 | `partitions` | Required array containing `1..8` partition objects. |
 
@@ -363,18 +552,18 @@ HDS partition and volume fields:
 | Field | Rule |
 | --- | --- |
 | partition `name` | Required non-empty sampler-facing partition name. |
-| partition `volumes` | Required non-empty array of volume objects. |
+| partition `volumes` | Required array of volume objects; it may be empty. |
 | volume `name` | Required non-empty sampler-facing volume name. |
 | volume `waveforms` | Required array; it may be empty. |
-| volume `sample_banks` | Required array; it may be empty. |
-| volume `sample_bank_groups` | Optional array using the common authored-content schema below. |
+| volume `samples` | Required Sample (`SBNK`) array; it may be empty. |
+| volume `sample_banks` | Optional Sample Bank (`SBAC`) array using the common authored-content schema below. |
 | volume `programs` | Optional array using the common authored-content schema below. |
 
 Top-level removable-media fields:
 
 | Field | Rule |
 | --- | --- |
-| `schema_version` | Required; currently exactly `"1.0"`. |
+| `schema_version` | Required; the only accepted value is `"1.0"`. |
 | `format` | Required; `"fat12_floppy"` or `"iso9660"`. |
 | `authored_volume` / `transfer` | Exactly one is required. |
 | `iso` | Required for `iso9660`; omitted for `fat12_floppy`. |
@@ -384,9 +573,9 @@ Top-level removable-media fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required non-empty string. Match `iso.volume_name` for clear ISO manifests. |
-| `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a hardware-promoted standalone profile. |
-| `sample_banks` | Required array. |
-| `sample_bank_groups` | Optional array; current groups contain 1..3 distinct Sample Bank names. |
+| `waveforms` | Required array. Completed FAT12 images must contain at least one generated object. An object-empty ISO volume is accepted only as a package-import staging target; it is not a standalone hardware-verified profile. |
+| `samples` | Required Sample (`SBNK`) array. |
+| `sample_banks` | Optional Sample Bank (`SBAC`) array; each bank contains 1..127 distinct Sample names. |
 | `programs` | Optional array; Program numbers are `1..128`. |
 
 Waveform fields:
@@ -398,8 +587,11 @@ Waveform fields:
 | `path` | Required WAV, FLAC, or AIFF source path. Relative paths use the manifest directory. |
 | `root_key` | Required MIDI note `0..127`. |
 | `target_sample_rate` | Optional requested output rate. Omit to preserve supported native rates or use the default conversion policy. |
+| `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
+| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
+| `loop_start_frame`, `loop_length_frames` | Optional explicit loop window. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero and serializes the full physical Wave Data span. |
 
-Direct and stereo Sample Bank fields:
+Direct and stereo Sample fields:
 
 | Field | Rule |
 | --- | --- |
@@ -407,6 +599,10 @@ Direct and stereo Sample Bank fields:
 | `root_key` | Required MIDI note `0..127`. |
 | `key_low`, `key_high` | Required MIDI limits `0..127`; high must not precede low. |
 | `level` | Optional `0..127`; default `100`. |
+| `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
+| `velocity_low`, `velocity_high` | Optional MIDI limits `0..127`; defaults `0` and `127`, and high must not precede low. |
+| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
+| `loop_start_frame`, `loop_length_frames` | Optional Sample loop window within the full linked Wave Data playback span. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
@@ -417,11 +613,12 @@ Direct stereo members must have equal sample rate and logical frame count.
 Interleaved input is split into two physical mono objects and inherently meets
 that constraint.
 
-The current authored `SBAC`/`PROG` profile is intentionally narrow. Each group
-contains 1..3 mono Sample Banks. Each Program has exactly two ordered
-assignments: one distinct `sample_bank_group` on receive channel `1`, followed
-by one direct `sample_bank` on receive channel `2`. Every group and direct bank
-used by this profile is assigned once. Sequence (`SEQU`) and profile (`PRF3`)
+The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
+contains 1..127 mono or stereo Samples. Each Program has exactly two ordered
+assignments: one distinct `sample_bank` on receive channel `1`, followed
+by one direct `sample` on receive channel `2`. Every Sample Bank and direct Sample
+used by the Program profile is assigned once, and the direct Program Sample remains
+mono-only. Sequence (`SEQU`) and profile (`PRF3`)
 payload authoring are not exposed; transfer mode can preserve existing objects
 of those known types.
 
@@ -479,31 +676,72 @@ Supported operation types:
 | --- | --- |
 | `delete_volume` | `volume_name` |
 | `insert_volume` | `volume` using the common authored-volume schema |
+| `rename_volume` | `volume_name`, `new_volume_name` |
+| `rename_partition` | `partition_name`, `new_partition_name` |
 | `delete_waveform` | `volume_name`, `waveform_name` |
 | `insert_waveform` | `volume_name`, `audio` |
 | `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |
-| `delete_sbnk` | `volume_name`, `sample_bank_name` |
-| `insert_sbnk` | `volume_name`, `sample_bank` |
-| `rename_sbnk` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
-| `delete_sbac` | `volume_name`, `sample_bank_group_name` |
-| `insert_sbac` | `volume_name`, `sample_bank_group` |
-| `rename_sbac` | `volume_name`, `sample_bank_group_name`, `new_sample_bank_group_name` |
+| `delete_sbnk` | `volume_name`, `sample_name` |
+| `insert_sbnk` | `volume_name`, `sample` |
+| `rename_sbnk` | `volume_name`, `sample_name`, `new_sample_name` |
+| `delete_sbac` | `volume_name`, `sample_bank_name` |
+| `insert_sbac` | `volume_name`, `sample_bank` |
+| `assign_sbac_members` | `volume_name`, `sample_bank_name`, `sample_names` |
+| `rename_sbac` | `volume_name`, `sample_bank_name`, `new_sample_bank_name` |
 | `delete_program` | `volume_name`, `program_number` |
 | `insert_program` | `volume_name`, `program` |
+| `rename_program` | `volume_name`, `program_number`, `new_program_name` |
 
 An `insert_waveform` audio object contains `path`, one or two distinct
-`waveform_names`, and `root_key`; `target_sample_rate` is optional. Relative
-audio paths resolve from the alteration manifest directory.
+`waveform_names`, and `root_key`. Optional fields are `target_sample_rate`,
+`fine_tune_cents`, `loop_mode`, `loop_start_frame`, and
+`loop_length_frames`. Relative audio paths resolve from the alteration manifest
+directory.
 
 An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
-and `key_high`. Optional fields are `right_waveform_name` and `level`. The named
-waveforms must already exist at that point in the ordered transaction.
+and `key_high`. Optional fields are `right_waveform_name`, `level`,
+`fine_tune_cents`, `velocity_low`, `velocity_high`, `loop_mode`,
+`loop_start_frame`, and `loop_length_frames`. The named Wave Data entries in
+the evolving transaction must already exist at that point.
 
-An `insert_sbac` object contains `name` and `member_sample_banks`, an array of
-one to three distinct existing Sample Bank names. An `insert_program` object
-contains a Program `number` and exactly two assignments: a
-`sample_bank_group` on receive channel 1 followed by a direct `sample_bank` on
-receive channel 2. These limits match the currently supported authored profile.
+An `insert_sbac` object contains `name` and `member_samples`, an array of
+one to 127 distinct existing Sample names. Samples may be mono or stereo. If a
+member already belongs to another Sample Bank, the transaction removes that
+membership and moves the Sample into the new bank; the source bank remains with
+its other members and may become empty. A Sample assigned directly to a Program
+is rejected rather than silently changing the Program assignment.
+
+`assign_sbac_members` applies the same membership safety rules to an existing
+Sample Bank. `sample_bank_name` identifies that target and `sample_names`
+contains one to 127 distinct existing Sample names. Existing target members are
+left in place; all other selected Samples are appended in manifest order. The
+target Sample Bank's object identity and incoming Program relationships are
+preserved. The final bank may contain at most 127 members. This metadata-only
+operation can grow the target payload only within its currently allocated record
+extents; insufficient extent capacity rejects the transaction atomically. It
+preserves opaque bytes after the active member table when that table expands.
+
+An `insert_program` object contains a Program `number`, its sampler-visible
+`name` (`1..8` printable ASCII characters without leading or trailing spaces),
+and one supported assignment profile:
+
+- A single `sample_bank` or `sample` assignment with
+  `"receive_mode":"SAMPLE"`. It omits `receive_channel` and encodes the
+  sampler's `Rch Assign =SMP` mode. Axkdeck's **Generate Programs** action uses
+  this profile to make otherwise unassigned Sample Banks and Samples directly
+  auditionable.
+- Exactly two ordered assignments using `"receive_mode":"MIDI_CHANNEL"`: a
+  `sample_bank` on `receive_channel` 1 followed by a direct `sample` on
+  `receive_channel` 2. This is the full-image authored Program profile.
+
+Program generation is deliberately conservative. It only offers unreferenced
+Sample Banks whose complete same-volume membership is known, then unreferenced
+Samples not covered by those banks. Ambiguous, overlapping, unreadable, and
+cross-volume relationships are reported and excluded. The operation recomputes
+eligibility and free slots immediately before applying the reviewed selection.
+`rename_program` changes the sampler-visible Program name while retaining its
+numeric slot; `new_program_name` is `1..8` printable ASCII characters without
+leading or trailing spaces.
 
 Plan without writing an image:
 
@@ -517,9 +755,22 @@ Apply to a different output path only after reviewing that plan:
 axklib alter hds source.hds transaction.json -o altered.hds --pretty
 ```
 
-Deletion checks live relationships. Delete a Program or group before deleting
-objects it owns, and delete a Sample Bank before deleting its waveform. The
+Deletion checks live relationships. Delete a Program or Sample Bank before deleting
+objects it owns, and delete a Sample before deleting its Wave Data. The
 engine rejects an operation that would leave a known dangling relationship.
+
+## Canonical Terminology
+
+Schema `1.0` is the canonical authored and alteration format. It uses `samples`
+for Sample (`SBNK`) objects, `sample_banks` for Sample Bank (`SBAC`) objects,
+`member_samples` for bank membership, and Program targets `sample` and
+`sample_bank`. Obsolete pre-release field meanings are rejected rather than
+translated.
+
+The C++ writer API follows the same terminology: `SampleSpec` models `SBNK`,
+`SampleBankSpec` models `SBAC`, and `VolumeSpec` exposes `samples` and
+`sample_banks`. No transitional C++ aliases are provided for superseded
+pre-release names.
 
 ## Publication And Validation Guarantees
 
@@ -530,6 +781,12 @@ Both removable-media writers:
 3. compare the complete expected and reopened object-payload multisets;
 4. publish only after those checks pass.
 
+ISO sectors are written directly to the reserved temporary file in bounded
+chunks. Reopen validation inventories metadata first and hashes retained files
+and object payloads one at a time. The writer therefore does not allocate a
+second output-sized image buffer; prepared payload memory and output size are
+still independently bounded by `MediaBuildLimits`.
+
 This proves deterministic container construction and exact object retention
 within axklib. It does not replace physical sampler testing for a new object
 topology or profile. Keep source material until the resulting image has been
@@ -538,3 +795,11 @@ verified in the intended workflow.
 Existing-image alteration performs relationship, capacity, name, and
 operation-order checks before applying an ordered transaction. Application uses
 a temporary destination and validates the completed image before replacement.
+The server application API normally requires a distinct output file. Trusted
+clients may instead set `replaceSource` to `true` on `alter.hds`, set `output`
+to the same `FileRef` as `source`, and close every open session for that image
+first. The operation then
+builds and validates a temporary sibling before atomically replacing the source
+path; `overwrite` must be omitted in this mode. `alter.inspect` provides a
+write-free advisory validation response. It does not issue a token or authorize
+a later apply request; `alter.hds` receives and revalidates the complete request.

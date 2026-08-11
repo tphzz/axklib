@@ -7,6 +7,7 @@
 #include "axklib/bytes.hpp"
 #include "axklib/generated/current_sbnk_fields.hpp"
 #include "axklib/lookups.hpp"
+#include "axklib/sequence.hpp"
 
 namespace axk {
 namespace {
@@ -51,7 +52,7 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
     const auto sample_width = reader.be16(0x2a);
     const auto source_name = reader.printable_ascii_field(0x54, 16);
     const auto group_id = reader.be32(0x6c);
-    const auto link_id = reader.be32(0x78);
+    const auto reference_value = reader.be32(0x78);
     const auto duplicate_rate = reader.be16(0x7c);
     const auto root_key = reader.u8(0x7e);
     const auto fine_tune = reader.s8(0x7f);
@@ -59,8 +60,8 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
     const auto wave_length = reader.be32(0x92);
     const auto loop_start = reader.be32(0x96);
     const auto loop_length = reader.be32(0x9a);
-    if (!sample_rate || !sample_width || !source_name || !group_id || !link_id || !duplicate_rate || !root_key ||
-        !fine_tune || !loop_mode || !wave_length || !loop_start || !loop_length) {
+    if (!sample_rate || !sample_width || !source_name || !group_id || !reference_value || !duplicate_rate ||
+        !root_key || !fine_tune || !loop_mode || !wave_length || !loop_start || !loop_length) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SMPL metadata is truncated")};
     }
@@ -69,7 +70,7 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
         field(*sample_width, 0x2a, 2, Verification::corroborated, "current SMPL header"),
         field(*source_name, 0x54, 16, Verification::corroborated, "compact record text"),
         field(*group_id, 0x6c, 4, Verification::corroborated, "compact record link field"),
-        field(*link_id, 0x78, 4, Verification::corroborated, "compact record link field"),
+        field(*reference_value, 0x78, 4, Verification::corroborated, "compact Wave Data reference value"),
         field(*duplicate_rate, 0x7c, 2, Verification::corroborated, "compact rate copy"),
         field(*root_key, 0x7e, 1, Verification::corroborated, "compact pitch field"),
         field(*fine_tune, 0x7f, 1, Verification::corroborated, "compact pitch field"),
@@ -82,6 +83,8 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
         std::nullopt,
         header.header_size,
         header.payload_bytes_0x1c,
+        header.payload_offset_0x24,
+        header.payload_bytes_0x20,
         {},
     };
     result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
@@ -98,19 +101,30 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
 
 Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool right) {
     const auto name = reader.printable_ascii_field(right ? 0x88U : 0x78U, 16);
-    const auto link = reader.be32(right ? 0xa4U : 0xa0U);
+    const auto cached_reference = reader.be32(right ? 0xa4U : 0xa0U);
     const auto root = reader.u8(right ? 0xd7U : 0xd6U);
     const auto rate = reader.be16(right ? 0xdaU : 0xd8U);
     const auto fine = reader.s8(right ? 0xddU : 0xdcU);
     const auto pitch = reader.be16(right ? 0xe0U : 0xdeU);
+    const auto start = reader.be32(right ? 0xecU : 0xe8U);
     const auto length = reader.be32(right ? 0xf4U : 0xf0U);
     const auto loop_start = reader.be32(right ? 0xfcU : 0xf8U);
     const auto loop_length = reader.be32(right ? 0x104U : 0x100U);
-    if (!name || !link || !root || !rate || !fine || !pitch || !length || !loop_start || !loop_length) {
+    if (!name || !cached_reference || !root || !rate || !fine || !pitch || !start || !length || !loop_start ||
+        !loop_length) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SBNK member lane is truncated")};
     }
-    return CurrentSbnkMember{*name, *link, *root, *rate, *fine, *pitch, *length, *loop_start, *loop_length};
+    return CurrentSbnkMember{.wave_data_name = *name,
+                             .cached_wave_data_reference_value = *cached_reference,
+                             .root_key = *root,
+                             .sample_rate = *rate,
+                             .fine_tune_cents = *fine,
+                             .pitch_base_word = *pitch,
+                             .wave_start_frame = *start,
+                             .wave_length_frames = *length,
+                             .loop_start_frame = *loop_start,
+                             .loop_length_frames = *loop_length};
 }
 
 Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
@@ -119,29 +133,29 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
                                           "current SBNK member contract requires at least 264 bytes")};
     }
     const ByteReader reader{payload};
-    const auto bank_name = reader.printable_ascii_field(0x32, 16);
+    const auto sample_name = reader.printable_ascii_field(0x32, 16);
     const auto instrument_name = reader.printable_ascii_field(0x50, 24);
     const auto left = decode_sbnk_member(reader, false);
     const auto inactive_right = decode_sbnk_member(reader, true);
-    if (!bank_name || !instrument_name || !left || !inactive_right) {
+    if (!sample_name || !instrument_name || !left || !inactive_right) {
         return std::unexpected{!left ? left.error()
                                      : (!inactive_right ? inactive_right.error()
                                                         : make_error(ErrorCode::object_malformed, ErrorCategory::object,
                                                                      "current SBNK names are malformed"))};
     }
     CurrentSbnk result;
-    result.bank_name = *bank_name;
+    result.sample_name = *sample_name;
     result.instrument_name = *instrument_name;
     result.left = *left;
     result.inactive_right = *inactive_right;
-    result.right_slot_present = !inactive_right->sample_name.empty();
+    result.right_slot_present = !inactive_right->wave_data_name.empty();
     if (result.right_slot_present) {
         result.right = *inactive_right;
         result.right_link_role = "sample-reference";
-    } else if (inactive_right->smpl_link_id == 0) {
+    } else if (inactive_right->cached_wave_data_reference_value == 0) {
         result.right_link_role = "unused-zero";
-    } else if (inactive_right->smpl_link_id == left->smpl_link_id) {
-        result.right_link_role = "unused-mirrors-left-link";
+    } else if (inactive_right->cached_wave_data_reference_value == left->cached_wave_data_reference_value) {
+        result.right_link_role = "unused-mirrors-left-cache";
     } else {
         result.right_link_role = "unused-nonzero";
     }
@@ -165,7 +179,9 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     const auto pan = reader.s8(0x117);
     const auto velocity_high = reader.u8(0x11a);
     const auto velocity_low = reader.u8(0x11b);
-    if (!sample_flags || !mapout_flags || !key_high || !key_low || !level || !pan || !velocity_high || !velocity_low) {
+    const auto loop_mode = reader.u8(0xe5);
+    if (!sample_flags || !mapout_flags || !key_high || !key_low || !level || !pan || !velocity_high || !velocity_low ||
+        !loop_mode) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "current SBNK parameter window is truncated")};
     }
@@ -177,6 +193,8 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     result.pan = *pan;
     result.velocity_range_high = *velocity_high;
     result.velocity_range_low = *velocity_low;
+    result.loop_mode = *loop_mode;
+    result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
     constexpr std::size_t control_count = 6;
     for (std::size_t index = 0; index < control_count; ++index) {
         const auto offset = 0x164U + index * 4U;
@@ -370,7 +388,9 @@ Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     const auto record_size = reader.be32(0x18);
     const auto payload_1c = reader.be32(0x1c);
     const auto payload_20 = reader.be32(0x20);
-    if (!raw_type || !name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20) {
+    const auto payload_offset = reader.be32(0x24);
+    if (!raw_type || !name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20 ||
+        !payload_offset) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "object header fields are truncated")};
     }
@@ -383,6 +403,7 @@ Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     result.record_size_or_header_used = *record_size;
     result.payload_bytes_0x1c = *payload_1c;
     result.payload_bytes_0x20 = *payload_20;
+    result.payload_offset_0x24 = *payload_offset;
     std::copy_n(payload.begin(), result.raw_prefix.size(), result.raw_prefix.begin());
     return result;
 }
@@ -419,7 +440,10 @@ Result<DecodedObject> decode_object(std::span<const std::byte> payload) {
         return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::sequ) {
-        return DecodedObject{*header, ObjectFormat::current, CurrentSequence{{payload.begin(), payload.end()}}};
+        const auto decoded = decode_current_sequence(payload);
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::prf3) {
         return DecodedObject{*header, ObjectFormat::current, CurrentProfile{{payload.begin(), payload.end()}}};

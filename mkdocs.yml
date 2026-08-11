@@ -1,5 +1,5 @@
 site_name: axklib
-site_description: Native Yamaha A-series disk image and sampler object tooling.
+site_description: axkdeck, CLI, and C++ library tooling for Yamaha A-series sampler media.
 site_url: https://tphzz.github.io/axklib/
 repo_url: https://github.com/tphzz/axklib
 repo_name: tphzz/axklib
@@ -7,6 +7,8 @@ docs_dir: docs
 site_dir: build/docs/site
 strict: true
 use_directory_urls: false
+hooks:
+  - docs/hooks.py
 extra_css:
   - stylesheets/axklib-material.css
 
@@ -77,17 +79,20 @@ nav:
       - Overview: axklib/index.md
       - C++ And CLI Usage: axklib/typical-usage.md
       - CLI Reference: axklib/cli.md
-  - SDK:
+  - Library:
       - C++ API: axklib/cpp-api.md
       - Portable Object Packages: axklib/portable-packages.md
       - Architecture: architecture.md
   - Formats:
       - Media Containers: axklib/media.md
+      - A3K Volume Archives: axklib/a3k-archive.md
       - SFS Filesystem: axklib/sfs-filesystem.md
       - FAT12 Floppy Images: axklib/floppy.md
       - CD-ROM Images: axklib/cdrom.md
       - Sampler Data Structures: axklib/sampler-data.md
+      - Sequence Data And MIDI: axklib/sequences.md
   - Output Contracts:
+      - Current Contract Index: axklib/current-contracts.md
       - Names, Paths, And Exports: axklib/names-and-paths.md
       - SFZ Export: axklib/sfz.md
       - Report Schemas: axklib/report-schemas.md
@@ -97,5 +102,6 @@ nav:
       - Compatibility: axklib/compatibility.md
       - Versioning And Build Identity: axklib/versioning.md
       - REST And WebSocket Server: axklib/server.md
+      - OpenAPI Reference: axklib/openapi.md
       - Native Dependencies: native-dependencies.md
   - Yamaha Glossary: axklib/glossary.md

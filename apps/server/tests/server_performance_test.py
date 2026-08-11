@@ -16,6 +16,7 @@ from server_test_harness import (
     process_file_descriptors,
     process_resident_bytes,
     request,
+    scaled_timeout,
     write_workspace_store,
 )
 
@@ -39,7 +40,9 @@ def main() -> int:
 
     direct = json.loads(
         subprocess.check_output(
-            [str(args.direct_benchmark), "2000"], text=True, timeout=10
+            [str(args.direct_benchmark), "2000"],
+            text=True,
+            timeout=scaled_timeout(10.0),
         )
     )
     instrumented = any(

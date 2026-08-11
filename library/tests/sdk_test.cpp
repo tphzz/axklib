@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include "media_test_fixtures.hpp"
+
 namespace {
 
 std::filesystem::path fixture_path() {
@@ -30,6 +32,11 @@ void write_test_wave(const std::filesystem::path &path) {
     output.write(reinterpret_cast<const char *>(wave.data()), static_cast<std::streamsize>(wave.size()));
 }
 
+void write_bytes(const std::filesystem::path &path, std::span<const std::byte> bytes) {
+    std::ofstream output{path, std::ios::binary};
+    output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
 TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
     static_assert(!std::is_copy_constructible_v<axk::image>);
     static_assert(std::is_move_constructible_v<axk::image>);
@@ -39,7 +46,6 @@ TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
     static_assert(sizeof(axk::build_plan) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::portable_package) <= sizeof(void *) * 2U);
     static_assert(sizeof(axk::package_import_plan) <= sizeof(void *) * 2U);
-    static_assert(sizeof(axk::transaction) <= sizeof(void *) * 2U);
     EXPECT_EQ(axk::sdk_version(), axk::version_string);
     EXPECT_EQ(axk::sdk_version(), axk::version());
     const auto sdk_build = axk::sdk_build_info();
@@ -123,6 +129,43 @@ TEST(Sdk, OpensPagesValidatesPreviewsAndOwnsPcm) {
     EXPECT_EQ(snapshot_validation->issue_count, validation->issue_count);
 }
 
+TEST(Sdk, OpensInventoriesPreviewsAndExportsEveryDocumentedMediaProfile) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-media-profiles";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    const auto fat_path = root / "fixture.ima";
+    const auto iso_path = root / "fixture.iso";
+    const auto standalone_path = root / "fixture.smpl";
+    const auto object_directory = root / "objects";
+    std::filesystem::create_directory(object_directory);
+    write_bytes(fat_path, fat_fixture());
+    write_bytes(iso_path, iso_fixture());
+    write_bytes(standalone_path, smpl_object());
+    write_bytes(object_directory / "SAMPLE.001", smpl_object());
+
+    axk::operation_context context;
+    for (const auto &path : {fixture_path(), fat_path, iso_path, standalone_path, object_directory}) {
+        auto opened = axk::image::open(path.string(), context);
+        ASSERT_TRUE(opened) << path << ": " << opened.error().message;
+        auto objects = opened->objects(0U, 32U, context);
+        ASSERT_TRUE(objects) << path << ": " << objects.error().message;
+        const auto waveform = std::ranges::find(objects->items, "SMPL", &axk::object_info::type);
+        ASSERT_NE(waveform, objects->items.end()) << path;
+        auto validation = opened->validation(context);
+        ASSERT_TRUE(validation) << path << ": " << validation.error().message;
+        EXPECT_EQ(validation->object_count, objects->total_count) << path;
+        auto preview = opened->preview(waveform->key, 2U, context);
+        ASSERT_TRUE(preview) << path << ": " << preview.error().message;
+        EXPECT_EQ(preview->bins.size(), 2U) << path;
+        const auto output = root / (path.filename().string() + "-export");
+        auto exported = opened->export_audio(output.string(), {}, context);
+        ASSERT_TRUE(exported) << path << ": " << exported.error().message;
+        EXPECT_GT(exported->written_file_count, 0U) << path;
+    }
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Sdk, CancellationIsAnOwnedFailure) {
     axk::operation_context context;
     context.cancel();
@@ -175,7 +218,7 @@ class ThrowingProgressSink final : public axk::progress_sink {
     std::uint64_t calls{};
 };
 
-TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
+TEST(Sdk, BuildAndAlterationInspectionApplyThroughTheFacade) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-plans";
     const auto build_manifest = root / "build.json";
     const auto alteration_manifest = root / "alteration.json";
@@ -185,7 +228,7 @@ TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
     std::filesystem::remove_all(root, filesystem_error);
     std::filesystem::create_directories(root);
     std::ofstream{build_manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Keep","waveforms":[],"sample_banks":[]},{"name":"Delete","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Keep","waveforms":[],"samples":[]},{"name":"Delete","waveforms":[],"samples":[]}]}]})";
     std::ofstream{alteration_manifest}
         << R"({"schema_version":"1.0","operations":[{"id":"delete","type":"delete_volume","partition_index":0,"volume_name":"Delete"}]})";
 
@@ -199,21 +242,23 @@ TEST(Sdk, BuildAndTransactionPlansApplyThroughTheFacade) {
     ASSERT_TRUE(build->apply(source.string(), {}, context));
     EXPECT_TRUE(std::filesystem::exists(source));
 
-    auto alteration = axk::transaction::from_manifest(source.string(), alteration_manifest.string(), context);
-    ASSERT_TRUE(alteration);
-    EXPECT_EQ(alteration->summary().operation_count, 1U);
-    ASSERT_TRUE(alteration->apply(output.string(), {}, context));
+    auto inspection = axk::alteration::inspect(source.string(), alteration_manifest.string(), context);
+    ASSERT_TRUE(inspection);
+    EXPECT_EQ(inspection->operation_count, 1U);
+    ASSERT_TRUE(axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), {}, context));
     EXPECT_TRUE(std::filesystem::exists(output));
 
     std::ofstream{output, std::ios::binary | std::ios::trunc} << "occupied";
-    const auto rejected = alteration->apply(output.string(), {}, context);
+    const auto rejected =
+        axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), {}, context);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().message, "output image already exists");
     EXPECT_EQ(std::filesystem::file_size(output), 8U);
 
     axk::write_options overwrite;
     overwrite.overwrite = true;
-    ASSERT_TRUE(alteration->apply(output.string(), overwrite, context));
+    ASSERT_TRUE(
+        axk::alteration::apply(source.string(), alteration_manifest.string(), output.string(), overwrite, context));
     auto reopened = axk::image::open(output.string(), context);
     ASSERT_TRUE(reopened) << reopened.error().message;
     EXPECT_GT(progress.calls, 0U);
@@ -231,9 +276,16 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
     std::filesystem::create_directories(root);
     write_test_wave(audio);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"sample_banks":[{"name":"Tone Bank","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
+        << R"({"schema_version":"1.0","format":"fat12_floppy","authored_volume":{"name":"Volume","waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],"samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127}]}})";
 
     axk::operation_context context;
+    axk::media_build_limits limits;
+    limits.maximum_object_bytes = 128U;
+    limits.maximum_aggregate_payload_bytes = 128U;
+    const auto limited = axk::build_plan::from_manifest(manifest.string(), limits, context);
+    ASSERT_FALSE(limited);
+    EXPECT_EQ(limited.error().code, axk::error_code::io_unsupported_size);
+
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_EQ(plan->summary().size_bytes, 1'474'560U);
@@ -244,6 +296,9 @@ TEST(Sdk, MediaBuildPlanCreatesAFat12Image) {
 }
 
 TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::sample_bank) == 2U);
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::sample) == 3U);
+    static_assert(static_cast<std::uint8_t>(axk::package_root_kind::wave_data) == 4U);
     const auto root = std::filesystem::temp_directory_path() / "axklib-sdk-package";
     const auto package_stem = root / "waveform";
     const auto target_manifest = root / "target.json";
@@ -265,7 +320,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     ASSERT_NE(waveform, objects->items.end());
 
     axk::package_root_selector selector;
-    selector.kind = axk::package_root_kind::sample;
+    selector.kind = axk::package_root_kind::wave_data;
     selector.partition_index = waveform->partition_index;
     selector.group_name = waveform->partition_name;
     selector.volume_name = waveform->volume_name;
@@ -295,7 +350,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     EXPECT_EQ(invalid_export.error().code, axk::error_code::invalid_argument);
 
     std::ofstream{target_manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"Target","volumes":[{"name":"Imported","waveforms":[],"samples":[]}]}]})";
     auto target_plan = axk::build_plan::from_manifest(target_manifest.string(), context);
     ASSERT_TRUE(target_plan) << target_plan.error().message;
     ASSERT_TRUE(target_plan->apply(target.string(), {}, context));
@@ -320,11 +375,25 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     EXPECT_TRUE(import_summary->valid);
     EXPECT_EQ(import_summary->package_count, 1U);
     EXPECT_EQ(import_summary->object_count, 1U);
+    EXPECT_EQ(import_summary->adjustment_count, 0U);
     auto actions = import_plan->actions();
     ASSERT_TRUE(actions) << actions.error().message;
     ASSERT_EQ(actions->size(), 1U);
     EXPECT_NE(std::find(actions->front().actions.begin(), actions->front().actions.end(), "insert"),
               actions->front().actions.end());
+    auto adjustments = import_plan->adjustments();
+    ASSERT_TRUE(adjustments) << adjustments.error().message;
+    EXPECT_TRUE(adjustments->empty());
+    auto program_slots = import_plan->program_slot_placements();
+    ASSERT_TRUE(program_slots) << program_slots.error().message;
+    EXPECT_TRUE(program_slots->empty());
+    auto index_capacity = import_plan->sfs_index_capacity();
+    ASSERT_TRUE(index_capacity) << index_capacity.error().message;
+    ASSERT_EQ(index_capacity->size(), 1U);
+    EXPECT_EQ(index_capacity->front().records_per_index_block, 14U);
+    EXPECT_EQ(index_capacity->front().required_record_slots, 1U);
+    ASSERT_EQ(index_capacity->front().packages.size(), 1U);
+    EXPECT_EQ(index_capacity->front().packages.front().planned_object_record_slots, 1U);
 
     const std::string invalid_import_path = root.string() + "/invalid-\xc3\x28";
     const auto invalid_apply = import_plan->apply(invalid_import_path, {}, context);
@@ -336,6 +405,7 @@ TEST(Sdk, PortablePackageFacadeExportsVerifiesPlansAndImports) {
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(applied->applied);
     EXPECT_EQ(applied->object_count, 1U);
+    EXPECT_EQ(applied->adjustment_count, 0U);
     auto reopened = axk::image::open(imported.string(), context);
     ASSERT_TRUE(reopened) << reopened.error().message;
     auto imported_objects = reopened->objects(0U, 64U, context);
@@ -360,7 +430,7 @@ TEST(Sdk, ProgressCallbackFailureDoesNotCrossTheFacade) {
     std::filesystem::remove_all(root, filesystem_error);
     std::filesystem::create_directories(root);
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"samples":[]}]}]})";
     axk::operation_context context;
     ThrowingProgressSink sink;
     context.set_progress_sink(&sink);

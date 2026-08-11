@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "maximumLines": 700,
+  "sourceRoots": [
+    {
+      "path": "library/include",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "library/internal",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "library/src",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "library/adapters",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "apps/application",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "apps/cli",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "apps/server",
+      "extensions": [
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx"
+      ]
+    },
+    {
+      "path": "apps/axkdeck/src",
+      "extensions": [
+        ".ts",
+        ".svelte"
+      ]
+    },
+    {
+      "path": "apps/axkdeck/vite.config.ts",
+      "extensions": [
+        ".ts"
+      ]
+    },
+    {
+      "path": "apps/axkdeck/src-tauri/src",
+      "extensions": [
+        ".rs"
+      ]
+    },
+    {
+      "path": "apps/axkdeck/src-tauri/build.rs",
+      "extensions": [
+        ".rs"
+      ]
+    },
+    {
+      "path": "tools/python",
+      "extensions": [
+        ".py"
+      ]
+    }
+  ],
+  "classifiedExclusions": [
+    {
+      "path": "library/include/axklib/generated",
+      "classification": "generated",
+      "reason": "Generated from maintained Yamaha effect and field data"
+    },
+    {
+      "path": "apps/axkdeck/src/lib/generated",
+      "classification": "generated",
+      "reason": "Generated from the canonical OpenAPI contract"
+    },
+    {
+      "path": "apps/axkdeck/src/vite-env.d.ts",
+      "classification": "machine-maintained",
+      "reason": "Vite environment declarations are maintained by the frontend toolchain"
+    },
+    {
+      "path": "tools/python/.venv",
+      "classification": "vendored",
+      "reason": "Local uv environment containing third-party Python packages",
+      "mayBeAbsent": true
+    }
+  ],
+  "legacyFiles": {}
+}

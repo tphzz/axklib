@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 
 #include "axklib/server/config.hpp"
+#include "axklib/writer.hpp"
+#include "environment.hpp"
 
 namespace {
 
@@ -34,8 +36,7 @@ class TemporaryConfigFile {
 class ScopedEnvironment {
   public:
     ScopedEnvironment(std::string name, std::string value) : name_(std::move(name)) {
-        if (const auto *existing = std::getenv(name_.c_str()); existing != nullptr)
-            previous_ = existing;
+        previous_ = axk::server::detail::environment_variable(name_);
         set(value);
     }
 
@@ -72,8 +73,6 @@ TEST(ServerConfig, ParsesSafeLoopbackConfiguration) {
     std::array arguments{std::string{"axklib-server"},
                          std::string{"--port"},
                          std::string{"0"},
-                         std::string{"--token"},
-                         std::string{"0123456789abcdef"},
                          std::string{"--workers"},
                          std::string{"3"},
                          std::string{"--job-workers"},
@@ -112,6 +111,7 @@ TEST(ServerConfig, ParsesSafeLoopbackConfiguration) {
     EXPECT_EQ(parsed->config.job_retention_seconds, 60U);
     EXPECT_EQ(parsed->config.replay_events_per_job, 23U);
     EXPECT_EQ(parsed->config.maximum_event_tickets, 29U);
+    EXPECT_EQ(parsed->config.maximum_uploads, 1024U);
     EXPECT_EQ(parsed->config.connection_file, root / "axklib-server.json");
     EXPECT_EQ(parsed->config.parent_process_id, 4242U);
     EXPECT_EQ(parsed->config.workspace_store, root / "workspaces.json");
@@ -141,7 +141,7 @@ TEST(ServerConfig, GeneratesSidecarTokenWithoutPuttingASecretInProcessArguments)
                                     [](unsigned char character) { return std::isxdigit(character) != 0; }));
 }
 
-TEST(ServerConfig, AppliesExplicitConfigInSidecarModeWithoutInheritedEnvironment) {
+TEST(ServerConfig, RejectsExplicitConfigInSidecarMode) {
     const auto root = std::filesystem::current_path();
     ScopedEnvironment inherited_bind{"AXKLIB_SERVER_BIND", "0.0.0.0"};
     ScopedEnvironment inherited_token{"AXKLIB_SERVER_TOKEN", "inherited-token-must-not-be-used"};
@@ -158,11 +158,37 @@ TEST(ServerConfig, AppliesExplicitConfigInSidecarModeWithoutInheritedEnvironment
         pointers[index] = arguments[index].data();
 
     const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().message.find("--config"), std::string::npos);
+}
+
+TEST(ServerConfig, RejectsCallerProvidedCredentialsInSidecarMode) {
+    const auto root = std::filesystem::temp_directory_path();
+    for (const auto option : {"--token", "--token-sha256"}) {
+        std::array arguments{std::string{"axklib-server"}, std::string{"--connection-file"},
+                             (root / "axklib-sidecar.json").string(), std::string{option},
+                             option == std::string_view{"--token"} ? std::string{"0123456789abcdef"}
+                                                                   : std::string{"test=0123456789abcdef"}};
+        std::array<char *, arguments.size()> pointers{};
+        for (std::size_t index = 0; index < arguments.size(); ++index)
+            pointers[index] = arguments[index].data();
+
+        const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+        ASSERT_FALSE(parsed);
+        EXPECT_NE(parsed.error().message.find(option), std::string::npos);
+    }
+}
+
+TEST(ServerConfig, DoesNotEnterSidecarModeFromEnvironment) {
+    ScopedEnvironment inherited_connection{"AXKLIB_SERVER_CONNECTION_FILE", "/tmp/inherited-sidecar.json"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--token"}, std::string{"0123456789abcdef"}};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
     ASSERT_TRUE(parsed) << parsed.error().message;
-    EXPECT_EQ(parsed->config.bind_address, "127.0.0.1");
-    EXPECT_EQ(parsed->config.bearer_token.size(), 64U);
-    EXPECT_NE(parsed->config.bearer_token, "inherited-token-must-not-be-used");
-    EXPECT_FALSE(parsed->config.workspace_store.empty());
+    EXPECT_TRUE(parsed->config.connection_file.empty());
 }
 
 TEST(ServerConfig, AppliesDefaultsThenConfigFileThenCommandLineOverrides) {
@@ -227,6 +253,71 @@ TEST(ServerConfig, RejectsInvalidJobResourceLimits) {
     EXPECT_NE(queue.error().message.find("queued jobs"), std::string::npos);
 }
 
+TEST(ServerConfig, BoundsUploadEntryLimit) {
+    auto config = axk::server::Config{};
+    config.bearer_token = "0123456789abcdef";
+
+    config.maximum_uploads = 10000U;
+    EXPECT_TRUE(axk::server::validate_config(config));
+
+    config.maximum_uploads = 10001U;
+    EXPECT_FALSE(axk::server::validate_config(config));
+}
+
+TEST(ServerConfig, ParsesAndBoundsConcurrentArchiveDownloads) {
+    TemporaryConfigFile config{R"({"bearerToken":"0123456789abcdef","maximumConcurrentArchiveDownloads":7})"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, config.path().string()};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->config.maximum_concurrent_archive_downloads, 7U);
+
+    auto invalid = parsed->config;
+    invalid.maximum_concurrent_archive_downloads = 0U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid.maximum_concurrent_archive_downloads = 65U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+}
+
+TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
+    TemporaryConfigFile config{
+        R"({"bearerToken":"0123456789abcdef","maximumAlterationJournalBytes":1073741824,"maximumAuditionBundleBytes":8388608,"maximumDownloadArchiveDepth":12,"maximumDownloadArchivePathBytes":4096,"maximumMediaBuildObjectBytes":1048576,"maximumMediaBuildPayloadBytes":2097152,"maximumMediaBuildOutputBytes":4194304})"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, config.path().string()};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->config.maximum_download_archive_depth, 12U);
+    EXPECT_EQ(parsed->config.maximum_download_archive_path_bytes, 4096U);
+    EXPECT_EQ(parsed->config.maximum_media_build_object_bytes, 1048576U);
+    EXPECT_EQ(parsed->config.maximum_audition_bundle_bytes, 8388608U);
+    EXPECT_EQ(parsed->config.maximum_alteration_journal_bytes, 1073741824U);
+
+    auto invalid = parsed->config;
+    invalid.maximum_audition_bundle_bytes = 44U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_audition_bundle_bytes = 4ULL * 1024ULL * 1024ULL * 1024ULL + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_alteration_journal_bytes = 0U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid.maximum_alteration_journal_bytes = 8ULL * 1024ULL * 1024ULL * 1024ULL + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_download_archive_depth = 0U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_media_build_object_bytes = invalid.maximum_media_build_payload_bytes + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+    invalid = parsed->config;
+    invalid.maximum_media_build_output_bytes = axk::MediaBuildLimits{}.maximum_output_bytes + 1U;
+    EXPECT_FALSE(axk::server::validate_config(invalid));
+}
+
 TEST(ServerConfig, RestrictsParentMonitoringToSidecarMode) {
     auto config = axk::server::Config{};
     config.bearer_token = "0123456789abcdef";
@@ -286,6 +377,10 @@ TEST(ServerConfig, RejectsWeakAuthenticationAndUnsafeLanDefaults) {
     ASSERT_FALSE(lan);
     EXPECT_NE(lan.error().message.find("allowed origin"), std::string::npos);
     config.allowed_origins.push_back("https://sampler.example.test");
+    lan = axk::server::validate_config(config);
+    ASSERT_FALSE(lan);
+    EXPECT_NE(lan.error().message.find("unsafe"), std::string::npos);
+    config.allow_insecure_remote_http = true;
     EXPECT_TRUE(axk::server::validate_config(config));
 
     config.connection_file = std::filesystem::temp_directory_path() / "axklib-server.json";
@@ -304,6 +399,7 @@ TEST(ServerConfig, ParsesNamedLanTokenHashesAndRejectsWildcards) {
         std::string{"operator=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"},
         std::string{"--allow-origin"},
         std::string{"https://sampler.example.test"},
+        std::string{"--allow-insecure-remote-http"},
         std::string{"--workspace-store"},
         (root / "workspaces.json").string(),
     };
@@ -316,12 +412,26 @@ TEST(ServerConfig, ParsesNamedLanTokenHashesAndRejectsWildcards) {
     ASSERT_EQ(parsed->config.token_hashes.size(), 1U);
     EXPECT_EQ(parsed->config.token_hashes.front().principal_id, "operator");
     EXPECT_TRUE(parsed->config.bearer_token.empty());
+    EXPECT_TRUE(parsed->config.allow_insecure_remote_http);
 
     auto wildcard = parsed->config;
     wildcard.allowed_origins = {"*"};
     const auto rejected = axk::server::validate_config(wildcard);
     ASSERT_FALSE(rejected);
     EXPECT_NE(rejected.error().message.find("non-wildcard"), std::string::npos);
+}
+
+TEST(ServerConfig, RejectsInsecureRemoteOverrideInSidecarMode) {
+    const auto root = std::filesystem::temp_directory_path();
+    std::array arguments{std::string{"axklib-server"}, std::string{"--connection-file"},
+                         (root / "axklib-sidecar.json").string(), std::string{"--allow-insecure-remote-http"}};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().message.find("--allow-insecure-remote-http"), std::string::npos);
 }
 
 } // namespace

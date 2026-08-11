@@ -1,13 +1,82 @@
+#include <array>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <limits>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/file_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
+#include "axklib/bytes.hpp"
+#include "axklib/media.hpp"
 
 namespace {
+
+void write_wave_sidecar(const std::filesystem::path &path, const std::string &wav_path) {
+    std::ofstream output{path};
+    output << nlohmann::json({{"schema", "axklib.wave_sidecar.v1"},
+                              {"identity", {{"object_key", "smpl:1"}}},
+                              {"audio",
+                               {{"wav_path", wav_path},
+                                {"sample_rate", 44'100U},
+                                {"channels", 1U},
+                                {"sample_width_bytes", 2U},
+                                {"frames", 0U}}},
+                              {"playback", nlohmann::json::object()},
+                              {"relationships", nlohmann::json::object()},
+                              {"parameters", nlohmann::json::object()},
+                              {"conversion", nlohmann::json::object()},
+                              {"origin", nlohmann::json::object()}})
+                  .dump();
+}
+
+void write_minimal_wav(const std::filesystem::path &path, std::uint16_t channels, std::uint16_t bits_per_sample) {
+    std::array<std::uint8_t, 44U> bytes{};
+    const auto copy = [&](std::size_t offset, std::string_view value) {
+        std::ranges::copy(value, bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    };
+    const auto write_u16 = [&](std::size_t offset, std::uint16_t value) {
+        bytes[offset] = static_cast<std::uint8_t>(value & 0xffU);
+        bytes[offset + 1U] = static_cast<std::uint8_t>(value >> 8U);
+    };
+    const auto write_u32 = [&](std::size_t offset, std::uint32_t value) {
+        for (std::size_t index = 0U; index < 4U; ++index)
+            bytes[offset + index] = static_cast<std::uint8_t>(value >> (index * 8U));
+    };
+    copy(0U, "RIFF");
+    write_u32(4U, 36U);
+    copy(8U, "WAVE");
+    copy(12U, "fmt ");
+    write_u32(16U, 16U);
+    write_u16(20U, 1U);
+    write_u16(22U, channels);
+    write_u32(24U, 44'100U);
+    const auto block_align = static_cast<std::uint16_t>(channels * (bits_per_sample / 8U));
+    write_u32(28U, 44'100U * block_align);
+    write_u16(32U, block_align);
+    write_u16(34U, bits_per_sample);
+    copy(36U, "data");
+    std::ofstream output{path, std::ios::binary};
+    output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+}
+
+void write_damaged_sequence(const std::filesystem::path &path) {
+    std::vector<std::byte> payload(0x90U);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SEQU", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x32U, 16U, "Damaged Sequence", std::byte{}));
+    ASSERT_TRUE(writer.write_be16(0x7cU, 1U));
+    ASSERT_TRUE(writer.write_be16(0x7eU, 96U));
+    ASSERT_TRUE(writer.write_be16(0x88U, 1U));
+    ASSERT_TRUE(writer.write_u8(0x8aU, 0x90U));
+    ASSERT_TRUE(writer.write_u8(0x8bU, 60U));
+    ASSERT_TRUE(writer.write_u8(0x8cU, 0xfdU));
+    std::ofstream output{path, std::ios::binary};
+    output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+}
 
 std::filesystem::path fixture_path() {
     return std::filesystem::path{AXK_SOURCE_ROOT} / "tests" / "fixtures" / "images" / "sampler-authored" /
@@ -146,12 +215,144 @@ TEST_F(FileOperationsTest, ValidationChecksExportTreesAndRejectsAmbiguousRequest
     EXPECT_EQ(ambiguous.error().code, "invalid_request");
 }
 
+TEST_F(FileOperationsTest, ExportValidationAllowsParentTraversalThatStaysInsideTheExportRoot) {
+    const auto graph_path = root_ / "exports/file/image/partition/volume/volume.axklib.json";
+    std::filesystem::create_directories(graph_path.parent_path());
+    const auto write_graph = [&](std::string_view wav_path) {
+        std::ofstream output{graph_path};
+        output << nlohmann::json({{"schema", "axklib.volume_graph.v1"},
+                                  {"objects", {{"smpl", {{{"object_key", "smpl:1"}, {"wav_path", wav_path}}}}}}})
+                      .dump();
+    };
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+
+    write_graph("../../../../_samples/physical/tone.wav");
+    const auto valid =
+        registry.invoke("report.validate",
+                        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+                         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/export-path-valid"}}},
+                         {"policy", "strict"}},
+                        context);
+    ASSERT_TRUE(valid) << valid.error().message;
+    EXPECT_EQ(valid->at("issueCount"), 0U);
+    EXPECT_FALSE(valid->at("failed").get<bool>());
+
+    write_graph("../../../../../outside.wav");
+    const auto escaped =
+        registry.invoke("report.validate",
+                        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+                         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/export-path-escaped"}}},
+                         {"policy", "strict"}},
+                        context);
+    ASSERT_TRUE(escaped) << escaped.error().message;
+    EXPECT_EQ(escaped->at("issueCount"), 1U);
+    EXPECT_TRUE(escaped->at("failed").get<bool>());
+}
+
+TEST_F(FileOperationsTest, ExportValidationRejectsWaveSidecarPathsOutsideTheRetainedExportTree) {
+    std::filesystem::create_directories(root_ / "exports");
+    write_minimal_wav(root_ / "outside.wav", 1U, 16U);
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto context = axk::app::OperationContext{
+        .owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}};
+
+    const std::array<std::pair<std::string, std::string>, 2U> paths{
+        std::pair{"absolute", (root_ / "outside.wav").string()}, std::pair{"traversal", "../outside.wav"}};
+    for (const auto &[name, wav_path] : paths) {
+        write_wave_sidecar(root_ / "exports" / "tone.json", wav_path);
+        const auto result = registry.invoke(
+            "report.validate",
+            {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+             {"destination", {{"rootId", "workspace"}, {"relativePath", std::format("reports/{}", name)}}},
+             {"policy", "strict"}},
+            context);
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_TRUE(result->at("failed").get<bool>());
+        std::ifstream input{root_ / "reports" / name / "validation_issues.json"};
+        const auto issues = nlohmann::json::parse(input);
+        ASSERT_EQ(issues.size(), 1U);
+        EXPECT_EQ(issues.front().at("code"), "EXPORT_SIDECAR_PATH_ESCAPE");
+    }
+}
+
+TEST_F(FileOperationsTest, ExportValidationRejectsObsoleteSchemaLessWaveSidecars) {
+    std::filesystem::create_directories(root_ / "exports");
+    std::ofstream{root_ / "exports" / "tone.json"}
+        << nlohmann::json({{"object_key", "smpl:1"}, {"wav_path", "tone.wav"}}).dump();
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.validate",
+        {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/obsolete-sidecar"}}},
+         {"policy", "strict"}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->at("failed").get<bool>());
+    std::ifstream input{root_ / "reports" / "obsolete-sidecar" / "validation_issues.json"};
+    const auto issues = nlohmann::json::parse(input);
+    ASSERT_EQ(issues.size(), 1U);
+    EXPECT_EQ(issues.front().at("code"), "EXPORT_SIDECAR_UNSUPPORTED_SCHEMA");
+}
+
+TEST_F(FileOperationsTest, ExportValidationRejectsMalformedWavFormatWithoutUnsafeArithmetic) {
+    std::filesystem::create_directories(root_ / "exports");
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+
+    const auto validate = [&](std::string_view name, const auto &mutate) {
+        const auto wav = root_ / "exports" / "tone.wav";
+        write_minimal_wav(wav, 1U, 16U);
+        mutate(wav);
+        write_wave_sidecar(root_ / "exports" / "tone.json", "tone.wav");
+        const auto report_path = std::format("reports/malformed-wav-{}", name);
+        const auto result = registry.invoke("report.validate",
+                                            {{"exports", {{"rootId", "workspace"}, {"relativePath", "exports"}}},
+                                             {"destination", {{"rootId", "workspace"}, {"relativePath", report_path}}},
+                                             {"policy", "strict"}},
+                                            {.owner_id = "owner",
+                                             .request_id = "request",
+                                             .cancellation = {},
+                                             .progress = nullptr,
+                                             .display_path = {}});
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_TRUE(result->at("failed").get<bool>());
+        std::ifstream input{root_ / report_path / "validation_issues.json"};
+        const auto issues = nlohmann::json::parse(input);
+        ASSERT_EQ(issues.size(), 1U);
+        EXPECT_EQ(issues.front().at("code"), "EXPORT_WAV_BAD_HEADER");
+    };
+    const auto patch_u16 = [](const std::filesystem::path &path, std::size_t offset, std::uint16_t value) {
+        std::fstream output{path, std::ios::binary | std::ios::in | std::ios::out};
+        output.seekp(static_cast<std::streamoff>(offset));
+        const std::array bytes{static_cast<char>(value), static_cast<char>(value >> 8U)};
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    const auto patch_u32 = [](const std::filesystem::path &path, std::size_t offset, std::uint32_t value) {
+        std::fstream output{path, std::ios::binary | std::ios::in | std::ios::out};
+        output.seekp(static_cast<std::streamoff>(offset));
+        const std::array bytes{static_cast<char>(value), static_cast<char>(value >> 8U),
+                               static_cast<char>(value >> 16U), static_cast<char>(value >> 24U)};
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    };
+    validate("zero-channels", [&](const auto &path) { patch_u16(path, 22U, 0U); });
+    validate("zero-bit-depth", [&](const auto &path) { patch_u16(path, 34U, 0U); });
+    validate("truncated-data-chunk", [&](const auto &path) { patch_u32(path, 40U, 8U); });
+    validate("oversized-riff",
+             [&](const auto &path) { patch_u32(path, 4U, std::numeric_limits<std::uint32_t>::max()); });
+}
+
 TEST_F(FileOperationsTest, InfoReturnsCanonicalHierarchyWithoutRequiringAnArtifactDestination) {
     auto registry = axk::app::make_operation_registry();
     ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
     const auto result = registry.invoke(
         "report.info",
-        {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}, {"includeDefaultPrograms", false}},
+        {{"sources", {{{"kind", "FILE"}, {"file", {{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}}}},
+         {"includeDefaultPrograms", false}},
         {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("operationId"), "report.info");
@@ -171,6 +372,38 @@ TEST_F(FileOperationsTest, InfoReturnsCanonicalHierarchyWithoutRequiringAnArtifa
     ASSERT_FALSE(partition.at("children").empty());
     const auto serialized = result->dump();
     EXPECT_EQ(serialized.find(root_.string()), std::string::npos);
+}
+
+TEST_F(FileOperationsTest, InfoReadsAnExplicitFlatObjectDirectory) {
+    const auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    ASSERT_FALSE(objects->empty());
+    ASSERT_TRUE(std::filesystem::create_directory(root_ / "objects"));
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        std::ofstream output{root_ / "objects" / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        const auto &payload = (*objects)[index].raw_payload;
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    }
+    std::ofstream{root_ / "objects" / "README.TXT"} << "support file\n";
+
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.info",
+        {{"sources",
+          {{{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", {{"rootId", "workspace"}, {"relativePath", "objects"}}}}}}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("loadedCount"), 1U);
+    EXPECT_EQ(result->at("failedCount"), 0U);
+    ASSERT_EQ(result->at("trees").size(), 1U);
+    const auto &tree = result->at("trees").front();
+    EXPECT_EQ(tree.at("sourcePath"), "objects");
+    EXPECT_EQ(tree.at("containerKind"), "axk_object_directory");
+    EXPECT_EQ(tree.at("objectCount"), objects->size());
 }
 
 TEST_F(FileOperationsTest, ObjectsWritesTheCompleteCliArtifactSetWithCanonicalRows) {
@@ -232,6 +465,29 @@ TEST_F(FileOperationsTest, InventoryWritesTheCompleteCliArtifactSetAndSummary) {
     EXPECT_EQ(summary.at("load_error_count"), 0U);
     EXPECT_EQ(summary.at("object_type_counts"), nlohmann::json({{"SBAC", 1U}, {"SBNK", 8U}, {"SMPL", 8U}}));
     EXPECT_TRUE(summary.at("load_errors").empty());
+}
+
+TEST_F(FileOperationsTest, InventoryReportsAnOpaqueSequenceAndItsDecodeIssue) {
+    write_damaged_sequence(root_ / "damaged.SEQU");
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.inventory",
+        {{"sources", {{{"rootId", "workspace"}, {"relativePath", "damaged.SEQU"}}}},
+         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/damaged"}}}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("rowCount"), 1U);
+    EXPECT_EQ(result->at("decodeIssueCount"), 1U);
+
+    std::ifstream objects_input{root_ / "reports" / "damaged" / "inventory_objects.json"};
+    const auto objects = nlohmann::json::parse(objects_input);
+    ASSERT_EQ(objects.size(), 1U);
+    EXPECT_EQ(objects.front().at("object_type"), "SEQU");
+    EXPECT_EQ(objects.front().at("object_format"), "unknown");
+    EXPECT_EQ(objects.front().at("decoded_kind"), "OpaqueSequence");
+    EXPECT_EQ(objects.front().at("decode_issue_count"), 1U);
+    EXPECT_EQ(objects.front().at("decode_issue_codes"), "media_object_decode_failed");
 }
 
 TEST_F(FileOperationsTest, OrphansWritesOwnershipRowsAndPerImageSummary) {

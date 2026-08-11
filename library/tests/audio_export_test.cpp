@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <ranges>
 
 #include <gtest/gtest.h>
 
@@ -32,13 +33,19 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     const auto &volume = plan->volumes[0];
     EXPECT_EQ(volume.relative_root, "partition_00_New_Partition/New Volume");
     EXPECT_EQ(volume.waveforms.size(), 8U);
-    EXPECT_EQ(volume.sample_banks.size(), 8U);
-    EXPECT_EQ(volume.sample_bank_groups.size(), 1U);
-    EXPECT_TRUE(volume.sample_bank_groups.front().member_bank_keys.empty());
-    EXPECT_FALSE(volume.sample_bank_groups.front().relationship_bank_keys.empty());
-    EXPECT_TRUE(std::ranges::all_of(volume.sample_banks, [](const auto &bank) {
-        return bank.members.size() == 1U && !bank.rendered_wav_path && !bank.parameter_contexts.empty() &&
-               bank.parameter_contexts.front().object_key == bank.object_key;
+    EXPECT_EQ(volume.samples.size(), 8U);
+    EXPECT_EQ(volume.sample_banks.size(), 1U);
+    EXPECT_TRUE(volume.sample_banks.front().member_sample_keys.empty());
+    EXPECT_FALSE(volume.sample_banks.front().relationship_sample_keys.empty());
+    EXPECT_TRUE(std::ranges::all_of(volume.samples, [](const auto &sample) {
+        return sample.members.size() == 1U && !sample.rendered_wav_path && !sample.parameter_contexts.empty() &&
+               sample.parameter_contexts.front().object_key == sample.object_key;
+    }));
+    EXPECT_TRUE(std::ranges::all_of(volume.waveforms, [](const auto &waveform) {
+        return waveform.user_facing_aliases.size() == 1U &&
+               waveform.user_facing_aliases.front().relationship_quality == axk::RelationshipQuality::known &&
+               !waveform.user_facing_aliases.front().sample_object_key.empty() &&
+               !waveform.user_facing_aliases.front().display_name.empty();
     }));
 
     const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-export-test";
@@ -56,7 +63,56 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     std::filesystem::remove_all(output, error);
 }
 
-TEST(AudioExport, ProjectsLogicalBanksToTheirKnownWaveformVolume) {
+TEST(AudioExport, WritesMissingAndAmbiguousWaveDataIntoExplicitUnresolvedScope) {
+    const auto container = axk::open_image(fixture());
+    ASSERT_TRUE(container);
+    auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog);
+    auto wave_data = catalog->objects | std::views::filter([](const auto &item) {
+                         return item.object.header.type == axk::ObjectType::smpl;
+                     });
+    auto first = wave_data.begin();
+    ASSERT_NE(first, wave_data.end());
+    first->placement.reset();
+    first->placement_candidates.clear();
+    first->placement_resolution = axk::PlacementResolution::missing;
+    ++first;
+    ASSERT_NE(first, wave_data.end());
+    ASSERT_TRUE(first->placement);
+    auto alternate = *first->placement;
+    alternate.volume_name = "Other candidate";
+    first->placement.reset();
+    first->placement_candidates.push_back(std::move(alternate));
+    first->placement_resolution = axk::PlacementResolution::ambiguous;
+
+    const auto graph = axk::build_relationship_graph(*catalog);
+    const auto plan = axk::build_export_plan(*container, *catalog, graph);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->volumes.size(), 1U);
+    EXPECT_EQ(plan->volumes.front().waveforms.size(), 6U);
+    ASSERT_EQ(plan->unresolved_wave_data.size(), 1U);
+    const auto &unresolved = plan->unresolved_wave_data.front();
+    EXPECT_EQ(unresolved.relative_root, "partition_00_New_Partition/Unresolved Wave Data");
+    ASSERT_EQ(unresolved.waveforms.size(), 2U);
+    EXPECT_EQ(unresolved.waveforms[0].placement_resolution, axk::PlacementResolution::missing);
+    EXPECT_TRUE(unresolved.waveforms[0].placement_candidates.empty());
+    EXPECT_EQ(unresolved.waveforms[0].user_facing_aliases.size(), 1U);
+    EXPECT_EQ(unresolved.waveforms[1].placement_resolution, axk::PlacementResolution::ambiguous);
+    EXPECT_EQ(unresolved.waveforms[1].placement_candidates.size(), 2U);
+    EXPECT_EQ(unresolved.waveforms[1].user_facing_aliases.size(), 1U);
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-unresolved-export-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto exported = axk::write_export_audio(*plan, output);
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->written_files.size(), 8U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / unresolved.relative_root /
+                                                 unresolved.waveforms.front().relative_wav_path));
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, DoesNotProjectLogicalSamplesAcrossVolumesWithoutALocalNameTarget) {
     const auto container = axk::open_image(fixture());
     ASSERT_TRUE(container);
     auto catalog = axk::build_object_catalog(*container);
@@ -77,10 +133,10 @@ TEST(AudioExport, ProjectsLogicalBanksToTheirKnownWaveformVolume) {
         std::ranges::find(plan->volumes, "Storage-only volume", &axk::VolumeExport::volume_name);
     ASSERT_NE(waveform_volume, plan->volumes.end());
     ASSERT_NE(storage_volume, plan->volumes.end());
-    EXPECT_EQ(waveform_volume->sample_banks.size(), 8U);
-    EXPECT_EQ(waveform_volume->sample_bank_groups.size(), 1U);
-    EXPECT_TRUE(storage_volume->sample_banks.empty());
-    EXPECT_TRUE(storage_volume->sample_bank_groups.empty());
+    EXPECT_TRUE(waveform_volume->samples.empty());
+    EXPECT_TRUE(waveform_volume->sample_banks.empty());
+    EXPECT_EQ(storage_volume->samples.size(), 8U);
+    EXPECT_EQ(storage_volume->sample_banks.size(), 1U);
 }
 
 TEST(AudioExport, RetainsLikelyMembersAsGraphMetadataWithoutWritingSfzRegions) {
@@ -97,13 +153,13 @@ TEST(AudioExport, RetainsLikelyMembersAsGraphMetadataWithoutWritingSfzRegions) {
     const auto plan = axk::build_export_plan(*container, *catalog, graph);
     ASSERT_TRUE(plan);
     ASSERT_EQ(plan->volumes.size(), 1U);
-    EXPECT_TRUE(std::ranges::all_of(plan->volumes.front().sample_banks, [](const auto &bank) {
-        return bank.members.size() == 1U && bank.members.front().quality == axk::RelationshipQuality::likely &&
-               !bank.rendered_wav_path;
+    EXPECT_TRUE(std::ranges::all_of(plan->volumes.front().samples, [](const auto &sample) {
+        return sample.members.size() == 1U && sample.members.front().quality == axk::RelationshipQuality::likely &&
+               !sample.rendered_wav_path;
     }));
-    ASSERT_EQ(plan->volumes.front().sample_bank_groups.size(), 1U);
-    EXPECT_TRUE(plan->volumes.front().sample_bank_groups.front().member_bank_keys.empty());
-    EXPECT_FALSE(plan->volumes.front().sample_bank_groups.front().relationship_bank_keys.empty());
+    ASSERT_EQ(plan->volumes.front().sample_banks.size(), 1U);
+    EXPECT_TRUE(plan->volumes.front().sample_banks.front().member_sample_keys.empty());
+    EXPECT_FALSE(plan->volumes.front().sample_banks.front().relationship_sample_keys.empty());
 
     const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-likely-sfz-test";
     std::error_code error;
@@ -119,14 +175,14 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     left.object_key = "left";
     left.name = "Left";
     left.format = {1, 2, 44100};
-    left.frame_count = 2;
+    left.frame_count = 100;
     left.root_key = 60;
     left.fine_tune_cents = 3;
     left.loop_mode = 1;
     left.loop_mode_label = "Forward";
     left.loop_start = 10;
     left.loop_length = 80;
-    left.pcm = {std::byte{}, std::byte{}, std::byte{}, std::byte{}};
+    left.pcm.resize(200U);
     auto right = left;
     right.object_key = "right";
     right.name = "Right";
@@ -142,20 +198,25 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
         {"right", "Right", "SMPL/Right.wav", right},
         {"wide-loop", "Wide Loop", "SMPL/Wide Loop.wav", wide_loop},
     };
-    axk::SampleBankExport bank;
-    bank.object_key = "bank";
-    bank.display_name = "Stereo Member";
-    bank.members = {
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Stereo Member";
+    sample.members = {
         {"left", "left", "SMPL/Left.wav", axk::RelationshipQuality::known},
         {"right", "right", "SMPL/Right.wav", axk::RelationshipQuality::known},
     };
-    bank.rendered_wav_path = "RENDERED/Stereo Member.wav";
-    bank.key_low = 48;
-    bank.key_high = 72;
-    bank.coarse_tune = 1;
-    bank.decoded.left.root_key = 61;
-    bank.decoded.left.fine_tune_cents = 4;
-    auto invalid_tune = bank;
+    sample.rendered_wav_path = "RENDERED/Stereo Member.wav";
+    sample.key_low = 48;
+    sample.key_high = 72;
+    sample.coarse_tune = 1;
+    sample.decoded.left.root_key = 61;
+    sample.decoded.left.fine_tune_cents = 4;
+    sample.decoded.left.wave_length_frames = 100;
+    sample.decoded.left.loop_start_frame = 10;
+    sample.decoded.left.loop_length_frames = 80;
+    sample.decoded.loop_mode = 1;
+    sample.decoded.right = sample.decoded.left;
+    auto invalid_tune = sample;
     invalid_tune.object_key = "invalid-tune";
     invalid_tune.display_name = "Invalid Tune";
     invalid_tune.members.resize(1);
@@ -165,8 +226,8 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     invalid_tune.coarse_tune = 113;
     auto duplicate_name = invalid_tune;
     duplicate_name.object_key = "duplicate-name";
-    volume.sample_banks = {bank, invalid_tune, duplicate_name};
-    volume.sample_bank_groups.push_back({"group", " Bank", {"bank"}, {"bank"}});
+    volume.samples = {sample, invalid_tune, duplicate_name};
+    volume.sample_banks.push_back({"sample_bank", " Bank", {"sample"}, {"sample"}});
     axk::ExportPlan plan;
     plan.volumes.push_back(std::move(volume));
 
@@ -188,7 +249,7 @@ TEST(AudioExport, PrefersRenderedStereoAndEmitsSamplerParametersToSfz) {
     const std::string invalid_text{std::istreambuf_iterator<char>{invalid_input}, {}};
     EXPECT_EQ(invalid_text.find("transpose="), std::string::npos);
     EXPECT_NE(invalid_text.find("tune=4"), std::string::npos);
-    EXPECT_NE(invalid_text.find("loop_start=23423 loop_end=4294990715"), std::string::npos);
+    EXPECT_NE(invalid_text.find("loop_start=10 loop_end=89"), std::string::npos);
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "partition_00_hd1/Vol 1/Invalid Tune (2).sfz"));
     std::filesystem::remove_all(output, error);
 }
@@ -257,15 +318,16 @@ TEST(AudioExport, DeduplicatesSfzNamesAcrossLogicalVolumesSharingOneDirectory) {
     axk::VolumeExport first;
     first.relative_root = "shared-volume";
     first.waveforms = {{"wave-one", "Wave", "SMPL/Wave.wav", waveform}};
-    axk::SampleBankExport first_bank;
-    first_bank.object_key = "bank-one";
-    first_bank.display_name = "Duplicate";
-    first_bank.members = {{"left", "wave-one", "SMPL/Wave.wav", axk::RelationshipQuality::known}};
-    first.sample_banks = {first_bank};
+    axk::SampleExport first_sample;
+    first_sample.object_key = "sample-one";
+    first_sample.display_name = "Duplicate";
+    first_sample.members = {{"left", "wave-one", "SMPL/Wave.wav", axk::RelationshipQuality::known}};
+    first_sample.decoded.left.wave_length_frames = 1;
+    first.samples = {first_sample};
     auto second = first;
     second.waveforms[0].object_key = "wave-two";
-    second.sample_banks[0].object_key = "bank-two";
-    second.sample_banks[0].members[0].waveform_key = "wave-two";
+    second.samples[0].object_key = "sample-two";
+    second.samples[0].members[0].waveform_key = "wave-two";
     axk::ExportPlan plan;
     plan.volumes = {first, second};
     const auto output = std::filesystem::temp_directory_path() / "axklib-cpp-sfz-dedupe-test";
@@ -278,4 +340,121 @@ TEST(AudioExport, DeduplicatesSfzNamesAcrossLogicalVolumesSharingOneDirectory) {
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "shared-volume/Duplicate.sfz"));
     EXPECT_TRUE(std::filesystem::is_regular_file(output / "shared-volume/Duplicate (2).sfz"));
     std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, UsesEachSamplesPlaybackWindowAndLoopPolicyForSharedWaveData) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 100;
+    waveform.loop_mode = 1;
+    waveform.loop_mode_label = "Forward";
+    waveform.loop_start = 5;
+    waveform.loop_length = 90;
+    waveform.pcm.resize(200U);
+
+    axk::SampleExport first;
+    first.object_key = "first";
+    first.display_name = "First";
+    first.members = {{"left", "shared", "SMPL/Shared.wav", axk::RelationshipQuality::known}};
+    first.decoded.left.wave_start_frame = 20;
+    first.decoded.left.wave_length_frames = 40;
+    first.decoded.left.loop_start_frame = 25;
+    first.decoded.left.loop_length_frames = 10;
+    first.decoded.loop_mode = 0;
+
+    auto second = first;
+    second.object_key = "second";
+    second.display_name = "Second";
+    second.decoded.left.wave_start_frame = 60;
+    second.decoded.left.wave_length_frames = 20;
+    second.decoded.left.loop_start_frame = 65;
+    second.decoded.left.loop_length_frames = 5;
+    second.decoded.loop_mode = 1;
+
+    axk::VolumeExport volume;
+    volume.relative_root = "volume";
+    volume.waveforms = {{"shared", "Shared", "SMPL/Shared.wav", waveform}};
+    volume.samples = {first, second};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-sfz-sample-window-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_sfz(plan, output);
+    ASSERT_TRUE(result) << result.error().message;
+    std::ifstream first_input{output / "volume/First.sfz"};
+    const std::string first_text{std::istreambuf_iterator<char>{first_input}, {}};
+    EXPECT_NE(first_text.find("offset=20 end=59 loop_mode=one_shot"), std::string::npos);
+    EXPECT_EQ(first_text.find("loop_start="), std::string::npos);
+    std::ifstream second_input{output / "volume/Second.sfz"};
+    const std::string second_text{std::istreambuf_iterator<char>{second_input}, {}};
+    EXPECT_NE(second_text.find("offset=60 end=79 loop_mode=loop_continuous loop_start=65 loop_end=69"),
+              std::string::npos);
+    first_input.close();
+    second_input.close();
+
+    plan.volumes.front().samples.front().decoded.left.wave_length_frames = 81;
+    std::filesystem::remove_all(output, error);
+    const auto invalid = axk::write_sfz(plan, output);
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, axk::ErrorCode::object_malformed);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
+TEST(AudioExport, RejectsEveryEscapingPlanPathBeforeCreatingOutput) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::VolumeExport volume;
+    volume.relative_root = "volume";
+    volume.waveforms = {{"wave", "Wave", "SMPL/Wave.wav", waveform}};
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Sample";
+    sample.members = {{"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::known}};
+    sample.rendered_wav_path = "RENDERED/Sample.wav";
+    volume.samples = {sample};
+    axk::ExportPlan base;
+    base.volumes = {volume};
+    base.unresolved_wave_data = {{axk::PartitionIndex{0}, "", "unresolved", {volume.waveforms.front()}}};
+
+    const auto root = std::filesystem::temp_directory_path() / "axklib-export-containment-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    const auto outside = root.parent_path() / "axklib-export-containment-outside.wav";
+    std::filesystem::remove(outside, error);
+
+    const auto rejected = [&](axk::ExportPlan plan, bool sfz = false) {
+        const auto result = sfz ? static_cast<bool>(axk::write_sfz(plan, root))
+                                : static_cast<bool>(axk::write_export_audio(plan, root));
+        EXPECT_FALSE(result);
+        EXPECT_FALSE(std::filesystem::exists(root));
+        EXPECT_FALSE(std::filesystem::exists(outside));
+    };
+
+    auto absolute = base;
+    absolute.volumes[0].waveforms[0].relative_wav_path = outside;
+    rejected(std::move(absolute));
+
+    auto physical = base;
+    physical.volumes[0].waveforms[0].relative_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(physical));
+
+    auto rendered = base;
+    rendered.volumes[0].samples[0].rendered_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(rendered));
+
+    auto member = base;
+    member.volumes[0].samples[0].members[0].relative_wav_path = "../../axklib-export-containment-outside.wav";
+    rejected(std::move(member), true);
+
+    auto unresolved = base;
+    unresolved.unresolved_wave_data[0].relative_root = "../../escape";
+    rejected(std::move(unresolved));
+
+    auto sfz = base;
+    sfz.volumes[0].relative_root = "../../escape";
+    rejected(std::move(sfz), true);
 }

@@ -23,6 +23,17 @@ struct IsoMenuLabels {
     std::vector<MediaValidationIssue> validation_issues;
 };
 
+struct MediaDecode {
+    DecodedObject object;
+    std::optional<Error> issue;
+};
+
+struct FatCatalogInspection {
+    std::optional<YamahaFloppyCatalog> catalog;
+    FloppyDiskIdentity identity;
+    std::vector<MediaValidationIssue> issues;
+};
+
 [[nodiscard]] Error media_error(ErrorCode code, std::string message, std::string_view source = {},
                                 std::optional<std::uint64_t> offset = std::nullopt);
 [[nodiscard]] Result<std::vector<std::byte>> read_bytes(const RandomAccessReader &reader, std::uint64_t offset,
@@ -35,6 +46,10 @@ struct IsoMenuLabels {
 [[nodiscard]] bool object_prefix(std::span<const std::byte> bytes);
 [[nodiscard]] std::string upper_ascii(std::string value);
 [[nodiscard]] bool unsafe_component(std::string_view value);
+[[nodiscard]] Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size);
+[[nodiscard]] std::string object_category(ObjectType type);
+[[nodiscard]] FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image,
+                                                                 const CancellationToken &cancellation);
 
 [[nodiscard]] Result<IsoMenuLabels> read_yamaha_iso_menu_labels(const IsoImage &image,
                                                                 const CancellationToken &cancellation);

@@ -38,7 +38,7 @@ int main() {
         return 4;
 
     axk::package_root_selector selector;
-    selector.kind = axk::package_root_kind::sample;
+    selector.kind = axk::package_root_kind::wave_data;
     selector.partition_index = waveform->partition_index;
     selector.group_name = waveform->partition_name;
     selector.volume_name = waveform->volume_name;
@@ -57,7 +57,7 @@ int main() {
         return 7;
 
     std::ofstream{manifest}
-        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"sample_banks":[]}]}]})";
+        << R"({"schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"hd1","volumes":[{"name":"Volume","waveforms":[],"samples":[]}]}]})";
     auto plan = axk::build_plan::from_manifest(manifest.string(), context);
     if (!plan || !plan->apply(output.string(), {}, context) || !std::filesystem::exists(output))
         return 8;

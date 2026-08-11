@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/file_publication.hpp"
+
 namespace axk {
 namespace {
 
@@ -23,7 +25,7 @@ OrderedJson empty_volume(std::string_view name) {
     OrderedJson result = OrderedJson::object();
     result["name"] = name;
     result["waveforms"] = OrderedJson::array();
-    result["sample_banks"] = OrderedJson::array();
+    result["samples"] = OrderedJson::array();
     return result;
 }
 
@@ -32,24 +34,24 @@ OrderedJson authored_starter_volume(std::string_view name) {
     result["name"] = name;
     result["waveforms"] =
         OrderedJson::array({{{"id", "tone"}, {"name", "Authored Tone"}, {"path", "tone.wav"}, {"root_key", 60}}});
-    result["sample_banks"] = OrderedJson::array({{{"name", "Authored Tone"},
-                                                  {"waveform_id", "tone"},
-                                                  {"root_key", 60},
-                                                  {"key_low", 60},
-                                                  {"key_high", 60},
-                                                  {"level", 100}}});
+    result["samples"] = OrderedJson::array({{{"name", "Authored Tone"},
+                                             {"waveform_id", "tone"},
+                                             {"root_key", 60},
+                                             {"key_low", 60},
+                                             {"key_high", 60},
+                                             {"level", 100}}});
     return result;
 }
 
 Result<OrderedJson> manifest_template(BuildManifestKind kind) {
     OrderedJson result = OrderedJson::object();
-    result["schema_version"] = "1.0";
+    result["schema_version"] = build_manifest_schema_version;
     switch (kind) {
     case BuildManifestKind::hds: {
         result["size_bytes"] = 536'870'912;
         OrderedJson partition = OrderedJson::object();
         partition["name"] = "New Partition";
-        partition["volumes"] = OrderedJson::array({empty_volume("New Volume")});
+        partition["volumes"] = OrderedJson::array();
         result["partitions"] = OrderedJson::array({std::move(partition)});
         return result;
     }
@@ -117,6 +119,16 @@ Result<std::uint64_t> integer(const Json &value, std::string_view context, std::
     return result;
 }
 
+Result<std::int64_t> signed_integer(const Json &value, std::string_view context, std::int64_t minimum,
+                                    std::int64_t maximum) {
+    if (!value.is_number_integer())
+        return std::unexpected{manifest_error(std::string{context} + " must be an integer")};
+    const auto result = value.get<std::int64_t>();
+    if (result < minimum || result > maximum)
+        return std::unexpected{manifest_error(std::string{context} + " is outside its supported range")};
+    return result;
+}
+
 Result<std::filesystem::path> path(const Json &value, std::string_view context, const std::filesystem::path &base) {
     auto parsed = text(value, context);
     if (!parsed)
@@ -130,7 +142,10 @@ Result<std::filesystem::path> path(const Json &value, std::string_view context, 
 }
 
 Result<WaveformSpec> waveform(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"id", "name", "path", "root_key"}, {"target_sample_rate"}); !valid)
+    if (auto valid =
+            fields(value, context, {"id", "name", "path", "root_key"},
+                   {"target_sample_rate", "fine_tune_cents", "loop_mode", "loop_start_frame", "loop_length_frames"});
+        !valid)
         return std::unexpected{valid.error()};
     auto id = text(value["id"], context + ".id");
     auto name = text(value["name"], context + ".name");
@@ -152,13 +167,40 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
     }
+    if (value.contains("fine_tune_cents")) {
+        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
+        if (!fine)
+            return std::unexpected{fine.error()};
+        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
+    }
+    if (value.contains("loop_mode")) {
+        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
+        if (!mode)
+            return std::unexpected{mode.error()};
+        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
+    }
+    if (value.contains("loop_start_frame")) {
+        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
+                             std::numeric_limits<std::uint32_t>::max());
+        if (!start)
+            return std::unexpected{start.error()};
+        result.loop_start_frame = static_cast<std::uint32_t>(*start);
+    }
+    if (value.contains("loop_length_frames")) {
+        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
+                              std::numeric_limits<std::uint32_t>::max());
+        if (!length)
+            return std::unexpected{length.error()};
+        result.loop_length_frames = static_cast<std::uint32_t>(*length);
+    }
     return result;
 }
 
-Result<SampleBankSpec> sample_bank(const Json &value, std::string context, const std::filesystem::path &base) {
+Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
     if (auto valid = fields(value, context, {"name", "root_key", "key_low", "key_high"},
                             {"level", "waveform_id", "right_waveform_id", "interleaved_audio_path",
-                             "left_waveform_name", "right_waveform_name", "target_sample_rate"});
+                             "left_waveform_name", "right_waveform_name", "target_sample_rate", "fine_tune_cents",
+                             "velocity_low", "velocity_high", "loop_mode", "loop_start_frame", "loop_length_frames"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -183,7 +225,7 @@ Result<SampleBankSpec> sample_bank(const Json &value, std::string context, const
         return std::unexpected{high.error()};
     if (*high < *low)
         return std::unexpected{manifest_error(context + ".key_high precedes key_low")};
-    SampleBankSpec result;
+    SampleSpec result;
     result.name = *name;
     result.root_key = static_cast<std::uint8_t>(*root);
     result.key_low = static_cast<std::uint8_t>(*low);
@@ -231,16 +273,49 @@ Result<SampleBankSpec> sample_bank(const Json &value, std::string context, const
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
     }
+    if (value.contains("fine_tune_cents")) {
+        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
+        if (!fine)
+            return std::unexpected{fine.error()};
+        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
+    }
+    for (const auto field : {std::string_view{"velocity_low"}, std::string_view{"velocity_high"}}) {
+        if (!value.contains(field))
+            continue;
+        auto velocity = integer(value[field], context + "." + std::string{field}, 0, 127);
+        if (!velocity)
+            return std::unexpected{velocity.error()};
+        (field == "velocity_low" ? result.velocity_low : result.velocity_high) = static_cast<std::uint8_t>(*velocity);
+    }
+    if (value.contains("loop_mode")) {
+        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
+        if (!mode)
+            return std::unexpected{mode.error()};
+        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
+    }
+    if (value.contains("loop_start_frame")) {
+        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
+                             std::numeric_limits<std::uint32_t>::max());
+        if (!start)
+            return std::unexpected{start.error()};
+        result.loop_start_frame = static_cast<std::uint32_t>(*start);
+    }
+    if (value.contains("loop_length_frames")) {
+        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
+                              std::numeric_limits<std::uint32_t>::max());
+        if (!length)
+            return std::unexpected{length.error()};
+        result.loop_length_frames = static_cast<std::uint32_t>(*length);
+    }
     return result;
 }
 
 Result<VolumeSpec> volume(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"name", "waveforms", "sample_banks"}, {"sample_bank_groups", "programs"});
-        !valid) {
+    if (auto valid = fields(value, context, {"name", "waveforms", "samples"}, {"sample_banks", "programs"}); !valid) {
         return std::unexpected{valid.error()};
     }
-    if (!value["waveforms"].is_array() || !value["sample_banks"].is_array()) {
-        return std::unexpected{manifest_error(context + " waveform and sample-bank fields must be arrays")};
+    if (!value["waveforms"].is_array() || !value["samples"].is_array()) {
+        return std::unexpected{manifest_error(context + " waveforms and samples must be arrays")};
     }
     auto name = text(value["name"], context + ".name");
     if (!name)
@@ -256,72 +331,60 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             return std::unexpected{manifest_error(context + " has duplicate waveform ids")};
         result.waveforms.push_back(std::move(*item));
     }
-    std::set<std::string> bank_names;
-    for (std::size_t index = 0; index < value["sample_banks"].size(); ++index) {
-        auto item =
-            sample_bank(value["sample_banks"][index], context + ".sample_banks[" + std::to_string(index) + "]", base);
+    std::set<std::string> sample_names;
+    for (std::size_t index = 0; index < value["samples"].size(); ++index) {
+        auto item = sample(value["samples"][index], context + ".samples[" + std::to_string(index) + "]", base);
         if (!item)
             return std::unexpected{item.error()};
-        if (!bank_names.insert(item->name).second)
-            return std::unexpected{manifest_error(context + " has duplicate sample-bank names")};
+        if (!sample_names.insert(item->name).second)
+            return std::unexpected{manifest_error(context + " has duplicate Sample names")};
         if (item->waveform_id && !waveform_ids.contains(*item->waveform_id))
             return std::unexpected{manifest_error(context + " references an unknown waveform")};
         if (item->right_waveform_id &&
             (!waveform_ids.contains(*item->right_waveform_id) || item->right_waveform_id == item->waveform_id))
             return std::unexpected{manifest_error(context + " has an invalid right waveform reference")};
-        result.sample_banks.push_back(std::move(*item));
+        result.samples.push_back(std::move(*item));
     }
-    const auto &groups = value.contains("sample_bank_groups") ? value["sample_bank_groups"] : Json::array();
-    if (!groups.is_array()) {
-        return std::unexpected{manifest_error(context + ".sample_bank_groups must be an array")};
+    const auto &sample_banks_json = value.contains("sample_banks") ? value["sample_banks"] : Json::array();
+    if (!sample_banks_json.is_array()) {
+        return std::unexpected{manifest_error(context + ".sample_banks must be an array")};
     }
-    std::set<std::string> group_names;
-    for (std::size_t index = 0; index < groups.size(); ++index) {
-        const auto group_context = context + ".sample_bank_groups[" + std::to_string(index) + "]";
-        const auto &row = groups[index];
-        if (auto valid = fields(row, group_context, {"name"}, {"member_sample_bank", "member_sample_banks"}); !valid) {
+    std::set<std::string> sample_bank_names;
+    for (std::size_t index = 0; index < sample_banks_json.size(); ++index) {
+        const auto sample_bank_context = context + ".sample_banks[" + std::to_string(index) + "]";
+        const auto &row = sample_banks_json[index];
+        if (auto valid = fields(row, sample_bank_context, {"name", "member_samples"}); !valid) {
             return std::unexpected{valid.error()};
         }
-        const bool singular = row.contains("member_sample_bank");
-        const bool plural = row.contains("member_sample_banks");
-        if (singular == plural) {
-            return std::unexpected{manifest_error(group_context + " must contain exactly one member field")};
+        auto sample_bank_name = text(row["name"], sample_bank_context + ".name");
+        if (!sample_bank_name)
+            return std::unexpected{sample_bank_name.error()};
+        if (!sample_bank_names.insert(*sample_bank_name).second) {
+            return std::unexpected{manifest_error(context + " has duplicate Sample Bank names")};
         }
-        auto group_name = text(row["name"], group_context + ".name");
-        if (!group_name)
-            return std::unexpected{group_name.error()};
-        if (!group_names.insert(*group_name).second) {
-            return std::unexpected{manifest_error(context + " has duplicate sample-bank group names")};
+        SampleBankSpec sample_bank{*sample_bank_name, {}};
+        if (!row["member_samples"].is_array()) {
+            return std::unexpected{manifest_error(sample_bank_context + ".member_samples must be an array")};
         }
-        SampleBankGroupSpec group{*group_name, {}};
-        if (singular) {
-            auto member = text(row["member_sample_bank"], group_context + ".member_sample_bank");
+        for (std::size_t member_index = 0; member_index < row["member_samples"].size(); ++member_index) {
+            auto member = text(row["member_samples"][member_index],
+                               sample_bank_context + ".member_samples[" + std::to_string(member_index) + "]");
             if (!member)
                 return std::unexpected{member.error()};
-            group.member_sample_banks.push_back(*member);
-        } else {
-            if (!row["member_sample_banks"].is_array()) {
-                return std::unexpected{manifest_error(group_context + ".member_sample_banks must be an array")};
-            }
-            for (std::size_t member_index = 0; member_index < row["member_sample_banks"].size(); ++member_index) {
-                auto member = text(row["member_sample_banks"][member_index],
-                                   group_context + ".member_sample_banks[" + std::to_string(member_index) + "]");
-                if (!member)
-                    return std::unexpected{member.error()};
-                group.member_sample_banks.push_back(*member);
-            }
+            sample_bank.member_samples.push_back(*member);
         }
-        const std::set<std::string> unique_members{group.member_sample_banks.begin(), group.member_sample_banks.end()};
-        if (group.member_sample_banks.empty() || group.member_sample_banks.size() > 3U ||
-            unique_members.size() != group.member_sample_banks.size()) {
-            return std::unexpected{manifest_error(group_context + " must contain 1..3 distinct members")};
+        const std::set<std::string> unique_members{sample_bank.member_samples.begin(),
+                                                   sample_bank.member_samples.end()};
+        if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members ||
+            unique_members.size() != sample_bank.member_samples.size()) {
+            return std::unexpected{manifest_error(sample_bank_context + " must contain 1..127 distinct members")};
         }
-        for (const auto &member : group.member_sample_banks) {
-            if (!bank_names.contains(member)) {
-                return std::unexpected{manifest_error(group_context + " references an unknown sample bank")};
+        for (const auto &member : sample_bank.member_samples) {
+            if (!sample_names.contains(member)) {
+                return std::unexpected{manifest_error(sample_bank_context + " references an unknown Sample")};
             }
         }
-        result.sample_bank_groups.push_back(std::move(group));
+        result.sample_banks.push_back(std::move(sample_bank));
     }
     const auto &programs = value.contains("programs") ? value["programs"] : Json::array();
     if (!programs.is_array()) {
@@ -331,42 +394,57 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     for (std::size_t index = 0; index < programs.size(); ++index) {
         const auto program_context = context + ".programs[" + std::to_string(index) + "]";
         const auto &row = programs[index];
-        if (auto valid = fields(row, program_context, {"number", "assignments"}); !valid) {
+        if (auto valid = fields(row, program_context, {"number", "name", "assignments"}); !valid) {
             return std::unexpected{valid.error()};
         }
         auto number = integer(row["number"], program_context + ".number", 1, 128);
+        auto program_name = text(row["name"], program_context + ".name");
         if (!number)
             return std::unexpected{number.error()};
+        if (!program_name)
+            return std::unexpected{program_name.error()};
         if (!program_numbers.insert(*number).second) {
             return std::unexpected{manifest_error(context + " has duplicate Program numbers")};
         }
         if (!row["assignments"].is_array()) {
             return std::unexpected{manifest_error(program_context + ".assignments must be an array")};
         }
-        ProgramSpec program{static_cast<std::uint8_t>(*number), {}};
+        ProgramSpec program{static_cast<std::uint8_t>(*number), std::move(*program_name), {}};
         for (std::size_t assignment_index = 0; assignment_index < row["assignments"].size(); ++assignment_index) {
             const auto assignment_context = program_context + ".assignments[" + std::to_string(assignment_index) + "]";
             const auto &assignment = row["assignments"][assignment_index];
-            if (auto valid =
-                    fields(assignment, assignment_context, {"receive_channel"}, {"sample_bank", "sample_bank_group"});
+            if (auto valid = fields(assignment, assignment_context, {"receive_mode"},
+                                    {"receive_channel", "sample", "sample_bank"});
                 !valid) {
                 return std::unexpected{valid.error()};
             }
-            const bool bank = assignment.contains("sample_bank");
-            const bool group = assignment.contains("sample_bank_group");
-            if (bank == group)
+            const bool sample_target = assignment.contains("sample");
+            const bool sample_bank_target = assignment.contains("sample_bank");
+            if (sample_target == sample_bank_target)
                 return std::unexpected{manifest_error(assignment_context + " must contain exactly one target")};
-            const auto target_field = bank ? "sample_bank" : "sample_bank_group";
+            const auto target_field = sample_target ? "sample" : "sample_bank";
             auto target = text(assignment[target_field], assignment_context + "." + target_field);
-            auto channel = integer(assignment["receive_channel"], assignment_context + ".receive_channel", 1, 16);
+            auto receive_mode = text(assignment["receive_mode"], assignment_context + ".receive_mode");
             if (!target)
                 return std::unexpected{target.error()};
+            if (!receive_mode || (*receive_mode != "MIDI_CHANNEL" && *receive_mode != "SAMPLE"))
+                return std::unexpected{manifest_error(assignment_context + ".receive_mode is invalid")};
+            const auto midi_mode = *receive_mode == "MIDI_CHANNEL";
+            if (assignment.contains("receive_channel") != midi_mode)
+                return std::unexpected{
+                    manifest_error(assignment_context + " must specify receive_channel only for MIDI_CHANNEL")};
+            auto channel = midi_mode
+                               ? integer(assignment["receive_channel"], assignment_context + ".receive_channel", 1, 16)
+                               : Result<std::uint64_t>{0U};
             if (!channel)
                 return std::unexpected{channel.error()};
-            if ((bank && !bank_names.contains(*target)) || (group && !group_names.contains(*target))) {
+            if ((sample_target && !sample_names.contains(*target)) ||
+                (sample_bank_target && !sample_bank_names.contains(*target))) {
                 return std::unexpected{manifest_error(assignment_context + " references an unknown target")};
             }
-            program.assignments.push_back({bank ? "SBNK" : "SBAC", *target, static_cast<std::uint8_t>(*channel)});
+            program.assignments.push_back({sample_target ? "SBNK" : "SBAC", *target,
+                                           static_cast<std::uint8_t>(*channel),
+                                           midi_mode ? ProgramReceiveMode::midi_channel : ProgramReceiveMode::sample});
         }
         result.programs.push_back(std::move(program));
     }
@@ -379,7 +457,7 @@ Result<HdsBuildManifest> parse(const Json &root, const std::filesystem::path &ba
     auto version = text(root["schema_version"], "manifest.schema_version");
     if (!version)
         return std::unexpected{version.error()};
-    if (*version != "1.0")
+    if (*version != build_manifest_schema_version)
         return std::unexpected{manifest_error("manifest.schema_version must be '1.0'")};
     auto size = integer(root["size_bytes"], "manifest.size_bytes", minimum_hds_size, maximum_hds_size);
     if (!size)
@@ -397,8 +475,8 @@ Result<HdsBuildManifest> parse(const Json &root, const std::filesystem::path &ba
         auto name = text(row["name"], context + ".name");
         if (!name)
             return std::unexpected{name.error()};
-        if (!row["volumes"].is_array() || row["volumes"].empty())
-            return std::unexpected{manifest_error(context + ".volumes must be a non-empty array")};
+        if (!row["volumes"].is_array())
+            return std::unexpected{manifest_error(context + ".volumes must be an array")};
         PartitionSpec partition{*name, {}};
         for (std::size_t volume_index = 0; volume_index < row["volumes"].size(); ++volume_index) {
             auto parsed =
@@ -423,7 +501,7 @@ Result<MediaBuildManifest> parse_media(const Json &root, const std::filesystem::
         return std::unexpected{version.error()};
     if (!format)
         return std::unexpected{format.error()};
-    if (*version != "1.0")
+    if (*version != build_manifest_schema_version)
         return std::unexpected{manifest_error("manifest.schema_version must be '1.0'")};
     const bool transfer = root.contains("transfer");
     const bool authored = root.contains("authored_volume");
@@ -527,7 +605,8 @@ Result<MediaBuildManifest> parse_media(const Json &root, const std::filesystem::
 
 Result<HdsBuildManifest> parse_hds_build_manifest(std::string_view json, const std::filesystem::path &base_directory) {
     try {
-        return parse(Json::parse(json), base_directory);
+        auto root = Json::parse(json);
+        return parse(root, base_directory);
     } catch (const Json::exception &error) {
         return std::unexpected{manifest_error(std::string{"invalid HDS manifest JSON: "} + error.what())};
     }
@@ -547,7 +626,8 @@ Result<HdsBuildManifest> load_hds_build_manifest(const std::filesystem::path &pa
 Result<MediaBuildManifest> parse_media_build_manifest(std::string_view json,
                                                       const std::filesystem::path &base_directory) {
     try {
-        return parse_media(Json::parse(json), base_directory);
+        auto root = Json::parse(json);
+        return parse_media(root, base_directory);
     } catch (const Json::exception &error) {
         return std::unexpected{manifest_error(std::string{"invalid media manifest JSON: "} + error.what())};
     }
@@ -578,8 +658,8 @@ Result<std::string> serialize_build_manifest_template(BuildManifestKind kind) {
     }
 }
 
-Result<void> write_build_manifest_template(BuildManifestKind kind, const std::filesystem::path &output_path,
-                                           bool overwrite) {
+Result<PublicationOutcome> write_build_manifest_template(BuildManifestKind kind,
+                                                         const std::filesystem::path &output_path, bool overwrite) {
     auto serialized = serialize_build_manifest_template(kind);
     if (!serialized)
         return std::unexpected{serialized.error()};
@@ -600,50 +680,16 @@ Result<void> write_build_manifest_template(BuildManifestKind kind, const std::fi
         return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
                                           "could not create build manifest output directory")};
     }
-    auto temporary = text::temporary_sibling(output_path);
+    auto temporary = detail::TemporaryPublication::create(output_path, [&](const detail::TemporaryFileSink &sink) {
+        return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
+    });
     if (!temporary)
         return std::unexpected{temporary.error()};
-    {
-        std::ofstream output{*temporary, std::ios::binary | std::ios::trunc};
-        output.write(serialized->data(), static_cast<std::streamsize>(serialized->size()));
-        if (!output) {
-            std::filesystem::remove(*temporary, filesystem_error);
-            return std::unexpected{
-                make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write temporary build manifest")};
-        }
-    }
-    if (overwrite)
-        std::filesystem::remove(output_path, filesystem_error);
-    std::filesystem::rename(*temporary, output_path, filesystem_error);
-    if (filesystem_error) {
-        std::filesystem::remove(*temporary, filesystem_error);
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not publish build manifest atomically")};
-    }
-    return {};
-}
-
-Result<std::vector<PartitionGeometry>> plan_hds_geometry(const HdsBuildManifest &manifest) {
-    if (manifest.partitions.empty() || manifest.partitions.size() > 8U || manifest.size_bytes < minimum_hds_size ||
-        manifest.size_bytes > maximum_hds_size || manifest.size_bytes % 512U != 0U) {
-        return std::unexpected{manifest_error("HDS manifest geometry is outside the writer profile")};
-    }
-    constexpr std::uint64_t start = 3;
-    constexpr std::uint64_t maximum_slot = 1'073'741'824 / 512U - 1U;
-    const auto slot = std::min((manifest.size_bytes / 512U - (start - 1U)) / manifest.partitions.size(), maximum_slot);
-    const auto sectors = slot - 1U;
-    if (sectors < 2045U)
-        return std::unexpected{manifest_error("partition slots are too small for SFS")};
-    const auto clusters = sectors / 2U;
-    const auto bitmap_count = ((clusters + 7U) / 8U + 1023U) / 1024U;
-    std::vector<PartitionGeometry> result;
-    for (std::size_t index = 0; index < manifest.partitions.size(); ++index) {
-        const auto bitmap = 2U + bitmap_count;
-        const auto directory = bitmap + bitmap_count;
-        result.push_back({static_cast<std::uint8_t>(index), start + index * slot, slot, sectors, clusters, bitmap,
-                          bitmap_count, directory, directory + 358U});
-    }
-    return result;
+    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
+    auto published = temporary->publish(mode);
+    if (!published)
+        return std::unexpected{published.error()};
+    return std::move(*published);
 }
 
 } // namespace axk
