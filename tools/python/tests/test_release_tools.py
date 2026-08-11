@@ -1358,6 +1358,9 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     assert "await puppeteer.executablePath()" in workflow
     assert 'ldd "$browser_path"' in workflow
     assert "not found" in workflow
+    assert '"--no-sandbox"' in workflow
+    assert '"--disable-setuid-sandbox"' in workflow
+    assert '-p "$puppeteer_config"' in workflow
     assert 'mmdc -i "$smoke_source" -o "$smoke_output" -b transparent' in workflow
     assert 'test -s "$smoke_output"' in workflow
     assert "apt-get" not in workflow
