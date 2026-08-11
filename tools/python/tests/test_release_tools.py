@@ -989,6 +989,12 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
     assert "needs: native-linux-arm64" in native_windows_arm64
     assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_x64
     assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_arm64
+    assert "needs:\n      - macos-slices" in macos_universal
+    assert "native-windows-x64" not in macos_universal.split("runs-on:", 1)[0]
+    assert (
+        "needs:\n      - native-windows-x64\n      - macos-universal"
+        in draft_release
+    )
     assert "group: native-macos-signing" in macos_universal
     assert "cancel-in-progress: false" in macos_universal
     assert "group: native-draft-release" in draft_release
@@ -1154,7 +1160,11 @@ def test_macos_signing_uses_persistent_runner_state_without_credential_secrets()
     assert "codesign --force --timestamp --options runtime" in universal_job
     assert "macos-signing-verification" in universal_job
     assert "APPLE_SIGNING_IDENTITY: ${{ steps.signing.outputs.fingerprint }}" in universal_job
-    assert "--keychain-profile developer-id-notary" in universal_job
+    assert "printf 'keychain=%s\\n' \"$signing_keychain\" >> \"$GITHUB_OUTPUT\"" in universal_job
+    assert "- name: Preflight persistent macOS notarization profile" in universal_job
+    assert universal_job.count("--keychain-profile \"$NOTARY_PROFILE\"") == 3
+    assert universal_job.count("--keychain \"$SIGNING_KEYCHAIN\"") == 3
+    assert "${RUNNER_NAME:-unknown}" in universal_job
 
 
 def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None:

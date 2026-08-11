@@ -366,10 +366,6 @@ jobs:
     name: macOS universal
     if: github.event_name == 'workflow_dispatch'
     needs:
-      - native-linux-x64
-      - native-windows-x64
-      - native-linux-arm64
-      - native-windows-arm64
       - macos-slices
     runs-on: [self-hosted, macOS, ARM64]
     concurrency:
@@ -475,13 +471,27 @@ jobs:
           codesign --verify --strict --verbose=2 "$verification_binary"
           "$verification_binary"
 
-          if [[ "${{ inputs.notarize_macos }}" == "true" ]]; then
-            xcrun notarytool history \
-              --keychain-profile developer-id-notary \
-              > "$verification_directory/notary-history.json"
-          fi
           printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
           printf 'team_id=%s\n' "$team_id" >> "$GITHUB_OUTPUT"
+          printf 'keychain=%s\n' "$signing_keychain" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight persistent macOS notarization profile
+        if: inputs.notarize_macos
+        shell: bash
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
+        run: |
+          set -euo pipefail
+          verification_directory="$RUNNER_TEMP/axklib-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/macos-signing-verification"
+          if ! xcrun notarytool history \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
+            --output-format json \
+            > "$verification_directory/notary-history.json"; then
+            echo "Notarization profile '$NOTARY_PROFILE' is unavailable in keychain '$SIGNING_KEYCHAIN' on runner '${RUNNER_NAME:-unknown}' for user '$(id -un)'." >&2
+            exit 1
+          fi
 
       - name: Assemble and verify universal native binaries
         shell: bash
@@ -675,24 +685,32 @@ jobs:
       - name: Notarize macOS universal CLI archive
         if: inputs.notarize_macos
         shell: bash
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
         run: |
           set -euo pipefail
           archive="build/artifacts/${{ steps.package.outputs.cli_artifact_stem }}.zip"
           test -f "$archive"
           xcrun notarytool submit "$archive" \
-            --keychain-profile developer-id-notary \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
             --wait
 
       - name: Notarize and staple universal macOS desktop DMG
         if: inputs.notarize_macos
         shell: bash
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          NOTARY_PROFILE: developer-id-notary
         run: |
           set -euo pipefail
           dmg=$(find build/artifacts/axkdeck-macos-universal \
             -type f -name '*.dmg' -print -quit)
           test -n "$dmg"
           xcrun notarytool submit "$dmg" \
-            --keychain-profile developer-id-notary \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --keychain "$SIGNING_KEYCHAIN" \
             --wait
           xcrun stapler staple "$dmg"
 
@@ -768,10 +786,7 @@ jobs:
     name: Draft release
     if: ${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}
     needs:
-      - native-linux-x64
       - native-windows-x64
-      - native-linux-arm64
-      - native-windows-arm64
       - macos-universal
     runs-on: [self-hosted, Linux, X64, jammy, docker]
     permissions:
