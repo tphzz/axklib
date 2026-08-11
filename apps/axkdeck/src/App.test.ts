@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -68,6 +69,12 @@ vi.mock('./lib/nativeMediaDrop', () => ({
 
 import App from './App.svelte';
 import { AuditionController } from './lib/audio/auditionController';
+
+function renderAcknowledgedApp() {
+    const rendered = render(App);
+    flushSync(() => screen.getByRole('button', { name: 'I understand' }).click());
+    return rendered;
+}
 
 async function chooseNestedImage(buttonName: 'Open image' | 'Open another image' = 'Open image'): Promise<void> {
     await fireEvent.click(screen.getByRole('button', { name: buttonName }));
@@ -187,8 +194,23 @@ describe('App panel layout', () => {
         mocks.uploadClientFile.mockReset();
     });
 
+    it('requires acknowledgement on every application start', async () => {
+        const first = render(App);
+        const dialog = screen.getByRole('dialog', { name: 'Experimental software' });
+
+        await fireEvent.keyDown(dialog, { key: 'Escape' });
+        expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'I understand' }));
+        expect(screen.queryByRole('dialog', { name: 'Experimental software' })).toBeNull();
+
+        first.unmount();
+        render(App);
+        expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+    });
+
     it('keeps one stable toolbar across all side-panel combinations', async () => {
-        const { container } = render(App);
+        const { container } = renderAcknowledgedApp();
         const shell = container.querySelector('.app-shell');
         const toolbar = screen.getByRole('toolbar', { name: 'Panel layout' });
         const library = screen.getByRole('button', { name: 'Library panel' });
@@ -227,7 +249,7 @@ describe('App panel layout', () => {
     });
 
     it('uses canonical Yamaha object terminology', () => {
-        render(App);
+        renderAcknowledgedApp();
 
         expect(screen.getByRole('button', { name: 'Sample Banks' })).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Samples' })).toBeTruthy();
@@ -236,7 +258,7 @@ describe('App panel layout', () => {
     });
 
     it('keeps autoplay session-local and disabled until the user enables it', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         expect(screen.queryByRole('checkbox', { name: 'Autoplay' })).toBeNull();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
@@ -247,7 +269,7 @@ describe('App panel layout', () => {
     });
 
     it('uses contained-object lanes above the editor for SBAC and SBNK views', async () => {
-        const { container } = render(App);
+        const { container } = renderAcknowledgedApp();
         await fireEvent.click(screen.getByRole('button', { name: 'Editor panel' }));
 
         await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
@@ -345,7 +367,7 @@ describe('App panel layout', () => {
         const playSequence = vi.spyOn(AuditionController.prototype, 'playSequence').mockImplementation(() => undefined);
 
         try {
-            render(App);
+            renderAcknowledgedApp();
             await chooseNestedImage();
             await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Play Slice Bank' }));
@@ -485,7 +507,7 @@ describe('App panel layout', () => {
             });
 
         try {
-            render(App);
+            renderAcknowledgedApp();
             await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
             const picker = await screen.findByRole('dialog', { name: 'Open image' });
             await fireEvent.click(await within(picker).findByText('Yamaha'));
@@ -549,7 +571,7 @@ describe('App panel layout', () => {
             floppySet: { ...opened.floppySet, status: 'COMPLETE', nextRequiredIndex: null },
         });
 
-        render(App);
+        renderAcknowledgedApp();
         await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         const picker = await screen.findByRole('dialog', { name: 'Open image' });
         await fireEvent.click(await within(picker).findByText('Yamaha'));
@@ -570,7 +592,7 @@ describe('App panel layout', () => {
     });
 
     it('defaults the object browser to two-thirds of the middle workspace', () => {
-        const { container } = render(App);
+        const { container } = renderAcknowledgedApp();
 
         expect(container.querySelector<HTMLElement>('.main-stage')?.style.getPropertyValue('--split-position')).toBe(
             '66.66666666666666%',
@@ -578,7 +600,7 @@ describe('App panel layout', () => {
     });
 
     it('keeps image management commands out of the top toolbar', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Save directory' })).toBeNull();
@@ -590,7 +612,7 @@ describe('App panel layout', () => {
     });
 
     it('keeps image lifecycle commands in the image navigator', () => {
-        render(App);
+        renderAcknowledgedApp();
 
         const navigator = screen.getByRole('complementary', { name: 'Image navigator' });
         expect(screen.getByRole('button', { name: 'Open image' }).closest('aside')).toBe(navigator);
@@ -601,7 +623,7 @@ describe('App panel layout', () => {
     });
 
     it('closes the active image and returns to the initial empty state', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
@@ -629,7 +651,7 @@ describe('App panel layout', () => {
             truncated: false,
             nextCursor: null,
         }));
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
@@ -646,7 +668,7 @@ describe('App panel layout', () => {
     });
 
     it('preserves the active image when opening a replacement fails', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
@@ -674,7 +696,7 @@ describe('App panel layout', () => {
             truncated: false,
             nextCursor: null,
         }));
-        render(App);
+        renderAcknowledgedApp();
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
@@ -695,7 +717,7 @@ describe('App panel layout', () => {
     });
 
     it('closes the active image session when the application is unmounted', async () => {
-        const desktop = render(App);
+        const desktop = renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
@@ -819,7 +841,7 @@ describe('App panel layout', () => {
                 finishRefresh = resolve;
             }),
         );
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
@@ -943,7 +965,7 @@ describe('App panel layout', () => {
             status: 'completed',
             result: { deletedObjectIds: ['wave-unused-a'] },
         });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
@@ -1024,7 +1046,7 @@ describe('App panel layout', () => {
             status: 'completed',
             result: {},
         });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
@@ -1065,7 +1087,7 @@ describe('App panel layout', () => {
                 finishOpening = resolve;
             }),
         );
-        const desktop = render(App);
+        const desktop = renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
@@ -1094,7 +1116,7 @@ describe('App panel layout', () => {
     });
 
     it('keeps open-image selection free of destructive file-management commands', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
@@ -1175,7 +1197,7 @@ describe('App panel layout', () => {
             programSlotPlacements: [],
             allocation: [],
         });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await vi.waitFor(() => expect(screen.getByRole('button', { name: /My Volume/ })).toBeTruthy());
@@ -1249,7 +1271,7 @@ describe('App panel layout', () => {
             packageImportAvailable: true,
             packageExportAvailable: true,
         });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         const partitionButton = await screen.findByRole('button', { name: /My Partition/ });
@@ -1310,7 +1332,7 @@ describe('App panel layout', () => {
             packageExportAvailable: true,
         });
         mocks.objectPage.mockResolvedValue({ objects: programs, totalCount: programs.length });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         const first = await screen.findByRole('button', { name: /Program 1/ });
@@ -1409,7 +1431,7 @@ describe('App panel layout', () => {
             objects: filter?.scopeId === pianoVolume.id ? [program] : filter?.scopeId === drumsVolume.id ? [bank] : [],
             totalCount: 1,
         }));
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await fireEvent.click(await screen.findByText('Concert Grand'));
@@ -1472,7 +1494,7 @@ describe('App panel layout', () => {
             packageImportAvailable: false,
             packageExportAvailable: true,
         });
-        render(App);
+        renderAcknowledgedApp();
 
         await chooseNestedImage();
         await fireEvent.contextMenu(await screen.findByRole('button', { name: /Object directory/ }));
@@ -1487,21 +1509,21 @@ describe('App panel layout', () => {
     it('suppresses context menus only in the desktop runtime', async () => {
         const runtime = window as unknown as { __TAURI_INTERNALS__?: unknown };
         runtime.__TAURI_INTERNALS__ = {};
-        const desktop = render(App);
+        const desktop = renderAcknowledgedApp();
         const desktopEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
         window.dispatchEvent(desktopEvent);
         expect(desktopEvent.defaultPrevented).toBe(true);
         desktop.unmount();
 
         delete runtime.__TAURI_INTERNALS__;
-        render(App);
+        renderAcknowledgedApp();
         const browserEvent = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
         window.dispatchEvent(browserEvent);
         expect(browserEvent.defaultPrevented).toBe(false);
     });
 
     it('prevents WebKit URI-list file drops from navigating away', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         const file = new File(['audio'], 'take.wav', { type: 'audio/wav' });
         const dataTransfer = {
@@ -1527,7 +1549,7 @@ describe('App panel layout', () => {
     it('routes native Tauri file drops through the audio import flow', async () => {
         const runtime = window as unknown as { __TAURI_INTERNALS__?: unknown };
         runtime.__TAURI_INTERNALS__ = {};
-        render(App);
+        renderAcknowledgedApp();
 
         await vi.waitFor(() => expect(mocks.listenForNativeMediaDrops).toHaveBeenCalledOnce());
         const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
@@ -1555,7 +1577,7 @@ describe('App panel layout', () => {
             uploadKind: 'MIDI',
             displayName: 'intro.mid',
         });
-        render(App);
+        renderAcknowledgedApp();
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
 
@@ -1598,7 +1620,7 @@ describe('App panel layout', () => {
             uploadKind: 'MIDI',
             displayName: 'native.mid',
         });
-        render(App);
+        renderAcknowledgedApp();
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
         await vi.waitFor(() => expect(mocks.listenForNativeMediaDrops).toHaveBeenCalledOnce());
@@ -1623,7 +1645,7 @@ describe('App panel layout', () => {
     });
 
     it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         const midiTransfer = {
             types: ['Files'],
@@ -1682,7 +1704,7 @@ describe('App panel layout', () => {
             uploadKind: 'MIDI',
             displayName: 'target.mid',
         });
-        render(App);
+        renderAcknowledgedApp();
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
 
@@ -1728,7 +1750,7 @@ describe('App panel layout', () => {
             objectDeletionAvailable: true,
             waveDataCleanupAvailable: false,
         });
-        render(App);
+        renderAcknowledgedApp();
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
@@ -1811,7 +1833,7 @@ describe('App panel layout', () => {
             uploadKind: 'AUDIO',
             displayName: '16bit_11k.wav',
         });
-        const { container } = render(App);
+        const { container } = renderAcknowledgedApp();
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
@@ -1830,7 +1852,7 @@ describe('App panel layout', () => {
     });
 
     it('consumes unsupported and empty file drops without opening the import dialog', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         const unsupportedTransfer = {
             types: ['text/uri-list'],
@@ -1857,7 +1879,7 @@ describe('App panel layout', () => {
     });
 
     it('restores the last image-picker directory after cancelling', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
@@ -1871,7 +1893,7 @@ describe('App panel layout', () => {
     });
 
     it('starts hard-disk image creation through a dedicated destination picker', async () => {
-        render(App);
+        renderAcknowledgedApp();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Create image' }));
         await fireEvent.click(await screen.findByText('Yamaha'));

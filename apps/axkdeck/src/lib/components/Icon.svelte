@@ -34,6 +34,7 @@
         | 'sparkles'
         | 'stop'
         | 'trash'
+        | 'triangle-alert'
         | 'upload'
         | 'waveform';
 
@@ -92,6 +93,10 @@
         <path d="M4 19h5l10-10-5-5L4 14v5Z" /><path d="m12 6 5 5" />
     {:else if name === 'trash'}
         <path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" />
+    {:else if name === 'triangle-alert'}
+        <path d="M10.3 3.6 2.2 18a2 2 0 0 0 1.8 3h16a2 2 0 0 0 1.8-3L13.7 3.6a2 2 0 0 0-3.4 0Z" /><path
+            d="M12 9v4M12 17h.01"
+        />
     {:else if name === 'broom'}
         <path d="m16 3 5 5-9 9H7l-4-4 13-10Z" /><path d="m5 15-2 3 3 3 3-3M8 16l3 3" />
     {:else if name === 'grid'}

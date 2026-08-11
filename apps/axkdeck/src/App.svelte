@@ -21,6 +21,7 @@
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
+    import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import { createTransport } from './lib/createTransport';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
@@ -61,6 +62,7 @@
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
+    let experimentalWarningOpen = $state(true);
     let workspaceView = $state<WorkspaceView>('programs');
     let inspectorOpen = $state(true);
     let connectionSettings = $state<RemoteServerSettingsView | null>(null);
@@ -570,6 +572,10 @@
     selectionChanged={(selection) => (packageExportSelection = selection)}
     selectionLimit={reportPackageExportSelectionLimit}
 />
+
+{#if experimentalWarningOpen}
+    <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningOpen = false)} />
+{/if}
 
 <AppDialogs
     {transport}

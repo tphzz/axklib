@@ -527,6 +527,10 @@ if(BUILD_TESTING)
     tests/writer_test.cpp
   )
   target_compile_features(axk_core_tests PRIVATE cxx_std_23)
+  target_compile_definitions(
+    axk_core_tests
+    PRIVATE AXK_TEST_EXPECTED_SEMANTIC_VERSION="${AXK_SEMANTIC_VERSION}"
+  )
   target_include_directories(
     axk_core_tests
     PRIVATE
