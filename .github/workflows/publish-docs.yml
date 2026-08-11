@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           browser_path="$(
             node --input-type=module -e \
-              'import puppeteer from "puppeteer"; process.stdout.write(puppeteer.executablePath());'
+              'import puppeteer from "puppeteer"; process.stdout.write(await puppeteer.executablePath());'
           )"
           if [[ ! -x "$browser_path" ]]; then
             echo "Puppeteer's pinned browser is missing or is not executable: $browser_path" >&2
