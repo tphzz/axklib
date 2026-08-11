@@ -1355,7 +1355,7 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     assert 'node-version: "24"' in workflow
     assert "npm ci" in workflow
     assert "name: Verify Mermaid browser runtime" in workflow
-    assert "puppeteer.executablePath()" in workflow
+    assert "await puppeteer.executablePath()" in workflow
     assert 'ldd "$browser_path"' in workflow
     assert "not found" in workflow
     assert 'mmdc -i "$smoke_source" -o "$smoke_output" -b transparent' in workflow
