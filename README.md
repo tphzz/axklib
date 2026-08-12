@@ -20,6 +20,9 @@ axkdeck presents sampler media as Programs, Sample Banks, Samples, Wave Data,
 and Sequences using the same object hierarchy across hard disks, floppies, and
 CD-ROMs.
 
+<img width="1802" height="1156" alt="image" src="https://github.com/user-attachments/assets/dba48def-6e9a-46e2-97b6-49e96cc3676a" />
+
+
 ### Browse And Audition
 
 - Open SFS HDA/HDS images, FAT12 floppy images, ISO9660 sample CD-ROMs, A3K
