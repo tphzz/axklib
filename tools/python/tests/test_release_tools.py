@@ -1378,10 +1378,15 @@ def test_docs_publish_checked_in_openapi_with_pinned_redoc(tmp_path: Path) -> No
     mkdocs = (root / "mkdocs.yml").read_text(encoding="utf-8")
     package = json.loads((root / "package.json").read_text(encoding="utf-8"))
     hook_path = root / "docs/hooks.py"
+    openapi_page = (root / "docs/axklib/openapi.md").read_text(encoding="utf-8")
 
     assert "hooks:\n  - docs/hooks.py" in mkdocs
     assert "OpenAPI Reference: axklib/openapi.md" in mkdocs
     assert package["devDependencies"]["redoc"] == "2.5.3"
+    assert 'href="../openapi/index.html"' in openapi_page
+    assert 'href="../assets/openapi/openapi-v1.json"' in openapi_page
+    assert "Redoc.init" not in openapi_page
+    assert "redoc-container" not in openapi_page
 
     module_spec = importlib.util.spec_from_file_location("axklib_docs_hooks", hook_path)
     assert module_spec is not None and module_spec.loader is not None
@@ -1401,6 +1406,19 @@ def test_docs_publish_checked_in_openapi_with_pinned_redoc(tmp_path: Path) -> No
 
     assert (site / "assets/openapi/openapi-v1.json").read_bytes() == source.read_bytes()
     assert (site / "assets/openapi/redoc.standalone.js").read_bytes() == renderer.read_bytes()
+    standalone_reference = (site / "openapi/index.html").read_text(encoding="utf-8")
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in standalone_reference
+    assert '<div id="redoc-container"></div>' in standalone_reference
+    assert 'src="../assets/openapi/redoc.standalone.js"' in standalone_reference
+    assert 'env: { NODE_ENV: "production" }' in standalone_reference
+    assert 'cwd: () => "/"' in standalone_reference
+    assert 'const openApiSpecification = {"openapi":"3.1.0","info":{"title":"test"}};' in standalone_reference
+    assert "Redoc.init(\n      openApiSpecification," in standalone_reference
+    assert '"../assets/openapi/openapi-v1.json"' not in standalone_reference
+    assert "Redoc.init" in standalone_reference
+    assert "https://" not in standalone_reference
+    assert "width: 100%" in standalone_reference
+    assert "min-height: 100%" in standalone_reference
 
 
 def test_privileged_workflows_pin_every_action_to_a_full_commit() -> None:
