@@ -7,7 +7,7 @@ import {
     linkedWaveDataForSample,
     orderedSamplesForBank,
 } from '../../lib/sampleRelationships';
-import type { ImageTransport, SamplerObject, SamplerRelationship } from '../../lib/transport';
+import type { ImageTransport, SamplerObject, SamplerRelationship, SystemProgramContexts } from '../../lib/transport';
 import type {
     DiskTreeItem,
     InspectorSelection,
@@ -56,6 +56,10 @@ export class CatalogWorkflow {
     });
     samplePreviewStates = $state<Record<string, Pick<SampleWaveformPreview, 'preview' | 'previewState'>>>({});
     activeVolumeId = $state('');
+    activePartitionIndex = $state<number | null>(null);
+    systemProgramContexts = $state<SystemProgramContexts | null>(null);
+    systemProgramContextsLoading = $state(false);
+    systemProgramContextsError = $state('');
     objectCount = $state(0);
     private loadGeneration = 0;
 
@@ -158,14 +162,16 @@ export class CatalogWorkflow {
         return waveform ? { kind: 'wave-data', waveData: waveform } : null;
     }
 
-    async loadVolume(volumeId: string): Promise<void> {
+    async loadVolume(volumeId: string, partitionIndex: number | null = this.activePartitionIndex): Promise<void> {
         const sessionId = this.dependencies.sessionId();
         if (sessionId === null) return;
         this.dependencies.resetCleanup();
         void this.dependencies.stopPlayback();
         this.dependencies.resetPreviews();
         this.activeVolumeId = volumeId;
+        this.activePartitionIndex = partitionIndex;
         const generation = ++this.loadGeneration;
+        this.loadSystemProgramContexts(sessionId, partitionIndex, generation);
         this.dependencies.setStatus('Loading volume');
         this.inspectorObjectId = '';
         try {
@@ -209,6 +215,10 @@ export class CatalogWorkflow {
         this.clearSelections();
         this.objectCount = 0;
         this.activeVolumeId = '';
+        this.activePartitionIndex = null;
+        this.systemProgramContexts = null;
+        this.systemProgramContextsLoading = false;
+        this.systemProgramContextsError = '';
     }
 
     private clearSelections(): void {
@@ -230,6 +240,27 @@ export class CatalogWorkflow {
         this.selectedSampleWaveDataId = '';
         this.editorObjectIds = { ...this.editorObjectIds, samples: '' };
         if (hiddenIds.has(this.inspectorObjectId)) this.inspectorObjectId = '';
+    }
+
+    private loadSystemProgramContexts(sessionId: number, partitionIndex: number | null, generation: number): void {
+        this.systemProgramContexts = null;
+        this.systemProgramContextsError = '';
+        this.systemProgramContextsLoading = partitionIndex !== null;
+        if (partitionIndex === null) return;
+        void Promise.resolve()
+            .then(() => this.dependencies.transport.systemProgramContexts(sessionId, partitionIndex))
+            .then(
+                (contexts) => {
+                    if (generation !== this.loadGeneration) return;
+                    this.systemProgramContexts = contexts;
+                    this.systemProgramContextsLoading = false;
+                },
+                () => {
+                    if (generation !== this.loadGeneration) return;
+                    this.systemProgramContextsError = "Could not read the partition's saved System Files.";
+                    this.systemProgramContextsLoading = false;
+                },
+            );
     }
 
     private setWaveDataObjects(objects: SamplerObject[], names: Map<string, string>): void {
@@ -319,6 +350,7 @@ function programItems(objects: SamplerObject[], names: Map<string, string>): Pro
                 objectId: object.key,
                 object,
                 slot: match?.[1] ?? object.name,
+                programNumber: Number(match?.[1] ?? object.name),
                 name: match?.[2] || name,
             };
         });

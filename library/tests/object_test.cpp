@@ -23,6 +23,23 @@ TEST(ObjectHeader, RejectsTruncationAndInvalidMagic) {
     EXPECT_EQ(invalid_result.error().code, axk::ErrorCode::object_malformed);
 }
 
+TEST(CurrentRecordEnvelope, DecodesTheSharedHeaderWithoutRequiringANamedObject) {
+    std::array<std::byte, axk::current_record_envelope_size> bytes{};
+    axk::ByteWriter writer{bytes};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "PRF3", std::byte{}));
+    ASSERT_TRUE(writer.write_be32(0x14U, 4U));
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0x1008U));
+
+    const auto envelope = axk::decode_current_record_envelope(bytes);
+
+    ASSERT_TRUE(envelope) << envelope.error().message;
+    EXPECT_EQ(envelope->type, axk::ObjectType::prf3);
+    EXPECT_EQ(envelope->raw_type, "PRF3");
+    EXPECT_EQ(envelope->raw_bytes, bytes);
+    EXPECT_FALSE(axk::decode_object_header(bytes));
+}
+
 TEST(CurrentLookups, ExposesCanonicalParameterAndProgramLabels) {
     EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_eq_frequency_ui_labels, 26), "630Hz");
     EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_control_function_ui_labels, 4), "Cutoff Bias");

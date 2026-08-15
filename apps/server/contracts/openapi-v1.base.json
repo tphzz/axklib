@@ -345,6 +345,21 @@
         }
       }
     },
+    "/images/{imageId}/system-program-contexts": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "partitionIndex", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 0, "maximum": 7}}
+      ],
+      "get": {
+        "operationId": "images.systemProgramContexts",
+        "responses": {
+          "200": {
+            "description": "Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SystemProgramContextsResponse"}}}
+          }
+        }
+      }
+    },
     "/images/{imageId}/validation/issues": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -1146,6 +1161,107 @@
         "required": ["data", "meta"],
         "properties": {
           "data": {"$ref": "#/components/schemas/ImageRelationshipPage"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "SystemMidiAddress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["port", "channel", "display"],
+        "properties": {
+          "port": {"enum": ["A", "B"]},
+          "channel": {"type": "integer", "minimum": 1, "maximum": 16},
+          "display": {"type": "string", "pattern": "^(A|B)?(0[1-9]|1[0-6])$"}
+        }
+      },
+      "SystemProgramPart": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partNumber", "partLabel", "midi", "programNumber", "master"],
+        "properties": {
+          "partNumber": {"type": "integer", "minimum": 1, "maximum": 32},
+          "partLabel": {"type": "string", "pattern": "^(A|B)?(0[1-9]|1[0-6])$"},
+          "midi": {"$ref": "#/components/schemas/SystemMidiAddress"},
+          "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
+          "master": {"type": "boolean"}
+        }
+      },
+      "A3000SystemProgramContextAvailable": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileKind", "availability", "model", "basicReceive", "omni", "programChangeEnabled"],
+        "properties": {
+          "fileKind": {"const": "SYSTEM"},
+          "availability": {"const": "AVAILABLE"},
+          "model": {"const": "A3000"},
+          "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
+          "omni": {"type": "boolean"},
+          "programChangeEnabled": {"type": "boolean"}
+        }
+      },
+      "A4000A5000SystemProgramContextAvailable": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileKind", "availability", "model", "savedProgramMode", "basicReceive", "omni", "programChangeEnabled", "parts"],
+        "properties": {
+          "fileKind": {"const": "SYSTEM2"},
+          "availability": {"const": "AVAILABLE"},
+          "model": {"enum": ["A4000", "A5000"]},
+          "savedProgramMode": {"enum": ["SINGLE", "MULTI"]},
+          "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
+          "omni": {"type": "boolean"},
+          "programChangeEnabled": {"type": "boolean"},
+          "parts": {"type": "array", "minItems": 16, "maxItems": 32, "items": {"$ref": "#/components/schemas/SystemProgramPart"}}
+        }
+      },
+      "SystemProgramContextNotPresent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileKind", "availability", "message"],
+        "properties": {
+          "fileKind": {"enum": ["SYSTEM", "SYSTEM2"]},
+          "availability": {"const": "NOT_PRESENT"},
+          "message": {"type": "string", "minLength": 1}
+        }
+      },
+      "SystemProgramContextInvalid": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fileKind", "availability", "message"],
+        "properties": {
+          "fileKind": {"enum": ["SYSTEM", "SYSTEM2"]},
+          "availability": {"const": "INVALID"},
+          "message": {"type": "string", "minLength": 1}
+        }
+      },
+      "SystemProgramContext": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/A3000SystemProgramContextAvailable"},
+          {"$ref": "#/components/schemas/A4000A5000SystemProgramContextAvailable"},
+          {"$ref": "#/components/schemas/SystemProgramContextNotPresent"},
+          {"$ref": "#/components/schemas/SystemProgramContextInvalid"}
+        ]
+      },
+      "SystemProgramContexts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "files", "message"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "files": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {"$ref": "#/components/schemas/SystemProgramContext"}
+          },
+          "message": {"type": "string"}
+        }
+      },
+      "SystemProgramContextsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/SystemProgramContexts"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

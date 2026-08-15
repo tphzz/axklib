@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/error.hpp"
@@ -172,6 +173,9 @@ class AXK_API Container {
 AXK_API Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::uint32_t first_payload_cluster,
                                                       std::uint32_t allocated_cluster_count,
                                                       std::uint32_t cluster_size_bytes = 1024);
+
+[[nodiscard]] AXK_API bool is_partition_support_root_entry(std::string_view name) noexcept;
+[[nodiscard]] AXK_API Result<SfsId> locate_partition_root_record(const Partition &partition);
 
 AXK_API Result<Container> open_image(const std::filesystem::path &path, const OpenOptions &options = {});
 AXK_API Result<Container> open_image(std::shared_ptr<const RandomAccessReader> reader,

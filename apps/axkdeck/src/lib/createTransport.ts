@@ -24,6 +24,7 @@ import type {
     ProgramGenerationInspection,
     PreviewEnvelope,
     RelationshipPage,
+    SystemProgramContexts,
     WaveDataOrphanInspection,
     VolumeDeletionInspection,
 } from './transport';
@@ -179,6 +180,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     relationshipPage(): Promise<RelationshipPage> {
+        return this.unavailable();
+    }
+    systemProgramContexts(): Promise<SystemProgramContexts> {
         return this.unavailable();
     }
     closeImage(): Promise<void> {

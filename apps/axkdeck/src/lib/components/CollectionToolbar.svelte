@@ -1,9 +1,11 @@
 <script lang="ts">
+    import type { Snippet } from 'svelte';
     import Icon from './Icon.svelte';
 
     interface Props {
         title: string;
         count: number;
+        countText?: string;
         query: string;
         onquerychange: (value: string) => void;
         actionLabel?: string;
@@ -12,11 +14,14 @@
         filterLabel?: string;
         filterChecked?: boolean;
         onfilterchange?: (checked: boolean) => void;
+        titleControls?: Snippet;
+        trailingControls?: Snippet;
     }
 
     let {
         title,
         count,
+        countText,
         query,
         onquerychange,
         actionLabel,
@@ -25,13 +30,18 @@
         filterLabel,
         filterChecked = false,
         onfilterchange = () => undefined,
+        titleControls,
+        trailingControls,
     }: Props = $props();
 </script>
 
 <header class="collection-toolbar">
     <div class="collection-title">
         <h1>{title}</h1>
-        <span>{count} {count === 1 ? 'item' : 'items'}</span>
+        <span class="collection-count">{countText ?? `${count} ${count === 1 ? 'item' : 'items'}`}</span>
+        {#if titleControls}
+            <div class="collection-title-controls">{@render titleControls()}</div>
+        {/if}
     </div>
     <div class="collection-actions">
         {#if actionLabel}
@@ -48,6 +58,9 @@
                 />
                 <span>{filterLabel}</span>
             </label>
+        {/if}
+        {#if trailingControls}
+            <span class="collection-trailing-controls">{@render trailingControls()}</span>
         {/if}
         <label class="search-field collection-search">
             <Icon name="search" size={14} />

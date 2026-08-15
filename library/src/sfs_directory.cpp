@@ -1,6 +1,7 @@
 #include "sfs_internal.hpp"
 
 #include "axklib/bytes.hpp"
+#include "axklib/object.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,11 +14,6 @@
 #include <vector>
 
 namespace axk::sfs_detail {
-namespace {
-
-constexpr std::string_view object_magic{"FSFSDEV3SPLX"};
-
-} // namespace
 
 std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> payload) {
     std::vector<DirectoryEntry> result;
@@ -40,15 +36,11 @@ std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> p
 }
 
 void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
-    if (begins_with(payload, object_magic) && payload.size() >= 0x42U) {
-        const ByteReader reader{payload};
-        const auto type = reader.ascii_field(0x0c, 4);
-        const auto name = reader.ascii_field(0x32, 16);
-        if (type && name) {
-            record.payload_kind = PayloadKind::object;
-            record.object_type = *type;
-            record.object_name = *name;
-        }
+    if (const auto envelope = decode_current_record_envelope(payload); envelope) {
+        record.payload_kind = PayloadKind::object;
+        record.object_type = envelope->raw_type;
+        if (const auto header = decode_object_header(payload); header)
+            record.object_name = header->name;
         return;
     }
     if (payload.size() >= 16U) {
@@ -224,3 +216,35 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
 }
 
 } // namespace axk::sfs_detail
+
+namespace axk {
+
+bool is_partition_support_root_entry(std::string_view name) noexcept {
+    if (const auto terminator = name.find('\0'); terminator != std::string_view::npos)
+        name = name.substr(0U, terminator);
+    while (!name.empty() && name.back() == ' ')
+        name.remove_suffix(1U);
+    return name == "PRF3";
+}
+
+Result<SfsId> locate_partition_root_record(const Partition &partition) {
+    std::vector<const IndexRecord *> roots;
+    for (const auto &record : partition.records) {
+        if (record.payload_kind == PayloadKind::directory && record.directory_id && record.parent_directory_id &&
+            *record.directory_id == *record.parent_directory_id) {
+            roots.push_back(&record);
+        }
+    }
+    if (roots.size() == 1U)
+        return roots.front()->sfs_id;
+
+    ErrorContext context;
+    context.partition_index = partition.index.value;
+    return std::unexpected{
+        make_error(roots.empty() ? ErrorCode::relationship_unresolved : ErrorCode::relationship_ambiguous,
+                   ErrorCategory::relationship,
+                   roots.empty() ? "partition has no root directory" : "partition has multiple root directories",
+                   std::move(context))};
+}
+
+} // namespace axk

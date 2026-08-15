@@ -8,6 +8,8 @@
 #include <string_view>
 #include <type_traits>
 
+#include "axklib/sfs.hpp"
+
 namespace axk::detail {
 namespace {
 
@@ -150,6 +152,8 @@ Result<void> validate_inserted_program(const ProgramSpec &program) { return vali
 Result<void> validate_volume(const VolumeSpec &volume) {
     if (auto valid = require_object_name(volume.name, "volume.name"); !valid)
         return valid;
+    if (is_partition_support_root_entry(volume.name))
+        return std::unexpected{manifest_error("volume.name PRF3 is reserved for partition support files")};
 
     std::set<std::string_view> waveform_ids;
     std::set<std::string_view> waveform_names;
@@ -249,7 +253,11 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
         [](const auto &operation) -> Result<void> {
             using T = std::decay_t<decltype(operation)>;
             if constexpr (std::same_as<T, DeleteVolumeOperation>) {
-                return require_text(operation.volume_name, "volume_name");
+                if (auto valid = require_text(operation.volume_name, "volume_name"); !valid)
+                    return valid;
+                if (is_partition_support_root_entry(operation.volume_name))
+                    return std::unexpected{manifest_error("volume_name PRF3 is reserved for partition support files")};
+                return {};
             } else if constexpr (std::same_as<T, InsertVolumeOperation>) {
                 return validate_volume(operation.volume);
             } else if constexpr (std::same_as<T, RenameVolumeOperation>) {
@@ -257,6 +265,10 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return valid;
                 if (auto valid = require_object_name(operation.new_volume_name, "new_volume_name"); !valid)
                     return valid;
+                if (is_partition_support_root_entry(operation.volume_name) ||
+                    is_partition_support_root_entry(operation.new_volume_name)) {
+                    return std::unexpected{manifest_error("PRF3 is reserved for partition support files")};
+                }
                 if (operation.volume_name == operation.new_volume_name)
                     return std::unexpected{manifest_error("new_volume_name must differ")};
                 return {};

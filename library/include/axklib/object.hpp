@@ -28,6 +28,16 @@ enum class ObjectType : std::uint8_t {
 enum class ObjectFormat : std::uint8_t { current, alternating_byte, unknown };
 enum class Verification : std::uint8_t { verified, corroborated, tentative, unknown };
 
+inline constexpr std::size_t current_record_envelope_size = 0x30U;
+
+struct CurrentRecordEnvelope {
+    ObjectType type{ObjectType::unknown};
+    std::string raw_type;
+    std::array<std::byte, current_record_envelope_size> raw_bytes{};
+
+    friend bool operator==(const CurrentRecordEnvelope &, const CurrentRecordEnvelope &) = default;
+};
+
 struct FieldSource {
     std::uint32_t offset{};
     std::uint32_t size{};
@@ -221,6 +231,7 @@ struct DecodedObject {
     DecodedPayload payload;
 };
 
+AXK_API Result<CurrentRecordEnvelope> decode_current_record_envelope(std::span<const std::byte> payload);
 AXK_API Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload);
 AXK_API Result<DecodedObject> decode_object(std::span<const std::byte> payload);
 

@@ -635,11 +635,47 @@ content. This rule is **Strong**, based on the independent Don Solaris hardware
 observations above and exact image data; the raw row is known, while the
 sampler's complete target-lookup implementation remains to be traced.
 
-The sampler's Single/Multi Program Mode and the Multi table are system/common
-state, not fields of an individual `PROG` payload. A volume object graph from a
-CD-ROM does not contain that global runtime setup. Program-object views
-consequently expose the decoded assignment rows
-without inventing a per-Program mode or Multi table.
+The sampler's system MIDI receive environment and A4000/A5000 Single/Multi
+setup are not fields of an individual `PROG` payload or data written by a
+normal Volume save. On SFS media, an explicit sampler System File save can
+place a model-specific partition-level file alongside all Volumes:
+
+| Path | Model and logical SFS record | Decoded context |
+| --- | --- | --- |
+| `\PRF3\SYSTEM` | A3000, `0x430` bytes: shared `0x30` current-record envelope plus `0x400` System body | Basic Receive Channel, Omni, Program Change Enable |
+| `\PRF3\SYSTEM2` | A4000/A5000, `0x1030` bytes: shared `0x30` current-record envelope plus `0x1000` System body | The same receive settings plus saved Program Mode and Multi Part Programs |
+
+The shared envelope begins with `FSFSDEV3SPLXPRF3` and is decoded by the same
+SFS current-record framework as ordinary sampler objects. Each model-specific
+body then has a `0x20` System header followed by the System Bulk parameter
+domain. The A3000 bulk is `0x348` bytes and its final `0x98` bytes remain
+unknown and preserved. The A4000/A5000 bulk occupies the remaining `0x0fe0`
+bytes.
+
+| System-body offset | Logical-record offset | `SYSTEM` | `SYSTEM2` |
+| ---: | ---: | --- | --- |
+| `0x00..0x03` | `0x30..0x33` | `21 52 05 31` | `DE AD FA CE` |
+| `0x0e` | `0x3e` | A3000 marker `0` | `0` A4000, `1` A5000 |
+| `0x34` | `0x64` | Basic Receive Channel `0..15` | Basic Receive Channel `0..15` or `0..31` |
+| `0x36` | `0x66` | bit 0 Omni; bit 1 Program Change | bit 0 Omni; bit 1 Program Change |
+| `0x5e` | `0x8e` | not interpreted | saved mode: `0` Single, `1` Multi |
+| `0x60..0x7f` | `0x90..0xaf` | not interpreted | zero-based Program indexes, displayed as `001..128` |
+
+The A3000 `SYSTEM` file has no Program Mode or Multi Part table. The A4000 uses
+16 `SYSTEM2` parts on channels `01..16`; the A5000 uses 32 on `A01..A16` and
+`B01..B16`. The part matching Basic Receive Channel is the master part. In
+Multi, each part's channel is authoritative and the Sample or Sample Bank Rch
+Assign values inside its Program are ignored.
+
+Axklib reports `SYSTEM` and `SYSTEM2` independently and preserves their shared
+record envelopes and raw System-body sections. Axkdeck lets users switch
+between Single and Multi presentations
+without being forced by the saved mode. It displays both saved receive contexts
+when they coexist, but only an available `SYSTEM2` enables Multi rows. An
+A3000-only partition explicitly reports that `SYSTEM` cannot provide Program
+Mode or Multi assignments. CD-ROM, floppy, and `.a3k` sources have no
+partition-level System File entries, so Multi is never invented from a
+Volume's Programs.
 
 Assignment target matching preserves the complete 16-byte sampler name. An
 exact target whose stored name ends in `*` can be active and playable, so the

@@ -108,6 +108,20 @@ TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
     EXPECT_TRUE(parsed->partitions.front().volumes.empty());
 }
 
+TEST(HdsManifest, RejectsPartitionSupportDirectoryNameAsAVolume) {
+    constexpr std::string_view reserved = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"PRF3   ","waveforms":[],"samples":[]
+      }]}]
+    })json";
+    const auto parsed = axk::parse_hds_build_manifest(reserved);
+    ASSERT_FALSE(parsed);
+    EXPECT_EQ(parsed.error().code, axk::ErrorCode::manifest_invalid);
+    EXPECT_NE(parsed.error().message.find("reserved"), std::string::npos);
+}
+
 TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
     constexpr std::string_view obsolete = R"json({
       "schema_version":"1.0",
@@ -448,6 +462,21 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     ASSERT_EQ(reopened->partitions().size(), 1U);
     EXPECT_EQ(reopened->partitions()[0].name, "hd1");
     std::filesystem::remove(path, error);
+}
+
+TEST(HdsWriter, RejectsPartitionSupportDirectoryNameAsAVolume) {
+    axk::VolumeSpec reserved;
+    reserved.name = "PRF3";
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {{"hd1", {std::move(reserved)}}}};
+    const auto path = std::filesystem::temp_directory_path() / "axklib-native-reserved-prf3.hds";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+
+    const auto written = axk::write_hds_image(manifest_value, path);
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().code, axk::ErrorCode::manifest_invalid);
+    EXPECT_NE(written.error().message.find("reserved"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(path));
 }
 
 TEST(HdsWriter, SizesDirectoryIndexFromRecordIdsAndEnforcesFixedCapacity) {

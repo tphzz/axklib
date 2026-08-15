@@ -944,6 +944,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/system-program-contexts': {
+        parameters: {
+            query: {
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.systemProgramContexts'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/validation/issues': {
         parameters: {
             query?: {
@@ -1480,6 +1500,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        A3000SystemProgramContextAvailable: {
+            /** @constant */
+            availability: 'AVAILABLE';
+            basicReceive: components['schemas']['SystemMidiAddress'];
+            /** @constant */
+            fileKind: 'SYSTEM';
+            /** @constant */
+            model: 'A3000';
+            omni: boolean;
+            programChangeEnabled: boolean;
+        };
+        A4000A5000SystemProgramContextAvailable: {
+            /** @constant */
+            availability: 'AVAILABLE';
+            basicReceive: components['schemas']['SystemMidiAddress'];
+            /** @constant */
+            fileKind: 'SYSTEM2';
+            /** @enum {unknown} */
+            model: 'A4000' | 'A5000';
+            omni: boolean;
+            parts: components['schemas']['SystemProgramPart'][];
+            programChangeEnabled: boolean;
+            /** @enum {unknown} */
+            savedProgramMode: 'SINGLE' | 'MULTI';
+        };
         AlterationAudioImportSummary: {
             clippedSamples: number;
             ditherAlgorithm: string;
@@ -3654,6 +3699,47 @@ export interface components {
             shortfallRecordSlots: number;
             totalRecordSlots: number;
             usedRecordSlots: number;
+        };
+        SystemMidiAddress: {
+            channel: number;
+            display: string;
+            /** @enum {unknown} */
+            port: 'A' | 'B';
+        };
+        SystemProgramContext:
+            | components['schemas']['A3000SystemProgramContextAvailable']
+            | components['schemas']['A4000A5000SystemProgramContextAvailable']
+            | components['schemas']['SystemProgramContextNotPresent']
+            | components['schemas']['SystemProgramContextInvalid'];
+        SystemProgramContextInvalid: {
+            /** @constant */
+            availability: 'INVALID';
+            /** @enum {unknown} */
+            fileKind: 'SYSTEM' | 'SYSTEM2';
+            message: string;
+        };
+        SystemProgramContextNotPresent: {
+            /** @constant */
+            availability: 'NOT_PRESENT';
+            /** @enum {unknown} */
+            fileKind: 'SYSTEM' | 'SYSTEM2';
+            message: string;
+        };
+        SystemProgramContexts: {
+            files: components['schemas']['SystemProgramContext'][];
+            message: string;
+            partitionIndex: number;
+        };
+        SystemProgramContextsResponse: {
+            data: components['schemas']['SystemProgramContexts'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        SystemProgramPart: {
+            master: boolean;
+            midi: components['schemas']['SystemMidiAddress'];
+            partLabel: string;
+            partNumber: number;
+            programNumber: number;
         };
         Upload: {
             declaredSize: number;
@@ -8986,6 +9072,41 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageRelationshipPageResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.systemProgramContexts': {
+        parameters: {
+            query: {
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['SystemProgramContextsResponse'];
                 };
             };
             /** @description Request could not be completed */

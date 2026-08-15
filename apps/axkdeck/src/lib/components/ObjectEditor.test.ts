@@ -29,6 +29,7 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         id: programObject.key,
         objectId: programObject.key,
         slot: '001',
+        programNumber: 1,
         name: 'Strings',
         object: programObject,
     };
@@ -408,6 +409,22 @@ describe('ObjectEditor', () => {
 
         expect(screen.getByText('Sample Bank editor unavailable')).toBeTruthy();
         expect(screen.queryByRole('tab')).toBeNull();
+    });
+
+    it('shows Multi Part routing context without repeating its fixed MIDI address', () => {
+        const props = {
+            selection: null,
+            assignmentQuery: '',
+            onassignmentquerychange: vi.fn(),
+            onassignmentselect: vi.fn(),
+            multiPartContext: { partLabel: 'A01', programNumber: 3 },
+        };
+        render(ObjectEditor, { props });
+
+        expect(screen.getByText('Multi Part A01 → Program 003')).toBeTruthy();
+        expect(screen.queryByText(/MIDI A channel/)).toBeNull();
+        expect(screen.getByText('Program 003 is not present in the selected Volume.')).toBeTruthy();
+        expect(screen.getByText('Part routing is authoritative in Multi mode.')).toBeTruthy();
     });
 });
 

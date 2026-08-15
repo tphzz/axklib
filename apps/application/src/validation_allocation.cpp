@@ -181,18 +181,17 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
             if (record.directory_id)
                 directories.emplace(record.directory_id->value, &record);
         }
-        const axk::IndexRecord *root{};
-        for (const auto &[id, directory] : directories) {
-            if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-                root = directory;
-                break;
-            }
-        }
-        if (root == nullptr || !root->directory_id)
+        const auto located_root = axk::locate_partition_root_record(partition);
+        if (!located_root)
             continue;
+        const auto root_record = std::ranges::find(partition.records, *located_root, &axk::IndexRecord::sfs_id);
+        if (root_record == partition.records.end())
+            continue;
+        const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
             const auto found = directories.find(entry.link_id.value);
-            if (entry.name == "." || entry.name == ".." || found == directories.end())
+            if (entry.name == "." || entry.name == ".." || axk::is_partition_support_root_entry(entry.name) ||
+                found == directories.end())
                 continue;
             const auto *volume = found->second;
             if (!volume->parent_directory_id || volume->parent_directory_id->value != root->directory_id->value)

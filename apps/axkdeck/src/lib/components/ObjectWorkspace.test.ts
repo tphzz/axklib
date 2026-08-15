@@ -40,6 +40,7 @@ describe('ObjectWorkspace', () => {
             id: `program-${index + 1}`,
             objectId: programObject.key,
             slot: programObject.name,
+            programNumber: index + 1,
             name: `Program ${index + 1}`,
             object: programObject,
         }));
@@ -325,6 +326,7 @@ describe('ObjectWorkspace', () => {
                         id: 'program-1',
                         objectId: programObject.key,
                         slot: '001',
+                        programNumber: 1,
                         name: 'Grand Piano',
                         object: programObject,
                     },
@@ -350,6 +352,7 @@ describe('ObjectWorkspace', () => {
             id: `program-${index + 1}`,
             objectId: programObject.key,
             slot: programObject.name,
+            programNumber: index + 1,
             name: `Program ${index + 1}`,
             object: programObject,
         }));
@@ -408,6 +411,7 @@ describe('ObjectWorkspace', () => {
                         id: 'program-1',
                         objectId: programObject.key,
                         slot: '001',
+                        programNumber: 1,
                         name: 'Grand',
                         object: programObject,
                     },
@@ -446,7 +450,14 @@ describe('ObjectWorkspace', () => {
             props: {
                 ...common,
                 programs: [
-                    { id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject },
+                    {
+                        id: 'program-1',
+                        objectId: firstObject.key,
+                        slot: '001',
+                        programNumber: 1,
+                        name: 'Piano',
+                        object: firstObject,
+                    },
                 ],
                 view: 'programs',
                 packageExportAvailable: true,
@@ -465,7 +476,16 @@ describe('ObjectWorkspace', () => {
 
         await rendered.rerender({
             ...common,
-            programs: [{ id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject }],
+            programs: [
+                {
+                    id: 'program-1',
+                    objectId: firstObject.key,
+                    slot: '001',
+                    programNumber: 1,
+                    name: 'Piano',
+                    object: firstObject,
+                },
+            ],
             view: 'programs',
             packageExportAvailable: true,
             objectDeletionAvailable: true,

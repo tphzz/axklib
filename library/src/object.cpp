@@ -371,17 +371,34 @@ const NumericField *CurrentSbnk::find_numeric_field(std::string_view name) const
     return found == numeric_fields.end() ? nullptr : &*found;
 }
 
+Result<CurrentRecordEnvelope> decode_current_record_envelope(std::span<const std::byte> payload) {
+    if (payload.size() < current_record_envelope_size) {
+        return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
+                                          "current record envelope requires at least 48 bytes")};
+    }
+    if (!begins_with(payload, object_magic)) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                          "record does not begin with current record magic")};
+    }
+    const auto raw_type = ByteReader{payload}.ascii_field(0x0cU, 4U, false);
+    if (!raw_type)
+        return std::unexpected{raw_type.error()};
+    CurrentRecordEnvelope result;
+    result.type = object_type(*raw_type);
+    result.raw_type = *raw_type;
+    std::copy_n(payload.begin(), result.raw_bytes.size(), result.raw_bytes.begin());
+    return result;
+}
+
 Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     if (payload.size() < 0x42U) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "object header requires at least 66 bytes")};
     }
-    if (!begins_with(payload, object_magic)) {
-        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
-                                          "object does not begin with current object magic")};
-    }
+    const auto envelope = decode_current_record_envelope(payload);
+    if (!envelope)
+        return std::unexpected{envelope.error()};
     const ByteReader reader{payload};
-    const auto raw_type = reader.ascii_field(0x0c, 4, false);
     const auto name = reader.printable_ascii_field(0x32, 16);
     const auto header_size = reader.be32(0x10);
     const auto unknown_14 = reader.be32(0x14);
@@ -389,14 +406,13 @@ Result<ObjectHeader> decode_object_header(std::span<const std::byte> payload) {
     const auto payload_1c = reader.be32(0x1c);
     const auto payload_20 = reader.be32(0x20);
     const auto payload_offset = reader.be32(0x24);
-    if (!raw_type || !name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20 ||
-        !payload_offset) {
+    if (!name || !header_size || !unknown_14 || !record_size || !payload_1c || !payload_20 || !payload_offset) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "object header fields are truncated")};
     }
     ObjectHeader result;
-    result.type = object_type(*raw_type);
-    result.raw_type = *raw_type;
+    result.type = envelope->type;
+    result.raw_type = envelope->raw_type;
     result.name = *name;
     result.header_size = *header_size;
     result.unknown_0x14 = *unknown_14;

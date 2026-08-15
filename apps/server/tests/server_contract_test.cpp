@@ -191,6 +191,31 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
     EXPECT_EQ(item.at("properties").at("receiveChannelDisplay").at("type"), "string");
 }
 
+TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvailable) {
+    const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
+    const auto &path = document.at("paths").at("/images/{imageId}/system-program-contexts");
+    EXPECT_EQ(path.at("get").at("operationId"), "images.systemProgramContexts");
+    const auto &parameters = path.at("parameters");
+    const auto partition = std::ranges::find_if(parameters, [](const auto &candidate) {
+        return candidate.is_object() && candidate.value("name", "") == "partitionIndex";
+    });
+    ASSERT_NE(partition, parameters.end());
+    EXPECT_TRUE(partition->at("required"));
+    EXPECT_EQ(partition->at("schema").at("minimum"), 0U);
+    EXPECT_EQ(partition->at("schema").at("maximum"), 7U);
+
+    const auto &response =
+        path.at("get").at("responses").at("200").at("content").at("application/json").at("schema").at("$ref");
+    EXPECT_EQ(response, "#/components/schemas/SystemProgramContextsResponse");
+    const auto &contexts = document.at("components").at("schemas").at("SystemProgramContexts");
+    EXPECT_TRUE(std::ranges::contains(contexts.at("required"), "files"));
+    const auto &files = contexts.at("properties").at("files");
+    EXPECT_EQ(files.at("maxItems"), 2U);
+    EXPECT_EQ(files.at("items").at("$ref"), "#/components/schemas/SystemProgramContext");
+    const auto &context = document.at("components").at("schemas").at("SystemProgramContext");
+    ASSERT_EQ(context.at("oneOf").size(), 4U);
+}
+
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();

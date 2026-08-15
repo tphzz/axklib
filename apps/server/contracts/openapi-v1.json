@@ -33,6 +33,89 @@
       }
     },
     "schemas": {
+      "A3000SystemProgramContextAvailable": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "const": "AVAILABLE"
+          },
+          "basicReceive": {
+            "$ref": "#/components/schemas/SystemMidiAddress"
+          },
+          "fileKind": {
+            "const": "SYSTEM"
+          },
+          "model": {
+            "const": "A3000"
+          },
+          "omni": {
+            "type": "boolean"
+          },
+          "programChangeEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fileKind",
+          "availability",
+          "model",
+          "basicReceive",
+          "omni",
+          "programChangeEnabled"
+        ],
+        "type": "object"
+      },
+      "A4000A5000SystemProgramContextAvailable": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "const": "AVAILABLE"
+          },
+          "basicReceive": {
+            "$ref": "#/components/schemas/SystemMidiAddress"
+          },
+          "fileKind": {
+            "const": "SYSTEM2"
+          },
+          "model": {
+            "enum": [
+              "A4000",
+              "A5000"
+            ]
+          },
+          "omni": {
+            "type": "boolean"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/SystemProgramPart"
+            },
+            "maxItems": 32,
+            "minItems": 16,
+            "type": "array"
+          },
+          "programChangeEnabled": {
+            "type": "boolean"
+          },
+          "savedProgramMode": {
+            "enum": [
+              "SINGLE",
+              "MULTI"
+            ]
+          }
+        },
+        "required": [
+          "fileKind",
+          "availability",
+          "model",
+          "savedProgramMode",
+          "basicReceive",
+          "omni",
+          "programChangeEnabled",
+          "parts"
+        ],
+        "type": "object"
+      },
       "AlterationAudioImportSummary": {
         "additionalProperties": false,
         "properties": {
@@ -10116,6 +10199,171 @@
           "shortfallRecordSlots",
           "remainingRecordSlots",
           "packages"
+        ],
+        "type": "object"
+      },
+      "SystemMidiAddress": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "maximum": 16,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "display": {
+            "pattern": "^(A|B)?(0[1-9]|1[0-6])$",
+            "type": "string"
+          },
+          "port": {
+            "enum": [
+              "A",
+              "B"
+            ]
+          }
+        },
+        "required": [
+          "port",
+          "channel",
+          "display"
+        ],
+        "type": "object"
+      },
+      "SystemProgramContext": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/A3000SystemProgramContextAvailable"
+          },
+          {
+            "$ref": "#/components/schemas/A4000A5000SystemProgramContextAvailable"
+          },
+          {
+            "$ref": "#/components/schemas/SystemProgramContextNotPresent"
+          },
+          {
+            "$ref": "#/components/schemas/SystemProgramContextInvalid"
+          }
+        ]
+      },
+      "SystemProgramContextInvalid": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "const": "INVALID"
+          },
+          "fileKind": {
+            "enum": [
+              "SYSTEM",
+              "SYSTEM2"
+            ]
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileKind",
+          "availability",
+          "message"
+        ],
+        "type": "object"
+      },
+      "SystemProgramContextNotPresent": {
+        "additionalProperties": false,
+        "properties": {
+          "availability": {
+            "const": "NOT_PRESENT"
+          },
+          "fileKind": {
+            "enum": [
+              "SYSTEM",
+              "SYSTEM2"
+            ]
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileKind",
+          "availability",
+          "message"
+        ],
+        "type": "object"
+      },
+      "SystemProgramContexts": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/SystemProgramContext"
+            },
+            "maxItems": 2,
+            "type": "array"
+          },
+          "message": {
+            "type": "string"
+          },
+          "partitionIndex": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partitionIndex",
+          "files",
+          "message"
+        ],
+        "type": "object"
+      },
+      "SystemProgramContextsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SystemProgramContexts"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
+      "SystemProgramPart": {
+        "additionalProperties": false,
+        "properties": {
+          "master": {
+            "type": "boolean"
+          },
+          "midi": {
+            "$ref": "#/components/schemas/SystemMidiAddress"
+          },
+          "partLabel": {
+            "pattern": "^(A|B)?(0[1-9]|1[0-6])$",
+            "type": "string"
+          },
+          "partNumber": {
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "programNumber": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "partNumber",
+          "partLabel",
+          "midi",
+          "programNumber",
+          "master"
         ],
         "type": "object"
       },
@@ -26259,6 +26507,76 @@
         },
         {
           "$ref": "#/components/parameters/PageCursor"
+        }
+      ]
+    },
+    "/images/{imageId}/system-program-contexts": {
+      "get": {
+        "operationId": "images.systemProgramContexts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemProgramContextsResponse"
+                }
+              }
+            },
+            "description": "Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "partitionIndex",
+          "required": true,
+          "schema": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          }
         }
       ]
     },

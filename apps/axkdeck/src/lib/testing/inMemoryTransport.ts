@@ -48,6 +48,7 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SystemProgramContexts,
     SampleBankAssignment,
     SampleBankCreation,
     SequenceImportItem,
@@ -221,6 +222,10 @@ export class InMemoryImageTransport implements ImageTransport {
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage> {
         return this.invoke('relationshipPage', [sessionId, offset, limit, filter]);
+    }
+
+    systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
+        return this.invoke('systemProgramContexts', [sessionId, partitionIndex]);
     }
 
     async closeImage(sessionId: number): Promise<void> {

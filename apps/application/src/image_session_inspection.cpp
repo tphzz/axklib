@@ -17,9 +17,9 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
             ++validation.info_count;
     }
     std::vector<std::string> available_operations{
-        "images.content",           "images.objects",      "images.relationships",
-        "images.validation.issues", "images.preview",      "auditions.prepare",
-        "images.package.export",    "images.audio_export", "images.sequence_export",
+        "images.content",           "images.objects",         "images.relationships", "images.systemProgramContexts",
+        "images.validation.issues", "images.preview",         "auditions.prepare",    "images.package.export",
+        "images.audio_export",      "images.sequence_export",
     };
     if ((*session)->format == "sfs" || (*session)->format == "iso9660")
         available_operations.emplace_back("images.volume_package_export");

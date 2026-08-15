@@ -110,7 +110,7 @@ export class ImageSessionWorkflow {
             catalog.clear();
             return;
         }
-        if (item.id !== catalog.activeVolumeId) void catalog.loadVolume(item.id);
+        if (item.id !== catalog.activeVolumeId) void catalog.loadVolume(item.id, item.partitionIndex ?? null);
     }
 
     currentSourcePreference(): { partitionIndex: number; volumeName?: string } | undefined {
@@ -323,7 +323,8 @@ export class ImageSessionWorkflow {
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
             : null;
         this.selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? this.selectedSource;
-        if (this.selectedSource.kind === 'volume') await catalog.loadVolume(this.selectedSource.id);
+        if (this.selectedSource.kind === 'volume')
+            await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
         else catalog.clear();
         this.status = validationStatus(opened.validation);
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);

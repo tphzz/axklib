@@ -25,6 +25,7 @@ import type {
     OpenedImage,
     RelationshipPage,
     RelationshipPageFilter,
+    SystemProgramContexts,
     JobState,
     ObjectDeletionInspection,
     PlacementRepairInspection,
@@ -184,6 +185,15 @@ export class HttpImageSessions {
         );
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { relationships: page.items.map(mapRelationship), totalCount: page.totalCount };
+    }
+
+    async systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
+        const session = this.get(sessionId);
+        const query = new URLSearchParams({ partitionIndex: String(partitionIndex) });
+        return this.client.request<SystemProgramContexts>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}/system-program-contexts?${query}`,
+        );
     }
 
     async close(sessionId: number): Promise<void> {

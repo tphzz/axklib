@@ -111,22 +111,21 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
         if (record.directory_id)
             directories.emplace(record.directory_id->value, &record);
     }
-    const IndexRecord *root{};
-    for (const auto &[id, directory] : directories) {
-        if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-            root = directory;
-            break;
-        }
+    const auto located_root = locate_partition_root_record(partition);
+    if (!located_root)
+        return std::unexpected{located_root.error()};
+    const auto root_record = std::ranges::find(partition.records, *located_root, &IndexRecord::sfs_id);
+    if (root_record == partition.records.end()) {
+        return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
+                                          "partition root record is unavailable")};
     }
-    if (root == nullptr || !root->directory_id) {
-        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
-                                          "partition has no unambiguous root directory")};
-    }
+    const auto *root = &*root_record;
 
     std::vector<SourceVolume> result;
     for (const auto &entry : root->directory_entries) {
         const auto found = directories.find(entry.link_id.value);
-        if (entry.name == "." || entry.name == ".." || found == directories.end())
+        if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
+            found == directories.end())
             continue;
         const auto &volume = *found->second;
         if (!volume.parent_directory_id || volume.parent_directory_id->value != root->directory_id->value ||

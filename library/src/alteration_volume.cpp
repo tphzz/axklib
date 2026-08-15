@@ -20,6 +20,8 @@ Result<OperationReport> delete_volume(TransactionState &state, OperationContext 
                                       const DeleteVolumeOperation &operation, const CancellationToken &cancellation) {
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
+    if (is_partition_support_root_entry(operation.volume_name))
+        return std::unexpected{transaction_error("PRF3 is a reserved partition support directory")};
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -440,6 +442,8 @@ Result<std::vector<std::byte>> remap_directory(std::vector<std::byte> payload,
 
 Result<OperationReport> insert_volume(TransactionState &state, OperationContext context,
                                       const InsertVolumeOperation &operation, const CancellationToken &cancellation) {
+    if (is_partition_support_root_entry(operation.volume.name))
+        return std::unexpected{transaction_error("PRF3 is reserved for partition support files")};
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -524,6 +528,10 @@ Result<OperationReport> rename_volume(TransactionState &state, OperationContext 
                                       const RenameVolumeOperation &operation, const CancellationToken &cancellation) {
     if (operation.volume_name == operation.new_volume_name)
         return std::unexpected{transaction_error("new_volume_name must differ")};
+    if (is_partition_support_root_entry(operation.volume_name) ||
+        is_partition_support_root_entry(operation.new_volume_name)) {
+        return std::unexpected{transaction_error("PRF3 is a reserved partition support directory")};
+    }
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};

@@ -58,6 +58,7 @@ export interface Program {
     id: string;
     objectId: string;
     slot: string;
+    programNumber: number;
     name: string;
     object: SamplerObject;
 }

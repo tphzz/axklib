@@ -144,6 +144,7 @@ add_library(
   src/sfs.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/system_file.cpp
   src/tx16w.cpp
   src/tx16w_a_series.cpp
   src/utf8.cpp
@@ -524,6 +525,7 @@ if(BUILD_TESTING)
     tests/sequence_test.cpp
     tests/sfs_test.cpp
     tests/sfs_write_codec_test.cpp
+    tests/system_file_test.cpp
     tests/tx16w_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp

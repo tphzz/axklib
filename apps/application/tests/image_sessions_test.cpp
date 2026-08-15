@@ -165,14 +165,26 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.root_id, "workspace");
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(
-        opened->available_operations,
-        (std::vector<std::string>{
-            "images.content", "images.objects", "images.relationships", "images.validation.issues", "images.preview",
-            "auditions.prepare", "images.package.export", "images.audio_export", "images.sequence_export",
-            "images.volume_package_export", "images.volume_floppy_export", "images.media_conversion",
-            "images.alter.volumes", "images.alter.partitions", "images.alter.objects", "images.package.import",
-            "images.deletion.orphans.inspect", "images.programs.generate.inspect", "images.programs.generate"}));
+    EXPECT_EQ(opened->available_operations, (std::vector<std::string>{"images.content",
+                                                                      "images.objects",
+                                                                      "images.relationships",
+                                                                      "images.systemProgramContexts",
+                                                                      "images.validation.issues",
+                                                                      "images.preview",
+                                                                      "auditions.prepare",
+                                                                      "images.package.export",
+                                                                      "images.audio_export",
+                                                                      "images.sequence_export",
+                                                                      "images.volume_package_export",
+                                                                      "images.volume_floppy_export",
+                                                                      "images.media_conversion",
+                                                                      "images.alter.volumes",
+                                                                      "images.alter.partitions",
+                                                                      "images.alter.objects",
+                                                                      "images.package.import",
+                                                                      "images.deletion.orphans.inspect",
+                                                                      "images.programs.generate.inspect",
+                                                                      "images.programs.generate"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -1426,6 +1438,40 @@ TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
     ASSERT_TRUE(sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U));
     now += std::chrono::seconds{4};
     EXPECT_TRUE(sessions.inspect(opened->image_id, "owner-a"));
+}
+
+TEST_F(ImageSessionTest, ReportsBothSavedSystemFilesAsAbsentInDeterministicOrder) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+
+    ASSERT_TRUE(contexts) << contexts.error().message;
+    EXPECT_EQ(contexts->partition_index, 0U);
+    ASSERT_EQ(contexts->files.size(), 2U);
+    EXPECT_EQ(contexts->files[0].file_kind, axk::app::SystemProgramContextFile::system);
+    EXPECT_EQ(contexts->files[0].availability, axk::app::SystemProgramContextAvailability::not_present);
+    EXPECT_EQ(contexts->files[0].message, "No saved SYSTEM file exists for partition 0.");
+    EXPECT_EQ(contexts->files[1].file_kind, axk::app::SystemProgramContextFile::system2);
+    EXPECT_EQ(contexts->files[1].availability, axk::app::SystemProgramContextAvailability::not_present);
+    EXPECT_EQ(contexts->files[1].message,
+              "No saved SYSTEM2 file exists for partition 0. Multi assignments cannot be derived from this "
+              "partition.");
+}
+
+TEST_F(ImageSessionTest, ReportsUnsupportedMediaWithoutInventingMultiAssignments) {
+    axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "archive.a3k"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+
+    ASSERT_TRUE(contexts) << contexts.error().message;
+    EXPECT_EQ(contexts->partition_index, 0U);
+    EXPECT_TRUE(contexts->files.empty());
+    EXPECT_EQ(contexts->message, "System File decoding is not supported for this media format.");
 }
 
 } // namespace

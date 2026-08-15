@@ -126,6 +126,10 @@ axk::app::Result<std::set<axk::SfsId>> physical_volume_closure(const axk::Partit
 axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::ImageSessionRead &session,
                                                               std::uint8_t partition_index,
                                                               std::string_view volume_name) {
+    if (axk::is_partition_support_root_entry(volume_name)) {
+        return std::unexpected(
+            operation_error("volume_scope_invalid", "PRF3 is a reserved partition support directory"));
+    }
     const auto *container = session.media == nullptr ? nullptr : std::get_if<axk::Container>(&session.media->storage());
     if (container == nullptr) {
         return std::unexpected(

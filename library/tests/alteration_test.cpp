@@ -847,6 +847,36 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, RejectsPartitionSupportDirectoryAsAVolumeTarget) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-reserved-prf3";
+    const auto source = root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+
+    const auto parsed = axk::parse_alteration_manifest(
+        R"({"schema_version":"1.0","operations":[{"id":"remove","type":"delete_volume","partition_index":0,"volume_name":"PRF3"}]})");
+    ASSERT_FALSE(parsed);
+    EXPECT_NE(parsed.error().message.find("reserved"), std::string::npos);
+
+    const auto expect_reserved = [&](axk::AlterationOperationData operation) {
+        axk::AlterationManifest manifest{"1.0", {{"reserved", std::move(operation)}}};
+        const auto inspected = axk::inspect_hds_alteration(source, manifest);
+        ASSERT_FALSE(inspected);
+        EXPECT_NE(inspected.error().message.find("reserved"), std::string::npos);
+    };
+
+    expect_reserved(axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "PRF3"});
+    axk::VolumeSpec inserted;
+    inserted.name = "PRF3";
+    expect_reserved(axk::InsertVolumeOperation{axk::PartitionIndex{0U}, std::move(inserted)});
+    expect_reserved(axk::RenameVolumeOperation{axk::PartitionIndex{0U}, "Retained", "PRF3"});
+    expect_reserved(axk::RenameVolumeOperation{axk::PartitionIndex{0U}, "PRF3", "Renamed"});
+
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, RejectsParseableNon512ByteSectorGeometryBeforePlanning) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sector-profile";
     const auto source = root / "source.hds";

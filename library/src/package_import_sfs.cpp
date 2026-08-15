@@ -108,11 +108,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     for (const auto &[key, destination] : destinations) {
         const auto &[package_index, root_index] = key;
         const auto &package = packages[package_index];
-        if (!destination->partition_index || destination->volume_name.empty() || !destination->group_name.empty() ||
+        if (!destination->partition_index || destination->volume_name.empty() ||
+            is_partition_support_root_entry(destination->volume_name) || !destination->group_name.empty() ||
             !destination->raw_group.empty() || !destination->raw_volume.empty()) {
             add_conflict(plan, "SFS_DESTINATION_INVALID",
-                         "SFS destinations require a partition and volume but "
-                         "no group or raw ISO "
+                         "SFS destinations require a non-reserved partition Volume and no group or raw ISO "
                          "identifiers",
                          destination, &package);
             continue;

@@ -5,6 +5,11 @@ for the outer container and often add a sampler menu layer above the folders tha
 hold Yamaha object files. The object payloads use the shared format described in
 [Sampler Data Structures](sampler-data.md).
 
+CD-ROM volumes are source-load content and do not carry the SFS
+partition-level `PRF3/SYSTEM` or `PRF3/SYSTEM2` operating context. Axklib
+therefore returns no System File entries for ISO sessions and never derives
+A4000/A5000 Multi Part assignments from the Programs present on a disc.
+
 ```mermaid
 flowchart TD
   iso[ISO image] --> pvd[Primary volume descriptor]

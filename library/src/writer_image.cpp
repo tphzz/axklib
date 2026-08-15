@@ -138,6 +138,10 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
     for (const auto &volume : partition.volumes) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
+        if (is_partition_support_root_entry(volume.name)) {
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "PRF3 is reserved for partition support files")};
+        }
         if (volume.sample_banks.empty() != volume.programs.empty() ||
             volume.sample_banks.size() != volume.programs.size()) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,

@@ -39,6 +39,22 @@ std::string_view floppy_set_status_name(axk::app::ImageFloppySetStatus status) {
     return "SINGLE";
 }
 
+std::string_view system_program_context_availability_name(axk::app::SystemProgramContextAvailability availability) {
+    switch (availability) {
+    case axk::app::SystemProgramContextAvailability::available:
+        return "AVAILABLE";
+    case axk::app::SystemProgramContextAvailability::not_present:
+        return "NOT_PRESENT";
+    case axk::app::SystemProgramContextAvailability::invalid:
+        return "INVALID";
+    }
+    return "INVALID";
+}
+
+std::string_view system_program_context_file_name(axk::app::SystemProgramContextFile file) {
+    return file == axk::app::SystemProgramContextFile::system ? "SYSTEM" : "SYSTEM2";
+}
+
 axk::app::ImageSourceRef parse_image_source(const Json &reference) {
     const auto kind = reference.at("kind").get<std::string>();
     if (kind == "FILE") {
@@ -329,6 +345,56 @@ crow::response ServerApplication::image_relationships_response(const crow::reque
                         {"assignmentState", item.assignment_state},
                         {"receiveChannelDisplay", item.receive_channel_display}};
         });
+}
+
+crow::response ServerApplication::image_system_program_contexts_response(const crow::request &request,
+                                                                         const std::string &image_id) {
+    const auto id = request_id(request);
+    if (auto denied = guard(request, id))
+        return std::move(*denied);
+    const auto *partition_text = request.url_params.get("partitionIndex");
+    const auto partition = parse_unsigned(partition_text == nullptr ? "" : partition_text);
+    if (!partition || *partition > 7U) {
+        return error_response(400, {"invalid_partition", "partitionIndex must be an integer from 0 through 7"}, id);
+    }
+    const auto contexts =
+        images_.system_program_contexts(image_id, request_owner(request), static_cast<std::uint8_t>(*partition));
+    if (!contexts)
+        return error_response(status_for_error(contexts.error()), contexts.error(), id);
+
+    Json files = Json::array();
+    for (const auto &context : contexts->files) {
+        Json file{{"fileKind", system_program_context_file_name(context.file_kind)},
+                  {"availability", system_program_context_availability_name(context.availability)}};
+        if (context.availability == axk::app::SystemProgramContextAvailability::available) {
+            file["model"] = context.model;
+            file["basicReceive"] = {{"port", context.basic_receive->port},
+                                    {"channel", context.basic_receive->channel},
+                                    {"display", context.basic_receive->display}};
+            file["omni"] = *context.omni;
+            file["programChangeEnabled"] = *context.program_change_enabled;
+            if (context.file_kind == axk::app::SystemProgramContextFile::system2) {
+                Json parts = Json::array();
+                for (const auto &part : context.parts) {
+                    parts.push_back(
+                        {{"partNumber", part.part_number},
+                         {"partLabel", part.part_label},
+                         {"midi",
+                          {{"port", part.midi.port}, {"channel", part.midi.channel}, {"display", part.midi.display}}},
+                         {"programNumber", part.program_number},
+                         {"master", part.master}});
+                }
+                file["savedProgramMode"] = *context.saved_program_mode;
+                file["parts"] = std::move(parts);
+            }
+        } else {
+            file["message"] = context.message;
+        }
+        files.push_back(std::move(file));
+    }
+    Json data{
+        {"partitionIndex", contexts->partition_index}, {"files", std::move(files)}, {"message", contexts->message}};
+    return json_response(200, {{"data", std::move(data)}, {"meta", {{"requestId", id}}}}, id);
 }
 
 crow::response ServerApplication::image_validation_response(const crow::request &request, const std::string &image_id) {

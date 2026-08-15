@@ -194,6 +194,9 @@ export interface RelationshipPageFilter {
 }
 
 export type RelationshipQuality = 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+export type SystemProgramContext = components['schemas']['SystemProgramContext'];
+export type SystemProgramContexts = components['schemas']['SystemProgramContexts'];
+export type SystemProgramPart = components['schemas']['SystemProgramPart'];
 
 export interface SamplerRelationship {
     id: string;
@@ -462,6 +465,7 @@ export interface ImageTransport {
         limit: number,
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage>;
+    systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts>;
     closeImage(sessionId: number): Promise<void>;
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;

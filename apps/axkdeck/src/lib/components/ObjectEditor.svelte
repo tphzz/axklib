@@ -21,9 +21,16 @@
         assignmentQuery: string;
         onassignmentquerychange: (value: string) => void;
         onassignmentselect: (row: ProgramSampleSelectRow) => void;
+        multiPartContext?: { partLabel: string; programNumber: number } | null;
     }
 
-    let { selection, assignmentQuery, onassignmentquerychange, onassignmentselect }: Props = $props();
+    let {
+        selection,
+        assignmentQuery,
+        onassignmentquerychange,
+        onassignmentselect,
+        multiPartContext = null,
+    }: Props = $props();
     let programTab = $state<ProgramEditorTab>('sample-select');
     let sampleTab = $state<SampleEditorTab>('trim-loop');
     let showOnlyAssigned = $state(true);
@@ -101,9 +108,19 @@
             if (button instanceof HTMLElement) button.focus();
         });
     }
+
+    function multiPartContextLabel(): string {
+        if (!multiPartContext) return '';
+        return `Multi Part ${multiPartContext.partLabel} → Program ${String(multiPartContext.programNumber).padStart(3, '0')}`;
+    }
 </script>
 
 <section class="object-editor" aria-label="Object editor" data-navigation-workspace>
+    {#if multiPartContext}
+        <div class="multi-part-editor-context">
+            <strong>{multiPartContextLabel()}</strong><span>Part routing is authoritative in Multi mode.</span>
+        </div>
+    {/if}
     {#if selection?.kind === 'program'}
         <header class="editor-header">
             <div class="editor-tabs" role="tablist" aria-label="Program editor">
@@ -204,6 +221,12 @@
         <div class="editor-placeholder"><p class="empty-copy">Sample Bank editor unavailable</p></div>
     {:else if selection?.kind === 'wave-data'}
         <div class="editor-placeholder"><p class="empty-copy">Wave Data editor unavailable</p></div>
+    {:else if multiPartContext}
+        <div class="editor-placeholder">
+            <p class="empty-copy">
+                Program {String(multiPartContext.programNumber).padStart(3, '0')} is not present in the selected Volume.
+            </p>
+        </div>
     {:else}
         <div class="editor-placeholder"><p class="empty-copy">No object selected</p></div>
     {/if}

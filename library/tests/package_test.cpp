@@ -2849,6 +2849,25 @@ TEST(PackageImportPlanner, ReportsMissingDestinationMappings) {
                                     [](const auto &conflict) { return conflict.code == "DESTINATION_ROOT_MISSING"; }));
 }
 
+TEST(PackageImportPlanner, RejectsPartitionSupportDirectoryAsASfsVolumeDestination) {
+    auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
+    ASSERT_TRUE(image) << image.error().message;
+    const axk::MediaContainer media{std::move(*image)};
+    const std::vector roots{root(axk::PackageRootKind::smpl, "FAT root", "TEST")};
+    const auto built = axk::build_portable_package(media, roots);
+    ASSERT_TRUE(built) << built.error().message;
+
+    axk::PackageImportRequest request;
+    request.root_destinations.push_back(destination(0U, "PRF3"));
+    const std::vector packages{built->package};
+    const auto plan = axk::plan_package_import(fixture("HD00_512_single_sbnk_authored.hds"), packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_FALSE(plan->valid());
+    EXPECT_TRUE(std::ranges::any_of(plan->conflicts, [](const auto &conflict) {
+        return conflict.code == "SFS_DESTINATION_INVALID" && conflict.message.find("non-reserved") != std::string::npos;
+    }));
+}
+
 TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     const auto output_root = publication_root("axklib-package-import-apply");
     std::error_code error;

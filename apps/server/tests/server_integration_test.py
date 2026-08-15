@@ -1612,6 +1612,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.content",
                 "images.objects",
                 "images.relationships",
+                "images.systemProgramContexts",
                 "images.validation.issues",
                 "images.preview",
                 "auditions.prepare",
@@ -1630,6 +1631,41 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.programs.generate",
             ]
             assert opened["data"]["objectCount"] > 0
+            status, missing_system_partition = http_request(
+                port, "GET", f"/api/v1/images/{image_id}/system-program-contexts"
+            )
+            assert status == 400, missing_system_partition
+            status, invalid_system_partition = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/system-program-contexts?partitionIndex=8",
+            )
+            assert status == 400, invalid_system_partition
+            status, system_program_contexts = http_request(
+                port,
+                "GET",
+                f"/api/v1/images/{image_id}/system-program-contexts?partitionIndex=0",
+            )
+            assert status == 200, system_program_contexts
+            assert system_program_contexts["data"] == {
+                "partitionIndex": 0,
+                "files": [
+                    {
+                        "fileKind": "SYSTEM",
+                        "availability": "NOT_PRESENT",
+                        "message": "No saved SYSTEM file exists for partition 0.",
+                    },
+                    {
+                        "fileKind": "SYSTEM2",
+                        "availability": "NOT_PRESENT",
+                        "message": (
+                            "No saved SYSTEM2 file exists for partition 0. Multi "
+                            "assignments cannot be derived from this partition."
+                        ),
+                    },
+                ],
+                "message": "",
+            }
             status, objects = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
             )

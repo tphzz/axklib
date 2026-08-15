@@ -49,6 +49,7 @@ struct FileRoutes {
     ItemRoute image_content;
     ItemRoute image_objects;
     ItemRoute image_relationships;
+    ItemRoute image_system_program_contexts;
     ItemRoute image_validation;
     ItemRoute image_preview;
     ItemRoute audition_content;
