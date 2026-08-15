@@ -311,6 +311,8 @@
                     ? catalog.selectedBankWaveDataId
                     : catalog.selectedSampleWaveDataId}
                 queries={audition.laneQueries[workspaceView]}
+                showOnlyStandaloneSamples={audition.showOnlyStandaloneSamples}
+                onshowonlystandalonechange={(checked) => audition.updateShowOnlyStandaloneSamples(checked)}
                 onquerychange={(lane: keyof LaneQueries, value) => audition.updateLaneQuery(workspaceView, lane, value)}
                 onsamplebankselect={(item: SampleStructureItem) => void audition.selectBank(item)}
                 onsampleselect={workspaceView === 'sample-banks'

@@ -15,6 +15,7 @@
         type PackageExportSelectionState,
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
+    import { isStandaloneSample } from '../sampleRelationships';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
@@ -41,6 +42,8 @@
         activeSampleId: string;
         activeWaveDataId: string;
         queries: LaneQueries;
+        showOnlyStandaloneSamples?: boolean;
+        onshowonlystandalonechange?: (checked: boolean) => void;
         onquerychange: (lane: LaneId, value: string) => void;
         onsamplebankselect: (item: SampleStructureItem) => void;
         onsampleselect: (item: SampleStructureItem) => void;
@@ -81,6 +84,8 @@
         activeSampleId,
         activeWaveDataId,
         queries,
+        showOnlyStandaloneSamples = true,
+        onshowonlystandalonechange = () => undefined,
         onquerychange,
         onsamplebankselect,
         onsampleselect,
@@ -131,7 +136,10 @@
     const orderedSamples = $derived(samples.toSorted(compareNamedItems));
     const orderedWaveData = $derived(waveData.toSorted(compareNamedItems));
     const filteredBanks = $derived(orderedBanks.filter((item) => matchesSearch(item.name, queries.primary)));
-    const filteredSamples = $derived(orderedSamples.filter((item) => matchesSearch(item.name, sampleQuery)));
+    const availableSamples = $derived(
+        view === 'samples' && showOnlyStandaloneSamples ? orderedSamples.filter(isStandaloneSample) : orderedSamples,
+    );
+    const filteredSamples = $derived(availableSamples.filter((item) => matchesSearch(item.name, sampleQuery)));
     const filteredWaveData = $derived(orderedWaveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
     const sampleWindow = $derived(fixedVirtualWindow(filteredSamples.length, sampleViewport, containedRowExtent));
     const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, containedRowExtent));
@@ -141,7 +149,6 @@
     function updateSampleViewport(viewport: VirtualViewportState): void {
         sampleViewport = viewport;
     }
-
     function updateWaveDataViewport(viewport: VirtualViewportState): void {
         waveDataViewport = viewport;
     }
@@ -323,7 +330,8 @@
     }
 
     function inspect(scope: SelectionScope, target: SelectableItem, mode: ObjectSelectionMode): void {
-        const domain = scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? orderedSamples : orderedWaveData;
+        const domain =
+            scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? availableSamples : orderedWaveData;
         const visible =
             scope === 'sample-banks' ? filteredBanks : scope === 'samples' ? filteredSamples : filteredWaveData;
         updateSelection(mode, scope, domain, visible, target);
@@ -397,7 +405,7 @@
         openObjectMenuFromKeyboard(
             event,
             scope,
-            scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? orderedSamples : orderedWaveData,
+            scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? availableSamples : orderedWaveData,
             visibleItems(scope),
             current,
         );
@@ -486,11 +494,14 @@
     <section class="contained-lane">
         <CollectionToolbar
             title="Samples"
-            count={samples.length}
+            count={availableSamples.length}
             query={sampleQuery}
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'secondary' : 'primary', value)}
             actionLabel={view === 'samples' ? 'Import audio' : undefined}
             onaction={onimportaudio}
+            filterLabel={view === 'samples' ? 'Show only standalone' : undefined}
+            filterChecked={showOnlyStandaloneSamples}
+            onfilterchange={onshowonlystandalonechange}
         />
         <div class="contained-list" data-navigation-list use:virtualViewport={updateSampleViewport}>
             {#if filteredSamples.length > 0}
@@ -522,7 +533,7 @@
                                             updateSelection(
                                                 selectionMode(event),
                                                 'samples',
-                                                orderedSamples,
+                                                availableSamples,
                                                 filteredSamples,
                                                 item,
                                             ) === 'replace'
@@ -530,7 +541,7 @@
                                             onsampleselect(item);
                                         }
                                     }}
-                                    oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
+                                    oncontextmenu={(event) => openObjectMenu(event, 'samples', availableSamples, item)}
                                     onkeydown={(event) => handleContainedKeyboard(event, 'samples', index, item)}
                                 >
                                     <strong>{item.name}</strong>
@@ -567,7 +578,11 @@
                 <p class="empty-copy">
                     {view === 'sample-banks' && !activeSampleBankId
                         ? 'Select a Sample Bank to inspect its Samples'
-                        : 'No matching Samples'}
+                        : sampleQuery
+                          ? 'No matching Samples'
+                          : view === 'samples' && showOnlyStandaloneSamples
+                            ? 'No standalone Samples'
+                            : 'No Samples'}
                 </p>
             {/if}
         </div>

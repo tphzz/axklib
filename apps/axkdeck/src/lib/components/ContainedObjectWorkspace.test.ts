@@ -72,6 +72,75 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('shows only standalone Samples by default and composes the filter with search', async () => {
+        const standalone = structure('SBNK', 'Standalone Piano');
+        const assigned = structure('SBNK', 'Banked Brass');
+        assigned.sampleBankObjectIds = ['SBAC-Brass'];
+        assigned.membershipLabel = 'Sample Bank: Brass';
+        const onshowonlystandalonechange = vi.fn();
+        const props = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples' as const,
+            sampleBanks: [],
+            samples: [assigned, standalone],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            showOnlyStandaloneSamples: true,
+            onshowonlystandalonechange,
+        };
+        const rendered = render(ContainedObjectWorkspace, { props });
+
+        const filter = screen.getByRole('checkbox', { name: 'Show only standalone' });
+        expect((filter as HTMLInputElement).checked).toBe(true);
+        expect(screen.getByText('1 item')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Inspect Standalone Piano' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Inspect Banked Brass' })).toBeNull();
+
+        await fireEvent.click(filter);
+        expect(onshowonlystandalonechange).toHaveBeenCalledWith(false);
+        await rendered.rerender({ ...props, showOnlyStandaloneSamples: false });
+        expect(screen.getByText('2 items')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+
+        await rendered.rerender({
+            ...props,
+            showOnlyStandaloneSamples: false,
+            queries: { primary: 'banked', secondary: '', tertiary: '' },
+        });
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Inspect Standalone Piano' })).toBeNull();
+        expect(screen.getByText('2 items')).toBeTruthy();
+    });
+
+    it('does not apply the standalone filter to Sample Bank members', () => {
+        const bank = structure('SBAC', 'Brass');
+        const member = structure('SBNK', 'Banked Brass');
+        member.sampleBankObjectIds = [bank.objectId];
+        member.membershipLabel = 'Sample Bank: Brass';
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [member],
+                waveData: [],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: member.objectId,
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                showOnlyStandaloneSamples: true,
+            },
+        });
+
+        expect(screen.queryByRole('checkbox', { name: 'Show only standalone' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+    });
+
     it('navigates vertically within a lane and horizontally through the hierarchy', async () => {
         const bank = structure('SBAC', 'Strings');
         const samples = [structure('SBNK', 'Cello'), structure('SBNK', 'Violin')];
@@ -220,6 +289,7 @@ describe('ContainedObjectWorkspace', () => {
                 activeSampleId: '',
                 activeWaveDataId: '',
                 queries: { primary: '', secondary: '', tertiary: '' },
+                showOnlyStandaloneSamples: false,
                 sampleBankCreationAvailable: true,
                 oncreatesamplebank,
                 selection: { items: selected, anchors: {} },

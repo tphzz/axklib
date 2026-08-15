@@ -224,6 +224,14 @@ export class CatalogWorkflow {
         this.editorObjectIds = { programs: '', sequences: '', 'sample-banks': '', samples: '', 'wave-data': '' };
     }
 
+    clearSampleSelection(): void {
+        const hiddenIds = new Set([this.selectedSampleId, this.selectedSampleWaveDataId, this.editorObjectIds.samples]);
+        this.selectedSampleId = '';
+        this.selectedSampleWaveDataId = '';
+        this.editorObjectIds = { ...this.editorObjectIds, samples: '' };
+        if (hiddenIds.has(this.inspectorObjectId)) this.inspectorObjectId = '';
+    }
+
     private setWaveDataObjects(objects: SamplerObject[], names: Map<string, string>): void {
         const previews = new Map(
             this.waveData.map(
