@@ -2547,6 +2547,23 @@ input:focus-visible {
   gap: 5px;
 }
 
+.collection-filter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
+.collection-filter input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
 .collection-actions .collection-search {
   width: 100px;
 }

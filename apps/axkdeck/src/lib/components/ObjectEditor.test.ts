@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import { programSampleSelectRows } from '../programSampleSelect';
 import type { SamplerObject, SamplerRelationship } from '../transport';
 import type { InspectorSelection, Program, ProgramAssignmentRow, SampleStructureItem } from '../types';
 import ObjectEditor from './ObjectEditor.svelte';
@@ -51,7 +52,20 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         targetName: 'String Bank',
         confirmed: true,
     };
-    return { kind: 'program', program, assignments: [assignment] };
+    const bankObject = object('SBAC', 'String Bank');
+    const bank: SampleStructureItem = {
+        id: bankObject.key,
+        objectId: relationship.targetObjectId!,
+        objectType: 'SBAC',
+        object: bankObject,
+        name: 'String Bank',
+    };
+    return {
+        kind: 'program',
+        program,
+        assignments: [assignment],
+        sampleSelect: programSampleSelectRows([assignment], [bank], []),
+    };
 }
 
 function sampleSelection(): Extract<InspectorSelection, { kind: 'sample' }> {
@@ -107,6 +121,7 @@ describe('ObjectEditor', () => {
                 quality: 'LIKELY',
             },
         };
+        selection.sampleSelect = programSampleSelectRows(selection.assignments, [], []);
         render(ObjectEditor, {
             props: {
                 selection,
@@ -133,6 +148,7 @@ describe('ObjectEditor', () => {
                 receiveChannelDisplay: '=SMP',
             },
         };
+        selection.sampleSelect = programSampleSelectRows(selection.assignments, [], []);
         render(ObjectEditor, {
             props: {
                 selection,
@@ -150,6 +166,103 @@ describe('ObjectEditor', () => {
         ).toBeTruthy();
         expect(screen.queryByText('Program 001')).toBeNull();
         expect(screen.queryByText('Strings')).toBeNull();
+    });
+
+    it('defaults to assigned objects and expands to the complete bank-then-sample inventory', async () => {
+        const selection = programSelection();
+        const bassBank = sampleItem('SBAC', 'Bass Bank');
+        const cello = sampleItem('SBNK', 'Cello');
+        const violin = sampleItem('SBNK', 'Violin');
+        selection.sampleSelect = programSampleSelectRows(
+            selection.assignments,
+            [sampleItem('SBAC', 'String Bank', 'SBAC-String Bank'), bassBank],
+            [violin, cello],
+        );
+
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect: vi.fn(),
+            },
+        });
+
+        const filter = screen.getByRole('checkbox', { name: 'Show only assigned' });
+        expect((filter as HTMLInputElement).checked).toBe(true);
+        expect(screen.getByText('1 item')).toBeTruthy();
+        expect(screen.queryByText('Bass Bank')).toBeNull();
+
+        await fireEvent.click(filter);
+        expect(screen.getByText('4 items')).toBeTruthy();
+        const rows = within(screen.getByRole('table', { name: 'Program assignments' })).getAllByRole('button');
+        expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+            'Bass BankSBAC off',
+            'String BankSBAC 05',
+            'CelloSBNK off',
+            'ViolinSBNK off',
+        ]);
+    });
+
+    it('keeps the expanded mode across Program changes and navigates unassigned inventory rows', async () => {
+        const onassignmentselect = vi.fn();
+        const selection = programSelection();
+        const cello = sampleItem('SBNK', 'Cello');
+        selection.sampleSelect = programSampleSelectRows(
+            selection.assignments,
+            [sampleItem('SBAC', 'String Bank', 'SBAC-String Bank')],
+            [cello],
+        );
+        const rendered = render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Show only assigned' }));
+        await fireEvent.click(screen.getByRole('button', { name: /Cello/ }));
+        expect(onassignmentselect).toHaveBeenLastCalledWith(
+            expect.objectContaining({ targetObjectId: cello.objectId }),
+        );
+
+        await rendered.rerender({
+            selection: { ...selection, program: { ...selection.program, name: 'Strings 2' } },
+            assignmentQuery: '',
+            onassignmentquerychange: vi.fn(),
+            onassignmentselect,
+        });
+        expect((screen.getByRole('checkbox', { name: 'Show only assigned' }) as HTMLInputElement).checked).toBe(false);
+        expect(screen.getByText('Cello')).toBeTruthy();
+    });
+
+    it('moves through navigable Sample Select rows with vertical navigation keys', async () => {
+        const onassignmentselect = vi.fn();
+        const selection = programSelection();
+        const cello = sampleItem('SBNK', 'Cello');
+        selection.sampleSelect = programSampleSelectRows(
+            selection.assignments,
+            [sampleItem('SBAC', 'String Bank', 'SBAC-String Bank')],
+            [cello],
+        );
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Show only assigned' }));
+        const stringBank = screen.getByRole('button', { name: /String Bank/ });
+        stringBank.focus();
+        await fireEvent.keyDown(stringBank, { key: 'ArrowDown' });
+
+        expect(onassignmentselect).toHaveBeenLastCalledWith(expect.objectContaining({ targetName: 'Cello' }));
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Cello/ }));
     });
 
     it('exposes the complete SBNK tab set and remembers the active tab across SBNK selections', async () => {
@@ -207,3 +320,18 @@ describe('ObjectEditor', () => {
         expect(screen.queryByRole('tab')).toBeNull();
     });
 });
+
+function sampleItem(
+    objectType: 'SBAC' | 'SBNK',
+    name: string,
+    objectId = `${objectType}-${name}`,
+): SampleStructureItem {
+    const samplerObject = object(objectType, name);
+    return {
+        id: objectId,
+        objectId,
+        objectType,
+        object: samplerObject,
+        name,
+    };
+}

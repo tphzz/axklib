@@ -3,7 +3,13 @@ import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelecti
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
 import { auditionableSampleBankIds, auditionableSampleIds } from '../../lib/sampleRelationships';
 import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
-import type { Program, ProgramAssignmentRow, SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
+import type {
+    Program,
+    ProgramSampleSelectRow,
+    SampleStructureItem,
+    WaveDataItem,
+    WorkspaceView,
+} from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 
@@ -203,8 +209,8 @@ export class AuditionWorkflow {
         }
     }
 
-    selectAssignment(row: ProgramAssignmentRow): void {
-        if (row.confirmed && row.targetObjectId) void this.inspectObject(row.targetObjectId);
+    selectAssignment(row: ProgramSampleSelectRow): void {
+        if (row.navigable && row.targetObjectId) void this.inspectObject(row.targetObjectId);
     }
 
     async selectWaveData(item: WaveDataItem, playAfterSelection = this.autoplay): Promise<void> {

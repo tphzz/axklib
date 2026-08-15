@@ -139,8 +139,30 @@ export interface ProgramAssignmentRow {
     confirmed: boolean;
 }
 
+export interface ProgramSampleSelectRow {
+    id: string;
+    targetType: string;
+    targetName: string;
+    targetObjectId?: string;
+    navigable: boolean;
+    assigned: boolean;
+    receiveChannelDisplays: string[];
+    sourceLoad: boolean;
+    relationships: SamplerRelationship[];
+}
+
+export interface ProgramSampleSelectRows {
+    assigned: ProgramSampleSelectRow[];
+    all: ProgramSampleSelectRow[];
+}
+
 export type InspectorSelection =
-    | { kind: 'program'; program: Program; assignments: ProgramAssignmentRow[] }
+    | {
+          kind: 'program';
+          program: Program;
+          assignments: ProgramAssignmentRow[];
+          sampleSelect: ProgramSampleSelectRows;
+      }
     | { kind: 'sequence'; sequence: SequenceItem }
     | {
           kind: 'sample-bank';

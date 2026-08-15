@@ -1,5 +1,6 @@
 import { objectPresentationName } from '../../lib/objectPresentation';
 import { collectPages } from '../../lib/pagination';
+import { programSampleSelectRows } from '../../lib/programSampleSelect';
 import { isConfirmedRelationship } from '../../lib/relationshipResolution';
 import {
     distinctWaveDataForSample,
@@ -119,12 +120,15 @@ export class CatalogWorkflow {
 
     selectionForObject(objectId: string, displayedBankMemberId = ''): InspectorSelection {
         const program = this.programs.find((item) => item.objectId === objectId);
-        if (program)
+        if (program) {
+            const assignments = this.assignmentsForProgram(program.objectId);
             return {
                 kind: 'program',
                 program,
-                assignments: this.assignmentsForProgram(program.objectId),
+                assignments,
+                sampleSelect: programSampleSelectRows(assignments, this.sampleBanks, this.samples),
             };
+        }
         const bank = this.sampleBanks.find((item) => item.objectId === objectId);
         if (bank) {
             const members = this.membersForBank(bank.objectId);

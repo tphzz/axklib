@@ -9,6 +9,9 @@
         actionLabel?: string;
         actionIcon?: 'upload' | 'broom' | 'sparkles';
         onaction?: () => void;
+        filterLabel?: string;
+        filterChecked?: boolean;
+        onfilterchange?: (checked: boolean) => void;
     }
 
     let {
@@ -19,6 +22,9 @@
         actionLabel,
         actionIcon = 'upload',
         onaction = () => undefined,
+        filterLabel,
+        filterChecked = false,
+        onfilterchange = () => undefined,
     }: Props = $props();
 </script>
 
@@ -32,6 +38,16 @@
             <button class="icon-button" type="button" aria-label={actionLabel} title={actionLabel} onclick={onaction}>
                 <Icon name={actionIcon} size={14} />
             </button>
+        {/if}
+        {#if filterLabel}
+            <label class="collection-filter">
+                <input
+                    type="checkbox"
+                    checked={filterChecked}
+                    onchange={(event) => onfilterchange(event.currentTarget.checked)}
+                />
+                <span>{filterLabel}</span>
+            </label>
         {/if}
         <label class="search-field collection-search">
             <Icon name="search" size={14} />
