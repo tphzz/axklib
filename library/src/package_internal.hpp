@@ -22,7 +22,6 @@ struct WaveformDigests {
     std::string audio;
 };
 
-[[nodiscard]] bool portable_inactive_program_relationship(const Relationship &relationship);
 [[nodiscard]] Error package_error(std::string message, ErrorCode code = ErrorCode::manifest_invalid);
 [[nodiscard]] std::vector<std::byte> string_bytes(std::string_view value);
 [[nodiscard]] std::string digest_text(std::string_view value);

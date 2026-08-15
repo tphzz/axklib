@@ -117,7 +117,7 @@ Current parameter behavior is:
 | Loop mode | A native loop becomes an A-series forward loop; a non-looped Wave becomes one-shot playback with no loop window |
 | Timbre root key | Translated from the TX16W native key numbering by `-16` |
 | Voice region low/high keys | Translated to A-series Sample key ranges |
-| Performance receive channel | Mapped to `=SMP` or a one-based MIDI channel |
+| Performance receive channel | Mapped to `=Smp` or a one-based A-channel (`A01` through `A16`) |
 | Voice Fade | Reported but not authored |
 | Per-Voice volume, detune, transpose, output, and alternative group | Reported but not authored |
 | Destination-only Sample fields | Use the existing A-series writer defaults |

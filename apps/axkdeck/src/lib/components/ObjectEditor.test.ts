@@ -42,8 +42,8 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
         basis: 'test',
         notes: [],
         assignmentName: 'String Bank',
-        assignmentState: 'confirmed-active',
-        receiveChannelDisplay: '05',
+        assignmentState: 'stored-assignment',
+        receiveChannelDisplay: 'A05',
     };
     const assignment: ProgramAssignmentRow = {
         relationship,
@@ -101,7 +101,7 @@ describe('ObjectEditor', () => {
         expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(expectedTabs);
         expect(screen.getByRole('tab', { name: 'Sample Select' }).getAttribute('aria-selected')).toBe('true');
         expect(screen.getByText('String Bank')).toBeTruthy();
-        expect(screen.getByText('05')).toBeTruthy();
+        expect(screen.getByText('A05')).toBeTruthy();
 
         await fireEvent.click(screen.getByRole('button', { name: /String Bank/ }));
         expect(onassignmentselect).toHaveBeenCalledOnce();
@@ -110,7 +110,7 @@ describe('ObjectEditor', () => {
         expect(screen.getByRole('tabpanel', { name: 'Easy Edit' })).toBeTruthy();
     });
 
-    it('shows unconfirmed Program assignments without making them navigable', async () => {
+    it('does not present an unconfirmed stored Program row as an assignment', async () => {
         const onassignmentselect = vi.fn();
         const selection = programSelection();
         selection.assignments[0] = {
@@ -131,11 +131,68 @@ describe('ObjectEditor', () => {
             },
         });
 
-        const assignment = screen.getByRole('button', { name: /String Bank/ });
-        expect(assignment.hasAttribute('disabled')).toBe(true);
-        expect(screen.getByText('Unconfirmed assignment')).toBeTruthy();
-        await fireEvent.click(assignment);
+        expect(screen.queryByRole('button', { name: /String Bank/ })).toBeNull();
+        expect(screen.getByText('No assigned Sample Banks or Samples')).toBeTruthy();
         expect(onassignmentselect).not.toHaveBeenCalled();
+    });
+
+    it('renders a missing named selector separately from the only resolved target', () => {
+        const selection = programSelection();
+        const astro = sampleItem('SBNK', 'Astro');
+        const exact: ProgramAssignmentRow = {
+            relationship: {
+                id: 'assignment-astro',
+                sourceObjectId: selection.program.objectId,
+                targetObjectId: astro.objectId,
+                candidateObjectIds: [astro.objectId],
+                relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
+                quality: 'KNOWN',
+                basis: 'assignment-kind-0x10+name',
+                notes: [],
+                assignmentIndex: 0,
+                assignmentName: 'Astro',
+                assignmentState: 'stored-assignment',
+                receiveChannelDisplay: '=Smp',
+            },
+            targetObjectId: astro.objectId,
+            targetType: 'SBNK',
+            targetName: 'Astro',
+            confirmed: true,
+        };
+        const missing: ProgramAssignmentRow = {
+            relationship: {
+                id: 'assignment-missing',
+                sourceObjectId: selection.program.objectId,
+                candidateObjectIds: [],
+                relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
+                quality: 'UNKNOWN',
+                basis: 'assignment-stored-missing-local-target',
+                notes: [],
+                assignmentIndex: 1,
+                assignmentName: 'ASR10 MergeX   *',
+                assignmentState: 'stored-assignment',
+                receiveChannelDisplay: 'A01',
+            },
+            targetType: 'SBNK',
+            targetName: 'ASR10 MergeX   *',
+            confirmed: false,
+        };
+        selection.assignments = [exact, missing];
+        selection.sampleSelect = programSampleSelectRows(selection.assignments, [], [astro]);
+
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect: vi.fn(),
+            },
+        });
+
+        const table = screen.getByRole('table', { name: 'Program assignments' });
+        const astroRow = within(table).getByRole('button', { name: /Astro/ });
+        expect(astroRow.textContent?.replace(/\s+/g, ' ').trim()).toBe('AstroSBNK =Smp');
+        expect(within(table).queryByText(/ASR10 MergeX/)).toBeNull();
     });
 
     it('shows the stored selector and status for source-load assignments', () => {
@@ -145,7 +202,7 @@ describe('ObjectEditor', () => {
             relationship: {
                 ...selection.assignments[0].relationship,
                 assignmentState: 'source-load-assignment',
-                receiveChannelDisplay: '=SMP',
+                receiveChannelDisplay: '=Smp',
             },
         };
         selection.sampleSelect = programSampleSelectRows(selection.assignments, [], []);
@@ -159,7 +216,7 @@ describe('ObjectEditor', () => {
         });
 
         expect(screen.getByText('Rch Assign')).toBeTruthy();
-        expect(screen.getByText('=SMP')).toBeTruthy();
+        expect(screen.getByText('=Smp')).toBeTruthy();
         expect(screen.getByText('Source load')).toBeTruthy();
         expect(
             screen.getByTitle('Stored CD-ROM selector; the sampler activates this assignment when it is loaded.'),
@@ -168,7 +225,7 @@ describe('ObjectEditor', () => {
         expect(screen.queryByText('Strings')).toBeNull();
     });
 
-    it('defaults to assigned objects and expands to the complete bank-then-sample inventory', async () => {
+    it('defaults to assigned objects and expands to selector-ordered inventory with inactive rows last', async () => {
         const selection = programSelection();
         const bassBank = sampleItem('SBAC', 'Bass Bank');
         const cello = sampleItem('SBNK', 'Cello');
@@ -197,8 +254,8 @@ describe('ObjectEditor', () => {
         expect(screen.getByText('4 items')).toBeTruthy();
         const rows = within(screen.getByRole('table', { name: 'Program assignments' })).getAllByRole('button');
         expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+            'String BankSBAC A05',
             'Bass BankSBAC off',
-            'String BankSBAC 05',
             'CelloSBNK off',
             'ViolinSBNK off',
         ]);

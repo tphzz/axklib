@@ -231,14 +231,13 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
                 relation.source_key,
             });
         }
-        if (relation.type.starts_with("PROG_ASSIGNMENT_TO_") && relation.assignment_state == AssignmentState::active &&
-            !relation.target_key) {
+        if (relation.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+            relation.assignment_state == AssignmentState::stored_assignment && !relation.target_key) {
             const auto *source = find_object(catalog, relation.source_key);
             result.issues.push_back({
-                "REL_ACTIVE_PROGRAM_TARGET_MISSING",
-                ValidationSeverity::error,
-                std::format("active Program assignment '{}' does not resolve "
-                            "to one local target",
+                "REL_PROGRAM_STORED_ROW_TARGET_MISSING",
+                ValidationSeverity::warning,
+                std::format("stored Program assignment row '{}' has no exact local target and is not effective",
                             relation.assignment_name),
                 source == nullptr ? "" : sampler_path(*source),
                 relation.source_key,

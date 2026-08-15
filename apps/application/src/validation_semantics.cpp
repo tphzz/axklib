@@ -104,7 +104,7 @@ std::string media_object_group_path(const ValidationSource &source, std::string_
     return path.substr(0U, category_separator);
 }
 
-std::string active_program_assignment_label(const ValidationSource &source, const axk::Relationship &row) {
+std::string program_assignment_label(const ValidationSource &source, const axk::Relationship &row) {
     const auto assignment_name =
         !row.assignment_name.empty() ? row.assignment_name : row.target_key.value_or("unnamed assignment");
     if (!row.assignment_index)
@@ -115,27 +115,11 @@ std::string active_program_assignment_label(const ValidationSource &source, cons
 
 std::string relationship_issue_path(const ValidationSource &source, const axk::Relationship &row) {
     if (row.type.starts_with("PROG_ASSIGNMENT_"))
-        return active_program_assignment_label(source, row);
+        return program_assignment_label(source, row);
     return media_object_report_path(source, row.source_key);
 }
 
 std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Relationship &row) {
-    if (row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ||
-        row.basis == "assignment-visible-off-same-volume-sbnk-diagnostic") {
-        const auto target =
-            row.basis == "assignment-visible-off-same-volume-sbac-diagnostic" ? "Sample Bank (SBAC)" : "Sample (SBNK)";
-        return {std::format("Visible/off Program assignment row names a {} with one same-volume diagnostic candidate "
-                            "plus other duplicate-name candidates; this is decoded Program inventory, not active "
-                            "Program content loss.",
-                            target),
-                "Use relationships.csv candidate fields when auditing off rows; the same-volume candidate is "
-                "diagnostic only and must not create an active Program child."};
-    }
-    if (row.assignment_state == axk::AssignmentState::visible_off)
-        return {"Visible/off Program assignment row has multiple possible local targets; this is decoded Program "
-                "inventory, not active Program content loss.",
-                "Use relationships.csv candidate fields only when auditing off rows; do not treat this warning as a "
-                "missing active Program child."};
     if (row.type == "PROG_ASSIGNMENT_TO_SBAC")
         return {"Program assignment to a Sample Bank (SBAC) has multiple possible targets.",
                 "Verify the sampler-visible Program assignment and Sample Bank target before promotion."};
@@ -174,8 +158,6 @@ std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Re
 }
 
 std::string tentative_relationship_code(const axk::Relationship &row) {
-    if (row.assignment_state == axk::AssignmentState::visible_off)
-        return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC";
     if (row.basis.starts_with("sbnk-program-link-bitmap-"))
         return "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC";
     if (row.basis == "sbnk-member-cache-only-name-mismatch")
@@ -184,20 +166,12 @@ std::string tentative_relationship_code(const axk::Relationship &row) {
 }
 
 std::pair<std::string, std::string> missing_relationship_message(const axk::Relationship &row) {
-    if (row.assignment_state == axk::AssignmentState::active)
-        return {"Stored active-form Program row references a missing exact local target; sampler lookup disables "
-                "the row when that target cannot be found.",
+    if (row.assignment_state == axk::AssignmentState::stored_assignment)
+        return {"Stored Program assignment row references a missing exact local target and is not an effective "
+                "assignment.",
                 "Preserve the unresolved row data and do not redirect it to a similar name. A volume package "
                 "may retain it without a dependency edge."};
-    if (row.assignment_state == axk::AssignmentState::visible_off) {
-        const auto expected = row.type == "PROG_ASSIGNMENT_TO_SBAC" ? "Sample Bank (SBAC)" : "Sample (SBNK)";
-        return {std::format("Visible/off Program assignment row names a missing local {} target; this is decoded "
-                            "Program inventory, not active Program content loss.",
-                            expected),
-                "Keep this row as diagnostic/off-row data unless sampler-visible checks prove it should become an "
-                "active assignment."};
-    }
-    if (row.assignment_state == axk::AssignmentState::source_load)
+    if (row.assignment_state == axk::AssignmentState::source_load_assignment)
         return {"Source-load Program assignment row has no resolved local target.",
                 "Keep the selector as diagnostic source data until sampler-loaded placement or another public rule "
                 "proves a target."};
@@ -209,10 +183,8 @@ std::pair<std::string, std::string> missing_relationship_message(const axk::Rela
 }
 
 std::string missing_relationship_code(const axk::Relationship &row) {
-    if (row.assignment_state == axk::AssignmentState::visible_off)
-        return "REL_VISIBLE_OFF_ASSIGNMENT_DIAGNOSTIC";
-    if (row.assignment_state == axk::AssignmentState::active)
-        return "REL_ACTIVE_ASSIGNMENT_MISSING_TARGET";
+    if (row.assignment_state == axk::AssignmentState::stored_assignment)
+        return "REL_PROGRAM_STORED_ROW_TARGET_MISSING";
     return "REL_MISSING_TARGET";
 }
 
@@ -246,10 +218,7 @@ std::vector<axk::ReportRow> validate_media_details(const ValidationSource &sourc
     }
     std::map<std::string, std::vector<const axk::Relationship *>> reachable;
     for (const auto &row : source.graph.relationships) {
-        if (!row.target_key ||
-            (row.assignment_state != axk::AssignmentState::active &&
-             row.assignment_state != axk::AssignmentState::source_load) ||
-            (row.quality != axk::RelationshipQuality::known && row.quality != axk::RelationshipQuality::likely)) {
+        if (!axk::is_effective_program_assignment(row)) {
             continue;
         }
         if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {
@@ -274,7 +243,7 @@ std::vector<axk::ReportRow> validate_media_details(const ValidationSource &sourc
         grouped_members[group].push_back(&row);
         if (active != reachable.end()) {
             for (const auto *program_row : active->second)
-                grouped_active_labels[group].insert(active_program_assignment_label(source, *program_row));
+                grouped_active_labels[group].insert(program_assignment_label(source, *program_row));
         }
         covered_relationships.insert(row.key);
     }

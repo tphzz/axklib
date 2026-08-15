@@ -240,7 +240,7 @@ Result<void> validate_package_closure(const PortablePackage &package) {
         } else if (const auto *program = std::get_if<CurrentProg>(&decoded->payload)) {
             for (std::size_t index = 0; index < program->assignments.size(); ++index) {
                 const auto &assignment = program->assignments[index];
-                if (assignment.name.empty() || std::to_integer<std::uint8_t>(assignment.raw_row[0x28U]) != 0xffU) {
+                if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U)) {
                     continue;
                 }
                 const auto role = assignment.kind == 0x11U   ? "PROG_ASSIGNMENT_TO_SBAC"
@@ -249,9 +249,6 @@ Result<void> validate_package_closure(const PortablePackage &package) {
                 const auto type = assignment.kind == 0x11U   ? ObjectType::sbac
                                   : assignment.kind == 0x10U ? ObjectType::sbnk
                                                              : ObjectType::unknown;
-                if (role.empty())
-                    return std::unexpected{package_error("package Program contains an unsupported "
-                                                         "active assignment")};
                 auto edges = package_children(package, node.node_id, role);
                 std::erase_if(edges, [&](const PackageRelationship *edge) { return edge->ordinal != index; });
                 const auto exact_target_present = std::ranges::any_of(package.nodes, [&](const PackageNode &target) {

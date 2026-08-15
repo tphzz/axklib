@@ -113,10 +113,9 @@ Result<void> clear_program_assignment_rows_in_place(std::vector<std::byte> &payl
                                               "Program assignment adjustment ordinal is invalid or duplicated")};
         }
         const auto &assignment = program.assignments[ordinal];
-        if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U) ||
-            std::to_integer<std::uint8_t>(assignment.raw_row[0x28U]) != 0xffU) {
+        if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U)) {
             return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
-                                              "Program assignment adjustment does not name an active row")};
+                                              "Program assignment adjustment does not name a stored assignment row")};
         }
         const auto offset = 0x120U + static_cast<std::size_t>(ordinal) * 0x38U;
         if (offset > payload.size() || 0x38U > payload.size() - offset) {

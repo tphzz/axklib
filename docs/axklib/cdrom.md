@@ -383,9 +383,9 @@ a sampler user recognizes.
 
 ## Program Source-Load Assignments
 
-CD-ROM Program assignment rows can describe how objects are loaded from the disc
-rather than the active/off state stored in a hard-disk save. axklib keeps this
-separate from hard-disk Program assignment state.
+CD-ROM Program assignment rows can describe how objects are loaded from the disc.
+axklib keeps source-load matching separate from ordinary stored Program
+assignments.
 
 Public behavior:
 
@@ -393,7 +393,7 @@ Public behavior:
 | --- | --- | --- |
 | Source-load assignment matched to a target object | Can be shown as a Program child when relationship quality is sufficient. | Row keeps raw ISO path, match method, assignment row, and quality fields. |
 | Assignment row with lower quality or no target | Not shown as a normal Program child. | Kept in relationship CSV/JSON diagnostics. |
-| Source row whose loaded active/off state is not represented by the ISO row | Stored row remains diagnostic; loaded state is not invented. | `active_assignment_state` can be `source-load-assignment`. |
+| Source row that resolves to a different stored object type | Loaded target type is not invented as a normal stored assignment. | `assignment_state` can be `source-load-assignment`. |
 
 The raw selector bytes in Program rows are diagnostic fields. They are not used
 as public target IDs.

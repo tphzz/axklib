@@ -12,7 +12,14 @@
 namespace axk {
 
 enum class RelationshipQuality : std::uint8_t { known, likely, tentative, unknown };
-enum class AssignmentState : std::uint8_t { active, source_load, visible_off, duplicate_not_active, unknown };
+enum class AssignmentState : std::uint8_t { stored_assignment, source_load_assignment, unknown };
+enum class ProgramReceiveSelectorKind : std::uint8_t { sample, a_channel, basic_channel, b_channel, unknown };
+
+struct ProgramReceiveSelector {
+    ProgramReceiveSelectorKind kind{ProgramReceiveSelectorKind::unknown};
+    std::optional<std::uint8_t> channel;
+    std::uint8_t raw_value{};
+};
 
 struct Relationship {
     std::string key;
@@ -27,6 +34,7 @@ struct Relationship {
     std::optional<std::size_t> assignment_index;
     std::string assignment_name;
     AssignmentState assignment_state{AssignmentState::unknown};
+    std::optional<ProgramReceiveSelector> receive_selector;
     std::string receive_channel_display;
 };
 
@@ -52,5 +60,7 @@ struct RelationshipGraph {
 AXK_API RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog);
 AXK_API std::string_view relationship_quality_name(RelationshipQuality quality) noexcept;
 AXK_API std::string_view assignment_state_name(AssignmentState state) noexcept;
+[[nodiscard]] AXK_API bool is_program_assignment_row(const Relationship &relationship) noexcept;
+[[nodiscard]] AXK_API bool is_effective_program_assignment(const Relationship &relationship) noexcept;
 
 } // namespace axk

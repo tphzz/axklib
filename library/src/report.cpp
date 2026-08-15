@@ -173,26 +173,21 @@ std::string semantic_notes(std::string_view name) {
     if (name == "assignment_row_state")
         return "Program assignment row classification; decoded-row means a "
                "PROG row was decoded "
-               "and reported separately from active assignment state.";
-    if (name == "active_assignment_state")
-        return "Conservative Program assignment classification. "
-               "SFS assignment rows may be "
-               "confirmed-active, confirmed-visible-off, or "
-               "confirmed-duplicate-not-active; ISO "
-               "source-load-assignment rows are matched source links whose "
-               "loaded active state is "
-               "reported separately from stored HDA active/off bytes.";
+               "and reported separately from assignment relationship state.";
+    if (name == "assignment_state")
+        return "Conservative Program assignment-row classification. A stored-assignment row is decoded from a named "
+               "kind-0x10 or kind-0x11 PROG row. A source-load-assignment is a matched CD-ROM source link. Either is "
+               "effective only when it resolves to an exact known local target.";
     if (name == "assignment_output1_byte_0x1d")
         return "Decoded PROG assignment row +0x1d byte retained as raw per-row "
                "output data; it is "
                "not the Rch Assign display selector by itself.";
-    if (name == "assignment_rch_assign_gate_byte_0x28")
-        return "Decoded PROG assignment row byte used for active/off "
-               "classification where 0xff is "
-               "active and 0x00 is visible/off.";
+    if (name == "assignment_output2_byte_0x28")
+        return "Decoded PROG assignment row +0x28 Output 2 byte. It is independent of assignment presence and Rch "
+               "Assign.";
     if (name == "assignment_rch_assign_display")
-        return "Conservative visible Rch Assign family: off, =SMP, 01 through "
-               "16, BasicRch, B01 "
+        return "Confirmed visible Rch Assign family: =Smp, A01 through "
+               "A16, Bch, B01 "
                "through B16, or unknown.";
     if (name == "basis" || name == "extraction_basis" || name == "notes" || name == "match_notes")
         return "Quality/basis origin field. Do not treat as decoded raw "

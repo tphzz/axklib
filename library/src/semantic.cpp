@@ -59,19 +59,13 @@ std::string display_program(const ObjectSnapshot &item) {
 }
 
 bool navigable(const Relationship &row) {
-    if (row.type.starts_with("PROG_ASSIGNMENT_TO_")) {
-        return (row.assignment_state == AssignmentState::active ||
-                row.assignment_state == AssignmentState::source_load) &&
-               (row.quality == RelationshipQuality::known || row.quality == RelationshipQuality::likely) &&
-               row.target_key.has_value();
-    }
+    if (row.type.starts_with("PROG_ASSIGNMENT_TO_"))
+        return is_effective_program_assignment(row);
     return row.quality == RelationshipQuality::known && row.target_key.has_value();
 }
 
 std::optional<std::string> assignment_detail(const Relationship &row) {
-    if (row.assignment_state == AssignmentState::source_load)
-        return "Rch Assign: =SMP";
-    if (row.assignment_state != AssignmentState::active || row.receive_channel_display.empty() ||
+    if (!is_effective_program_assignment(row) || row.receive_channel_display.empty() ||
         row.receive_channel_display == "off" || row.receive_channel_display == "unknown")
         return std::nullopt;
     return std::format("Rch Assign: {}", row.receive_channel_display);
@@ -442,9 +436,7 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
     }
     std::set<std::string> reachable_samples;
     for (const auto &row : graph.relationships) {
-        if (!row.target_key ||
-            (row.assignment_state != AssignmentState::active && row.assignment_state != AssignmentState::source_load) ||
-            (row.quality != RelationshipQuality::known && row.quality != RelationshipQuality::likely)) {
+        if (!is_effective_program_assignment(row)) {
             continue;
         }
         if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {

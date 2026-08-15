@@ -9628,17 +9628,13 @@
         "properties": {
           "assignmentState": {
             "enum": [
-              "CONFIRMED_ACTIVE",
+              "STORED_ASSIGNMENT",
               "SOURCE_LOAD_ASSIGNMENT",
-              "CONFIRMED_VISIBLE_OFF",
-              "CONFIRMED_DUPLICATE_NOT_ACTIVE",
               "UNKNOWN"
             ],
             "x-axklib-application-enum": {
-              "CONFIRMED_ACTIVE": "confirmed-active",
-              "CONFIRMED_DUPLICATE_NOT_ACTIVE": "confirmed-duplicate-not-active",
-              "CONFIRMED_VISIBLE_OFF": "confirmed-visible-off",
               "SOURCE_LOAD_ASSIGNMENT": "source-load-assignment",
+              "STORED_ASSIGNMENT": "stored-assignment",
               "UNKNOWN": "unknown"
             }
           },

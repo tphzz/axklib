@@ -4,12 +4,12 @@ import type {
     ProgramSampleSelectRows,
     SampleStructureItem,
 } from './types';
+import { isEffectiveProgramAssignment } from './relationshipResolution';
 
-const activeAssignmentStates = new Set(['confirmed-active', 'source-load-assignment']);
 const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-function isActive(row: ProgramAssignmentRow): boolean {
-    return activeAssignmentStates.has(row.relationship.assignmentState);
+function isEffective(row: ProgramAssignmentRow): boolean {
+    return isEffectiveProgramAssignment(row.relationship);
 }
 
 function displayValues(rows: ProgramAssignmentRow[]): string[] {
@@ -39,13 +39,13 @@ function inventoryRow(
     };
 }
 
-function unresolvedRow(row: ProgramAssignmentRow): ProgramSampleSelectRow {
+function confirmedTargetRow(row: ProgramAssignmentRow): ProgramSampleSelectRow {
     return {
         id: row.relationship.id,
         targetType: row.targetType,
         targetName: row.targetName,
         targetObjectId: row.targetObjectId,
-        navigable: false,
+        navigable: true,
         assigned: true,
         receiveChannelDisplays: displayValues([row]),
         sourceLoad: row.relationship.assignmentState === 'source-load-assignment',
@@ -57,6 +57,32 @@ function typeOrder(type: string): number {
     if (type === 'SBAC') return 0;
     if (type === 'SBNK') return 1;
     return 2;
+}
+
+function receiveSelectorOrder(display: string): number {
+    const normalized = display.trim();
+    const channel = /^(A|B)(0[1-9]|1[0-6])$/.exec(normalized);
+    if (channel) {
+        const channelNumber = Number(channel[2]);
+        return channel[1] === 'A' ? channelNumber - 1 : 16 + channelNumber - 1;
+    }
+    if (normalized === 'Bch') return 32;
+    if (normalized === '=Smp') return 33;
+    if (normalized === 'off') return 35;
+    return 34;
+}
+
+function rowReceiveSelectorOrder(row: ProgramSampleSelectRow): number {
+    return Math.min(...row.receiveChannelDisplays.map(receiveSelectorOrder));
+}
+
+function compareSamplerOrder(left: ProgramSampleSelectRow, right: ProgramSampleSelectRow): number {
+    const selectorDifference = rowReceiveSelectorOrder(left) - rowReceiveSelectorOrder(right);
+    if (selectorDifference !== 0) return selectorDifference;
+    const typeDifference = typeOrder(left.targetType) - typeOrder(right.targetType);
+    if (typeDifference !== 0) return typeDifference;
+    const nameDifference = nameCollator.compare(left.targetName, right.targetName);
+    return nameDifference !== 0 ? nameDifference : left.id.localeCompare(right.id);
 }
 
 export function programSampleSelectRows(
@@ -74,7 +100,7 @@ export function programSampleSelectRows(
         const related = assignmentsByTarget.get(row.targetObjectId) ?? [];
         related.push(row);
         assignmentsByTarget.set(row.targetObjectId, related);
-        if (!isActive(row)) continue;
+        if (!isEffective(row)) continue;
         const active = activeByTarget.get(row.targetObjectId) ?? [];
         active.push(row);
         activeByTarget.set(row.targetObjectId, active);
@@ -91,23 +117,18 @@ export function programSampleSelectRows(
 
     const assigned: ProgramSampleSelectRow[] = [];
     const includedTargetIds = new Set<string>();
-    for (const row of orderedAssignments.filter(isActive)) {
+    for (const row of orderedAssignments.filter(isEffective)) {
         if (row.targetObjectId && inventoryById.has(row.targetObjectId)) {
             if (includedTargetIds.has(row.targetObjectId)) continue;
             includedTargetIds.add(row.targetObjectId);
             assigned.push(rowsById.get(row.targetObjectId)!);
-        } else {
-            assigned.push(unresolvedRow(row));
+        } else if (row.targetObjectId) {
+            assigned.push(confirmedTargetRow(row));
         }
     }
 
-    const unresolved = assigned.filter((row) => !row.navigable);
-    const all = [...rowsById.values(), ...unresolved].toSorted((left, right) => {
-        const typeDifference = typeOrder(left.targetType) - typeOrder(right.targetType);
-        if (typeDifference !== 0) return typeDifference;
-        const nameDifference = nameCollator.compare(left.targetName, right.targetName);
-        return nameDifference !== 0 ? nameDifference : left.id.localeCompare(right.id);
-    });
+    const assignedOutsideInventory = assigned.filter((row) => !inventoryById.has(row.id));
+    const all = [...rowsById.values(), ...assignedOutsideInventory].toSorted(compareSamplerOrder);
 
-    return { assigned, all };
+    return { assigned: assigned.toSorted(compareSamplerOrder), all };
 }

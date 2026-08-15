@@ -1872,8 +1872,8 @@
           "candidateObjectKeys": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "basis": {"type": "string"},
           "assignmentState": {
-            "enum": ["CONFIRMED_ACTIVE", "SOURCE_LOAD_ASSIGNMENT", "CONFIRMED_VISIBLE_OFF", "CONFIRMED_DUPLICATE_NOT_ACTIVE", "UNKNOWN"],
-            "x-axklib-application-enum": {"CONFIRMED_ACTIVE": "confirmed-active", "SOURCE_LOAD_ASSIGNMENT": "source-load-assignment", "CONFIRMED_VISIBLE_OFF": "confirmed-visible-off", "CONFIRMED_DUPLICATE_NOT_ACTIVE": "confirmed-duplicate-not-active", "UNKNOWN": "unknown"}
+            "enum": ["STORED_ASSIGNMENT", "SOURCE_LOAD_ASSIGNMENT", "UNKNOWN"],
+            "x-axklib-application-enum": {"STORED_ASSIGNMENT": "stored-assignment", "SOURCE_LOAD_ASSIGNMENT": "source-load-assignment", "UNKNOWN": "unknown"}
           }
         }
       },

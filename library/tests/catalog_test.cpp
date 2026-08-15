@@ -395,7 +395,7 @@ TEST(RelationshipGraph, DoesNotResolveUniqueCachedReferenceWhenMemberNameDoesNot
     EXPECT_EQ(graph.relationships.front().candidate_keys, std::vector<std::string>{"wave"});
 }
 
-TEST(ProgramRelationships, UsesIsoBasisForMissingVisibleOffSampleBank) {
+TEST(ProgramRelationships, ClassifiesMissingIsoSampleBankAsStoredMetadata) {
     axk::ObjectCatalog catalog;
     axk::CurrentProg current_program;
     axk::ProgAssignment assignment;
@@ -413,8 +413,8 @@ TEST(ProgramRelationships, UsesIsoBasisForMissingVisibleOffSampleBank) {
 
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 1U);
-    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::visible_off);
-    EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-iso-missing-local-sbac");
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-stored-missing-local-target");
 }
 
 TEST(ProgramRelationships, DoesNotResolveUniqueSampleBankFromAnotherIsoVolume) {
@@ -452,7 +452,7 @@ TEST(ProgramRelationships, DoesNotResolveUniqueSampleBankFromAnotherIsoVolume) {
     EXPECT_EQ(graph.relationships.front().candidate_keys, std::vector<std::string>{"remote-bank"});
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-nonlocal");
-    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::visible_off);
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::stored_assignment);
 }
 
 TEST(ProgramRelationships, PrefersUniqueSameIsoVolumeSampleBankOverRemoteDuplicate) {
@@ -496,7 +496,7 @@ TEST(ProgramRelationships, PrefersUniqueSameIsoVolumeSampleBankOverRemoteDuplica
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name+same-folder");
 }
 
-TEST(ProgramRelationships, PreservesSourceLoadReceiveChannelSelector) {
+TEST(ProgramRelationships, DecodesReceiveChannelIndependentlyFromOutput2) {
     const auto relationship_for = [](std::uint8_t selector) {
         axk::ObjectCatalog catalog;
         const axk::ObjectPlacement placement{
@@ -533,14 +533,77 @@ TEST(ProgramRelationships, PreservesSourceLoadReceiveChannelSelector) {
     };
 
     const auto sample_channel = relationship_for(0xffU);
-    EXPECT_EQ(sample_channel.assignment_state, axk::AssignmentState::source_load);
-    EXPECT_EQ(sample_channel.receive_channel_display, "=SMP");
-    EXPECT_EQ(relationship_for(0U).receive_channel_display, "01");
-    EXPECT_EQ(relationship_for(15U).receive_channel_display, "16");
-    EXPECT_EQ(relationship_for(16U).receive_channel_display, "BasicRch");
-    EXPECT_EQ(relationship_for(17U).receive_channel_display, "B01");
+    EXPECT_EQ(sample_channel.assignment_state, axk::AssignmentState::stored_assignment);
+    ASSERT_TRUE(sample_channel.receive_selector);
+    EXPECT_EQ(sample_channel.receive_selector->kind, axk::ProgramReceiveSelectorKind::sample);
+    EXPECT_FALSE(sample_channel.receive_selector->channel);
+    EXPECT_EQ(sample_channel.receive_selector->raw_value, 0xffU);
+    EXPECT_EQ(sample_channel.receive_channel_display, "=Smp");
+
+    const auto a01 = relationship_for(0U);
+    ASSERT_TRUE(a01.receive_selector);
+    EXPECT_EQ(a01.receive_selector->kind, axk::ProgramReceiveSelectorKind::a_channel);
+    EXPECT_EQ(a01.receive_selector->channel, 1U);
+    EXPECT_EQ(a01.receive_channel_display, "A01");
+    EXPECT_EQ(relationship_for(15U).receive_channel_display, "A16");
+
+    const auto basic_channel = relationship_for(16U);
+    ASSERT_TRUE(basic_channel.receive_selector);
+    EXPECT_EQ(basic_channel.receive_selector->kind, axk::ProgramReceiveSelectorKind::basic_channel);
+    EXPECT_FALSE(basic_channel.receive_selector->channel);
+    EXPECT_EQ(basic_channel.receive_channel_display, "Bch");
+
+    const auto b01 = relationship_for(17U);
+    ASSERT_TRUE(b01.receive_selector);
+    EXPECT_EQ(b01.receive_selector->kind, axk::ProgramReceiveSelectorKind::b_channel);
+    EXPECT_EQ(b01.receive_selector->channel, 1U);
+    EXPECT_EQ(b01.receive_channel_display, "B01");
     EXPECT_EQ(relationship_for(32U).receive_channel_display, "B16");
-    EXPECT_EQ(relationship_for(33U).receive_channel_display, "unknown");
+
+    const auto unknown = relationship_for(33U);
+    ASSERT_TRUE(unknown.receive_selector);
+    EXPECT_EQ(unknown.receive_selector->kind, axk::ProgramReceiveSelectorKind::unknown);
+    EXPECT_FALSE(unknown.receive_selector->channel);
+    EXPECT_EQ(unknown.receive_channel_display, "unknown");
+}
+
+TEST(ProgramRelationships, TreatsOutput2AsIndependentFromExactSampleBankAssignment) {
+    axk::ObjectCatalog catalog;
+    const axk::ObjectPlacement placement{
+        axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBAC", "VCO Pad", "GROUP/F001"};
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "VCO Pad";
+    sample_bank.payload = axk::CurrentSbac{};
+    catalog.objects.push_back(
+        {"sample-bank", axk::PartitionIndex{0}, axk::SfsId{1}, "partition:0", std::move(sample_bank), placement});
+
+    axk::CurrentProg current_program;
+    axk::ProgAssignment assignment;
+    assignment.name = "VCO Pad";
+    assignment.raw_handle = 21'255'888U;
+    assignment.kind = 0x11U;
+    assignment.flags = 0xffU;
+    assignment.raw_row[0x28] = std::byte{0x07};
+    current_program.assignments.push_back(assignment);
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "043";
+    program.payload = std::move(current_program);
+    auto program_placement = placement;
+    program_placement.category_name = "PROG";
+    program_placement.entry_name = "043";
+    catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{2}, "partition:0", std::move(program),
+                               std::move(program_placement)});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 1U);
+    const auto &relationship = graph.relationships.front();
+    EXPECT_EQ(relationship.target_key, "sample-bank");
+    EXPECT_EQ(relationship.quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(relationship.assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_EQ(relationship.receive_channel_display, "=Smp");
+    EXPECT_TRUE(axk::is_effective_program_assignment(relationship));
 }
 
 TEST(ProgramRelationships, ResolvesUnknownKindsByUniqueNameWithoutInventingACategory) {
@@ -605,10 +668,111 @@ TEST(ProgramRelationships, ClassifiesZeroHandleActiveMissingSampleTargets) {
 
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 1U);
-    EXPECT_EQ(graph.relationships.front().basis, "assignment-active-missing-local-target");
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-stored-missing-local-target");
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_TRUE(axk::is_program_assignment_row(graph.relationships.front()));
+    EXPECT_FALSE(axk::is_effective_program_assignment(graph.relationships.front()));
 }
 
-TEST(ProgramRelationships, KeepsVisibleOffAmbiguousSampleBanksAsDiagnosticCandidates) {
+TEST(ProgramRelationships, DoesNotRedirectAMissingNamedTargetToTheProgramsOnlyResolvedTarget) {
+    axk::ObjectCatalog catalog;
+    axk::DecodedObject sample;
+    sample.header.type = axk::ObjectType::sbnk;
+    sample.header.name = "Astro";
+    sample.payload = axk::CurrentSbnk{};
+    catalog.objects.push_back({"sample", axk::PartitionIndex{0}, axk::SfsId{1}, "scope", std::move(sample), {}});
+
+    axk::ProgAssignment exact;
+    exact.name = "Astro";
+    exact.raw_handle = 1U;
+    exact.kind = 0x10U;
+    exact.flags = 0xffU;
+    exact.raw_row[0x28] = std::byte{0xff};
+
+    axk::ProgAssignment missing;
+    missing.name = "ASR10 MergeX   *";
+    missing.raw_handle = 2U;
+    missing.kind = 0x10U;
+    missing.flags = 0U;
+    missing.raw_row[0x28] = std::byte{0xff};
+
+    axk::CurrentProg current_program;
+    current_program.assignments = {exact, missing};
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "005";
+    program.payload = std::move(current_program);
+    catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{2}, "scope", std::move(program), {}});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 2U);
+
+    const auto exact_relationship =
+        std::ranges::find(graph.relationships, std::string{"Astro"}, &axk::Relationship::assignment_name);
+    ASSERT_NE(exact_relationship, graph.relationships.end());
+    EXPECT_EQ(exact_relationship->target_key, "sample");
+    EXPECT_EQ(exact_relationship->quality, axk::RelationshipQuality::known);
+    EXPECT_EQ(exact_relationship->receive_channel_display, "=Smp");
+
+    const auto missing_relationship =
+        std::ranges::find(graph.relationships, std::string{"ASR10 MergeX   *"}, &axk::Relationship::assignment_name);
+    ASSERT_NE(missing_relationship, graph.relationships.end());
+    EXPECT_FALSE(missing_relationship->target_key);
+    EXPECT_TRUE(missing_relationship->candidate_keys.empty());
+    EXPECT_EQ(missing_relationship->quality, axk::RelationshipQuality::unknown);
+    EXPECT_EQ(missing_relationship->basis, "assignment-stored-missing-local-target");
+    EXPECT_EQ(missing_relationship->receive_channel_display, "A01");
+    EXPECT_FALSE(axk::is_effective_program_assignment(*missing_relationship));
+    EXPECT_TRUE(axk::is_effective_program_assignment(*exact_relationship));
+}
+
+TEST(ProgramRelationships, TreatsAcidBMissingSqr2RowAsStoredMetadataOnly) {
+    axk::ObjectCatalog catalog;
+    axk::DecodedObject sample_bank;
+    sample_bank.header.type = axk::ObjectType::sbac;
+    sample_bank.header.name = "SQR2B";
+    sample_bank.payload = axk::CurrentSbac{};
+    catalog.objects.push_back(
+        {"sample-bank", axk::PartitionIndex{0}, axk::SfsId{1}, "scope", std::move(sample_bank), {}});
+
+    axk::ProgAssignment exact;
+    exact.name = "SQR2B";
+    exact.raw_handle = 1U;
+    exact.kind = 0x11U;
+    exact.flags = 0xffU;
+    exact.raw_row[0x28] = std::byte{0xff};
+
+    axk::ProgAssignment missing;
+    missing.name = "SQR2           *";
+    missing.raw_handle = 2U;
+    missing.kind = 0x11U;
+    missing.flags = 0xffU;
+    missing.raw_row[0x28] = std::byte{0xff};
+
+    axk::CurrentProg current_program;
+    current_program.assignments = {exact, missing};
+    axk::DecodedObject program;
+    program.header.type = axk::ObjectType::prog;
+    program.header.name = "002";
+    program.payload = std::move(current_program);
+    catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{2}, "scope", std::move(program), {}});
+
+    const auto graph = axk::build_relationship_graph(catalog);
+    ASSERT_EQ(graph.relationships.size(), 2U);
+    const auto resolved =
+        std::ranges::find(graph.relationships, std::string{"SQR2B"}, &axk::Relationship::assignment_name);
+    const auto stored =
+        std::ranges::find(graph.relationships, std::string{"SQR2           *"}, &axk::Relationship::assignment_name);
+    ASSERT_NE(resolved, graph.relationships.end());
+    ASSERT_NE(stored, graph.relationships.end());
+    EXPECT_TRUE(axk::is_effective_program_assignment(*resolved));
+    EXPECT_FALSE(axk::is_effective_program_assignment(*stored));
+    EXPECT_TRUE(axk::is_program_assignment_row(*stored));
+    EXPECT_FALSE(stored->target_key);
+    EXPECT_EQ(stored->basis, "assignment-stored-missing-local-target");
+}
+
+TEST(ProgramRelationships, KeepsAmbiguousSampleBanksAsDiagnosticCandidates) {
     axk::ObjectCatalog catalog;
     for (const auto key : {"sample_bank-a", "sample_bank-b"}) {
         axk::DecodedObject sample_bank;
@@ -635,7 +799,7 @@ TEST(ProgramRelationships, KeepsVisibleOffAmbiguousSampleBanksAsDiagnosticCandid
     EXPECT_FALSE(graph.relationships.front().target_key);
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
-    EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-name-ambiguous-sbac");
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-ambiguous");
 }
 
 TEST(RelationshipGraph, ResolvesExactIsoSampleBankMemberWithinItsRawVolume) {
@@ -809,7 +973,7 @@ TEST(RelationshipGraph, ResolvesActiveSfsSampleBankMemberWithinItsOwningVolume) 
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
 }
 
-TEST(ProgramRelationships, ResolvesUniqueSameVolumeVisibleOffTargets) {
+TEST(ProgramRelationships, ResolvesUniqueSameVolumeStoredTargets) {
     axk::ObjectCatalog catalog;
     for (const auto &[key, volume] : {std::pair{"sample_bank-a", 1U}, std::pair{"sample_bank-b", 2U}}) {
         axk::DecodedObject sample_bank;
@@ -862,7 +1026,7 @@ TEST(ProgramRelationships, ResolvesUniqueSameVolumeVisibleOffTargets) {
     EXPECT_EQ(graph.relationships[1].basis, "assignment-kind-0x10+name+same-volume");
 }
 
-TEST(ProgramRelationships, KeepsMultipleSameVolumeVisibleOffTargetsAmbiguous) {
+TEST(ProgramRelationships, KeepsMultipleSameVolumeStoredTargetsAmbiguous) {
     axk::ObjectCatalog catalog;
     for (const auto &[key, id] : {std::pair{"sample_bank-a", 1U}, std::pair{"sample_bank-b", 2U}}) {
         axk::DecodedObject sample_bank;
@@ -894,10 +1058,10 @@ TEST(ProgramRelationships, KeepsMultipleSameVolumeVisibleOffTargetsAmbiguous) {
     EXPECT_FALSE(graph.relationships.front().target_key);
     EXPECT_EQ(graph.relationships.front().candidate_keys.size(), 2U);
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::tentative);
-    EXPECT_EQ(graph.relationships.front().basis, "assignment-visible-off-name-ambiguous-sbac");
+    EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-ambiguous");
 }
 
-TEST(ProgramRelationships, DoesNotResolveVisibleOffTargetFromAnotherSfsVolume) {
+TEST(ProgramRelationships, DoesNotResolveStoredTargetFromAnotherSfsVolume) {
     axk::ObjectCatalog catalog;
     axk::DecodedObject sample_bank;
     sample_bank.header.type = axk::ObjectType::sbac;
@@ -930,7 +1094,7 @@ TEST(ProgramRelationships, DoesNotResolveVisibleOffTargetFromAnotherSfsVolume) {
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name-nonlocal");
 }
 
-TEST(ProgramRelationships, MarksVisibleOffRepeatOfActiveTargetAsDuplicate) {
+TEST(ProgramRelationships, PreservesRepeatedStoredAssignmentsWithIndependentOutput2Values) {
     axk::ObjectCatalog catalog;
     axk::DecodedObject sample;
     sample.header.type = axk::ObjectType::sbnk;
@@ -943,10 +1107,10 @@ TEST(ProgramRelationships, MarksVisibleOffRepeatOfActiveTargetAsDuplicate) {
     active.raw_handle = 1U;
     active.kind = 0x10U;
     active.raw_row[0x28] = std::byte{0xff};
-    auto visible_off = active;
-    visible_off.raw_row[0x28] = std::byte{0};
+    auto alternate_output = active;
+    alternate_output.raw_row[0x28] = std::byte{0};
     axk::CurrentProg current_program;
-    current_program.assignments = {active, visible_off};
+    current_program.assignments = {active, alternate_output};
     axk::DecodedObject program;
     program.header.type = axk::ObjectType::prog;
     program.header.name = "001";
@@ -956,8 +1120,10 @@ TEST(ProgramRelationships, MarksVisibleOffRepeatOfActiveTargetAsDuplicate) {
 
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 2U);
-    EXPECT_EQ(graph.relationships[0].assignment_state, axk::AssignmentState::active);
-    EXPECT_EQ(graph.relationships[1].assignment_state, axk::AssignmentState::duplicate_not_active);
+    EXPECT_EQ(graph.relationships[0].assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_EQ(graph.relationships[1].assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_TRUE(axk::is_effective_program_assignment(graph.relationships[0]));
+    EXPECT_TRUE(axk::is_effective_program_assignment(graph.relationships[1]));
 }
 
 TEST(ProgramRelationships, ResolvesAnExactTargetWhoseStoredNameEndsInStar) {
@@ -986,11 +1152,15 @@ TEST(ProgramRelationships, ResolvesAnExactTargetWhoseStoredNameEndsInStar) {
 
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 1U);
-    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::active);
+    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_TRUE(axk::is_effective_program_assignment(graph.relationships.front()));
     EXPECT_EQ(graph.relationships.front().target_key, "sample");
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x10+name");
-    EXPECT_EQ(graph.relationships.front().receive_channel_display, "02");
+    ASSERT_TRUE(graph.relationships.front().receive_selector);
+    EXPECT_EQ(graph.relationships.front().receive_selector->kind, axk::ProgramReceiveSelectorKind::a_channel);
+    EXPECT_EQ(graph.relationships.front().receive_selector->channel, 2U);
+    EXPECT_EQ(graph.relationships.front().receive_channel_display, "A02");
 }
 
 TEST(WaveformOrphans, AllowsOnlyCompleteExactUnreferencedClassification) {
@@ -1017,7 +1187,7 @@ TEST(WaveformOrphans, AllowsOnlyCompleteExactUnreferencedClassification) {
     EXPECT_EQ(report.ambiguous_or_unresolved_count, 1U);
 }
 
-TEST(ProgramRelationships, KeepsVisibleOffRowsOutOfNavigableContent) {
+TEST(ProgramRelationships, TreatsZeroOutput2AsIndependentFromNavigableContent) {
     axk::ObjectCatalog catalog;
     axk::DecodedObject sample;
     sample.header.type = axk::ObjectType::sbnk;
@@ -1043,8 +1213,9 @@ TEST(ProgramRelationships, KeepsVisibleOffRowsOutOfNavigableContent) {
     const auto graph = axk::build_relationship_graph(catalog);
     ASSERT_EQ(graph.relationships.size(), 1U);
     EXPECT_EQ(graph.relationships[0].quality, axk::RelationshipQuality::known);
-    EXPECT_EQ(graph.relationships[0].assignment_state, axk::AssignmentState::visible_off);
-    EXPECT_EQ(graph.relationships[0].receive_channel_display, "off");
+    EXPECT_EQ(graph.relationships[0].assignment_state, axk::AssignmentState::stored_assignment);
+    EXPECT_EQ(graph.relationships[0].receive_channel_display, "A01");
+    EXPECT_TRUE(axk::is_effective_program_assignment(graph.relationships[0]));
     ASSERT_EQ(graph.bitmap_comparisons.size(), 1U);
     EXPECT_EQ(graph.bitmap_comparisons.front().mismatch_class, "nondefault_flag_direct_assignment_without_bitmap");
 }
@@ -1067,7 +1238,8 @@ TEST(ContentTree, DistinguishesContainedObjectsFromProgramReferences) {
     assignment.name = "Local Bank";
     assignment.raw_handle = 1U;
     assignment.kind = 0x11U;
-    assignment.raw_row[0x28] = std::byte{0xff};
+    assignment.flags = 1U;
+    assignment.raw_row[0x28] = std::byte{0};
     current_program.assignments.push_back(assignment);
     axk::DecodedObject program;
     program.header.type = axk::ObjectType::prog;
@@ -1089,6 +1261,7 @@ TEST(ContentTree, DistinguishesContainedObjectsFromProgramReferences) {
     ASSERT_EQ(programs->children.size(), 1U);
     ASSERT_EQ(programs->children.front().children.size(), 1U);
     EXPECT_EQ(programs->children.front().children.front().scope_role, axk::ContentScopeRole::reference);
+    EXPECT_EQ(programs->children.front().children.front().details, (std::vector<std::string>{"Rch Assign: A02"}));
 
     const auto sample_structure = std::ranges::find(volume.children, std::string{"Sample Banks/Samples (SBAC/SBNK)"},
                                                     &axk::ContentNode::display_name);

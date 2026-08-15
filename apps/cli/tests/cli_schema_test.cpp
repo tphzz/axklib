@@ -36,8 +36,9 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
         .scope_key = "scope",
         .assignment_index = std::nullopt,
         .assignment_name = "",
-        .assignment_state = axk::AssignmentState::active,
-        .receive_channel_display = "off",
+        .assignment_state = axk::AssignmentState::stored_assignment,
+        .receive_selector = std::nullopt,
+        .receive_channel_display = "=Smp",
     });
     axk::VolumeExport volume;
     axk::Waveform non_looping;
@@ -64,7 +65,8 @@ TEST(CliSchema, VolumeGraphSchemaStaysParseable) {
         .scope_key = "scope",
         .assignment_index = 0U,
         .assignment_name = "Bank",
-        .assignment_state = axk::AssignmentState::source_load,
+        .assignment_state = axk::AssignmentState::source_load_assignment,
+        .receive_selector = std::nullopt,
         .receive_channel_display = "unknown",
     });
     const auto volume_graph = export_schema::serialize_volume_graph(volume, graph, "source.iso", "iso");

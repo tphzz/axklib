@@ -24,6 +24,7 @@
 #include "axklib/package_archive.hpp"
 #include "axklib/package_import_planning.hpp"
 #include "axklib/package_relocation.hpp"
+#include "axklib/semantic.hpp"
 #include "axklib/writer.hpp"
 
 #include "../src/package_import_sfs_capacity.hpp"
@@ -223,7 +224,8 @@ void make_program_assignment_target_missing_with_same_type_context(const std::fi
     ASSERT_TRUE(image);
 }
 
-void set_program_assignments_visible_off(const std::filesystem::path &path, std::size_t assignment_count) {
+void set_program_assignment_output2(const std::filesystem::path &path, std::size_t assignment_count,
+                                    std::uint8_t output2) {
     const auto media = axk::open_media(path);
     ASSERT_TRUE(media) << media.error().message;
     const auto *sfs = std::get_if<axk::Container>(&media->storage());
@@ -242,7 +244,7 @@ void set_program_assignments_visible_off(const std::filesystem::path &path, std:
     ASSERT_TRUE(image);
     for (std::size_t index = 0; index < assignment_count; ++index) {
         image.seekp(static_cast<std::streamoff>(payload_offset + 0x148U + index * 0x38U));
-        image.put(0);
+        image.put(static_cast<char>(output2));
     }
     ASSERT_TRUE(image);
 }
@@ -562,18 +564,6 @@ TEST(PortablePackage, BuildsSbnkClosureFromMemberNameWhenCachedReferenceIsStale)
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PortablePackage, IgnoresAmbiguousInactiveProgramDiagnosticsButKeepsExactRows) {
-    axk::Relationship relationship;
-    relationship.assignment_state = axk::AssignmentState::visible_off;
-    relationship.quality = axk::RelationshipQuality::tentative;
-    EXPECT_FALSE(axk::package_internal::portable_inactive_program_relationship(relationship));
-
-    relationship.assignment_state = axk::AssignmentState::source_load;
-    relationship.quality = axk::RelationshipQuality::known;
-    relationship.target_key = "target";
-    EXPECT_TRUE(axk::package_internal::portable_inactive_program_relationship(relationship));
-}
-
 TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInventingADependency) {
     const auto output_root = publication_root("axklib-package-unresolved-program-row");
     const auto audio_path = output_root / "tone.wav";
@@ -607,6 +597,18 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
 
     const auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
+    const auto source_catalog = axk::build_object_catalog(*source);
+    ASSERT_TRUE(source_catalog) << source_catalog.error().message;
+    const auto source_graph = axk::build_relationship_graph(*source_catalog);
+    const auto *source_sfs = std::get_if<axk::Container>(&source->storage());
+    ASSERT_NE(source_sfs, nullptr);
+    const auto validation = axk::validate_semantics(*source_sfs, *source_catalog, source_graph);
+    EXPECT_TRUE(validation.valid());
+    const auto missing_row_warning = std::ranges::find(
+        validation.issues, std::string{"REL_PROGRAM_STORED_ROW_TARGET_MISSING"}, &axk::ValidationIssue::code);
+    ASSERT_NE(missing_row_warning, validation.issues.end());
+    EXPECT_EQ(missing_row_warning->severity, axk::ValidationSeverity::warning);
+
     const std::vector program_root{root(axk::PackageRootKind::prog, "Graph Volume", "001")};
     const auto single_program = axk::build_portable_package(*source, program_root);
     ASSERT_TRUE(single_program) << single_program.error().message;
@@ -3427,8 +3429,8 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
-    const auto output_root = publication_root("axklib-package-import-visible-off-duplicate-volumes");
+TEST(PackageImportApply, PreservesNonDefaultOutput2AssignmentsAcrossTwoSfsImports) {
+    const auto output_root = publication_root("axklib-package-import-output2-duplicate-volumes");
     const auto audio_path = output_root / "tone.wav";
     const auto source_path = output_root / "source.hds";
     const auto target_path = output_root / "target.hds";
@@ -3442,7 +3444,7 @@ TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
     axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
-    set_program_assignments_visible_off(source_path, 2U);
+    set_program_assignment_output2(source_path, 2U, 0x07U);
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
     const std::vector volume_root{root(axk::PackageRootKind::volume, "Graph Volume")};
@@ -3503,13 +3505,15 @@ TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
         for (const auto *edge : children) {
             ASSERT_TRUE(edge->target_key) << edge->type;
             EXPECT_EQ(edge->quality, axk::RelationshipQuality::known) << edge->type;
-            EXPECT_EQ(edge->assignment_state, axk::AssignmentState::visible_off) << edge->type;
+            EXPECT_EQ(edge->assignment_state, axk::AssignmentState::stored_assignment) << edge->type;
             EXPECT_TRUE(edge->basis.ends_with("+same-volume")) << edge->basis;
             const auto target = std::ranges::find(catalog->objects, *edge->target_key, &axk::ObjectSnapshot::key);
             ASSERT_NE(target, catalog->objects.end()) << edge->type;
             ASSERT_TRUE(target->placement) << edge->type;
             EXPECT_EQ(target->placement->volume_name, volume_name) << edge->type;
         }
+        EXPECT_EQ(std::to_integer<std::uint8_t>(decoded->assignments[0].raw_row[0x28U]), 0x07U);
+        EXPECT_EQ(std::to_integer<std::uint8_t>(decoded->assignments[1].raw_row[0x28U]), 0x07U);
     }
 
     const std::vector second_volume_root{root(axk::PackageRootKind::volume, "Second Import")};

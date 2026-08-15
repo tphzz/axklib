@@ -88,9 +88,7 @@ bool dependency_relationship(const Relationship &relationship) {
         relationship.type == "SBAC_SLOT_TO_SBNK") {
         return true;
     }
-    return (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
-           (relationship.assignment_state == AssignmentState::active ||
-            relationship.assignment_state == AssignmentState::source_load);
+    return is_effective_program_assignment(relationship);
 }
 
 void add_issue(MediaConversionPlanSummary &summary, std::string code, std::string message,
@@ -98,9 +96,10 @@ void add_issue(MediaConversionPlanSummary &summary, std::string code, std::strin
     summary.issues.push_back({std::move(code), std::move(message), blocking, measurement});
 }
 
-bool retained_disabled_program_row(const Relationship &relationship,
-                                   const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key) {
-    return relationship.assignment_state == AssignmentState::active && !relationship.assignment_name.empty() &&
+bool retained_unresolved_program_row(const Relationship &relationship,
+                                     const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key) {
+    return relationship.assignment_state == AssignmentState::stored_assignment &&
+           !relationship.assignment_name.empty() &&
            (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
            relationship.quality != RelationshipQuality::known &&
            !detail::relationship_has_exact_named_program_target(relationship, objects_by_key);
@@ -427,17 +426,19 @@ Result<detail::PreparedMediaConversion> prepare_media_conversion_from_source(con
     std::size_t retained_program_row_count{};
     std::vector<std::string> retained_program_row_names;
     for (const auto &relationship : source.graph.relationships) {
-        if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
+        if (!selected_keys.contains(relationship.source_key))
+            continue;
+        if (retained_unresolved_program_row(relationship, source.objects_by_key)) {
+            ++retained_program_row_count;
+            if (retained_program_row_names.size() < 5U &&
+                !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
+                retained_program_row_names.push_back(relationship.assignment_name);
+            }
+            continue;
+        }
+        if (!dependency_relationship(relationship))
             continue;
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
-            if (retained_disabled_program_row(relationship, source.objects_by_key)) {
-                ++retained_program_row_count;
-                if (retained_program_row_names.size() < 5U &&
-                    !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
-                    retained_program_row_names.push_back(relationship.assignment_name);
-                }
-                continue;
-            }
             add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
                       std::format("{} dependency is not Known", relationship.type));
             continue;

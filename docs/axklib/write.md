@@ -489,7 +489,7 @@ independent reader, and exact-payload coverage; object-heavy multi-sector
 hardware compatibility remains pending.
 
 Dependency closure remains Known-only. One bounded whole-partition exception
-does not create a dependency: an active-form Program assignment row whose exact
+does not create a dependency: a stored Program assignment row whose exact
 named Sample or Sample Bank target is absent from the complete source partition
 is copied byte for byte and reported as a nonblocking retained-disabled-row
 warning. This preserves sampler-saved Program bytes without redirecting the row
@@ -532,7 +532,7 @@ Then reference one or more reported object keys:
 
 `selection` defaults to `roots` when omitted. Root selection requires a
 non-empty `root_object_keys` array. Selecting an `SBNK` includes known linked
-`SMPL` members. Selecting an `SBAC` or an active/source-load `PROG` assignment
+`SMPL` members. Selecting an `SBAC` or an effective stored/source-load `PROG` assignment
 continues through known `SBAC -> SBNK` and `PROG -> SBAC/SBNK` relationships.
 An unresolved or ambiguous required edge is an error; the writer does not guess
 a transfer closure.
@@ -727,12 +727,13 @@ and one supported assignment profile:
 
 - A single `sample_bank` or `sample` assignment with
   `"receive_mode":"SAMPLE"`. It omits `receive_channel` and encodes the
-  sampler's `Rch Assign =SMP` mode. Axkdeck's **Generate Programs** action uses
+  sampler's `Rch Assign =Smp` mode. Axkdeck's **Generate Programs** action uses
   this profile to make otherwise unassigned Sample Banks and Samples directly
   auditionable.
 - Exactly two ordered assignments using `"receive_mode":"MIDI_CHANNEL"`: a
-  `sample_bank` on `receive_channel` 1 followed by a direct `sample` on
-  `receive_channel` 2. This is the full-image authored Program profile.
+  `sample_bank` on `receive_channel` 1 (`A01`) followed by a direct `sample` on
+  `receive_channel` 2 (`A02`). This is the full-image authored Program profile.
+  The current writer profile does not claim `Bch` or B-channel authoring.
 
 Program generation is deliberately conservative. It only offers unreferenced
 Sample Banks whose complete same-volume membership is known, then unreferenced

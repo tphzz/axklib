@@ -165,11 +165,13 @@ or object-ID exhaustion remains a blocking conflict.
 
 Plans also report `program_assignment_adjustments` in CLI JSON and
 `programAssignmentAdjustments` through the server contract. These are
-nonblocking, row-specific decisions for unresolved Program assignments that
-would otherwise acquire an exact type-and-name target in the destination. Each
-entry identifies the imported or existing Program, assignment ordinal, target
-type and name, destination scope, reason, and `clear-assignment` disposition.
-Axkdeck shows these decisions before enabling import.
+nonblocking, row-specific decisions for stored Program rows that have no exact
+local target but would acquire one by type and name in the destination. Such a
+row is preserved in the Program payload but is not an effective assignment and
+does not create a package dependency edge. Each adjustment identifies the
+imported or existing Program, assignment ordinal, target type and name,
+destination scope, reason, and `clear-assignment` disposition. Axkdeck shows
+these decisions before enabling import.
 
 Program slot collisions are planned separately from object-name collisions.
 For each destination volume, `program_slot_placements` in CLI JSON and
@@ -421,18 +423,17 @@ kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignment rows. Empty rows, other
 assignment kinds, reserved bytes, and undeclared tail words remain
 identity-significant.
 
-Program closure retains Known target rows classified as active, source-load,
-or visible-off. The visible-off case is required because an imported zero
-destination handle re-parses in that state even though the sampler can still
-load the named assignment. Known Program edges remain required dependencies.
+Program closure retains Known target rows classified as stored assignments or
+source-load assignments. Output 2 is independent of assignment presence, so
+all such Known Program edges remain required dependencies regardless of the
+stored Output 2 value.
 On SFS, duplicate type-and-name targets in other volumes do not make that edge
 ambiguous when exactly one candidate shares the Program's volume. Multiple
 same-volume candidates and cross-volume-only matches remain non-portable
 diagnostics rather than invented dependencies.
-Ambiguous visible-off diagnostics, duplicate inactive rows, unresolved targets,
-and ambiguous targets do not become dependency edges.
+Unresolved and ambiguous targets do not become dependency edges.
 
-Any package containing a Program may preserve a stored active assignment row
+Any package containing a Program may preserve a stored assignment row
 whose exact same-volume target is absent. The complete row remains
 identity-significant, its source-local `PROG_ASSIGNMENT_HANDLE` is normalized to
 zero, and it has no relationship edge. This records source state without

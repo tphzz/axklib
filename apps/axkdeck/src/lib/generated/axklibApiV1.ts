@@ -3551,12 +3551,7 @@ export interface components {
         };
         RelationshipDiagnostic: {
             /** @enum {unknown} */
-            assignmentState:
-                | 'CONFIRMED_ACTIVE'
-                | 'SOURCE_LOAD_ASSIGNMENT'
-                | 'CONFIRMED_VISIBLE_OFF'
-                | 'CONFIRMED_DUPLICATE_NOT_ACTIVE'
-                | 'UNKNOWN';
+            assignmentState: 'STORED_ASSIGNMENT' | 'SOURCE_LOAD_ASSIGNMENT' | 'UNKNOWN';
             basis: string;
             candidateObjectKeys: string[];
             /** @constant */

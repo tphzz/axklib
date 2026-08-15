@@ -146,17 +146,11 @@
                         {#each filteredAssignments as row (row.id)}
                             <button
                                 type="button"
-                                class:unresolved={!row.navigable}
-                                disabled={!row.navigable}
-                                data-navigation-index={row.navigable ? navigableAssignments.indexOf(row) : undefined}
-                                onclick={() => row.navigable && onassignmentselect(row)}
-                                onkeydown={(event) => row.navigable && navigateAssignments(event, row)}
+                                data-navigation-index={navigableAssignments.indexOf(row)}
+                                onclick={() => onassignmentselect(row)}
+                                onkeydown={(event) => navigateAssignments(event, row)}
                             >
-                                <span
-                                    ><strong>{row.targetName}</strong><small
-                                        >{row.navigable ? row.targetType : 'Unconfirmed assignment'}</small
-                                    ></span
-                                >
+                                <span><strong>{row.targetName}</strong><small>{row.targetType}</small></span>
                                 <span class="assignment-channel"
                                     >{row.receiveChannelDisplays.join(', ')}
                                     {#if row.sourceLoad}

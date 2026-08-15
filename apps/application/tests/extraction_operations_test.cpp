@@ -191,7 +191,7 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     program_to_bank.target_key = "bank";
     program_to_bank.type = "PROG_ASSIGNMENT_TO_SBAC";
     program_to_bank.quality = axk::RelationshipQuality::likely;
-    program_to_bank.assignment_state = axk::AssignmentState::active;
+    program_to_bank.assignment_state = axk::AssignmentState::stored_assignment;
     graph.relationships.push_back(program_to_bank);
 
     axk::Relationship bank_to_sample;
@@ -211,12 +211,7 @@ TEST(ExtractionSelection, ExactProgramAndSampleBankTraversalRequiresKnownRelatio
     auto selected = source;
     auto excluded = axk::app::filter_export_plan(selected, graph, "program", "Program", "program");
     EXPECT_TRUE(selected.volumes.empty());
-    ASSERT_EQ(excluded.size(), 1U);
-    EXPECT_EQ(excluded.front().type, "PROG_ASSIGNMENT_TO_SBAC");
-    EXPECT_EQ(excluded.front().quality, axk::RelationshipQuality::likely);
-    EXPECT_EQ(excluded.front().reason, "exact export requires a Known relationship");
-    ASSERT_TRUE(excluded.front().target_key);
-    EXPECT_EQ(*excluded.front().target_key, "bank");
+    EXPECT_TRUE(excluded.empty());
 
     graph.relationships.front().quality = axk::RelationshipQuality::known;
     graph.relationships[1].quality = axk::RelationshipQuality::likely;

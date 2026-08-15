@@ -449,7 +449,7 @@ SBAC slot row layout, stride `0x14`:
 The current reader uses `active_slot_count_0x144` to decide how many rows to
 read, capped by the payload size. The 32-bit handle is retained as a diagnostic
 field. It is opaque source-local state rather than a portable object identity.
-Package export declares each active row handle as a relocation, and package
+Package export declares each stored assignment-row handle as a relocation, and package
 import writes the hardware-proven zero form while preserving the row order and
 resolved member name. Target matching uses exact name, object type, and local
 placement before it emits a resolved relationship. For directory-backed ISO
@@ -539,7 +539,7 @@ Program assignment rows start at `0x120` and use a `0x38` byte stride.
 | `+0x25` | 1 | u8 | aeg_attack_rate_offset |
 | `+0x26` | 1 | u8 | aeg_decay_rate_offset |
 | `+0x27` | 1 | u8 | aeg_release_rate_offset |
-| `+0x28` | 1 | u8 | output2 / active-state gate |
+| `+0x28` | 1 | u8 | output2 |
 | `+0x29` | 1 | u8 | filter_cutoff_offset |
 | `+0x2a` | 1 | u8 | filter_gain_offset |
 
@@ -571,34 +571,69 @@ Assignment kind byte mapping currently used for read-side relationship matching:
 
 Rch Assign display family:
 
-| Gate byte `+0x28` | Channel byte `+0x15` | Display |
-| ---: | ---: | --- |
-| `0x00` | any | `off` |
-| not `0x00` or `0xff` | any | `unknown` |
-| `0xff` | `0xff` | `=SMP` |
-| `0xff` | `0x00..0x0f` | `01` through `16` |
-| `0xff` | `0x10` | `BasicRch` |
-| `0xff` | `0x11..0x20` | `B01` through `B16` |
+| Channel byte `+0x15` | Display |
+| ---: | --- |
+| `0xff` | `=Smp` |
+| `0x00..0x0f` | `A01` through `A16` |
+| `0x10` | `Bch` |
+| `0x11..0x20` | `B01` through `B16` |
+| any other value | `unknown` |
+
+Direct sampler observation confirms these exact visible labels and their casing.
+The read-side relationship model retains the selector family, one-based channel
+number where applicable, and raw selector byte independently of the display
+projection.
+
+The source CD-ROM
+`Teklab - Frank Winkelmann Spitzensynth Encounters (Yamaha A3000).ISO`, volume
+`11 EC Demo A`, Program `001: EC DemoA`, provides a direct sampler check of the
+A-channel projection: Sample `Electro FX` stores selector `0x01` and loads as
+`Rch Assign=A02`; Sample `Sub Bass` stores selector `0x02` and loads as
+`Rch Assign=A03`. Direct sampler observation confirms both same-folder target
+assignments.
+
+The byte at `+0x28` is the independent Output 2 parameter. It neither enables
+nor disables an assignment and must not affect Rch Assign decoding or target
+matching. The `Don Solaris CD7` source, volume `Analog Update`, Program
+`043: Polysix`, stores Sample Bank `VCO Pad` with selector `0xff` and Output 2
+value `0x07`. The sampler shows `VCO Pad`, `Solo=off`, and `Rch Assign =Smp`.
+This direct sampler observation confirms that a non-`0xff` Output 2 value is
+compatible with an effective stored assignment.
+
+The `Don Solaris CD7` source provides direct checks that Program-local context
+must not replace exact assignment-name matching. Program slot `005` stores a
+Sample `Astro` row with selector `0xff`, and the sampler shows only `=Smp`. A
+separate stored `ASR10 MergeX   *` row has selector `0x00`, but no exact
+same-scope target with that full stored name. Program slot `002` similarly
+shows only Sample Bank `SQR2B` on hardware; its additional stored
+`SQR2           *` row has no exact local target. axklib preserves both missing
+rows as raw Program data and diagnostics, but neither row is an effective
+assignment, a dependency edge, or a sampler-visible Program child.
 
 CD-ROM source-load rows are a distinct case. When a named source row matches a
-target object in the same ISO folder, axklib keeps the row in
-`source-load-assignment` state rather than claiming that its source gate is
-active. It still projects the stored `+0x15` selector with the same selector
-family: `0xff` is `=SMP`, `0x00..0x0f` are channels `01` through `16`, `0x10`
-is `BasicRch`, and `0x11..0x20` are `B01` through `B16`. The selector display
-therefore describes what the sampler applies when loading the source; it does
-not promote the CD-ROM row to `confirmed-active` in the source catalog.
+target object in the same ISO folder but the stored target type differs from
+the matched source object type, axklib keeps the row in
+`source-load-assignment` state. It still projects the stored `+0x15` selector with the same selector
+family: `0xff` is `=Smp`, `0x00..0x0f` are channels `A01` through `A16`, `0x10`
+is `Bch`, and `0x11..0x20` are `B01` through `B16`. The selector display
+therefore describes what the sampler applies when loading the source.
 
-Active assignment state is separate from target matching:
+Stored assignment-row state is separate from target matching:
 
 | State | Meaning |
 | --- | --- |
 | `decoded-row` | A row was decoded. |
-| `confirmed-active` | Gate byte indicates an active Program assignment. |
-| `confirmed-visible-off` | The inventory row is visible but Rch Assign is off. |
-| `confirmed-duplicate-not-active` | A duplicate row exists but is not the active assignment. |
+| `stored-assignment` | Named kind-`0x10` or kind-`0x11` assignment row stored in the Program. |
 | `source-load-assignment` | CD-ROM source-load row matched to a target object. |
 | `unknown` | State is not classified beyond diagnostics. |
+
+An effective Program assignment must have a `stored-assignment` or
+`source-load-assignment` state, a `Known` exact local target, and a concrete
+target object key. A missing or ambiguous target keeps the stored row available
+for byte-preserving package/export behavior without turning it into active
+content. This rule is **Strong**, based on the independent Don Solaris hardware
+observations above and exact image data; the raw row is known, while the
+sampler's complete target-lookup implementation remains to be traced.
 
 The sampler's Single/Multi Program Mode and the Multi table are system/common
 state, not fields of an individual `PROG` payload. A volume object graph from a
@@ -625,24 +660,23 @@ matching star generations. No additional raw Duplicate flag is part of the
 public contract. Starred objects use the same relationship and orphan rules as
 other exact object names.
 
-Normal `info` output shows active Program children and CD-ROM source-load
+Normal `info` output shows effective Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship
-reports keep all decoded rows, raw selector values, and inactive rows.
+reports keep all decoded rows and raw selector values.
 
-Portable-package closure has a separate preservation rule: Known named
-kind-`0x10` and kind-`0x11` targets in `confirmed-visible-off` state are retained
-because imported zero-handle assignments re-parse in that state and remain
-loadable on hardware. For SFS media, a target remains Known when exactly one
-matching object is in the Program's volume, even when other volumes contain the
-same type and name. Multiple same-volume candidates, cross-volume-only matches,
-`confirmed-duplicate-not-active`, unresolved rows, and ambiguous rows remain
-diagnostic-only.
+Portable-package closure retains every effective Known named kind-`0x10` and
+kind-`0x11` target regardless of its Output 2 value. For SFS media, a target
+remains Known when exactly one matching object is in the Program's volume, even
+when other volumes contain the same type and name. Multiple same-volume
+candidates, cross-volume-only matches, unresolved rows, and ambiguous rows
+remain diagnostic-only. Unresolved stored-assignment rows remain in the raw
+`PROG` payload and portable package identity, but do not create dependency
+edges.
 
-Relationship target matching is reported separately from active/off state. Rows
+Relationship target matching is reported separately from stored-row state. Rows
 that are useful for diagnostics but should not become normal Program children use
-`diagnostic_category` values such as `visible-off-assignment`,
-`program-link-bitmap`, `sbnk-member-cache`, or
-`active-assignment-missing-target`.
+`diagnostic_category` values such as `program-link-bitmap`,
+`sbnk-member-cache`, or `stored-assignment-missing-target`.
 
 ## SEQU And PRF3
 

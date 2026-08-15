@@ -857,7 +857,7 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
     EXPECT_GT(content->snapshot.entry_count, 1U);
 }
 
-TEST_F(PackageOperationsTest, SessionExportsConfirmedSfzSubsetWhenRelationshipWarningsAreNonfatal) {
+TEST_F(PackageOperationsTest, SessionIgnoresStoredProgramRowsWithoutAnExactTargetDuringSfzExport) {
     const auto source_path = root_ / "warned-audio.hds";
     std::filesystem::copy_file(root_ / "mixed-roots.hds", source_path);
     make_first_program_assignment_context_only(source_path);
@@ -870,9 +870,7 @@ TEST_F(PackageOperationsTest, SessionExportsConfirmedSfzSubsetWhenRelationshipWa
     const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_GT(inspected->at("sfzFileCount").get<std::size_t>(), 0U);
-    ASSERT_EQ(inspected->at("issues").size(), 1U);
-    EXPECT_EQ(inspected->at("issues").at(0).at("code"), "unconfirmed_relationship_excluded");
-    EXPECT_FALSE(inspected->at("issues").at(0).at("fatal").get<bool>());
+    EXPECT_TRUE(inspected->at("issues").empty());
     EXPECT_TRUE(inspected->at("sfzEligible").get<bool>());
 
     auto request = base;

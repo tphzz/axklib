@@ -181,6 +181,10 @@ struct DeletionIndex {
         }
         for (const auto &relationship : graph.relationships) {
             outgoing[relationship.source_key].push_back(&relationship);
+            if (relationship.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+                !axk::is_effective_program_assignment(relationship)) {
+                continue;
+            }
             if (relationship.target_key)
                 incoming[*relationship.target_key].push_back(&relationship);
             for (const auto &candidate : relationship.candidate_keys) {
@@ -232,19 +236,13 @@ void evaluate_program(const DeletionIndex &index, const axk::ObjectSnapshot &obj
     }
     std::set<std::string> assignments;
     std::size_t direct_assignment_count{};
-    for (const auto &assignment : program->assignments) {
-        if (!assignment.name.empty() && assignment.kind == 0x10U)
-            ++direct_assignment_count;
-    }
     if (const auto outgoing = index.outgoing.find(object.key); outgoing != index.outgoing.end()) {
         for (const auto *relationship : outgoing->second) {
-            if (relationship->type != "PROG_ASSIGNMENT_TO_SBNK")
-                continue;
-            if (relationship->quality != axk::RelationshipQuality::known || !relationship->target_key) {
-                add_notice(notices, "PROGRAM_ASSIGNMENT_UNRESOLVED",
-                           "Program direct Sample assignments do not resolve exactly", {object.key});
+            if (relationship->type != "PROG_ASSIGNMENT_TO_SBNK" ||
+                !axk::is_effective_program_assignment(*relationship)) {
                 continue;
             }
+            ++direct_assignment_count;
             assignments.insert(*relationship->target_key);
         }
     }

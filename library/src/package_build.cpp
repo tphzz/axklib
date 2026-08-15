@@ -30,13 +30,6 @@
 #include "relationship_policy.hpp"
 
 namespace axk {
-
-bool package_internal::portable_inactive_program_relationship(const Relationship &relationship) {
-    return (relationship.assignment_state == AssignmentState::source_load ||
-            relationship.assignment_state == AssignmentState::visible_off) &&
-           relationship.quality == RelationshipQuality::known && relationship.target_key.has_value();
-}
-
 namespace {
 
 using Json = nlohmann::json;
@@ -143,11 +136,6 @@ Result<std::vector<SelectedRoot>> select_roots(const ObjectCatalog &catalog,
     return result;
 }
 
-bool portable_program_assignment(AssignmentState state) {
-    return state == AssignmentState::active || state == AssignmentState::source_load ||
-           state == AssignmentState::visible_off;
-}
-
 Result<std::vector<const Relationship *>>
 required_relationships(const ObjectSnapshot &object, const RelationshipGraph &graph,
                        const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects) {
@@ -155,8 +143,7 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
     for (const auto *relationship : graph.children(object.key)) {
         if (!closure_relationship(relationship->type))
             continue;
-        if (relationship->type.starts_with("PROG_ASSIGNMENT_TO_") &&
-            !portable_program_assignment(relationship->assignment_state)) {
+        if (relationship->type.starts_with("PROG_ASSIGNMENT_TO_") && !is_program_assignment_row(*relationship)) {
             continue;
         }
         candidates.push_back(relationship);
@@ -215,18 +202,13 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
     } else if (const auto *program = std::get_if<CurrentProg>(&object.object.payload)) {
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
-            if (assignment.name.empty() || std::to_integer<std::uint8_t>(assignment.raw_row[0x28U]) != 0xffU)
+            if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U))
                 continue;
             const auto role = assignment.kind == 0x11U   ? "PROG_ASSIGNMENT_TO_SBAC"
                               : assignment.kind == 0x10U ? "PROG_ASSIGNMENT_TO_SBNK"
                                                          : std::string_view{};
-            if (role.empty())
-                return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "active Program assignment has an unsupported target "
-                                                  "kind")};
             const auto unresolved = std::ranges::find_if(candidates, [&](const Relationship *row) {
-                return row->type == role && row->assignment_index == index &&
-                       row->assignment_state == AssignmentState::active && row->quality != RelationshipQuality::known &&
+                return row->type == role && row->assignment_index == index && !is_effective_program_assignment(*row) &&
                        !detail::relationship_has_exact_named_program_target(*row, objects);
             });
             if (unresolved != candidates.end())
@@ -235,15 +217,6 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
             if (!row)
                 return std::unexpected{row.error()};
             result.push_back(*row);
-        }
-        for (const auto *row : candidates) {
-            // Inactive diagnostic rows are portable only when their target is
-            // exact. Ambiguous visible-off rows do not represent active Program
-            // content.
-            if (!package_internal::portable_inactive_program_relationship(*row))
-                continue;
-            if (std::ranges::find(result, row) == result.end())
-                result.push_back(row);
         }
     }
     return result;
