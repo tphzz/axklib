@@ -234,21 +234,25 @@ AssignmentState assignment_state(const ProgAssignment &row) {
     return AssignmentState::unknown;
 }
 
+std::string receive_channel_selector(std::uint8_t selector) {
+    if (selector == 0xffU)
+        return "=SMP";
+    if (selector <= 15U)
+        return std::format("{:02}", selector + 1U);
+    if (selector == 16U)
+        return "BasicRch";
+    if (selector <= 32U)
+        return std::format("B{:02}", selector - 16U);
+    return "unknown";
+}
+
 std::string receive_channel(const ProgAssignment &row) {
     const auto gate = std::to_integer<std::uint8_t>(row.raw_row[0x28]);
     if (gate == 0U)
         return "off";
     if (gate != 0xffU)
         return "unknown";
-    if (row.flags == 0xffU)
-        return "=SMP";
-    if (row.flags <= 15U)
-        return std::format("{:02}", row.flags + 1U);
-    if (row.flags == 16U)
-        return "BasicRch";
-    if (row.flags <= 32U)
-        return std::format("B{:02}", row.flags - 16U);
-    return "unknown";
+    return receive_channel_selector(row.flags);
 }
 
 std::optional<std::uint8_t> program_number(const ObjectSnapshot &item) {
@@ -371,7 +375,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     if (match.target != nullptr && item->scope_key.starts_with("iso:") &&
                         state != AssignmentState::active) {
                         state = AssignmentState::source_load;
-                        channel = "unknown";
+                        channel = receive_channel_selector(row.flags);
                     }
                     result.relationships.push_back(
                         edge(*item, rel_type, match, index, row.name, state, std::move(channel)));

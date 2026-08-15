@@ -1,6 +1,12 @@
 <script lang="ts">
     import { matchesSearch } from '../auditionVisibility';
     import {
+        focusCollectionIndex,
+        hasDisallowedNavigationModifier,
+        keyboardSelectionMode,
+        linearNavigationIndex,
+    } from '../collectionNavigation';
+    import {
         emptyPackageExportSelection,
         selectionMode,
         type ObjectSelectionMode,
@@ -179,14 +185,13 @@
     }
 
     function updateSelection(
-        event: MouseEvent,
+        mode: ObjectSelectionMode,
         scope: SelectionScope,
         domain: SelectableItem[],
         visible: SelectableItem[],
         target: SelectableItem,
     ): ObjectSelectionMode {
         const targetId = objectId(target);
-        const mode = selectionMode(event);
         const result = updatePackageExportSelection(
             selection,
             selectionKey(scope, domain),
@@ -315,12 +320,92 @@
             target,
         );
     }
+
+    function inspect(scope: SelectionScope, target: SelectableItem, mode: ObjectSelectionMode): void {
+        const domain = scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? orderedSamples : orderedWaveData;
+        const visible =
+            scope === 'sample-banks' ? filteredBanks : scope === 'samples' ? filteredSamples : filteredWaveData;
+        updateSelection(mode, scope, domain, visible, target);
+        if (mode !== 'replace') return;
+        if (scope === 'sample-banks') onsamplebankselect(target as SampleStructureItem);
+        else if (scope === 'samples') onsampleselect(target as SampleStructureItem);
+        else onwavedataselect(target as WaveDataItem);
+    }
+
+    function activeIndex(scope: SelectionScope, items: SelectableItem[]): number {
+        const activeId =
+            scope === 'sample-banks' ? activeSampleBankId : scope === 'samples' ? activeSampleId : activeWaveDataId;
+        const index = items.findIndex((item) => objectId(item) === activeId);
+        return index < 0 ? 0 : index;
+    }
+
+    function adjacentScope(scope: SelectionScope, direction: -1 | 1): SelectionScope | null {
+        const scopes: SelectionScope[] =
+            view === 'sample-banks' ? ['sample-banks', 'samples', 'wave-data'] : ['samples', 'wave-data'];
+        return scopes[scopes.indexOf(scope) + direction] ?? null;
+    }
+
+    function visibleItems(scope: SelectionScope): SelectableItem[] {
+        return scope === 'sample-banks' ? filteredBanks : scope === 'samples' ? filteredSamples : filteredWaveData;
+    }
+
+    function handleContainedKeyboard(
+        event: KeyboardEvent,
+        scope: SelectionScope,
+        currentIndex: number,
+        current: SelectableItem,
+    ): void {
+        if (!hasDisallowedNavigationModifier(event) && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+            const direction = event.key === 'ArrowLeft' ? -1 : 1;
+            const targetScope = adjacentScope(scope, direction);
+            const targets = targetScope ? visibleItems(targetScope) : [];
+            if (targetScope && targets.length > 0) {
+                event.preventDefault();
+                const targetIndex = activeIndex(targetScope, targets);
+                const target = targets[targetIndex];
+                if (!target) return;
+                inspect(targetScope, target, 'replace');
+                void focusCollectionIndex(
+                    event.currentTarget,
+                    targetIndex,
+                    targetScope === 'sample-banks' ? undefined : containedRowExtent,
+                    direction,
+                );
+                return;
+            }
+        }
+        if (!hasDisallowedNavigationModifier(event)) {
+            const items = visibleItems(scope);
+            const targetIndex = linearNavigationIndex(event.key, currentIndex, items.length);
+            if (targetIndex !== null) {
+                event.preventDefault();
+                if (targetIndex === currentIndex) return;
+                const target = items[targetIndex];
+                if (!target) return;
+                inspect(scope, target, keyboardSelectionMode(event));
+                void focusCollectionIndex(
+                    event.currentTarget,
+                    targetIndex,
+                    scope === 'sample-banks' ? undefined : containedRowExtent,
+                );
+                return;
+            }
+        }
+        openObjectMenuFromKeyboard(
+            event,
+            scope,
+            scope === 'sample-banks' ? orderedBanks : scope === 'samples' ? orderedSamples : orderedWaveData,
+            visibleItems(scope),
+            current,
+        );
+    }
 </script>
 
 <section
     class:three-lanes={view === 'sample-banks'}
     class:two-lanes={view === 'samples'}
     class="contained-object-workspace"
+    data-navigation-workspace
     aria-label={view === 'sample-banks' ? 'Sample Bank hierarchy' : 'Sample hierarchy'}
 >
     {#if view === 'sample-banks'}
@@ -331,8 +416,8 @@
                 query={queries.primary}
                 onquerychange={(value) => onquerychange('primary', value)}
             />
-            <div class="contained-list">
-                {#each filteredBanks as item (item.id)}
+            <div class="contained-list" data-navigation-list>
+                {#each filteredBanks as item, index (item.id)}
                     {@const playbackActive = playingSampleBankId === item.objectId}
                     {@const auditionable = auditionableSampleBankIds.has(item.objectId)}
                     <div
@@ -342,20 +427,25 @@
                     >
                         <button
                             class="contained-identity"
+                            data-navigation-index={index}
                             type="button"
                             aria-label={`Inspect ${item.name}`}
                             aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                             onclick={(event) => {
                                 if (
-                                    updateSelection(event, 'sample-banks', orderedBanks, filteredBanks, item) ===
-                                    'replace'
+                                    updateSelection(
+                                        selectionMode(event),
+                                        'sample-banks',
+                                        orderedBanks,
+                                        filteredBanks,
+                                        item,
+                                    ) === 'replace'
                                 ) {
                                     onsamplebankselect(item);
                                 }
                             }}
                             oncontextmenu={(event) => openObjectMenu(event, 'sample-banks', orderedBanks, item)}
-                            onkeydown={(event) =>
-                                openObjectMenuFromKeyboard(event, 'sample-banks', orderedBanks, filteredBanks, item)}
+                            onkeydown={(event) => handleContainedKeyboard(event, 'sample-banks', index, item)}
                         >
                             <strong>{item.name}</strong>
                             <small>{item.memberCount ?? 0} {(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}</small
@@ -399,14 +489,15 @@
             actionLabel={view === 'samples' ? 'Import audio' : undefined}
             onaction={onimportaudio}
         />
-        <div class="contained-list" use:virtualViewport={updateSampleViewport}>
+        <div class="contained-list" data-navigation-list use:virtualViewport={updateSampleViewport}>
             {#if filteredSamples.length > 0}
                 <div class="virtual-list-space" style={`height: ${sampleWindow.totalHeight}px`}>
                     <div
                         class="virtual-list-window contained-virtual-window"
                         style={`transform: translateY(${sampleWindow.offset}px)`}
                     >
-                        {#each visibleSamples as item (item.id)}
+                        {#each visibleSamples as item, visibleIndex (item.id)}
+                            {@const index = sampleWindow.startIndex + visibleIndex}
                             {@const playbackActive =
                                 playingObjectId === item.objectId || preparingObjectId === item.objectId}
                             {@const auditionable = auditionableSampleIds.has(item.objectId)}
@@ -417,6 +508,7 @@
                             >
                                 <button
                                     class="contained-identity"
+                                    data-navigation-index={index}
                                     type="button"
                                     aria-label={`Inspect ${item.name}`}
                                     aria-pressed={selection.items.some(
@@ -424,21 +516,19 @@
                                     )}
                                     onclick={(event) => {
                                         if (
-                                            updateSelection(event, 'samples', orderedSamples, filteredSamples, item) ===
-                                            'replace'
+                                            updateSelection(
+                                                selectionMode(event),
+                                                'samples',
+                                                orderedSamples,
+                                                filteredSamples,
+                                                item,
+                                            ) === 'replace'
                                         ) {
                                             onsampleselect(item);
                                         }
                                     }}
                                     oncontextmenu={(event) => openObjectMenu(event, 'samples', orderedSamples, item)}
-                                    onkeydown={(event) =>
-                                        openObjectMenuFromKeyboard(
-                                            event,
-                                            'samples',
-                                            orderedSamples,
-                                            filteredSamples,
-                                            item,
-                                        )}
+                                    onkeydown={(event) => handleContainedKeyboard(event, 'samples', index, item)}
                                 >
                                     <strong>{item.name}</strong>
                                     {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
@@ -487,14 +577,15 @@
             query={waveDataQuery}
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'tertiary' : 'secondary', value)}
         />
-        <div class="contained-list" use:virtualViewport={updateWaveDataViewport}>
+        <div class="contained-list" data-navigation-list use:virtualViewport={updateWaveDataViewport}>
             {#if filteredWaveData.length > 0}
                 <div class="virtual-list-space" style={`height: ${waveDataWindow.totalHeight}px`}>
                     <div
                         class="virtual-list-window contained-virtual-window"
                         style={`transform: translateY(${waveDataWindow.offset}px)`}
                     >
-                        {#each visibleWaveData as item (item.id)}
+                        {#each visibleWaveData as item, visibleIndex (item.id)}
+                            {@const index = waveDataWindow.startIndex + visibleIndex}
                             <div
                                 class="contained-row"
                                 class:active={activeWaveDataId === item.objectKey}
@@ -504,6 +595,7 @@
                             >
                                 <button
                                     class="contained-identity"
+                                    data-navigation-index={index}
                                     type="button"
                                     aria-label={`Inspect ${item.name}`}
                                     aria-pressed={selection.items.some(
@@ -512,7 +604,7 @@
                                     onclick={(event) => {
                                         if (
                                             updateSelection(
-                                                event,
+                                                selectionMode(event),
                                                 'wave-data',
                                                 orderedWaveData,
                                                 filteredWaveData,
@@ -523,14 +615,7 @@
                                         }
                                     }}
                                     oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
-                                    onkeydown={(event) =>
-                                        openObjectMenuFromKeyboard(
-                                            event,
-                                            'wave-data',
-                                            orderedWaveData,
-                                            filteredWaveData,
-                                            item,
-                                        )}
+                                    onkeydown={(event) => handleContainedKeyboard(event, 'wave-data', index, item)}
                                 >
                                     <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
                                 </button>

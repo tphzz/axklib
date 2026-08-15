@@ -3,6 +3,45 @@ import { describe, expect, it, vi } from 'vitest';
 import TreeNode from './TreeNode.svelte';
 
 describe('TreeNode', () => {
+    it('uses conventional tree arrow navigation and selects the focused row', async () => {
+        const partition = {
+            id: 'p0',
+            name: 'Partition 0',
+            kind: 'partition' as const,
+            childCount: 2,
+            children: [
+                { id: 'v0', name: 'Piano', kind: 'volume' as const, childCount: 0 },
+                { id: 'v1', name: 'Strings', kind: 'volume' as const, childCount: 0 },
+            ],
+        };
+        const onselect = vi.fn();
+        render(TreeNode, {
+            props: { item: partition, selectedId: 'p0', onselect, onloadchildren: vi.fn() },
+        });
+
+        const partitionButton = screen.getByRole('button', { name: 'Partition 0' });
+        partitionButton.focus();
+        await fireEvent.keyDown(partitionButton, { key: 'ArrowRight' });
+        expect(screen.getByRole('button', { name: /Piano \[Volume/ })).toBe(document.activeElement);
+        expect(onselect).toHaveBeenLastCalledWith(partition.children[0]);
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+        expect(screen.getByRole('button', { name: /Strings \[Volume/ })).toBe(document.activeElement);
+        expect(onselect).toHaveBeenLastCalledWith(partition.children[1]);
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+        expect(partitionButton).toBe(document.activeElement);
+        await fireEvent.keyDown(partitionButton, { key: 'End' });
+        expect(screen.getByRole('button', { name: /Strings \[Volume/ })).toBe(document.activeElement);
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' });
+        expect(partitionButton).toBe(document.activeElement);
+        expect(onselect).toHaveBeenLastCalledWith(partition);
+
+        await fireEvent.keyDown(partitionButton, { key: 'ArrowLeft' });
+        expect(screen.queryByRole('button', { name: /Piano \[Volume/ })).toBeNull();
+    });
+
     it('loads a branch only when it is expanded', async () => {
         const onloadchildren = vi.fn().mockResolvedValue({
             items: [{ id: 'v0', name: 'Volume α', kind: 'volume', childCount: 0 }],
@@ -18,9 +57,14 @@ describe('TreeNode', () => {
         });
 
         expect(onloadchildren).not.toHaveBeenCalled();
-        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
+        const partitionButton = screen.getByRole('button', { name: 'Partition 0' });
+        partitionButton.focus();
+        await fireEvent.keyDown(partitionButton, { key: 'ArrowRight' });
         await waitFor(() => expect(screen.getByText('Volume α')).toBeTruthy());
         expect(onloadchildren).toHaveBeenCalledWith('p0', 0, 64);
+
+        await fireEvent.keyDown(partitionButton, { key: 'ArrowRight' });
+        expect(screen.getByRole('button', { name: /Volume α \[Volume/ })).toBe(document.activeElement);
     });
 
     it('treats volumes as terminal browser entries even when they contain objects', () => {

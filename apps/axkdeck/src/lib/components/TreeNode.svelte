@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { tick } from 'svelte';
+    import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
     import type { DiskTreeItem } from '../types';
     import Icon from './Icon.svelte';
     import TreeNode from './TreeNode.svelte';
@@ -7,6 +9,7 @@
         item: DiskTreeItem;
         selectedId: string;
         depth?: number;
+        parentId?: string;
         onselect: (item: DiskTreeItem) => void;
         onloadchildren: (
             parentId: string,
@@ -28,6 +31,7 @@
         item,
         selectedId,
         depth = 0,
+        parentId = '',
         onselect,
         onloadchildren,
         volumeActionsEnabled = false,
@@ -127,6 +131,59 @@
         const bounds = target.getBoundingClientRect();
         onrequestmenu(item, bounds.left + Math.min(bounds.width, 180), bounds.bottom);
     }
+
+    function treeButtons(current: HTMLElement): HTMLElement[] {
+        const tree = current.closest('.image-tree-scroll') ?? current.ownerDocument;
+        return [...tree.querySelectorAll<HTMLElement>('.tree-item-select[data-tree-id]')];
+    }
+
+    function selectAndFocus(target: HTMLElement): void {
+        target.click();
+        target.focus({ preventScroll: true });
+        target.scrollIntoView?.({ block: 'nearest' });
+    }
+
+    async function handleTreeKeyboard(event: KeyboardEvent): Promise<void> {
+        if (hasDisallowedNavigationModifier(event)) {
+            openKeyboardMenu(event);
+            return;
+        }
+        const current = event.currentTarget as HTMLElement;
+        if (event.key === 'ArrowRight') {
+            if (!hasChildren) return;
+            event.preventDefault();
+            if (!expanded) {
+                await toggle();
+                return;
+            }
+            await tick();
+            const child = treeButtons(current).find((button) => button.dataset.treeParentId === item.id);
+            if (child) selectAndFocus(child);
+            return;
+        }
+        if (event.key === 'ArrowLeft') {
+            if (!expanded && !parentId) return;
+            event.preventDefault();
+            if (expanded) {
+                await toggle();
+                return;
+            }
+            const parent = treeButtons(current).find((button) => button.dataset.treeId === parentId);
+            if (parent) selectAndFocus(parent);
+            return;
+        }
+        const buttons = treeButtons(current);
+        const currentIndex = buttons.indexOf(current);
+        const targetIndex = linearNavigationIndex(event.key, currentIndex, buttons.length);
+        if (targetIndex !== null) {
+            event.preventDefault();
+            if (targetIndex === currentIndex) return;
+            const target = buttons[targetIndex];
+            if (target) selectAndFocus(target);
+            return;
+        }
+        openKeyboardMenu(event);
+    }
 </script>
 
 <div>
@@ -144,6 +201,7 @@
                 type="button"
                 aria-label={`${expanded ? 'Collapse' : 'Expand'} ${item.name}`}
                 aria-expanded={expanded}
+                tabindex="-1"
                 onclick={() => void toggle()}
             >
                 <Icon name="chevron" size={12} strokeWidth={2} />
@@ -154,8 +212,11 @@
         <button
             class="tree-item-select"
             type="button"
+            aria-current={selectedId === item.id ? 'true' : undefined}
+            data-tree-id={item.id}
+            data-tree-parent-id={parentId}
             onclick={() => onselect(item)}
-            onkeydown={openKeyboardMenu}
+            onkeydown={(event) => void handleTreeKeyboard(event)}
             oncontextmenu={openContextMenu}
         >
             <span class:volume={item.kind === 'volume'} class="tree-icon"
@@ -184,6 +245,7 @@
                     item={child}
                     {selectedId}
                     depth={depth + 1}
+                    parentId={item.id}
                     {onselect}
                     {onloadchildren}
                     {volumeActionsEnabled}

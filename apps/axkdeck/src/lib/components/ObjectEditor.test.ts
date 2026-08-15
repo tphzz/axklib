@@ -123,6 +123,35 @@ describe('ObjectEditor', () => {
         expect(onassignmentselect).not.toHaveBeenCalled();
     });
 
+    it('shows the stored selector and status for source-load assignments', () => {
+        const selection = programSelection();
+        selection.assignments[0] = {
+            ...selection.assignments[0],
+            relationship: {
+                ...selection.assignments[0].relationship,
+                assignmentState: 'source-load-assignment',
+                receiveChannelDisplay: '=SMP',
+            },
+        };
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect: vi.fn(),
+            },
+        });
+
+        expect(screen.getByText('Rch Assign')).toBeTruthy();
+        expect(screen.getByText('=SMP')).toBeTruthy();
+        expect(screen.getByText('Source load')).toBeTruthy();
+        expect(
+            screen.getByTitle('Stored CD-ROM selector; the sampler activates this assignment when it is loaded.'),
+        ).toBeTruthy();
+        expect(screen.queryByText('Program 001')).toBeNull();
+        expect(screen.queryByText('Strings')).toBeNull();
+    });
+
     it('exposes the complete SBNK tab set and remembers the active tab across SBNK selections', async () => {
         const { rerender } = render(ObjectEditor, {
             props: {

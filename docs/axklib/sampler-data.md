@@ -580,6 +580,15 @@ Rch Assign display family:
 | `0xff` | `0x10` | `BasicRch` |
 | `0xff` | `0x11..0x20` | `B01` through `B16` |
 
+CD-ROM source-load rows are a distinct case. When a named source row matches a
+target object in the same ISO folder, axklib keeps the row in
+`source-load-assignment` state rather than claiming that its source gate is
+active. It still projects the stored `+0x15` selector with the same selector
+family: `0xff` is `=SMP`, `0x00..0x0f` are channels `01` through `16`, `0x10`
+is `BasicRch`, and `0x11..0x20` are `B01` through `B16`. The selector display
+therefore describes what the sampler applies when loading the source; it does
+not promote the CD-ROM row to `confirmed-active` in the source catalog.
+
 Active assignment state is separate from target matching:
 
 | State | Meaning |
@@ -590,6 +599,12 @@ Active assignment state is separate from target matching:
 | `confirmed-duplicate-not-active` | A duplicate row exists but is not the active assignment. |
 | `source-load-assignment` | CD-ROM source-load row matched to a target object. |
 | `unknown` | State is not classified beyond diagnostics. |
+
+The sampler's Single/Multi Program Mode and the Multi table are system/common
+state, not fields of an individual `PROG` payload. A volume object graph from a
+CD-ROM does not contain that global runtime setup. Program-object views
+consequently expose the decoded assignment rows
+without inventing a per-Program mode or Multi table.
 
 Assignment target matching preserves the complete 16-byte sampler name. An
 exact target whose stored name ends in `*` can be active and playable, so the

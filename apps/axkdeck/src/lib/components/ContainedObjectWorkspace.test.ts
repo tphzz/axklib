@@ -72,6 +72,48 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('navigates vertically within a lane and horizontally through the hierarchy', async () => {
+        const bank = structure('SBAC', 'Strings');
+        const samples = [structure('SBNK', 'Cello'), structure('SBNK', 'Violin')];
+        const waveData = waveform('Violin L');
+        const onsamplebankselect = vi.fn();
+        const onsampleselect = vi.fn();
+        const onwavedataselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples,
+                waveData: [waveData],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: samples[0]!.objectId,
+                activeWaveDataId: waveData.objectKey,
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onquerychange: vi.fn(),
+                onsamplebankselect,
+                onsampleselect,
+                onwavedataselect,
+                onselectionchange,
+            },
+        });
+
+        const cello = screen.getByRole('button', { name: 'Inspect Cello' });
+        cello.focus();
+        await fireEvent.keyDown(cello, { key: 'ArrowDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[1]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Violin' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowRight' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Violin L' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Cello' }));
+    });
+
     it('mounts and scrolls a bounded window for a large Sample collection', async () => {
         const samples = Array.from({ length: 200 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),

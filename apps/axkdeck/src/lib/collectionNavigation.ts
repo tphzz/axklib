@@ -1,0 +1,55 @@
+import { tick } from 'svelte';
+
+import type { ObjectSelectionMode } from './objectSelection';
+
+export function linearNavigationIndex(key: string, currentIndex: number, itemCount: number): number | null {
+    if (itemCount <= 0 || currentIndex < 0 || currentIndex >= itemCount) return null;
+    let targetIndex: number | null = null;
+    if (key === 'ArrowDown') targetIndex = Math.min(itemCount - 1, currentIndex + 1);
+    if (key === 'ArrowUp') targetIndex = Math.max(0, currentIndex - 1);
+    if (key === 'Home') targetIndex = 0;
+    if (key === 'End') targetIndex = itemCount - 1;
+    return targetIndex;
+}
+
+export function keyboardSelectionMode(event: KeyboardEvent): ObjectSelectionMode {
+    if (!event.shiftKey) return 'replace';
+    return event.ctrlKey || event.metaKey ? 'add-range' : 'range';
+}
+
+export function hasDisallowedNavigationModifier(event: KeyboardEvent): boolean {
+    return event.altKey || ((event.ctrlKey || event.metaKey) && !event.shiftKey);
+}
+
+export async function focusCollectionIndex(
+    currentTarget: EventTarget | null,
+    targetIndex: number,
+    itemExtent?: number,
+    listOffset = 0,
+): Promise<void> {
+    const current = currentTarget instanceof HTMLElement ? currentTarget : null;
+    const currentContainer = current?.closest<HTMLElement>('[data-navigation-list]');
+    const workspace = currentContainer?.closest<HTMLElement>('[data-navigation-workspace]');
+    const lists = workspace ? [...workspace.querySelectorAll<HTMLElement>('[data-navigation-list]')] : [];
+    const currentListIndex = currentContainer ? lists.indexOf(currentContainer) : -1;
+    const container = listOffset === 0 ? currentContainer : lists[currentListIndex + listOffset];
+    if (!container) return;
+
+    if (itemExtent !== undefined) {
+        const itemTop = targetIndex * itemExtent;
+        const itemBottom = itemTop + itemExtent;
+        const viewportBottom = container.scrollTop + container.clientHeight;
+        if (itemTop < container.scrollTop) container.scrollTop = itemTop;
+        else if (itemBottom > viewportBottom) {
+            container.scrollTop = Math.max(0, itemBottom - Math.max(container.clientHeight, itemExtent));
+        }
+        container.dispatchEvent(new Event('scroll'));
+    }
+
+    await tick();
+    const target = [...container.querySelectorAll<HTMLElement>('[data-navigation-index]')].find(
+        (candidate) => Number(candidate.dataset.navigationIndex) === targetIndex,
+    );
+    target?.focus({ preventScroll: true });
+    if (itemExtent === undefined) target?.scrollIntoView?.({ block: 'nearest' });
+}

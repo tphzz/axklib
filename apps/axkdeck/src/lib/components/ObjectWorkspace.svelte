@@ -1,5 +1,11 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import {
+        focusCollectionIndex,
+        hasDisallowedNavigationModifier,
+        keyboardSelectionMode,
+        linearNavigationIndex,
+    } from '../collectionNavigation';
     import { formatStoredSize } from '../formatBytes';
     import {
         emptyPackageExportSelection,
@@ -163,8 +169,7 @@
         return `${view}\u0000${first?.partitionIndex ?? ''}\u0000${first?.volumeName ?? ''}`;
     }
 
-    function updateSelection(event: MouseEvent, objectId: string): ObjectSelectionMode {
-        const mode = selectionMode(event);
+    function updateSelection(mode: ObjectSelectionMode, objectId: string): ObjectSelectionMode {
         const result = updatePackageExportSelection(
             selection,
             domainKey(),
@@ -179,7 +184,7 @@
     }
 
     function selectWaveData(event: MouseEvent, item: WaveDataItem, seekAfterSelection = false): void {
-        if (updateSelection(event, item.objectKey) !== 'replace') return;
+        if (updateSelection(selectionMode(event), item.objectKey) !== 'replace') return;
         onwavedataselect(item);
         if (seekAfterSelection) seek(event, item);
     }
@@ -263,6 +268,40 @@
         );
     }
 
+    function navigateObject(event: KeyboardEvent, currentIndex: number): boolean {
+        if (hasDisallowedNavigationModifier(event)) return false;
+        const items = view === 'programs' ? filteredPrograms : filteredWaveData;
+        const targetIndex = linearNavigationIndex(event.key, currentIndex, items.length);
+        if (targetIndex === null) return false;
+        event.preventDefault();
+        if (targetIndex === currentIndex) return true;
+        const target = items[targetIndex];
+        if (!target) return true;
+        const mode = keyboardSelectionMode(event);
+        const targetId = view === 'programs' ? (target as Program).objectId : (target as WaveDataItem).objectKey;
+        updateSelection(mode, targetId);
+        if (mode === 'replace') {
+            if (view === 'programs') onprogramselect(target as Program);
+            else onwavedataselect(target as WaveDataItem);
+        }
+        void focusCollectionIndex(
+            event.currentTarget,
+            targetIndex,
+            view === 'wave-data' ? waveDataRowExtent : undefined,
+        );
+        return true;
+    }
+
+    function handleObjectKeyboard(
+        event: KeyboardEvent,
+        currentIndex: number,
+        object: SamplerObject,
+        renameTarget: ObjectRenameTarget | null,
+    ): void {
+        if (navigateObject(event, currentIndex)) return;
+        openObjectMenuFromKeyboard(event, object, renameTarget);
+    }
+
     function programRenameTarget(program: Program): ObjectRenameTarget | null {
         if (!/^\d{3}$/.test(program.slot)) return null;
         const programNumber = Number(program.slot);
@@ -330,23 +369,26 @@
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
+        data-navigation-list
         use:virtualViewport={updateWaveDataViewport}
         onclick={clearWaveDataSelection}
     >
         {#if view === 'programs'}
-            {#each filteredPrograms as program (program.id)}
+            {#each filteredPrograms as program, index (program.id)}
                 <button
                     type="button"
                     class:active={activeObjectId === program.objectId}
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
+                    data-navigation-index={index}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => {
-                        if (updateSelection(event, program.objectId) === 'replace') onprogramselect(program);
+                        if (updateSelection(selectionMode(event), program.objectId) === 'replace')
+                            onprogramselect(program);
                     }}
                     oncontextmenu={(event) => openObjectMenu(event, program.object, programRenameTarget(program))}
                     onkeydown={(event) =>
-                        openObjectMenuFromKeyboard(event, program.object, programRenameTarget(program))}
+                        handleObjectKeyboard(event, index, program.object, programRenameTarget(program))}
                 >
                     <span class="object-slot">{program.slot}</span>
                     <strong>{program.name}</strong>
@@ -360,7 +402,8 @@
                     class="virtual-list-window wave-data-virtual-window"
                     style={`transform: translateY(${waveDataWindow.offset}px)`}
                 >
-                    {#each visibleWaveData as item (item.id)}
+                    {#each visibleWaveData as item, visibleIndex (item.id)}
+                        {@const index = waveDataWindow.startIndex + visibleIndex}
                         <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
                         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                         <div
@@ -374,12 +417,13 @@
                         >
                             <button
                                 class="wave-data-selection"
+                                data-navigation-index={index}
                                 type="button"
                                 aria-label={`Inspect ${item.name}`}
                                 aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
                                 onclick={(event) => selectWaveData(event, item)}
                                 onkeydown={(event) =>
-                                    openObjectMenuFromKeyboard(event, item.object, waveDataRenameTarget(item))}
+                                    handleObjectKeyboard(event, index, item.object, waveDataRenameTarget(item))}
                             ></button>
                             <strong class="wave-data-identity">{item.name}</strong>
                             <span class="wave-data-meta">{item.note} · {item.duration}</span>

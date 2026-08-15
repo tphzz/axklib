@@ -496,39 +496,51 @@ TEST(ProgramRelationships, PrefersUniqueSameIsoVolumeSampleBankOverRemoteDuplica
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x11+name+same-folder");
 }
 
-TEST(ProgramRelationships, KeepsSourceLoadReceiveChannelUnknown) {
-    axk::ObjectCatalog catalog;
-    const axk::ObjectPlacement placement{
-        axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBNK", "Sample", "GROUP/F001"};
-    axk::DecodedObject sample;
-    sample.header.type = axk::ObjectType::sbnk;
-    sample.header.name = "Sample";
-    sample.payload = axk::CurrentSbnk{};
-    catalog.objects.push_back(
-        {"sample", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:GROUP", std::move(sample), placement});
+TEST(ProgramRelationships, PreservesSourceLoadReceiveChannelSelector) {
+    const auto relationship_for = [](std::uint8_t selector) {
+        axk::ObjectCatalog catalog;
+        const axk::ObjectPlacement placement{
+            axk::PartitionIndex{0}, "GROUP", axk::SfsId{1}, "Volume", "SBNK", "Sample", "GROUP/F001"};
+        axk::DecodedObject sample;
+        sample.header.type = axk::ObjectType::sbnk;
+        sample.header.name = "Sample";
+        sample.payload = axk::CurrentSbnk{};
+        catalog.objects.push_back(
+            {"sample", axk::PartitionIndex{0}, axk::SfsId{1}, "iso:GROUP", std::move(sample), placement});
 
-    axk::CurrentProg current_program;
-    axk::ProgAssignment assignment;
-    assignment.name = "Sample";
-    assignment.raw_handle = 1U;
-    assignment.kind = 0x10U;
-    assignment.raw_row[0x1d] = std::byte{0};
-    assignment.raw_row[0x28] = std::byte{0};
-    current_program.assignments.push_back(assignment);
-    axk::DecodedObject program;
-    program.header.type = axk::ObjectType::prog;
-    program.header.name = "001";
-    program.payload = std::move(current_program);
-    auto program_placement = placement;
-    program_placement.category_name = "PROG";
-    program_placement.entry_name = "001";
-    catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{2}, "iso:GROUP", std::move(program),
-                               std::move(program_placement)});
+        axk::CurrentProg current_program;
+        axk::ProgAssignment assignment;
+        assignment.name = "Sample";
+        assignment.raw_handle = 1U;
+        assignment.kind = 0x10U;
+        assignment.flags = selector;
+        assignment.raw_row[0x1d] = std::byte{0};
+        assignment.raw_row[0x28] = std::byte{0};
+        current_program.assignments.push_back(assignment);
+        axk::DecodedObject program;
+        program.header.type = axk::ObjectType::prog;
+        program.header.name = "001";
+        program.payload = std::move(current_program);
+        auto program_placement = placement;
+        program_placement.category_name = "PROG";
+        program_placement.entry_name = "001";
+        catalog.objects.push_back({"program", axk::PartitionIndex{0}, axk::SfsId{2}, "iso:GROUP", std::move(program),
+                                   std::move(program_placement)});
 
-    const auto graph = axk::build_relationship_graph(catalog);
-    ASSERT_EQ(graph.relationships.size(), 1U);
-    EXPECT_EQ(graph.relationships.front().assignment_state, axk::AssignmentState::source_load);
-    EXPECT_EQ(graph.relationships.front().receive_channel_display, "unknown");
+        const auto graph = axk::build_relationship_graph(catalog);
+        EXPECT_EQ(graph.relationships.size(), 1U);
+        return graph.relationships.front();
+    };
+
+    const auto sample_channel = relationship_for(0xffU);
+    EXPECT_EQ(sample_channel.assignment_state, axk::AssignmentState::source_load);
+    EXPECT_EQ(sample_channel.receive_channel_display, "=SMP");
+    EXPECT_EQ(relationship_for(0U).receive_channel_display, "01");
+    EXPECT_EQ(relationship_for(15U).receive_channel_display, "16");
+    EXPECT_EQ(relationship_for(16U).receive_channel_display, "BasicRch");
+    EXPECT_EQ(relationship_for(17U).receive_channel_display, "B01");
+    EXPECT_EQ(relationship_for(32U).receive_channel_display, "B16");
+    EXPECT_EQ(relationship_for(33U).receive_channel_display, "unknown");
 }
 
 TEST(ProgramRelationships, ResolvesUnknownKindsByUniqueNameWithoutInventingACategory) {

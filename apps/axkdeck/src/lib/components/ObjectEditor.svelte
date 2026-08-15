@@ -75,9 +75,6 @@
 <section class="object-editor" aria-label="Object editor">
     {#if selection?.kind === 'program'}
         <header class="editor-header">
-            <div class="editor-object-title">
-                <span>Program {selection.program.slot}</span><strong>{selection.program.name}</strong>
-            </div>
             <div class="editor-tabs" role="tablist" aria-label="Program editor">
                 {#each programTabs as tab (tab.id)}
                     <button
@@ -110,7 +107,7 @@
                 <div class="editor-body">
                     <div class="assignment-table" role="table" aria-label="Program assignments">
                         <div class="assignment-header" role="row">
-                            <span>Target</span><span>Receive channel</span>
+                            <span>Target</span><span>Rch Assign</span>
                         </div>
                         {#each filteredAssignments as row (row.relationship.id)}
                             <button
@@ -124,7 +121,15 @@
                                         >{row.confirmed ? row.targetType : 'Unconfirmed assignment'}</small
                                     ></span
                                 >
-                                <span>{row.relationship.receiveChannelDisplay || 'Unknown'}</span>
+                                <span class="assignment-channel"
+                                    >{row.relationship.receiveChannelDisplay || 'Unknown'}
+                                    {#if row.relationship.assignmentState === 'source-load-assignment'}
+                                        <small
+                                            title="Stored CD-ROM selector; the sampler activates this assignment when it is loaded."
+                                            >Source load</small
+                                        >
+                                    {/if}</span
+                                >
                             </button>
                         {:else}
                             <p class="empty-copy">No matching assignments</p>

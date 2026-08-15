@@ -45,6 +45,29 @@ const common = {
 };
 
 describe('SequenceWorkspace', () => {
+    it('moves through Sequences with Up, Down, Home, and End', async () => {
+        const sequences = [sequence('First', 1), sequence('Second', 2), sequence('Third', 3)];
+        const onselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(SequenceWorkspace, {
+            props: { ...common, sequences, onselect, onselectionchange },
+        });
+
+        const second = screen.getByRole('button', { name: /Second/ });
+        second.focus();
+        await fireEvent.keyDown(second, { key: 'ArrowDown' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[2]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Third/ }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /First/ }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[2]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Third/ }));
+    });
+
     it('naturally orders dense Sequence rows and exposes decoded timing facts', () => {
         render(SequenceWorkspace, {
             props: {
