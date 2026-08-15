@@ -32,6 +32,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_audio_export_operations.cpp src/session_media_conversion_operations.cpp
                                    src/session_placement_operations.cpp src/session_placement_plan.cpp
                                    src/session_sequence_operations.cpp src/session_volume_package_operations.cpp
+                                   src/session_tx16w_operations.cpp
                                    src/session_volume_floppy_export_operations.cpp
                                    src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp

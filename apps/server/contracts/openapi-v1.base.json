@@ -809,7 +809,7 @@
         "required": ["filename", "kind", "mediaType", "size"],
         "properties": {
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE"]},
           "mediaType": {"type": "string", "minLength": 1},
           "size": {"type": "integer", "minimum": 0},
           "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
@@ -822,7 +822,7 @@
         "properties": {
           "uploadId": {"type": "string", "minLength": 1},
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE"]},
           "mediaType": {"type": "string", "minLength": 1},
           "declaredSize": {"type": "integer", "minimum": 0},
           "receivedSize": {"type": "integer", "minimum": 0},
@@ -1380,6 +1380,143 @@
         "required": ["source"],
         "properties": {
           "source": {"$ref": "#/components/schemas/InputRef"}
+        }
+      },
+      "ImageSessionTx16wImportTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "volumeName"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImageSessionTx16wImportInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "sources", "importMode", "target"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {"$ref": "#/components/schemas/InputRef"}
+          },
+          "importMode": {"enum": ["HIERARCHY", "WAVE_DATA_ONLY"]},
+          "target": {"$ref": "#/components/schemas/ImageSessionTx16wImportTarget"}
+        }
+      },
+      "ImageSessionTx16wImportCounts": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["waveData", "samples", "sampleBanks", "programs"],
+        "properties": {
+          "waveData": {"type": "integer", "minimum": 0},
+          "samples": {"type": "integer", "minimum": 0},
+          "sampleBanks": {"type": "integer", "minimum": 0},
+          "programs": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageSessionTx16wWaveDataPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "targetSampleRate"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 16},
+          "targetSampleRate": {"type": "integer", "minimum": 1}
+        }
+      },
+      "ImageSessionTx16wSamplePlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "waveDataName", "rootKey", "keyLow", "keyHigh"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 16},
+          "waveDataName": {"type": "string", "minLength": 1, "maxLength": 16},
+          "rootKey": {"type": "integer", "minimum": 0, "maximum": 127},
+          "keyLow": {"type": "integer", "minimum": 0, "maximum": 127},
+          "keyHigh": {"type": "integer", "minimum": 0, "maximum": 127}
+        }
+      },
+      "ImageSessionTx16wSampleBankPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "sampleNames"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1, "maxLength": 16},
+          "sampleNames": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1, "maxLength": 16}
+          }
+        }
+      },
+      "ImageSessionTx16wProgramAssignmentPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {"enum": ["SBAC", "SBNK"]},
+          "name": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "ImageSessionTx16wProgramPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slot", "name", "assignments"],
+        "properties": {
+          "slot": {"type": "integer", "minimum": 1, "maximum": 128},
+          "name": {"type": "string", "minLength": 1, "maxLength": 8},
+          "assignments": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ImageSessionTx16wProgramAssignmentPlan"}
+          }
+        }
+      },
+      "ImageSessionTx16wImportObjects": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["waveData", "samples", "sampleBanks", "programs"],
+        "properties": {
+          "waveData": {"type": "array", "items": {"$ref": "#/components/schemas/ImageSessionTx16wWaveDataPlan"}},
+          "samples": {"type": "array", "items": {"$ref": "#/components/schemas/ImageSessionTx16wSamplePlan"}},
+          "sampleBanks": {"type": "array", "items": {"$ref": "#/components/schemas/ImageSessionTx16wSampleBankPlan"}},
+          "programs": {"type": "array", "items": {"$ref": "#/components/schemas/ImageSessionTx16wProgramPlan"}}
+        }
+      },
+      "ImageSessionTx16wMappingNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["disposition", "sourceObject", "sourceParameter", "targetObject", "targetParameter", "message"],
+        "properties": {
+          "disposition": {"enum": ["EXACT", "APPROXIMATED", "DEFAULTED", "OMITTED", "BLOCKED"]},
+          "sourceObject": {"type": "string"},
+          "sourceParameter": {"type": "string"},
+          "targetObject": {"type": "string"},
+          "targetParameter": {"type": "string"},
+          "message": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageSessionTx16wImportInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "sourceMembers", "importMode", "profile", "target", "valid", "counts", "objects", "notices"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "sourceMembers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "importMode": {"enum": ["HIERARCHY", "WAVE_DATA_ONLY"]},
+          "profile": {"enum": ["YAMAHA_NATIVE", "YAMAHA_NATIVE_WITH_AUXILIARY"]},
+          "target": {"$ref": "#/components/schemas/ImageSessionTx16wImportTarget"},
+          "valid": {"type": "boolean"},
+          "counts": {"$ref": "#/components/schemas/ImageSessionTx16wImportCounts"},
+          "objects": {"$ref": "#/components/schemas/ImageSessionTx16wImportObjects"},
+          "notices": {"type": "array", "items": {"$ref": "#/components/schemas/ImageSessionTx16wMappingNotice"}}
         }
       },
       "MidiControllerCount": {
@@ -3369,7 +3506,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "ASSIGN_SBAC_MEMBERS", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "ASSIGN_SBAC_MEMBERS", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS", "IMPORT_TX16W_DISK_SET"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -3391,7 +3528,8 @@
               "RENAME_SEQUENCE": "rename_sequence",
               "RENAME_VOLUME": "rename_volume",
               "RENAME_PARTITION": "rename_partition",
-              "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements"
+              "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements",
+              "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set"
             }
           },
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},

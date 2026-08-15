@@ -577,6 +577,30 @@ TEST(AlterationManifest, ParsesStrictWaveformSamplerMetadataAndRejectsInvalidLoo
     ]})"));
 }
 
+TEST(AlterationManifest, ParsesStrictTx16wDiskSetImport) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"tx16w","type":"import_tx16w_disk_set","partition_index":0,
+       "volume_name":"TX16W","disk_paths":["source.img","companion.img"],
+       "import_mode":"hierarchy"}
+    ]})",
+                                                       "/imports");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *operation = std::get_if<axk::ImportTx16wDiskSetOperation>(&parsed->operations.front().data);
+    ASSERT_NE(operation, nullptr);
+    EXPECT_EQ(operation->volume_name, "TX16W");
+    EXPECT_EQ(operation->disk_paths,
+              (std::vector<std::filesystem::path>{"/imports/source.img", "/imports/companion.img"}));
+    EXPECT_EQ(operation->import_mode, axk::tx16w::ImportMode::hierarchy);
+    EXPECT_EQ(axk::operation_type_name(parsed->operations.front().data), "import_tx16w_disk_set");
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"tx16w","type":"import_tx16w_disk","partition_index":0,
+       "volume_name":"TX16W","disk_path":"source.img"}
+    ]})"));
+}
+
 TEST(AlterationManifest, RejectsObsoleteSampleAndSampleBankFields) {
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
@@ -687,6 +711,41 @@ TEST(Alteration, InsertsSamplerControlledProgramForDirectSample) {
     const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&sample->object.payload);
     ASSERT_NE(decoded_sample, nullptr);
     EXPECT_TRUE(decoded_sample->linked_program_numbers == std::vector<std::uint8_t>{1U});
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, InsertsProgramThatSharesAnExistingSampleBankTarget) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-shared-program-target";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"shared","type":"insert_program","partition_index":0,"volume_name":"Chain",
+         "program":{"number":34,"name":"Shared","assignments":[
+           {"sample_bank":"Bank","receive_mode":"SAMPLE"}
+         ]}}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto graph = axk::build_relationship_graph(*catalog);
+    const auto shared_relationships = std::ranges::count_if(graph.relationships, [](const auto &relationship) {
+        return relationship.type == "PROG_ASSIGNMENT_TO_SBAC" && relationship.assignment_name == "Bank" &&
+               relationship.quality == axk::RelationshipQuality::known;
+    });
+    EXPECT_EQ(shared_relationships, 2U);
     std::filesystem::remove_all(root, error);
 }
 

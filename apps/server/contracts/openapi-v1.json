@@ -196,7 +196,8 @@
               "RENAME_SEQUENCE",
               "RENAME_VOLUME",
               "RENAME_PARTITION",
-              "REPAIR_OBJECT_PLACEMENTS"
+              "REPAIR_OBJECT_PLACEMENTS",
+              "IMPORT_TX16W_DISK_SET"
             ],
             "x-axklib-application-enum": {
               "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
@@ -206,6 +207,7 @@
               "DELETE_SEQUENCE": "delete_sequence",
               "DELETE_VOLUME": "delete_volume",
               "DELETE_WAVEFORM": "delete_waveform",
+              "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set",
               "INSERT_PROGRAM": "insert_program",
               "INSERT_SBAC": "insert_sbac",
               "INSERT_SBNK": "insert_sbnk",
@@ -5474,6 +5476,354 @@
         ],
         "type": "object"
       },
+      "ImageSessionTx16wImportCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "programs": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampleBanks": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "samples": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "waveData": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "waveData",
+          "samples",
+          "sampleBanks",
+          "programs"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wImportInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/ImageSessionTx16wImportCounts"
+          },
+          "importMode": {
+            "enum": [
+              "HIERARCHY",
+              "WAVE_DATA_ONLY"
+            ]
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wMappingNotice"
+            },
+            "type": "array"
+          },
+          "objects": {
+            "$ref": "#/components/schemas/ImageSessionTx16wImportObjects"
+          },
+          "profile": {
+            "enum": [
+              "YAMAHA_NATIVE",
+              "YAMAHA_NATIVE_WITH_AUXILIARY"
+            ]
+          },
+          "schemaVersion": {
+            "const": "1.0"
+          },
+          "sourceMembers": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ImageSessionTx16wImportTarget"
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "sourceMembers",
+          "importMode",
+          "profile",
+          "target",
+          "valid",
+          "counts",
+          "objects",
+          "notices"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wImportInspectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "importMode": {
+            "enum": [
+              "HIERARCHY",
+              "WAVE_DATA_ONLY"
+            ]
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/InputRef"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ImageSessionTx16wImportTarget"
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "sources",
+          "importMode",
+          "target"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wImportObjects": {
+        "additionalProperties": false,
+        "properties": {
+          "programs": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wProgramPlan"
+            },
+            "type": "array"
+          },
+          "sampleBanks": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wSampleBankPlan"
+            },
+            "type": "array"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wSamplePlan"
+            },
+            "type": "array"
+          },
+          "waveData": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wWaveDataPlan"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "waveData",
+          "samples",
+          "sampleBanks",
+          "programs"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wImportTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "partitionIndex": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "volumeName": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "partitionIndex",
+          "volumeName"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wMappingNotice": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "enum": [
+              "EXACT",
+              "APPROXIMATED",
+              "DEFAULTED",
+              "OMITTED",
+              "BLOCKED"
+            ]
+          },
+          "message": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sourceObject": {
+            "type": "string"
+          },
+          "sourceParameter": {
+            "type": "string"
+          },
+          "targetObject": {
+            "type": "string"
+          },
+          "targetParameter": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disposition",
+          "sourceObject",
+          "sourceParameter",
+          "targetObject",
+          "targetParameter",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wProgramAssignmentPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "SBAC",
+              "SBNK"
+            ]
+          },
+          "name": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wProgramPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSessionTx16wProgramAssignmentPlan"
+            },
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 8,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slot": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slot",
+          "name",
+          "assignments"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wSampleBankPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sampleNames": {
+            "items": {
+              "maxLength": 16,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "sampleNames"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wSamplePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "keyHigh": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "keyLow": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "rootKey": {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "waveDataName": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "waveDataName",
+          "rootKey",
+          "keyLow",
+          "keyHigh"
+        ],
+        "type": "object"
+      },
+      "ImageSessionTx16wWaveDataPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetSampleRate": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "targetSampleRate"
+        ],
+        "type": "object"
+      },
       "ImageSessionVolumeFloppyExportDestination": {
         "$ref": "#/components/schemas/ImageSessionVolumePackageExportDestination"
       },
@@ -9793,7 +10143,8 @@
               "AUDIO",
               "MIDI",
               "PACKAGE",
-              "MANIFEST"
+              "MANIFEST",
+              "DISK_IMAGE"
             ]
           },
           "mediaType": {
@@ -9839,7 +10190,8 @@
               "AUDIO",
               "MIDI",
               "PACKAGE",
-              "MANIFEST"
+              "MANIFEST",
+              "DISK_IMAGE"
             ]
           },
           "mediaType": {
@@ -22646,6 +22998,415 @@
         ],
         "x-axklib-operation-ids": [
           "images.sequence_export"
+        ]
+      }
+    },
+    "/image-session-tx16w-import-inspections": {
+      "post": {
+        "operationId": "images.tx16w.inspect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "expectedRevision": 1,
+                    "imageId": "x",
+                    "importMode": "HIERARCHY",
+                    "sources": [
+                      {
+                        "fileRef": {
+                          "relativePath": "x",
+                          "rootId": "x"
+                        }
+                      }
+                    ],
+                    "target": {
+                      "partitionIndex": 0,
+                      "volumeName": "x"
+                    }
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ImageSessionTx16wImportInspectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "counts": {
+                          "programs": 0,
+                          "sampleBanks": 0,
+                          "samples": 0,
+                          "waveData": 0
+                        },
+                        "importMode": "HIERARCHY",
+                        "notices": [],
+                        "objects": {
+                          "programs": [],
+                          "sampleBanks": [],
+                          "samples": [],
+                          "waveData": []
+                        },
+                        "profile": "YAMAHA_NATIVE",
+                        "schemaVersion": "1.0",
+                        "sourceMembers": [
+                          "x"
+                        ],
+                        "target": {
+                          "partitionIndex": 0,
+                          "volumeName": "x"
+                        },
+                        "valid": false
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "counts": {
+                          "programs": 0,
+                          "sampleBanks": 0,
+                          "samples": 0,
+                          "waveData": 0
+                        },
+                        "importMode": "HIERARCHY",
+                        "notices": [],
+                        "objects": {
+                          "programs": [],
+                          "sampleBanks": [],
+                          "samples": [],
+                          "waveData": []
+                        },
+                        "profile": "YAMAHA_NATIVE",
+                        "schemaVersion": "1.0",
+                        "sourceMembers": [
+                          "x"
+                        ],
+                        "target": {
+                          "partitionIndex": 0,
+                          "volumeName": "x"
+                        },
+                        "valid": false
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ImageSessionTx16wImportInspection"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Operation completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "images.tx16w.inspect",
+            "mode": "request",
+            "operationClass": "read",
+            "requestSchema": "ImageSessionTx16wImportInspectionRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "ImageSessionTx16wImportInspection",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "images.tx16w.inspect"
         ]
       }
     },

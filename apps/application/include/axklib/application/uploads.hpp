@@ -15,7 +15,7 @@
 
 namespace axk::app {
 
-enum class UploadKind : std::uint8_t { audio, midi, package, manifest };
+enum class UploadKind : std::uint8_t { audio, midi, package, manifest, disk_image };
 enum class UploadState : std::uint8_t { receiving, ready };
 
 struct UploadCreateRequest {

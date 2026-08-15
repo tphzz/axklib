@@ -10,6 +10,7 @@
 #include "axklib/application/session_audio_export_operations.hpp"
 #include "axklib/application/session_media_conversion_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
+#include "axklib/application/session_tx16w_operations.hpp"
 #include "axklib/application/session_volume_floppy_export_operations.hpp"
 #include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/application/validation_operations.hpp"
@@ -131,7 +132,8 @@ Result<void> bind_standard_path_accesses(axk::app::OperationRegistry &registry) 
         !bound) {
         return bound;
     }
-    for (const auto id : {"package.inspect", "package.verify", "audio.inspect", "midi.inspect"}) {
+    for (const auto id :
+         {"package.inspect", "package.verify", "audio.inspect", "midi.inspect", "images.tx16w.inspect"}) {
         if (auto bound = bind(id,
                               [](const Json &input, const OperationContext &) -> Result<std::vector<PathAccess>> {
                                   std::vector<PathAccess> result;
@@ -229,6 +231,8 @@ axk::app::Result<void> axk::app::bind_session_application_operations(
         !bound)
         return bound;
     if (auto bound = bind_session_audio_export_operations(registry, sandbox, images, downloads); !bound)
+        return bound;
+    if (auto bound = bind_session_tx16w_operations(registry, sandbox, uploads, images); !bound)
         return bound;
     if (auto bound = bind_session_media_conversion_operations(registry, sandbox, images, downloads, media_limits);
         !bound)

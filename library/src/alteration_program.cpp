@@ -198,22 +198,6 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
             return std::unexpected{target.error()};
         targets.push_back({&assignment, target->second});
     }
-    auto existing_programs =
-        category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
-    if (!existing_programs)
-        return std::unexpected{existing_programs.error()};
-    for (const auto &existing : *existing_programs) {
-        const auto *decoded_program = std::get_if<CurrentProg>(&existing.decoded.payload);
-        for (const auto &assignment : decoded_program->assignments) {
-            const auto duplicate = std::ranges::any_of(targets, [&](const auto &target) {
-                const auto kind = target.assignment->target_kind == "SBAC" ? 0x11U : 0x10U;
-                return assignment.kind == kind && assignment.name == target.assignment->target_name;
-            });
-            if (duplicate) {
-                return std::unexpected{transaction_error("Program target is already assigned by another Program")};
-            }
-        }
-    }
     for (const auto &target : targets) {
         if (target.assignment->target_kind != "SBNK")
             continue;

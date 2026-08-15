@@ -83,6 +83,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_volume(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, RepairObjectPlacementsOperation>)
                     return repair_object_placements(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ImportTx16wDiskSetOperation>)
+                    return import_tx16w_disk_set(state, context, operation, cancellation);
                 else
                     return rename_partition(state, context, operation, cancellation);
             },

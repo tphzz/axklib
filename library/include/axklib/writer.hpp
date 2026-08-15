@@ -27,6 +27,7 @@ inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 102
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 inline constexpr std::size_t maximum_sample_bank_members = 127U;
+inline constexpr std::size_t maximum_program_assignments = 16U;
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
     4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
 inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;

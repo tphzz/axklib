@@ -232,6 +232,8 @@ std::optional<axk::app::UploadKind> parse_upload_kind(std::string_view value) {
         return axk::app::UploadKind::package;
     if (value == "MANIFEST")
         return axk::app::UploadKind::manifest;
+    if (value == "DISK_IMAGE")
+        return axk::app::UploadKind::disk_image;
     return std::nullopt;
 }
 

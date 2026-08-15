@@ -16,6 +16,7 @@
     import { PackageBatchImportWorkflow } from './features/import/packageBatchWorkflow.svelte';
     import { PackagePickerHistory } from './features/import/packagePickerHistory';
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
+    import { Tx16wImportWorkflow } from './features/import/tx16wWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
@@ -249,11 +250,26 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const tx16wImportWorkflow = new Tx16wImportWorkflow({
+        transport,
+        jobs: jobController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageLocation: () => imageSessionWorkflow.location,
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     const mediaDropWorkflow = new MediaDropWorkflow({
         isDesktop,
         workspaceView: () => workspaceView,
         audioImport: audioImportWorkflow,
         sequenceImport: sequenceImportWorkflow,
+        tx16wImport: tx16wImportWorkflow,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({
@@ -285,6 +301,7 @@
         pickerController.dispose();
         void packageImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
+        void tx16wImportWorkflow.close();
         void jobController.dispose();
         void imageSessionWorkflow
             .dispose()
@@ -608,6 +625,7 @@
     deletion={deletionWorkflow}
     programGeneration={programGenerationWorkflow}
     mediaDrop={mediaDropWorkflow}
+    tx16wImport={tx16wImportWorkflow}
     audioImport={audioImportWorkflow}
     {audioFileInput}
     sequenceImport={sequenceImportWorkflow}

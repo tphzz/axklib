@@ -433,6 +433,8 @@ export interface SequenceImportItem {
 }
 
 export type MidiInspection = components['schemas']['MidiInspection'];
+export type Tx16wImportInspection = components['schemas']['ImageSessionTx16wImportInspection'];
+export type Tx16wImportMode = Tx16wImportInspection['importMode'];
 export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
 export interface SequenceImportTarget {
@@ -510,6 +512,12 @@ export interface ImageTransport {
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
     inspectMidi(source: InputFileLocation): Promise<MidiInspection>;
+    inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -523,6 +531,12 @@ export interface ImageTransport {
         target: SequenceImportTarget,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+    ): Promise<JobState>;
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
     ): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;

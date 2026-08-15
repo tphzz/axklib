@@ -1677,7 +1677,7 @@ describe('App panel layout', () => {
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
         unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
-        expect(within(unavailable).getByText('Drop audio and MIDI files separately.')).toBeTruthy();
+        expect(within(unavailable).getByText('Drop audio, MIDI, and TX16W disks separately.')).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
     });

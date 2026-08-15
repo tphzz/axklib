@@ -54,6 +54,8 @@ import type {
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
+    Tx16wImportInspection,
+    Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
     WaveDataOrphanInspection,
@@ -341,6 +343,15 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectMidi', [source]);
     }
 
+    inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection> {
+        return this.invoke('inspectTx16wDiskSet', [sessionId, sources, target, importMode]);
+    }
+
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -365,6 +376,15 @@ export class InMemoryImageTransport implements ImageTransport {
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
         return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy]);
+    }
+
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<JobState> {
+        return this.invoke('startTx16wDiskSetImport', [sessionId, sources, target, importMode]);
     }
 
     startImageSequenceExport(

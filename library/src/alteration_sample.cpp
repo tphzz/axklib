@@ -170,9 +170,9 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
     return report;
 }
 
-Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
-                                        const InsertWaveformOperation &operation,
-                                        const CancellationToken &cancellation) {
+Result<OperationReport> insert_waveform_audio(TransactionState &state, OperationContext context,
+                                              const InsertWaveformOperation &operation, const ImportedAudio &audio,
+                                              const CancellationToken &cancellation) {
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -182,6 +182,9 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
     }
     auto &partition = found->second;
     const auto &spec = operation.waveform;
+    if (audio.pcm_channels.size() != spec.waveform_names.size()) {
+        return std::unexpected{transaction_error("Wave Data channel count does not match requested names")};
+    }
     auto directory = volume_category(state, partition, operation.volume_name, "SMPL", cancellation);
     if (!directory)
         return std::unexpected{directory.error()};
@@ -213,12 +216,6 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
         link_ids.insert(wave_data->wave_data_reference_value.value);
     }
 
-    AudioImportOptions options;
-    options.expected_channels = static_cast<std::uint8_t>(spec.waveform_names.size());
-    options.target_sample_rate = spec.target_sample_rate;
-    auto audio = import_sampler_audio(spec.path, options);
-    if (!audio)
-        return std::unexpected{audio.error()};
     std::uint32_t candidate = 0x016b1dbcU;
     std::vector<SfsId> inserted;
     std::uint64_t allocated_clusters{};
@@ -229,9 +226,9 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
         link_ids.insert(link_id);
         candidate += 0x100U;
 
-        auto mono = *audio;
+        auto mono = audio;
         mono.source_channels = 1U;
-        mono.pcm_channels = {audio->pcm_channels[channel]};
+        mono.pcm_channels = {audio.pcm_channels[channel]};
         WaveformSpec waveform;
         waveform.id = spec.waveform_names[channel];
         waveform.name = spec.waveform_names[channel];
@@ -268,22 +265,34 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
     }
     report.inserted_sfs_ids = std::move(inserted);
     report.allocated_clusters = allocated_clusters;
-    report.audio_import = AudioImportSummary{audio->source_path,
-                                             audio->source_format,
-                                             audio->source_subtype,
-                                             audio->source_channels,
-                                             audio->source_sample_rate,
-                                             audio->output_sample_rate,
-                                             audio->source_sample_width_bits,
-                                             audio->output_sample_width_bits,
-                                             audio->output_frames,
-                                             audio->resampled,
-                                             audio->quantized,
-                                             audio->sample_width_converted,
-                                             audio->source_channels == 2U,
-                                             audio->dither_algorithm,
-                                             audio->clipped_samples};
+    report.audio_import = AudioImportSummary{audio.source_path,
+                                             audio.source_format,
+                                             audio.source_subtype,
+                                             audio.source_channels,
+                                             audio.source_sample_rate,
+                                             audio.output_sample_rate,
+                                             audio.source_sample_width_bits,
+                                             audio.output_sample_width_bits,
+                                             audio.output_frames,
+                                             audio.resampled,
+                                             audio.quantized,
+                                             audio.sample_width_converted,
+                                             audio.source_channels == 2U,
+                                             audio.dither_algorithm,
+                                             audio.clipped_samples};
     return report;
+}
+
+Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
+                                        const InsertWaveformOperation &operation,
+                                        const CancellationToken &cancellation) {
+    AudioImportOptions options;
+    options.expected_channels = static_cast<std::uint8_t>(operation.waveform.waveform_names.size());
+    options.target_sample_rate = operation.waveform.target_sample_rate;
+    auto audio = import_sampler_audio(operation.waveform.path, options);
+    if (!audio)
+        return std::unexpected{audio.error()};
+    return insert_waveform_audio(state, context, operation, *audio, cancellation);
 }
 
 Result<OperationReport> delete_waveform(TransactionState &state, OperationContext context,

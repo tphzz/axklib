@@ -61,10 +61,11 @@ import type {
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
+    Tx16wImportInspection,
+    Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
 } from './transport';
-
 import {
     clientUploadLocation,
     type ClientUploadLocation,
@@ -150,33 +151,27 @@ export class HttpImageTransport implements ImageTransport {
         );
         return clientUploadLocation({ uploadId: uploaded.uploadId }, kind, file.name);
     }
-
     async releaseClientUpload(source: ClientUploadLocation): Promise<void> {
         await this.client.deleteUpload(source.reference);
     }
-
     async audioImportCapabilities(): Promise<AudioImportCapabilities> {
-        const serverCapabilities = await this.client.serverCapabilities();
-        const capabilities = serverCapabilities.audioImport;
-        if (!capabilities) throw new Error('The connected server does not publish audio import capabilities');
-        return { ...capabilities, maximumUploads: serverCapabilities.limits.maximumUploads };
+        return this.imports.capabilities();
     }
-
     async inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo> {
-        const result = await this.client.invoke<AudioSourceInfo>('audio.inspect', {
-            source: serverInput(source),
-            ...(targetSampleRate === undefined ? {} : { targetSampleRate }),
-        });
-        if (this.jobs.isJob(result)) throw new Error('audio.inspect unexpectedly returned a job');
-        return result;
+        return this.imports.inspectAudio(source, targetSampleRate);
     }
 
-    async inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
-        const result = await this.client.invoke<MidiInspection>('midi.inspect', { source: serverInput(source) });
-        if (this.jobs.isJob(result)) throw new Error('midi.inspect unexpectedly returned a job');
-        return result;
+    inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
+        return this.imports.inspectMidi(source);
     }
-
+    async inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection> {
+        return this.imports.inspectTx16wDiskSet(sessionId, sources, target, importMode);
+    }
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -201,6 +196,14 @@ export class HttpImageTransport implements ImageTransport {
         return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy);
     }
 
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<JobState> {
+        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode);
+    }
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = serverFile(location);
         return downloadServerFile(this.client, source.reference, source.displayName);

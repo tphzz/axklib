@@ -551,10 +551,29 @@ TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
     axk::ProgramSpec program;
     program.number = 1U;
     program.name = "Program";
-    program.assignments.resize(12U);
+    program.assignments.resize(axk::maximum_program_assignments + 1U);
     const auto oversized_program = axk::detail::prepare_prog_payload(program);
     ASSERT_FALSE(oversized_program);
     EXPECT_EQ(oversized_program.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, EncodesTheNativeTx16wProgramAssignmentCapacity) {
+    axk::ProgramSpec program;
+    program.number = 7U;
+    program.name = "Wide";
+    for (std::size_t index = 0U; index < axk::maximum_program_assignments; ++index) {
+        program.assignments.push_back(
+            {"SBAC", std::format("Bank {}", index + 1U), 0U, axk::ProgramReceiveMode::sample});
+    }
+
+    const auto payload = axk::detail::prepare_prog_payload(program);
+    ASSERT_TRUE(payload) << payload.error().message;
+    const auto decoded = axk::decode_object(*payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *current = std::get_if<axk::CurrentProg>(&decoded->payload);
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->assignments.size(), axk::maximum_program_assignments);
+    EXPECT_EQ(current->assignments.back().name, "Bank 16");
 }
 
 TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {

@@ -113,8 +113,9 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
         return std::unexpected{manifest_error("program.number must be between 1 and 128")};
     if (auto valid = require_program_name(program.name, "program.name"); !valid)
         return valid;
-    if (program.assignments.empty() || program.assignments.size() > 11U)
-        return std::unexpected{manifest_error("program.assignments must contain 1..11 assignments")};
+    if (program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
+        return std::unexpected{manifest_error("program.assignments must contain 1..16 assignments")};
+    }
     for (const auto &assignment : program.assignments) {
         if (assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK")
             return std::unexpected{manifest_error("Program assignment target must be SBAC or SBNK")};
@@ -144,23 +145,7 @@ Result<void> validate_authored_program(const ProgramSpec &program) {
     return {};
 }
 
-Result<void> validate_inserted_program(const ProgramSpec &program) {
-    if (auto valid = validate_program_fields(program); !valid)
-        return valid;
-    const auto generated_profile =
-        program.assignments.size() == 1U && program.assignments.front().receive_mode == ProgramReceiveMode::sample;
-    const auto authored_profile = program.assignments.size() == 2U && program.assignments[0].target_kind == "SBAC" &&
-                                  program.assignments[0].receive_mode == ProgramReceiveMode::midi_channel &&
-                                  program.assignments[0].receive_channel == 1U &&
-                                  program.assignments[1].target_kind == "SBNK" &&
-                                  program.assignments[1].receive_mode == ProgramReceiveMode::midi_channel &&
-                                  program.assignments[1].receive_channel == 2U;
-    if (!generated_profile && !authored_profile) {
-        return std::unexpected{manifest_error("inserted Program must use one SBAC/SBNK SAMPLE assignment or the "
-                                              "verified SBAC/channel 1 then SBNK/channel 2 profile")};
-    }
-    return {};
-}
+Result<void> validate_inserted_program(const ProgramSpec &program) { return validate_program_fields(program); }
 
 Result<void> validate_volume(const VolumeSpec &volume) {
     if (auto valid = require_object_name(volume.name, "volume.name"); !valid)
@@ -293,6 +278,14 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (id.value <= 2U || !ids.insert(id.value).second)
                         return std::unexpected{manifest_error("object_sfs_ids must contain unique object SFS IDs")};
                 }
+                return {};
+            } else if constexpr (std::same_as<T, ImportTx16wDiskSetOperation>) {
+                if (auto valid = require_object_name(operation.volume_name, "volume_name"); !valid)
+                    return valid;
+                if (operation.disk_paths.empty() || operation.disk_paths.size() > 32U)
+                    return std::unexpected{manifest_error("disk_paths must contain 1..32 paths")};
+                if (std::ranges::any_of(operation.disk_paths, &std::filesystem::path::empty))
+                    return std::unexpected{manifest_error("disk_paths must contain non-empty paths")};
                 return {};
             } else {
                 if (auto valid = require_text(operation.volume_name, "volume_name"); !valid)

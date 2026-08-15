@@ -171,6 +171,12 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
 Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
                                         const InsertWaveformOperation &operation,
                                         const CancellationToken &cancellation);
+Result<OperationReport> insert_waveform_audio(TransactionState &state, OperationContext context,
+                                              const InsertWaveformOperation &operation, const ImportedAudio &audio,
+                                              const CancellationToken &cancellation);
+Result<OperationReport> import_tx16w_disk_set(TransactionState &state, OperationContext context,
+                                              const ImportTx16wDiskSetOperation &operation,
+                                              const CancellationToken &cancellation);
 Result<OperationReport> delete_waveform(TransactionState &state, OperationContext context,
                                         const DeleteWaveformOperation &operation,
                                         const CancellationToken &cancellation);
