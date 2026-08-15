@@ -2,14 +2,29 @@ import { tick } from 'svelte';
 
 import type { ObjectSelectionMode } from './objectSelection';
 
-export function linearNavigationIndex(key: string, currentIndex: number, itemCount: number): number | null {
+export function linearNavigationIndex(
+    key: string,
+    currentIndex: number,
+    itemCount: number,
+    pageStep = 0,
+): number | null {
     if (itemCount <= 0 || currentIndex < 0 || currentIndex >= itemCount) return null;
     let targetIndex: number | null = null;
     if (key === 'ArrowDown') targetIndex = Math.min(itemCount - 1, currentIndex + 1);
     if (key === 'ArrowUp') targetIndex = Math.max(0, currentIndex - 1);
+    if (key === 'PageDown' && pageStep > 0) targetIndex = Math.min(itemCount - 1, currentIndex + pageStep);
+    if (key === 'PageUp' && pageStep > 0) targetIndex = Math.max(0, currentIndex - pageStep);
     if (key === 'Home') targetIndex = 0;
     if (key === 'End') targetIndex = itemCount - 1;
     return targetIndex;
+}
+
+export function collectionPageStep(currentTarget: EventTarget | null, itemExtent?: number): number {
+    const current = currentTarget instanceof HTMLElement ? currentTarget : null;
+    const container = current?.closest<HTMLElement>('[data-navigation-list]');
+    const measuredExtent = itemExtent ?? current?.offsetHeight ?? 0;
+    if (!container || container.clientHeight <= 0 || measuredExtent <= 0) return 1;
+    return Math.max(1, Math.floor(container.clientHeight / measuredExtent) - 1);
 }
 
 export function keyboardSelectionMode(event: KeyboardEvent): ObjectSelectionMode {

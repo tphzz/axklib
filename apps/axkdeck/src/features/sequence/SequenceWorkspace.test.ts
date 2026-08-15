@@ -68,6 +68,25 @@ describe('SequenceWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: /Third/ }));
     });
 
+    it('moves selection and focus by a visible page in an ordinary list', async () => {
+        const sequences = Array.from({ length: 12 }, (_, index) => sequence(`Song ${index + 1}`, index + 1));
+        const onselect = vi.fn();
+        render(SequenceWorkspace, {
+            props: { ...common, sequences, onselect, onselectionchange: vi.fn() },
+        });
+
+        const first = screen.getByRole('button', { name: /Song 1 / });
+        const list = first.closest<HTMLElement>('[data-navigation-list]')!;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 160 });
+        Object.defineProperty(first, 'offsetHeight', { configurable: true, value: 40 });
+        first.focus();
+
+        await fireEvent.keyDown(first, { key: 'PageDown' });
+
+        expect(onselect).toHaveBeenLastCalledWith(sequences[3]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Song 4 / }));
+    });
+
     it('naturally orders dense Sequence rows and exposes decoded timing facts', () => {
         render(SequenceWorkspace, {
             props: {

@@ -117,6 +117,62 @@ describe('ObjectWorkspace', () => {
         expect(list.scrollTop).toBeGreaterThan(0);
     });
 
+    it('retains selection and focus across repeated paging in virtualized Wave Data', async () => {
+        const waveData = Array.from({ length: 80 }, (_, index) => {
+            const name = `SMP ${String(index + 1).padStart(3, '0')}`;
+            const waveObject = {
+                ...object('SMPL', name),
+                sampleRate: 44_100,
+                sampleWidthBytes: 2,
+                frameCount: 1,
+            };
+            return {
+                id: waveObject.key,
+                objectKey: waveObject.key,
+                name,
+                note: 'C3',
+                duration: '0.00 s',
+                sampleRate: '44.1 kHz',
+                bitDepth: '16-bit',
+                channels: 'Mono' as const,
+                storedSizeBytes: 2,
+                waveform: [],
+                previewState: 'idle' as const,
+                object: waveObject,
+            };
+        });
+        const onwavedataselect = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData,
+                view: 'wave-data',
+                onwavedataselect,
+                onselectionchange: vi.fn(),
+            },
+        });
+
+        const list = document.querySelector('.collection-body') as HTMLElement;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
+        screen.getByRole('button', { name: 'Inspect SMP 001' }).focus();
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 005' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[8]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 009' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageUp' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 005' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[79]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 080' }));
+    });
+
     it('mounts and scrolls a bounded window of Wave Data rows and canvases', async () => {
         const waveData = Array.from({ length: 200 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;

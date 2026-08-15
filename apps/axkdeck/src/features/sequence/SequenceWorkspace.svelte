@@ -7,6 +7,7 @@
         type PackageExportSelectionState,
     } from '../../lib/objectSelection';
     import {
+        collectionPageStep,
         focusCollectionIndex,
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
@@ -164,7 +165,12 @@
 
     function handleSequenceKeyboard(event: KeyboardEvent, currentIndex: number, item: SequenceItem): void {
         if (!hasDisallowedNavigationModifier(event)) {
-            const targetIndex = linearNavigationIndex(event.key, currentIndex, filteredSequences.length);
+            const targetIndex = linearNavigationIndex(
+                event.key,
+                currentIndex,
+                filteredSequences.length,
+                collectionPageStep(event.currentTarget),
+            );
             if (targetIndex !== null) {
                 event.preventDefault();
                 if (targetIndex === currentIndex) return;

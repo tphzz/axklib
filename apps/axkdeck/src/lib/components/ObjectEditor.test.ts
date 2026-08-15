@@ -265,6 +265,37 @@ describe('ObjectEditor', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: /Cello/ }));
     });
 
+    it('pages through the complete Sample Select list while retaining focus', async () => {
+        const onassignmentselect = vi.fn();
+        const selection = programSelection();
+        const samples = Array.from({ length: 8 }, (_, index) => sampleItem('SBNK', `Sample ${index + 1}`));
+        selection.sampleSelect = programSampleSelectRows(
+            selection.assignments,
+            [sampleItem('SBAC', 'String Bank', 'SBAC-String Bank')],
+            samples,
+        );
+        render(ObjectEditor, {
+            props: {
+                selection,
+                assignmentQuery: '',
+                onassignmentquerychange: vi.fn(),
+                onassignmentselect,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Show only assigned' }));
+        const first = screen.getByRole('button', { name: /String Bank/ });
+        const list = first.closest<HTMLElement>('[data-navigation-list]')!;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 120 });
+        Object.defineProperty(first, 'offsetHeight', { configurable: true, value: 30 });
+        first.focus();
+
+        await fireEvent.keyDown(first, { key: 'PageDown' });
+
+        expect(onassignmentselect).toHaveBeenLastCalledWith(expect.objectContaining({ targetName: 'Sample 3' }));
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Sample 3/ }));
+    });
+
     it('exposes the complete SBNK tab set and remembers the active tab across SBNK selections', async () => {
         const { rerender } = render(ObjectEditor, {
             props: {

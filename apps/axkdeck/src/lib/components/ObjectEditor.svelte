@@ -1,5 +1,6 @@
 <script lang="ts">
     import {
+        collectionPageStep,
         focusCollectionIndex,
         hasDisallowedNavigationModifier,
         linearNavigationIndex,
@@ -66,7 +67,12 @@
     function navigateAssignments(event: KeyboardEvent, row: ProgramSampleSelectRow): void {
         if (hasDisallowedNavigationModifier(event)) return;
         const currentIndex = navigableAssignments.findIndex((candidate) => candidate.id === row.id);
-        const targetIndex = linearNavigationIndex(event.key, currentIndex, navigableAssignments.length);
+        const targetIndex = linearNavigationIndex(
+            event.key,
+            currentIndex,
+            navigableAssignments.length,
+            collectionPageStep(event.currentTarget),
+        );
         if (targetIndex === null) return;
         event.preventDefault();
         const target = navigableAssignments[targetIndex];

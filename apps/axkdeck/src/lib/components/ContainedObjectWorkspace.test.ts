@@ -148,6 +148,51 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('button', { name: 'Inspect Sample 200' })).toBeTruthy();
     });
 
+    it('pages repeatedly within a virtualized lane and retains horizontal navigation', async () => {
+        const samples = Array.from({ length: 200 }, (_, index) =>
+            structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
+        );
+        const waves = [waveform('Wave 001')];
+        const onsampleselect = vi.fn();
+        const onwavedataselect = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'samples',
+                sampleBanks: [],
+                samples,
+                waveData: waves,
+                activeSampleBankId: '',
+                activeSampleId: samples[0]!.objectId,
+                activeWaveDataId: waves[0]!.objectKey,
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onsampleselect,
+                onwavedataselect,
+            },
+        });
+
+        const lists = [...document.querySelectorAll<HTMLElement>('.contained-list')];
+        Object.defineProperty(lists[0], 'clientHeight', { configurable: true, value: 260 });
+        screen.getByRole('button', { name: 'Inspect Sample 001' }).focus();
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 010' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[18]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 019' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageUp' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 010' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowRight' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waves[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Wave 001' }));
+    });
+
     it('creates a Sample Bank from standalone and already-banked Samples in displayed order', async () => {
         const sample2 = structure('SBNK', 'Sample 2');
         const sample10 = structure('SBNK', 'Sample 10');

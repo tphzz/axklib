@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import {
+        collectionPageStep,
         focusCollectionIndex,
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
@@ -271,7 +272,13 @@
     function navigateObject(event: KeyboardEvent, currentIndex: number): boolean {
         if (hasDisallowedNavigationModifier(event)) return false;
         const items = view === 'programs' ? filteredPrograms : filteredWaveData;
-        const targetIndex = linearNavigationIndex(event.key, currentIndex, items.length);
+        const itemExtent = view === 'wave-data' ? waveDataRowExtent : undefined;
+        const targetIndex = linearNavigationIndex(
+            event.key,
+            currentIndex,
+            items.length,
+            collectionPageStep(event.currentTarget, itemExtent),
+        );
         if (targetIndex === null) return false;
         event.preventDefault();
         if (targetIndex === currentIndex) return true;
@@ -284,11 +291,7 @@
             if (view === 'programs') onprogramselect(target as Program);
             else onwavedataselect(target as WaveDataItem);
         }
-        void focusCollectionIndex(
-            event.currentTarget,
-            targetIndex,
-            view === 'wave-data' ? waveDataRowExtent : undefined,
-        );
+        void focusCollectionIndex(event.currentTarget, targetIndex, itemExtent);
         return true;
     }
 

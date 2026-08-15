@@ -1,6 +1,7 @@
 <script lang="ts">
     import { matchesSearch } from '../auditionVisibility';
     import {
+        collectionPageStep,
         focusCollectionIndex,
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
@@ -376,18 +377,20 @@
         }
         if (!hasDisallowedNavigationModifier(event)) {
             const items = visibleItems(scope);
-            const targetIndex = linearNavigationIndex(event.key, currentIndex, items.length);
+            const itemExtent = scope === 'sample-banks' ? undefined : containedRowExtent;
+            const targetIndex = linearNavigationIndex(
+                event.key,
+                currentIndex,
+                items.length,
+                collectionPageStep(event.currentTarget, itemExtent),
+            );
             if (targetIndex !== null) {
                 event.preventDefault();
                 if (targetIndex === currentIndex) return;
                 const target = items[targetIndex];
                 if (!target) return;
                 inspect(scope, target, keyboardSelectionMode(event));
-                void focusCollectionIndex(
-                    event.currentTarget,
-                    targetIndex,
-                    scope === 'sample-banks' ? undefined : containedRowExtent,
-                );
+                void focusCollectionIndex(event.currentTarget, targetIndex, itemExtent);
                 return;
             }
         }
