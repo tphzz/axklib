@@ -2777,34 +2777,6 @@ input:focus-visible {
   border-bottom: 1px solid var(--color-border);
 }
 
-.editor-object-title {
-  display: flex;
-  width: 170px;
-  min-width: 120px;
-  flex-direction: column;
-  justify-content: center;
-  padding: 2px 8px;
-  border-right: 1px solid var(--color-border);
-  overflow: hidden;
-}
-
-.editor-object-title span,
-.editor-object-title strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.editor-object-title span {
-  color: var(--color-text-muted);
-  font-size: 8px;
-}
-
-.editor-object-title strong {
-  color: var(--color-text-strong);
-  font-size: 10px;
-}
-
 .editor-tabs {
   display: flex;
   min-width: 0;

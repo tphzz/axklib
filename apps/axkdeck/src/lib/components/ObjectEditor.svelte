@@ -184,7 +184,6 @@
         </div>
     {:else if selection?.kind === 'sample'}
         <header class="editor-header">
-            <div class="editor-object-title"><span>Sample</span><strong>{selection.item.name}</strong></div>
             <div class="editor-tabs" role="tablist" aria-label="Sample editor">
                 {#each sampleTabs as tab (tab.id)}
                     <button

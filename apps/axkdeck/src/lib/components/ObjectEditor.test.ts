@@ -297,7 +297,7 @@ describe('ObjectEditor', () => {
     });
 
     it('exposes the complete SBNK tab set and remembers the active tab across SBNK selections', async () => {
-        const { rerender } = render(ObjectEditor, {
+        const { container, rerender } = render(ObjectEditor, {
             props: {
                 selection: sampleSelection(),
                 assignmentQuery: '',
@@ -313,6 +313,8 @@ describe('ObjectEditor', () => {
             'LFO',
             'MIDI/CTRL',
         ]);
+        expect(container.querySelector('.editor-header > .editor-tabs:first-child')).toBeTruthy();
+        expect(container.querySelector('.editor-object-title')).toBeNull();
         await fireEvent.click(screen.getByRole('tab', { name: 'LFO' }));
         await rerender({
             selection: sampleSelection(),
