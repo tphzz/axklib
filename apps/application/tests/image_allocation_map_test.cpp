@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <numeric>
 
 #include "axklib/application/allocation_map.hpp"
