@@ -235,9 +235,9 @@ Result<Wave> decode_wave(std::span<const std::byte> bytes, std::string source_na
     result.pcm.reserve(static_cast<std::size_t>(logical_frames));
     const auto pcm_end = header_size + static_cast<std::size_t>(packed_bytes);
     for (std::size_t offset = header_size; offset < pcm_end; offset += 3U) {
-        const auto first = std::to_integer<std::uint16_t>(bytes[offset]);
-        const auto middle = std::to_integer<std::uint16_t>(bytes[offset + 1U]);
-        const auto second = std::to_integer<std::uint16_t>(bytes[offset + 2U]);
+        const auto first = std::to_integer<std::uint32_t>(bytes[offset]);
+        const auto middle = std::to_integer<std::uint32_t>(bytes[offset + 1U]);
+        const auto second = std::to_integer<std::uint32_t>(bytes[offset + 2U]);
         result.pcm.push_back(expand_pcm(static_cast<std::uint16_t>((first << 4U) | (middle >> 4U))));
         if (result.pcm.size() < logical_frames)
             result.pcm.push_back(expand_pcm(static_cast<std::uint16_t>((second << 4U) | (middle & 0x0fU))));
