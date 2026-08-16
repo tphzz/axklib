@@ -54,19 +54,19 @@ owner_for(const axk::IndexRecord &record, std::string kind, std::optional<std::u
                                           {},
                                           {},
                                           {}};
-    if (const auto found = objects_by_sfs_id.find(record.sfs_id.value); found != objects_by_sfs_id.end()) {
-        result.object_id = found->second.object_id;
-        result.object_type = found->second.object_type;
-        result.object_name = found->second.object_name;
-        result.volume_name = found->second.volume_name;
-        result.category_name = found->second.category_name;
+    if (const auto object_it = objects_by_sfs_id.find(record.sfs_id.value); object_it != objects_by_sfs_id.end()) {
+        result.object_id = object_it->second.object_id;
+        result.object_type = object_it->second.object_type;
+        result.object_name = object_it->second.object_name;
+        result.volume_name = object_it->second.volume_name;
+        result.category_name = object_it->second.category_name;
     } else {
         result.object_type = record.object_type;
         result.object_name = record.object_name;
         if (result.object_name.empty()) {
-            if (const auto found = record_names_by_sfs_id.find(record.sfs_id.value);
-                found != record_names_by_sfs_id.end()) {
-                result.object_name = found->second;
+            if (const auto record_name_it = record_names_by_sfs_id.find(record.sfs_id.value);
+                record_name_it != record_names_by_sfs_id.end()) {
+                result.object_name = record_name_it->second;
             }
         }
         if (result.record_kind == "UNKNOWN" &&
