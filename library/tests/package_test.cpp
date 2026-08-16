@@ -2787,6 +2787,30 @@ TEST(PackageImportPlanner, ReportsAtomicVolumeScaffoldingShortfallExactly) {
               1U);
 }
 
+TEST(PackageImportPlanner, PrefersOneContiguousExtentOverEarlierFragmentedFreeClusters) {
+    axk::Partition partition;
+    partition.directory_index_cluster = 10U;
+    partition.directory_index_span_clusters = 1U;
+    partition.cluster_count = 30U;
+
+    axk::package_import_internal::PartitionCapacity capacity;
+    capacity.partition = &partition;
+    for (std::uint32_t cluster = 11U; cluster < partition.cluster_count; ++cluster) {
+        const auto isolated_early_hole = cluster < 21U && (cluster % 2U) != 0U;
+        const auto contiguous_late_hole = cluster >= 21U && cluster <= 26U;
+        if (!isolated_early_hole && !contiguous_late_hole)
+            capacity.used_clusters.insert(cluster);
+    }
+
+    const auto reserved = axk::package_import_internal::reserve_clusters(capacity, 6U);
+
+    ASSERT_TRUE(reserved);
+    ASSERT_EQ(reserved->extents.size(), 1U);
+    EXPECT_EQ(reserved->extents.front().cluster_offset, 21U);
+    EXPECT_EQ(reserved->extents.front().cluster_count, 6U);
+    EXPECT_EQ(reserved->continuation_clusters, 0U);
+}
+
 TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {
     const auto output_root = publication_root("axklib-package-iso-capacity");
     const auto audio_path = output_root / "tone.wav";

@@ -13,6 +13,7 @@
 #include "axklib/object.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/writer_internal.hpp"
+#include "sfs_cluster_allocation.hpp"
 
 namespace axk::alteration_internal {
 
@@ -116,32 +117,13 @@ std::vector<SfsId> free_ids(const MutablePartition &partition, std::size_t count
 
 Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::uint32_t count) {
     const auto first = partition.source->directory_index_cluster + partition.source->directory_index_span_clusters;
-    std::uint32_t run_begin{};
-    std::uint32_t run_length{};
-    for (std::uint32_t cluster = first; cluster < partition.source->cluster_count; ++cluster) {
-        if (bitmap_used(partition.bitmap, cluster)) {
-            run_length = 0U;
-            continue;
-        }
-        if (run_length == 0U)
-            run_begin = cluster;
-        ++run_length;
-        if (run_length == count) {
-            for (std::uint32_t selected = run_begin; selected < run_begin + count; ++selected)
-                set_bitmap(partition.bitmap, selected, true);
-            return std::vector{Extent{run_begin, count, count * 1'024U}};
-        }
-    }
-    std::vector<std::uint32_t> selected;
-    for (std::uint32_t cluster = first; cluster < partition.source->cluster_count && selected.size() < count;
-         ++cluster) {
-        if (!bitmap_used(partition.bitmap, cluster))
-            selected.push_back(cluster);
-    }
-    if (selected.size() != count)
+    auto selected = detail::select_sfs_payload_clusters(
+        first, partition.source->cluster_count, count,
+        [&](const std::uint32_t cluster) { return bitmap_used(partition.bitmap, cluster); });
+    if (!selected)
         return std::unexpected{transaction_error("partition has insufficient free clusters")};
     std::vector<Extent> result;
-    for (const auto cluster : selected) {
+    for (const auto cluster : *selected) {
         set_bitmap(partition.bitmap, cluster, true);
         if (!result.empty() && result.back().cluster_offset + result.back().cluster_count == cluster) {
             ++result.back().cluster_count;
