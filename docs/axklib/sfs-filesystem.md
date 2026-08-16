@@ -171,6 +171,13 @@ each stored copy with that reconstruction:
 | `marked_used_without_index_extent` | A stored copy marks a cluster used, but no valid index record owns it. |
 | `index_extent_marked_free` | A valid index record owns a cluster that is clear in that stored copy. |
 
+The reserved metadata prefix is implicit in the partition geometry. It is not
+an index-record extent and is therefore not marked in the reconstructed bitmap.
+The allocation inspector still identifies those clusters as reserved so their
+role remains visible, but a clear stored bitmap bit in that prefix is not an
+`index_extent_marked_free` mismatch. Conversely, a set stored bitmap bit in the
+reserved prefix remains visible as allocated storage without an index claim.
+
 Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
 without listing every cluster.
 
@@ -202,6 +209,12 @@ free_clusters = cluster_count - first_payload_cluster - allocated_clusters
 free_bytes = free_clusters * sectors_per_cluster * sector_size
 sampler_visible_free_kib = free_bytes // 1024
 ```
+
+Allocation summaries use the same payload-only accounting. Consequently,
+`reserved_clusters + allocated_clusters + free_clusters == cluster_count`,
+where allocated and free clusters both exclude the reserved prefix. Free-run
+counts and the largest free run are likewise measured only in the payload
+region.
 
 Use the native function for the same calculation in applications:
 
@@ -425,6 +438,39 @@ Allocation-integrity failures use stable validation codes:
 All four conditions are errors and make the image unsafe for mutation. They do
 not prevent bounded inventory, validation, or export from still-readable
 objects.
+
+### Allocation Inspection
+
+axkdeck exposes a read-only **Visualize partition allocation...** action on the
+context menu of an SFS partition. The action opens a separate, revision-pinned
+window with partition statistics and a cluster map. Hovering a cell reports its
+partition-relative cluster plus absolute sector and byte position, SFS record,
+extent, object type, object name, category, and volume when those identities are
+known. The complete run-length encoded map can also be exported as JSON for
+automated inspection.
+
+The view deliberately presents three different allocation layers instead of
+collapsing them into one inferred state:
+
+- the fixed-location allocation bitmap;
+- the header-addressed allocation bitmap copy; and
+- implicit reserved-metadata ownership plus index-record continuation and data
+  extents. Only continuation and data extents contribute to the reconstructed
+  allocation bitmap.
+
+Clusters where those layers disagree are highlighted separately from normal
+reserved, continuation, directory, SFS support-file, sampler-object, unknown
+record-data, and free clusters. Directory entry names are projected onto their
+linked records when no sampler object identity exists. This identifies the
+formatter-authored `sfserram` extent as SFS support data and the root record as
+directory data; neither is an unknown sampler object. A bitmap-copy mismatch, an
+allocated cluster without a reconstructed index owner, an index extent or
+continuation claim on a payload cluster marked free, or multiple claims remains
+a diagnostic anomaly. The reserved prefix is not reported as claimed-but-free
+merely because it is implicit rather than bitmap-allocated. The inspector does
+not repair or reinterpret any genuine mismatch. If the image revision changes
+after the window opens, its request is rejected so the visualization cannot
+silently mix metadata from two image states.
 
 Extent byte-total mismatch has a narrow copy-only repair when it is the only
 allocation inconsistency anywhere in the image. Overreported layouts are

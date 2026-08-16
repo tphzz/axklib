@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "axklib/application/allocation_map.hpp"
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/path_reservations.hpp"
@@ -466,6 +467,9 @@ class ImageSessionManager {
                   std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});
     [[nodiscard]] Result<ImageSystemProgramContexts>
     system_program_contexts(std::string_view image_id, std::string_view owner_id, std::uint8_t partition_index);
+    [[nodiscard]] Result<ImageAllocationMap> allocation_map(std::string_view image_id, std::string_view owner_id,
+                                                            std::uint64_t expected_revision,
+                                                            std::uint8_t partition_index);
     [[nodiscard]] Result<ImagePage<ImageValidationItem>>
     validation_issues(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                       std::optional<std::string_view> cursor = std::nullopt);

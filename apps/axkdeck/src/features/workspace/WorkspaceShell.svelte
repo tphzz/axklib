@@ -79,6 +79,7 @@
         audioExportAvailable: boolean;
         sequenceExportAvailable: boolean;
         mediaConversionAvailable: boolean;
+        allocationInspectionAvailable: boolean;
         openConnectionSettings: () => void;
         openImage: () => void;
         createImage: () => void;
@@ -139,6 +140,7 @@
         audioExportAvailable,
         sequenceExportAvailable,
         mediaConversionAvailable,
+        allocationInspectionAvailable,
         openConnectionSettings,
         openImage,
         createImage,
@@ -340,6 +342,7 @@
             volumeFloppyExportEnabled={volumeFloppyExportAvailable}
             audioExportEnabled={audioExportAvailable}
             mediaConversionEnabled={mediaConversionAvailable}
+            allocationInspectionEnabled={allocationInspectionAvailable}
             onimageaction={imageAction}
             onloadchildren={(parentId, offset, limit) =>
                 sessionId === null

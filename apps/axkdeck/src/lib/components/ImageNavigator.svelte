@@ -29,6 +29,7 @@
         volumeFloppyExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
+        allocationInspectionEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
     }
 
@@ -53,6 +54,7 @@
         volumeFloppyExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
+        allocationInspectionEnabled = false,
         onimageaction,
     }: Props = $props();
     let filter = $state('');
@@ -277,6 +279,7 @@
                         {volumeFloppyExportEnabled}
                         {audioExportEnabled}
                         {mediaConversionEnabled}
+                        {allocationInspectionEnabled}
                         onrequestmenu={requestTreeMenu}
                     />
                 {:else}
@@ -319,6 +322,12 @@
         onkeydown={(event) => event.stopPropagation()}
     >
         {#if treeMenu.item.kind === 'partition'}
+            {#if allocationInspectionEnabled}
+                <button type="button" role="menuitem" onclick={() => chooseTreeAction('inspect-allocation')}
+                    >Visualize partition allocation…</button
+                >
+                <div class="context-menu-separator" role="separator"></div>
+            {/if}
             {#if packageImportEnabled}
                 <button type="button" role="menuitem" onclick={() => chooseTreeAction('import-packages')}
                     >Import packages…</button

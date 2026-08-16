@@ -846,6 +846,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/allocation-map': {
+        parameters: {
+            query: {
+                expectedRevision: number;
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.allocationMap'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/companions': {
         parameters: {
             query?: never;
@@ -1968,6 +1989,90 @@ export interface components {
                 roots: components['schemas']['HostDirectoryEntry'][];
             };
             meta: components['schemas']['ResponseMeta'];
+        };
+        ImageAllocationMap: {
+            clusterCount: number;
+            clusterSizeBytes: number;
+            imageId: string;
+            partitionIndex: number;
+            partitionName: string;
+            partitionStartSector: number;
+            revision: number;
+            runs: components['schemas']['ImageAllocationRun'][];
+            sectorSizeBytes: number;
+            sectorsPerCluster: number;
+            summary: components['schemas']['ImageAllocationSummary'];
+        };
+        ImageAllocationMapResponse: {
+            data: components['schemas']['ImageAllocationMap'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        ImageAllocationOwner: {
+            categoryName: string;
+            /** @enum {string} */
+            claimKind: 'RESERVED' | 'CONTINUATION' | 'DATA';
+            extentIndex: number | null;
+            objectId: string | null;
+            objectName: string;
+            objectType: string;
+            /** @enum {string} */
+            recordKind: 'METADATA' | 'DIRECTORY' | 'SUPPORT' | 'OBJECT' | 'ALTERNATING_BYTE_OBJECT' | 'UNKNOWN';
+            sfsId: number | null;
+            volumeName: string;
+        };
+        ImageAllocationRun: {
+            /** @enum {string} */
+            allocationKind:
+                | 'RESERVED'
+                | 'CONTINUATION'
+                | 'DIRECTORY'
+                | 'SUPPORT'
+                | 'DATA'
+                | 'UNKNOWN'
+                | 'FREE'
+                | 'UNCLAIMED'
+                | 'CONFLICT';
+            byteCount: number;
+            byteOffset: number;
+            clusterCount: number;
+            consistencyFlags: (
+                'BITMAP_COPY_MISMATCH' | 'CLAIMED_BUT_FREE' | 'USED_WITHOUT_CLAIM' | 'MULTIPLE_CLAIMS'
+            )[];
+            fixedBitmapUsed: boolean;
+            headerBitmapUsed: boolean;
+            owners: components['schemas']['ImageAllocationOwner'][];
+            /** @description True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded. */
+            reconstructedUsed: boolean;
+            sectorCount: number;
+            startCluster: number;
+            startSector: number;
+        };
+        ImageAllocationSummary: {
+            /** @description Bytes represented by allocatedClusters at the partition cluster size. */
+            allocatedBytes: number;
+            /** @description Bitmap-allocated payload clusters. The implicit reserved metadata prefix is excluded. */
+            allocatedClusters: number;
+            bitmapCopyMismatchClusters: number;
+            /** @description Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap. */
+            claimedButFreeClusters: number;
+            conflictingClusters: number;
+            continuationClusters: number;
+            dataClusters: number;
+            dataSlackBytes: number;
+            fragmentedRecordCount: number;
+            /** @description Bitmap-clear payload clusters. The implicit reserved metadata prefix is excluded. */
+            freeClusters: number;
+            freeRunCount: number;
+            invalidExtentRecords: number;
+            largestFreeRunClusters: number;
+            logicalRecordBytes: number;
+            maximumExtentCount: number;
+            recordCount: number;
+            /** @description Clusters in the implicit metadata prefix before the first payload cluster. */
+            reservedClusters: number;
+            totalClusters: number;
+            totalExtentCount: number;
+            usedWithoutClaimClusters: number;
         };
         ImageAlterationInspection: {
             /** @constant */
@@ -9018,6 +9123,42 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageCloseResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.allocationMap': {
+        parameters: {
+            query: {
+                expectedRevision: number;
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revision-pinned SFS partition cluster allocation map */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageAllocationMapResponse'];
                 };
             };
             /** @description Request could not be completed */

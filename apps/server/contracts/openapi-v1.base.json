@@ -360,6 +360,22 @@
         }
       }
     },
+    "/images/{imageId}/allocation-map": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+        {"name": "partitionIndex", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 0, "maximum": 7}},
+        {"name": "expectedRevision", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}}
+      ],
+      "get": {
+        "operationId": "images.allocationMap",
+        "responses": {
+          "200": {
+            "description": "Revision-pinned SFS partition cluster allocation map",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageAllocationMapResponse"}}}
+          }
+        }
+      }
+    },
     "/images/{imageId}/validation/issues": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -1262,6 +1278,95 @@
         "required": ["data", "meta"],
         "properties": {
           "data": {"$ref": "#/components/schemas/SystemProgramContexts"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImageAllocationOwner": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claimKind", "sfsId", "extentIndex", "recordKind", "objectId", "objectType", "objectName", "volumeName", "categoryName"],
+        "properties": {
+          "claimKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DATA"]},
+          "sfsId": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
+          "extentIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
+          "recordKind": {"type": "string", "enum": ["METADATA", "DIRECTORY", "SUPPORT", "OBJECT", "ALTERNATING_BYTE_OBJECT", "UNKNOWN"]},
+          "objectId": {"type": ["string", "null"]},
+          "objectType": {"type": "string"},
+          "objectName": {"type": "string"},
+          "volumeName": {"type": "string"},
+          "categoryName": {"type": "string"}
+        }
+      },
+      "ImageAllocationRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["startCluster", "clusterCount", "startSector", "sectorCount", "byteOffset", "byteCount", "fixedBitmapUsed", "headerBitmapUsed", "reconstructedUsed", "allocationKind", "owners", "consistencyFlags"],
+        "properties": {
+          "startCluster": {"type": "integer", "minimum": 0},
+          "clusterCount": {"type": "integer", "minimum": 1},
+          "startSector": {"type": "integer", "minimum": 0},
+          "sectorCount": {"type": "integer", "minimum": 1},
+          "byteOffset": {"type": "integer", "minimum": 0},
+          "byteCount": {"type": "integer", "minimum": 1},
+          "fixedBitmapUsed": {"type": "boolean"},
+          "headerBitmapUsed": {"type": "boolean"},
+          "reconstructedUsed": {"type": "boolean", "description": "True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded."},
+          "allocationKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DIRECTORY", "SUPPORT", "DATA", "UNKNOWN", "FREE", "UNCLAIMED", "CONFLICT"]},
+          "owners": {"type": "array", "items": {"$ref": "#/components/schemas/ImageAllocationOwner"}},
+          "consistencyFlags": {"type": "array", "items": {"type": "string", "enum": ["BITMAP_COPY_MISMATCH", "CLAIMED_BUT_FREE", "USED_WITHOUT_CLAIM", "MULTIPLE_CLAIMS"]}}
+        }
+      },
+      "ImageAllocationSummary": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["totalClusters", "reservedClusters", "dataClusters", "continuationClusters", "freeClusters", "freeRunCount", "largestFreeRunClusters", "allocatedClusters", "allocatedBytes", "logicalRecordBytes", "dataSlackBytes", "recordCount", "fragmentedRecordCount", "totalExtentCount", "maximumExtentCount", "bitmapCopyMismatchClusters", "claimedButFreeClusters", "usedWithoutClaimClusters", "conflictingClusters", "invalidExtentRecords"],
+        "properties": {
+          "totalClusters": {"type": "integer", "minimum": 1},
+          "reservedClusters": {"type": "integer", "minimum": 0, "description": "Clusters in the implicit metadata prefix before the first payload cluster."},
+          "dataClusters": {"type": "integer", "minimum": 0},
+          "continuationClusters": {"type": "integer", "minimum": 0},
+          "freeClusters": {"type": "integer", "minimum": 0, "description": "Bitmap-clear payload clusters. The implicit reserved metadata prefix is excluded."},
+          "freeRunCount": {"type": "integer", "minimum": 0},
+          "largestFreeRunClusters": {"type": "integer", "minimum": 0},
+          "allocatedClusters": {"type": "integer", "minimum": 0, "description": "Bitmap-allocated payload clusters. The implicit reserved metadata prefix is excluded."},
+          "allocatedBytes": {"type": "integer", "minimum": 0, "description": "Bytes represented by allocatedClusters at the partition cluster size."},
+          "logicalRecordBytes": {"type": "integer", "minimum": 0},
+          "dataSlackBytes": {"type": "integer", "minimum": 0},
+          "recordCount": {"type": "integer", "minimum": 0},
+          "fragmentedRecordCount": {"type": "integer", "minimum": 0},
+          "totalExtentCount": {"type": "integer", "minimum": 0},
+          "maximumExtentCount": {"type": "integer", "minimum": 0},
+          "bitmapCopyMismatchClusters": {"type": "integer", "minimum": 0},
+          "claimedButFreeClusters": {"type": "integer", "minimum": 0, "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap."},
+          "usedWithoutClaimClusters": {"type": "integer", "minimum": 0},
+          "conflictingClusters": {"type": "integer", "minimum": 0},
+          "invalidExtentRecords": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageAllocationMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "partitionIndex", "partitionName", "sectorSizeBytes", "sectorsPerCluster", "clusterSizeBytes", "clusterCount", "partitionStartSector", "summary", "runs"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "partitionName": {"type": "string"},
+          "sectorSizeBytes": {"type": "integer", "minimum": 1},
+          "sectorsPerCluster": {"type": "integer", "minimum": 1},
+          "clusterSizeBytes": {"type": "integer", "minimum": 1},
+          "clusterCount": {"type": "integer", "minimum": 1},
+          "partitionStartSector": {"type": "integer", "minimum": 0},
+          "summary": {"$ref": "#/components/schemas/ImageAllocationSummary"},
+          "runs": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/ImageAllocationRun"}}
+        }
+      },
+      "ImageAllocationMapResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/ImageAllocationMap"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

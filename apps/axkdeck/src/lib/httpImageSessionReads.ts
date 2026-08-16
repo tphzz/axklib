@@ -1,6 +1,7 @@
 import { HttpImageSessions } from './httpImageSessions';
 import type {
     CompanionSelection,
+    AllocationMapReference,
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
@@ -50,6 +51,10 @@ export class HttpImageSessionReads {
 
     systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
         return this.imageSessions.systemProgramContexts(sessionId, partitionIndex);
+    }
+
+    allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
+        return this.imageSessions.allocationMapReference(sessionId);
     }
 
     closeImage(sessionId: number): Promise<void> {

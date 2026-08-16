@@ -8,6 +8,7 @@ import type {
     ImageSessionMediaConversionInspection,
     ImageSessionExtentLayoutRepairDestination,
     AudioImportCapabilities,
+    AllocationMapReference,
     AuditionBundleDescriptor,
     ClientDownload,
     CompanionSelection,
@@ -194,6 +195,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     systemProgramContexts(): Promise<SystemProgramContexts> {
+        return this.unavailable();
+    }
+    allocationMapReference(): Promise<AllocationMapReference> {
         return this.unavailable();
     }
     closeImage(): Promise<void> {

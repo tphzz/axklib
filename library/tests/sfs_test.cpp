@@ -622,6 +622,9 @@ TEST(SfsReader, ResolvesFragmentedFortyEightExtentDirectoryAndListAllocation) {
     EXPECT_EQ(record.directory_entries[2].name, "Samples");
     EXPECT_EQ(partition.allocation.fixed_location.used_cluster_count, 49U);
     EXPECT_EQ(partition.allocation.header_addressed.used_cluster_count, 49U);
+    ASSERT_EQ(partition.allocation.header_addressed.used_cluster_ranges.size(), 1U);
+    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_ranges[0].start_cluster, 6U);
+    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_ranges[0].end_cluster, 54U);
     EXPECT_TRUE(partition.allocation.stored_copies_match);
     EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 49U);
     EXPECT_TRUE(partition.allocation.fixed_location.marked_used_without_index_extent.empty());

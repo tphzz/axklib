@@ -642,6 +642,11 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     }
     result.allocation.header_addressed.used_cluster_count = count_bitmap_bits(header_useful, result.cluster_count);
     result.allocation.fixed_location.used_cluster_count = count_bitmap_bits(fixed_useful, result.cluster_count);
+    const std::vector<std::byte> clear_bitmap(useful_size, std::byte{0});
+    result.allocation.header_addressed.used_cluster_ranges =
+        mismatch_ranges(header_useful, clear_bitmap, result.cluster_count, result.cluster_count);
+    result.allocation.fixed_location.used_cluster_ranges =
+        mismatch_ranges(fixed_useful, clear_bitmap, result.cluster_count, result.cluster_count);
     result.allocation.reconstructed_used_cluster_count = count_bitmap_bits(reconstructed, result.cluster_count);
     result.allocation.header_addressed.marked_used_without_index_extent_count =
         mismatch_cluster_count(header_useful, reconstructed, result.cluster_count);

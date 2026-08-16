@@ -87,6 +87,7 @@ export class ImageSessionWorkflow {
     sequenceExportAvailable = $state(false);
     mediaConversionAvailable = $state(false);
     extentLayoutRepairAvailable = $state(false);
+    allocationInspectionAvailable = $state(false);
     integrityDialogOpen = $state(false);
     integrityIssues = $state<ImageValidationIssue[]>([]);
     integrityLoading = $state(false);
@@ -353,6 +354,7 @@ export class ImageSessionWorkflow {
         this.sequenceExportAvailable = opened.sequenceExportAvailable;
         this.mediaConversionAvailable = opened.mediaConversionAvailable;
         this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
+        this.allocationInspectionAvailable = opened.allocationInspectionAvailable;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -440,6 +442,7 @@ export class ImageSessionWorkflow {
         this.sequenceExportAvailable = false;
         this.mediaConversionAvailable = false;
         this.extentLayoutRepairAvailable = false;
+        this.allocationInspectionAvailable = false;
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;

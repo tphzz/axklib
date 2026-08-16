@@ -47,6 +47,12 @@ export interface OpenedImage {
     sequenceExportAvailable: boolean;
     mediaConversionAvailable: boolean;
     extentLayoutRepairAvailable: boolean;
+    allocationInspectionAvailable: boolean;
+}
+
+export interface AllocationMapReference {
+    imageId: string;
+    revision: number;
 }
 
 export type ImageValidationIssue = components['schemas']['ImageValidationItem'];
@@ -473,6 +479,7 @@ export interface ImageTransport {
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage>;
     systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts>;
+    allocationMapReference(sessionId: number): Promise<AllocationMapReference>;
     closeImage(sessionId: number): Promise<void>;
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;

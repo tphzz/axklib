@@ -293,6 +293,7 @@ describe('ImageNavigator', () => {
                 packageImportEnabled: true,
                 volumePackageExportEnabled: true,
                 volumeFloppyExportEnabled: true,
+                allocationInspectionEnabled: true,
                 onimageaction,
             },
         });
@@ -317,6 +318,12 @@ describe('ImageNavigator', () => {
         expect(menuStyle.width).toBe('220px');
         expect(floppyActionStyle.whiteSpace).toBe('nowrap');
         style.remove();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Visualize partition allocation…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'partition-0' }),
+            'inspect-allocation',
+        );
+        await fireEvent.contextMenu(partitionButton!);
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
         expect(treeScroll?.classList.contains('context-menu-open')).toBe(false);
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition-0' }), 'import-packages');

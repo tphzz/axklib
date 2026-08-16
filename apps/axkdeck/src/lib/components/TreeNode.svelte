@@ -24,6 +24,7 @@
         volumeFloppyExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
+        allocationInspectionEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
@@ -42,6 +43,7 @@
         volumeFloppyExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
+        allocationInspectionEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -107,6 +109,7 @@
                     partitionActionsEnabled ||
                     volumePackageExportEnabled ||
                     volumeFloppyExportEnabled ||
+                    allocationInspectionEnabled ||
                     mediaConversionEnabled)) ||
                 (item.kind === 'volume' &&
                     (volumeActionsEnabled ||
@@ -256,6 +259,7 @@
                     {volumeFloppyExportEnabled}
                     {audioExportEnabled}
                     {mediaConversionEnabled}
+                    {allocationInspectionEnabled}
                     {onrequestmenu}
                 />
             {/each}

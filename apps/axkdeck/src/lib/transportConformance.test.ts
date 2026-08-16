@@ -24,6 +24,7 @@ const object: SamplerObject = {
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
     revision: 1,
+    allocationInspectionAvailable: false,
     companionSources: [],
     floppySet: null,
     initialVolume: null,

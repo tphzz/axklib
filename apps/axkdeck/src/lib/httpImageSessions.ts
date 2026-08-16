@@ -19,6 +19,7 @@ import { collectPages } from './pagination';
 import type { ImageLocation } from './storageLocations';
 import type {
     CompanionSelection,
+    AllocationMapReference,
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
@@ -144,6 +145,11 @@ export class HttpImageSessions {
             if (!cursor) return issues;
         }
         throw new Error('Image validation issue pagination exceeded its safety limit');
+    }
+
+    async allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
+        const session = this.get(sessionId);
+        return { imageId: session.remoteId, revision: session.revision };
     }
 
     async objectPage(
@@ -436,6 +442,7 @@ export class HttpImageSessions {
             sequenceExportAvailable: (summary.availableOperations ?? []).includes('images.sequence_export'),
             mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
             extentLayoutRepairAvailable: (summary.availableOperations ?? []).includes('images.extent_layout.repair'),
+            allocationInspectionAvailable: summary.format === 'sfs',
             tree: [disk],
         };
     }

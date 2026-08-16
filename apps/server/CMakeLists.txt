@@ -86,6 +86,7 @@ add_library(
   src/process_lifetime.cpp
   src/request_validation.cpp
   src/server.cpp
+  src/server_allocation_map_response.cpp
   src/server_application.cpp
   src/server_image_responses.cpp
   src/server_infrastructure_responses.cpp

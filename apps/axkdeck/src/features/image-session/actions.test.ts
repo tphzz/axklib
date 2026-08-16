@@ -17,6 +17,7 @@ const secondLocation: ImageLocation = {
 function opened(sessionId: number): OpenedImage {
     return {
         sessionId,
+        allocationInspectionAvailable: false,
         revision: 1,
         companionSources: [],
         floppySet: null,

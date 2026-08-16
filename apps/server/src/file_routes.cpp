@@ -27,6 +27,7 @@ void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
     app.route_dynamic("/api/v1/images/<string>/relationships")(std::move(routes.image_relationships));
     app.route_dynamic("/api/v1/images/<string>/system-program-contexts")(
         std::move(routes.image_system_program_contexts));
+    app.route_dynamic("/api/v1/images/<string>/allocation-map")(std::move(routes.image_allocation_map));
     app.route_dynamic("/api/v1/images/<string>/validation/issues")(std::move(routes.image_validation));
     app.route_dynamic("/api/v1/images/<string>/preview")(std::move(routes.image_preview));
     app.route_dynamic("/api/v1/auditions/<string>/content")

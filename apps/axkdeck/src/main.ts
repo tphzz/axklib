@@ -1,6 +1,7 @@
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
+import AllocationInspector from './AllocationInspector.svelte';
 import { invoke } from '@tauri-apps/api/core';
 import { installDiagnostics, reportDiagnostic, reportError, reportInfo } from './lib/diagnostics';
 import { createInterfaceScaleController, type InterfaceScaleController } from './lib/interfaceScale';
@@ -41,7 +42,12 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
             reportError('axklib-server is unavailable', error);
         }
     }
-    mount(App, { target: mountTarget, props: { interfaceScaling } });
+    const view = new URLSearchParams(window.location.search).get('view');
+    if (view === 'allocation') {
+        mount(AllocationInspector, { target: mountTarget });
+    } else {
+        mount(App, { target: mountTarget, props: { interfaceScaling } });
+    }
 }
 
 void bootstrap(target);

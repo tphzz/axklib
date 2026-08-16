@@ -1,5 +1,6 @@
 import type {
     AudioImportGrouping,
+    AllocationMapReference,
     AudioImportItem,
     AudioImportTarget,
     AudioSourceInfo,
@@ -99,6 +100,7 @@ export interface InMemoryImageTransportOptions {
         | 'sequenceExportAvailable'
         | 'mediaConversionAvailable'
         | 'extentLayoutRepairAvailable'
+        | 'allocationInspectionAvailable'
     > & {
         revision?: number;
         volumeMutationsAvailable?: boolean;
@@ -115,6 +117,7 @@ export interface InMemoryImageTransportOptions {
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
         extentLayoutRepairAvailable?: boolean;
+        allocationInspectionAvailable?: boolean;
         companionSources?: ImageLocation[];
         floppySet?: OpenedImage['floppySet'];
     };
@@ -182,6 +185,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
             extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
+            allocationInspectionAvailable: this.options.opened.allocationInspectionAvailable ?? false,
         };
     }
 
@@ -209,6 +213,7 @@ export class InMemoryImageTransport implements ImageTransport {
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
             extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
+            allocationInspectionAvailable: this.options.opened.allocationInspectionAvailable ?? false,
         };
     }
 
@@ -239,6 +244,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
         return this.invoke('systemProgramContexts', [sessionId, partitionIndex]);
+    }
+
+    allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
+        return Promise.resolve({ imageId: `in-memory-${sessionId}`, revision: this.options.opened.revision ?? 1 });
     }
 
     async closeImage(sessionId: number): Promise<void> {

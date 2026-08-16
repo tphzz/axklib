@@ -115,6 +115,7 @@ struct SfsFreeSpace {
 
 struct AllocationBitmapSummary {
     std::uint32_t used_cluster_count{};
+    std::vector<AllocationMismatchRange> used_cluster_ranges;
     std::uint32_t marked_used_without_index_extent_count{};
     std::uint32_t index_extent_marked_free_count{};
     std::vector<AllocationMismatchRange> marked_used_without_index_extent;

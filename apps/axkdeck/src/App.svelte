@@ -26,6 +26,7 @@
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
     import { createTransport } from './lib/createTransport';
+    import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
     import {
@@ -384,6 +385,28 @@
 
     function requestImageAction(item: DiskTreeItem, action: ImageTreeAction): void {
         if (item.partitionIndex === undefined) return;
+        if (action === 'inspect-allocation') {
+            const sessionId = imageSessionWorkflow.sessionId;
+            if (
+                !isDesktop ||
+                sessionId === null ||
+                !imageSessionWorkflow.allocationInspectionAvailable ||
+                item.kind !== 'partition'
+            )
+                return;
+            imageSessionWorkflow.selectedSource = item;
+            void transport
+                .allocationMapReference(sessionId)
+                .then((reference) =>
+                    openAllocationInspector({
+                        ...reference,
+                        partitionIndex: item.partitionIndex!,
+                        partitionName: item.name,
+                    }),
+                )
+                .catch((error) => imageSessionWorkflow.setStatus(userFacingMessage(error)));
+            return;
+        }
         if (action === 'import-package') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
@@ -585,6 +608,7 @@
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
+    allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
