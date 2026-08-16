@@ -215,7 +215,9 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
             continue;
         const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            const auto found = directories.find(entry.link_id.value);
+            if (!entry.target_link_id)
+                continue;
+            const auto found = directories.find(entry.target_link_id->value);
             if (entry.name == "." || entry.name == ".." || axk::is_partition_support_root_entry(entry.name) ||
                 found == directories.end())
                 continue;
@@ -269,23 +271,23 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
                 return axk::ObjectType::unknown;
             };
             for (const auto &category_entry : volume_record->directory_entries) {
-                if (category_entry.name == "." || category_entry.name == "..")
+                if (category_entry.name == "." || category_entry.name == ".." || !category_entry.target_link_id)
                     continue;
                 ++category_count;
                 const auto type = category_type(category_entry.name);
                 if (type == axk::ObjectType::unknown)
                     continue;
-                const auto category = std::ranges::find(partition->records, category_entry.link_id.value,
+                const auto category = std::ranges::find(partition->records, category_entry.target_link_id->value,
                                                         [](const auto &record) { return record.sfs_id.value; });
                 if (category == partition->records.end())
                     continue;
                 ++category_directory_count;
                 for (const auto &entry : category->directory_entries) {
-                    if (entry.name == "." || entry.name == "..")
+                    if (entry.name == "." || entry.name == ".." || !entry.target_link_id)
                         continue;
                     ++object_entry_count;
                     ++checked_entry_count;
-                    const auto target = std::ranges::find(partition->records, entry.link_id.value,
+                    const auto target = std::ranges::find(partition->records, entry.target_link_id->value,
                                                           [](const auto &record) { return record.sfs_id.value; });
                     if (target == partition->records.end() ||
                         (target->payload_kind != axk::PayloadKind::object &&

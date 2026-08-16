@@ -134,7 +134,11 @@ Result<std::vector<ParsedDirectoryEntry>> parse_directory(std::span<const std::b
         const auto link = (std::to_integer<std::uint32_t>(row[4]) << 24U) |
                           (std::to_integer<std::uint32_t>(row[5]) << 16U) |
                           (std::to_integer<std::uint32_t>(row[6]) << 8U) | std::to_integer<std::uint32_t>(row[7]);
-        result.push_back({SfsId{link}, directory_name(row), offset});
+        const auto raw_link_id = LinkId{link};
+        const auto state = directory_entry_state(raw_link_id);
+        result.push_back({raw_link_id,
+                          state == DirectoryEntryState::live ? std::optional<SfsId>{SfsId{link}} : std::nullopt, state,
+                          directory_name(row), offset});
     }
     if (result.empty() || result.front().name != ".") {
         return std::unexpected{
@@ -303,8 +307,8 @@ Result<SfsId> unique_directory_child(TransactionState &state, MutablePartition &
         return std::unexpected{entries.error()};
     std::vector<SfsId> matches;
     for (const auto &entry : *entries) {
-        if (entry.name == name)
-            matches.push_back(entry.id);
+        if (entry.name == name && entry.target_sfs_id)
+            matches.push_back(*entry.target_sfs_id);
     }
     if (matches.size() != 1U) {
         return std::unexpected{transaction_error("directory requires exactly one entry named " + std::string{name})};
@@ -360,16 +364,17 @@ Result<std::vector<CategoryObject>> category_objects(TransactionState &state, Mu
         return std::unexpected{entries.error()};
     std::vector<CategoryObject> result;
     for (const auto &entry : *entries) {
-        if (entry.name == "." || entry.name == "..")
+        if (entry.name == "." || entry.name == ".." || !entry.target_sfs_id)
             continue;
-        auto object_payload = current_payload(state, partition, entry.id, cancellation);
+        auto object_payload = current_payload(state, partition, *entry.target_sfs_id, cancellation);
         if (!object_payload)
             return std::unexpected{object_payload.error()};
         auto decoded = decode_object(*object_payload);
         if (!decoded || decoded->header.type != expected_type) {
             return std::unexpected{transaction_error("category contains an unresolved or incorrectly typed object")};
         }
-        result.push_back(CategoryObject{entry.name, entry.id, std::move(*object_payload), std::move(*decoded)});
+        result.push_back(
+            CategoryObject{entry.name, *entry.target_sfs_id, std::move(*object_payload), std::move(*decoded)});
     }
     return result;
 }
@@ -441,8 +446,9 @@ Result<void> remove_directory_entry(TransactionState &state, MutablePartition &p
     auto entries = parse_directory(*payload, directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    const auto found = std::ranges::find_if(
-        *entries, [&](const ParsedDirectoryEntry &entry) { return entry.id == child && entry.name == name; });
+    const auto found = std::ranges::find_if(*entries, [&](const ParsedDirectoryEntry &entry) {
+        return entry.target_sfs_id == child && entry.name == name;
+    });
     if (found == entries->end()) {
         return std::unexpected{transaction_error("directory entry is absent from transaction state")};
     }
@@ -463,8 +469,10 @@ Result<PartitionIndex> resolve_partition(const TransactionState &state, const Pa
 }
 
 Result<std::set<SfsId>> volume_closure(const Partition &partition, const DirectoryEntry &volume) {
+    if (!volume.target_link_id)
+        return std::unexpected{transaction_error("volume directory entry is deleted")};
     std::set<SfsId> result;
-    std::vector<SfsId> queue{SfsId{volume.link_id.value}};
+    std::vector<SfsId> queue{SfsId{volume.target_link_id->value}};
     while (!queue.empty()) {
         const auto id = queue.front();
         queue.erase(queue.begin());
@@ -477,15 +485,16 @@ Result<std::set<SfsId>> volume_closure(const Partition &partition, const Directo
         if (item->payload_kind != PayloadKind::directory)
             continue;
         for (const auto &child : item->directory_entries) {
-            if (child.name != "." && child.name != "..")
-                queue.push_back(SfsId{child.link_id.value});
+            if (child.name != "." && child.name != ".." && child.target_link_id)
+                queue.push_back(SfsId{child.target_link_id->value});
         }
     }
     for (const auto &item : partition.records) {
         if (result.contains(item.sfs_id) || item.sfs_id.value == 1U || item.payload_kind != PayloadKind::directory)
             continue;
         for (const auto &child : item.directory_entries) {
-            if (child.name != "." && child.name != ".." && result.contains(SfsId{child.link_id.value})) {
+            if (child.name != "." && child.name != ".." && child.target_link_id &&
+                result.contains(SfsId{child.target_link_id->value})) {
                 return std::unexpected{transaction_error("a directory outside the volume references its closure")};
             }
         }

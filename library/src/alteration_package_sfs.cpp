@@ -40,7 +40,13 @@ Result<void> grow_package_category_directories(TransactionState &state, const Pa
         auto payload = current_payload(state, partition->second, *directory, cancellation);
         if (!payload)
             return std::unexpected{payload.error()};
-        const auto required_size = static_cast<std::uint64_t>(payload->size()) + count * 32U;
+        auto entries = parse_directory(*payload, *directory);
+        if (!entries)
+            return std::unexpected{entries.error()};
+        const auto reusable = static_cast<std::size_t>(
+            std::ranges::count(*entries, DirectoryEntryState::deleted, &ParsedDirectoryEntry::state));
+        const auto appended = count > reusable ? count - reusable : 0U;
+        const auto required_size = static_cast<std::uint64_t>(payload->size()) + appended * 32U;
         auto growth = grow_directory_capacity(state, partition->second, *directory, required_size, cancellation);
         if (!growth)
             return std::unexpected{growth.error()};

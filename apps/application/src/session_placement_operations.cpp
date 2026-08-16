@@ -88,8 +88,10 @@ axk::app::Result<PlacementRequest> parse_placement_request(const Json &input) {
 
 axk::app::Result<std::set<axk::SfsId>> physical_volume_closure(const axk::Partition &partition,
                                                                const axk::DirectoryEntry &volume) {
+    if (!volume.target_link_id)
+        return std::unexpected(operation_error("volume_closure_invalid", "volume directory entry is deleted"));
     std::set<axk::SfsId> result;
-    std::vector<axk::SfsId> pending{axk::SfsId{volume.link_id.value}};
+    std::vector<axk::SfsId> pending{axk::SfsId{volume.target_link_id->value}};
     while (!pending.empty()) {
         const auto id = pending.back();
         pending.pop_back();
@@ -104,8 +106,8 @@ axk::app::Result<std::set<axk::SfsId>> physical_volume_closure(const axk::Partit
         if (item->payload_kind != axk::PayloadKind::directory)
             continue;
         for (const auto &child : item->directory_entries) {
-            if (child.name != "." && child.name != "..")
-                pending.push_back(axk::SfsId{child.link_id.value});
+            if (child.name != "." && child.name != ".." && child.target_link_id)
+                pending.push_back(axk::SfsId{child.target_link_id->value});
         }
     }
     for (const auto &item : partition.records) {
@@ -114,7 +116,8 @@ axk::app::Result<std::set<axk::SfsId>> physical_volume_closure(const axk::Partit
             continue;
         }
         for (const auto &child : item.directory_entries) {
-            if (child.name != "." && child.name != ".." && result.contains(axk::SfsId{child.link_id.value})) {
+            if (child.name != "." && child.name != ".." && child.target_link_id &&
+                result.contains(axk::SfsId{child.target_link_id->value})) {
                 return std::unexpected(
                     operation_error("volume_closure_invalid", "a directory outside the volume references its closure"));
             }
@@ -145,7 +148,7 @@ axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::Im
     }
     std::vector<const axk::DirectoryEntry *> matches;
     for (const auto &entry : root->directory_entries) {
-        if (entry.name == volume_name)
+        if (entry.state == axk::DirectoryEntryState::live && entry.name == volume_name)
             matches.push_back(&entry);
     }
     if (matches.size() != 1U) {

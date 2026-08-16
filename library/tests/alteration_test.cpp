@@ -977,7 +977,7 @@ TEST(Alteration, InsertsFirstVolumeIntoEmptyPartition) {
     const auto inserted = std::ranges::find(root_record.directory_entries, "First Volume", &axk::DirectoryEntry::name);
     ASSERT_NE(inserted, root_record.directory_entries.end());
     EXPECT_TRUE(std::ranges::any_of(applied->operations.front().inserted_sfs_ids,
-                                    [&](const auto id) { return id.value == inserted->link_id.value; }));
+                                    [&](const auto id) { return id.value == inserted->raw_link_id.value; }));
     std::filesystem::remove_all(root, error);
 }
 
@@ -1034,7 +1034,7 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     EXPECT_EQ(std::ranges::count(after_root.directory_entries, "Chain", &axk::DirectoryEntry::name), 0U);
     const auto after_entry = std::ranges::find(after_root.directory_entries, "Renamed", &axk::DirectoryEntry::name);
     ASSERT_NE(after_entry, after_root.directory_entries.end());
-    EXPECT_EQ(after_entry->link_id, before_entry->link_id);
+    EXPECT_EQ(after_entry->raw_link_id, before_entry->raw_link_id);
     const auto after_catalog = axk::build_object_catalog(*after);
     ASSERT_TRUE(after_catalog) << after_catalog.error().message;
     ASSERT_EQ(after_catalog->objects.size(), before_catalog->objects.size());
@@ -2115,7 +2115,7 @@ TEST(Alteration, RepairsExplicitlySelectedMissingObjectPlacementWithoutChangingP
     const auto sample_entry =
         std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
     ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
-    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    const auto sample_sfs_id = axk::SfsId{sample_entry->raw_link_id.value};
     patch_index_be32(source, *sample_directory, 6U, 64U);
 
     const auto unrelated_output = root / "unrelated.hds";
@@ -2193,7 +2193,7 @@ TEST(Alteration, AtomicallyCreatesRecoveryVolumeAndRepairsOwnerlessObjectPlaceme
     const auto waveform_entry =
         std::ranges::find(waveform_directory->directory_entries, "Wave", &axk::DirectoryEntry::name);
     ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
-    const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
+    const auto waveform_sfs_id = axk::SfsId{waveform_entry->raw_link_id.value};
     patch_index_be32(source, *waveform_directory, 6U, 64U);
     patch_index_be32(source, *waveform_directory, 0x12U, 64U);
 
@@ -2261,7 +2261,7 @@ TEST(Alteration, RecoversDirectoryEntriesHiddenByAStaleExtentByteCount) {
     const auto sample_entry =
         std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
     ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
-    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    const auto sample_sfs_id = axk::SfsId{sample_entry->raw_link_id.value};
     const auto sample_directory_sfs_id = sample_directory->sfs_id;
     patch_index_be32(source, *sample_directory, 0x12U, 64U);
 

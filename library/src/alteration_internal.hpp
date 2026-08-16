@@ -69,7 +69,9 @@ struct ExpectedObjectPlacement {
 };
 
 struct ParsedDirectoryEntry {
-    SfsId id;
+    LinkId raw_link_id;
+    std::optional<SfsId> target_sfs_id;
+    DirectoryEntryState state{DirectoryEntryState::live};
     std::string name;
     std::size_t offset{};
 };

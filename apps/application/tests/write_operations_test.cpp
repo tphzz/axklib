@@ -906,7 +906,7 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     const auto sample_entry =
         std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
     ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
-    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    const auto sample_sfs_id = axk::SfsId{sample_entry->raw_link_id.value};
     patch_index_be32(source, *sample_directory, 6U, 64U);
     patch_index_be32(source, *sample_directory, 0x12U, 64U);
 
@@ -1000,7 +1000,7 @@ TEST_F(WriteOperationsTest, SessionPartitionPlacementRepairRecoversOwnerlessWave
     const auto waveform_entry =
         std::ranges::find(waveform_directory->directory_entries, "Wave", &axk::DirectoryEntry::name);
     ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
-    const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
+    const auto waveform_sfs_id = axk::SfsId{waveform_entry->raw_link_id.value};
     patch_index_be32(source, *waveform_directory, 6U, 64U);
     patch_index_be32(source, *waveform_directory, 0x12U, 64U);
 

@@ -90,6 +90,24 @@ std::vector<std::byte> image_fixture() {
     return bytes;
 }
 
+std::vector<std::byte> deleted_directory_entry_fixture() {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto directory = 15U * sector_size;
+    EXPECT_TRUE(writer.write_be32(directory + 64U + 4U, 0xf0000004U));
+    return bytes;
+}
+
+std::vector<std::byte> missing_root_support_entry_fixture() {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto entry = 15U * sector_size + 64U;
+    EXPECT_TRUE(writer.write_be16(entry + 2U, 10U));
+    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(entry + 8U), 24U, std::byte{});
+    write_ascii(bytes, entry + 8U, "sfserrlog");
+    return bytes;
+}
+
 std::vector<std::byte> cross_linked_fixture() {
     auto bytes = image_fixture();
     constexpr auto index = 11U * sector_size;
@@ -880,6 +898,10 @@ TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
     EXPECT_TRUE(std::any_of(missing_diagnostics.begin(), missing_diagnostics.end(), [](const axk::Error &error) {
         return error.code == axk::ErrorCode::relationship_unresolved && error.context.object_name == "Samples";
     }));
+    const auto missing_validation = axk::validate_semantics(*missing, {}, {});
+    EXPECT_NE(
+        std::ranges::find(missing_validation.issues, "SFS_DIRECTORY_ENTRY_TARGET_MISSING", &axk::ValidationIssue::code),
+        missing_validation.issues.end());
 
     auto cycle_bytes = image_fixture();
     axk::ByteWriter writer{cycle_bytes};
@@ -892,6 +914,43 @@ TEST(SfsReader, ReportsMissingDirectoryTargetsAndChildCycles) {
     EXPECT_TRUE(std::any_of(cycle_diagnostics.begin(), cycle_diagnostics.end(), [](const axk::Error &error) {
         return error.code == axk::ErrorCode::relationship_cycle && error.context.object_name == "Samples";
     }));
+}
+
+TEST(SfsReader, PreservesDeletedDirectoryRowsWithoutTreatingThemAsMissingTargets) {
+    auto reader = std::make_shared<axk::MemoryReader>(deleted_directory_entry_fixture());
+    const auto image = axk::open_image(reader, "deleted-directory-entry.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_EQ(image->partitions().size(), 1U);
+    const auto &partition = image->partitions().front();
+    ASSERT_EQ(partition.records.size(), 1U);
+    const auto &entries = partition.records.front().directory_entries;
+    ASSERT_EQ(entries.size(), 3U);
+    EXPECT_EQ(entries[2].state, axk::DirectoryEntryState::deleted);
+    EXPECT_EQ(entries[2].raw_link_id, axk::LinkId{0xf0000004U});
+    EXPECT_FALSE(entries[2].target_link_id);
+    EXPECT_EQ(entries[2].name, "Samples");
+    EXPECT_FALSE(std::ranges::any_of(partition.diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::relationship_unresolved && error.context.object_name == "Samples";
+    }));
+
+    const auto validation = axk::validate_semantics(*image, {}, {});
+    EXPECT_EQ(std::ranges::find(validation.issues, "SFS_DIRECTORY_ENTRY_TARGET_MISSING", &axk::ValidationIssue::code),
+              validation.issues.end());
+}
+
+TEST(SfsReader, PermitsMissingFormatterSupportTargetsOnlyAtThePartitionRoot) {
+    auto reader = std::make_shared<axk::MemoryReader>(missing_root_support_entry_fixture());
+    const auto image = axk::open_image(reader, "missing-root-support-entry.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    ASSERT_EQ(image->partitions().size(), 1U);
+    const auto &partition = image->partitions().front();
+    EXPECT_FALSE(std::ranges::any_of(partition.diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::relationship_unresolved && error.context.object_name == "sfserrlog";
+    }));
+
+    const auto validation = axk::validate_semantics(*image, {}, {});
+    EXPECT_EQ(std::ranges::find(validation.issues, "SFS_DIRECTORY_ENTRY_TARGET_MISSING", &axk::ValidationIssue::code),
+              validation.issues.end());
 }
 
 TEST(SfsReader, RejectsNonSfsAndCancellationWithoutPartialContainer) {

@@ -51,7 +51,9 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                 continue;
             const auto *root = &*root_record;
             for (const auto &volume_entry : root->directory_entries) {
-                const auto volume_found = directories.find(volume_entry.link_id.value);
+                if (!volume_entry.target_link_id)
+                    continue;
+                const auto volume_found = directories.find(volume_entry.target_link_id->value);
                 if (volume_entry.name == "." || volume_entry.name == ".." ||
                     is_partition_support_root_entry(volume_entry.name) || volume_found == directories.end()) {
                     continue;
@@ -61,9 +63,9 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                     continue;
                 }
                 for (const auto &category_entry : volume->directory_entries) {
-                    if (!is_category(category_entry.name))
+                    if (!category_entry.target_link_id || !is_category(category_entry.name))
                         continue;
-                    const auto category_found = directories.find(category_entry.link_id.value);
+                    const auto category_found = directories.find(category_entry.target_link_id->value);
                     if (category_found == directories.end())
                         continue;
                     const auto *category = category_found->second;
@@ -72,10 +74,10 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                         continue;
                     }
                     for (const auto &entry : category->directory_entries) {
-                        if (entry.name == "." || entry.name == "..")
+                        if (entry.name == "." || entry.name == ".." || !entry.target_link_id)
                             continue;
                         candidates.push_back({
-                            SfsId{entry.link_id.value},
+                            SfsId{entry.target_link_id->value},
                             {partition.index,
                              partition.name,
                              volume->sfs_id,

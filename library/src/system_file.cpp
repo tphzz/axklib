@@ -181,7 +181,7 @@ std::vector<const IndexRecord *> records_with_id(const Partition &partition, Sfs
 std::vector<const DirectoryEntry *> named_entries(const IndexRecord &directory, std::string_view name) {
     std::vector<const DirectoryEntry *> result;
     for (const auto &entry : directory.directory_entries) {
-        if (entry.name == name)
+        if (entry.name == name && entry.target_link_id)
             result.push_back(&entry);
     }
     return result;
@@ -236,7 +236,7 @@ Result<std::optional<SfsId>> locate_system_file_record(const Partition &partitio
                                                    "partition root has multiple PRF3 entries")};
     }
 
-    const auto prf3_directories = directories_with_id(partition, prf3_entries.front()->link_id);
+    const auto prf3_directories = directories_with_id(partition, *prf3_entries.front()->target_link_id);
     if (prf3_directories.size() != 1U || !prf3_directories.front()->parent_directory_id || !root->directory_id ||
         *prf3_directories.front()->parent_directory_id != *root->directory_id) {
         return std::unexpected{invalid_system_path(
@@ -255,7 +255,7 @@ Result<std::optional<SfsId>> locate_system_file_record(const Partition &partitio
                                 std::format("partition PRF3 directory has multiple {} entries", file_name))};
     }
 
-    const auto records = records_with_id(partition, SfsId{system_entries.front()->link_id.value});
+    const auto records = records_with_id(partition, SfsId{system_entries.front()->target_link_id->value});
     if (records.size() != 1U || records.front()->payload_kind == PayloadKind::directory) {
         return std::unexpected{invalid_system_path(
             partition, kind,

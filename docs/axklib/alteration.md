@@ -134,3 +134,22 @@ or a newly authored image rather than guessing allocation ownership.
 Fragmented records use continuation-list clusters when more than four extents
 are required. Payload extents and list clusters are both included in allocation
 and free-space accounting.
+
+## Sampler-retained directory tombstones
+
+Sampler-authored deletion can leave a directory row whose link ID has a `0xF`
+high nibble. The reader preserves this row as a deleted slot, but it is not a
+live object and does not cause a destination-name conflict.
+
+Insertion reuses these slots deterministically: a same-name tombstone is chosen
+first, otherwise the deleted row with the lowest payload offset is used. The
+complete 32-byte row is overwritten. Reusing a row adds no directory-payload
+bytes, and package-import planning uses that same net-growth rule for root,
+volume-category, and object-directory capacity. Tombstones unrelated to the
+insertion remain byte-for-byte unchanged.
+
+Axklib's own deletion operations continue to remove and compact directory rows;
+they do not create new tombstones. A live directory row whose target record is
+missing is not reusable deletion history: validation reports
+`SFS_DIRECTORY_ENTRY_TARGET_MISSING`, and the normal mutation integrity gate
+keeps the image read-only.

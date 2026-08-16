@@ -369,6 +369,24 @@ Special names `.` and `..` are directory navigation entries. Other entries are
 matched to index records by `link_id`. axklib classifies the target as a
 directory or an object file by the target index record and payload.
 
+### Deleted directory rows
+
+**Strong:** sampler-authored deletion can retain a 32-byte directory row while
+replacing the link ID's high nibble with `0xF`. axklib treats these rows as
+deleted directory slots (tombstones), retains their raw link value and name for
+inspection, and does not resolve their low bits as a live SFS ID. A valid
+tombstone therefore does not appear in the catalog, participate in directory
+traversal, reserve a name, or produce a missing-target validation finding.
+
+A non-`0xF` directory row remains live. If its target SFS record is missing,
+validation reports `SFS_DIRECTORY_ENTRY_TARGET_MISSING`; mutation is blocked
+because the intended object cannot be recovered safely. The formatter-owned
+partition-root support names `sfserrlog` and `sfserram` are exempt: formatter
+images can retain these reserved entries without a normal target SFS record.
+The exemption applies only at the partition root. This distinction keeps
+sampler-retained deletion history and formatter metadata separate from genuine
+dangling directory links.
+
 ## Object Payload Resolution
 
 SFS object loading follows this path:
@@ -419,7 +437,7 @@ Container checks include:
 | Duplicate headers | Header copy differs or cannot be read. |
 | Allocation bitmaps | Stored copies differ, either copy disagrees with reconstructed extents, or clusters have multiple owners. |
 | Index records | Invalid extent count, impossible extent size, malformed continuation list. |
-| Directory entries | Blank names, zero link ID, unknown target, mismatched target type. |
+| Directory entries | Blank names, zero live link ID, missing live target (`SFS_DIRECTORY_ENTRY_TARGET_MISSING`), mismatched target type. Valid `0xF` tombstones are retained but are not findings. |
 | Payload reads | Logical byte count mismatch or unsupported object payload. |
 
 Relationship and sampler-data validation is reported separately so a caller can

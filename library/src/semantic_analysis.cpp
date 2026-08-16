@@ -250,6 +250,20 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
     }
     for (const auto &partition : container.partitions()) {
         const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);
+        for (const auto &diagnostic : partition.diagnostics) {
+            if (diagnostic.code != ErrorCode::relationship_unresolved ||
+                diagnostic.context.object_type != "directory-entry") {
+                continue;
+            }
+            const auto entry_name = diagnostic.context.object_name.value_or("<unnamed>");
+            result.issues.push_back({
+                "SFS_DIRECTORY_ENTRY_TARGET_MISSING",
+                ValidationSeverity::error,
+                std::format("Directory entry '{}' references a missing SFS record", entry_name),
+                std::format("{} / directory entry {}", partition_path, entry_name),
+                {},
+            });
+        }
         for (const auto &record : partition.records) {
             if (record.extent_byte_count_total == record.data_size)
                 continue;

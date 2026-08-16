@@ -123,7 +123,9 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
 
     std::vector<SourceVolume> result;
     for (const auto &entry : root->directory_entries) {
-        const auto found = directories.find(entry.link_id.value);
+        if (!entry.target_link_id)
+            continue;
+        const auto found = directories.find(entry.target_link_id->value);
         if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
             found == directories.end())
             continue;
@@ -134,9 +136,9 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
         }
         SourceVolume item{volume.sfs_id.value, entry.name, {}};
         for (const auto &category_entry : volume.directory_entries) {
-            if (!category_name(category_entry.name))
+            if (!category_entry.target_link_id || !category_name(category_entry.name))
                 continue;
-            const auto category_found = directories.find(category_entry.link_id.value);
+            const auto category_found = directories.find(category_entry.target_link_id->value);
             if (category_found == directories.end())
                 continue;
             const auto &category = *category_found->second;
@@ -144,8 +146,8 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
                 continue;
             }
             for (const auto &object_entry : category.directory_entries) {
-                if (object_entry.name != "." && object_entry.name != "..")
-                    item.object_ids.push_back(object_entry.link_id.value);
+                if (object_entry.name != "." && object_entry.name != ".." && object_entry.target_link_id)
+                    item.object_ids.push_back(object_entry.target_link_id->value);
             }
         }
         result.push_back(std::move(item));

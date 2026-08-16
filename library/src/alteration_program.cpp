@@ -181,7 +181,9 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
     auto entries = parse_directory(*directory_payload, *directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    if (std::ranges::any_of(*entries, [&](const auto &entry) { return entry.name == name; })) {
+    if (std::ranges::any_of(*entries, [&](const auto &entry) {
+            return entry.state == DirectoryEntryState::live && entry.name == name;
+        })) {
         return std::unexpected{transaction_error("volume already contains Program " + name)};
     }
     struct ResolvedTarget {

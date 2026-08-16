@@ -54,9 +54,21 @@ struct Extent {
     std::uint32_t byte_count{};
 };
 
+enum class DirectoryEntryState : std::uint8_t { live, deleted };
+
+inline constexpr std::uint32_t sfs_deleted_directory_link_prefix = 0xf0000000U;
+
+[[nodiscard]] constexpr DirectoryEntryState directory_entry_state(LinkId raw_link_id) noexcept {
+    return (raw_link_id.value & sfs_deleted_directory_link_prefix) == sfs_deleted_directory_link_prefix
+               ? DirectoryEntryState::deleted
+               : DirectoryEntryState::live;
+}
+
 struct DirectoryEntry {
     std::uint16_t flags{};
-    LinkId link_id;
+    LinkId raw_link_id;
+    std::optional<LinkId> target_link_id;
+    DirectoryEntryState state{DirectoryEntryState::live};
     std::string name;
     std::uint64_t payload_relative_offset{};
 };

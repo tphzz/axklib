@@ -113,7 +113,9 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
     auto entries = parse_directory(*directory_payload, *directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    if (std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) { return entry.name == spec.name; })) {
+    if (std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) {
+            return entry.state == DirectoryEntryState::live && entry.name == spec.name;
+        })) {
         return std::unexpected{transaction_error("volume already contains the requested Sample")};
     }
     if (!spec.waveform_id) {
@@ -197,12 +199,12 @@ Result<OperationReport> insert_waveform_audio(TransactionState &state, Operation
 
     std::set<std::uint32_t> link_ids;
     for (const auto &entry : *entries) {
-        if (entry.name == "." || entry.name == "..")
+        if (entry.name == "." || entry.name == ".." || !entry.target_sfs_id)
             continue;
         if (std::ranges::contains(spec.waveform_names, entry.name)) {
             return std::unexpected{transaction_error("volume already contains a requested waveform name")};
         }
-        auto payload = current_payload(state, partition, entry.id, cancellation);
+        auto payload = current_payload(state, partition, *entry.target_sfs_id, cancellation);
         if (!payload)
             return std::unexpected{transaction_error("existing SMPL record is unresolved; link-ID "
                                                      "allocation is unsafe")};
@@ -332,9 +334,9 @@ Result<OperationReport> delete_waveform(TransactionState &state, OperationContex
     if (!sample_entries)
         return std::unexpected{sample_entries.error()};
     for (const auto &entry : *sample_entries) {
-        if (entry.name == "." || entry.name == "..")
+        if (entry.name == "." || entry.name == ".." || !entry.target_sfs_id)
             continue;
-        auto payload = current_payload(state, partition, entry.id, cancellation);
+        auto payload = current_payload(state, partition, *entry.target_sfs_id, cancellation);
         if (!payload) {
             return std::unexpected{transaction_error("waveform ownership is ambiguous because an "
                                                      "SBNK is unreadable")};

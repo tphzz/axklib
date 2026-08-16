@@ -86,7 +86,7 @@ axk::IndexRecord directory_record(std::uint32_t sfs_id, std::uint32_t directory_
 }
 
 axk::DirectoryEntry entry(std::string name, std::uint32_t target) {
-    return {.link_id = axk::LinkId{target}, .name = std::move(name)};
+    return {.raw_link_id = axk::LinkId{target}, .target_link_id = axk::LinkId{target}, .name = std::move(name)};
 }
 
 axk::IndexRecord file_record(std::uint32_t sfs_id) {
@@ -268,6 +268,8 @@ TEST(SystemFileTest, UsesTheSharedSfsRootAndReservedEntryContract) {
     EXPECT_TRUE(axk::is_partition_support_root_entry("PRF3"));
     EXPECT_TRUE(axk::is_partition_support_root_entry("PRF3   "));
     EXPECT_TRUE(axk::is_partition_support_root_entry(std::string_view{"PRF3\0ignored", 12U}));
+    EXPECT_TRUE(axk::is_partition_support_root_entry("sfserrlog"));
+    EXPECT_TRUE(axk::is_partition_support_root_entry("sfserram"));
     EXPECT_FALSE(axk::is_partition_support_root_entry("prf3"));
     EXPECT_FALSE(axk::is_partition_support_root_entry("Volume"));
 }

@@ -134,7 +134,9 @@ std::vector<VolumeSeed> sfs_volume_seeds(const Container &container) {
             continue;
         const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            const auto found = directories.find(entry.link_id.value);
+            if (!entry.target_link_id)
+                continue;
+            const auto found = directories.find(entry.target_link_id->value);
             if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
                 found == directories.end())
                 continue;

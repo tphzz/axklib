@@ -204,14 +204,17 @@ std::map<DestinationKey, SfsVolume> sfs_volumes(const Container &container) {
             continue;
         const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name))
+            if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
+                !entry.target_link_id)
                 continue;
-            const auto found = directories.find(entry.link_id.value);
+            const auto found = directories.find(entry.target_link_id->value);
             if (found == directories.end())
                 continue;
             SfsVolume volume{&partition, found->second, {}};
             for (const auto &category_entry : found->second->directory_entries) {
-                const auto category = directories.find(category_entry.link_id.value);
+                if (!category_entry.target_link_id)
+                    continue;
+                const auto category = directories.find(category_entry.target_link_id->value);
                 if (category_entry.name != "." && category_entry.name != ".." && category != directories.end()) {
                     volume.categories.emplace(category_entry.name, category->second);
                 }

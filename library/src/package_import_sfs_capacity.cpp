@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <format>
+#include <functional>
 #include <ranges>
 
 namespace axk::package_import_internal {
@@ -96,6 +97,46 @@ void SfsRecordCapacityPlanner::finalize(PackageImportPlan &plan) {
             plan.conflicts.back().partition_index = report.partition_index;
         }
         plan.sfs_index_capacity.push_back(std::move(report));
+    }
+}
+
+std::map<std::uint8_t, std::size_t> reusable_root_directory_entries(const Container &container) {
+    std::map<std::uint8_t, std::size_t> reusable;
+    for (const auto &partition : container.partitions()) {
+        const auto root = std::ranges::find(partition.records, SfsId{1}, &IndexRecord::sfs_id);
+        if (root == partition.records.end())
+            continue;
+        reusable[partition.index.value] = static_cast<std::size_t>(
+            std::ranges::count(root->directory_entries, DirectoryEntryState::deleted, &DirectoryEntry::state));
+    }
+    return reusable;
+}
+
+void validate_root_directory_growth(const Container &container, std::span<const PlannedPackageDestination> destinations,
+                                    PackageImportPlan &plan) {
+    for (const auto &partition : container.partitions()) {
+        const auto growth = std::ranges::fold_left(
+            destinations | std::views::filter([&](const PlannedPackageDestination &destination) {
+                return destination.create && destination.partition_index == partition.index.value;
+            }) | std::views::transform(&PlannedPackageDestination::root_directory_growth_bytes),
+            std::uint64_t{0}, std::plus<>{});
+        if (growth == 0U)
+            continue;
+        const auto root = std::ranges::find(partition.records, SfsId{1}, &IndexRecord::sfs_id);
+        if (root == partition.records.end()) {
+            add_conflict(plan, "SFS_ROOT_DIRECTORY_MISSING",
+                         "partition root directory is unavailable for destination creation");
+            continue;
+        }
+        const auto capacity =
+            std::ranges::fold_left(root->extents | std::views::transform([](const Extent &extent) {
+                                       return static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
+                                   }),
+                                   std::uint64_t{0}, std::plus<>{});
+        if (root->data_size + growth > capacity) {
+            add_conflict(plan, "SFS_ROOT_DIRECTORY_CAPACITY_EXHAUSTED",
+                         "partition root directory cannot contain all planned destination volumes");
+        }
     }
 }
 

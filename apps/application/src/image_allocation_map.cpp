@@ -131,8 +131,8 @@ axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
         if (record.directory_id && record.parent_directory_id && record.directory_id == record.parent_directory_id)
             record_names_by_sfs_id.try_emplace(record.sfs_id.value, "/");
         for (const auto &entry : record.directory_entries) {
-            if (entry.name != "." && entry.name != "..")
-                record_names_by_sfs_id.try_emplace(entry.link_id.value, entry.name);
+            if (entry.name != "." && entry.name != ".." && entry.target_link_id)
+                record_names_by_sfs_id.try_emplace(entry.target_link_id->value, entry.name);
         }
     }
 
