@@ -415,18 +415,22 @@ Result<SfsExtentLayoutRepairResult> repair_sfs_extent_layout(const std::filesyst
     if (auto flushed = publication->flush(); !flushed)
         return std::unexpected{flushed.error()};
 
-    auto repaired = open_image(publication->path(), options);
-    if (!repaired)
-        return std::unexpected{repaired.error()};
-    if (!std::ranges::all_of(repaired->partitions(), [](const Partition &partition) {
-            return allocation_is_safe_for_mutation(partition.allocation);
-        }))
-        return std::unexpected{repair_error("repaired image did not pass complete SFS allocation validation")};
-    for (const auto &payload : payloads) {
-        auto repaired_payload =
-            repaired->read_record_data(payload.partition, payload.record, payload.bytes.size(), cancellation);
-        if (!repaired_payload || !std::ranges::equal(payload.bytes, *repaired_payload))
-            return std::unexpected{repair_error("repaired record payload differs from the source logical payload")};
+    // Close the validation reader before Windows reopens the staging file with delete access for publication.
+    {
+        auto repaired = open_image(publication->path(), options);
+        if (!repaired)
+            return std::unexpected{repaired.error()};
+        if (!std::ranges::all_of(repaired->partitions(), [](const Partition &partition) {
+                return allocation_is_safe_for_mutation(partition.allocation);
+            }))
+            return std::unexpected{repair_error("repaired image did not pass complete SFS allocation validation")};
+        for (const auto &payload : payloads) {
+            auto repaired_payload =
+                repaired->read_record_data(payload.partition, payload.record, payload.bytes.size(), cancellation);
+            if (!repaired_payload || !std::ranges::equal(payload.bytes, *repaired_payload)) {
+                return std::unexpected{repair_error("repaired record payload differs from the source logical payload")};
+            }
+        }
     }
     auto published = publication->publish(overwrite ? detail::PublicationMode::replace_existing
                                                     : detail::PublicationMode::create_only);
