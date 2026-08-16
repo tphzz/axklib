@@ -30,6 +30,11 @@ interface CatalogWorkflowDependencies {
     setStatus: (status: string) => void;
 }
 
+interface SystemProgramContextResult {
+    contexts: SystemProgramContexts | null;
+    error: string;
+}
+
 export class CatalogWorkflow {
     programs = $state<Program[]>([]);
     sequences = $state<SequenceItem[]>([]);
@@ -168,17 +173,18 @@ export class CatalogWorkflow {
         this.dependencies.resetCleanup();
         void this.dependencies.stopPlayback();
         this.dependencies.resetPreviews();
+        const generation = ++this.loadGeneration;
+        this.resetLoadedVolumeContent();
         this.activeVolumeId = volumeId;
         this.activePartitionIndex = partitionIndex;
-        const generation = ++this.loadGeneration;
-        this.loadSystemProgramContexts(sessionId, partitionIndex, generation);
+        this.systemProgramContextsLoading = partitionIndex !== null;
         this.dependencies.setStatus('Loading volume');
-        this.inspectorObjectId = '';
         try {
-            const [objects, scopedRelationships, names] = await Promise.all([
+            const [objects, scopedRelationships, names, contextResult] = await Promise.all([
                 this.allObjects(sessionId, volumeId),
                 this.allRelationships(sessionId, volumeId),
                 this.visibleObjectNames(sessionId, volumeId),
+                this.readSystemProgramContexts(sessionId, partitionIndex),
             ]);
             if (generation !== this.loadGeneration) return;
             this.relationships = scopedRelationships;
@@ -190,11 +196,17 @@ export class CatalogWorkflow {
             this.samples = sampleItems(objects, bankObjects, scopedRelationships, names);
             this.setWaveDataObjects(objects, names);
             this.objectCount = objects.length;
+            this.systemProgramContexts = contextResult.contexts;
+            this.systemProgramContextsError = contextResult.error;
+            this.systemProgramContextsLoading = false;
             this.clearSelections();
             this.dependencies.setStatus('Ready');
         } catch (error) {
             if (generation === this.loadGeneration) {
+                ++this.loadGeneration;
+                this.resetLoadedVolumeContent();
                 this.activeVolumeId = '';
+                this.activePartitionIndex = null;
                 this.dependencies.setStatus(userFacingMessage(error));
             }
         }
@@ -205,6 +217,12 @@ export class CatalogWorkflow {
         void this.dependencies.stopPlayback();
         this.dependencies.resetPreviews();
         ++this.loadGeneration;
+        this.resetLoadedVolumeContent();
+        this.activeVolumeId = '';
+        this.activePartitionIndex = null;
+    }
+
+    private resetLoadedVolumeContent(): void {
         this.programs = [];
         this.sequences = [];
         this.sampleBanks = [];
@@ -214,8 +232,6 @@ export class CatalogWorkflow {
         this.objectsById = new Map();
         this.clearSelections();
         this.objectCount = 0;
-        this.activeVolumeId = '';
-        this.activePartitionIndex = null;
         this.systemProgramContexts = null;
         this.systemProgramContextsLoading = false;
         this.systemProgramContextsError = '';
@@ -242,25 +258,22 @@ export class CatalogWorkflow {
         if (hiddenIds.has(this.inspectorObjectId)) this.inspectorObjectId = '';
     }
 
-    private loadSystemProgramContexts(sessionId: number, partitionIndex: number | null, generation: number): void {
-        this.systemProgramContexts = null;
-        this.systemProgramContextsError = '';
-        this.systemProgramContextsLoading = partitionIndex !== null;
-        if (partitionIndex === null) return;
-        void Promise.resolve()
-            .then(() => this.dependencies.transport.systemProgramContexts(sessionId, partitionIndex))
-            .then(
-                (contexts) => {
-                    if (generation !== this.loadGeneration) return;
-                    this.systemProgramContexts = contexts;
-                    this.systemProgramContextsLoading = false;
-                },
-                () => {
-                    if (generation !== this.loadGeneration) return;
-                    this.systemProgramContextsError = "Could not read the partition's saved System Files.";
-                    this.systemProgramContextsLoading = false;
-                },
-            );
+    private async readSystemProgramContexts(
+        sessionId: number,
+        partitionIndex: number | null,
+    ): Promise<SystemProgramContextResult> {
+        if (partitionIndex === null) return { contexts: null, error: '' };
+        try {
+            return {
+                contexts: await this.dependencies.transport.systemProgramContexts(sessionId, partitionIndex),
+                error: '',
+            };
+        } catch {
+            return {
+                contexts: null,
+                error: "Could not read the partition's saved System Files.",
+            };
+        }
     }
 
     private setWaveDataObjects(objects: SamplerObject[], names: Map<string, string>): void {

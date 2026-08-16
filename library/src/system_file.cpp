@@ -140,12 +140,12 @@ Result<DecodedSystemFile> decode_system2(const CurrentRecordEnvelope &envelope, 
     for (std::size_t index = 0U; index < part_count; ++index) {
         const auto part_index = static_cast<std::uint8_t>(index);
         const auto raw_program = byte_value(payload, multi_part_offset + index);
-        if (raw_program >= 128U)
+        if (raw_program == 0U || raw_program > 128U)
             return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an invalid Multi Part Program number")};
         context.parts.push_back({
             .part_number = static_cast<std::uint8_t>(index + 1U),
             .midi = midi_address(part_index),
-            .program_number = static_cast<std::uint16_t>(raw_program + 1U),
+            .program_number = raw_program,
             .master = part_index == raw_basic_receive,
         });
     }

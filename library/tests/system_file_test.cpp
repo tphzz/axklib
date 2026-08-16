@@ -44,7 +44,7 @@ std::vector<std::byte> system2_fixture(std::uint8_t model, std::uint8_t mode, st
     bytes[0x36] = static_cast<std::byte>(receive_flags);
     bytes[0x5e] = static_cast<std::byte>(mode);
     for (std::size_t index = 0; index < 32U; ++index)
-        bytes[0x60U + index] = static_cast<std::byte>(127U - index);
+        bytes[0x60U + index] = static_cast<std::byte>(128U - index);
     return bytes;
 }
 
@@ -151,6 +151,8 @@ TEST(SystemFileTest, DecodesA5000ProgramModeReceiveContextAndAllThirtyTwoParts) 
 
 TEST(SystemFileTest, DecodesSamplerAuthoredWrappedA5000MultiContext) {
     auto inner = system2_fixture(1U, 1U, 0U, 0U);
+    // These assignment bytes were captured from a sampler-authored A5000 SYSTEM2 file. The test helper synthesizes
+    // only the surrounding record and unrelated fields so the regression remains small and deterministic.
     constexpr std::array<std::uint8_t, 32> stored_programs{
         1U, 7U, 2U, 6U, 3U, 5U, 4U, 1U, 17U, 11U, 1U, 1U, 1U, 1U, 1U, 1U,
         2U, 2U, 2U, 2U, 2U, 2U, 2U, 2U, 2U,  2U,  2U, 2U, 2U, 2U, 2U, 2U,
@@ -168,13 +170,13 @@ TEST(SystemFileTest, DecodesSamplerAuthoredWrappedA5000MultiContext) {
     EXPECT_EQ(context->saved_program_mode, axk::ProgramMode::multi);
     ASSERT_EQ(context->parts.size(), 32U);
     EXPECT_TRUE(context->parts.front().master);
-    EXPECT_EQ(context->parts[0].program_number, 2U);
-    EXPECT_EQ(context->parts[1].program_number, 8U);
-    EXPECT_EQ(context->parts[8].program_number, 18U);
-    EXPECT_EQ(context->parts[9].program_number, 12U);
-    EXPECT_EQ(context->parts[15].program_number, 2U);
-    EXPECT_EQ(context->parts[16].program_number, 3U);
-    EXPECT_EQ(context->parts.back().program_number, 3U);
+    EXPECT_EQ(context->parts[0].program_number, 1U);
+    EXPECT_EQ(context->parts[1].program_number, 7U);
+    EXPECT_EQ(context->parts[8].program_number, 17U);
+    EXPECT_EQ(context->parts[9].program_number, 11U);
+    EXPECT_EQ(context->parts[15].program_number, 1U);
+    EXPECT_EQ(context->parts[16].program_number, 2U);
+    EXPECT_EQ(context->parts.back().program_number, 2U);
 }
 
 TEST(SystemFileTest, DecodesOnlyTheSixteenA4000Parts) {
@@ -221,9 +223,13 @@ TEST(SystemFileTest, RejectsMalformedOrUnsupportedSystem2Files) {
     EXPECT_FALSE(
         axk::decode_system_file(axk::SystemFileKind::a4000_a5000_system2, system2_record_fixture(0U, 1U, 16U)));
 
-    auto invalid_program = system2_record_fixture(1U, 1U, 0U);
-    invalid_program[axk::current_record_envelope_size + 0x60U] = std::byte{128U};
-    EXPECT_FALSE(axk::decode_system_file(axk::SystemFileKind::a4000_a5000_system2, invalid_program));
+    auto zero_program = system2_record_fixture(1U, 1U, 0U);
+    zero_program[axk::current_record_envelope_size + 0x60U] = std::byte{0U};
+    EXPECT_FALSE(axk::decode_system_file(axk::SystemFileKind::a4000_a5000_system2, zero_program));
+
+    auto excessive_program = system2_record_fixture(1U, 1U, 0U);
+    excessive_program[axk::current_record_envelope_size + 0x60U] = std::byte{129U};
+    EXPECT_FALSE(axk::decode_system_file(axk::SystemFileKind::a4000_a5000_system2, excessive_program));
 }
 
 TEST(SystemFileTest, LocatesBothPartitionLevelSystemFileKindsIndependently) {

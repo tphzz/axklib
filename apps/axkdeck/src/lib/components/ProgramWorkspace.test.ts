@@ -162,6 +162,24 @@ describe('ProgramWorkspace', () => {
         expect(onpartselect).toHaveBeenCalledWith(system2.parts[2], null);
     });
 
+    it('uses direct one-based SYSTEM2 Program numbers without shifting the selected Program', async () => {
+        const assignedProgram = program(1, 'Strings1');
+        const directPart = { ...system2.parts[0], programNumber: 1 };
+        const directContexts: SystemProgramContexts = {
+            ...contexts,
+            files: [a3000, { ...system2, parts: [directPart] }],
+        };
+        const onpartselect = vi.fn();
+        render(ProgramWorkspace, {
+            props: { ...baseProps, programs: [assignedProgram], contexts: directContexts, onpartselect },
+        });
+
+        const a01 = screen.getByRole('button', { name: 'Part A01, 001: Strings1, Master' });
+        await fireEvent.click(a01);
+
+        expect(onpartselect).toHaveBeenCalledWith(directPart, assignedProgram);
+    });
+
     it('uses the shared list cursor keys across the Multi Part table', async () => {
         const onpartselect = vi.fn();
         render(ProgramWorkspace, { props: { ...baseProps, onpartselect } });

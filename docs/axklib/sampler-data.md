@@ -659,13 +659,18 @@ bytes.
 | `0x34` | `0x64` | Basic Receive Channel `0..15` | Basic Receive Channel `0..15` or `0..31` |
 | `0x36` | `0x66` | bit 0 Omni; bit 1 Program Change | bit 0 Omni; bit 1 Program Change |
 | `0x5e` | `0x8e` | not interpreted | saved mode: `0` Single, `1` Multi |
-| `0x60..0x7f` | `0x90..0xaf` | not interpreted | zero-based Program indexes, displayed as `001..128` |
+| `0x60..0x7f` | `0x90..0xaf` | not interpreted | direct Program numbers `1..128`, displayed as `001..128` |
 
 The A3000 `SYSTEM` file has no Program Mode or Multi Part table. The A4000 uses
 16 `SYSTEM2` parts on channels `01..16`; the A5000 uses 32 on `A01..A16` and
 `B01..B16`. The part matching Basic Receive Channel is the master part. In
 Multi, each part's channel is authoritative and the Sample or Sample Bank Rch
 Assign values inside its Program are ignored.
+
+The Yamaha MIDI data-format table uses a zero-based `0..127` representation for
+the corresponding transfer parameter. The saved SYSTEM2 file does not: direct
+sampler-authored files and sampler display establish that disk values are direct
+Program numbers `1..128`.
 
 Axklib reports `SYSTEM` and `SYSTEM2` independently and preserves their shared
 record envelopes and raw System-body sections. Axkdeck lets users switch
