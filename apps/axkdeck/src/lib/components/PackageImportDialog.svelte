@@ -37,6 +37,15 @@
         type: string;
     }
 
+    const renameConflictCodes = new Set([
+        'SFS_NAME_CONFLICT',
+        'SFS_TARGET_NAME_AMBIGUOUS',
+        'FAT12_NAME_CONFLICT',
+        'FAT12_TARGET_NAME_AMBIGUOUS',
+        'ISO9660_NAME_CONFLICT',
+        'ISO9660_TARGET_NAME_AMBIGUOUS',
+    ]);
+
     let {
         targetName,
         desktop,
@@ -75,7 +84,13 @@
                 : 'Resolve import issues before importing.',
     );
     const treeRows = $derived(packageTree(inspection));
-    const conflictNodes = $derived(new Set(plan?.conflicts.map((conflict) => conflict.nodeId) ?? []));
+    const renameConflictNodes = $derived(
+        new Set(
+            plan?.conflicts
+                .filter((conflict) => renameConflictCodes.has(conflict.code) && conflict.nodeId)
+                .map((conflict) => conflict.nodeId) ?? [],
+        ),
+    );
     const placementNodeIds = $derived(
         new Set(
             plan?.programSlotPlacements.flatMap((placement) => placement.mappings.map((mapping) => mapping.nodeId)),
@@ -99,7 +114,7 @@
                     .filter(
                         (action) =>
                             !placementNodeIds.has(action.nodeId) &&
-                            conflictNodes.has(action.nodeId) &&
+                            renameConflictNodes.has(action.nodeId) &&
                             action.actions.includes('CONFLICT'),
                     )
                     .map((action) => [action.nodeId, action]),
@@ -114,7 +129,10 @@
                         (conflict) =>
                             conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
                             !(placementNodeIds.has(conflict.nodeId) && conflict.code === 'SFS_NAME_CONFLICT') &&
-                            !renameActions.some((action) => action.nodeId === conflict.nodeId),
+                            !(
+                                renameConflictCodes.has(conflict.code) &&
+                                renameActions.some((action) => action.nodeId === conflict.nodeId)
+                            ),
                     )
                     .map((conflict) => [`${conflict.code}:${conflict.nodeId}:${conflict.message}`, conflict]),
             ).values(),
@@ -305,10 +323,12 @@
                                         <dt>Reuse</dt>
                                         <dd>{reusedObjects}</dd>
                                     </div>
-                                    <div>
-                                        <dt>Image space</dt>
-                                        <dd>{formatStoredSize(allocatedBytes)}</dd>
-                                    </div>
+                                    {#if plan.valid}
+                                        <div>
+                                            <dt>Image space</dt>
+                                            <dd>{formatStoredSize(allocatedBytes)}</dd>
+                                        </div>
+                                    {/if}
                                 </dl>
                                 {#if plan.opaqueSequences.length > 0}
                                     <div class="opaque-sequence-choices" aria-label="Undecodable Sequences">

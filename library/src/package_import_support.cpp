@@ -86,6 +86,20 @@ std::uint8_t type_rank(std::string_view type) {
     return 5U;
 }
 
+std::string_view package_object_type_label(std::string_view raw_type) {
+    if (raw_type == "SMPL")
+        return "Wave Data";
+    if (raw_type == "SBNK")
+        return "Sample";
+    if (raw_type == "SBAC")
+        return "Sample Bank";
+    if (raw_type == "PROG")
+        return "Program";
+    if (raw_type == "SEQU")
+        return "Sequence";
+    return "object";
+}
+
 const PackageNode *node_by_id(const PortablePackage &package, std::string_view node_id) {
     const auto found = std::ranges::find(package.nodes, node_id, &PackageNode::node_id);
     return found == package.nodes.end() ? nullptr : &*found;

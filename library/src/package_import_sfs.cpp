@@ -209,9 +209,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                             std::pair{planned.partition_index, planned.infrastructure_sfs_ids[index]}, *reserved);
                     }
                     if (cluster_failure) {
-                        add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                                     "partition lacks clusters for destination "
-                                     "volume scaffolding");
+                        add_conflict(
+                            plan, "SFS_CLUSTER_EXHAUSTED",
+                            std::format("partition has {} free cluster(s), but destination volume scaffolding needs "
+                                        "at least 2 more cluster(s)",
+                                        remaining_clusters(capacity->second)));
                     }
                     planned.root_directory_growth_bytes = 32U;
                     ++new_volume_counts[key.first];
@@ -451,8 +453,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         if (!reserved) {
             for (const auto index : indices)
                 mark_conflict(plan.objects[index]);
-            add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                         "partition has insufficient clusters to grow an object category directory");
+            add_conflict(
+                plan, "SFS_CLUSTER_EXHAUSTED",
+                std::format("partition has {} free cluster(s), but the object category directory needs at least {} "
+                            "additional data cluster(s) plus any required extent metadata",
+                            remaining_clusters(capacity), added_clusters));
             auto &conflict = plan.conflicts.back();
             conflict.partition_index = partition_index;
             conflict.volume_name = volume_name;
@@ -475,8 +480,12 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         const auto reserved = reserve_clusters(capacity, clusters);
         if (!reserved) {
             mark_conflict(object);
-            add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                         "partition has insufficient clusters for the planned object payload");
+            add_conflict(
+                plan, "SFS_CLUSTER_EXHAUSTED",
+                std::format("partition has {} free cluster(s), but {} '{}' needs at least {} cluster(s) plus any "
+                            "required extent metadata",
+                            remaining_clusters(capacity), package_object_type_label(object.object_type),
+                            object.destination_name, clusters));
             auto &conflict = plan.conflicts.back();
             conflict.package_index = object.package_index;
             conflict.root_index = object.root_index;

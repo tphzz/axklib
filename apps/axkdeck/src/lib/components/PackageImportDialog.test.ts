@@ -76,7 +76,7 @@ function plan(valid = true): ImageSessionPackageImportPlan {
             ? []
             : [
                   {
-                      code: 'NAME_CONFLICT',
+                      code: 'SFS_NAME_CONFLICT',
                       message: 'Sample name already exists',
                       nodeId: 'sample-1',
                       packageId: 'package-1',
@@ -571,9 +571,9 @@ describe('PackageImportDialog', () => {
         blocked.conflicts = [
             {
                 ...blocked.conflicts[0],
-                code: 'SFS_CAPACITY_EXCEEDED',
-                nodeId: '',
-                message: 'The destination does not have enough free clusters',
+                code: 'SFS_CLUSTER_EXHAUSTED',
+                nodeId: 'sample-1',
+                message: 'The destination has 8 free clusters, but this Wave Data needs at least 50 clusters',
             },
         ];
         render(PackageImportDialog, {
@@ -593,7 +593,12 @@ describe('PackageImportDialog', () => {
         });
 
         expect(screen.getByText('1 issue prevents import')).toBeTruthy();
-        expect(screen.getByText('The destination does not have enough free clusters')).toBeTruthy();
+        expect(
+            screen.getByText('The destination has 8 free clusters, but this Wave Data needs at least 50 clusters'),
+        ).toBeTruthy();
+        expect(screen.queryByText('Choose unused destination names.')).toBeNull();
+        expect(screen.queryByDisplayValue('Kick')).toBeNull();
+        expect(screen.queryByText('Image space')).toBeNull();
         expect(screen.queryByRole('button', { name: 'Check conflicts' })).toBeNull();
     });
 

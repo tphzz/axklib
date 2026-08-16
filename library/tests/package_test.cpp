@@ -2636,8 +2636,12 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     const auto plan = axk::plan_package_import(target_path, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_FALSE(plan->valid());
-    EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
-                                    [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; }));
+    const auto sfs_capacity_conflict = std::ranges::find_if(
+        plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; });
+    ASSERT_NE(sfs_capacity_conflict, plan->conflicts.end());
+    EXPECT_NE(sfs_capacity_conflict->message.find("free cluster(s)"), std::string::npos);
+    EXPECT_NE(sfs_capacity_conflict->message.find("Wave Data"), std::string::npos);
+    EXPECT_NE(sfs_capacity_conflict->message.find("needs at least"), std::string::npos);
     EXPECT_TRUE(std::ranges::any_of(plan->objects, [](const auto &object) {
         return std::ranges::contains(object.actions, axk::PackageImportObjectAction::conflict);
     }));

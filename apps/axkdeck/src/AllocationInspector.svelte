@@ -4,6 +4,12 @@
     import Icon from './lib/components/Icon.svelte';
     import type { components } from './lib/generated/axklibApiV1';
     import { AxklibHttpApiClient } from './lib/httpApiClient';
+    import {
+        allocationExportFilename,
+        allocationSpaceStatistic,
+        formatAllocationBytes,
+        saveAllocationMap,
+    } from './lib/allocationInspector';
 
     type AllocationMap = components['schemas']['ImageAllocationMap'];
 
@@ -15,7 +21,14 @@
 
     let map = $state<AllocationMap | null>(null);
     let error = $state('');
+    let exportError = $state('');
+    let exporting = $state(false);
     let cellSize = $state(7);
+
+    const freeSpace = $derived(map ? allocationSpaceStatistic(map.summary.freeClusters, map.clusterSizeBytes) : null);
+    const largestFreeRun = $derived(
+        map ? allocationSpaceStatistic(map.summary.largestFreeRunClusters, map.clusterSizeBytes) : null,
+    );
 
     const anomalyCount = $derived(
         map
@@ -27,18 +40,6 @@
             : 0,
     );
 
-    function formatBytes(bytes: number): string {
-        if (bytes < 1024) return `${bytes.toLocaleString()} B`;
-        const units = ['KiB', 'MiB', 'GiB'];
-        let value = bytes / 1024;
-        let unit = units[0];
-        for (let index = 1; index < units.length && value >= 1024; index += 1) {
-            value /= 1024;
-            unit = units[index];
-        }
-        return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${unit}`;
-    }
-
     function describeError(reason: unknown): string {
         const message = reason instanceof Error ? reason.message : String(reason);
         if (/revision/i.test(message)) {
@@ -47,17 +48,17 @@
         return message;
     }
 
-    function exportJson(): void {
-        if (!map) return;
-        const blob = new Blob([`${JSON.stringify(map, null, 2)}\n`], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        const partition =
-            map.partitionName.replaceAll(/[^A-Za-z0-9._-]+/g, '_') || `partition-${map.partitionIndex + 1}`;
-        link.href = url;
-        link.download = `${partition}-allocation-map.json`;
-        link.click();
-        URL.revokeObjectURL(url);
+    async function exportJson(): Promise<void> {
+        if (!map || exporting) return;
+        exportError = '';
+        exporting = true;
+        try {
+            await saveAllocationMap(allocationExportFilename(map.partitionName, map.partitionIndex), map);
+        } catch (reason) {
+            exportError = describeError(reason);
+        } finally {
+            exporting = false;
+        }
     }
 
     onMount(async () => {
@@ -99,6 +100,7 @@
             <h1>{map?.partitionName || requestedPartitionName || `Partition ${partitionIndex + 1}`}</h1>
         </div>
         <div class="header-actions">
+            {#if exportError}<span class="export-error" role="alert" title={exportError}>{exportError}</span>{/if}
             <div class="cell-size" aria-label="Cluster cell size">
                 {#each [4, 7, 11] as size}
                     <button
@@ -110,9 +112,14 @@
                     </button>
                 {/each}
             </div>
-            <button class="export-action" onclick={exportJson} disabled={!map} title="Export allocation map as JSON">
+            <button
+                class="export-action"
+                onclick={exportJson}
+                disabled={!map || exporting}
+                title="Export allocation map as JSON"
+            >
                 <Icon name="save" size={15} />
-                Export JSON
+                {exporting ? 'Saving…' : 'Export JSON'}
             </button>
         </div>
     </header>
@@ -121,9 +128,13 @@
         <section class="statistics" aria-label="Partition allocation statistics">
             <div><span>Clusters</span><strong>{map.summary.totalClusters.toLocaleString()}</strong></div>
             <div><span>Allocated</span><strong>{map.summary.allocatedClusters.toLocaleString()}</strong></div>
-            <div><span>Free</span><strong>{map.summary.freeClusters.toLocaleString()}</strong></div>
             <div>
-                <span>Largest free run</span><strong>{map.summary.largestFreeRunClusters.toLocaleString()}</strong>
+                <span>Free</span><strong>{freeSpace?.primary}</strong><small>{freeSpace?.secondary}</small>
+            </div>
+            <div>
+                <span>Largest free run</span><strong>{largestFreeRun?.primary}</strong><small
+                    >{largestFreeRun?.secondary}</small
+                >
             </div>
             <div>
                 <span>Records / extents</span><strong
@@ -135,10 +146,16 @@
             </div>
             <div>
                 <span>Logical / allocated</span><strong
-                    >{formatBytes(map.summary.logicalRecordBytes)} / {formatBytes(map.summary.allocatedBytes)}</strong
+                    >{formatAllocationBytes(map.summary.logicalRecordBytes)} / {formatAllocationBytes(
+                        map.summary.allocatedBytes,
+                    )}</strong
                 >
             </div>
-            <div><span>Data slack</span><strong>{formatBytes(map.summary.dataSlackBytes)}</strong></div>
+            <div>
+                <span title="Unused bytes inside allocated clusters; unavailable for new allocations."
+                    >Allocated slack</span
+                ><strong>{formatAllocationBytes(map.summary.dataSlackBytes)}</strong><small>Not free space</small>
+            </div>
             <div class:warning={anomalyCount > 0}>
                 <span>Integrity findings</span><strong>{anomalyCount.toLocaleString()}</strong>
             </div>
@@ -219,6 +236,14 @@
     .header-actions {
         gap: 8px;
     }
+    .export-error {
+        max-width: 320px;
+        overflow: hidden;
+        color: var(--color-danger);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     .cell-size {
         overflow: hidden;
         border: 1px solid var(--color-border);
@@ -280,6 +305,13 @@
         color: var(--color-text-strong);
         font-size: 11px;
         font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .statistics small {
+        overflow: hidden;
+        color: var(--color-text-muted);
+        font-size: 8px;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
