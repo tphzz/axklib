@@ -5,6 +5,7 @@ import type {
     ObjectPage,
     ObjectPageFilter,
     OpenedImage,
+    ImageValidationIssue,
     RelationshipPage,
     RelationshipPageFilter,
     SystemProgramContexts,
@@ -28,6 +29,10 @@ export class HttpImageSessionReads {
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
         return this.imageSessions.contentChildren(sessionId, parentId, offset, limit);
+    }
+
+    validationIssues(sessionId: number): Promise<ImageValidationIssue[]> {
+        return this.imageSessions.validationIssues(sessionId);
     }
 
     objectPage(sessionId: number, offset: number, limit: number, filter: ObjectPageFilter = {}): Promise<ObjectPage> {

@@ -19,6 +19,7 @@
 #include "axklib/package.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/sfs_repair.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -173,32 +174,36 @@ class CancellingProgress final : public axk::ProgressSink {
     std::uint64_t cancel_after_{};
 };
 
-void mark_cluster_used(const std::filesystem::path &path, const axk::Partition &partition, std::uint32_t cluster) {
+void mark_clusters_used(const std::filesystem::path &path, const axk::Partition &partition, std::uint32_t cluster,
+                        std::uint32_t cluster_count) {
+    ASSERT_LE(static_cast<std::uint64_t>(cluster) + cluster_count, partition.cluster_count);
     std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
     ASSERT_TRUE(image);
-    const auto byte_index = cluster / 8U;
-    const auto mask = static_cast<unsigned char>(0x80U >> (cluster % 8U));
+    const auto bitmap_size = (static_cast<std::size_t>(partition.cluster_count) + 7U) / 8U;
+    std::vector<char> bitmap(bitmap_size);
     const std::array offsets{
         (static_cast<std::uint64_t>(partition.start_sector) +
          static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-                512U +
-            byte_index,
-        static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U + byte_index,
+            512U,
+        static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U,
     };
+    image.seekg(static_cast<std::streamoff>(offsets[0]));
+    image.read(bitmap.data(), static_cast<std::streamsize>(bitmap.size()));
+    ASSERT_TRUE(image);
+    for (std::uint32_t current = cluster; current < cluster + cluster_count; ++current) {
+        const auto byte_index = current / 8U;
+        const auto mask = static_cast<unsigned char>(0x80U >> (current % 8U));
+        bitmap[byte_index] = static_cast<char>(static_cast<unsigned char>(bitmap[byte_index]) | mask);
+    }
     for (const auto offset : offsets) {
-        image.seekg(static_cast<std::streamoff>(offset));
-        char value{};
-        image.read(&value, 1);
-        ASSERT_TRUE(image);
-        value = static_cast<char>(static_cast<unsigned char>(value) | mask);
         image.seekp(static_cast<std::streamoff>(offset));
-        image.write(&value, 1);
+        image.write(bitmap.data(), static_cast<std::streamsize>(bitmap.size()));
         ASSERT_TRUE(image);
     }
 }
 
-void add_single_cluster_record(const std::filesystem::path &path, const axk::Partition &partition, axk::SfsId id,
-                               std::uint32_t cluster) {
+void add_extent_record(const std::filesystem::path &path, const axk::Partition &partition, axk::SfsId id,
+                       std::uint32_t cluster, std::uint32_t cluster_count, std::uint32_t byte_count) {
     std::array<char, 72> record{};
     const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
         record[offset] = static_cast<char>(value >> 8U);
@@ -211,11 +216,12 @@ void add_single_cluster_record(const std::filesystem::path &path, const axk::Par
         record[offset + 3U] = static_cast<char>(value);
     };
     put_be16(0U, 1U);
-    put_be16(4U, 1U);
-    put_be32(6U, 1U);
+    ASSERT_LE(cluster_count, std::numeric_limits<std::uint16_t>::max());
+    put_be16(4U, static_cast<std::uint16_t>(cluster_count));
+    put_be32(6U, byte_count);
     put_be32(0x0aU, cluster);
-    put_be32(0x0eU, 1U);
-    put_be32(0x12U, 1U);
+    put_be32(0x0eU, cluster_count);
+    put_be32(0x12U, byte_count);
     std::fill(record.begin() + 0x3aU, record.begin() + 0x42U, static_cast<char>(0xff));
     record[0x42U] = static_cast<char>(0x9e);
     record[0x47U] = 1;
@@ -234,7 +240,12 @@ void add_single_cluster_record(const std::filesystem::path &path, const axk::Par
     image.seekp(static_cast<std::streamoff>(record_offset));
     image.write(record.data(), static_cast<std::streamsize>(record.size()));
     ASSERT_TRUE(image);
-    mark_cluster_used(path, partition, cluster);
+    mark_clusters_used(path, partition, cluster, cluster_count);
+}
+
+void add_single_cluster_record(const std::filesystem::path &path, const axk::Partition &partition, axk::SfsId id,
+                               std::uint32_t cluster) {
+    add_extent_record(path, partition, id, cluster, 1U, 1U);
 }
 
 void mark_cluster_free(const std::filesystem::path &path, const axk::Partition &partition, std::uint32_t cluster) {
@@ -1011,14 +1022,14 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     const auto after = axk::open_image(output);
     ASSERT_TRUE(after) << after.error().message;
     const auto &after_partition = after->partitions().front();
-    EXPECT_EQ(after_partition.allocation.stored_used_cluster_count,
-              before_partition.allocation.stored_used_cluster_count);
+    EXPECT_EQ(after_partition.allocation.fixed_location.used_cluster_count,
+              before_partition.allocation.fixed_location.used_cluster_count);
+    EXPECT_EQ(after_partition.allocation.header_addressed.used_cluster_count,
+              before_partition.allocation.header_addressed.used_cluster_count);
     EXPECT_EQ(after_partition.allocation.reconstructed_used_cluster_count,
               before_partition.allocation.reconstructed_used_cluster_count);
-    EXPECT_TRUE(before_partition.allocation.stored_not_reconstructed.empty());
-    EXPECT_TRUE(after_partition.allocation.stored_not_reconstructed.empty());
-    EXPECT_TRUE(before_partition.allocation.reconstructed_not_stored.empty());
-    EXPECT_TRUE(after_partition.allocation.reconstructed_not_stored.empty());
+    EXPECT_TRUE(axk::allocation_is_safe_for_mutation(before_partition.allocation));
+    EXPECT_TRUE(axk::allocation_is_safe_for_mutation(after_partition.allocation));
     const auto &after_root = *std::ranges::find(after_partition.records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
     EXPECT_EQ(std::ranges::count(after_root.directory_entries, "Chain", &axk::DirectoryEntry::name), 0U);
     const auto after_entry = std::ranges::find(after_root.directory_entries, "Renamed", &axk::DirectoryEntry::name);
@@ -1052,6 +1063,47 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
          "volume_name":"Chain","new_volume_name":"This name is too long"}
       ]})");
     EXPECT_FALSE(too_long);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, RenameVolumePreservesCompleteAllocationBitmapsBeyondFirst4096Clusters) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-large-bitmap";
+    const auto audio = root / "large.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 2'200'000U;
+    waveform.pcm.resize(waveform.frame_count * 2U);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, waveform));
+
+    auto source_spec = sample_source_manifest(audio);
+    source_spec.size_bytes = 16U * 1024U * 1024U;
+    source_spec.partitions[0].volumes[0].name = "Large Bitmap";
+    ASSERT_TRUE(axk::write_hds_image(source_spec, source));
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"rename","type":"rename_volume","partition_index":0,
+         "volume_name":"Large Bitmap","new_volume_name":"Renamed"}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    ASSERT_EQ(reopened->partitions().size(), 1U);
+    const auto &allocation = reopened->partitions().front().allocation;
+    EXPECT_TRUE(allocation.stored_copies_match);
+    EXPECT_EQ(allocation.stored_copy_mismatch_byte_count, 0U);
+    EXPECT_TRUE(axk::allocation_is_safe_for_mutation(allocation));
+    EXPECT_GT(allocation.reconstructed_used_cluster_count, 4096U);
+
     std::filesystem::remove_all(root, error);
 }
 
@@ -2066,6 +2118,14 @@ TEST(Alteration, RepairsExplicitlySelectedMissingObjectPlacementWithoutChangingP
     const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
     patch_index_be32(source, *sample_directory, 6U, 64U);
 
+    const auto unrelated_output = root / "unrelated.hds";
+    const axk::AlterationManifest unrelated{
+        "1.0", {{"rename", axk::RenameVolumeOperation{axk::PartitionIndex{0U}, "Samples", "Renamed"}}}};
+    const auto unrelated_result = axk::alter_hds(source, unrelated, unrelated_output);
+    ASSERT_FALSE(unrelated_result);
+    EXPECT_EQ(unrelated_result.error().message, "source allocation cannot safely support alteration");
+    EXPECT_FALSE(std::filesystem::exists(unrelated_output));
+
     opened = axk::open_image(source);
     ASSERT_TRUE(opened) << opened.error().message;
     const auto before = axk::build_object_catalog(*opened);
@@ -2135,6 +2195,7 @@ TEST(Alteration, AtomicallyCreatesRecoveryVolumeAndRepairsOwnerlessObjectPlaceme
     ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
     const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
     patch_index_be32(source, *waveform_directory, 6U, 64U);
+    patch_index_be32(source, *waveform_directory, 0x12U, 64U);
 
     opened = axk::open_image(source);
     ASSERT_TRUE(opened) << opened.error().message;
@@ -2181,7 +2242,7 @@ TEST(Alteration, RecoversDirectoryEntriesHiddenByAStaleExtentByteCount) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-placement-byte-count-repair";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
-    const auto output = root / "output.hds";
+    const auto repaired_source = root / "extent-repaired.hds";
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root);
@@ -2215,14 +2276,10 @@ TEST(Alteration, RecoversDirectoryEntriesHiddenByAStaleExtentByteCount) {
     ASSERT_EQ(unplaced->placement_resolution, axk::PlacementResolution::missing);
     const auto expected_payload = unplaced->raw_payload;
 
-    const axk::AlterationManifest manifest{
-        "1.0",
-        {{"repair", axk::RepairObjectPlacementsOperation{axk::PartitionIndex{0U}, "Samples", {sample_sfs_id}}}},
-    };
-    const auto applied = axk::alter_hds(source, manifest, output);
-    ASSERT_TRUE(applied) << applied.error().message;
+    const auto extent_repair = axk::repair_sfs_extent_layout(source, repaired_source);
+    ASSERT_TRUE(extent_repair) << extent_repair.error().message;
 
-    const auto repaired = axk::open_image(output);
+    const auto repaired = axk::open_image(repaired_source);
     ASSERT_TRUE(repaired) << repaired.error().message;
     const auto after = axk::build_object_catalog(*repaired);
     ASSERT_TRUE(after) << after.error().message;
@@ -2489,12 +2546,19 @@ TEST(Alteration, WritesAndReopensFortyEightExtentContinuationList) {
     for (const auto &record : partition.records)
         used_ids.insert(record.sfs_id.value);
     std::uint32_t next_id = 3U;
-    for (std::uint32_t index = 0; index < 48U; ++index) {
+    for (std::uint32_t index = 0; index < 49U; ++index) {
         while (used_ids.contains(next_id))
             ++next_id;
         add_single_cluster_record(source, partition, axk::SfsId{next_id}, first_free + index * 2U + 1U);
         used_ids.insert(next_id++);
     }
+    while (used_ids.contains(next_id))
+        ++next_id;
+    const auto tail_begin = first_free + 98U;
+    ASSERT_LT(tail_begin, partition.cluster_count);
+    const auto tail_count = partition.cluster_count - tail_begin;
+    ASSERT_LE(static_cast<std::uint64_t>(tail_count) * 1024U, std::numeric_limits<std::uint32_t>::max());
+    add_extent_record(source, partition, axk::SfsId{next_id}, tail_begin, tail_count, tail_count * 1024U);
     const auto manifest = axk::parse_alteration_manifest(
         R"({"schema_version":"1.0","operations":[
         {"id":"wave","type":"insert_waveform","partition_index":0,

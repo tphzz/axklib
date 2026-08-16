@@ -23,6 +23,7 @@ const object: SamplerObject = {
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
+    revision: 1,
     companionSources: [],
     floppySet: null,
     initialVolume: null,
@@ -39,6 +40,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     audioExportAvailable: false,
     sequenceExportAvailable: false,
     mediaConversionAvailable: false,
+    extentLayoutRepairAvailable: false,
     tree: [
         {
             id: 'disk',

@@ -45,3 +45,18 @@ TEST(SfsWriteCodec, RejectsTooManyDirectExtentsBeforeWritingTheRecord) {
     ASSERT_FALSE(encoded);
     EXPECT_EQ(encoded.error().code, axk::ErrorCode::internal_invariant);
 }
+
+TEST(SfsWriteCodec, RejectsTrailingExtentsAfterTheLogicalPayloadIsExhausted) {
+    axk::detail::PreparedRecord record;
+    record.kind = axk::detail::RecordKind::directory;
+    const std::array extents{
+        axk::Extent{10U, 1U, 96U},
+        axk::Extent{20U, 1U, 1'024U},
+    };
+
+    const auto encoded = axk::detail::encode_sfs_index_record(record, extents, 96U);
+
+    ASSERT_FALSE(encoded);
+    EXPECT_EQ(encoded.error().code, axk::ErrorCode::internal_invariant);
+    EXPECT_NE(encoded.error().message.find("extent byte total"), std::string::npos);
+}

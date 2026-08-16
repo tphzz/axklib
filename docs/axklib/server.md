@@ -244,6 +244,33 @@ file-prefix inspection recognizes Yamaha object data, otherwise `null`.
 Inspection does not decode complete payloads or recurse beyond one related
 disk-folder level.
 
+### Image integrity and mutation admission
+
+Every readable image session advertises `images.validation.issues`. Retrieve
+the bounded issue list with
+`GET /api/v1/images/{imageId}/validation/issues`. An SFS image remains readable
+when its two allocation bitmap copies differ, a stored bitmap disagrees with
+index extents, or clusters have multiple owners; inventory, validation, preview,
+audition, and supported exports remain available for still-readable objects.
+
+Those allocation errors make alteration unsafe. The session then omits
+`images.alter.volumes`, `images.alter.partitions`, `images.alter.objects`,
+`images.package.import`, orphan cleanup, and generated-Program operations from
+`availableOperations`. Mutation admission checks the same predicate again under
+the session lease and returns `image_integrity_unsafe` if inconsistent
+allocation metadata is encountered. Clients must treat capability omission and
+that error as a safety boundary, not as a free-space failure.
+
+An otherwise allocation-clean, file-backed SFS session whose only allocation
+errors are repairable extent byte-total mismatches advertises
+`images.extent_layout.repair`. The operation accepts the current image identity,
+expected revision, and a workspace or retained-download destination. It repairs
+all eligible records together into a distinct image copy, verifies both bitmap
+copies and reconstructed ownership, and verifies each repaired logical payload
+before publication. It never alters the open source image. The operation is not
+advertised for bitmap divergence, stored/index disagreement, invalid extents,
+cross-links, or an ambiguous underreported multi-extent record.
+
 Writable SFS image sessions advertise `images.alter.objects`. Use
 `images.deletion.inspect` with the image ID, expected revision, target object
 IDs, and explicit optional-cleanup object IDs to obtain the complete deletion

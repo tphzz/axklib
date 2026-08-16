@@ -8,6 +8,7 @@
 #include "axklib/application/midi_operations.hpp"
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
+#include "axklib/application/session_extent_layout_repair_operations.hpp"
 #include "axklib/application/session_media_conversion_operations.hpp"
 #include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/application/session_tx16w_operations.hpp"
@@ -231,6 +232,8 @@ axk::app::Result<void> axk::app::bind_session_application_operations(
         !bound)
         return bound;
     if (auto bound = bind_session_audio_export_operations(registry, sandbox, images, downloads); !bound)
+        return bound;
+    if (auto bound = bind_session_extent_layout_repair_operations(registry, sandbox, images, downloads); !bound)
         return bound;
     if (auto bound = bind_session_tx16w_operations(registry, sandbox, uploads, images); !bound)
         return bound;

@@ -195,11 +195,7 @@ struct DeletionIndex {
         for (const auto &issue : catalog.issues)
             inconsistent_partitions.insert(issue.partition.value);
         for (const auto &partition : container.partitions()) {
-            if (partition.allocation.invalid_extent_record_count != 0U ||
-                partition.allocation.extent_total_mismatch_count != 0U ||
-                partition.allocation.conflicting_cluster_count != 0U ||
-                !partition.allocation.stored_not_reconstructed.empty() ||
-                !partition.allocation.reconstructed_not_stored.empty()) {
+            if (!allocation_is_safe_for_mutation(partition.allocation)) {
                 inconsistent_partitions.insert(partition.index.value);
             }
         }

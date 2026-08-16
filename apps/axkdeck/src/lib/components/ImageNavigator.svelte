@@ -13,6 +13,7 @@
         onopen: () => void;
         oncreate: () => void;
         onclose: () => void;
+        onintegrity?: () => void;
         onmanagelocations: () => void;
         onselect: (item: DiskTreeItem) => void;
         onloadchildren: (
@@ -40,6 +41,7 @@
         onopen,
         oncreate,
         onclose,
+        onintegrity = () => undefined,
         onmanagelocations,
         onselect,
         onloadchildren,
@@ -205,6 +207,16 @@
                 onkeydown={(event) => event.stopPropagation()}
             >
                 {#if image}
+                    <button
+                        type="button"
+                        role="menuitem"
+                        onclick={() => {
+                            imageMenuOpen = false;
+                            onintegrity();
+                        }}
+                    >
+                        <Icon name="info" size={14} /> Image integrity...
+                    </button>
                     <button
                         type="button"
                         role="menuitem"

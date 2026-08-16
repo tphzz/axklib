@@ -3,10 +3,8 @@
 #include "semantic_support.hpp"
 
 #include <algorithm>
-#include <cstdint>
 #include <format>
 #include <ranges>
-#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -38,13 +36,6 @@ std::string object_type_name(ObjectType type) {
         return "UNKNOWN";
     }
     return "UNKNOWN";
-}
-
-std::uint64_t mismatch_cluster_count(std::span<const AllocationMismatchRange> ranges) {
-    std::uint64_t result{};
-    for (const auto &range : ranges)
-        result += static_cast<std::uint64_t>(range.end_cluster) - range.start_cluster + 1U;
-    return result;
 }
 
 std::string join(const std::vector<std::string> &values) {
@@ -258,36 +249,58 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
         });
     }
     for (const auto &partition : container.partitions()) {
+        const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);
+        for (const auto &record : partition.records) {
+            if (record.extent_byte_count_total == record.data_size)
+                continue;
+            result.issues.push_back({
+                "SFS_EXTENT_BYTE_TOTAL_MISMATCH",
+                ValidationSeverity::error,
+                std::format("SFS record {} declares {} logical byte(s), but its extents declare {} byte(s)",
+                            record.sfs_id.value, record.data_size, record.extent_byte_count_total),
+                std::format("{} / SFS record {}", partition_path, record.sfs_id.value),
+                {},
+            });
+        }
+        if (!partition.allocation.stored_copies_match) {
+            result.issues.push_back({
+                "SFS_ALLOCATION_BITMAP_COPIES_DIFFER",
+                ValidationSeverity::error,
+                std::format("the fixed-location and header-addressed SFS allocation bitmaps differ in {} byte(s)",
+                            partition.allocation.stored_copy_mismatch_byte_count),
+                partition_path,
+                {},
+            });
+        }
         if (partition.allocation.conflicting_cluster_count != 0U) {
             result.issues.push_back({
                 "SFS_ALLOCATION_CROSS_LINK",
                 ValidationSeverity::error,
                 std::format("{} cluster(s) are claimed by multiple SFS allocation owners",
                             partition.allocation.conflicting_cluster_count),
-                std::format("partition {}: {}", partition.index.value, partition.name),
+                partition_path,
                 {},
             });
         }
-        const auto stored_without_record = mismatch_cluster_count(partition.allocation.stored_not_reconstructed);
-        const auto record_marked_free = mismatch_cluster_count(partition.allocation.reconstructed_not_stored);
+        const auto fixed_without_record = partition.allocation.fixed_location.marked_used_without_index_extent_count;
+        const auto fixed_marked_free = partition.allocation.fixed_location.index_extent_marked_free_count;
+        const auto header_without_record = partition.allocation.header_addressed.marked_used_without_index_extent_count;
+        const auto header_marked_free = partition.allocation.header_addressed.index_extent_marked_free_count;
         if (partition.allocation.invalid_extent_record_count != 0U ||
-            partition.allocation.extent_total_mismatch_count != 0U || stored_without_record != 0U ||
-            record_marked_free != 0U) {
-            auto message =
-                std::format("partition allocation metadata disagrees with "
-                            "index extents: {} cluster(s) are marked "
-                            "used without an index-record extent, {} "
-                            "cluster(s) are referenced by index records but "
-                            "marked free, {} record(s) contain invalid "
-                            "extents, and {} record(s) have extent totals "
-                            "that disagree with their headers",
-                            stored_without_record, record_marked_free, partition.allocation.invalid_extent_record_count,
-                            partition.allocation.extent_total_mismatch_count);
+            partition.allocation.extent_total_mismatch_count != 0U || fixed_without_record != 0U ||
+            fixed_marked_free != 0U || header_without_record != 0U || header_marked_free != 0U) {
+            auto message = std::format(
+                "partition allocation metadata disagrees with index extents: fixed bitmap has {} "
+                "used-without-extent and {} extent-marked-free cluster(s); header-addressed bitmap has {} "
+                "used-without-extent and {} extent-marked-free cluster(s); {} record(s) contain invalid "
+                "extents; {} record(s) have extent totals that disagree with their headers",
+                fixed_without_record, fixed_marked_free, header_without_record, header_marked_free,
+                partition.allocation.invalid_extent_record_count, partition.allocation.extent_total_mismatch_count);
             result.issues.push_back({
                 "SFS_ALLOCATION_MISMATCH",
                 ValidationSeverity::error,
                 std::move(message),
-                std::format("partition {}: {}", partition.index.value, partition.name),
+                partition_path,
                 {},
             });
         }

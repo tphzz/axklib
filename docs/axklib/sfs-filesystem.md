@@ -133,9 +133,10 @@ absolute_offset = absolute_sector * sector_size
 
 ## Allocation Bitmap
 
-The allocation bitmap starts at the partition header field `0x09c`. It stores one
-bit per cluster. A set bit means the cluster is allocated; a clear bit means it
-is free.
+Partition-header field `0x09c` identifies the cluster offset of the
+header-addressed allocation bitmap copy. Each allocation bitmap stores one bit
+per cluster. A set bit means the cluster is allocated; a clear bit means it is
+free.
 
 ```text
 bitmap_offset = (partition_start_sector
@@ -148,13 +149,27 @@ bit_mask     = 0x80 >> (cluster_offset & 7)
 allocated    = (bitmap[byte_index] & bit_mask) != 0
 ```
 
-Validation reconstructs a second bitmap from all valid index-record extents,
-then compares it with the stored bitmap:
+SFS stores two complete copies of the allocation bitmap:
+
+| Copy | Location |
+| --- | --- |
+| Fixed-location copy | `partition_start_byte + 0x800` |
+| Header-addressed copy | Cluster offset stored at partition-header field `0x09c` |
+
+Each copy occupies the cluster-rounded span needed for all partition clusters,
+not only its first 512-byte sector. For example, a bitmap for 359,999 clusters
+has 45,000 meaningful bytes and occupies 45,056 bytes in a 1024-byte-cluster
+partition. The fixed-location span ends where the header-addressed span begins
+in the current formatter geometry.
+
+Readers must retain and compare both complete copies. Validation independently
+reconstructs a third bitmap from all valid index-record extents, then compares
+each stored copy with that reconstruction:
 
 | Direction | Meaning |
 | --- | --- |
-| `stored_used_not_reconstructed` | Stored bitmap marks a cluster used, but no valid index record owns it. |
-| `reconstructed_used_not_stored` | A valid index record owns a cluster that is clear in the stored bitmap. |
+| `marked_used_without_index_extent` | A stored copy marks a cluster used, but no valid index record owns it. |
+| `index_extent_marked_free` | A valid index record owns a cluster that is clear in that stored copy. |
 
 Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
 without listing every cluster.
@@ -168,11 +183,13 @@ unreachability explains why the sampler can ignore the remnant, but it does not
 make the record and bitmap agree. The validator does not silently discard or
 repair these records.
 
-A-series 256 MiB images also carry an early mirror of the first
-allocation-bitmap sector immediately after the duplicate partition header.
-Generated images write that mirror as well, while the partition header field
-`0x09c` remains the authoritative primary bitmap location for reads and
-validation.
+The fixed-location data is not a 512-byte preview and the header-addressed copy
+is not solely authoritative. Generated images and alterations write the same
+complete, cluster-rounded bytes to both locations. Before publication, axklib
+reopens the independently written image and requires both stored copies to be
+identical and to agree with reconstructed extents. A mismatch, invalid extent,
+extent-total discrepancy, or cross-linked cluster makes the image read-only for
+mutation; browsing, validation, and export remain available.
 
 ## Free Space
 
@@ -387,7 +404,7 @@ Container checks include:
 | --- | --- |
 | Superblock/header identity | Unsupported or malformed SFS image. |
 | Duplicate headers | Header copy differs or cannot be read. |
-| Allocation bitmap | Stored/reconstructed cluster mismatch. |
+| Allocation bitmaps | Stored copies differ, either copy disagrees with reconstructed extents, or clusters have multiple owners. |
 | Index records | Invalid extent count, impossible extent size, malformed continuation list. |
 | Directory entries | Blank names, zero link ID, unknown target, mismatched target type. |
 | Payload reads | Logical byte count mismatch or unsupported object payload. |
@@ -395,6 +412,29 @@ Container checks include:
 Relationship and sampler-data validation is reported separately so a caller can
 distinguish a broken filesystem from a readable filesystem that contains broken
 sampler object links.
+
+Allocation-integrity failures use stable validation codes:
+
+| Code | Meaning |
+| --- | --- |
+| `SFS_ALLOCATION_BITMAP_COPIES_DIFFER` | The complete fixed-location and header-addressed copies are not byte-identical. |
+| `SFS_ALLOCATION_MISMATCH` | At least one stored copy disagrees with reconstructed index extents, or an index record has another invalid or internally inconsistent extent condition. |
+| `SFS_ALLOCATION_CROSS_LINK` | At least one cluster is claimed by multiple reserved, data, or continuation owners. |
+| `SFS_EXTENT_BYTE_TOTAL_MISMATCH` | A record's extent byte counts do not sum to its logical data size. |
+
+All four conditions are errors and make the image unsafe for mutation. They do
+not prevent bounded inventory, validation, or export from still-readable
+objects.
+
+Extent byte-total mismatch has a narrow copy-only repair when it is the only
+allocation inconsistency anywhere in the image. Overreported layouts are
+normalized by shortening the last used extent and dropping wholly trailing
+extents. An underreported layout is accepted only when one extent's allocated
+capacity can contain the complete logical payload; underreported multi-extent
+layouts are ambiguous and rejected. Every eligible record is repaired in the
+same transaction, both allocation copies are updated, and the output is reopened
+to prove allocation safety and exact logical-payload preservation. The source
+image is never replaced. No other allocation condition is guessed or repaired.
 
 ## Generated Image Writing
 
@@ -420,8 +460,8 @@ The first writer scope is intentionally narrow:
   reference values;
 - generated disk headers include the bounded superblock compatibility block,
   initialized sector-2 disk metadata, full primary and duplicate partition-header
-  sectors for the supported hard-disk metadata profile, and the early
-  first-bitmap-sector mirror used by A-series hard-disk images;
+  sectors for the supported hard-disk metadata profile, and complete matching
+  fixed-location and header-addressed allocation bitmap copies;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current Sample (`SBNK`) object payloads use the current single-member
@@ -472,8 +512,8 @@ those tail bytes as storage padding unless a later compatibility case proves
 otherwise.
 
 The writer constructs the superblock, partition table, sector-2 metadata,
-partition headers, allocation bitmap, directory index, and object payload
-extents from the typed image model. Fields with known formulas, such as
+partition headers, both complete allocation bitmap copies, directory index,
+and object payload extents from the typed image model. Fields with known formulas, such as
 partition slot placement, partition-header start/count words, partition-index
 words, leading formatter-transfer tokens, and dynamic header words, are
 generated explicitly.
@@ -510,10 +550,12 @@ A minimal SFS reader performs these steps:
 1. Read sector 0 and check `YAMAHA_dev3`.
 2. Read sector size and the eight partition entries.
 3. For each active partition, read the partition header and cluster geometry.
-4. Read the allocation bitmap and directory/file index region.
+4. Read both complete allocation bitmap copies and the directory/file index
+   region.
 5. Walk 72-byte index records using the 14-record-per-block mapping.
 6. Read directory payloads and match entry `link_id` values to SFS IDs.
 7. For each object file entry, read extents and return logical payload bytes.
 8. Pass `FSFSDEV3SPLX` payloads to the sampler-data decoder.
 9. Attach SFS placement metadata to every decoded object.
-10. Run allocation and directory validation if a consistency report is needed.
+10. Compare both allocation copies with each other and with extents reconstructed
+    from the index before allowing any mutation.

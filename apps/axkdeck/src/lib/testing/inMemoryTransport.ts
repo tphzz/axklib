@@ -21,6 +21,7 @@ import type {
     ImageSessionAudioExportInspection,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
+    ImageSessionExtentLayoutRepairDestination,
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
     ImageSessionPackageImportDestination,
@@ -81,6 +82,7 @@ export interface InMemoryImageTransportOptions {
     opened: Omit<
         OpenedImage,
         | 'sessionId'
+        | 'revision'
         | 'companionSources'
         | 'floppySet'
         | 'volumeMutationsAvailable'
@@ -96,7 +98,9 @@ export interface InMemoryImageTransportOptions {
         | 'audioExportAvailable'
         | 'sequenceExportAvailable'
         | 'mediaConversionAvailable'
+        | 'extentLayoutRepairAvailable'
     > & {
+        revision?: number;
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
         objectRenameAvailable?: boolean;
@@ -110,6 +114,7 @@ export interface InMemoryImageTransportOptions {
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
+        extentLayoutRepairAvailable?: boolean;
         companionSources?: ImageLocation[];
         floppySet?: OpenedImage['floppySet'];
     };
@@ -160,6 +165,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId: this.nextSessionId++,
+            revision: this.options.opened.revision ?? 1,
             companionSources: this.options.opened.companionSources ?? [],
             floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
@@ -175,6 +181,7 @@ export class InMemoryImageTransport implements ImageTransport {
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
+            extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
         };
     }
 
@@ -185,6 +192,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId,
+            revision: this.options.opened.revision ?? 1,
             companionSources: this.options.opened.companionSources ?? [],
             floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
@@ -200,6 +208,7 @@ export class InMemoryImageTransport implements ImageTransport {
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
+            extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
         };
     }
 
@@ -209,6 +218,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
         return this.invoke('contentChildren', [sessionId, parentId, offset, limit]);
+    }
+
+    validationIssues(sessionId: number): ReturnType<ImageTransport['validationIssues']> {
+        return this.invoke('validationIssues', [sessionId]);
     }
 
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage> {
@@ -413,6 +426,13 @@ export class InMemoryImageTransport implements ImageTransport {
         destination: ImageSessionMediaConversionDestination,
     ): Promise<JobState> {
         return this.invoke('startImageMediaConversion', [sessionId, selection, destination]);
+    }
+
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.invoke('startExtentLayoutRepair', [sessionId, destination]);
     }
 
     downloadFile(source: FileLocation): Promise<ClientDownload> {

@@ -43,6 +43,28 @@ Result<void> write_record_kind(ByteWriter &writer, RecordKind kind, std::uint16_
 
 } // namespace
 
+Result<std::vector<std::uint32_t>> plan_extent_byte_counts(std::span<const Extent> extents, std::uint32_t size) {
+    if (extents.empty())
+        return std::unexpected{encoding_error("SFS record requires at least one extent")};
+    std::uint64_t remaining = size;
+    std::vector<std::uint32_t> result;
+    result.reserve(extents.size());
+    for (const auto &extent : extents) {
+        if (extent.cluster_count == 0U || remaining == 0U) {
+            return std::unexpected{
+                encoding_error("SFS extent byte total cannot equal the logical record payload size")};
+        }
+        const auto capacity = static_cast<std::uint64_t>(extent.cluster_count) * 1'024U;
+        const auto byte_count = std::min(remaining, capacity);
+        result.push_back(static_cast<std::uint32_t>(byte_count));
+        remaining -= byte_count;
+    }
+    if (remaining != 0U) {
+        return std::unexpected{encoding_error("SFS extent byte total cannot cover the logical record payload size")};
+    }
+    return result;
+}
+
 Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record) {
     std::vector<std::byte> result(sfs_directory_index_record_bytes);
     ByteWriter writer{result};
@@ -74,6 +96,9 @@ Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &rec
         return std::unexpected{encoding_error("SFS record requires at least one extent")};
     if (continuation_clusters.empty() && extents.size() > 4U)
         return std::unexpected{encoding_error("direct SFS index record cannot encode more than four extents")};
+    const auto byte_counts = plan_extent_byte_counts(extents, size);
+    if (!byte_counts)
+        return std::unexpected{byte_counts.error()};
 
     std::uint64_t total_clusters{};
     for (const auto &extent : extents)
@@ -95,19 +120,14 @@ Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &rec
         if (auto written = writer.write_be32(0x12U, size); !written)
             return std::unexpected{written.error()};
     } else {
-        std::uint32_t remaining = size;
         for (std::size_t index = 0; index < extents.size(); ++index) {
             const auto &extent = extents[index];
-            const auto capacity = static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
-            const auto byte_count =
-                static_cast<std::uint32_t>(std::min<std::uint64_t>(remaining == 0U ? capacity : remaining, capacity));
-            remaining = remaining > byte_count ? remaining - byte_count : 0U;
             const auto offset = 0x0aU + index * 12U;
             if (auto written = writer.write_be32(offset, extent.cluster_offset); !written)
                 return std::unexpected{written.error()};
             if (auto written = writer.write_be32(offset + 4U, extent.cluster_count); !written)
                 return std::unexpected{written.error()};
-            if (auto written = writer.write_be32(offset + 8U, byte_count); !written)
+            if (auto written = writer.write_be32(offset + 8U, (*byte_counts)[index]); !written)
                 return std::unexpected{written.error()};
         }
     }

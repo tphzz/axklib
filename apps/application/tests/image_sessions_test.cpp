@@ -75,6 +75,25 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
     ASSERT_TRUE(image);
 }
 
+void corrupt_fixed_allocation_bitmap_copy(const std::filesystem::path &path) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto offset = static_cast<std::uint64_t>(sfs->partitions().front().start_sector) * 512U + 2048U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekg(static_cast<std::streamoff>(offset));
+    char byte{};
+    image.read(&byte, 1);
+    ASSERT_TRUE(image);
+    byte = static_cast<char>(static_cast<unsigned char>(byte) ^ 0x01U);
+    image.seekp(static_cast<std::streamoff>(offset));
+    image.write(&byte, 1);
+    ASSERT_TRUE(image);
+}
+
 void patch_sample_window(const std::filesystem::path &path, std::uint32_t first_frame, std::uint32_t frame_count,
                          std::uint32_t loop_start, std::uint32_t loop_length,
                          std::optional<std::array<std::uint32_t, 4>> right_window = std::nullopt,
@@ -261,6 +280,36 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     }
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
+}
+
+TEST_F(ImageSessionTest, AllocationMetadataMismatchRemainsReadableButCannotBeAltered) {
+    corrupt_fixed_allocation_bitmap_copy(root_ / "fixture.hds");
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
+              opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.validation.issues"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.alter.volumes"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+
+    const auto issues = sessions.validation_issues(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(issues) << issues.error().message;
+    EXPECT_NE(
+        std::ranges::find(issues->items, "SFS_ALLOCATION_BITMAP_COPIES_DIFFER", &axk::app::ImageValidationItem::code),
+        issues->items.end());
+
+    {
+        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        ASSERT_TRUE(read) << read.error().message;
+    }
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
+    EXPECT_EQ(mutation.error().code, "image_integrity_unsafe");
 }
 
 TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {

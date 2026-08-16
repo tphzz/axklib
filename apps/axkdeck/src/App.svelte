@@ -18,11 +18,13 @@
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
     import { Tx16wImportWorkflow } from './features/import/tx16wWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
+    import { ExtentLayoutRepairWorkflow } from './features/image-session/extentLayoutRepairWorkflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
+    import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
     import { createTransport } from './lib/createTransport';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
@@ -95,6 +97,16 @@
         isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
+    });
+    const extentLayoutRepairWorkflow = new ExtentLayoutRepairWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageLocation: () => imageSessionWorkflow.location,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        closeDialog: () => imageSessionWorkflow.closeIntegrity(),
     });
     const volumePackageExportWorkflow = new VolumePackageExportWorkflow({
         transport,
@@ -283,6 +295,7 @@
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
         programGeneration: programGenerationWorkflow,
+        extentRepairs: extentLayoutRepairWorkflow,
         clearExportSelection: clearPackageExportSelection,
     });
     const programs = $derived(catalog.programs);
@@ -296,6 +309,7 @@
         volumePackageExportWorkflow.dispose();
         volumeFloppyExportWorkflow.dispose();
         mediaExportWorkflow.dispose();
+        extentLayoutRepairWorkflow.dispose();
         deletionWorkflow.dispose();
         programGenerationWorkflow.dispose();
         pickerController.dispose();
@@ -575,6 +589,7 @@
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
     closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
+    showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
     manageLocations={() => (workspaceManagerOpen = true)}
     selectSource={(item) => imageSessionWorkflow.selectSource(item)}
     imageAction={requestImageAction}
@@ -592,6 +607,20 @@
 
 {#if experimentalWarningOpen}
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningOpen = false)} />
+{/if}
+
+{#if imageSessionWorkflow.integrityDialogOpen}
+    <ImageIntegrityDialog
+        issues={imageSessionWorkflow.integrityIssues}
+        loading={imageSessionWorkflow.integrityLoading}
+        error={imageSessionWorkflow.integrityError}
+        repairAvailable={imageSessionWorkflow.extentLayoutRepairAvailable}
+        repairing={extentLayoutRepairWorkflow.busy}
+        repairLabel={extentLayoutRepairWorkflow.progressLabel}
+        repairError={extentLayoutRepairWorkflow.error}
+        onrepair={() => void extentLayoutRepairWorkflow.repair()}
+        onclose={() => imageSessionWorkflow.closeIntegrity()}
+    />
 {/if}
 
 <AppDialogs

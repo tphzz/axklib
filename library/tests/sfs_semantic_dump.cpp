@@ -77,10 +77,13 @@ int main(int argc, char **argv) {
              {"backup_header_matches", partition.backup_header_matches},
              {"records", std::move(records)},
              {"allocation",
-              {{"stored_used_cluster_count", partition.allocation.stored_used_cluster_count},
+              {{"fixed_bitmap_used_cluster_count", partition.allocation.fixed_location.used_cluster_count},
+               {"header_bitmap_used_cluster_count", partition.allocation.header_addressed.used_cluster_count},
+               {"bitmap_copies_match", partition.allocation.stored_copies_match},
                {"reconstructed_used_cluster_count", partition.allocation.reconstructed_used_cluster_count},
                {"invalid_extent_record_count", partition.allocation.invalid_extent_record_count},
                {"extent_total_mismatch_count", partition.allocation.extent_total_mismatch_count},
+               {"extent_byte_total_mismatch_count", partition.allocation.extent_byte_total_mismatch_count},
                {"free_space", std::move(free_space)}}}});
     }
     const nlohmann::ordered_json result = {

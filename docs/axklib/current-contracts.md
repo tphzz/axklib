@@ -8,6 +8,7 @@ every in-repository producer, consumer, test, and summary together.
 | Subject | Authoritative current specification |
 | --- | --- |
 | Writer admission, mandatory planning, and source preservation | [Writer And Alteration](write.md) |
+| SFS allocation copies and integrity validation | [SFS Filesystem](sfs-filesystem.md) |
 | Read-only A3K archive envelope and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
 | Exact physical audio, derived rendered stereo, and output layout | [Names, Paths, And Exports](names-and-paths.md) |
 | Relationship-quality admission for exact output | [Names, Paths, And Exports](names-and-paths.md) |

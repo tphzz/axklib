@@ -572,6 +572,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-session-extent-layout-repairs': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.extent_layout.repair'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/image-session-media-conversion-inspections': {
         parameters: {
             query?: never;
@@ -2462,6 +2478,22 @@ export interface components {
                   kind: 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
                   objectId: string;
               };
+        ImageSessionExtentLayoutRepairRequest: {
+            destination: components['schemas']['ImageSessionMediaConversionDestination'];
+            expectedRevision: number;
+            imageId: string;
+        };
+        ImageSessionExtentLayoutRepairResult: {
+            defaultFilename: string;
+            /** @enum {unknown} */
+            destination: 'WORKSPACE' | 'DOWNLOAD';
+            download: components['schemas']['RetainedDownload'] | null;
+            imageId: string;
+            output: components['schemas']['FileRef'] | null;
+            repairs: components['schemas']['SfsExtentLayoutRepairEntry'][];
+            revision: number;
+            sizeBytes: number;
+        };
         ImageSessionMediaConversionDestination:
             | {
                   /** @constant */
@@ -3684,6 +3716,18 @@ export interface components {
         SequenceTempoEvent: {
             microsecondsPerQuarterNote: number;
             tick: number;
+        };
+        SfsExtent: {
+            byteCount: number;
+            clusterCount: number;
+            clusterOffset: number;
+        };
+        SfsExtentLayoutRepairEntry: {
+            logicalSize: number;
+            partitionIndex: number;
+            recordId: number;
+            replacementExtents: components['schemas']['SfsExtent'][];
+            sourceExtents: components['schemas']['SfsExtent'][];
         };
         SfsIndexCapacityEstimate: {
             allocatableRecordSlots: number;
@@ -7033,6 +7077,121 @@ export interface operations {
         requestBody: {
             content: {
                 'application/json': components['schemas']['ImageSessionAudioExportRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.extent_layout.repair': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionExtentLayoutRepairRequest'];
             };
         };
         responses: {

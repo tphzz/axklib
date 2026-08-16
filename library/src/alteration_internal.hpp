@@ -217,13 +217,19 @@ Result<void> validate_post_write_placements(const ObjectCatalog &before, const O
                                             std::span<const ExpectedObjectPlacement> expected_objects);
 Result<void> validate_post_write_placements(const TransactionState &state, const Container &actual,
                                             const CancellationToken &cancellation);
+bool placement_repair_can_normalize_directory_extents(const Partition &partition);
+Result<void> stage_recoverable_directory_extent_repairs(const RandomAccessReader &source, const Partition &partition,
+                                                        MutablePartition &mutable_state,
+                                                        const CancellationToken &cancellation);
 Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAccessReader> source,
                                                 const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph);
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition = std::nullopt);
 Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph);
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition = std::nullopt);
 Result<PublicationOutcome>
 publish(const TransactionState &state, const std::filesystem::path &output_path, const CancellationToken &cancellation,
         bool overwrite = false,

@@ -30,6 +30,7 @@ import type {
     ImageSessionMediaConversionDestination,
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
+    ImageSessionExtentLayoutRepairDestination,
     ImageSessionPackageImportDestination,
     ImageSessionPackageImportPlan,
     InputBinding,
@@ -335,6 +336,12 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
         destination: ImageSessionMediaConversionDestination,
     ): Promise<JobState> {
         return this.packages.startMediaConversion(sessionId, selection, destination);
+    }
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.imageSessions.startExtentLayoutRepair(sessionId, destination);
     }
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {
         return this.packages.deleteRetained(download);

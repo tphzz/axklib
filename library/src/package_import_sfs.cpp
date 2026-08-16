@@ -42,9 +42,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     }
     append_sfs_catalog_issues(plan, catalog_issues, catalog_objects);
     for (const auto &partition : container.partitions()) {
-        if (partition.allocation.invalid_extent_record_count != 0U ||
-            !partition.allocation.stored_not_reconstructed.empty() ||
-            !partition.allocation.reconstructed_not_stored.empty()) {
+        if (!allocation_is_safe_for_mutation(partition.allocation)) {
             add_conflict(plan, "SFS_ALLOCATION_INVALID",
                          "target partition allocation is not safe for package planning");
             plan.conflicts.back().partition_index = partition.index.value;

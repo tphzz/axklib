@@ -101,9 +101,35 @@ same inspection and direct-apply operations through the C++17 facade.
 
 Application uses a uniquely named sibling temporary file. Before publication,
 the library verifies the exact planned record set, changed and inserted payloads,
-root directory, and allocation bitmap. It flushes the temporary file to disk,
+root directory, and both complete SFS allocation bitmap copies. It independently
+reopens the temporary image and requires both stored copies to match each other
+and all reconstructed index extents. It flushes the temporary file to disk,
 publishes without replacing an existing destination, and synchronizes the parent
 directory where the platform provides that operation.
+
+The same allocation-integrity predicate gates every mutation entry point. An
+image with divergent bitmap copies, stored/index disagreement, invalid extents,
+extent-total disagreement, or cross-linked ownership remains available for
+browsing, validation, and export, but volume, partition, object, and package
+mutations are disabled. axkdeck opens its Image integrity dialog automatically
+for these blocking conditions and also exposes it from the image menu.
+
+Axklib has one deliberately narrow repair operation for an otherwise clean SFS
+image whose record extent byte totals differ from the records' logical sizes.
+It normalizes every such record in one copy-only transaction, updates both
+allocation bitmap copies when a wholly trailing extent can be released, then
+reopens the output and requires complete allocation agreement and byte-identical
+logical payloads. The source image is never overwritten. Axkdeck exposes this as
+`Repair copy...` in the Image integrity dialog when, and only when, the complete
+image satisfies that repair contract.
+
+Other allocation failures are not repaired automatically. In particular, a
+cross-linked cluster does not contain enough information to determine which
+owner should keep possibly overwritten bytes. Divergent bitmap copies,
+stored/index disagreement, invalid extents, ambiguous underreported
+multi-extent records, and cross-links remain read-only. Preserve the source
+image, export every still-readable object, and continue from a known-good backup
+or a newly authored image rather than guessing allocation ownership.
 
 Fragmented records use continuation-list clusters when more than four extents
 are required. Payload extents and list clusters are both included in allocation

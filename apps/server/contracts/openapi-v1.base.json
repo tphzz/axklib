@@ -3388,6 +3388,53 @@
           "download": {"oneOf": [{"$ref": "#/components/schemas/RetainedDownload"}, {"type": "null"}]}
         }
       },
+      "SfsExtent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clusterOffset", "clusterCount", "byteCount"],
+        "properties": {
+          "clusterOffset": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "clusterCount": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+          "byteCount": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        }
+      },
+      "ImageSessionExtentLayoutRepairRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "destination": {"$ref": "#/components/schemas/ImageSessionMediaConversionDestination"}
+        }
+      },
+      "SfsExtentLayoutRepairEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "recordId", "logicalSize", "sourceExtents", "replacementExtents"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "recordId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "logicalSize": {"type": "integer", "minimum": 0},
+          "sourceExtents": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/SfsExtent"}},
+          "replacementExtents": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/SfsExtent"}}
+        }
+      },
+      "ImageSessionExtentLayoutRepairResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "repairs", "sizeBytes", "defaultFilename", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "repairs": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/SfsExtentLayoutRepairEntry"}},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "defaultFilename": {"type": "string", "minLength": 1},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {"oneOf": [{"$ref": "#/components/schemas/FileRef"}, {"type": "null"}]},
+          "download": {"oneOf": [{"$ref": "#/components/schemas/RetainedDownload"}, {"type": "null"}]}
+        }
+      },
       "ManifestTemplateRequest": {
         "type": "object",
         "additionalProperties": false,

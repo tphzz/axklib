@@ -142,8 +142,10 @@ add_library(
   src/sequence.cpp
   src/sequence_diagnostics.cpp
   src/sfs.cpp
+  src/sfs_allocation.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/sfs_repair.cpp
   src/system_file.cpp
   src/tx16w.cpp
   src/tx16w_a_series.cpp
@@ -217,6 +219,7 @@ add_library(
     src/alteration_package_sfs.cpp
   src/alteration_program.cpp
   src/alteration_sample_bank_assignment.cpp
+  src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp

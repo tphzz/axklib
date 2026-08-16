@@ -26,6 +26,8 @@ import type {
     RelationshipPage,
     RelationshipPageFilter,
     SystemProgramContexts,
+    ImageValidationIssue,
+    ImageSessionExtentLayoutRepairDestination,
     JobState,
     ObjectDeletionInspection,
     PlacementRepairInspection,
@@ -124,6 +126,24 @@ export class HttpImageSessions {
         const items = page.items.map((item) => mapContentItem(item, parent));
         for (const item of items) session.contentItems.set(item.id, item);
         return { items, totalCount: page.totalCount };
+    }
+
+    async validationIssues(sessionId: number): Promise<ImageValidationIssue[]> {
+        const session = this.get(sessionId);
+        const issues: ImageValidationIssue[] = [];
+        let cursor: string | null = null;
+        for (let request = 0; request < 256; request += 1) {
+            const query = new URLSearchParams({ limit: '200' });
+            if (cursor) query.set('cursor', cursor);
+            const page = await this.client.request<ApiPage<ImageValidationIssue>>(
+                'GET',
+                `/images/${encodeURIComponent(session.remoteId)}/validation/issues?${query}`,
+            );
+            issues.push(...page.items);
+            cursor = page.nextCursor;
+            if (!cursor) return issues;
+        }
+        throw new Error('Image validation issue pagination exceeded its safety limit');
     }
 
     async objectPage(
@@ -335,6 +355,24 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
+    async startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.extent_layout.repair',
+            {
+                imageId: session.remoteId,
+                expectedRevision: session.revision,
+                destination,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) throw new Error('images.extent_layout.repair did not return a job');
+        return this.jobs.map(result);
+    }
+
     async startMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
         const session = this.get(sessionId);
         const job = await this.client.invoke<never>(
@@ -375,6 +413,7 @@ export class HttpImageSessions {
         const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
         return {
             sessionId,
+            revision: summary.revision,
             companionSources: summary.companionSources.map(imageLocation),
             floppySet: summary.floppySet,
             validation: validationSummary(summary),
@@ -396,6 +435,7 @@ export class HttpImageSessions {
             audioExportAvailable: (summary.availableOperations ?? []).includes('images.audio_export'),
             sequenceExportAvailable: (summary.availableOperations ?? []).includes('images.sequence_export'),
             mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
+            extentLayoutRepairAvailable: (summary.availableOperations ?? []).includes('images.extent_layout.repair'),
             tree: [disk],
         };
     }

@@ -10,6 +10,15 @@ include source, target or candidates, relationship type, quality, basis,
 assignment state, and sampler-facing location. Validation rows include stable
 issue code, severity, message, sampler path, and technical object key.
 
+SFS allocation summaries report the fixed-location and header-addressed bitmap
+offsets and used-cluster counts separately, whether the complete copies match,
+their mismatch byte and cluster counts, reconstructed usage, invalid or
+extent-total-mismatched records, and cross-linked clusters. Allocation mismatch
+rows identify which stored copy and comparison direction produced each
+inclusive cluster range; multiple-owner rows identify both claim kinds and SFS
+record IDs when present. Consumers must not collapse the two stored copies into
+one authoritative bitmap.
+
 Exact exports also write a selection graph that links Wave Data files, rendered
 stereo files, Samples, Sample Banks, Programs, parameters, and any
 unresolved decisions.

@@ -13,6 +13,13 @@ export audio and SFZ instruments, and create or alter supported sampler images.
 Planning views expose name conflicts, Program slots, storage use, and filesystem
 record capacity before a write is committed.
 
+Axkdeck validates SFS allocation metadata when an image is opened. Images with
+unsafe allocation remain available for browsing and export, while alteration is
+disabled and the Image integrity dialog explains the blocking issues. Axkdeck is
+experimental software; always keep a backup before changing a disk image. For
+the one supported malformed extent byte-total condition, the dialog can produce
+a separately validated repaired copy without changing the source image.
+
 [Download axkdeck](https://github.com/tphzz/axklib/releases)
 
 ## Other Interfaces

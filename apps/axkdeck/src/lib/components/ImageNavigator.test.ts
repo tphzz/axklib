@@ -61,6 +61,7 @@ describe('ImageNavigator', () => {
         const onopen = vi.fn();
         const oncreate = vi.fn();
         const onclose = vi.fn();
+        const onintegrity = vi.fn();
         const onmanagelocations = vi.fn();
         const { container } = render(ImageNavigator, {
             props: {
@@ -72,6 +73,7 @@ describe('ImageNavigator', () => {
                 onopen,
                 oncreate,
                 onclose,
+                onintegrity,
                 onmanagelocations,
             },
         });
@@ -87,6 +89,10 @@ describe('ImageNavigator', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
         expect(onopen).toHaveBeenCalledOnce();
         expect(onclose).toHaveBeenCalledOnce();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Image integrity...' }));
+        expect(onintegrity).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Create new image' }));

@@ -464,6 +464,48 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     std::filesystem::remove(path, error);
 }
 
+TEST(HdsWriter, WritesCompleteMatchingAllocationBitmapsBeyondFirst4096Clusters) {
+    axk::Waveform source;
+    source.format = {1, 2, 44'100};
+    source.frame_count = 2'200'000U;
+    source.pcm.resize(source.frame_count * 2U);
+    const auto audio_path = std::filesystem::temp_directory_path() / "axklib-writer-large-bitmap.wav";
+    const auto image_path = std::filesystem::temp_directory_path() / "axklib-writer-large-bitmap.hds";
+    std::error_code error;
+    std::filesystem::remove(audio_path, error);
+    std::filesystem::remove(image_path, error);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
+
+    axk::VolumeSpec volume;
+    volume.name = "Large Bitmap";
+    volume.waveforms.push_back({"wave", "Large Wave", audio_path, 60U, {}});
+    axk::HdsBuildManifest manifest_value{"1.0", 16U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest_value, image_path);
+    ASSERT_TRUE(written) << written.error().message;
+    ASSERT_EQ(written->partitions.size(), 1U);
+    const auto &geometry = written->partitions.front().geometry;
+    const auto bitmap_size = static_cast<std::size_t>(geometry.bitmap_cluster_count * 1024U);
+    ASSERT_GT(bitmap_size, 512U);
+
+    const auto read_bitmap = [&](std::uint64_t offset) {
+        std::ifstream stream{image_path, std::ios::binary};
+        std::vector<std::byte> bytes(bitmap_size);
+        stream.seekg(static_cast<std::streamoff>(offset));
+        stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        EXPECT_TRUE(stream);
+        return bytes;
+    };
+    const auto partition_start = geometry.start_sector * 512U;
+    const auto fixed_location = read_bitmap(partition_start + 2048U);
+    const auto header_addressed = read_bitmap(partition_start + geometry.bitmap_cluster * 1024U);
+    EXPECT_TRUE(std::ranges::any_of(std::span{header_addressed}.subspan(512U),
+                                    [](std::byte value) { return value != std::byte{}; }));
+    EXPECT_EQ(fixed_location, header_addressed);
+
+    std::filesystem::remove(audio_path, error);
+    std::filesystem::remove(image_path, error);
+}
+
 TEST(HdsWriter, RejectsPartitionSupportDirectoryNameAsAVolume) {
     axk::VolumeSpec reserved;
     reserved.name = "PRF3";

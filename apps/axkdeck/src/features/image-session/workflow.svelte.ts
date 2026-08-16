@@ -1,6 +1,12 @@
 import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
-import type { CompanionSelection, FloppySetSummary, ImageTransport, OpenedImage } from '../../lib/transport';
+import type {
+    CompanionSelection,
+    FloppySetSummary,
+    ImageTransport,
+    ImageValidationIssue,
+    OpenedImage,
+} from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
@@ -15,12 +21,20 @@ import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
+import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
 import { validationStatus } from './validationStatus';
 
 export type CompanionRetry =
     { kind: 'audition'; objectId: string } | { kind: 'sample-bank'; bankId: string } | ExportCompanionRetry;
 
 type CompanionSourceKind = 'file' | 'directory';
+
+const allocationBlockerCodes = new Set([
+    'SFS_ALLOCATION_BITMAP_COPIES_DIFFER',
+    'SFS_ALLOCATION_CROSS_LINK',
+    'SFS_ALLOCATION_MISMATCH',
+    'SFS_EXTENT_BYTE_TOTAL_MISMATCH',
+]);
 
 interface SessionCollaborators {
     catalog: CatalogWorkflow;
@@ -33,6 +47,7 @@ interface SessionCollaborators {
     packageImport: PackageImportWorkflow;
     deletion: DeletionWorkflow;
     programGeneration: ProgramGenerationWorkflow;
+    extentRepairs: ExtentLayoutRepairWorkflow;
     clearExportSelection: () => void;
 }
 
@@ -71,6 +86,11 @@ export class ImageSessionWorkflow {
     audioExportAvailable = $state(false);
     sequenceExportAvailable = $state(false);
     mediaConversionAvailable = $state(false);
+    extentLayoutRepairAvailable = $state(false);
+    integrityDialogOpen = $state(false);
+    integrityIssues = $state<ImageValidationIssue[]>([]);
+    integrityLoading = $state(false);
+    integrityError = $state('');
 
     private readonly controller: ImageSessionController;
     private collaborators: SessionCollaborators | null = null;
@@ -78,6 +98,7 @@ export class ImageSessionWorkflow {
     private lastImageDirectory = $state<DirectoryRef | null>(null);
     private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
+    private lastAutomaticIntegrityKey = '';
 
     constructor(
         private readonly transport: ImageTransport,
@@ -101,6 +122,16 @@ export class ImageSessionWorkflow {
 
     setStatus(status: string): void {
         this.status = status;
+    }
+
+    async showIntegrity(): Promise<void> {
+        if (this.sessionId === null) return;
+        this.integrityDialogOpen = true;
+        await this.loadIntegrityIssues(this.sessionId);
+    }
+
+    closeIntegrity(): void {
+        this.integrityDialogOpen = false;
     }
 
     selectSource(item: DiskTreeItem): void {
@@ -305,6 +336,9 @@ export class ImageSessionWorkflow {
     ): Promise<void> {
         const { catalog, mutation, clearExportSelection } = this.requireCollaborators();
         clearExportSelection();
+        this.integrityDialogOpen = false;
+        this.integrityIssues = [];
+        this.integrityError = '';
         this.companionSources = opened.companionSources;
         this.floppySet = opened.floppySet;
         mutation.setCapabilities(opened);
@@ -318,6 +352,7 @@ export class ImageSessionWorkflow {
         this.audioExportAvailable = opened.audioExportAvailable;
         this.sequenceExportAvailable = opened.sequenceExportAvailable;
         this.mediaConversionAvailable = opened.mediaConversionAvailable;
+        this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -327,7 +362,34 @@ export class ImageSessionWorkflow {
             await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
         else catalog.clear();
         this.status = validationStatus(opened.validation);
+        if (opened.validation.errorCount > 0) await this.showAllocationBlockers(opened);
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
+    }
+
+    private async showAllocationBlockers(opened: OpenedImage): Promise<void> {
+        await this.loadIntegrityIssues(opened.sessionId);
+        if (this.sessionId !== opened.sessionId || this.integrityError) return;
+        const blockerCodes = [...new Set(this.integrityIssues.map((issue) => issue.code))]
+            .filter((code) => allocationBlockerCodes.has(code))
+            .sort();
+        if (blockerCodes.length === 0) return;
+        const automaticKey = `${opened.sessionId}:${opened.revision}:${blockerCodes.join(',')}`;
+        if (automaticKey === this.lastAutomaticIntegrityKey) return;
+        this.lastAutomaticIntegrityKey = automaticKey;
+        this.integrityDialogOpen = true;
+    }
+
+    private async loadIntegrityIssues(sessionId: number): Promise<void> {
+        this.integrityLoading = true;
+        this.integrityError = '';
+        try {
+            const issues = await this.transport.validationIssues(sessionId);
+            if (this.sessionId === sessionId) this.integrityIssues = issues;
+        } catch (error) {
+            if (this.sessionId === sessionId) this.integrityError = userFacingMessage(error);
+        } finally {
+            if (this.sessionId === sessionId) this.integrityLoading = false;
+        }
     }
 
     private async retryCompanionAction(retry: CompanionRetry): Promise<void> {
@@ -355,12 +417,18 @@ export class ImageSessionWorkflow {
         collaborators.volumePackages.dispose();
         collaborators.volumeFloppies.dispose();
         collaborators.mediaExports.dispose();
+        collaborators.extentRepairs.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
         await this.controller.close();
         collaborators.clearExportSelection();
         this.companionSources = [];
         this.floppySet = null;
+        this.integrityDialogOpen = false;
+        this.integrityIssues = [];
+        this.integrityLoading = false;
+        this.integrityError = '';
+        this.lastAutomaticIntegrityKey = '';
         collaborators.mutation.reset();
         this.objectDeletionAvailable = false;
         this.waveDataCleanupAvailable = false;
@@ -371,6 +439,7 @@ export class ImageSessionWorkflow {
         this.audioExportAvailable = false;
         this.sequenceExportAvailable = false;
         this.mediaConversionAvailable = false;
+        this.extentLayoutRepairAvailable = false;
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;

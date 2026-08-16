@@ -25,6 +25,7 @@ export interface ValidationSummary {
 
 export interface OpenedImage {
     sessionId: number;
+    revision: number;
     companionSources: ImageLocation[];
     floppySet: FloppySetSummary | null;
     tree: DiskTreeItem[];
@@ -45,7 +46,10 @@ export interface OpenedImage {
     audioExportAvailable: boolean;
     sequenceExportAvailable: boolean;
     mediaConversionAvailable: boolean;
+    extentLayoutRepairAvailable: boolean;
 }
+
+export type ImageValidationIssue = components['schemas']['ImageValidationItem'];
 
 export type CompanionSelection = { kind: 'sources'; sources: ImageLocation[] } | { kind: 'immediate-siblings' };
 
@@ -348,6 +352,8 @@ export type ImageSessionSequenceExportResult = components['schemas']['ImageSessi
 export type ImageSessionMediaConversionInspection = components['schemas']['ImageSessionMediaConversionInspection'];
 export type ImageSessionMediaConversionDestination = components['schemas']['ImageSessionMediaConversionDestination'];
 export type ImageSessionMediaConversionResult = components['schemas']['ImageSessionMediaConversionResult'];
+export type ImageSessionExtentLayoutRepairDestination = components['schemas']['ImageSessionMediaConversionDestination'];
+export type ImageSessionExtentLayoutRepairResult = components['schemas']['ImageSessionExtentLayoutRepairResult'];
 export type RetainedDownload = components['schemas']['RetainedDownload'];
 
 export type ImageSessionMediaConversionSelection =
@@ -458,6 +464,7 @@ export interface ImageTransport {
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
+    validationIssues(sessionId: number): Promise<ImageValidationIssue[]>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;
     relationshipPage(
         sessionId: number,
@@ -610,6 +617,10 @@ export interface ImageTransport {
         sessionId: number,
         selection: ImageSessionMediaConversionSelection,
         destination: ImageSessionMediaConversionDestination,
+    ): Promise<JobState>;
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
     ): Promise<JobState>;
     deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;

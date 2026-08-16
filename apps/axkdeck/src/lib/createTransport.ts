@@ -6,6 +6,7 @@ import type {
     ImageSessionVolumePackageExportInspection,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionMediaConversionInspection,
+    ImageSessionExtentLayoutRepairDestination,
     AudioImportCapabilities,
     AuditionBundleDescriptor,
     ClientDownload,
@@ -16,6 +17,7 @@ import type {
     ObjectPage,
     ObjectDeletionInspection,
     OpenedImage,
+    ImageValidationIssue,
     PackageImportPlan,
     PackageInspection,
     RetainedDownload,
@@ -146,6 +148,12 @@ class UnavailableTransport implements ImageTransport {
     startImageMediaConversion(): Promise<JobState> {
         return this.unavailable();
     }
+    startExtentLayoutRepair(
+        _sessionId: number,
+        _destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.unavailable();
+    }
     deleteRetainedPackage(_download: RetainedDownload): Promise<void> {
         return this.unavailable();
     }
@@ -174,6 +182,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     contentChildren(): Promise<ContentPage> {
+        return this.unavailable();
+    }
+    validationIssues(): Promise<ImageValidationIssue[]> {
         return this.unavailable();
     }
     objectPage(): Promise<ObjectPage> {

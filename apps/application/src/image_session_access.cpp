@@ -62,6 +62,13 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
         return std::unexpected(session_error("image_mutation_unsupported",
                                              "image geometry is outside the supported 512-byte alteration profile"));
     }
+    if (!std::ranges::all_of(container->partitions(), [](const Partition &partition) {
+            return allocation_is_safe_for_mutation(partition.allocation);
+        })) {
+        return std::unexpected(
+            session_error("image_integrity_unsafe",
+                          "image allocation metadata is inconsistent; alteration is disabled to avoid further damage"));
+    }
     if ((*session)->mutating)
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
     if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)

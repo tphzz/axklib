@@ -17,6 +17,7 @@ const secondLocation: ImageLocation = {
 function opened(sessionId: number): OpenedImage {
     return {
         sessionId,
+        revision: 1,
         companionSources: [],
         floppySet: null,
         tree: [],
@@ -44,6 +45,7 @@ function opened(sessionId: number): OpenedImage {
         audioExportAvailable: false,
         sequenceExportAvailable: false,
         mediaConversionAvailable: false,
+        extentLayoutRepairAvailable: false,
     };
 }
 

@@ -83,6 +83,7 @@
         openImage: () => void;
         createImage: () => void;
         closeImage: () => void;
+        showImageIntegrity: () => void;
         manageLocations: () => void;
         selectSource: (item: DiskTreeItem) => void;
         imageAction: (item: DiskTreeItem, action: ImageTreeAction) => void;
@@ -142,6 +143,7 @@
         openImage,
         createImage,
         closeImage,
+        showImageIntegrity,
         manageLocations,
         selectSource,
         imageAction,
@@ -327,6 +329,7 @@
             onopen={openImage}
             oncreate={createImage}
             onclose={closeImage}
+            onintegrity={showImageIntegrity}
             onmanagelocations={manageLocations}
             onselect={selectSource}
             volumeActionsEnabled={mutation.volumeAvailable}

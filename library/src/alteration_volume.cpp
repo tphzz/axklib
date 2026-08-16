@@ -115,8 +115,24 @@ std::vector<SfsId> free_ids(const MutablePartition &partition, std::size_t count
 }
 
 Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::uint32_t count) {
-    std::vector<std::uint32_t> selected;
     const auto first = partition.source->directory_index_cluster + partition.source->directory_index_span_clusters;
+    std::uint32_t run_begin{};
+    std::uint32_t run_length{};
+    for (std::uint32_t cluster = first; cluster < partition.source->cluster_count; ++cluster) {
+        if (bitmap_used(partition.bitmap, cluster)) {
+            run_length = 0U;
+            continue;
+        }
+        if (run_length == 0U)
+            run_begin = cluster;
+        ++run_length;
+        if (run_length == count) {
+            for (std::uint32_t selected = run_begin; selected < run_begin + count; ++selected)
+                set_bitmap(partition.bitmap, selected, true);
+            return std::vector{Extent{run_begin, count, count * 1'024U}};
+        }
+    }
+    std::vector<std::uint32_t> selected;
     for (std::uint32_t cluster = first; cluster < partition.source->cluster_count && selected.size() < count;
          ++cluster) {
         if (!bitmap_used(partition.bitmap, cluster))
@@ -169,17 +185,13 @@ std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<co
 }
 
 Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size) {
-    std::uint64_t remaining = payload_size;
-    for (auto &extent : extents) {
-        const auto capacity = static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
-        const auto byte_count = std::min(remaining == 0U ? capacity : remaining, capacity);
-        if (byte_count == 0U || byte_count > std::numeric_limits<std::uint32_t>::max())
-            return std::unexpected{transaction_error("SFS extent byte count is outside its encoded range")};
-        extent.byte_count = static_cast<std::uint32_t>(byte_count);
-        remaining = remaining > byte_count ? remaining - byte_count : 0U;
-    }
-    if (remaining != 0U)
-        return std::unexpected{transaction_error("record payload exceeds its allocated extent capacity")};
+    if (payload_size > std::numeric_limits<std::uint32_t>::max())
+        return std::unexpected{transaction_error("record payload exceeds its encoded size")};
+    const auto byte_counts = detail::plan_extent_byte_counts(extents, static_cast<std::uint32_t>(payload_size));
+    if (!byte_counts)
+        return std::unexpected{transaction_error(byte_counts.error().message)};
+    for (std::size_t index = 0; index < extents.size(); ++index)
+        extents[index].byte_count = (*byte_counts)[index];
     return {};
 }
 
@@ -226,8 +238,6 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     if (!added)
         return std::unexpected{added.error()};
     auto extents = merge_extents(target->extents, *added);
-    if (auto normalized = normalize_extent_byte_counts(extents, static_cast<std::size_t>(required_size)); !normalized)
-        return std::unexpected{normalized.error()};
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto required_lists =
         extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
@@ -240,18 +250,6 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
             return std::unexpected{lists.error()};
         target->continuation_clusters.insert(target->continuation_clusters.end(), lists->begin(), lists->end());
     }
-    const ByteReader current_index{target->raw_index};
-    const auto tail = current_index.be16(0x46U);
-    if (!tail)
-        return std::unexpected{tail.error()};
-    detail::PreparedRecord prepared;
-    prepared.kind = detail::RecordKind::directory;
-    prepared.tail = *tail;
-    auto encoded = detail::encode_sfs_index_record(
-        prepared, extents, static_cast<std::uint32_t>(target->payload.size()), target->continuation_clusters);
-    if (!encoded)
-        return std::unexpected{encoded.error()};
-    target->raw_index = std::move(*encoded);
     target->extents = std::move(extents);
     target->capacity_expanded = true;
     return std::pair{static_cast<std::uint64_t>(additional_clusters), static_cast<std::uint64_t>(additional_lists)};
@@ -269,6 +267,8 @@ Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partit
     auto extents = allocate_extents(partition, clusters);
     if (!extents)
         return std::unexpected{extents.error()};
+    if (auto normalized = normalize_extent_byte_counts(*extents, payload.size()); !normalized)
+        return std::unexpected{normalized.error()};
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     std::vector<std::uint32_t> list_clusters;
     if (extents->size() > 4U) {

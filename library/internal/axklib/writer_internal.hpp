@@ -162,6 +162,7 @@ Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample
                                                     const std::map<std::string, SampleSpec> &samples);
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
 Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record);
+Result<std::vector<std::uint32_t>> plan_extent_byte_counts(std::span<const Extent> extents, std::uint32_t size);
 Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record, std::span<const Extent> extents,
                                                        std::uint32_t size,
                                                        std::span<const std::uint32_t> continuation_clusters = {});

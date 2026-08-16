@@ -238,7 +238,11 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
     if (payload.size() > capacity) {
         return std::unexpected{transaction_error("record payload growth exceeds its current extent capacity")};
     }
-    if (target->capacity_expanded || target->extents.size() > 4U) {
+    if (target->capacity_expanded) {
+        target->payload = std::move(payload);
+        return {};
+    }
+    if (target->extents.size() > 4U) {
         if (auto normalized = normalize_extent_byte_counts(target->extents, payload.size()); !normalized)
             return std::unexpected{normalized.error()};
         const ByteReader current_index{target->raw_index};
@@ -261,12 +265,13 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
     if (auto written = writer.write_be32(6U, static_cast<std::uint32_t>(payload.size())); !written)
         return std::unexpected{written.error()};
     if (target->extents.size() <= 4U) {
-        std::uint32_t remaining = static_cast<std::uint32_t>(payload.size());
+        const auto byte_counts =
+            detail::plan_extent_byte_counts(target->extents, static_cast<std::uint32_t>(payload.size()));
+        if (!byte_counts)
+            return std::unexpected{transaction_error(byte_counts.error().message)};
         for (std::size_t index = 0; index < target->extents.size(); ++index) {
-            const auto capacity_for_extent = target->extents[index].cluster_count * 1024U;
-            const auto byte_count = remaining == 0U ? capacity_for_extent : std::min(remaining, capacity_for_extent);
-            remaining = remaining > byte_count ? remaining - byte_count : 0U;
-            if (auto written = writer.write_be32(0x12U + index * 12U, byte_count); !written)
+            target->extents[index].byte_count = (*byte_counts)[index];
+            if (auto written = writer.write_be32(0x12U + index * 12U, (*byte_counts)[index]); !written)
                 return std::unexpected{written.error()};
         }
     }

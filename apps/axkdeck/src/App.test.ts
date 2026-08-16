@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     refreshImage: vi.fn(),
     attachCompanions: vi.fn(),
     closeImage: vi.fn(),
+    validationIssues: vi.fn(),
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
     relationshipPage: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('./lib/createTransport', () => ({
         refreshImage: mocks.refreshImage,
         attachCompanions: mocks.attachCompanions,
         closeImage: mocks.closeImage,
+        validationIssues: mocks.validationIssues,
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
         relationshipPage: mocks.relationshipPage,
@@ -110,6 +112,7 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             sessionId: 17,
+            revision: 1,
             companionSources: [],
             floppySet: null,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 0 }],
@@ -133,6 +136,7 @@ describe('App panel layout', () => {
         mocks.refreshImage.mockReset();
         mocks.attachCompanions.mockReset();
         mocks.closeImage.mockReset().mockResolvedValue(undefined);
+        mocks.validationIssues.mockReset().mockResolvedValue([]);
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
@@ -636,6 +640,50 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.closeImage).toHaveBeenCalledWith(17));
         await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Open image' })).toBeTruthy());
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
+    });
+
+    it('automatically warns when allocation integrity makes alteration unsafe', async () => {
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            revision: 4,
+            companionSources: [],
+            floppySet: null,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 0 }],
+            validation: {
+                valid: false,
+                issueCount: 1,
+                errorCount: 1,
+                warningCount: 0,
+                objectCount: 0,
+                relationshipCount: 0,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: null,
+            volumeMutationsAvailable: false,
+            partitionMutationsAvailable: false,
+            objectRenameAvailable: false,
+            objectDeletionAvailable: false,
+            waveDataCleanupAvailable: false,
+            packageExportAvailable: true,
+        });
+        mocks.validationIssues.mockResolvedValueOnce([
+            {
+                code: 'SFS_ALLOCATION_BITMAP_COPIES_DIFFER',
+                severity: 'ERROR',
+                message: 'The two stored SFS allocation maps differ.',
+                objectId: null,
+                samplerPath: 'Partition 0',
+            },
+        ]);
+        renderAcknowledgedApp();
+
+        await chooseNestedImage();
+
+        const dialog = await screen.findByRole('dialog', { name: 'Image integrity' });
+        expect(within(dialog).getByText('Alteration is disabled for this image')).toBeTruthy();
+        expect(within(dialog).getByText(/Browsing and export remain available/)).toBeTruthy();
+        expect(mocks.validationIssues).toHaveBeenCalledWith(17);
     });
 
     it('restores the last successfully opened image as the active picker row after ejecting', async () => {

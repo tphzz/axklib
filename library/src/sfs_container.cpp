@@ -129,6 +129,17 @@ Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::
                         cluster_size_bytes, *free_bytes,           *free_bytes / 1024U};
 }
 
+bool allocation_is_safe_for_mutation(const AllocationSummary &allocation) noexcept {
+    const auto bitmap_matches_extents = [](const AllocationBitmapSummary &bitmap) {
+        return bitmap.marked_used_without_index_extent_count == 0U && bitmap.index_extent_marked_free_count == 0U;
+    };
+    return allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
+           allocation.fixed_not_header.empty() && allocation.header_not_fixed.empty() &&
+           bitmap_matches_extents(allocation.fixed_location) && bitmap_matches_extents(allocation.header_addressed) &&
+           allocation.invalid_extent_record_count == 0U && allocation.extent_total_mismatch_count == 0U &&
+           allocation.extent_byte_total_mismatch_count == 0U && allocation.conflicting_cluster_count == 0U;
+}
+
 Result<Container> open_image(const std::filesystem::path &path, const OpenOptions &options) {
     const auto reader = FileReader::open(path);
     if (!reader)
