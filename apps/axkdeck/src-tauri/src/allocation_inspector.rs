@@ -105,7 +105,10 @@ fn temporary_sibling(destination: &Path) -> Result<(PathBuf, File), String> {
     Err("could not reserve an allocation map staging file".to_owned())
 }
 
-fn write_allocation_document(destination: &Path, document: &serde_json::Value) -> Result<(), String> {
+fn write_allocation_document(
+    destination: &Path,
+    document: &serde_json::Value,
+) -> Result<(), String> {
     let bytes = encoded_allocation_document(document)?;
     let (temporary, mut output) = temporary_sibling(destination)?;
     let result = (|| {
@@ -137,7 +140,9 @@ pub(crate) async fn save_allocation_map_json(
 ) -> Result<Option<String>, String> {
     let suggested_path = Path::new(&request.suggested_name);
     if suggested_path.file_name() != Some(std::ffi::OsStr::new(&request.suggested_name)) {
-        return Err("the suggested allocation map filename must not contain a directory".to_owned());
+        return Err(
+            "the suggested allocation map filename must not contain a directory".to_owned(),
+        );
     }
     normalize_json_destination(suggested_path.to_path_buf())?;
     let starting_directory = match preferences.lock() {
@@ -187,9 +192,11 @@ pub(crate) async fn save_allocation_map_json(
     }
     let result_path = destination.to_string_lossy().into_owned();
     let document = request.document;
-    tauri::async_runtime::spawn_blocking(move || write_allocation_document(&destination, &document))
-        .await
-        .map_err(|error| format!("save allocation map: {error}"))??;
+    tauri::async_runtime::spawn_blocking(move || {
+        write_allocation_document(&destination, &document)
+    })
+    .await
+    .map_err(|error| format!("save allocation map: {error}"))??;
     Ok(Some(result_path))
 }
 
