@@ -2,6 +2,7 @@
     import type { ImageLocation } from '../storageLocations';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
+    import ImageTreeContextMenu from './ImageTreeContextMenu.svelte';
     import TreeNode from './TreeNode.svelte';
 
     interface Props {
@@ -111,11 +112,7 @@
     });
 
     function requestTreeMenu(item: DiskTreeItem, x: number, y: number): void {
-        treeMenu = {
-            item,
-            left: Math.max(8, Math.min(x, window.innerWidth - 228)),
-            top: Math.max(8, Math.min(y, window.innerHeight - 244)),
-        };
+        treeMenu = { item, left: x, top: y };
     }
 
     function chooseTreeAction(action: ImageTreeAction): void {
@@ -312,96 +309,22 @@
 </aside>
 
 {#if treeMenu}
-    <div
-        class="tree-context-menu"
-        role="menu"
-        aria-label={`${treeMenu.item.name} actions`}
-        tabindex="-1"
-        style={`left: ${treeMenu.left}px; top: ${treeMenu.top}px;`}
-        onclick={(event) => event.stopPropagation()}
-        onkeydown={(event) => event.stopPropagation()}
-    >
-        {#if treeMenu.item.kind === 'partition'}
-            {#if allocationInspectionEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('inspect-allocation')}
-                    >Visualize partition allocation…</button
-                >
-                <div class="context-menu-separator" role="separator"></div>
-            {/if}
-            {#if packageImportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('import-packages')}
-                    >Import packages…</button
-                >
-            {/if}
-            {#if volumePackageExportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-volume-packages')}
-                    >Export volume packages…</button
-                >
-            {/if}
-            {#if volumeFloppyExportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-volume-floppies')}
-                    >Export volumes to floppies…</button
-                >
-            {/if}
-            {#if mediaConversionEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-cdrom')}
-                    >Export CD-ROM image…</button
-                >
-                {#if partitionActionsEnabled || volumeActionsEnabled}
-                    <div class="context-menu-separator" role="separator"></div>
-                {/if}
-            {/if}
-            {#if (packageImportEnabled || volumePackageExportEnabled || volumeFloppyExportEnabled) && !mediaConversionEnabled && partitionActionsEnabled}
-                <div class="context-menu-separator" role="separator"></div>
-            {/if}
-            {#if partitionActionsEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('repair-placement')}
-                    >Repair object placement…</button
-                >
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-partition')}
-                    >Rename partition</button
-                >
-            {/if}
-            {#if volumeActionsEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('add-volume')}>Add volume</button>
-            {/if}
-        {:else}
-            {#if packageImportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('import-package')}
-                    >Import package…</button
-                >
-            {/if}
-            {#if packageExportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-package')}
-                    >Export package…</button
-                >
-            {/if}
-            {#if audioExportEnabled}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-sfz')}>Export SFZ…</button
-                >
-            {/if}
-            {#if mediaConversionEnabled && treeMenu.item.volumeDirectoryId !== undefined}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('export-floppy')}
-                    >Export floppy image…</button
-                >
-            {/if}
-            {#if volumeActionsEnabled}
-                {#if packageImportEnabled || packageExportEnabled || audioExportEnabled || mediaConversionEnabled}
-                    <div class="context-menu-separator" role="separator"></div>
-                {/if}
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('repair-placement')}
-                    >Repair object placement…</button
-                >
-                <button type="button" role="menuitem" onclick={() => chooseTreeAction('rename-volume')}
-                    >Rename volume</button
-                >
-                <button
-                    class="danger-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onclick={() => chooseTreeAction('delete-volume')}>Delete volume</button
-                >
-            {/if}
-        {/if}
-    </div>
+    {#key `${treeMenu.item.id}:${treeMenu.left}:${treeMenu.top}`}
+        <ImageTreeContextMenu
+            item={treeMenu.item}
+            left={treeMenu.left}
+            top={treeMenu.top}
+            {volumeActionsEnabled}
+            {partitionActionsEnabled}
+            {packageImportEnabled}
+            {packageExportEnabled}
+            {volumePackageExportEnabled}
+            {volumeFloppyExportEnabled}
+            {audioExportEnabled}
+            {mediaConversionEnabled}
+            {allocationInspectionEnabled}
+            onaction={chooseTreeAction}
+            onclose={() => (treeMenu = null)}
+        />
+    {/key}
 {/if}

@@ -1324,6 +1324,7 @@ describe('App panel layout', () => {
         await chooseNestedImage();
         const partitionButton = await screen.findByRole('button', { name: /My Partition/ });
         await fireEvent.contextMenu(partitionButton);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
 
         const dialog = screen.getByRole('dialog', { name: 'Import volume packages' });

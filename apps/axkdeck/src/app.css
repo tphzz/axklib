@@ -658,6 +658,23 @@ input:focus-visible {
   background: rgb(255 255 255 / 7%);
 }
 
+.tree-context-menu button:focus-visible {
+  background: rgb(255 255 255 / 7%);
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.tree-context-menu .context-submenu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tree-context-submenu {
+  z-index: 81;
+}
+
 .tree-context-menu .danger-menu-item {
   color: #f3a4a4;
 }
