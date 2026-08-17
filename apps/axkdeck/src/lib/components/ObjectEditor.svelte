@@ -1,5 +1,11 @@
 <script lang="ts">
-    import type { InspectorSelection, ProgramAssignmentRow } from '../types';
+    import {
+        collectionPageStep,
+        focusCollectionIndex,
+        hasDisallowedNavigationModifier,
+        linearNavigationIndex,
+    } from '../collectionNavigation';
+    import type { InspectorSelection, ProgramSampleSelectRow } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
 
     type ProgramEditorTab = 'sample-select' | 'easy-edit' | 'effect-setup' | 'setup' | 'control';
@@ -14,12 +20,20 @@
         selection: InspectorSelection;
         assignmentQuery: string;
         onassignmentquerychange: (value: string) => void;
-        onassignmentselect: (row: ProgramAssignmentRow) => void;
+        onassignmentselect: (row: ProgramSampleSelectRow) => void;
+        multiPartContext?: { partLabel: string; programNumber: number } | null;
     }
 
-    let { selection, assignmentQuery, onassignmentquerychange, onassignmentselect }: Props = $props();
+    let {
+        selection,
+        assignmentQuery,
+        onassignmentquerychange,
+        onassignmentselect,
+        multiPartContext = null,
+    }: Props = $props();
     let programTab = $state<ProgramEditorTab>('sample-select');
     let sampleTab = $state<SampleEditorTab>('trim-loop');
+    let showOnlyAssigned = $state(true);
 
     const programTabs: Tab<ProgramEditorTab>[] = [
         { id: 'sample-select', label: 'Sample Select' },
@@ -37,17 +51,41 @@
     ];
 
     const normalizedAssignmentQuery = $derived(assignmentQuery.trim().toLocaleLowerCase());
+    const sampleSelectRows = $derived(
+        selection?.kind === 'program'
+            ? showOnlyAssigned
+                ? selection.sampleSelect.assigned
+                : selection.sampleSelect.all
+            : [],
+    );
     const filteredAssignments = $derived(
         selection?.kind === 'program'
             ? normalizedAssignmentQuery
-                ? selection.assignments.filter((row) =>
-                      `${row.targetType} ${row.targetName} ${row.relationship.receiveChannelDisplay}`
+                ? sampleSelectRows.filter((row) =>
+                      `${row.targetType} ${row.targetName} ${row.receiveChannelDisplays.join(' ')}`
                           .toLocaleLowerCase()
                           .includes(normalizedAssignmentQuery),
                   )
-                : selection.assignments
+                : sampleSelectRows
             : [],
     );
+    const navigableAssignments = $derived(filteredAssignments.filter((row) => row.navigable));
+
+    function navigateAssignments(event: KeyboardEvent, row: ProgramSampleSelectRow): void {
+        if (hasDisallowedNavigationModifier(event)) return;
+        const currentIndex = navigableAssignments.findIndex((candidate) => candidate.id === row.id);
+        const targetIndex = linearNavigationIndex(
+            event.key,
+            currentIndex,
+            navigableAssignments.length,
+            collectionPageStep(event.currentTarget),
+        );
+        if (targetIndex === null) return;
+        event.preventDefault();
+        const target = navigableAssignments[targetIndex];
+        if (target && target.id !== row.id) onassignmentselect(target);
+        void focusCollectionIndex(event.currentTarget, targetIndex);
+    }
 
     function moveTab<T extends string>(
         event: KeyboardEvent,
@@ -70,14 +108,21 @@
             if (button instanceof HTMLElement) button.focus();
         });
     }
+
+    function multiPartContextLabel(): string {
+        if (!multiPartContext) return '';
+        return `Multi Part ${multiPartContext.partLabel} → Program ${String(multiPartContext.programNumber).padStart(3, '0')}`;
+    }
 </script>
 
-<section class="object-editor" aria-label="Object editor">
+<section class="object-editor" aria-label="Object editor" data-navigation-workspace>
+    {#if multiPartContext}
+        <div class="multi-part-editor-context">
+            <strong>{multiPartContextLabel()}</strong><span>Part routing is authoritative in Multi mode.</span>
+        </div>
+    {/if}
     {#if selection?.kind === 'program'}
         <header class="editor-header">
-            <div class="editor-object-title">
-                <span>Program {selection.program.slot}</span><strong>{selection.program.name}</strong>
-            </div>
             <div class="editor-tabs" role="tablist" aria-label="Program editor">
                 {#each programTabs as tab (tab.id)}
                     <button
@@ -103,31 +148,44 @@
             {#if programTab === 'sample-select'}
                 <CollectionToolbar
                     title="Assignments"
-                    count={selection.assignments.length}
+                    count={sampleSelectRows.length}
                     query={assignmentQuery}
                     onquerychange={onassignmentquerychange}
+                    filterLabel="Show only assigned"
+                    filterChecked={showOnlyAssigned}
+                    onfilterchange={(checked) => (showOnlyAssigned = checked)}
                 />
-                <div class="editor-body">
+                <div class="editor-body" data-navigation-list>
                     <div class="assignment-table" role="table" aria-label="Program assignments">
                         <div class="assignment-header" role="row">
-                            <span>Target</span><span>Receive channel</span>
+                            <span>Target</span><span>Rch Assign</span>
                         </div>
-                        {#each filteredAssignments as row (row.relationship.id)}
+                        {#each filteredAssignments as row (row.id)}
                             <button
                                 type="button"
-                                class:unresolved={!row.targetObjectId || !row.confirmed}
-                                disabled={!row.targetObjectId || !row.confirmed}
-                                onclick={() => row.confirmed && onassignmentselect(row)}
+                                data-navigation-index={navigableAssignments.indexOf(row)}
+                                onclick={() => onassignmentselect(row)}
+                                onkeydown={(event) => navigateAssignments(event, row)}
                             >
-                                <span
-                                    ><strong>{row.targetName}</strong><small
-                                        >{row.confirmed ? row.targetType : 'Unconfirmed assignment'}</small
-                                    ></span
+                                <span><strong>{row.targetName}</strong><small>{row.targetType}</small></span>
+                                <span class="assignment-channel"
+                                    >{row.receiveChannelDisplays.join(', ')}
+                                    {#if row.sourceLoad}
+                                        <small
+                                            title="Stored CD-ROM selector; the sampler activates this assignment when it is loaded."
+                                            >Source load</small
+                                        >
+                                    {/if}</span
                                 >
-                                <span>{row.relationship.receiveChannelDisplay || 'Unknown'}</span>
                             </button>
                         {:else}
-                            <p class="empty-copy">No matching assignments</p>
+                            <p class="empty-copy">
+                                {normalizedAssignmentQuery
+                                    ? 'No matching Sample Banks or Samples'
+                                    : showOnlyAssigned
+                                      ? 'No assigned Sample Banks or Samples'
+                                      : 'No Sample Banks or Samples'}
+                            </p>
                         {/each}
                     </div>
                 </div>
@@ -137,7 +195,6 @@
         </div>
     {:else if selection?.kind === 'sample'}
         <header class="editor-header">
-            <div class="editor-object-title"><span>Sample</span><strong>{selection.item.name}</strong></div>
             <div class="editor-tabs" role="tablist" aria-label="Sample editor">
                 {#each sampleTabs as tab (tab.id)}
                     <button
@@ -164,6 +221,12 @@
         <div class="editor-placeholder"><p class="empty-copy">Sample Bank editor unavailable</p></div>
     {:else if selection?.kind === 'wave-data'}
         <div class="editor-placeholder"><p class="empty-copy">Wave Data editor unavailable</p></div>
+    {:else if multiPartContext}
+        <div class="editor-placeholder">
+            <p class="empty-copy">
+                Program {String(multiPartContext.programNumber).padStart(3, '0')} is not present in the selected Volume.
+            </p>
+        </div>
     {:else}
         <div class="editor-placeholder"><p class="empty-copy">No object selected</p></div>
     {/if}

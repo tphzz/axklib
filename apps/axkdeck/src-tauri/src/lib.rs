@@ -1,3 +1,4 @@
+mod allocation_inspector;
 mod desktop_preferences;
 mod file_publication;
 mod local_directory_exports;
@@ -13,6 +14,7 @@ use serde::Serialize;
 use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
+use allocation_inspector::{open_allocation_inspector, save_allocation_map_json};
 use desktop_preferences::DesktopPreferencesStore;
 use local_directory_exports::{
     DirectorySaveCandidateStore, save_retained_directory_export,
@@ -463,7 +465,9 @@ pub fn run() {
             save_retained_directory_export,
             open_developer_tools,
             diagnostic_log_level,
-            desktop_build_info
+            desktop_build_info,
+            open_allocation_inspector,
+            save_allocation_map_json
         ])
         .run(tauri::generate_context!())
         .expect("failed to run axkdeck");

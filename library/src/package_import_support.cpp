@@ -1,5 +1,7 @@
 #include "package_import_support.hpp"
 
+#include "sfs_cluster_allocation.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <format>
@@ -82,6 +84,20 @@ std::uint8_t type_rank(std::string_view type) {
     if (type == "SEQU")
         return 4U;
     return 5U;
+}
+
+std::string_view package_object_type_label(std::string_view raw_type) {
+    if (raw_type == "SMPL")
+        return "Wave Data";
+    if (raw_type == "SBNK")
+        return "Sample";
+    if (raw_type == "SBAC")
+        return "Sample Bank";
+    if (raw_type == "PROG")
+        return "Program";
+    if (raw_type == "SEQU")
+        return "Sequence";
+    return "object";
 }
 
 const PackageNode *node_by_id(const PortablePackage &package, std::string_view node_id) {
@@ -180,24 +196,25 @@ std::map<DestinationKey, SfsVolume> sfs_volumes(const Container &container) {
             if (record.directory_id)
                 directories.emplace(record.directory_id->value, &record);
         }
-        const IndexRecord *root{};
-        for (const auto &[id, directory] : directories) {
-            if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-                root = directory;
-                break;
-            }
-        }
-        if (root == nullptr || !root->directory_id)
+        const auto located_root = locate_partition_root_record(partition);
+        if (!located_root)
             continue;
+        const auto root_record = std::ranges::find(partition.records, *located_root, &IndexRecord::sfs_id);
+        if (root_record == partition.records.end())
+            continue;
+        const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            if (entry.name == "." || entry.name == "..")
+            if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
+                !entry.target_link_id)
                 continue;
-            const auto found = directories.find(entry.link_id.value);
+            const auto found = directories.find(entry.target_link_id->value);
             if (found == directories.end())
                 continue;
             SfsVolume volume{&partition, found->second, {}};
             for (const auto &category_entry : found->second->directory_entries) {
-                const auto category = directories.find(category_entry.link_id.value);
+                if (!category_entry.target_link_id)
+                    continue;
+                const auto category = directories.find(category_entry.target_link_id->value);
                 if (category_entry.name != "." && category_entry.name != ".." && category != directories.end()) {
                     volume.categories.emplace(category_entry.name, category->second);
                 }
@@ -432,17 +449,14 @@ std::vector<Extent> merged_extents(std::span<const Extent> existing, std::span<c
 }
 
 std::optional<ClusterReservation> reserve_clusters(PartitionCapacity &capacity, std::uint32_t payload_cluster_count) {
-    std::vector<std::uint32_t> selected;
     const auto first = capacity.partition->directory_index_cluster + capacity.partition->directory_index_span_clusters;
-    for (std::uint32_t cluster = first;
-         cluster < capacity.partition->cluster_count && selected.size() < payload_cluster_count; ++cluster) {
-        if (!capacity.used_clusters.contains(cluster))
-            selected.push_back(cluster);
-    }
-    if (selected.size() != payload_cluster_count)
+    auto selected = detail::select_sfs_payload_clusters(
+        first, capacity.partition->cluster_count, payload_cluster_count,
+        [&](const std::uint32_t cluster) { return capacity.used_clusters.contains(cluster); });
+    if (!selected)
         return std::nullopt;
-    const auto extents = cluster_extents(selected);
-    const std::set selected_set(selected.begin(), selected.end());
+    const auto extents = cluster_extents(*selected);
+    const std::set selected_set(selected->begin(), selected->end());
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto list_count =
         extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
@@ -454,7 +468,7 @@ std::optional<ClusterReservation> reserve_clusters(PartitionCapacity &capacity, 
     }
     if (selected_lists.size() != list_count)
         return std::nullopt;
-    capacity.used_clusters.insert(selected.begin(), selected.end());
+    capacity.used_clusters.insert(selected->begin(), selected->end());
     capacity.used_clusters.insert(selected_lists.begin(), selected_lists.end());
     return ClusterReservation{payload_cluster_count, static_cast<std::uint64_t>(list_count), extents};
 }
@@ -465,16 +479,13 @@ std::optional<ClusterReservation> reserve_directory_growth(PartitionCapacity &ca
                                                            std::uint32_t additional_payload_clusters) {
     if (additional_payload_clusters == 0U)
         return ClusterReservation{};
-    std::vector<std::uint32_t> selected;
     const auto first = capacity.partition->directory_index_cluster + capacity.partition->directory_index_span_clusters;
-    for (std::uint32_t cluster = first;
-         cluster < capacity.partition->cluster_count && selected.size() < additional_payload_clusters; ++cluster) {
-        if (!capacity.used_clusters.contains(cluster))
-            selected.push_back(cluster);
-    }
-    if (selected.size() != additional_payload_clusters)
+    auto selected = detail::select_sfs_payload_clusters(
+        first, capacity.partition->cluster_count, additional_payload_clusters,
+        [&](const std::uint32_t cluster) { return capacity.used_clusters.contains(cluster); });
+    if (!selected)
         return std::nullopt;
-    const auto added_extents = cluster_extents(selected);
+    const auto added_extents = cluster_extents(*selected);
     const auto extents = merged_extents(existing_extents, added_extents);
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto required_lists =
@@ -482,7 +493,7 @@ std::optional<ClusterReservation> reserve_directory_growth(PartitionCapacity &ca
     if (required_lists < existing_continuation_clusters)
         return std::nullopt;
     const auto additional_lists = required_lists - existing_continuation_clusters;
-    const std::set selected_set(selected.begin(), selected.end());
+    const std::set selected_set(selected->begin(), selected->end());
     std::vector<std::uint32_t> selected_lists;
     for (std::uint32_t cluster = first;
          cluster < capacity.partition->cluster_count && selected_lists.size() < additional_lists; ++cluster) {
@@ -491,7 +502,7 @@ std::optional<ClusterReservation> reserve_directory_growth(PartitionCapacity &ca
     }
     if (selected_lists.size() != additional_lists)
         return std::nullopt;
-    capacity.used_clusters.insert(selected.begin(), selected.end());
+    capacity.used_clusters.insert(selected->begin(), selected->end());
     capacity.used_clusters.insert(selected_lists.begin(), selected_lists.end());
     return ClusterReservation{additional_payload_clusters, static_cast<std::uint64_t>(additional_lists), extents};
 }

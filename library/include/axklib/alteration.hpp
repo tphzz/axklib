@@ -10,6 +10,7 @@
 #include "axklib/io.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/sequence.hpp"
+#include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
 #include "axklib/writer.hpp"
 
@@ -170,13 +171,20 @@ struct RepairObjectPlacementsOperation {
     std::vector<SfsId> object_sfs_ids;
 };
 
+struct ImportTx16wDiskSetOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::vector<std::filesystem::path> disk_paths;
+    tx16w::ImportMode import_mode{tx16w::ImportMode::hierarchy};
+};
+
 using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
                  InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
                  DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
                  RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
                  DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
-                 RenamePartitionOperation, RepairObjectPlacementsOperation>;
+                 RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation>;
 
 struct AlterationOperation {
     std::string id;

@@ -373,7 +373,7 @@ TEST(Iso9660Reader, MarksOnlyUnknownActiveSampleBankMembersAsVolumeErrors) {
     assignment.basis = "test";
     assignment.assignment_index = 0U;
     assignment.assignment_name = "SAMPLE";
-    assignment.assignment_state = axk::AssignmentState::active;
+    assignment.assignment_state = axk::AssignmentState::stored_assignment;
     graph.relationships.push_back(std::move(assignment));
     axk::Relationship member;
     member.key = "member";

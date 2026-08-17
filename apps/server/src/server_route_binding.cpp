@@ -79,6 +79,14 @@ void ServerApplication::register_infrastructure_routes() {
              [this](const crow::request &request, const std::string &image_id) {
                  return image_relationships_response(request, image_id);
              },
+         .image_system_program_contexts =
+             [this](const crow::request &request, const std::string &image_id) {
+                 return image_system_program_contexts_response(request, image_id);
+             },
+         .image_allocation_map =
+             [this](const crow::request &request, const std::string &image_id) {
+                 return image_allocation_map_response(request, image_id);
+             },
          .image_validation =
              [this](const crow::request &request, const std::string &image_id) {
                  return image_validation_response(request, image_id);

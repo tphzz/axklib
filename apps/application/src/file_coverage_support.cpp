@@ -98,10 +98,8 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
                                  0x120U + static_cast<unsigned int>(*row.assignment_index) * 0x38U);
     }
     std::string diagnostic;
-    if (row.assignment_state == axk::AssignmentState::visible_off)
-        diagnostic = "visible-off-assignment";
-    else if (row.basis == "assignment-active-missing-local-target")
-        diagnostic = "active-assignment-missing-target";
+    if (row.basis == "assignment-stored-missing-local-target")
+        diagnostic = "stored-program-row-missing-target";
     else if (row.basis.starts_with("sbnk-program-link-bitmap-"))
         diagnostic = "program-link-bitmap";
     else if (row.quality == axk::RelationshipQuality::tentative)
@@ -123,7 +121,7 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
                                      : axk::ReportValue{nullptr}},
             {"assignment_name", row.assignment_name},
             {"assignment_row_state", row.assignment_index ? "decoded-row" : ""},
-            {"active_assignment_state",
+            {"assignment_state",
              row.assignment_index ? std::string{axk::assignment_state_name(row.assignment_state)} : std::string{}},
             {"assignment_rch_assign_display", row.receive_channel_display},
             {"diagnostic_category", diagnostic}};

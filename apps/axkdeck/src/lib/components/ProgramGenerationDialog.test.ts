@@ -67,7 +67,7 @@ describe('ProgramGenerationDialog', () => {
         expect(screen.getByRole('dialog', { name: 'Generate Programs' })).toBeTruthy();
         expect(screen.getByText('Sample Bank')).toBeTruthy();
         expect(screen.getByText('Sample')).toBeTruthy();
-        expect(screen.getAllByText('=SMP')).toHaveLength(2);
+        expect(screen.getAllByText('=Smp')).toHaveLength(2);
         expect(screen.getByText('001')).toBeTruthy();
         expect(screen.getByText('No free slot')).toBeTruthy();
 

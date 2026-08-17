@@ -192,6 +192,48 @@ TEST(ObjectDeletion, KeepsDependenciesExplicitAndUncheckedByDefault) {
     EXPECT_EQ(wave_impact->prerequisite_keys, std::vector<std::string>{sample.key});
 }
 
+TEST(ObjectDeletion, IgnoresStoredProgramRowsWithoutAnEffectiveTarget) {
+    auto fixture = make_fixture(true);
+    auto program = std::ranges::find(fixture.catalog.objects, axk::ObjectType::prog,
+                                     [](const auto &item) { return item.object.header.type; });
+    ASSERT_NE(program, fixture.catalog.objects.end());
+    auto *decoded = std::get_if<axk::CurrentProg>(&program->object.payload);
+    ASSERT_NE(decoded, nullptr);
+
+    axk::ProgAssignment stored;
+    stored.name = "Missing Sample  *";
+    stored.kind = 0x10U;
+    stored.raw_row[0x28U] = std::byte{0xff};
+    decoded->assignments.push_back(stored);
+    fixture.graph.relationships.push_back({
+        .key = "stored-row",
+        .source_key = program->key,
+        .target_key = std::nullopt,
+        .candidate_keys = {},
+        .type = "PROG_ASSIGNMENT_TO_SBNK",
+        .quality = axk::RelationshipQuality::unknown,
+        .basis = "assignment-stored-missing-local-target",
+        .notes = {},
+        .scope_key = program->scope_key,
+        .assignment_index = decoded->assignments.size() - 1U,
+        .assignment_name = stored.name,
+        .assignment_state = axk::AssignmentState::stored_assignment,
+        .receive_selector = std::nullopt,
+        .receive_channel_display = "=Smp",
+    });
+
+    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                                        {.target_keys = {program->key}, .cleanup_keys = {}});
+
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->can_apply);
+    const auto is_program_link_notice = [](const auto &notice) {
+        return notice.code == "PROGRAM_ASSIGNMENT_UNRESOLVED" || notice.code == "PROGRAM_LINKS_INCONSISTENT";
+    };
+    EXPECT_TRUE(std::ranges::none_of(inspected->blockers, is_program_link_notice));
+    EXPECT_TRUE(std::ranges::none_of(inspected->warnings, is_program_link_notice));
+}
+
 TEST(ObjectDeletion, OrdersSelectedDependencyClosureFromParentsToLeaves) {
     const auto fixture = make_fixture();
     const auto &bank = object(fixture, axk::ObjectType::sbac);

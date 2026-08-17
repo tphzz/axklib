@@ -13,10 +13,8 @@ import type {
     SampleBankCreation,
     SampleBankAssignment,
     AudioSourceInfo,
-    ContentPage,
     AuditionBundleDescriptor,
     ClientDownload,
-    CompanionSelection,
     HardDiskCreationProfile,
     HardDiskCreationProfileId,
     ImageTransport,
@@ -32,18 +30,16 @@ import type {
     ImageSessionMediaConversionDestination,
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
+    ImageSessionExtentLayoutRepairDestination,
     ImageSessionPackageImportDestination,
     ImageSessionPackageImportPlan,
     InputBinding,
     JobState,
-    ObjectPage,
-    ObjectPageFilter,
     ObjectDeletionInspection,
     ProgramGenerationInspection,
     ProgramGenerationSelection,
     WaveDataOrphanInspection,
     ObjectRenameMutation,
-    OpenedImage,
     PackageImportDestination,
     PackageImportPlan,
     PackageInspection,
@@ -55,16 +51,15 @@ import type {
     PlacementRepairInspection,
     PlacementRepairScope,
     PreviewEnvelope,
-    RelationshipPage,
-    RelationshipPageFilter,
     SequenceImportItem,
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
+    Tx16wImportInspection,
+    Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
 } from './transport';
-
 import {
     clientUploadLocation,
     type ClientUploadLocation,
@@ -73,13 +68,13 @@ import {
     type DirectoryRef,
     type FileLocation,
     type FileRef,
-    type ImageLocation,
     type InputFileLocation,
     type SandboxRoot,
     type UploadKind,
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
+import { HttpImageSessionReads } from './httpImageSessionReads';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
 import { HttpJobController } from './httpJobController';
@@ -97,20 +92,22 @@ import {
     volumeMutationOperation,
 } from './httpTransportWire';
 type HttpImageTransportConnection = AxklibApiConnection;
-export class HttpImageTransport implements ImageTransport {
+export class HttpImageTransport extends HttpImageSessionReads implements ImageTransport {
     readonly storageMode = 'server' as const;
     readonly supportsClientUploads = true;
     private readonly client: AxklibHttpApiClient;
-    private readonly imageSessions: HttpImageSessions;
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
     private readonly packages: HttpPackageOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
 
     constructor(connection: HttpImageTransportConnection) {
-        this.client = new AxklibHttpApiClient(connection);
-        this.jobs = new HttpJobController(this.client);
-        this.imageSessions = new HttpImageSessions(this.client, this.jobs);
+        const client = new AxklibHttpApiClient(connection);
+        const jobs = new HttpJobController(client);
+        const imageSessions = new HttpImageSessions(client, jobs);
+        super(imageSessions);
+        this.client = client;
+        this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
         this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
     }
@@ -150,33 +147,27 @@ export class HttpImageTransport implements ImageTransport {
         );
         return clientUploadLocation({ uploadId: uploaded.uploadId }, kind, file.name);
     }
-
     async releaseClientUpload(source: ClientUploadLocation): Promise<void> {
         await this.client.deleteUpload(source.reference);
     }
-
     async audioImportCapabilities(): Promise<AudioImportCapabilities> {
-        const serverCapabilities = await this.client.serverCapabilities();
-        const capabilities = serverCapabilities.audioImport;
-        if (!capabilities) throw new Error('The connected server does not publish audio import capabilities');
-        return { ...capabilities, maximumUploads: serverCapabilities.limits.maximumUploads };
+        return this.imports.capabilities();
     }
-
     async inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo> {
-        const result = await this.client.invoke<AudioSourceInfo>('audio.inspect', {
-            source: serverInput(source),
-            ...(targetSampleRate === undefined ? {} : { targetSampleRate }),
-        });
-        if (this.jobs.isJob(result)) throw new Error('audio.inspect unexpectedly returned a job');
-        return result;
+        return this.imports.inspectAudio(source, targetSampleRate);
     }
 
-    async inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
-        const result = await this.client.invoke<MidiInspection>('midi.inspect', { source: serverInput(source) });
-        if (this.jobs.isJob(result)) throw new Error('midi.inspect unexpectedly returned a job');
-        return result;
+    inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
+        return this.imports.inspectMidi(source);
     }
-
+    async inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection> {
+        return this.imports.inspectTx16wDiskSet(sessionId, sources, target, importMode);
+    }
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -201,6 +192,14 @@ export class HttpImageTransport implements ImageTransport {
         return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy);
     }
 
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<JobState> {
+        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode);
+    }
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = serverFile(location);
         return downloadServerFile(this.client, source.reference, source.displayName);
@@ -338,41 +337,15 @@ export class HttpImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.packages.startMediaConversion(sessionId, selection, destination);
     }
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.imageSessions.startExtentLayoutRepair(sessionId, destination);
+    }
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {
         return this.packages.deleteRetained(download);
     }
-    openImage(location: ImageLocation): Promise<OpenedImage> {
-        return this.imageSessions.open(location);
-    }
-    refreshImage(sessionId: number): Promise<OpenedImage> {
-        return this.imageSessions.refresh(sessionId);
-    }
-
-    attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
-        return this.imageSessions.attachCompanions(sessionId, selection);
-    }
-
-    contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
-        return this.imageSessions.contentChildren(sessionId, parentId, offset, limit);
-    }
-
-    objectPage(sessionId: number, offset: number, limit: number, filter: ObjectPageFilter = {}): Promise<ObjectPage> {
-        return this.imageSessions.objectPage(sessionId, offset, limit, filter);
-    }
-
-    relationshipPage(
-        sessionId: number,
-        offset: number,
-        limit: number,
-        filter: RelationshipPageFilter = {},
-    ): Promise<RelationshipPage> {
-        return this.imageSessions.relationshipPage(sessionId, offset, limit, filter);
-    }
-
-    closeImage(sessionId: number): Promise<void> {
-        return this.imageSessions.close(sessionId);
-    }
-
     async startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
         return this.imageSessions.startMutation(sessionId, volumeMutationOperation(mutation));
     }

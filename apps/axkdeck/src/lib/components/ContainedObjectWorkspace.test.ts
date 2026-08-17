@@ -72,6 +72,117 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('shows only standalone Samples by default and composes the filter with search', async () => {
+        const standalone = structure('SBNK', 'Standalone Piano');
+        const assigned = structure('SBNK', 'Banked Brass');
+        assigned.sampleBankObjectIds = ['SBAC-Brass'];
+        assigned.membershipLabel = 'Sample Bank: Brass';
+        const onshowonlystandalonechange = vi.fn();
+        const props = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples' as const,
+            sampleBanks: [],
+            samples: [assigned, standalone],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            showOnlyStandaloneSamples: true,
+            onshowonlystandalonechange,
+        };
+        const rendered = render(ContainedObjectWorkspace, { props });
+
+        const filter = screen.getByRole('checkbox', { name: 'Show only standalone' });
+        expect((filter as HTMLInputElement).checked).toBe(true);
+        expect(screen.getByText('1 item')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Inspect Standalone Piano' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Inspect Banked Brass' })).toBeNull();
+
+        await fireEvent.click(filter);
+        expect(onshowonlystandalonechange).toHaveBeenCalledWith(false);
+        await rendered.rerender({ ...props, showOnlyStandaloneSamples: false });
+        expect(screen.getByText('2 items')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+
+        await rendered.rerender({
+            ...props,
+            showOnlyStandaloneSamples: false,
+            queries: { primary: 'banked', secondary: '', tertiary: '' },
+        });
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Inspect Standalone Piano' })).toBeNull();
+        expect(screen.getByText('2 items')).toBeTruthy();
+    });
+
+    it('does not apply the standalone filter to Sample Bank members', () => {
+        const bank = structure('SBAC', 'Brass');
+        const member = structure('SBNK', 'Banked Brass');
+        member.sampleBankObjectIds = [bank.objectId];
+        member.membershipLabel = 'Sample Bank: Brass';
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples: [member],
+                waveData: [],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: member.objectId,
+                activeWaveDataId: '',
+                queries: { primary: '', secondary: '', tertiary: '' },
+                showOnlyStandaloneSamples: true,
+            },
+        });
+
+        expect(screen.queryByRole('checkbox', { name: 'Show only standalone' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+    });
+
+    it('navigates vertically within a lane and horizontally through the hierarchy', async () => {
+        const bank = structure('SBAC', 'Strings');
+        const samples = [structure('SBNK', 'Cello'), structure('SBNK', 'Violin')];
+        const waveData = waveform('Violin L');
+        const onsamplebankselect = vi.fn();
+        const onsampleselect = vi.fn();
+        const onwavedataselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...noAuditionableSamples,
+                view: 'sample-banks',
+                sampleBanks: [bank],
+                samples,
+                waveData: [waveData],
+                activeSampleBankId: bank.objectId,
+                activeSampleId: samples[0]!.objectId,
+                activeWaveDataId: waveData.objectKey,
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onquerychange: vi.fn(),
+                onsamplebankselect,
+                onsampleselect,
+                onwavedataselect,
+                onselectionchange,
+            },
+        });
+
+        const cello = screen.getByRole('button', { name: 'Inspect Cello' });
+        cello.focus();
+        await fireEvent.keyDown(cello, { key: 'ArrowDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[1]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Violin' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowRight' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Violin L' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Cello' }));
+    });
+
     it('mounts and scrolls a bounded window for a large Sample collection', async () => {
         const samples = Array.from({ length: 200 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
@@ -106,6 +217,51 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('button', { name: 'Inspect Sample 200' })).toBeTruthy();
     });
 
+    it('pages repeatedly within a virtualized lane and retains horizontal navigation', async () => {
+        const samples = Array.from({ length: 200 }, (_, index) =>
+            structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
+        );
+        const waves = [waveform('Wave 001')];
+        const onsampleselect = vi.fn();
+        const onwavedataselect = vi.fn();
+        render(ContainedObjectWorkspace, {
+            props: {
+                ...callbacks,
+                ...noAuditionableSamples,
+                view: 'samples',
+                sampleBanks: [],
+                samples,
+                waveData: waves,
+                activeSampleBankId: '',
+                activeSampleId: samples[0]!.objectId,
+                activeWaveDataId: waves[0]!.objectKey,
+                queries: { primary: '', secondary: '', tertiary: '' },
+                onsampleselect,
+                onwavedataselect,
+            },
+        });
+
+        const lists = [...document.querySelectorAll<HTMLElement>('.contained-list')];
+        Object.defineProperty(lists[0], 'clientHeight', { configurable: true, value: 260 });
+        screen.getByRole('button', { name: 'Inspect Sample 001' }).focus();
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 010' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[18]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 019' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageUp' });
+        expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample 010' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowRight' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waves[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Wave 001' }));
+    });
+
     it('creates a Sample Bank from standalone and already-banked Samples in displayed order', async () => {
         const sample2 = structure('SBNK', 'Sample 2');
         const sample10 = structure('SBNK', 'Sample 10');
@@ -133,6 +289,7 @@ describe('ContainedObjectWorkspace', () => {
                 activeSampleId: '',
                 activeWaveDataId: '',
                 queries: { primary: '', secondary: '', tertiary: '' },
+                showOnlyStandaloneSamples: false,
                 sampleBankCreationAvailable: true,
                 oncreatesamplebank,
                 selection: { items: selected, anchors: {} },

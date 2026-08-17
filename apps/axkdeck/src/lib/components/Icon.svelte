@@ -24,6 +24,8 @@
         | 'panel-bottom'
         | 'panel-right'
         | 'play'
+        | 'program-multi'
+        | 'program-single'
         | 'refresh'
         | 'rename'
         | 'save'
@@ -87,6 +89,20 @@
         <path d="m9 18 6-6-6-6" />
     {:else if name === 'music'}
         <path d="M9 18V5l10-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="16" cy="16" r="3" />
+    {:else if name === 'program-single'}
+        <rect x="4" y="4" width="16" height="16" rx="2" /><path d="M9 15V8l6-1v6" /><circle
+            cx="8"
+            cy="15"
+            r="1.5"
+        /><circle cx="14" cy="13" r="1.5" />
+    {:else if name === 'program-multi'}
+        <rect x="3" y="4" width="7" height="7" rx="1" /><rect x="14" y="4" width="7" height="7" rx="1" /><rect
+            x="3"
+            y="15"
+            width="7"
+            height="5"
+            rx="1"
+        /><rect x="14" y="15" width="7" height="5" rx="1" /><path d="M10 7.5h4M12 7.5v10" />
     {:else if name === 'more'}
         <circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" />
     {:else if name === 'rename'}

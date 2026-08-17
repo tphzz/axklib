@@ -59,19 +59,13 @@ std::string display_program(const ObjectSnapshot &item) {
 }
 
 bool navigable(const Relationship &row) {
-    if (row.type.starts_with("PROG_ASSIGNMENT_TO_")) {
-        return (row.assignment_state == AssignmentState::active ||
-                row.assignment_state == AssignmentState::source_load) &&
-               (row.quality == RelationshipQuality::known || row.quality == RelationshipQuality::likely) &&
-               row.target_key.has_value();
-    }
+    if (row.type.starts_with("PROG_ASSIGNMENT_TO_"))
+        return is_effective_program_assignment(row);
     return row.quality == RelationshipQuality::known && row.target_key.has_value();
 }
 
 std::optional<std::string> assignment_detail(const Relationship &row) {
-    if (row.assignment_state == AssignmentState::source_load)
-        return "Rch Assign: =SMP";
-    if (row.assignment_state != AssignmentState::active || row.receive_channel_display.empty() ||
+    if (!is_effective_program_assignment(row) || row.receive_channel_display.empty() ||
         row.receive_channel_display == "off" || row.receive_channel_display == "unknown")
         return std::nullopt;
     return std::format("Rch Assign: {}", row.receive_channel_display);
@@ -132,18 +126,19 @@ std::vector<VolumeSeed> sfs_volume_seeds(const Container &container) {
             if (record.directory_id)
                 directories.emplace(record.directory_id->value, &record);
         }
-        const IndexRecord *root{};
-        for (const auto &[id, directory] : directories) {
-            if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-                root = directory;
-                break;
-            }
-        }
-        if (root == nullptr || !root->directory_id)
+        const auto located_root = locate_partition_root_record(partition);
+        if (!located_root)
             continue;
+        const auto root_record = std::ranges::find(partition.records, *located_root, &IndexRecord::sfs_id);
+        if (root_record == partition.records.end())
+            continue;
+        const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            const auto found = directories.find(entry.link_id.value);
-            if (entry.name == "." || entry.name == ".." || found == directories.end())
+            if (!entry.target_link_id)
+                continue;
+            const auto found = directories.find(entry.target_link_id->value);
+            if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
+                found == directories.end())
                 continue;
             const auto *volume = found->second;
             if (!volume->parent_directory_id || volume->parent_directory_id->value != root->directory_id->value) {
@@ -442,9 +437,7 @@ ContentTree build_content_tree(const MediaContainer &container, const ObjectCata
     }
     std::set<std::string> reachable_samples;
     for (const auto &row : graph.relationships) {
-        if (!row.target_key ||
-            (row.assignment_state != AssignmentState::active && row.assignment_state != AssignmentState::source_load) ||
-            (row.quality != RelationshipQuality::known && row.quality != RelationshipQuality::likely)) {
+        if (!is_effective_program_assignment(row)) {
             continue;
         }
         if (row.type == "PROG_ASSIGNMENT_TO_SBNK") {

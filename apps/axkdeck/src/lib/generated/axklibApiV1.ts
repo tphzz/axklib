@@ -572,6 +572,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-session-extent-layout-repairs': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.extent_layout.repair'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/image-session-media-conversion-inspections': {
         parameters: {
             query?: never;
@@ -678,6 +694,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations['images.sequence_export'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/image-session-tx16w-import-inspections': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.tx16w.inspect'];
         delete?: never;
         options?: never;
         head?: never;
@@ -814,6 +846,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/allocation-map': {
+        parameters: {
+            query: {
+                expectedRevision: number;
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.allocationMap'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/companions': {
         parameters: {
             query?: never;
@@ -920,6 +973,26 @@ export interface paths {
             cookie?: never;
         };
         get: operations['images.relationships'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/system-program-contexts': {
+        parameters: {
+            query: {
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.systemProgramContexts'];
         put?: never;
         post?: never;
         delete?: never;
@@ -1464,6 +1537,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        A3000SystemProgramContextAvailable: {
+            /** @constant */
+            availability: 'AVAILABLE';
+            basicReceive: components['schemas']['SystemMidiAddress'];
+            /** @constant */
+            fileKind: 'SYSTEM';
+            /** @constant */
+            model: 'A3000';
+            omni: boolean;
+            programChangeEnabled: boolean;
+        };
+        A4000A5000SystemProgramContextAvailable: {
+            /** @constant */
+            availability: 'AVAILABLE';
+            basicReceive: components['schemas']['SystemMidiAddress'];
+            /** @constant */
+            fileKind: 'SYSTEM2';
+            /** @enum {unknown} */
+            model: 'A4000' | 'A5000';
+            omni: boolean;
+            parts: components['schemas']['SystemProgramPart'][];
+            programChangeEnabled: boolean;
+            /** @enum {unknown} */
+            savedProgramMode: 'SINGLE' | 'MULTI';
+        };
         AlterationAudioImportSummary: {
             clippedSamples: number;
             ditherAlgorithm: string;
@@ -1516,7 +1614,8 @@ export interface components {
                 | 'RENAME_SEQUENCE'
                 | 'RENAME_VOLUME'
                 | 'RENAME_PARTITION'
-                | 'REPAIR_OBJECT_PLACEMENTS';
+                | 'REPAIR_OBJECT_PLACEMENTS'
+                | 'IMPORT_TX16W_DISK_SET';
             volumeName: string;
         };
         AlterationSummary: {
@@ -1890,6 +1989,90 @@ export interface components {
                 roots: components['schemas']['HostDirectoryEntry'][];
             };
             meta: components['schemas']['ResponseMeta'];
+        };
+        ImageAllocationMap: {
+            clusterCount: number;
+            clusterSizeBytes: number;
+            imageId: string;
+            partitionIndex: number;
+            partitionName: string;
+            partitionStartSector: number;
+            revision: number;
+            runs: components['schemas']['ImageAllocationRun'][];
+            sectorSizeBytes: number;
+            sectorsPerCluster: number;
+            summary: components['schemas']['ImageAllocationSummary'];
+        };
+        ImageAllocationMapResponse: {
+            data: components['schemas']['ImageAllocationMap'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        ImageAllocationOwner: {
+            categoryName: string;
+            /** @enum {string} */
+            claimKind: 'RESERVED' | 'CONTINUATION' | 'DATA';
+            extentIndex: number | null;
+            objectId: string | null;
+            objectName: string;
+            objectType: string;
+            /** @enum {string} */
+            recordKind: 'METADATA' | 'DIRECTORY' | 'SUPPORT' | 'OBJECT' | 'ALTERNATING_BYTE_OBJECT' | 'UNKNOWN';
+            sfsId: number | null;
+            volumeName: string;
+        };
+        ImageAllocationRun: {
+            /** @enum {string} */
+            allocationKind:
+                | 'RESERVED'
+                | 'CONTINUATION'
+                | 'DIRECTORY'
+                | 'SUPPORT'
+                | 'DATA'
+                | 'UNKNOWN'
+                | 'FREE'
+                | 'UNCLAIMED'
+                | 'CONFLICT';
+            byteCount: number;
+            byteOffset: number;
+            clusterCount: number;
+            consistencyFlags: (
+                'BITMAP_COPY_MISMATCH' | 'CLAIMED_BUT_FREE' | 'USED_WITHOUT_CLAIM' | 'MULTIPLE_CLAIMS'
+            )[];
+            fixedBitmapUsed: boolean;
+            headerBitmapUsed: boolean;
+            owners: components['schemas']['ImageAllocationOwner'][];
+            /** @description True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded. */
+            reconstructedUsed: boolean;
+            sectorCount: number;
+            startCluster: number;
+            startSector: number;
+        };
+        ImageAllocationSummary: {
+            /** @description Bytes represented by allocatedClusters at the partition cluster size. */
+            allocatedBytes: number;
+            /** @description Bitmap-allocated payload clusters. The implicit reserved metadata prefix is excluded. */
+            allocatedClusters: number;
+            bitmapCopyMismatchClusters: number;
+            /** @description Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap. */
+            claimedButFreeClusters: number;
+            conflictingClusters: number;
+            continuationClusters: number;
+            dataClusters: number;
+            dataSlackBytes: number;
+            fragmentedRecordCount: number;
+            /** @description Bitmap-clear payload clusters. The implicit reserved metadata prefix is excluded. */
+            freeClusters: number;
+            freeRunCount: number;
+            invalidExtentRecords: number;
+            largestFreeRunClusters: number;
+            logicalRecordBytes: number;
+            maximumExtentCount: number;
+            recordCount: number;
+            /** @description Clusters in the implicit metadata prefix before the first payload cluster. */
+            reservedClusters: number;
+            totalClusters: number;
+            totalExtentCount: number;
+            usedWithoutClaimClusters: number;
         };
         ImageAlterationInspection: {
             /** @constant */
@@ -2400,6 +2583,22 @@ export interface components {
                   kind: 'PROGRAM' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
                   objectId: string;
               };
+        ImageSessionExtentLayoutRepairRequest: {
+            destination: components['schemas']['ImageSessionMediaConversionDestination'];
+            expectedRevision: number;
+            imageId: string;
+        };
+        ImageSessionExtentLayoutRepairResult: {
+            defaultFilename: string;
+            /** @enum {unknown} */
+            destination: 'WORKSPACE' | 'DOWNLOAD';
+            download: components['schemas']['RetainedDownload'] | null;
+            imageId: string;
+            output: components['schemas']['FileRef'] | null;
+            repairs: components['schemas']['SfsExtentLayoutRepairEntry'][];
+            revision: number;
+            sizeBytes: number;
+        };
         ImageSessionMediaConversionDestination:
             | {
                   /** @constant */
@@ -2657,6 +2856,78 @@ export interface components {
             output: components['schemas']['DirectoryRef'] | null;
             revision: number;
             sequenceCount: number;
+        };
+        ImageSessionTx16wImportCounts: {
+            programs: number;
+            sampleBanks: number;
+            samples: number;
+            waveData: number;
+        };
+        ImageSessionTx16wImportInspection: {
+            counts: components['schemas']['ImageSessionTx16wImportCounts'];
+            /** @enum {unknown} */
+            importMode: 'HIERARCHY' | 'WAVE_DATA_ONLY';
+            notices: components['schemas']['ImageSessionTx16wMappingNotice'][];
+            objects: components['schemas']['ImageSessionTx16wImportObjects'];
+            /** @enum {unknown} */
+            profile: 'YAMAHA_NATIVE' | 'YAMAHA_NATIVE_WITH_AUXILIARY';
+            /** @constant */
+            schemaVersion: '1.0';
+            sourceMembers: string[];
+            target: components['schemas']['ImageSessionTx16wImportTarget'];
+            valid: boolean;
+        };
+        ImageSessionTx16wImportInspectionRequest: {
+            expectedRevision: number;
+            imageId: string;
+            /** @enum {unknown} */
+            importMode: 'HIERARCHY' | 'WAVE_DATA_ONLY';
+            sources: components['schemas']['InputRef'][];
+            target: components['schemas']['ImageSessionTx16wImportTarget'];
+        };
+        ImageSessionTx16wImportObjects: {
+            programs: components['schemas']['ImageSessionTx16wProgramPlan'][];
+            sampleBanks: components['schemas']['ImageSessionTx16wSampleBankPlan'][];
+            samples: components['schemas']['ImageSessionTx16wSamplePlan'][];
+            waveData: components['schemas']['ImageSessionTx16wWaveDataPlan'][];
+        };
+        ImageSessionTx16wImportTarget: {
+            partitionIndex: number;
+            volumeName: string;
+        };
+        ImageSessionTx16wMappingNotice: {
+            /** @enum {unknown} */
+            disposition: 'EXACT' | 'APPROXIMATED' | 'DEFAULTED' | 'OMITTED' | 'BLOCKED';
+            message: string;
+            sourceObject: string;
+            sourceParameter: string;
+            targetObject: string;
+            targetParameter: string;
+        };
+        ImageSessionTx16wProgramAssignmentPlan: {
+            /** @enum {unknown} */
+            kind: 'SBAC' | 'SBNK';
+            name: string;
+        };
+        ImageSessionTx16wProgramPlan: {
+            assignments: components['schemas']['ImageSessionTx16wProgramAssignmentPlan'][];
+            name: string;
+            slot: number;
+        };
+        ImageSessionTx16wSampleBankPlan: {
+            name: string;
+            sampleNames: string[];
+        };
+        ImageSessionTx16wSamplePlan: {
+            keyHigh: number;
+            keyLow: number;
+            name: string;
+            rootKey: number;
+            waveDataName: string;
+        };
+        ImageSessionTx16wWaveDataPlan: {
+            name: string;
+            targetSampleRate: number;
         };
         ImageSessionVolumeFloppyExportDestination: components['schemas']['ImageSessionVolumePackageExportDestination'];
         ImageSessionVolumeFloppyExportDisk: {
@@ -3462,12 +3733,7 @@ export interface components {
         };
         RelationshipDiagnostic: {
             /** @enum {unknown} */
-            assignmentState:
-                | 'CONFIRMED_ACTIVE'
-                | 'SOURCE_LOAD_ASSIGNMENT'
-                | 'CONFIRMED_VISIBLE_OFF'
-                | 'CONFIRMED_DUPLICATE_NOT_ACTIVE'
-                | 'UNKNOWN';
+            assignmentState: 'STORED_ASSIGNMENT' | 'SOURCE_LOAD_ASSIGNMENT' | 'UNKNOWN';
             basis: string;
             candidateObjectKeys: string[];
             /** @constant */
@@ -3556,6 +3822,18 @@ export interface components {
             microsecondsPerQuarterNote: number;
             tick: number;
         };
+        SfsExtent: {
+            byteCount: number;
+            clusterCount: number;
+            clusterOffset: number;
+        };
+        SfsExtentLayoutRepairEntry: {
+            logicalSize: number;
+            partitionIndex: number;
+            recordId: number;
+            replacementExtents: components['schemas']['SfsExtent'][];
+            sourceExtents: components['schemas']['SfsExtent'][];
+        };
         SfsIndexCapacityEstimate: {
             allocatableRecordSlots: number;
             allocatedRecordSlots: number;
@@ -3571,12 +3849,53 @@ export interface components {
             totalRecordSlots: number;
             usedRecordSlots: number;
         };
+        SystemMidiAddress: {
+            channel: number;
+            display: string;
+            /** @enum {unknown} */
+            port: 'A' | 'B';
+        };
+        SystemProgramContext:
+            | components['schemas']['A3000SystemProgramContextAvailable']
+            | components['schemas']['A4000A5000SystemProgramContextAvailable']
+            | components['schemas']['SystemProgramContextNotPresent']
+            | components['schemas']['SystemProgramContextInvalid'];
+        SystemProgramContextInvalid: {
+            /** @constant */
+            availability: 'INVALID';
+            /** @enum {unknown} */
+            fileKind: 'SYSTEM' | 'SYSTEM2';
+            message: string;
+        };
+        SystemProgramContextNotPresent: {
+            /** @constant */
+            availability: 'NOT_PRESENT';
+            /** @enum {unknown} */
+            fileKind: 'SYSTEM' | 'SYSTEM2';
+            message: string;
+        };
+        SystemProgramContexts: {
+            files: components['schemas']['SystemProgramContext'][];
+            message: string;
+            partitionIndex: number;
+        };
+        SystemProgramContextsResponse: {
+            data: components['schemas']['SystemProgramContexts'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        SystemProgramPart: {
+            master: boolean;
+            midi: components['schemas']['SystemMidiAddress'];
+            partLabel: string;
+            partNumber: number;
+            programNumber: number;
+        };
         Upload: {
             declaredSize: number;
             expiresInSeconds: number;
             filename: string;
             /** @enum {unknown} */
-            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST';
+            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST' | 'DISK_IMAGE';
             mediaType: string;
             receivedSize: number;
             /** @enum {unknown} */
@@ -3586,7 +3905,7 @@ export interface components {
         UploadCreateRequest: {
             filename: string;
             /** @enum {unknown} */
-            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST';
+            kind: 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST' | 'DISK_IMAGE';
             mediaType: string;
             sha256?: string | null;
             size: number;
@@ -6968,6 +7287,121 @@ export interface operations {
             };
         };
     };
+    'images.extent_layout.repair': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionExtentLayoutRepairRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
     'images.media_conversion.inspect': {
         parameters: {
             query?: never;
@@ -7688,6 +8122,124 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.tx16w.inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageSessionTx16wImportInspectionRequest'];
+            };
+        };
+        responses: {
+            /** @description Operation completed */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ImageSessionTx16wImportInspection'];
+                        meta: components['schemas']['ResponseMeta'];
+                    };
                 };
             };
             /** @description Malformed or schema-invalid request */
@@ -8585,6 +9137,42 @@ export interface operations {
             };
         };
     };
+    'images.allocationMap': {
+        parameters: {
+            query: {
+                expectedRevision: number;
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revision-pinned SFS partition cluster allocation map */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageAllocationMapResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
     'images.companionSources.attach': {
         parameters: {
             query?: never;
@@ -8784,6 +9372,41 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageRelationshipPageResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.systemProgramContexts': {
+        parameters: {
+            query: {
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['SystemProgramContextsResponse'];
                 };
             };
             /** @description Request could not be completed */

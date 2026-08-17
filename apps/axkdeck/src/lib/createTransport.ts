@@ -6,7 +6,9 @@ import type {
     ImageSessionVolumePackageExportInspection,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionMediaConversionInspection,
+    ImageSessionExtentLayoutRepairDestination,
     AudioImportCapabilities,
+    AllocationMapReference,
     AuditionBundleDescriptor,
     ClientDownload,
     CompanionSelection,
@@ -16,6 +18,7 @@ import type {
     ObjectPage,
     ObjectDeletionInspection,
     OpenedImage,
+    ImageValidationIssue,
     PackageImportPlan,
     PackageInspection,
     RetainedDownload,
@@ -24,6 +27,7 @@ import type {
     ProgramGenerationInspection,
     PreviewEnvelope,
     RelationshipPage,
+    SystemProgramContexts,
     WaveDataOrphanInspection,
     VolumeDeletionInspection,
 } from './transport';
@@ -72,6 +76,9 @@ class UnavailableTransport implements ImageTransport {
     inspectMidi(): Promise<never> {
         return this.unavailable();
     }
+    inspectTx16wDiskSet(): Promise<never> {
+        return this.unavailable();
+    }
 
     startAudioImport(): Promise<never> {
         return this.unavailable();
@@ -83,6 +90,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startSequenceImport(): Promise<never> {
+        return this.unavailable();
+    }
+    startTx16wDiskSetImport(): Promise<never> {
         return this.unavailable();
     }
     downloadFile(): Promise<ClientDownload> {
@@ -139,6 +149,12 @@ class UnavailableTransport implements ImageTransport {
     startImageMediaConversion(): Promise<JobState> {
         return this.unavailable();
     }
+    startExtentLayoutRepair(
+        _sessionId: number,
+        _destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.unavailable();
+    }
     deleteRetainedPackage(_download: RetainedDownload): Promise<void> {
         return this.unavailable();
     }
@@ -169,10 +185,19 @@ class UnavailableTransport implements ImageTransport {
     contentChildren(): Promise<ContentPage> {
         return this.unavailable();
     }
+    validationIssues(): Promise<ImageValidationIssue[]> {
+        return this.unavailable();
+    }
     objectPage(): Promise<ObjectPage> {
         return this.unavailable();
     }
     relationshipPage(): Promise<RelationshipPage> {
+        return this.unavailable();
+    }
+    systemProgramContexts(): Promise<SystemProgramContexts> {
+        return this.unavailable();
+    }
+    allocationMapReference(): Promise<AllocationMapReference> {
         return this.unavailable();
     }
     closeImage(): Promise<void> {

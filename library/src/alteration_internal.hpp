@@ -69,7 +69,9 @@ struct ExpectedObjectPlacement {
 };
 
 struct ParsedDirectoryEntry {
-    SfsId id;
+    LinkId raw_link_id;
+    std::optional<SfsId> target_sfs_id;
+    DirectoryEntryState state{DirectoryEntryState::live};
     std::string name;
     std::size_t offset{};
 };
@@ -171,6 +173,12 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
 Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
                                         const InsertWaveformOperation &operation,
                                         const CancellationToken &cancellation);
+Result<OperationReport> insert_waveform_audio(TransactionState &state, OperationContext context,
+                                              const InsertWaveformOperation &operation, const ImportedAudio &audio,
+                                              const CancellationToken &cancellation);
+Result<OperationReport> import_tx16w_disk_set(TransactionState &state, OperationContext context,
+                                              const ImportTx16wDiskSetOperation &operation,
+                                              const CancellationToken &cancellation);
 Result<OperationReport> delete_waveform(TransactionState &state, OperationContext context,
                                         const DeleteWaveformOperation &operation,
                                         const CancellationToken &cancellation);
@@ -211,13 +219,19 @@ Result<void> validate_post_write_placements(const ObjectCatalog &before, const O
                                             std::span<const ExpectedObjectPlacement> expected_objects);
 Result<void> validate_post_write_placements(const TransactionState &state, const Container &actual,
                                             const CancellationToken &cancellation);
+bool placement_repair_can_normalize_directory_extents(const Partition &partition);
+Result<void> stage_recoverable_directory_extent_repairs(const RandomAccessReader &source, const Partition &partition,
+                                                        MutablePartition &mutable_state,
+                                                        const CancellationToken &cancellation);
 Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAccessReader> source,
                                                 const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph);
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition = std::nullopt);
 Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph);
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition = std::nullopt);
 Result<PublicationOutcome>
 publish(const TransactionState &state, const std::filesystem::path &output_path, const CancellationToken &cancellation,
         bool overwrite = false,

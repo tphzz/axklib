@@ -449,7 +449,7 @@ SBAC slot row layout, stride `0x14`:
 The current reader uses `active_slot_count_0x144` to decide how many rows to
 read, capped by the payload size. The 32-bit handle is retained as a diagnostic
 field. It is opaque source-local state rather than a portable object identity.
-Package export declares each active row handle as a relocation, and package
+Package export declares each stored assignment-row handle as a relocation, and package
 import writes the hardware-proven zero form while preserving the row order and
 resolved member name. Target matching uses exact name, object type, and local
 placement before it emits a resolved relationship. For directory-backed ISO
@@ -539,7 +539,7 @@ Program assignment rows start at `0x120` and use a `0x38` byte stride.
 | `+0x25` | 1 | u8 | aeg_attack_rate_offset |
 | `+0x26` | 1 | u8 | aeg_decay_rate_offset |
 | `+0x27` | 1 | u8 | aeg_release_rate_offset |
-| `+0x28` | 1 | u8 | output2 / active-state gate |
+| `+0x28` | 1 | u8 | output2 |
 | `+0x29` | 1 | u8 | filter_cutoff_offset |
 | `+0x2a` | 1 | u8 | filter_gain_offset |
 
@@ -571,25 +571,116 @@ Assignment kind byte mapping currently used for read-side relationship matching:
 
 Rch Assign display family:
 
-| Gate byte `+0x28` | Channel byte `+0x15` | Display |
-| ---: | ---: | --- |
-| `0x00` | any | `off` |
-| not `0x00` or `0xff` | any | `unknown` |
-| `0xff` | `0xff` | `=SMP` |
-| `0xff` | `0x00..0x0f` | `01` through `16` |
-| `0xff` | `0x10` | `BasicRch` |
-| `0xff` | `0x11..0x20` | `B01` through `B16` |
+| Channel byte `+0x15` | Display |
+| ---: | --- |
+| `0xff` | `=Smp` |
+| `0x00..0x0f` | `A01` through `A16` |
+| `0x10` | `Bch` |
+| `0x11..0x20` | `B01` through `B16` |
+| any other value | `unknown` |
 
-Active assignment state is separate from target matching:
+Direct sampler observation confirms these exact visible labels and their casing.
+The read-side relationship model retains the selector family, one-based channel
+number where applicable, and raw selector byte independently of the display
+projection.
+
+The source CD-ROM
+`Teklab - Frank Winkelmann Spitzensynth Encounters (Yamaha A3000).ISO`, volume
+`11 EC Demo A`, Program `001: EC DemoA`, provides a direct sampler check of the
+A-channel projection: Sample `Electro FX` stores selector `0x01` and loads as
+`Rch Assign=A02`; Sample `Sub Bass` stores selector `0x02` and loads as
+`Rch Assign=A03`. Direct sampler observation confirms both same-folder target
+assignments.
+
+The byte at `+0x28` is the independent Output 2 parameter. It neither enables
+nor disables an assignment and must not affect Rch Assign decoding or target
+matching. The `Don Solaris CD7` source, volume `Analog Update`, Program
+`043: Polysix`, stores Sample Bank `VCO Pad` with selector `0xff` and Output 2
+value `0x07`. The sampler shows `VCO Pad`, `Solo=off`, and `Rch Assign =Smp`.
+This direct sampler observation confirms that a non-`0xff` Output 2 value is
+compatible with an effective stored assignment.
+
+The `Don Solaris CD7` source provides direct checks that Program-local context
+must not replace exact assignment-name matching. Program slot `005` stores a
+Sample `Astro` row with selector `0xff`, and the sampler shows only `=Smp`. A
+separate stored `ASR10 MergeX   *` row has selector `0x00`, but no exact
+same-scope target with that full stored name. Program slot `002` similarly
+shows only Sample Bank `SQR2B` on hardware; its additional stored
+`SQR2           *` row has no exact local target. axklib preserves both missing
+rows as raw Program data and diagnostics, but neither row is an effective
+assignment, a dependency edge, or a sampler-visible Program child.
+
+CD-ROM source-load rows are a distinct case. When a named source row matches a
+target object in the same ISO folder but the stored target type differs from
+the matched source object type, axklib keeps the row in
+`source-load-assignment` state. It still projects the stored `+0x15` selector with the same selector
+family: `0xff` is `=Smp`, `0x00..0x0f` are channels `A01` through `A16`, `0x10`
+is `Bch`, and `0x11..0x20` are `B01` through `B16`. The selector display
+therefore describes what the sampler applies when loading the source.
+
+Stored assignment-row state is separate from target matching:
 
 | State | Meaning |
 | --- | --- |
 | `decoded-row` | A row was decoded. |
-| `confirmed-active` | Gate byte indicates an active Program assignment. |
-| `confirmed-visible-off` | The inventory row is visible but Rch Assign is off. |
-| `confirmed-duplicate-not-active` | A duplicate row exists but is not the active assignment. |
+| `stored-assignment` | Named kind-`0x10` or kind-`0x11` assignment row stored in the Program. |
 | `source-load-assignment` | CD-ROM source-load row matched to a target object. |
 | `unknown` | State is not classified beyond diagnostics. |
+
+An effective Program assignment must have a `stored-assignment` or
+`source-load-assignment` state, a `Known` exact local target, and a concrete
+target object key. A missing or ambiguous target keeps the stored row available
+for byte-preserving package/export behavior without turning it into active
+content. This rule is **Strong**, based on the independent Don Solaris hardware
+observations above and exact image data; the raw row is known, while the
+sampler's complete target-lookup implementation remains to be traced.
+
+The sampler's system MIDI receive environment and A4000/A5000 Single/Multi
+setup are not fields of an individual `PROG` payload or data written by a
+normal Volume save. On SFS media, an explicit sampler System File save can
+place a model-specific partition-level file alongside all Volumes:
+
+| Path | Model and logical SFS record | Decoded context |
+| --- | --- | --- |
+| `\PRF3\SYSTEM` | A3000, `0x430` bytes: shared `0x30` current-record envelope plus `0x400` System body | Basic Receive Channel, Omni, Program Change Enable |
+| `\PRF3\SYSTEM2` | A4000/A5000, `0x1030` bytes: shared `0x30` current-record envelope plus `0x1000` System body | The same receive settings plus saved Program Mode and Multi Part Programs |
+
+The shared envelope begins with `FSFSDEV3SPLXPRF3` and is decoded by the same
+SFS current-record framework as ordinary sampler objects. Each model-specific
+body then has a `0x20` System header followed by the System Bulk parameter
+domain. The A3000 bulk is `0x348` bytes and its final `0x98` bytes remain
+unknown and preserved. The A4000/A5000 bulk occupies the remaining `0x0fe0`
+bytes.
+
+| System-body offset | Logical-record offset | `SYSTEM` | `SYSTEM2` |
+| ---: | ---: | --- | --- |
+| `0x00..0x03` | `0x30..0x33` | `21 52 05 31` | `DE AD FA CE` |
+| `0x0e` | `0x3e` | A3000 marker `0` | `0` A4000, `1` A5000 |
+| `0x34` | `0x64` | Basic Receive Channel `0..15` | Basic Receive Channel `0..15` or `0..31` |
+| `0x36` | `0x66` | bit 0 Omni; bit 1 Program Change | bit 0 Omni; bit 1 Program Change |
+| `0x5e` | `0x8e` | not interpreted | saved mode: `0` Single, `1` Multi |
+| `0x60..0x7f` | `0x90..0xaf` | not interpreted | direct Program numbers `1..128`, displayed as `001..128` |
+
+The A3000 `SYSTEM` file has no Program Mode or Multi Part table. The A4000 uses
+16 `SYSTEM2` parts on channels `01..16`; the A5000 uses 32 on `A01..A16` and
+`B01..B16`. The part matching Basic Receive Channel is the master part. In
+Multi, each part's channel is authoritative and the Sample or Sample Bank Rch
+Assign values inside its Program are ignored.
+
+The Yamaha MIDI data-format table uses a zero-based `0..127` representation for
+the corresponding transfer parameter. The saved SYSTEM2 file does not: direct
+sampler-authored files and sampler display establish that disk values are direct
+Program numbers `1..128`.
+
+Axklib reports `SYSTEM` and `SYSTEM2` independently and preserves their shared
+record envelopes and raw System-body sections. Axkdeck lets users switch
+between Single and Multi presentations
+without being forced by the saved mode. It displays both saved receive contexts
+when they coexist, but only an available `SYSTEM2` enables Multi rows. An
+A3000-only partition explicitly reports that `SYSTEM` cannot provide Program
+Mode or Multi assignments. CD-ROM, floppy, and `.a3k` sources have no
+partition-level System File entries, so Multi is never invented from a
+Volume's Programs.
 
 Assignment target matching preserves the complete 16-byte sampler name. An
 exact target whose stored name ends in `*` can be active and playable, so the
@@ -610,24 +701,23 @@ matching star generations. No additional raw Duplicate flag is part of the
 public contract. Starred objects use the same relationship and orphan rules as
 other exact object names.
 
-Normal `info` output shows active Program children and CD-ROM source-load
+Normal `info` output shows effective Program children and CD-ROM source-load
 children that are suitable for user-facing display. CSV and JSON relationship
-reports keep all decoded rows, raw selector values, and inactive rows.
+reports keep all decoded rows and raw selector values.
 
-Portable-package closure has a separate preservation rule: Known named
-kind-`0x10` and kind-`0x11` targets in `confirmed-visible-off` state are retained
-because imported zero-handle assignments re-parse in that state and remain
-loadable on hardware. For SFS media, a target remains Known when exactly one
-matching object is in the Program's volume, even when other volumes contain the
-same type and name. Multiple same-volume candidates, cross-volume-only matches,
-`confirmed-duplicate-not-active`, unresolved rows, and ambiguous rows remain
-diagnostic-only.
+Portable-package closure retains every effective Known named kind-`0x10` and
+kind-`0x11` target regardless of its Output 2 value. For SFS media, a target
+remains Known when exactly one matching object is in the Program's volume, even
+when other volumes contain the same type and name. Multiple same-volume
+candidates, cross-volume-only matches, unresolved rows, and ambiguous rows
+remain diagnostic-only. Unresolved stored-assignment rows remain in the raw
+`PROG` payload and portable package identity, but do not create dependency
+edges.
 
-Relationship target matching is reported separately from active/off state. Rows
+Relationship target matching is reported separately from stored-row state. Rows
 that are useful for diagnostics but should not become normal Program children use
-`diagnostic_category` values such as `visible-off-assignment`,
-`program-link-bitmap`, `sbnk-member-cache`, or
-`active-assignment-missing-target`.
+`diagnostic_category` values such as `program-link-bitmap`,
+`sbnk-member-cache`, or `stored-assignment-missing-target`.
 
 ## SEQU And PRF3
 

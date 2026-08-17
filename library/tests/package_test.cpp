@@ -24,6 +24,7 @@
 #include "axklib/package_archive.hpp"
 #include "axklib/package_import_planning.hpp"
 #include "axklib/package_relocation.hpp"
+#include "axklib/semantic.hpp"
 #include "axklib/writer.hpp"
 
 #include "../src/package_import_sfs_capacity.hpp"
@@ -223,7 +224,8 @@ void make_program_assignment_target_missing_with_same_type_context(const std::fi
     ASSERT_TRUE(image);
 }
 
-void set_program_assignments_visible_off(const std::filesystem::path &path, std::size_t assignment_count) {
+void set_program_assignment_output2(const std::filesystem::path &path, std::size_t assignment_count,
+                                    std::uint8_t output2) {
     const auto media = axk::open_media(path);
     ASSERT_TRUE(media) << media.error().message;
     const auto *sfs = std::get_if<axk::Container>(&media->storage());
@@ -242,9 +244,171 @@ void set_program_assignments_visible_off(const std::filesystem::path &path, std:
     ASSERT_TRUE(image);
     for (std::size_t index = 0; index < assignment_count; ++index) {
         image.seekp(static_cast<std::streamoff>(payload_offset + 0x148U + index * 0x38U));
-        image.put(0);
+        image.put(static_cast<char>(output2));
     }
     ASSERT_TRUE(image);
+}
+
+std::uint64_t directory_entry_absolute_offset(const axk::Partition &partition, const axk::IndexRecord &directory,
+                                              std::uint64_t payload_relative_offset) {
+    auto remaining = payload_relative_offset;
+    for (const auto &extent : directory.extents) {
+        if (remaining < extent.byte_count) {
+            return (static_cast<std::uint64_t>(partition.start_sector) +
+                    static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
+                       512U +
+                   remaining;
+        }
+        remaining -= extent.byte_count;
+    }
+    return std::numeric_limits<std::uint64_t>::max();
+}
+
+void write_directory_tombstone(std::fstream &image, std::uint64_t absolute_offset, std::string_view name,
+                               std::uint32_t missing_sfs_id) {
+    ASSERT_LE(name.size(), 16U);
+    std::array<char, 32> row{};
+    row[0] = 0;
+    row[1] = 0x20;
+    row[2] = 0;
+    row[3] = 0x11;
+    const auto raw_link = axk::sfs_deleted_directory_link_prefix | missing_sfs_id;
+    row[4] = static_cast<char>(raw_link >> 24U);
+    row[5] = static_cast<char>(raw_link >> 16U);
+    row[6] = static_cast<char>(raw_link >> 8U);
+    row[7] = static_cast<char>(raw_link);
+    std::fill(row.begin() + 8, row.begin() + 24, ' ');
+    std::ranges::copy(name, row.begin() + 8);
+    image.seekp(static_cast<std::streamoff>(absolute_offset));
+    image.write(row.data(), static_cast<std::streamsize>(row.size()));
+    ASSERT_TRUE(image);
+}
+
+void clear_cluster_claim(std::fstream &image, const axk::Partition &partition, std::uint32_t cluster) {
+    const auto byte_index = cluster / 8U;
+    const auto mask = static_cast<unsigned char>(0x80U >> (cluster % 8U));
+    const std::array offsets{
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+                512U +
+            byte_index,
+        static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U + byte_index,
+    };
+    for (const auto offset : offsets) {
+        image.clear();
+        image.seekg(static_cast<std::streamoff>(offset));
+        char value{};
+        image.read(&value, 1);
+        ASSERT_TRUE(image);
+        value = static_cast<char>(static_cast<unsigned char>(value) & static_cast<unsigned char>(~mask));
+        image.clear();
+        image.seekp(static_cast<std::streamoff>(offset));
+        image.write(&value, 1);
+        ASSERT_TRUE(image);
+    }
+}
+
+void remove_sfs_record(std::fstream &image, const axk::Partition &partition, const axk::IndexRecord &record) {
+    constexpr std::array<char, 72> empty_record{};
+    image.clear();
+    image.seekp(static_cast<std::streamoff>(record.record_offset.value));
+    image.write(empty_record.data(), static_cast<std::streamsize>(empty_record.size()));
+    ASSERT_TRUE(image);
+    for (const auto &extent : record.extents) {
+        for (std::uint32_t cluster = extent.cluster_offset; cluster < extent.cluster_offset + extent.cluster_count;
+             ++cluster) {
+            clear_cluster_claim(image, partition, cluster);
+        }
+    }
+    for (const auto cluster : record.continuation_clusters)
+        clear_cluster_claim(image, partition, cluster);
+}
+
+void patch_object_directory_rows_as_tombstones(const std::filesystem::path &path, std::string_view object_type,
+                                               std::span<const std::string_view> names) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto directory = std::ranges::find_if(partition.records, [&](const auto &candidate) {
+        return candidate.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::count_if(candidate.directory_entries, [&](const auto &entry) {
+                   if (!entry.target_link_id || entry.name == "." || entry.name == "..")
+                       return false;
+                   const auto target = std::ranges::find_if(partition.records, [&](const auto &record) {
+                       return record.sfs_id.value == entry.target_link_id->value;
+                   });
+                   return target != partition.records.end() && target->object_type == object_type;
+               }) >= static_cast<std::ptrdiff_t>(names.size());
+    });
+    ASSERT_NE(directory, partition.records.end());
+    std::vector<std::pair<const axk::DirectoryEntry *, const axk::IndexRecord *>> rows;
+    for (const auto &entry : directory->directory_entries) {
+        if (!entry.target_link_id || entry.name == "." || entry.name == "..")
+            continue;
+        const auto target = std::ranges::find_if(
+            partition.records, [&](const auto &record) { return record.sfs_id.value == entry.target_link_id->value; });
+        if (target != partition.records.end() && target->object_type == object_type)
+            rows.emplace_back(&entry, &*target);
+    }
+    ASSERT_GE(rows.size(), names.size());
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    for (std::size_t index = 0U; index < names.size(); ++index) {
+        const auto absolute =
+            directory_entry_absolute_offset(partition, *directory, rows[index].first->payload_relative_offset);
+        ASSERT_NE(absolute, std::numeric_limits<std::uint64_t>::max());
+        write_directory_tombstone(image, absolute, names[index], 0x0ff0000U + static_cast<std::uint32_t>(index));
+        remove_sfs_record(image, partition, *rows[index].second);
+    }
+}
+
+void patch_root_volume_row_as_tombstone(const std::filesystem::path &path, std::string_view source_volume,
+                                        std::string_view deleted_name) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto root = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory && record.directory_id &&
+               record.parent_directory_id && record.directory_id == record.parent_directory_id;
+    });
+    ASSERT_NE(root, partition.records.end());
+    const auto row = std::ranges::find(root->directory_entries, source_volume, &axk::DirectoryEntry::name);
+    ASSERT_NE(row, root->directory_entries.end());
+    ASSERT_TRUE(row->target_link_id);
+    std::set<std::uint32_t> closure;
+    std::vector<std::uint32_t> pending{row->target_link_id->value};
+    while (!pending.empty()) {
+        const auto id = pending.back();
+        pending.pop_back();
+        if (!closure.insert(id).second)
+            continue;
+        const auto record = std::ranges::find_if(partition.records,
+                                                 [&](const auto &candidate) { return candidate.sfs_id.value == id; });
+        ASSERT_NE(record, partition.records.end());
+        if (record->payload_kind != axk::PayloadKind::directory)
+            continue;
+        for (const auto &entry : record->directory_entries) {
+            if (entry.name != "." && entry.name != ".." && entry.target_link_id)
+                pending.push_back(entry.target_link_id->value);
+        }
+    }
+    const auto absolute = directory_entry_absolute_offset(partition, *root, row->payload_relative_offset);
+    ASSERT_NE(absolute, std::numeric_limits<std::uint64_t>::max());
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    write_directory_tombstone(image, absolute, deleted_name, 0x0fe0000U);
+    for (const auto id : closure) {
+        const auto record = std::ranges::find_if(partition.records,
+                                                 [&](const auto &candidate) { return candidate.sfs_id.value == id; });
+        ASSERT_NE(record, partition.records.end());
+        remove_sfs_record(image, partition, *record);
+    }
 }
 
 axk::Result<std::vector<axk::PortablePackage>> mixed_source_packages(const std::filesystem::path &root_path) {
@@ -562,18 +726,6 @@ TEST(PortablePackage, BuildsSbnkClosureFromMemberNameWhenCachedReferenceIsStale)
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PortablePackage, IgnoresAmbiguousInactiveProgramDiagnosticsButKeepsExactRows) {
-    axk::Relationship relationship;
-    relationship.assignment_state = axk::AssignmentState::visible_off;
-    relationship.quality = axk::RelationshipQuality::tentative;
-    EXPECT_FALSE(axk::package_internal::portable_inactive_program_relationship(relationship));
-
-    relationship.assignment_state = axk::AssignmentState::source_load;
-    relationship.quality = axk::RelationshipQuality::known;
-    relationship.target_key = "target";
-    EXPECT_TRUE(axk::package_internal::portable_inactive_program_relationship(relationship));
-}
-
 TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInventingADependency) {
     const auto output_root = publication_root("axklib-package-unresolved-program-row");
     const auto audio_path = output_root / "tone.wav";
@@ -607,6 +759,18 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
 
     const auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
+    const auto source_catalog = axk::build_object_catalog(*source);
+    ASSERT_TRUE(source_catalog) << source_catalog.error().message;
+    const auto source_graph = axk::build_relationship_graph(*source_catalog);
+    const auto *source_sfs = std::get_if<axk::Container>(&source->storage());
+    ASSERT_NE(source_sfs, nullptr);
+    const auto validation = axk::validate_semantics(*source_sfs, *source_catalog, source_graph);
+    EXPECT_TRUE(validation.valid());
+    const auto missing_row_warning = std::ranges::find(
+        validation.issues, std::string{"REL_PROGRAM_STORED_ROW_TARGET_MISSING"}, &axk::ValidationIssue::code);
+    ASSERT_NE(missing_row_warning, validation.issues.end());
+    EXPECT_EQ(missing_row_warning->severity, axk::ValidationSeverity::warning);
+
     const std::vector program_root{root(axk::PackageRootKind::prog, "Graph Volume", "001")};
     const auto single_program = axk::build_portable_package(*source, program_root);
     ASSERT_TRUE(single_program) << single_program.error().message;
@@ -2634,8 +2798,12 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     const auto plan = axk::plan_package_import(target_path, packages, request);
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_FALSE(plan->valid());
-    EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
-                                    [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; }));
+    const auto sfs_capacity_conflict = std::ranges::find_if(
+        plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; });
+    ASSERT_NE(sfs_capacity_conflict, plan->conflicts.end());
+    EXPECT_NE(sfs_capacity_conflict->message.find("free cluster(s)"), std::string::npos);
+    EXPECT_NE(sfs_capacity_conflict->message.find("Wave Data"), std::string::npos);
+    EXPECT_NE(sfs_capacity_conflict->message.find("needs at least"), std::string::npos);
     EXPECT_TRUE(std::ranges::any_of(plan->objects, [](const auto &object) {
         return std::ranges::contains(object.actions, axk::PackageImportObjectAction::conflict);
     }));
@@ -2785,6 +2953,30 @@ TEST(PackageImportPlanner, ReportsAtomicVolumeScaffoldingShortfallExactly) {
               1U);
 }
 
+TEST(PackageImportPlanner, PrefersOneContiguousExtentOverEarlierFragmentedFreeClusters) {
+    axk::Partition partition;
+    partition.directory_index_cluster = 10U;
+    partition.directory_index_span_clusters = 1U;
+    partition.cluster_count = 30U;
+
+    axk::package_import_internal::PartitionCapacity capacity;
+    capacity.partition = &partition;
+    for (std::uint32_t cluster = 11U; cluster < partition.cluster_count; ++cluster) {
+        const auto isolated_early_hole = cluster < 21U && (cluster % 2U) != 0U;
+        const auto contiguous_late_hole = cluster >= 21U && cluster <= 26U;
+        if (!isolated_early_hole && !contiguous_late_hole)
+            capacity.used_clusters.insert(cluster);
+    }
+
+    const auto reserved = axk::package_import_internal::reserve_clusters(capacity, 6U);
+
+    ASSERT_TRUE(reserved);
+    ASSERT_EQ(reserved->extents.size(), 1U);
+    EXPECT_EQ(reserved->extents.front().cluster_offset, 21U);
+    EXPECT_EQ(reserved->extents.front().cluster_count, 6U);
+    EXPECT_EQ(reserved->continuation_clusters, 0U);
+}
+
 TEST(PackageImportPlanner, ReportsIsoDirectoryCapacityBeforeApply) {
     const auto output_root = publication_root("axklib-package-iso-capacity");
     const auto audio_path = output_root / "tone.wav";
@@ -2845,6 +3037,25 @@ TEST(PackageImportPlanner, ReportsMissingDestinationMappings) {
     EXPECT_FALSE(plan->valid());
     EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
                                     [](const auto &conflict) { return conflict.code == "DESTINATION_ROOT_MISSING"; }));
+}
+
+TEST(PackageImportPlanner, RejectsPartitionSupportDirectoryAsASfsVolumeDestination) {
+    auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "fixture.ima");
+    ASSERT_TRUE(image) << image.error().message;
+    const axk::MediaContainer media{std::move(*image)};
+    const std::vector roots{root(axk::PackageRootKind::smpl, "FAT root", "TEST")};
+    const auto built = axk::build_portable_package(media, roots);
+    ASSERT_TRUE(built) << built.error().message;
+
+    axk::PackageImportRequest request;
+    request.root_destinations.push_back(destination(0U, "PRF3"));
+    const std::vector packages{built->package};
+    const auto plan = axk::plan_package_import(fixture("HD00_512_single_sbnk_authored.hds"), packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_FALSE(plan->valid());
+    EXPECT_TRUE(std::ranges::any_of(plan->conflicts, [](const auto &conflict) {
+        return conflict.code == "SFS_DESTINATION_INVALID" && conflict.message.find("non-reserved") != std::string::npos;
+    }));
 }
 
 TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
@@ -2979,6 +3190,126 @@ TEST(PackageImportApply, GrowsAnExistingCategoryDirectoryBeforeInsertingObjects)
                                         }),
                   1U);
     }
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportApply, ReusesDeletedCategoryRowsAndPreservesUnrelatedTombstones) {
+    const auto output_root = publication_root("axklib-package-import-category-tombstone");
+    const auto audio_path = output_root / "tone.wav";
+    const auto target_path = output_root / "target.hds";
+    const auto output_path = output_root / "imported.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+
+    axk::VolumeSpec volume;
+    volume.name = "Existing Volume";
+    for (std::size_t index = 0U; index < 3U; ++index) {
+        volume.waveforms.push_back(
+            {std::format("wave{}", index), std::format("Existing Wave {}", index), audio_path, 60U, {}});
+    }
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1", {std::move(volume)}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
+    constexpr std::array<std::string_view, 2> deleted_names{"TEST", "PRESERVED"};
+    patch_object_directory_rows_as_tombstones(target_path, "SMPL", deleted_names);
+
+    const auto built = fat_smpl_package();
+    ASSERT_TRUE(built) << built.error().message;
+    const std::vector packages{built->package};
+    axk::PackageImportRequest request;
+    request.root_destinations.push_back(destination(0U, "Existing Volume"));
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
+    ASSERT_EQ(plan->allocation.size(), 1U);
+    EXPECT_EQ(plan->allocation.front().directory_growth_bytes, 0U);
+
+    const auto applied = axk::apply_package_import(target_path, packages, *plan, output_path, false);
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto reopened = axk::open_media(output_path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&reopened->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto category = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory &&
+               std::ranges::any_of(record.directory_entries, [](const auto &entry) {
+                   return entry.name == "TEST" && entry.state == axk::DirectoryEntryState::live;
+               });
+    });
+    ASSERT_NE(category, partition.records.end());
+    EXPECT_TRUE(std::ranges::any_of(category->directory_entries, [](const auto &entry) {
+        return entry.name == "PRESERVED" && entry.state == axk::DirectoryEntryState::deleted && !entry.target_link_id &&
+               entry.raw_link_id.value == 0xf0ff0001U;
+    }));
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    EXPECT_EQ(std::ranges::count_if(catalog->objects,
+                                    [](const auto &object) {
+                                        return object.placement && object.placement->volume_name == "Existing Volume" &&
+                                               object.object.header.raw_type == "SMPL" &&
+                                               object.object.header.name == "TEST";
+                                    }),
+              1U);
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportApply, ReusesADeletedRootRowWhenCreatingAVolume) {
+    const auto output_root = publication_root("axklib-package-import-root-tombstone");
+    const auto audio_path = output_root / "tone.wav";
+    const auto target_path = output_root / "target.hds";
+    const auto output_path = output_root / "imported.hds";
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, tiny_waveform(1000)));
+
+    axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1",
+                                   {single_sample_volume(audio_path, "Keep Volume", "Keep Wave", "Keep Sample"),
+                                    single_sample_volume(audio_path, "Retired Volume", "Old Wave", "Old Sample")}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
+    patch_root_volume_row_as_tombstone(target_path, "Retired Volume", "Imported Volume");
+
+    const auto built = fat_smpl_package();
+    ASSERT_TRUE(built) << built.error().message;
+    const std::vector packages{built->package};
+    axk::PackageImportRequest request;
+    auto target = destination(0U, "Imported Volume");
+    target.create_destination = true;
+    request.root_destinations.push_back(std::move(target));
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->valid()) << conflict_summary(*plan);
+    ASSERT_EQ(plan->destinations.size(), 1U);
+    EXPECT_EQ(plan->destinations.front().root_directory_growth_bytes, 0U);
+
+    const auto applied = axk::apply_package_import(target_path, packages, *plan, output_path, false);
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto reopened = axk::open_media(output_path);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&reopened->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto &partition = sfs->partitions().front();
+    const auto root_record = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory && record.directory_id &&
+               record.parent_directory_id && record.directory_id == record.parent_directory_id;
+    });
+    ASSERT_NE(root_record, partition.records.end());
+    EXPECT_EQ(std::ranges::count_if(root_record->directory_entries,
+                                    [](const auto &entry) {
+                                        return entry.name == "Imported Volume" &&
+                                               entry.state == axk::DirectoryEntryState::live;
+                                    }),
+              1U);
+    EXPECT_EQ(std::ranges::count(root_record->directory_entries, "Imported Volume", &axk::DirectoryEntry::name), 1U);
+    EXPECT_TRUE(std::ranges::any_of(root_record->directory_entries, [](const auto &entry) {
+        return entry.name == "Keep Volume" && entry.state == axk::DirectoryEntryState::live;
+    }));
     std::filesystem::remove_all(output_root, error);
 }
 
@@ -3427,8 +3758,8 @@ TEST(PackageImportApply, ImportsACompleteProgramSampleBankSampleAndWaveDataGraph
     std::filesystem::remove_all(output_root, error);
 }
 
-TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
-    const auto output_root = publication_root("axklib-package-import-visible-off-duplicate-volumes");
+TEST(PackageImportApply, PreservesNonDefaultOutput2AssignmentsAcrossTwoSfsImports) {
+    const auto output_root = publication_root("axklib-package-import-output2-duplicate-volumes");
     const auto audio_path = output_root / "tone.wav";
     const auto source_path = output_root / "source.hds";
     const auto target_path = output_root / "target.hds";
@@ -3442,7 +3773,7 @@ TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
     axk::HdsBuildManifest source_manifest{"1.0", 4U * 1024U * 1024U, {}};
     source_manifest.partitions.push_back({"P1", {graph_volume(audio_path)}});
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source_path));
-    set_program_assignments_visible_off(source_path, 2U);
+    set_program_assignment_output2(source_path, 2U, 0x07U);
     auto source = axk::open_media(source_path);
     ASSERT_TRUE(source) << source.error().message;
     const std::vector volume_root{root(axk::PackageRootKind::volume, "Graph Volume")};
@@ -3503,13 +3834,15 @@ TEST(PackageImportApply, ImportsTheSameVisibleOffVolumeGraphIntoTwoSfsVolumes) {
         for (const auto *edge : children) {
             ASSERT_TRUE(edge->target_key) << edge->type;
             EXPECT_EQ(edge->quality, axk::RelationshipQuality::known) << edge->type;
-            EXPECT_EQ(edge->assignment_state, axk::AssignmentState::visible_off) << edge->type;
+            EXPECT_EQ(edge->assignment_state, axk::AssignmentState::stored_assignment) << edge->type;
             EXPECT_TRUE(edge->basis.ends_with("+same-volume")) << edge->basis;
             const auto target = std::ranges::find(catalog->objects, *edge->target_key, &axk::ObjectSnapshot::key);
             ASSERT_NE(target, catalog->objects.end()) << edge->type;
             ASSERT_TRUE(target->placement) << edge->type;
             EXPECT_EQ(target->placement->volume_name, volume_name) << edge->type;
         }
+        EXPECT_EQ(std::to_integer<std::uint8_t>(decoded->assignments[0].raw_row[0x28U]), 0x07U);
+        EXPECT_EQ(std::to_integer<std::uint8_t>(decoded->assignments[1].raw_row[0x28U]), 0x07U);
     }
 
     const std::vector second_volume_root{root(axk::PackageRootKind::volume, "Second Import")};

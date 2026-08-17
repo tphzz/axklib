@@ -6,6 +6,13 @@
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../../lib/objectSelection';
+    import {
+        collectionPageStep,
+        focusCollectionIndex,
+        hasDisallowedNavigationModifier,
+        keyboardSelectionMode,
+        linearNavigationIndex,
+    } from '../../lib/collectionNavigation';
     import { compareNamedItems } from '../../lib/naturalSort';
     import { formatSequenceTempo } from '../../lib/sequenceTempo';
     import type { ObjectRenameTarget, PackageExportObject, SequenceItem } from '../../lib/types';
@@ -86,18 +93,18 @@
         return `sequences\u0000${first?.object.partitionIndex ?? ''}\u0000${first?.object.volumeName ?? ''}`;
     }
 
-    function updateSelection(event: MouseEvent, objectId: string): ObjectSelectionMode {
+    function updateSelection(mode: ObjectSelectionMode, objectId: string): ObjectSelectionMode {
         const result = updatePackageExportSelection(
             selection,
             domainKey(),
             domainObjects(),
             visibleObjects(),
             objectId,
-            selectionMode(event),
+            mode,
         );
         if (result.limitExceeded) onselectionlimit();
         else onselectionchange(result.selection);
-        return selectionMode(event);
+        return mode;
     }
 
     function selectAll(event: KeyboardEvent, objectId: string): boolean {
@@ -156,6 +163,29 @@
         );
     }
 
+    function handleSequenceKeyboard(event: KeyboardEvent, currentIndex: number, item: SequenceItem): void {
+        if (!hasDisallowedNavigationModifier(event)) {
+            const targetIndex = linearNavigationIndex(
+                event.key,
+                currentIndex,
+                filteredSequences.length,
+                collectionPageStep(event.currentTarget),
+            );
+            if (targetIndex !== null) {
+                event.preventDefault();
+                if (targetIndex === currentIndex) return;
+                const target = filteredSequences[targetIndex];
+                if (!target) return;
+                const mode = keyboardSelectionMode(event);
+                updateSelection(mode, target.objectId);
+                if (mode === 'replace') onselect(target);
+                void focusCollectionIndex(event.currentTarget, targetIndex);
+                return;
+            }
+        }
+        openMenuFromKeyboard(event, item);
+    }
+
     function clearSelection(event: MouseEvent): void {
         if (
             event.button !== 0 ||
@@ -201,20 +231,22 @@
     <div
         class:empty-collection={filteredSequences.length === 0}
         class="collection-body sequence-list"
+        data-navigation-list
         onclick={clearSelection}
     >
-        {#each filteredSequences as item (item.id)}
+        {#each filteredSequences as item, index (item.id)}
             <button
                 type="button"
                 class:active={activeObjectId === item.objectId}
                 class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
                 class="sequence-row"
+                data-navigation-index={index}
                 aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                 onclick={(event) => {
-                    if (updateSelection(event, item.objectId) === 'replace') onselect(item);
+                    if (updateSelection(selectionMode(event), item.objectId) === 'replace') onselect(item);
                 }}
                 oncontextmenu={(event) => openMenu(event, item)}
-                onkeydown={(event) => openMenuFromKeyboard(event, item)}
+                onkeydown={(event) => handleSequenceKeyboard(event, index, item)}
             >
                 <strong>{item.name}</strong>
                 <span>{metadata(item)}</span>

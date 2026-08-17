@@ -88,9 +88,7 @@ bool dependency_relationship(const Relationship &relationship) {
         relationship.type == "SBAC_SLOT_TO_SBNK") {
         return true;
     }
-    return (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
-           (relationship.assignment_state == AssignmentState::active ||
-            relationship.assignment_state == AssignmentState::source_load);
+    return is_effective_program_assignment(relationship);
 }
 
 void add_issue(MediaConversionPlanSummary &summary, std::string code, std::string message,
@@ -98,9 +96,10 @@ void add_issue(MediaConversionPlanSummary &summary, std::string code, std::strin
     summary.issues.push_back({std::move(code), std::move(message), blocking, measurement});
 }
 
-bool retained_disabled_program_row(const Relationship &relationship,
-                                   const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key) {
-    return relationship.assignment_state == AssignmentState::active && !relationship.assignment_name.empty() &&
+bool retained_unresolved_program_row(const Relationship &relationship,
+                                     const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects_by_key) {
+    return relationship.assignment_state == AssignmentState::stored_assignment &&
+           !relationship.assignment_name.empty() &&
            (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
            relationship.quality != RelationshipQuality::known &&
            !detail::relationship_has_exact_named_program_target(relationship, objects_by_key);
@@ -112,22 +111,23 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
         if (record.directory_id)
             directories.emplace(record.directory_id->value, &record);
     }
-    const IndexRecord *root{};
-    for (const auto &[id, directory] : directories) {
-        if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-            root = directory;
-            break;
-        }
+    const auto located_root = locate_partition_root_record(partition);
+    if (!located_root)
+        return std::unexpected{located_root.error()};
+    const auto root_record = std::ranges::find(partition.records, *located_root, &IndexRecord::sfs_id);
+    if (root_record == partition.records.end()) {
+        return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
+                                          "partition root record is unavailable")};
     }
-    if (root == nullptr || !root->directory_id) {
-        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
-                                          "partition has no unambiguous root directory")};
-    }
+    const auto *root = &*root_record;
 
     std::vector<SourceVolume> result;
     for (const auto &entry : root->directory_entries) {
-        const auto found = directories.find(entry.link_id.value);
-        if (entry.name == "." || entry.name == ".." || found == directories.end())
+        if (!entry.target_link_id)
+            continue;
+        const auto found = directories.find(entry.target_link_id->value);
+        if (entry.name == "." || entry.name == ".." || is_partition_support_root_entry(entry.name) ||
+            found == directories.end())
             continue;
         const auto &volume = *found->second;
         if (!volume.parent_directory_id || volume.parent_directory_id->value != root->directory_id->value ||
@@ -136,9 +136,9 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
         }
         SourceVolume item{volume.sfs_id.value, entry.name, {}};
         for (const auto &category_entry : volume.directory_entries) {
-            if (!category_name(category_entry.name))
+            if (!category_entry.target_link_id || !category_name(category_entry.name))
                 continue;
-            const auto category_found = directories.find(category_entry.link_id.value);
+            const auto category_found = directories.find(category_entry.target_link_id->value);
             if (category_found == directories.end())
                 continue;
             const auto &category = *category_found->second;
@@ -146,8 +146,8 @@ Result<std::vector<SourceVolume>> source_volumes(const Partition &partition) {
                 continue;
             }
             for (const auto &object_entry : category.directory_entries) {
-                if (object_entry.name != "." && object_entry.name != "..")
-                    item.object_ids.push_back(object_entry.link_id.value);
+                if (object_entry.name != "." && object_entry.name != ".." && object_entry.target_link_id)
+                    item.object_ids.push_back(object_entry.target_link_id->value);
             }
         }
         result.push_back(std::move(item));
@@ -427,17 +427,19 @@ Result<detail::PreparedMediaConversion> prepare_media_conversion_from_source(con
     std::size_t retained_program_row_count{};
     std::vector<std::string> retained_program_row_names;
     for (const auto &relationship : source.graph.relationships) {
-        if (!selected_keys.contains(relationship.source_key) || !dependency_relationship(relationship))
+        if (!selected_keys.contains(relationship.source_key))
+            continue;
+        if (retained_unresolved_program_row(relationship, source.objects_by_key)) {
+            ++retained_program_row_count;
+            if (retained_program_row_names.size() < 5U &&
+                !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
+                retained_program_row_names.push_back(relationship.assignment_name);
+            }
+            continue;
+        }
+        if (!dependency_relationship(relationship))
             continue;
         if (relationship.quality != RelationshipQuality::known || !relationship.target_key) {
-            if (retained_disabled_program_row(relationship, source.objects_by_key)) {
-                ++retained_program_row_count;
-                if (retained_program_row_names.size() < 5U &&
-                    !std::ranges::contains(retained_program_row_names, relationship.assignment_name)) {
-                    retained_program_row_names.push_back(relationship.assignment_name);
-                }
-                continue;
-            }
             add_issue(prepared.summary, "MEDIA_CONVERSION_RELATIONSHIP_UNCONFIRMED",
                       std::format("{} dependency is not Known", relationship.type));
             continue;

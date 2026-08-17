@@ -108,6 +108,20 @@ TEST(HdsManifest, AcceptsPartitionsWithoutVolumes) {
     EXPECT_TRUE(parsed->partitions.front().volumes.empty());
 }
 
+TEST(HdsManifest, RejectsPartitionSupportDirectoryNameAsAVolume) {
+    constexpr std::string_view reserved = R"json({
+      "schema_version":"1.0",
+      "size_bytes":1048576,
+      "partitions":[{"name":"P1","volumes":[{
+        "name":"PRF3   ","waveforms":[],"samples":[]
+      }]}]
+    })json";
+    const auto parsed = axk::parse_hds_build_manifest(reserved);
+    ASSERT_FALSE(parsed);
+    EXPECT_EQ(parsed.error().code, axk::ErrorCode::manifest_invalid);
+    EXPECT_NE(parsed.error().message.find("reserved"), std::string::npos);
+}
+
 TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
     constexpr std::string_view obsolete = R"json({
       "schema_version":"1.0",
@@ -450,6 +464,63 @@ TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     std::filesystem::remove(path, error);
 }
 
+TEST(HdsWriter, WritesCompleteMatchingAllocationBitmapsBeyondFirst4096Clusters) {
+    axk::Waveform source;
+    source.format = {1, 2, 44'100};
+    source.frame_count = 2'200'000U;
+    source.pcm.resize(source.frame_count * 2U);
+    const auto audio_path = std::filesystem::temp_directory_path() / "axklib-writer-large-bitmap.wav";
+    const auto image_path = std::filesystem::temp_directory_path() / "axklib-writer-large-bitmap.hds";
+    std::error_code error;
+    std::filesystem::remove(audio_path, error);
+    std::filesystem::remove(image_path, error);
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, source));
+
+    axk::VolumeSpec volume;
+    volume.name = "Large Bitmap";
+    volume.waveforms.push_back({"wave", "Large Wave", audio_path, 60U, {}});
+    axk::HdsBuildManifest manifest_value{"1.0", 16U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest_value, image_path);
+    ASSERT_TRUE(written) << written.error().message;
+    ASSERT_EQ(written->partitions.size(), 1U);
+    const auto &geometry = written->partitions.front().geometry;
+    const auto bitmap_size = static_cast<std::size_t>(geometry.bitmap_cluster_count * 1024U);
+    ASSERT_GT(bitmap_size, 512U);
+
+    const auto read_bitmap = [&](std::uint64_t offset) {
+        std::ifstream stream{image_path, std::ios::binary};
+        std::vector<std::byte> bytes(bitmap_size);
+        stream.seekg(static_cast<std::streamoff>(offset));
+        stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        EXPECT_TRUE(stream);
+        return bytes;
+    };
+    const auto partition_start = geometry.start_sector * 512U;
+    const auto fixed_location = read_bitmap(partition_start + 2048U);
+    const auto header_addressed = read_bitmap(partition_start + geometry.bitmap_cluster * 1024U);
+    EXPECT_TRUE(std::ranges::any_of(std::span{header_addressed}.subspan(512U),
+                                    [](std::byte value) { return value != std::byte{}; }));
+    EXPECT_EQ(fixed_location, header_addressed);
+
+    std::filesystem::remove(audio_path, error);
+    std::filesystem::remove(image_path, error);
+}
+
+TEST(HdsWriter, RejectsPartitionSupportDirectoryNameAsAVolume) {
+    axk::VolumeSpec reserved;
+    reserved.name = "PRF3";
+    axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {{"hd1", {std::move(reserved)}}}};
+    const auto path = std::filesystem::temp_directory_path() / "axklib-native-reserved-prf3.hds";
+    std::error_code error;
+    std::filesystem::remove(path, error);
+
+    const auto written = axk::write_hds_image(manifest_value, path);
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().code, axk::ErrorCode::manifest_invalid);
+    EXPECT_NE(written.error().message.find("reserved"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
 TEST(HdsWriter, SizesDirectoryIndexFromRecordIdsAndEnforcesFixedCapacity) {
     const auto record = [](std::uint32_t id) {
         return axk::detail::PreparedRecord{id, {}, axk::detail::RecordKind::directory};
@@ -551,10 +622,29 @@ TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
     axk::ProgramSpec program;
     program.number = 1U;
     program.name = "Program";
-    program.assignments.resize(12U);
+    program.assignments.resize(axk::maximum_program_assignments + 1U);
     const auto oversized_program = axk::detail::prepare_prog_payload(program);
     ASSERT_FALSE(oversized_program);
     EXPECT_EQ(oversized_program.error().code, axk::ErrorCode::unsupported_profile);
+}
+
+TEST(HdsWriter, EncodesTheNativeTx16wProgramAssignmentCapacity) {
+    axk::ProgramSpec program;
+    program.number = 7U;
+    program.name = "Wide";
+    for (std::size_t index = 0U; index < axk::maximum_program_assignments; ++index) {
+        program.assignments.push_back(
+            {"SBAC", std::format("Bank {}", index + 1U), 0U, axk::ProgramReceiveMode::sample});
+    }
+
+    const auto payload = axk::detail::prepare_prog_payload(program);
+    ASSERT_TRUE(payload) << payload.error().message;
+    const auto decoded = axk::decode_object(*payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *current = std::get_if<axk::CurrentProg>(&decoded->payload);
+    ASSERT_NE(current, nullptr);
+    EXPECT_EQ(current->assignments.size(), axk::maximum_program_assignments);
+    EXPECT_EQ(current->assignments.back().name, "Bank 16");
 }
 
 TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {

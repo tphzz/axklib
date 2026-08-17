@@ -1,6 +1,7 @@
 #include "sfs_internal.hpp"
 
 #include "axklib/bytes.hpp"
+#include "axklib/object.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,11 +14,16 @@
 #include <vector>
 
 namespace axk::sfs_detail {
-namespace {
 
-constexpr std::string_view object_magic{"FSFSDEV3SPLX"};
-
-} // namespace
+DirectoryEntry make_directory_entry(std::uint16_t flags, std::uint32_t raw_link, std::string name,
+                                    std::uint64_t offset) {
+    const auto raw_link_id = LinkId{raw_link};
+    const auto state = directory_entry_state(raw_link_id);
+    return {
+        flags, raw_link_id,     state == DirectoryEntryState::live ? std::optional<LinkId>{raw_link_id} : std::nullopt,
+        state, std::move(name), offset,
+    };
+}
 
 std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> payload) {
     std::vector<DirectoryEntry> result;
@@ -34,21 +40,17 @@ std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> p
         const auto name = reader.ascii_field(offset + 8U, *name_size, false);
         if (!name)
             break;
-        result.push_back({*flags, LinkId{*link}, *name, offset});
+        result.push_back(make_directory_entry(*flags, *link, *name, offset));
     }
     return result;
 }
 
 void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
-    if (begins_with(payload, object_magic) && payload.size() >= 0x42U) {
-        const ByteReader reader{payload};
-        const auto type = reader.ascii_field(0x0c, 4);
-        const auto name = reader.ascii_field(0x32, 16);
-        if (type && name) {
-            record.payload_kind = PayloadKind::object;
-            record.object_type = *type;
-            record.object_name = *name;
-        }
+    if (const auto envelope = decode_current_record_envelope(payload); envelope) {
+        record.payload_kind = PayloadKind::object;
+        record.object_type = envelope->raw_type;
+        if (const auto header = decode_object_header(payload); header)
+            record.object_name = header->name;
         return;
     }
     if (payload.size() >= 16U) {
@@ -81,10 +83,11 @@ void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
         }
     }
     auto entries = parse_directory_entries(payload);
-    if (entries.size() >= 2U && entries[0].name == "." && entries[1].name == "..") {
+    if (entries.size() >= 2U && entries[0].name == "." && entries[1].name == ".." && entries[0].target_link_id &&
+        entries[1].target_link_id) {
         record.payload_kind = PayloadKind::directory;
-        record.directory_id = entries[0].link_id;
-        record.parent_directory_id = entries[1].link_id;
+        record.directory_id = entries[0].target_link_id;
+        record.parent_directory_id = entries[1].target_link_id;
         record.directory_entries = std::move(entries);
     }
 }
@@ -125,11 +128,13 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
     }
 
     for (const auto &[directory_id, directory] : directories_by_id) {
-        static_cast<void>(directory_id);
+        const bool is_partition_root =
+            directory->parent_directory_id && directory->parent_directory_id->value == directory_id;
         for (const auto &entry : directory->directory_entries) {
-            if (entry.name == ".")
+            if (entry.name == "." || !entry.target_link_id ||
+                (is_partition_root && is_partition_support_root_entry(entry.name)))
                 continue;
-            if (!records_by_id.contains(entry.link_id.value)) {
+            if (!records_by_id.contains(entry.target_link_id->value)) {
                 ErrorContext context;
                 context.partition_index = partition.index.value;
                 context.object_type = "directory-entry";
@@ -190,7 +195,8 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
                 continue;
             }
             const auto &entry = found->second->directory_entries[frame.next_entry++];
-            if (entry.name == "." || entry.name == ".." || !directories_by_id.contains(entry.link_id.value))
+            if (entry.name == "." || entry.name == ".." || !entry.target_link_id ||
+                !directories_by_id.contains(entry.target_link_id->value))
                 continue;
             const auto child_depth = frame.depth + 1U;
             if (child_depth > options.max_directory_depth) {
@@ -204,7 +210,7 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
                                                            std::move(context)));
                 continue;
             }
-            const auto color = colors[entry.link_id.value];
+            const auto color = colors[entry.target_link_id->value];
             if (color == 1) {
                 ErrorContext context;
                 context.partition_index = partition.index.value;
@@ -215,8 +221,8 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
                                                            "directory child links contain a cycle",
                                                            std::move(context)));
             } else if (color == 0) {
-                colors[entry.link_id.value] = 1;
-                stack.push_back({entry.link_id.value, 0U, child_depth});
+                colors[entry.target_link_id->value] = 1;
+                stack.push_back({entry.target_link_id->value, 0U, child_depth});
             }
         }
     }
@@ -224,3 +230,35 @@ Result<void> validate_directory_graph(Partition &partition, const OpenOptions &o
 }
 
 } // namespace axk::sfs_detail
+
+namespace axk {
+
+bool is_partition_support_root_entry(std::string_view name) noexcept {
+    if (const auto terminator = name.find('\0'); terminator != std::string_view::npos)
+        name = name.substr(0U, terminator);
+    while (!name.empty() && name.back() == ' ')
+        name.remove_suffix(1U);
+    return name == "PRF3" || name == "sfserrlog" || name == "sfserram";
+}
+
+Result<SfsId> locate_partition_root_record(const Partition &partition) {
+    std::vector<const IndexRecord *> roots;
+    for (const auto &record : partition.records) {
+        if (record.payload_kind == PayloadKind::directory && record.directory_id && record.parent_directory_id &&
+            *record.directory_id == *record.parent_directory_id) {
+            roots.push_back(&record);
+        }
+    }
+    if (roots.size() == 1U)
+        return roots.front()->sfs_id;
+
+    ErrorContext context;
+    context.partition_index = partition.index.value;
+    return std::unexpected{
+        make_error(roots.empty() ? ErrorCode::relationship_unresolved : ErrorCode::relationship_ambiguous,
+                   ErrorCategory::relationship,
+                   roots.empty() ? "partition has no root directory" : "partition has multiple root directories",
+                   std::move(context))};
+}
+
+} // namespace axk

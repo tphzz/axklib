@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "axklib/application/allocation_map.hpp"
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/path_reservations.hpp"
@@ -189,6 +190,42 @@ struct ImageRelationshipFilter {
     std::optional<std::string_view> source_object_id;
     std::optional<std::string_view> target_object_id;
     std::optional<std::string_view> relationship_type;
+};
+
+enum class SystemProgramContextAvailability : std::uint8_t { available, not_present, invalid };
+
+enum class SystemProgramContextFile : std::uint8_t { system, system2 };
+
+struct ImageSystemMidiAddress {
+    std::string port;
+    std::uint8_t channel{1U};
+    std::string display;
+};
+
+struct ImageSystemProgramPart {
+    std::uint8_t part_number{1U};
+    std::string part_label;
+    ImageSystemMidiAddress midi;
+    std::uint16_t program_number{1U};
+    bool master{};
+};
+
+struct ImageSystemProgramContext {
+    SystemProgramContextFile file_kind{SystemProgramContextFile::system};
+    SystemProgramContextAvailability availability{SystemProgramContextAvailability::not_present};
+    std::string model;
+    std::optional<std::string> saved_program_mode;
+    std::optional<ImageSystemMidiAddress> basic_receive;
+    std::optional<bool> omni;
+    std::optional<bool> program_change_enabled;
+    std::vector<ImageSystemProgramPart> parts;
+    std::string message;
+};
+
+struct ImageSystemProgramContexts {
+    std::uint8_t partition_index{};
+    std::vector<ImageSystemProgramContext> files;
+    std::string message;
 };
 
 struct ImageObjectDeletionNotice {
@@ -428,6 +465,11 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                   std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});
+    [[nodiscard]] Result<ImageSystemProgramContexts>
+    system_program_contexts(std::string_view image_id, std::string_view owner_id, std::uint8_t partition_index);
+    [[nodiscard]] Result<ImageAllocationMap> allocation_map(std::string_view image_id, std::string_view owner_id,
+                                                            std::uint64_t expected_revision,
+                                                            std::uint8_t partition_index);
     [[nodiscard]] Result<ImagePage<ImageValidationItem>>
     validation_issues(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                       std::optional<std::string_view> cursor = std::nullopt);

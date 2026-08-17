@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "axklib/catalog_internal.hpp"
+#include "axklib/system_file.hpp"
 
 namespace axk {
 namespace {
@@ -43,17 +44,18 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
             if (record.directory_id)
                 directories.emplace(record.directory_id->value, &record);
         }
-        const IndexRecord *root{};
-        for (const auto &[id, directory] : directories) {
-            if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-                root = directory;
-                break;
-            }
-        }
-        if (root != nullptr && root->directory_id) {
+        const auto located_root = locate_partition_root_record(partition);
+        if (located_root) {
+            const auto root_record = std::ranges::find(partition.records, *located_root, &IndexRecord::sfs_id);
+            if (root_record == partition.records.end())
+                continue;
+            const auto *root = &*root_record;
             for (const auto &volume_entry : root->directory_entries) {
-                const auto volume_found = directories.find(volume_entry.link_id.value);
-                if (volume_entry.name == "." || volume_entry.name == ".." || volume_found == directories.end()) {
+                if (!volume_entry.target_link_id)
+                    continue;
+                const auto volume_found = directories.find(volume_entry.target_link_id->value);
+                if (volume_entry.name == "." || volume_entry.name == ".." ||
+                    is_partition_support_root_entry(volume_entry.name) || volume_found == directories.end()) {
                     continue;
                 }
                 const auto *volume = volume_found->second;
@@ -61,9 +63,9 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                     continue;
                 }
                 for (const auto &category_entry : volume->directory_entries) {
-                    if (!is_category(category_entry.name))
+                    if (!category_entry.target_link_id || !is_category(category_entry.name))
                         continue;
-                    const auto category_found = directories.find(category_entry.link_id.value);
+                    const auto category_found = directories.find(category_entry.target_link_id->value);
                     if (category_found == directories.end())
                         continue;
                     const auto *category = category_found->second;
@@ -72,10 +74,10 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                         continue;
                     }
                     for (const auto &entry : category->directory_entries) {
-                        if (entry.name == "." || entry.name == "..")
+                        if (entry.name == "." || entry.name == ".." || !entry.target_link_id)
                             continue;
                         candidates.push_back({
-                            SfsId{entry.link_id.value},
+                            SfsId{entry.target_link_id->value},
                             {partition.index,
                              partition.name,
                              volume->sfs_id,
@@ -89,8 +91,17 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
             }
         }
 
+        std::unordered_set<std::uint32_t> partition_support_records;
+        for (const auto kind : {SystemFileKind::a3000_system, SystemFileKind::a4000_a5000_system2}) {
+            const auto located = locate_system_file_record(partition, kind);
+            if (located && *located)
+                partition_support_records.insert((**located).value);
+        }
+
         for (const auto &record : partition.records) {
             if (record.payload_kind != PayloadKind::object)
+                continue;
+            if (partition_support_records.contains(record.sfs_id.value))
                 continue;
             const auto bytes =
                 container.read_record_data(partition.index, record.sfs_id, maximum_object_bytes, cancellation);

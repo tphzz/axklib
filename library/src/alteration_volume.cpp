@@ -13,6 +13,7 @@
 #include "axklib/object.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/writer_internal.hpp"
+#include "sfs_cluster_allocation.hpp"
 
 namespace axk::alteration_internal {
 
@@ -20,6 +21,8 @@ Result<OperationReport> delete_volume(TransactionState &state, OperationContext 
                                       const DeleteVolumeOperation &operation, const CancellationToken &cancellation) {
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
+    if (is_partition_support_root_entry(operation.volume_name))
+        return std::unexpected{transaction_error("PRF3 is a reserved partition support directory")};
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -35,7 +38,7 @@ Result<OperationReport> delete_volume(TransactionState &state, OperationContext 
     }
     std::vector<const DirectoryEntry *> matches;
     for (const auto &entry : root->directory_entries) {
-        if (entry.name == operation.volume_name)
+        if (entry.state == DirectoryEntryState::live && entry.name == operation.volume_name)
             matches.push_back(&entry);
     }
     if (matches.size() != 1U)
@@ -113,17 +116,14 @@ std::vector<SfsId> free_ids(const MutablePartition &partition, std::size_t count
 }
 
 Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::uint32_t count) {
-    std::vector<std::uint32_t> selected;
     const auto first = partition.source->directory_index_cluster + partition.source->directory_index_span_clusters;
-    for (std::uint32_t cluster = first; cluster < partition.source->cluster_count && selected.size() < count;
-         ++cluster) {
-        if (!bitmap_used(partition.bitmap, cluster))
-            selected.push_back(cluster);
-    }
-    if (selected.size() != count)
+    auto selected = detail::select_sfs_payload_clusters(
+        first, partition.source->cluster_count, count,
+        [&](const std::uint32_t cluster) { return bitmap_used(partition.bitmap, cluster); });
+    if (!selected)
         return std::unexpected{transaction_error("partition has insufficient free clusters")};
     std::vector<Extent> result;
-    for (const auto cluster : selected) {
+    for (const auto cluster : *selected) {
         set_bitmap(partition.bitmap, cluster, true);
         if (!result.empty() && result.back().cluster_offset + result.back().cluster_count == cluster) {
             ++result.back().cluster_count;
@@ -167,17 +167,13 @@ std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<co
 }
 
 Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size) {
-    std::uint64_t remaining = payload_size;
-    for (auto &extent : extents) {
-        const auto capacity = static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
-        const auto byte_count = std::min(remaining == 0U ? capacity : remaining, capacity);
-        if (byte_count == 0U || byte_count > std::numeric_limits<std::uint32_t>::max())
-            return std::unexpected{transaction_error("SFS extent byte count is outside its encoded range")};
-        extent.byte_count = static_cast<std::uint32_t>(byte_count);
-        remaining = remaining > byte_count ? remaining - byte_count : 0U;
-    }
-    if (remaining != 0U)
-        return std::unexpected{transaction_error("record payload exceeds its allocated extent capacity")};
+    if (payload_size > std::numeric_limits<std::uint32_t>::max())
+        return std::unexpected{transaction_error("record payload exceeds its encoded size")};
+    const auto byte_counts = detail::plan_extent_byte_counts(extents, static_cast<std::uint32_t>(payload_size));
+    if (!byte_counts)
+        return std::unexpected{transaction_error(byte_counts.error().message)};
+    for (std::size_t index = 0; index < extents.size(); ++index)
+        extents[index].byte_count = (*byte_counts)[index];
     return {};
 }
 
@@ -224,8 +220,6 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     if (!added)
         return std::unexpected{added.error()};
     auto extents = merge_extents(target->extents, *added);
-    if (auto normalized = normalize_extent_byte_counts(extents, static_cast<std::size_t>(required_size)); !normalized)
-        return std::unexpected{normalized.error()};
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     const auto required_lists =
         extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
@@ -238,18 +232,6 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
             return std::unexpected{lists.error()};
         target->continuation_clusters.insert(target->continuation_clusters.end(), lists->begin(), lists->end());
     }
-    const ByteReader current_index{target->raw_index};
-    const auto tail = current_index.be16(0x46U);
-    if (!tail)
-        return std::unexpected{tail.error()};
-    detail::PreparedRecord prepared;
-    prepared.kind = detail::RecordKind::directory;
-    prepared.tail = *tail;
-    auto encoded = detail::encode_sfs_index_record(
-        prepared, extents, static_cast<std::uint32_t>(target->payload.size()), target->continuation_clusters);
-    if (!encoded)
-        return std::unexpected{encoded.error()};
-    target->raw_index = std::move(*encoded);
     target->extents = std::move(extents);
     target->capacity_expanded = true;
     return std::pair{static_cast<std::uint64_t>(additional_clusters), static_cast<std::uint64_t>(additional_lists)};
@@ -267,6 +249,8 @@ Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partit
     auto extents = allocate_extents(partition, clusters);
     if (!extents)
         return std::unexpected{extents.error()};
+    if (auto normalized = normalize_extent_byte_counts(*extents, payload.size()); !normalized)
+        return std::unexpected{normalized.error()};
     constexpr std::size_t extents_per_list_cluster = (1024U - 12U) / 12U;
     std::vector<std::uint32_t> list_clusters;
     if (extents->size() > 4U) {
@@ -303,7 +287,9 @@ Result<void> append_directory_entry(TransactionState &state, MutablePartition &p
     auto entries = parse_directory(*payload, directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    if (std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) { return entry.name == name; })) {
+    if (std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) {
+            return entry.state == DirectoryEntryState::live && entry.name == name;
+        })) {
         return std::unexpected{transaction_error("directory already contains entry " + std::string{name})};
     }
     std::array<std::byte, 32> entry{};
@@ -316,7 +302,18 @@ Result<void> append_directory_entry(TransactionState &state, MutablePartition &p
         return std::unexpected{written.error()};
     std::fill(entry.begin() + 8U, entry.begin() + 24U, std::byte{' '});
     std::ranges::transform(name, entry.begin() + 8U, [](char value) { return static_cast<std::byte>(value); });
-    payload->insert(payload->end(), entry.begin(), entry.end());
+    const auto reusable = std::ranges::find_if(*entries, [&](const ParsedDirectoryEntry &candidate) {
+        return candidate.state == DirectoryEntryState::deleted && candidate.name == name;
+    });
+    const auto fallback = std::ranges::find_if(*entries, [](const ParsedDirectoryEntry &candidate) {
+        return candidate.state == DirectoryEntryState::deleted;
+    });
+    const auto selected = reusable != entries->end() ? reusable : fallback;
+    if (selected != entries->end()) {
+        std::ranges::copy(entry, payload->begin() + static_cast<std::ptrdiff_t>(selected->offset));
+    } else {
+        payload->insert(payload->end(), entry.begin(), entry.end());
+    }
     if (auto grown = grow_directory_capacity(state, partition, directory, payload->size(), cancellation); !grown)
         return std::unexpected{grown.error()};
     return replace_record_payload(state, partition, directory, std::move(*payload), cancellation);
@@ -335,11 +332,13 @@ Result<void> rename_directory_entry(TransactionState &state, MutablePartition &p
     auto entries = parse_directory(*payload, directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    if (std::ranges::any_of(*entries, [&](const auto &entry) { return entry.name == new_name && entry.id != child; })) {
+    if (std::ranges::any_of(*entries, [&](const auto &entry) {
+            return entry.state == DirectoryEntryState::live && entry.name == new_name && entry.target_sfs_id != child;
+        })) {
         return std::unexpected{transaction_error("rename destination already exists")};
     }
-    const auto found =
-        std::ranges::find_if(*entries, [&](const auto &entry) { return entry.id == child && entry.name == old_name; });
+    const auto found = std::ranges::find_if(
+        *entries, [&](const auto &entry) { return entry.target_sfs_id == child && entry.name == old_name; });
     if (found == entries->end()) {
         return std::unexpected{transaction_error("rename source directory entry is absent")};
     }
@@ -440,6 +439,8 @@ Result<std::vector<std::byte>> remap_directory(std::vector<std::byte> payload,
 
 Result<OperationReport> insert_volume(TransactionState &state, OperationContext context,
                                       const InsertVolumeOperation &operation, const CancellationToken &cancellation) {
+    if (is_partition_support_root_entry(operation.volume.name))
+        return std::unexpected{transaction_error("PRF3 is reserved for partition support files")};
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -450,20 +451,13 @@ Result<OperationReport> insert_volume(TransactionState &state, OperationContext 
     auto root_payload = current_root_payload(state, partition, cancellation);
     if (!root_payload)
         return std::unexpected{root_payload.error()};
-    for (std::size_t offset = 64U; offset + 32U <= root_payload->size(); offset += 32U) {
-        const auto length =
-            static_cast<std::size_t>(std::to_integer<std::uint16_t>((*root_payload)[offset + 2U]) << 8U |
-                                     std::to_integer<std::uint16_t>((*root_payload)[offset + 3U]));
-        std::string name;
-        for (std::size_t index = 0; index + 1U < length && index < 24U; ++index) {
-            const auto character = std::to_integer<char>((*root_payload)[offset + 8U + index]);
-            if (character != '\0')
-                name += character;
-        }
-        while (!name.empty() && name.back() == ' ')
-            name.pop_back();
-        if (name == operation.volume.name)
-            return std::unexpected{transaction_error("partition already contains the requested volume")};
+    auto root_entries = parse_directory(*root_payload, SfsId{1});
+    if (!root_entries)
+        return std::unexpected{root_entries.error()};
+    if (std::ranges::any_of(*root_entries, [&](const ParsedDirectoryEntry &entry) {
+            return entry.state == DirectoryEntryState::live && entry.name == operation.volume.name;
+        })) {
+        return std::unexpected{transaction_error("partition already contains the requested volume")};
     }
     HdsBuildManifest template_manifest{
         std::string{build_manifest_schema_version}, minimum_hds_size, {{"AXK ALTER", {operation.volume}}}};
@@ -507,7 +501,18 @@ Result<OperationReport> insert_volume(TransactionState &state, OperationContext 
     const auto encoded = operation.volume.name;
     for (std::size_t index = 0; index < 16U; ++index)
         entry[8U + index] = index < encoded.size() ? static_cast<std::byte>(encoded[index]) : std::byte{' '};
-    root_payload->insert(root_payload->end(), entry.begin(), entry.end());
+    const auto matching_tombstone = std::ranges::find_if(*root_entries, [&](const ParsedDirectoryEntry &candidate) {
+        return candidate.state == DirectoryEntryState::deleted && candidate.name == operation.volume.name;
+    });
+    const auto first_tombstone = std::ranges::find_if(*root_entries, [](const ParsedDirectoryEntry &candidate) {
+        return candidate.state == DirectoryEntryState::deleted;
+    });
+    const auto selected = matching_tombstone != root_entries->end() ? matching_tombstone : first_tombstone;
+    if (selected != root_entries->end()) {
+        std::ranges::copy(entry, root_payload->begin() + static_cast<std::ptrdiff_t>(selected->offset));
+    } else {
+        root_payload->insert(root_payload->end(), entry.begin(), entry.end());
+    }
     if (auto replaced = set_root_payload(state, partition, std::move(*root_payload), cancellation); !replaced)
         return std::unexpected{replaced.error()};
     OperationReport report;
@@ -524,6 +529,10 @@ Result<OperationReport> rename_volume(TransactionState &state, OperationContext 
                                       const RenameVolumeOperation &operation, const CancellationToken &cancellation) {
     if (operation.volume_name == operation.new_volume_name)
         return std::unexpected{transaction_error("new_volume_name must differ")};
+    if (is_partition_support_root_entry(operation.volume_name) ||
+        is_partition_support_root_entry(operation.new_volume_name)) {
+        return std::unexpected{transaction_error("PRF3 is a reserved partition support directory")};
+    }
     auto partition_index = resolve_partition(state, operation.partition);
     if (!partition_index)
         return std::unexpected{partition_index.error()};
@@ -537,11 +546,15 @@ Result<OperationReport> rename_volume(TransactionState &state, OperationContext 
     auto entries = parse_directory(*payload, SfsId{1});
     if (!entries)
         return std::unexpected{entries.error()};
-    const auto matches = std::ranges::count(*entries, operation.volume_name, &ParsedDirectoryEntry::name);
+    const auto matches = std::ranges::count_if(*entries, [&](const ParsedDirectoryEntry &entry) {
+        return entry.state == DirectoryEntryState::live && entry.name == operation.volume_name;
+    });
     if (matches != 1U)
         return std::unexpected{transaction_error("volume name is not unique in the selected partition")};
-    const auto source = std::ranges::find(*entries, operation.volume_name, &ParsedDirectoryEntry::name);
-    if (auto renamed = rename_directory_entry(state, partition, SfsId{1}, source->id, operation.volume_name,
+    const auto source = std::ranges::find_if(*entries, [&](const ParsedDirectoryEntry &entry) {
+        return entry.state == DirectoryEntryState::live && entry.name == operation.volume_name;
+    });
+    if (auto renamed = rename_directory_entry(state, partition, SfsId{1}, *source->target_sfs_id, operation.volume_name,
                                               operation.new_volume_name, cancellation);
         !renamed) {
         return std::unexpected{renamed.error()};

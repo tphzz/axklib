@@ -105,6 +105,23 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
     EXPECT_EQ(disk.error().code, "upload_type_not_allowed");
     EXPECT_EQ(disk.error().message, "package uploads require an axklib package file");
 
+    const auto tx16w_disk = value.create({.owner_id = "owner",
+                                          .filename = "tx16w.IMA",
+                                          .kind = axk::app::UploadKind::disk_image,
+                                          .media_type = "application/octet-stream",
+                                          .declared_size = 1U,
+                                          .sha256 = std::nullopt});
+    ASSERT_TRUE(tx16w_disk) << tx16w_disk.error().message;
+    ASSERT_TRUE(value.remove(tx16w_disk->reference, "owner"));
+    const auto wrong_disk_extension = value.create({.owner_id = "owner",
+                                                    .filename = "tx16w.iso",
+                                                    .kind = axk::app::UploadKind::disk_image,
+                                                    .media_type = "application/octet-stream",
+                                                    .declared_size = 1U,
+                                                    .sha256 = std::nullopt});
+    ASSERT_FALSE(wrong_disk_extension);
+    EXPECT_EQ(wrong_disk_extension.error().message, "disk image uploads require an IMG or IMA file");
+
     const auto mislabeled_audio = value.create({.owner_id = "owner",
                                                 .filename = "sample.wav",
                                                 .kind = axk::app::UploadKind::audio,

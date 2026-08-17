@@ -1,9 +1,15 @@
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
-import { auditionableSampleBankIds, auditionableSampleIds } from '../../lib/sampleRelationships';
+import { auditionableSampleBankIds, auditionableSampleIds, isStandaloneSample } from '../../lib/sampleRelationships';
 import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
-import type { Program, ProgramAssignmentRow, SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
+import type {
+    Program,
+    ProgramSampleSelectRow,
+    SampleStructureItem,
+    WaveDataItem,
+    WorkspaceView,
+} from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 
@@ -41,6 +47,7 @@ interface AuditionabilityIndex {
 export class AuditionWorkflow {
     state = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
     autoplay = $state(false);
+    showOnlyStandaloneSamples = $state(true);
     playingSampleBankId = $state('');
     sampleBankPreviewMemberId = $state('');
     laneQueries = $state<Record<WorkspaceView, LaneQueries>>({
@@ -203,8 +210,8 @@ export class AuditionWorkflow {
         }
     }
 
-    selectAssignment(row: ProgramAssignmentRow): void {
-        if (row.confirmed && row.targetObjectId) void this.inspectObject(row.targetObjectId);
+    selectAssignment(row: ProgramSampleSelectRow): void {
+        if (row.navigable && row.targetObjectId) void this.inspectObject(row.targetObjectId);
     }
 
     async selectWaveData(item: WaveDataItem, playAfterSelection = this.autoplay): Promise<void> {
@@ -375,6 +382,20 @@ export class AuditionWorkflow {
         }
     }
 
+    updateShowOnlyStandaloneSamples(enabled: boolean): void {
+        this.showOnlyStandaloneSamples = enabled;
+        if (!enabled) return;
+        const catalog = this.dependencies.catalog;
+        const selected = catalog.samples.find((item) => item.objectId === catalog.selectedSampleId);
+        if (!selected || isStandaloneSample(selected)) return;
+        const hiddenIds = new Set([
+            selected.objectId,
+            ...catalog.waveDataForSample(selected.objectId).map((item) => item.objectKey),
+        ]);
+        if (this.state.objectId && hiddenIds.has(this.state.objectId)) void this.stop();
+        catalog.clearSampleSelection();
+    }
+
     selectWorkspaceView(view: WorkspaceView): void {
         if (this.dependencies.workspaceView() === view) return;
         if (this.active) void this.stop();
@@ -439,7 +460,11 @@ export class AuditionWorkflow {
                 ? bankMembers.filter((item) => matchesSearch(item.name, queries.secondary)).map((item) => item.objectId)
                 : view === 'samples'
                   ? catalog.samples
-                        .filter((item) => matchesSearch(item.name, queries.primary))
+                        .filter(
+                            (item) =>
+                                (!this.showOnlyStandaloneSamples || isStandaloneSample(item)) &&
+                                matchesSearch(item.name, queries.primary),
+                        )
                         .map((item) => item.objectId)
                   : [];
         const visibleWaveDataIds =

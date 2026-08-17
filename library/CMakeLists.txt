@@ -142,8 +142,13 @@ add_library(
   src/sequence.cpp
   src/sequence_diagnostics.cpp
   src/sfs.cpp
+  src/sfs_allocation.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/sfs_repair.cpp
+  src/system_file.cpp
+  src/tx16w.cpp
+  src/tx16w_a_series.cpp
   src/utf8.cpp
   src/version.cpp
   "${AXK_BUILD_INFO_CPP}"
@@ -214,11 +219,13 @@ add_library(
     src/alteration_package_sfs.cpp
   src/alteration_program.cpp
   src/alteration_sample_bank_assignment.cpp
+  src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
+  src/alteration_tx16w.cpp
   src/alteration_validation.cpp
   src/alteration_volume.cpp
   src/deletion.cpp
@@ -521,6 +528,8 @@ if(BUILD_TESTING)
     tests/sequence_test.cpp
     tests/sfs_test.cpp
     tests/sfs_write_codec_test.cpp
+    tests/system_file_test.cpp
+    tests/tx16w_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp
     tests/version_test.cpp

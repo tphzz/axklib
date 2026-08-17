@@ -25,6 +25,7 @@ export interface ValidationSummary {
 
 export interface OpenedImage {
     sessionId: number;
+    revision: number;
     companionSources: ImageLocation[];
     floppySet: FloppySetSummary | null;
     tree: DiskTreeItem[];
@@ -45,7 +46,16 @@ export interface OpenedImage {
     audioExportAvailable: boolean;
     sequenceExportAvailable: boolean;
     mediaConversionAvailable: boolean;
+    extentLayoutRepairAvailable: boolean;
+    allocationInspectionAvailable: boolean;
 }
+
+export interface AllocationMapReference {
+    imageId: string;
+    revision: number;
+}
+
+export type ImageValidationIssue = components['schemas']['ImageValidationItem'];
 
 export type CompanionSelection = { kind: 'sources'; sources: ImageLocation[] } | { kind: 'immediate-siblings' };
 
@@ -194,6 +204,9 @@ export interface RelationshipPageFilter {
 }
 
 export type RelationshipQuality = 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+export type SystemProgramContext = components['schemas']['SystemProgramContext'];
+export type SystemProgramContexts = components['schemas']['SystemProgramContexts'];
+export type SystemProgramPart = components['schemas']['SystemProgramPart'];
 
 export interface SamplerRelationship {
     id: string;
@@ -345,6 +358,8 @@ export type ImageSessionSequenceExportResult = components['schemas']['ImageSessi
 export type ImageSessionMediaConversionInspection = components['schemas']['ImageSessionMediaConversionInspection'];
 export type ImageSessionMediaConversionDestination = components['schemas']['ImageSessionMediaConversionDestination'];
 export type ImageSessionMediaConversionResult = components['schemas']['ImageSessionMediaConversionResult'];
+export type ImageSessionExtentLayoutRepairDestination = components['schemas']['ImageSessionMediaConversionDestination'];
+export type ImageSessionExtentLayoutRepairResult = components['schemas']['ImageSessionExtentLayoutRepairResult'];
 export type RetainedDownload = components['schemas']['RetainedDownload'];
 
 export type ImageSessionMediaConversionSelection =
@@ -433,6 +448,8 @@ export interface SequenceImportItem {
 }
 
 export type MidiInspection = components['schemas']['MidiInspection'];
+export type Tx16wImportInspection = components['schemas']['ImageSessionTx16wImportInspection'];
+export type Tx16wImportMode = Tx16wImportInspection['importMode'];
 export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
 export interface SequenceImportTarget {
@@ -453,6 +470,7 @@ export interface ImageTransport {
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
+    validationIssues(sessionId: number): Promise<ImageValidationIssue[]>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;
     relationshipPage(
         sessionId: number,
@@ -460,6 +478,8 @@ export interface ImageTransport {
         limit: number,
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage>;
+    systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts>;
+    allocationMapReference(sessionId: number): Promise<AllocationMapReference>;
     closeImage(sessionId: number): Promise<void>;
     startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
@@ -510,6 +530,12 @@ export interface ImageTransport {
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
     inspectMidi(source: InputFileLocation): Promise<MidiInspection>;
+    inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -523,6 +549,12 @@ export interface ImageTransport {
         target: SequenceImportTarget,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+    ): Promise<JobState>;
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
     ): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;
@@ -592,6 +624,10 @@ export interface ImageTransport {
         sessionId: number,
         selection: ImageSessionMediaConversionSelection,
         destination: ImageSessionMediaConversionDestination,
+    ): Promise<JobState>;
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
     ): Promise<JobState>;
     deleteRetainedPackage(download: RetainedDownload): Promise<void>;
     hardDiskCreationProfiles(): Promise<HardDiskCreationProfile[]>;

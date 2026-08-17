@@ -329,7 +329,8 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
         const auto valid_creation =
             !destination.create ||
             (plan.target_kind == MediaKind::sfs && destination.infrastructure_sfs_ids.size() == 6U &&
-             destination.infrastructure_clusters == 12U && destination.root_directory_growth_bytes == 32U) ||
+             destination.infrastructure_clusters == 12U &&
+             (destination.root_directory_growth_bytes == 0U || destination.root_directory_growth_bytes == 32U)) ||
             (plan.target_kind == MediaKind::sfs && !has_infrastructure && record_capacity_exhausted) ||
             (plan.target_kind == MediaKind::iso9660 && !has_infrastructure);
         if (destination.volume_name.empty() ||

@@ -220,12 +220,9 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 if (!retained_relationship && !volume_edges.contains({row.source_key, *row.target_key}))
                     continue;
             } else {
-                const auto scoped_dependency = row.type == "SBAC_SLOT_TO_SBNK" ||
-                                               row.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
-                                               row.type == "SBNK_RIGHT_MEMBER_TO_SMPL" ||
-                                               (row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
-                                                (row.assignment_state == axk::AssignmentState::active ||
-                                                 row.assignment_state == axk::AssignmentState::source_load));
+                const auto scoped_dependency =
+                    row.type == "SBAC_SLOT_TO_SBNK" || row.type == "SBNK_LEFT_MEMBER_TO_SMPL" ||
+                    row.type == "SBNK_RIGHT_MEMBER_TO_SMPL" || axk::is_effective_program_assignment(row);
                 if (!scoped_dependency)
                     continue;
             }
@@ -236,7 +233,7 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 {"candidate_keys", row.candidate_keys},
                 {"quality", axk::relationship_quality_name(row.quality)},
                 {"basis", row.basis},
-                {"active_assignment_state", axk::assignment_state_name(row.assignment_state)},
+                {"assignment_state", axk::assignment_state_name(row.assignment_state)},
             });
         }
         OrderedJson decisions = OrderedJson::array();

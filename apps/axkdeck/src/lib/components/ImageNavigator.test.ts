@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { serverFileLocation } from '../storageLocations';
 import ImageNavigator from './ImageNavigator.svelte';
@@ -61,6 +61,7 @@ describe('ImageNavigator', () => {
         const onopen = vi.fn();
         const oncreate = vi.fn();
         const onclose = vi.fn();
+        const onintegrity = vi.fn();
         const onmanagelocations = vi.fn();
         const { container } = render(ImageNavigator, {
             props: {
@@ -72,6 +73,7 @@ describe('ImageNavigator', () => {
                 onopen,
                 oncreate,
                 onclose,
+                onintegrity,
                 onmanagelocations,
             },
         });
@@ -87,6 +89,10 @@ describe('ImageNavigator', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
         expect(onopen).toHaveBeenCalledOnce();
         expect(onclose).toHaveBeenCalledOnce();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Image integrity...' }));
+        expect(onintegrity).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Create new image' }));
@@ -260,7 +266,7 @@ describe('ImageNavigator', () => {
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Object directory/ }));
         expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
-        expect(screen.queryByRole('menuitem', { name: 'Rename volume' })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Rename volume…' })).toBeNull();
         expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
         expect(onimageaction).toHaveBeenCalledWith(
@@ -269,7 +275,7 @@ describe('ImageNavigator', () => {
         );
     });
 
-    it('offers batch imports, package exports, and floppy-set exports on an addressable partition', async () => {
+    it('groups partition import and export workflows and orders the remaining actions', async () => {
         const onimageaction = vi.fn();
         const { container } = render(ImageNavigator, {
             props: {
@@ -287,6 +293,10 @@ describe('ImageNavigator', () => {
                 packageImportEnabled: true,
                 volumePackageExportEnabled: true,
                 volumeFloppyExportEnabled: true,
+                mediaConversionEnabled: true,
+                allocationInspectionEnabled: true,
+                partitionActionsEnabled: true,
+                volumeActionsEnabled: true,
                 onimageaction,
             },
         });
@@ -297,6 +307,20 @@ describe('ImageNavigator', () => {
         expect(treeScroll).not.toBeNull();
         await fireEvent.contextMenu(partitionButton!);
         expect(treeScroll?.classList.contains('context-menu-open')).toBe(true);
+        const rootMenu = screen.getByRole('menu', { name: 'SYNTHS actions' });
+        expect(
+            within(rootMenu)
+                .getAllByRole('menuitem')
+                .map((item) => item.textContent?.trim()),
+        ).toEqual([
+            'Import',
+            'Export',
+            'Rename partition…',
+            'Add volume…',
+            'Visualize partition allocation',
+            'Repair object placement…',
+        ]);
+        expect(rootMenu.querySelectorAll(':scope > [role="separator"]')).toHaveLength(2);
         const menuGeometry = appStyles.match(/\.tree-context-menu\s*\{[^}]+\}/)?.[0];
         const menuActionGeometry = appStyles.match(/\.tree-context-menu button\s*\{[^}]+\}/)?.[0];
         expect(menuGeometry).toBeDefined();
@@ -304,27 +328,35 @@ describe('ImageNavigator', () => {
         const style = document.createElement('style');
         style.textContent = `${menuGeometry}\n${menuActionGeometry}`;
         document.head.append(style);
-        const menuStyle = getComputedStyle(screen.getByRole('menu'));
-        const floppyActionStyle = getComputedStyle(
-            screen.getByRole('menuitem', { name: 'Export volumes to floppies…' }),
-        );
+        const menuStyle = getComputedStyle(rootMenu);
         expect(menuStyle.width).toBe('220px');
+        await fireEvent.click(within(rootMenu).getByRole('menuitem', { name: 'Export' }));
+        const exportMenu = screen.getByRole('menu', { name: 'Export actions' });
+        expect(
+            within(exportMenu)
+                .getAllByRole('menuitem')
+                .map((item) => item.textContent?.trim()),
+        ).toEqual(['Export volume packages…', 'Export volumes to floppies…', 'Export CD-ROM image…']);
+        const floppyActionStyle = getComputedStyle(
+            within(exportMenu).getByRole('menuitem', { name: 'Export volumes to floppies…' }),
+        );
         expect(floppyActionStyle.whiteSpace).toBe('nowrap');
         style.remove();
+        await fireEvent.click(within(exportMenu).getByRole('menuitem', { name: 'Export volumes to floppies…' }));
+        expect(onimageaction).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'partition-0' }),
+            'export-volume-floppies',
+        );
+        await fireEvent.contextMenu(partitionButton!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
         expect(treeScroll?.classList.contains('context-menu-open')).toBe(false);
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition-0' }), 'import-packages');
         await fireEvent.contextMenu(partitionButton!);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume packages…' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Visualize partition allocation' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'partition-0' }),
-            'export-volume-packages',
-        );
-        await fireEvent.contextMenu(partitionButton!);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volumes to floppies…' }));
-        expect(onimageaction).toHaveBeenCalledWith(
-            expect.objectContaining({ id: 'partition-0' }),
-            'export-volume-floppies',
+            'inspect-allocation',
         );
         await fireEvent.contextMenu(partitionButton!);
         await fireEvent.keyDown(window, { key: 'Escape' });
@@ -334,6 +366,65 @@ describe('ImageNavigator', () => {
         expect(appStyles).toMatch(
             /\.image-tree-scroll\.context-menu-open::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/,
         );
+    });
+
+    it('supports keyboard traversal into and out of partition submenus', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                items: [
+                    {
+                        id: 'partition',
+                        name: 'PARTITION 1',
+                        kind: 'partition',
+                        partitionIndex: 0,
+                        childCount: 0,
+                    },
+                ],
+                packageImportEnabled: true,
+                volumePackageExportEnabled: true,
+                volumeFloppyExportEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        const importParent = screen.getByRole('menuitem', { name: 'Import' });
+        expect(document.activeElement).toBe(importParent);
+        await fireEvent.keyDown(importParent, { key: 'ArrowRight' });
+        const importLeaf = screen.getByRole('menuitem', { name: 'Import packages…' });
+        expect(document.activeElement).toBe(importLeaf);
+        await fireEvent.keyDown(importLeaf, { key: 'ArrowLeft' });
+        expect(document.activeElement).toBe(importParent);
+        expect(screen.queryByRole('menu', { name: 'Import actions' })).toBeNull();
+        await fireEvent.keyDown(importParent, { key: 'ArrowDown' });
+        expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Export' }));
+    });
+
+    it('does not render empty partition workflow submenus', async () => {
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                items: [
+                    {
+                        id: 'partition',
+                        name: 'PARTITION 1',
+                        kind: 'partition',
+                        partitionIndex: 0,
+                        childCount: 0,
+                    },
+                ],
+                partitionActionsEnabled: true,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Export' })).toBeNull();
+        expect(screen.getAllByRole('separator')).toHaveLength(1);
     });
 
     it('offers CD-ROM conversion for partitions and floppy conversion for addressable volumes', async () => {
@@ -375,6 +466,7 @@ describe('ImageNavigator', () => {
         });
 
         await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export CD-ROM image…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition' }), 'export-cdrom');
 

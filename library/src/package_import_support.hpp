@@ -73,6 +73,7 @@ Error stale_plan_error(std::string message);
 std::string policy_digest(const PackageImportPolicy &policy);
 bool valid_sfs_name(std::string_view value);
 std::uint8_t type_rank(std::string_view type);
+std::string_view package_object_type_label(std::string_view raw_type);
 const PackageNode *node_by_id(const PortablePackage &package, std::string_view node_id);
 const PlannedPackageObject *planned_node(const PackageImportPlan &plan, const PlannedPackageObject &owner,
                                          std::string_view node_id);

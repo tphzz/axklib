@@ -11,6 +11,7 @@ struct DesktopPreferences {
     last_package_export_directory: Option<PathBuf>,
     last_directory_export_directory: Option<PathBuf>,
     last_media_export_directory: Option<PathBuf>,
+    last_allocation_export_directory: Option<PathBuf>,
 }
 
 pub struct DesktopPreferencesStore {
@@ -95,6 +96,25 @@ impl DesktopPreferencesStore {
             return Err("the media export location is not a directory".to_owned());
         }
         self.preferences.last_media_export_directory = Some(directory);
+        self.persist()
+    }
+
+    pub fn allocation_export_directory(&self) -> Option<PathBuf> {
+        self.preferences
+            .last_allocation_export_directory
+            .as_ref()
+            .filter(|directory| directory.is_dir())
+            .cloned()
+    }
+
+    pub fn remember_allocation_export_directory(&mut self, directory: &Path) -> Result<(), String> {
+        let directory = directory
+            .canonicalize()
+            .map_err(|error| format!("resolve allocation export directory: {error}"))?;
+        if !directory.is_dir() {
+            return Err("the allocation export location is not a directory".to_owned());
+        }
+        self.preferences.last_allocation_export_directory = Some(directory);
         self.persist()
     }
 
@@ -240,6 +260,36 @@ mod tests {
                 directory_export
                     .canonicalize()
                     .expect("canonical directory export location")
+            )
+        );
+        fs::remove_dir_all(root).expect("remove temporary directory");
+    }
+
+    #[test]
+    fn allocation_export_location_is_remembered_separately() {
+        let root = temporary_directory("allocation-reload");
+        let package_directory = root.join("packages");
+        let allocation_export = root.join("allocation-exports");
+        fs::create_dir(&package_directory).expect("create package directory");
+        fs::create_dir(&allocation_export).expect("create allocation export location");
+        let document = root.join("desktop-preferences.json");
+
+        let mut store =
+            DesktopPreferencesStore::load(document.clone()).expect("load empty preferences");
+        store
+            .remember_package_export_directory(&package_directory)
+            .expect("remember package directory");
+        store
+            .remember_allocation_export_directory(&allocation_export)
+            .expect("remember allocation export location");
+
+        let reloaded = DesktopPreferencesStore::load(document).expect("reload preferences");
+        assert_eq!(
+            reloaded.allocation_export_directory(),
+            Some(
+                allocation_export
+                    .canonicalize()
+                    .expect("canonical allocation export location")
             )
         );
         fs::remove_dir_all(root).expect("remove temporary directory");

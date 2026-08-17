@@ -23,6 +23,8 @@ const object: SamplerObject = {
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
+    revision: 1,
+    allocationInspectionAvailable: false,
     companionSources: [],
     floppySet: null,
     initialVolume: null,
@@ -39,6 +41,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     audioExportAvailable: false,
     sequenceExportAvailable: false,
     mediaConversionAvailable: false,
+    extentLayoutRepairAvailable: false,
     tree: [
         {
             id: 'disk',
@@ -77,6 +80,24 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
         sourceObjectId: 'sample-1',
         targetObjectId: 'sample-1',
         relationshipType: 'TEST',
+    });
+
+    const contexts = await transport.systemProgramContexts(image.sessionId, 0);
+    expect(contexts).toEqual({
+        partitionIndex: 0,
+        files: [
+            {
+                fileKind: 'SYSTEM',
+                availability: 'NOT_PRESENT',
+                message: 'No saved SYSTEM file exists for partition 0.',
+            },
+            {
+                fileKind: 'SYSTEM2',
+                availability: 'NOT_PRESENT',
+                message: 'No saved SYSTEM2 file exists for partition 0.',
+            },
+        ],
+        message: '',
     });
 
     const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
@@ -143,6 +164,22 @@ describe('ImageTransport shared read contract', () => {
                         },
                     ],
                     totalCount: 1,
+                }),
+                systemProgramContexts: async () => ({
+                    partitionIndex: 0,
+                    files: [
+                        {
+                            fileKind: 'SYSTEM',
+                            availability: 'NOT_PRESENT',
+                            message: 'No saved SYSTEM file exists for partition 0.',
+                        },
+                        {
+                            fileKind: 'SYSTEM2',
+                            availability: 'NOT_PRESENT',
+                            message: 'No saved SYSTEM2 file exists for partition 0.',
+                        },
+                    ],
+                    message: '',
                 }),
             },
         });
@@ -225,6 +262,25 @@ describe('ImageTransport shared read contract', () => {
                         ],
                         totalCount: 1,
                         nextCursor: null,
+                    });
+                }
+                if (url.pathname.endsWith('/system-program-contexts')) {
+                    expect(url.searchParams.get('partitionIndex')).toBe('0');
+                    return json({
+                        partitionIndex: 0,
+                        files: [
+                            {
+                                fileKind: 'SYSTEM',
+                                availability: 'NOT_PRESENT',
+                                message: 'No saved SYSTEM file exists for partition 0.',
+                            },
+                            {
+                                fileKind: 'SYSTEM2',
+                                availability: 'NOT_PRESENT',
+                                message: 'No saved SYSTEM2 file exists for partition 0.',
+                            },
+                        ],
+                        message: '',
                     });
                 }
                 if (url.pathname.endsWith('/preview')) {

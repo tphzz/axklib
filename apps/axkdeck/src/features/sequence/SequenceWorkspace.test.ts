@@ -45,6 +45,48 @@ const common = {
 };
 
 describe('SequenceWorkspace', () => {
+    it('moves through Sequences with Up, Down, Home, and End', async () => {
+        const sequences = [sequence('First', 1), sequence('Second', 2), sequence('Third', 3)];
+        const onselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(SequenceWorkspace, {
+            props: { ...common, sequences, onselect, onselectionchange },
+        });
+
+        const second = screen.getByRole('button', { name: /Second/ });
+        second.focus();
+        await fireEvent.keyDown(second, { key: 'ArrowDown' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[2]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Third/ }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[0]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /First/ }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+        expect(onselect).toHaveBeenLastCalledWith(sequences[2]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Third/ }));
+    });
+
+    it('moves selection and focus by a visible page in an ordinary list', async () => {
+        const sequences = Array.from({ length: 12 }, (_, index) => sequence(`Song ${index + 1}`, index + 1));
+        const onselect = vi.fn();
+        render(SequenceWorkspace, {
+            props: { ...common, sequences, onselect, onselectionchange: vi.fn() },
+        });
+
+        const first = screen.getByRole('button', { name: /Song 1 / });
+        const list = first.closest<HTMLElement>('[data-navigation-list]')!;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 160 });
+        Object.defineProperty(first, 'offsetHeight', { configurable: true, value: 40 });
+        first.focus();
+
+        await fireEvent.keyDown(first, { key: 'PageDown' });
+
+        expect(onselect).toHaveBeenLastCalledWith(sequences[3]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: /Song 4 / }));
+    });
+
     it('naturally orders dense Sequence rows and exposes decoded timing facts', () => {
         render(SequenceWorkspace, {
             props: {

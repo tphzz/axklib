@@ -42,9 +42,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     }
     append_sfs_catalog_issues(plan, catalog_issues, catalog_objects);
     for (const auto &partition : container.partitions()) {
-        if (partition.allocation.invalid_extent_record_count != 0U ||
-            !partition.allocation.stored_not_reconstructed.empty() ||
-            !partition.allocation.reconstructed_not_stored.empty()) {
+        if (!allocation_is_safe_for_mutation(partition.allocation)) {
             add_conflict(plan, "SFS_ALLOCATION_INVALID",
                          "target partition allocation is not safe for package planning");
             plan.conflicts.back().partition_index = partition.index.value;
@@ -108,11 +106,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     for (const auto &[key, destination] : destinations) {
         const auto &[package_index, root_index] = key;
         const auto &package = packages[package_index];
-        if (!destination->partition_index || destination->volume_name.empty() || !destination->group_name.empty() ||
+        if (!destination->partition_index || destination->volume_name.empty() ||
+            is_partition_support_root_entry(destination->volume_name) || !destination->group_name.empty() ||
             !destination->raw_group.empty() || !destination->raw_volume.empty()) {
             add_conflict(plan, "SFS_DESTINATION_INVALID",
-                         "SFS destinations require a partition and volume but "
-                         "no group or raw ISO "
+                         "SFS destinations require a non-reserved partition Volume and no group or raw ISO "
                          "identifiers",
                          destination, &package);
             continue;
@@ -184,7 +182,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     }
 
     std::map<std::pair<std::uint8_t, std::uint32_t>, ClusterReservation> infrastructure_layouts;
-    std::map<std::uint8_t, std::size_t> new_volume_counts;
+    auto reusable_root_entries = reusable_root_directory_entries(container);
     SfsRecordCapacityPlanner record_capacity;
     for (const auto &[key, create] : destination_creation) {
         PlannedPackageDestination planned;
@@ -211,38 +209,24 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                             std::pair{planned.partition_index, planned.infrastructure_sfs_ids[index]}, *reserved);
                     }
                     if (cluster_failure) {
-                        add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                                     "partition lacks clusters for destination "
-                                     "volume scaffolding");
+                        add_conflict(
+                            plan, "SFS_CLUSTER_EXHAUSTED",
+                            std::format("partition has {} free cluster(s), but destination volume scaffolding needs "
+                                        "at least 2 more cluster(s)",
+                                        remaining_clusters(capacity->second)));
                     }
-                    planned.root_directory_growth_bytes = 32U;
-                    ++new_volume_counts[key.first];
+                    auto &reusable = reusable_root_entries[key.first];
+                    if (reusable != 0U) {
+                        --reusable;
+                    } else {
+                        planned.root_directory_growth_bytes = 32U;
+                    }
                 }
             }
         }
         plan.destinations.push_back(std::move(planned));
     }
-    for (const auto &[partition_index, count] : new_volume_counts) {
-        const auto partition =
-            std::ranges::find(container.partitions(), PartitionIndex{partition_index}, &Partition::index);
-        if (partition == container.partitions().end())
-            continue;
-        const auto root = std::ranges::find(partition->records, SfsId{1}, &IndexRecord::sfs_id);
-        if (root == partition->records.end()) {
-            add_conflict(plan, "SFS_ROOT_DIRECTORY_MISSING",
-                         "partition root directory is unavailable for "
-                         "destination creation");
-            continue;
-        }
-        std::uint64_t root_capacity{};
-        for (const auto &extent : root->extents)
-            root_capacity += static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
-        if (root->data_size + count * 32U > root_capacity) {
-            add_conflict(plan, "SFS_ROOT_DIRECTORY_CAPACITY_EXHAUSTED",
-                         "partition root directory cannot contain all planned "
-                         "destination volumes");
-        }
-    }
+    validate_root_directory_growth(container, plan.destinations, plan);
     std::ranges::sort(candidates, [](const Candidate &left, const Candidate &right) {
         return std::tuple{*left.destination->partition_index,
                           left.destination->volume_name,
@@ -379,6 +363,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
     record_capacity.finalize(plan);
 
     std::map<DestinationKey, std::pair<std::uint64_t, std::uint64_t>> directory_allocations;
+    std::map<DestinationKey, std::uint64_t> directory_growth_bytes;
     for (const auto &[key, indices] : category_insertions) {
         const auto &[partition_index, volume_name, category_name] = key;
         const auto planned_destination = destination_creation.find({partition_index, volume_name});
@@ -386,6 +371,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         std::size_t existing_continuation_clusters{};
         std::uint64_t existing_data_size{};
         std::vector<Extent> new_destination_extents;
+        std::size_t reusable_entries{};
         if (planned_destination != destination_creation.end() && planned_destination->second) {
             constexpr std::array<std::string_view, 5> category_names{"SMPL", "SBNK", "SBAC", "SEQU", "PROG"};
             const auto category_index = std::ranges::find(category_names, category_name);
@@ -437,12 +423,17 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             existing_extents = category->second->extents;
             existing_continuation_clusters = category->second->continuation_clusters.size();
             existing_data_size = category->second->data_size;
+            reusable_entries = static_cast<std::size_t>(std::ranges::count(
+                category->second->directory_entries, DirectoryEntryState::deleted, &DirectoryEntry::state));
         }
 
         std::uint64_t capacity_clusters{};
         for (const auto &extent : existing_extents)
             capacity_clusters += extent.cluster_count;
-        const auto required_size = existing_data_size + indices.size() * 32U;
+        const auto appended_entries = indices.size() > reusable_entries ? indices.size() - reusable_entries : 0U;
+        const auto growth_bytes = appended_entries * 32U;
+        directory_growth_bytes[{partition_index, volume_name}] += growth_bytes;
+        const auto required_size = existing_data_size + growth_bytes;
         const auto required_clusters = (required_size + 1023U) / 1024U;
         if (required_clusters <= capacity_clusters)
             continue;
@@ -453,8 +444,11 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         if (!reserved) {
             for (const auto index : indices)
                 mark_conflict(plan.objects[index]);
-            add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                         "partition has insufficient clusters to grow an object category directory");
+            add_conflict(
+                plan, "SFS_CLUSTER_EXHAUSTED",
+                std::format("partition has {} free cluster(s), but the object category directory needs at least {} "
+                            "additional data cluster(s) plus any required extent metadata",
+                            remaining_clusters(capacity), added_clusters));
             auto &conflict = plan.conflicts.back();
             conflict.partition_index = partition_index;
             conflict.volume_name = volume_name;
@@ -477,8 +471,12 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         const auto reserved = reserve_clusters(capacity, clusters);
         if (!reserved) {
             mark_conflict(object);
-            add_conflict(plan, "SFS_CLUSTER_EXHAUSTED",
-                         "partition has insufficient clusters for the planned object payload");
+            add_conflict(
+                plan, "SFS_CLUSTER_EXHAUSTED",
+                std::format("partition has {} free cluster(s), but {} '{}' needs at least {} cluster(s) plus any "
+                            "required extent metadata",
+                            remaining_clusters(capacity), package_object_type_label(object.object_type),
+                            object.destination_name, clusters));
             auto &conflict = plan.conflicts.back();
             conflict.package_index = object.package_index;
             conflict.root_index = object.root_index;
@@ -633,6 +631,8 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
         delta.directory_growth_clusters += growth.first;
         delta.directory_continuation_clusters += growth.second;
     }
+    for (const auto &[key, growth] : directory_growth_bytes)
+        allocation[key].directory_growth_bytes += growth;
     for (const auto &object : plan.objects) {
         auto &delta = allocation[{object.partition_index, object.volume_name}];
         delta.partition_index = object.partition_index;
@@ -643,7 +643,6 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             ++delta.inserted_object_count;
             delta.payload_clusters += object.payload_clusters;
             delta.continuation_clusters += object.continuation_clusters;
-            delta.directory_growth_bytes += 32U;
         } else if (std::ranges::contains(object.actions, PackageImportObjectAction::reuse) &&
                    !std::ranges::contains(object.actions, PackageImportObjectAction::conflict)) {
             ++delta.reused_object_count;

@@ -2,7 +2,7 @@ import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { JobController } from '../jobs/actions';
 import { compareNamedItems } from '../../lib/naturalSort';
-import { isConfirmedRelationship } from '../../lib/relationshipResolution';
+import { isEffectiveProgramAssignment } from '../../lib/relationshipResolution';
 import type { ImageTransport } from '../../lib/transport';
 import type {
     SampleBankAssignmentBlocker,
@@ -159,7 +159,7 @@ export class SampleBankAssignmentWorkflow {
         return this.dependencies.catalog.relationships
             .filter(
                 (relationship) =>
-                    isConfirmedRelationship(relationship) &&
+                    isEffectiveProgramAssignment(relationship) &&
                     relationship.relationshipType === 'PROG_ASSIGNMENT_TO_SBNK' &&
                     Boolean(relationship.targetObjectId && selectedIds.has(relationship.targetObjectId)),
             )

@@ -13,11 +13,12 @@
     import ObjectEditor from '../../lib/components/ObjectEditor.svelte';
     import ObjectInspector from '../../lib/components/ObjectInspector.svelte';
     import ObjectWorkspace from '../../lib/components/ObjectWorkspace.svelte';
+    import ProgramWorkspace, { type ProgramPresentation } from '../../lib/components/ProgramWorkspace.svelte';
     import PackageSelectionControls from '../../lib/components/PackageSelectionControls.svelte';
     import SequenceWorkspace from '../sequence/SequenceWorkspace.svelte';
     import type { InterfaceScaleController, InterfaceScaleMode, InterfaceScaleState } from '../../lib/interfaceScale';
     import type { ImageLocation } from '../../lib/storageLocations';
-    import type { ImageTransport } from '../../lib/transport';
+    import type { ImageTransport, SystemProgramContexts, SystemProgramPart } from '../../lib/transport';
     import type {
         DiskTreeItem,
         ImageTreeAction,
@@ -78,10 +79,12 @@
         audioExportAvailable: boolean;
         sequenceExportAvailable: boolean;
         mediaConversionAvailable: boolean;
+        allocationInspectionAvailable: boolean;
         openConnectionSettings: () => void;
         openImage: () => void;
         createImage: () => void;
         closeImage: () => void;
+        showImageIntegrity: () => void;
         manageLocations: () => void;
         selectSource: (item: DiskTreeItem) => void;
         imageAction: (item: DiskTreeItem, action: ImageTreeAction) => void;
@@ -137,10 +140,12 @@
         audioExportAvailable,
         sequenceExportAvailable,
         mediaConversionAvailable,
+        allocationInspectionAvailable,
         openConnectionSettings,
         openImage,
         createImage,
         closeImage,
+        showImageIntegrity,
         manageLocations,
         selectSource,
         imageAction,
@@ -163,8 +168,40 @@
     let resizing = $state(false);
     let interfaceScaleState = $state<InterfaceScaleState | null>(null);
     let stopInterfaceScaleSubscription: (() => void) | undefined;
+    let programPresentation = $state<ProgramPresentation>('single');
+    let selectedMultiPart = $state<SystemProgramPart | null>(null);
+    let observedSessionId = $state<number | null>(null);
+    let observedVolumeId = $state('');
+    let observedSystemProgramContexts = $state<SystemProgramContexts | null>(null);
     const lowerPanelAvailable = $derived(workspaceView !== 'wave-data' && workspaceView !== 'sequences');
     const auditionAvailable = $derived(workspaceView !== 'programs' && workspaceView !== 'sequences');
+    const multiPartEditorContext = $derived(
+        programPresentation === 'multi' && selectedMultiPart
+            ? {
+                  partLabel: selectedMultiPart.partLabel,
+                  programNumber: selectedMultiPart.programNumber,
+              }
+            : null,
+    );
+
+    $effect(() => {
+        if (sessionId === observedSessionId) return;
+        observedSessionId = sessionId;
+        programPresentation = 'single';
+        selectedMultiPart = null;
+    });
+
+    $effect(() => {
+        if (catalog.activeVolumeId === observedVolumeId) return;
+        observedVolumeId = catalog.activeVolumeId;
+        selectedMultiPart = null;
+    });
+
+    $effect(() => {
+        if (catalog.systemProgramContexts === observedSystemProgramContexts) return;
+        observedSystemProgramContexts = catalog.systemProgramContexts;
+        selectedMultiPart = null;
+    });
 
     onMount(() => {
         interfaceScaleState = interfaceScaling?.state() ?? null;
@@ -210,6 +247,29 @@
         const available = Math.max(1, mainStage.getBoundingClientRect().height - (auditionAvailable ? 34 : 4));
         const delta = (event.shiftKey ? 64 : 16) / available;
         splitRatio = Math.min(0.8, Math.max(0.2, splitRatio + (event.key === 'ArrowDown' ? delta : -delta)));
+    }
+
+    function changeProgramPresentation(value: ProgramPresentation): void {
+        programPresentation = value;
+        clearSelection();
+        if (value === 'single') selectedMultiPart = null;
+    }
+
+    function selectSingleProgram(program: Program): void {
+        selectedMultiPart = null;
+        audition.selectProgram(program);
+    }
+
+    function selectMultiPart(part: SystemProgramPart, program: Program | null): void {
+        selectedMultiPart = part;
+        clearSelection();
+        if (program) {
+            audition.selectProgram(program);
+            return;
+        }
+        catalog.selectedProgramId = '';
+        catalog.inspectorObjectId = '';
+        catalog.editorObjectIds.programs = '';
     }
 </script>
 
@@ -271,6 +331,7 @@
             onopen={openImage}
             oncreate={createImage}
             onclose={closeImage}
+            onintegrity={showImageIntegrity}
             onmanagelocations={manageLocations}
             onselect={selectSource}
             volumeActionsEnabled={mutation.volumeAvailable}
@@ -281,6 +342,7 @@
             volumeFloppyExportEnabled={volumeFloppyExportAvailable}
             audioExportEnabled={audioExportAvailable}
             mediaConversionEnabled={mediaConversionAvailable}
+            allocationInspectionEnabled={allocationInspectionAvailable}
             onimageaction={imageAction}
             onloadchildren={(parentId, offset, limit) =>
                 sessionId === null
@@ -311,6 +373,8 @@
                     ? catalog.selectedBankWaveDataId
                     : catalog.selectedSampleWaveDataId}
                 queries={audition.laneQueries[workspaceView]}
+                showOnlyStandaloneSamples={audition.showOnlyStandaloneSamples}
+                onshowonlystandalonechange={(checked) => audition.updateShowOnlyStandaloneSamples(checked)}
                 onquerychange={(lane: keyof LaneQueries, value) => audition.updateLaneQuery(workspaceView, lane, value)}
                 onsamplebankselect={(item: SampleStructureItem) => void audition.selectBank(item)}
                 onsampleselect={workspaceView === 'sample-banks'
@@ -368,6 +432,32 @@
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}
             />
+        {:else if workspaceView === 'programs'}
+            <ProgramWorkspace
+                {programs}
+                contexts={catalog.systemProgramContexts}
+                contextsLoading={catalog.systemProgramContextsLoading}
+                contextsError={catalog.systemProgramContextsError}
+                presentation={programPresentation}
+                selectedPartNumber={selectedMultiPart?.partNumber ?? null}
+                activeObjectId={activeCollectionObjectId}
+                query={audition.laneQueries.programs.primary}
+                onquerychange={(value) => audition.updateLaneQuery('programs', 'primary', value)}
+                onpresentationchange={changeProgramPresentation}
+                onprogramselect={selectSingleProgram}
+                onpartselect={selectMultiPart}
+                objectRenameAvailable={mutation.objectRenameAvailable}
+                onrenameobject={(target) => mutation.requestObjectRename(target)}
+                {objectDeletionAvailable}
+                ondeleteobjects={deleteObjects}
+                programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
+                onprogramgeneration={generatePrograms}
+                {packageExportAvailable}
+                onexportobjects={exportPackage}
+                selection={packageSelection}
+                onselectionchange={selectionChanged}
+                onselectionlimit={selectionLimit}
+            />
         {:else}
             <ObjectWorkspace
                 {programs}
@@ -376,7 +466,7 @@
                 activeObjectId={activeCollectionObjectId}
                 query={audition.laneQueries[workspaceView].primary}
                 onquerychange={(value) => audition.updateLaneQuery(workspaceView, 'primary', value)}
-                onprogramselect={(program) => audition.selectProgram(program)}
+                onprogramselect={selectSingleProgram}
                 onwavedataselect={(item: WaveDataItem) => void audition.selectWaveData(item)}
                 onpreviewrequest={(item) => audition.requestWaveformPreview(item)}
                 onplay={(item) => void audition.playWaveData(item)}
@@ -431,6 +521,7 @@
             </div>
             <ObjectEditor
                 selection={editorSelection}
+                multiPartContext={multiPartEditorContext}
                 assignmentQuery={audition.laneQueries.programs.secondary}
                 onassignmentquerychange={(value) => (audition.laneQueries.programs.secondary = value)}
                 onassignmentselect={(row) => audition.selectAssignment(row)}

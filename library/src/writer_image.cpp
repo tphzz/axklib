@@ -13,6 +13,7 @@
 #include "axklib/catalog.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
+#include "axklib/sfs_allocation.hpp"
 #include "axklib/utf8.hpp"
 #include "axklib/writer_internal.hpp"
 
@@ -45,6 +46,13 @@ Result<void> validate_hds_image(const std::filesystem::path &path,
     if (catalog->objects.size() != expected_objects) {
         return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                           "written HDS object inventory failed reopen validation")};
+    }
+    const auto *container = std::get_if<Container>(&media->storage());
+    if (container == nullptr || !std::ranges::all_of(container->partitions(), [](const Partition &partition) {
+            return allocation_is_safe_for_mutation(partition.allocation);
+        })) {
+        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                          "written HDS allocation metadata failed independent reopen validation")};
     }
     return {};
 }
@@ -138,6 +146,10 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
     for (const auto &volume : partition.volumes) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
+        if (is_partition_support_root_entry(volume.name)) {
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "PRF3 is reserved for partition support files")};
+        }
         if (volume.sample_banks.empty() != volume.programs.empty() ||
             volume.sample_banks.size() != volume.programs.size()) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
@@ -579,8 +591,15 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
                 return std::unexpected{
                     make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition payload")};
         }
-        if (!publication->write_at(start + 2048U, std::span{bitmap}.first(512)) ||
-            !publication->write_at((geometry.start_sector + geometry.bitmap_cluster * 2U) * 512U, bitmap) ||
+        const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
+            geometry.start_sector, static_cast<std::uint32_t>(geometry.cluster_count), 2U,
+            static_cast<std::uint32_t>(geometry.bitmap_cluster));
+        if (!bitmap_layout || bitmap_layout->rounded_bytes != bitmap.size()) {
+            return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
+                                              "prepared SFS allocation bitmap geometry is inconsistent")};
+        }
+        if (!publication->write_at(bitmap_layout->fixed_location_offset, bitmap) ||
+            !publication->write_at(bitmap_layout->header_addressed_offset, bitmap) ||
             !publication->write_at((geometry.start_sector + geometry.directory_index_cluster * 2U) * 512U, index))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition allocation data")};

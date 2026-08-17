@@ -1,6 +1,7 @@
 #include "image_sessions_internal.hpp"
 
 #include "axklib/bytes.hpp"
+#include "axklib/sfs_repair.hpp"
 
 axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::inspect(std::string_view image_id,
                                                                                        std::string_view owner_id) {
@@ -17,9 +18,9 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
             ++validation.info_count;
     }
     std::vector<std::string> available_operations{
-        "images.content",           "images.objects",      "images.relationships",
-        "images.validation.issues", "images.preview",      "auditions.prepare",
-        "images.package.export",    "images.audio_export", "images.sequence_export",
+        "images.content",           "images.objects",         "images.relationships", "images.systemProgramContexts",
+        "images.validation.issues", "images.preview",         "auditions.prepare",    "images.package.export",
+        "images.audio_export",      "images.sequence_export",
     };
     if ((*session)->format == "sfs" || (*session)->format == "iso9660")
         available_operations.emplace_back("images.volume_package_export");
@@ -30,10 +31,15 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     const auto source_metadata =
         implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
     const auto *mutable_container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;
+    if ((*session)->format == "sfs" && (*session)->source.kind == ImageSourceKind::file &&
+        mutable_container != nullptr && inspect_sfs_extent_layout_repair(*mutable_container)) {
+        available_operations.emplace_back("images.extent_layout.repair");
+    }
     const auto supported_mutation_profile =
         mutable_container != nullptr && mutable_container->superblock().sector_size_bytes == 512U &&
-        std::ranges::all_of(mutable_container->partitions(),
-                            [](const Partition &partition) { return partition.sectors_per_cluster == 2U; });
+        std::ranges::all_of(mutable_container->partitions(), [](const Partition &partition) {
+            return partition.sectors_per_cluster == 2U && allocation_is_safe_for_mutation(partition.allocation);
+        });
     if ((*session)->format == "sfs" && supported_mutation_profile && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
         available_operations.emplace_back("images.alter.partitions");

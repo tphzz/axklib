@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/file_publication.hpp"
+#include "axklib/sfs.hpp"
 
 namespace axk {
 namespace {
@@ -320,6 +321,9 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     auto name = text(value["name"], context + ".name");
     if (!name)
         return std::unexpected{name.error()};
+    if (is_partition_support_root_entry(*name)) {
+        return std::unexpected{manifest_error(context + ".name PRF3 is reserved for partition support files")};
+    }
     VolumeSpec result;
     result.name = *name;
     std::set<std::string> waveform_ids;

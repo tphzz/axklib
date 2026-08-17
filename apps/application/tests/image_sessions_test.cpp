@@ -75,6 +75,25 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
     ASSERT_TRUE(image);
 }
 
+void corrupt_fixed_allocation_bitmap_copy(const std::filesystem::path &path) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    ASSERT_FALSE(sfs->partitions().empty());
+    const auto offset = static_cast<std::uint64_t>(sfs->partitions().front().start_sector) * 512U + 2048U;
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekg(static_cast<std::streamoff>(offset));
+    char byte{};
+    image.read(&byte, 1);
+    ASSERT_TRUE(image);
+    byte = static_cast<char>(static_cast<unsigned char>(byte) ^ 0x01U);
+    image.seekp(static_cast<std::streamoff>(offset));
+    image.write(&byte, 1);
+    ASSERT_TRUE(image);
+}
+
 void patch_sample_window(const std::filesystem::path &path, std::uint32_t first_frame, std::uint32_t frame_count,
                          std::uint32_t loop_start, std::uint32_t loop_length,
                          std::optional<std::array<std::uint32_t, 4>> right_window = std::nullopt,
@@ -165,14 +184,26 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     EXPECT_EQ(opened->source.root_id, "workspace");
     EXPECT_EQ(opened->source.relative_path, "fixture.hds");
     EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(
-        opened->available_operations,
-        (std::vector<std::string>{
-            "images.content", "images.objects", "images.relationships", "images.validation.issues", "images.preview",
-            "auditions.prepare", "images.package.export", "images.audio_export", "images.sequence_export",
-            "images.volume_package_export", "images.volume_floppy_export", "images.media_conversion",
-            "images.alter.volumes", "images.alter.partitions", "images.alter.objects", "images.package.import",
-            "images.deletion.orphans.inspect", "images.programs.generate.inspect", "images.programs.generate"}));
+    EXPECT_EQ(opened->available_operations, (std::vector<std::string>{"images.content",
+                                                                      "images.objects",
+                                                                      "images.relationships",
+                                                                      "images.systemProgramContexts",
+                                                                      "images.validation.issues",
+                                                                      "images.preview",
+                                                                      "auditions.prepare",
+                                                                      "images.package.export",
+                                                                      "images.audio_export",
+                                                                      "images.sequence_export",
+                                                                      "images.volume_package_export",
+                                                                      "images.volume_floppy_export",
+                                                                      "images.media_conversion",
+                                                                      "images.alter.volumes",
+                                                                      "images.alter.partitions",
+                                                                      "images.alter.objects",
+                                                                      "images.package.import",
+                                                                      "images.deletion.orphans.inspect",
+                                                                      "images.programs.generate.inspect",
+                                                                      "images.programs.generate"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -249,6 +280,36 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     }
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
+}
+
+TEST_F(ImageSessionTest, AllocationMetadataMismatchRemainsReadableButCannotBeAltered) {
+    corrupt_fixed_allocation_bitmap_copy(root_ / "fixture.hds");
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
+              opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->available_operations, "images.validation.issues"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.alter.volumes"),
+              opened->available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
+              opened->available_operations.end());
+
+    const auto issues = sessions.validation_issues(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(issues) << issues.error().message;
+    EXPECT_NE(
+        std::ranges::find(issues->items, "SFS_ALLOCATION_BITMAP_COPIES_DIFFER", &axk::app::ImageValidationItem::code),
+        issues->items.end());
+
+    {
+        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        ASSERT_TRUE(read) << read.error().message;
+    }
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
+    EXPECT_EQ(mutation.error().code, "image_integrity_unsafe");
 }
 
 TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
@@ -1426,6 +1487,40 @@ TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
     ASSERT_TRUE(sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U));
     now += std::chrono::seconds{4};
     EXPECT_TRUE(sessions.inspect(opened->image_id, "owner-a"));
+}
+
+TEST_F(ImageSessionTest, ReportsBothSavedSystemFilesAsAbsentInDeterministicOrder) {
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+
+    ASSERT_TRUE(contexts) << contexts.error().message;
+    EXPECT_EQ(contexts->partition_index, 0U);
+    ASSERT_EQ(contexts->files.size(), 2U);
+    EXPECT_EQ(contexts->files[0].file_kind, axk::app::SystemProgramContextFile::system);
+    EXPECT_EQ(contexts->files[0].availability, axk::app::SystemProgramContextAvailability::not_present);
+    EXPECT_EQ(contexts->files[0].message, "No saved SYSTEM file exists for partition 0.");
+    EXPECT_EQ(contexts->files[1].file_kind, axk::app::SystemProgramContextFile::system2);
+    EXPECT_EQ(contexts->files[1].availability, axk::app::SystemProgramContextAvailability::not_present);
+    EXPECT_EQ(contexts->files[1].message,
+              "No saved SYSTEM2 file exists for partition 0. Multi assignments cannot be derived from this "
+              "partition.");
+}
+
+TEST_F(ImageSessionTest, ReportsUnsupportedMediaWithoutInventingMultiAssignments) {
+    axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
+    axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
+    const auto opened = sessions.open({"workspace", "archive.a3k"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+
+    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+
+    ASSERT_TRUE(contexts) << contexts.error().message;
+    EXPECT_EQ(contexts->partition_index, 0U);
+    EXPECT_TRUE(contexts->files.empty());
+    EXPECT_EQ(contexts->message, "System File decoding is not supported for this media format.");
 }
 
 } // namespace

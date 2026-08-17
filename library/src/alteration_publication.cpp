@@ -1,5 +1,11 @@
 #include "alteration_internal.hpp"
 
+#include "axklib/bytes.hpp"
+#include "axklib/file_publication.hpp"
+#include "axklib/object.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/sfs_allocation.hpp"
+#include "axklib/writer_internal.hpp"
 #include <algorithm>
 #include <array>
 #include <format>
@@ -8,55 +14,11 @@
 #include <ranges>
 #include <set>
 #include <tuple>
-
-#include "axklib/bytes.hpp"
-#include "axklib/file_publication.hpp"
-#include "axklib/object.hpp"
-#include "axklib/package_archive.hpp"
-#include "axklib/writer_internal.hpp"
-
 namespace axk::alteration_internal {
-
 Result<void> write_bytes(detail::TemporaryPublication &publication, std::uint64_t offset,
                          std::span<const std::byte> data) {
     return publication.write_at(offset, data);
 }
-
-Result<void> write_continuation_lists(detail::TemporaryPublication &publication, const Partition &partition,
-                                      const MutablePartition::InsertedRecord &record) {
-    constexpr std::size_t extents_per_cluster = (1024U - 12U) / 12U;
-    for (std::size_t list_index = 0; list_index < record.continuation_clusters.size(); ++list_index) {
-        const auto extent_begin = list_index * extents_per_cluster;
-        const auto extent_count = std::min(extents_per_cluster, record.extents.size() - extent_begin);
-        std::vector<std::byte> block(1024U);
-        ByteWriter writer{block};
-        if (auto written = writer.write_be32(0U, static_cast<std::uint32_t>(extent_count)); !written)
-            return std::unexpected{written.error()};
-        const auto next =
-            list_index + 1U < record.continuation_clusters.size() ? record.continuation_clusters[list_index + 1U] : 0U;
-        if (auto written = writer.write_be32(8U, next); !written)
-            return std::unexpected{written.error()};
-        for (std::size_t index = 0; index < extent_count; ++index) {
-            const auto &extent = record.extents[extent_begin + index];
-            const auto offset = 12U + index * 12U;
-            if (auto written = writer.write_be32(offset, extent.cluster_offset); !written)
-                return std::unexpected{written.error()};
-            if (auto written = writer.write_be32(offset + 4U, extent.cluster_count); !written)
-                return std::unexpected{written.error()};
-            if (auto written = writer.write_be32(offset + 8U, extent.byte_count); !written)
-                return std::unexpected{written.error()};
-        }
-        const auto absolute =
-            (static_cast<std::uint64_t>(partition.start_sector) +
-             static_cast<std::uint64_t>(record.continuation_clusters[list_index]) * partition.sectors_per_cluster) *
-            512U;
-        if (auto written = write_bytes(publication, absolute, block); !written) {
-            return written;
-        }
-    }
-    return {};
-}
-
 Result<std::vector<std::byte>> continuation_list_bytes(const MutablePartition::InsertedRecord &record,
                                                        std::size_t list_index) {
     constexpr std::size_t extents_per_cluster = (1024U - 12U) / 12U;
@@ -144,12 +106,36 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
             512U;
         const auto append_record = [&](const MutablePartition::InsertedRecord &changed,
                                        std::uint64_t index_offset) -> Result<void> {
-            if (auto appended = append_patch(patches, state, index_offset, changed.raw_index); !appended)
+            auto extents = changed.extents;
+            auto raw_index = changed.raw_index;
+            if (changed.capacity_expanded) {
+                if (auto normalized = normalize_extent_byte_counts(extents, changed.payload.size()); !normalized)
+                    return std::unexpected{normalized.error()};
+                const ByteReader current_index{raw_index};
+                const auto tail = current_index.be16(0x46U);
+                if (!tail)
+                    return std::unexpected{tail.error()};
+                detail::PreparedRecord prepared;
+                prepared.kind = changed.payload_kind == PayloadKind::directory ? detail::RecordKind::directory
+                                                                               : detail::RecordKind::object;
+                prepared.tail = *tail;
+                auto encoded = detail::encode_sfs_index_record(prepared, extents,
+                                                               static_cast<std::uint32_t>(changed.payload.size()),
+                                                               changed.continuation_clusters);
+                if (!encoded)
+                    return std::unexpected{encoded.error()};
+                raw_index = std::move(*encoded);
+            }
+            if (auto appended = append_patch(patches, state, index_offset, raw_index); !appended)
                 return appended;
             std::size_t payload_offset{};
-            for (const auto &extent : changed.extents) {
+            for (const auto &extent : extents) {
                 const auto capacity = static_cast<std::size_t>(extent.cluster_count) * 1024U;
-                const auto count = std::min(capacity, changed.payload.size() - payload_offset);
+                const auto count = static_cast<std::size_t>(extent.byte_count);
+                if (count == 0U || count > capacity || payload_offset > changed.payload.size() ||
+                    count > changed.payload.size() - payload_offset) {
+                    return std::unexpected{transaction_error("record extent byte total differs from its payload")};
+                }
                 const auto absolute =
                     (static_cast<std::uint64_t>(partition.start_sector) +
                      static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
@@ -160,11 +146,13 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
                     return appended;
                 }
                 payload_offset += count;
-                if (payload_offset == changed.payload.size())
-                    break;
             }
+            if (payload_offset != changed.payload.size())
+                return std::unexpected{transaction_error("record extent byte total differs from its payload")};
+            const MutablePartition::InsertedRecord materialized{
+                changed.id, {}, {}, extents, changed.continuation_clusters, changed.payload_kind, false};
             for (std::size_t list_index = 0; list_index < changed.continuation_clusters.size(); ++list_index) {
-                auto bytes = continuation_list_bytes(changed, list_index);
+                auto bytes = continuation_list_bytes(materialized, list_index);
                 if (!bytes)
                     return std::unexpected{bytes.error()};
                 const auto absolute = (static_cast<std::uint64_t>(partition.start_sector) +
@@ -188,15 +176,14 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
             if (auto appended = append_record(inserted, index_offset); !appended)
                 return std::unexpected{appended.error()};
         }
-        const auto bitmap_offset =
-            (static_cast<std::uint64_t>(partition.start_sector) +
-             static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-            512U;
-        if (auto appended = append_patch(patches, state, bitmap_offset, item.bitmap); !appended)
+        const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
+            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster, partition.bitmap_cluster);
+        if (!bitmap_layout || bitmap_layout->rounded_bytes != item.bitmap.size())
+            return std::unexpected{transaction_error("alteration allocation bitmap geometry is inconsistent")};
+        if (auto appended = append_patch(patches, state, bitmap_layout->header_addressed_offset, item.bitmap);
+            !appended)
             return std::unexpected{appended.error()};
-        const auto mirror_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U;
-        if (auto appended = append_patch(patches, state, mirror_offset,
-                                         std::span{item.bitmap}.first(std::min<std::size_t>(512U, item.bitmap.size())));
+        if (auto appended = append_patch(patches, state, bitmap_layout->fixed_location_offset, item.bitmap);
             !appended) {
             return std::unexpected{appended.error()};
         }
@@ -291,11 +278,7 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
         const auto partition = std::ranges::find(actual->partitions(), PartitionIndex{index}, &Partition::index);
         if (partition == actual->partitions().end())
             return std::unexpected{transaction_error("post-write validation lost a planned partition")};
-        if (partition->allocation.conflicting_cluster_count != 0U ||
-            partition->allocation.invalid_extent_record_count != 0U ||
-            partition->allocation.extent_total_mismatch_count != 0U ||
-            !partition->allocation.stored_not_reconstructed.empty() ||
-            !partition->allocation.reconstructed_not_stored.empty()) {
+        if (!allocation_is_safe_for_mutation(partition->allocation)) {
             return std::unexpected{transaction_error("post-write allocation validation is not clean")};
         }
         if (expected.renamed_name && (partition->name != *expected.renamed_name || !partition->backup_header_matches)) {
@@ -373,15 +356,13 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
                 offset += count;
             }
         }
-        const auto bitmap_size_u64 = (static_cast<std::uint64_t>(partition->cluster_count) + 7U) / 8U;
-        if (bitmap_size_u64 > std::numeric_limits<std::size_t>::max())
+        const auto bitmap_layout =
+            detail::sfs_allocation_bitmap_layout(partition->start_sector, partition->cluster_count,
+                                                 partition->sectors_per_cluster, partition->bitmap_cluster);
+        if (!bitmap_layout || bitmap_layout->rounded_bytes > std::numeric_limits<std::size_t>::max())
             return std::unexpected{transaction_error("post-write allocation bitmap exceeds platform limits")};
-        const auto bitmap_size = static_cast<std::size_t>(bitmap_size_u64);
-        const auto bitmap_offset =
-            (static_cast<std::uint64_t>(partition->start_sector) +
-             static_cast<std::uint64_t>(partition->bitmap_cluster) * partition->sectors_per_cluster) *
-            512U;
-        auto bitmap = read_raw(temporary, bitmap_offset, bitmap_size);
+        auto bitmap = read_raw(temporary, bitmap_layout->header_addressed_offset,
+                               static_cast<std::size_t>(bitmap_layout->rounded_bytes));
         if (!bitmap)
             return std::unexpected{bitmap.error()};
         if (*bitmap != expected.bitmap)
@@ -421,7 +402,8 @@ Result<void> validate_mutable_partition_geometry(const Partition &partition, std
 Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAccessReader> source,
                                                 const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph) {
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition) {
     if (!source)
         return std::unexpected{transaction_error("alteration source reader is required")};
     OpenOptions options;
@@ -467,27 +449,28 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
             !geometry) {
             return std::unexpected{geometry.error()};
         }
-        if (partition.allocation.conflicting_cluster_count != 0U ||
-            partition.allocation.invalid_extent_record_count != 0U ||
-            partition.allocation.extent_total_mismatch_count != 0U ||
-            !partition.allocation.stored_not_reconstructed.empty() ||
-            !partition.allocation.reconstructed_not_stored.empty()) {
+        const auto explicitly_repairable =
+            extent_repair_partition == partition.index && placement_repair_can_normalize_directory_extents(partition);
+        if (!allocation_is_safe_for_mutation(partition.allocation) && !explicitly_repairable) {
             return std::unexpected{transaction_error("source allocation cannot safely support alteration")};
         }
-        const auto bitmap_size_u64 = (static_cast<std::uint64_t>(partition.cluster_count) + 7U) / 8U;
-        if (bitmap_size_u64 > std::numeric_limits<std::size_t>::max())
+        const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
+            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster, partition.bitmap_cluster);
+        if (!bitmap_layout || bitmap_layout->rounded_bytes > std::numeric_limits<std::size_t>::max())
             return std::unexpected{transaction_error("source allocation bitmap exceeds platform limits")};
-        const auto bitmap_size = static_cast<std::size_t>(bitmap_size_u64);
-        const auto bitmap_offset =
-            (static_cast<std::uint64_t>(partition.start_sector) +
-             static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-            512U;
-        std::vector<std::byte> bitmap(bitmap_size);
-        if (auto read = state.source->read_exact_at(bitmap_offset, bitmap); !read)
+        std::vector<std::byte> bitmap(static_cast<std::size_t>(bitmap_layout->rounded_bytes));
+        if (auto read = state.source->read_exact_at(bitmap_layout->header_addressed_offset, bitmap); !read)
             return std::unexpected{read.error()};
         MutablePartition mutable_partition;
         mutable_partition.source = &partition;
         mutable_partition.bitmap = std::move(bitmap);
+        if (explicitly_repairable) {
+            if (auto staged = stage_recoverable_directory_extent_repairs(*state.source, partition, mutable_partition,
+                                                                         cancellation);
+                !staged) {
+                return std::unexpected{staged.error()};
+            }
+        }
         state.partitions.emplace(partition.index.value, std::move(mutable_partition));
     }
     return state;
@@ -495,11 +478,13 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
 
 Result<TransactionState> open_transaction_state(const std::filesystem::path &source_path,
                                                 const CancellationToken &cancellation, ProgressSink *progress,
-                                                bool include_object_graph) {
+                                                bool include_object_graph,
+                                                std::optional<PartitionIndex> extent_repair_partition) {
     auto source = FileReader::open(source_path);
     if (!source)
         return std::unexpected{source.error()};
-    return open_transaction_state(*source, source_path, cancellation, progress, include_object_graph);
+    return open_transaction_state(*source, source_path, cancellation, progress, include_object_graph,
+                                  extent_repair_partition);
 }
 
 Result<PublicationOutcome>
@@ -529,123 +514,21 @@ publish(const TransactionState &state, const std::filesystem::path &output_path,
     if (!temporary_result)
         return std::unexpected{temporary_result.error()};
     auto publication = std::move(*temporary_result);
-    std::uint64_t completed_partitions{};
-    for (const auto &[index, item] : state.partitions) {
-        static_cast<void>(index);
+    auto patches = collect_patches(state, cancellation);
+    if (!patches)
+        return std::unexpected{patches.error()};
+    std::uint64_t completed_patches{};
+    for (const auto &patch : *patches) {
         if (const auto check = cancellation.check(); !check) {
             return std::unexpected{check.error()};
         }
-        const auto &partition = *item.source;
-        if (item.renamed_name) {
-            std::array<std::byte, 16> encoded_name{};
-            std::ranges::fill(encoded_name, std::byte{' '});
-            for (std::size_t name_index = 0; name_index < item.renamed_name->size(); ++name_index)
-                encoded_name[name_index] = static_cast<std::byte>((*item.renamed_name)[name_index]);
-            const auto header_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 0x40U;
-            if (auto written = write_bytes(publication, header_offset, encoded_name); !written) {
-                return std::unexpected{written.error()};
-            }
-            if (auto written = write_bytes(publication, header_offset + 1024U, encoded_name); !written) {
-                return std::unexpected{written.error()};
-            }
-        }
-        for (const auto id : item.deleted) {
-            const auto *source_record = record(partition, id);
-            if (source_record == nullptr)
-                continue;
-            std::array<std::byte, 72> zero{};
-            if (auto written = write_bytes(publication, source_record->record_offset.value, zero); !written) {
-                return std::unexpected{written.error()};
-            }
-        }
-        if (item.root_index && item.root_payload) {
-            const auto *root = record(partition, SfsId{1});
-            if (auto written = write_bytes(publication, root->record_offset.value, *item.root_index); !written) {
-                return std::unexpected{written.error()};
-            }
-            const auto payload_offset =
-                (static_cast<std::uint64_t>(partition.start_sector) +
-                 static_cast<std::uint64_t>(root->extents[0].cluster_offset) * partition.sectors_per_cluster) *
-                512U;
-            if (auto written = write_bytes(publication, payload_offset, *item.root_payload); !written) {
-                return std::unexpected{written.error()};
-            }
-        }
-        const auto index_base =
-            (static_cast<std::uint64_t>(partition.start_sector) +
-             static_cast<std::uint64_t>(partition.directory_index_cluster) * partition.sectors_per_cluster) *
-            512U;
-        for (const auto &[id, changed] : item.changed) {
-            const auto *source_record = record(partition, id);
-            if (source_record == nullptr) {
-                return std::unexpected{transaction_error("changed record has no source index location")};
-            }
-            if (auto written = write_bytes(publication, source_record->record_offset.value, changed.raw_index);
-                !written) {
-                return std::unexpected{written.error()};
-            }
-            std::size_t payload_offset{};
-            for (const auto &extent : changed.extents) {
-                const auto capacity = static_cast<std::size_t>(extent.cluster_count) * 1024U;
-                const auto count = std::min(capacity, changed.payload.size() - payload_offset);
-                const auto absolute =
-                    (static_cast<std::uint64_t>(partition.start_sector) +
-                     static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
-                    512U;
-                if (auto written =
-                        write_bytes(publication, absolute, std::span{changed.payload}.subspan(payload_offset, count));
-                    !written) {
-                    return std::unexpected{written.error()};
-                }
-                payload_offset += count;
-                if (payload_offset == changed.payload.size())
-                    break;
-            }
-            if (auto written = write_continuation_lists(publication, partition, changed); !written) {
-                return std::unexpected{written.error()};
-            }
-        }
-        for (const auto &[id, inserted] : item.inserted) {
-            const auto index_offset = index_base + (id.value / 14U) * 1024U + (id.value % 14U) * 72U;
-            if (auto written = write_bytes(publication, index_offset, inserted.raw_index); !written) {
-                return std::unexpected{written.error()};
-            }
-            std::size_t payload_offset{};
-            for (const auto &extent : inserted.extents) {
-                const auto capacity = static_cast<std::size_t>(extent.cluster_count) * 1024U;
-                const auto count = std::min(capacity, inserted.payload.size() - payload_offset);
-                const auto absolute =
-                    (static_cast<std::uint64_t>(partition.start_sector) +
-                     static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster) *
-                    512U;
-                if (auto written =
-                        write_bytes(publication, absolute, std::span{inserted.payload}.subspan(payload_offset, count));
-                    !written) {
-                    return std::unexpected{written.error()};
-                }
-                payload_offset += count;
-            }
-            if (auto written = write_continuation_lists(publication, partition, inserted); !written) {
-                return std::unexpected{written.error()};
-            }
-        }
-        const auto bitmap_offset =
-            (static_cast<std::uint64_t>(partition.start_sector) +
-             static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-            512U;
-        if (auto written = write_bytes(publication, bitmap_offset, item.bitmap); !written) {
+        if (auto written = write_bytes(publication, patch.offset, patch.replacement); !written) {
             return std::unexpected{written.error()};
         }
-        const auto mirror_offset = static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U;
-        if (auto written = write_bytes(publication, mirror_offset,
-                                       std::span{item.bitmap}.first(std::min<std::size_t>(512, item.bitmap.size())));
-            !written) {
-            return std::unexpected{written.error()};
-        }
-        ++completed_partitions;
+        ++completed_patches;
         if (progress) {
-            progress->report({ProgressPhase::writing, completed_partitions, state.partitions.size(),
-                              "writing alteration image", output_path.string()});
+            progress->report({ProgressPhase::writing, completed_patches, patches->size(), "writing alteration image",
+                              output_path.string()});
         }
     }
     if (auto flushed = publication.flush(); !flushed) {

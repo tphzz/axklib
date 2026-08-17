@@ -56,7 +56,6 @@ distinguished.
 | `SBNK` | `[SAMPLE (SBNK)]` |
 | `SMPL` | `[WAVE DATA (SMPL)]` |
 | `SEQU` | `[SEQUENCE (SEQU)]` |
-| unresolved Program placeholder | `[UNKNOWN]` |
 
 ## Program Slot Labels
 
@@ -97,7 +96,7 @@ Data objects:
 
 ```text
 |-- 001: TSUYOSHI [PROGRAM (PROG)]
-|   `-- B TS-KICK [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
+|   `-- B TS-KICK [SAMPLE BANK (SBAC)] - Rch Assign: =Smp
 ```
 
 `SBNK -> SMPL` links are Sample-to-Wave-Data storage links. They are used by reports,
@@ -173,40 +172,27 @@ Or11 Argent (F002)
 
 ## Content Tree Sorting
 
-Within a category, nodes sort by:
-
-1. unresolved Program placeholders when `--show-unresolved` is active;
-2. category order: Programs, Sample Banks/Samples (SBAC/SBNK), Wave Data (SMPL), Sequences;
-3. Program slot number;
-4. display name;
-5. object type;
-6. object key.
-
-This keeps Program slots numerically stable and makes missing active targets
-visible before normal Program children when explicitly requested.
+Within a category, nodes sort by category order (Programs, Sample Banks/Samples,
+Wave Data, Sequences), Program slot number, display name, object type, and
+object key. This keeps Program slots numerically stable. Missing Program targets
+remain relationship diagnostics and are not synthesized as sampler-visible
+objects.
 
 ## Program Assignment Details In `info`
 
-Normal `info` output prints assignment details only for displayed active Program
+Normal `info` output prints assignment details only for displayed effective Program
 children:
 
 ```text
 |-- 001: TSUYOSHI [PROGRAM (PROG)]
-|   |-- B TS-BASS [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
-|   `-- TS-FX 7 [SAMPLE (SBNK)] - Rch Assign: =SMP
+|   |-- B TS-BASS [SAMPLE BANK (SBAC)] - Rch Assign: =Smp
+|   `-- TS-FX 7 [SAMPLE (SBNK)] - Rch Assign: =Smp
 ```
 
-Visible/off and duplicate-not-active rows are not printed as active Program
-children. They remain in relationship CSV/JSON reports.
-
-When `--show-unresolved` is used, active missing local targets appear as Unknown
-placeholders:
-
-```text
-|-- 009: India [PROGRAM (PROG)]
-|   |-- INDIAN 7 [UNKNOWN]
-|   `-- B India [SAMPLE BANK (SBAC)] - Rch Assign: =SMP
-```
+Missing-target and ambiguous rows are not printed as effective Program
+children. They remain in relationship CSV/JSON reports. `--show-unresolved`
+exposes relationship diagnostics without inventing a Sample or Sample Bank
+object for a name that is absent from the image.
 
 ## Export Path Sanitization
 

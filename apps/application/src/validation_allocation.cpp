@@ -60,9 +60,12 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
             {"start_sector", static_cast<std::uint64_t>(partition.start_sector)},
             {"sectors_per_cluster", static_cast<std::uint64_t>(partition.sectors_per_cluster)},
             {"cluster_count", static_cast<std::uint64_t>(partition.cluster_count)},
-            {"bitmap_offset", (static_cast<std::uint64_t>(partition.start_sector) +
-                               static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
-                                  container.superblock().sector_size_bytes},
+            {"fixed_bitmap_offset",
+             static_cast<std::uint64_t>(partition.start_sector) * container.superblock().sector_size_bytes + 2048U},
+            {"header_bitmap_offset",
+             (static_cast<std::uint64_t>(partition.start_sector) +
+              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+                 container.superblock().sector_size_bytes},
             {"index_offset",
              (static_cast<std::uint64_t>(partition.start_sector) +
               static_cast<std::uint64_t>(partition.directory_index_cluster) * partition.sectors_per_cluster) *
@@ -74,7 +77,14 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
             {"continuation_extent_record_count", continuation_records},
             {"data_extent_count", extent_count},
             {"continuation_list_cluster_count", continuation_clusters},
-            {"stored_used_cluster_count", static_cast<std::uint64_t>(allocation.stored_used_cluster_count)},
+            {"fixed_bitmap_used_cluster_count",
+             static_cast<std::uint64_t>(allocation.fixed_location.used_cluster_count)},
+            {"header_bitmap_used_cluster_count",
+             static_cast<std::uint64_t>(allocation.header_addressed.used_cluster_count)},
+            {"bitmap_copies_match", allocation.stored_copies_match},
+            {"bitmap_copy_mismatch_byte_count", allocation.stored_copy_mismatch_byte_count},
+            {"fixed_used_header_free_count", mismatch_cluster_count(allocation.fixed_not_header)},
+            {"header_used_fixed_free_count", mismatch_cluster_count(allocation.header_not_fixed)},
             {"reconstructed_used_cluster_count",
              static_cast<std::uint64_t>(allocation.reconstructed_used_cluster_count)},
             {"first_payload_cluster", first_payload},
@@ -83,9 +93,17 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
              free ? static_cast<std::uint64_t>(free->free_cluster_count) : std::uint64_t{0}},
             {"sampler_free_bytes", free ? free->free_bytes : std::uint64_t{0}},
             {"sampler_visible_free_kib", free ? free->sampler_visible_free_kib : std::uint64_t{0}},
-            {"stored_used_not_reconstructed_count", mismatch_cluster_count(allocation.stored_not_reconstructed)},
-            {"reconstructed_used_not_stored_count", mismatch_cluster_count(allocation.reconstructed_not_stored)},
+            {"fixed_used_not_reconstructed_count",
+             static_cast<std::uint64_t>(allocation.fixed_location.marked_used_without_index_extent_count)},
+            {"reconstructed_used_not_fixed_count",
+             static_cast<std::uint64_t>(allocation.fixed_location.index_extent_marked_free_count)},
+            {"header_used_not_reconstructed_count",
+             static_cast<std::uint64_t>(allocation.header_addressed.marked_used_without_index_extent_count)},
+            {"reconstructed_used_not_header_count",
+             static_cast<std::uint64_t>(allocation.header_addressed.index_extent_marked_free_count)},
             {"extent_total_mismatch_count", static_cast<std::uint64_t>(allocation.extent_total_mismatch_count)},
+            {"extent_byte_total_mismatch_count",
+             static_cast<std::uint64_t>(allocation.extent_byte_total_mismatch_count)},
             {"conflicting_cluster_count", static_cast<std::uint64_t>(allocation.conflicting_cluster_count)},
             {"conflicts_truncated", allocation.conflicts_truncated},
             {"warning_count", std::uint64_t{0}},
@@ -134,8 +152,16 @@ std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path
         }
     };
     for (const auto &partition : partitions) {
-        append(partition, "stored-used-without-index-extent", partition.allocation.stored_not_reconstructed);
-        append(partition, "index-extent-references-free-cluster", partition.allocation.reconstructed_not_stored);
+        append(partition, "fixed-used-without-index-extent",
+               partition.allocation.fixed_location.marked_used_without_index_extent);
+        append(partition, "index-extent-references-free-cluster-in-fixed",
+               partition.allocation.fixed_location.index_extent_marked_free);
+        append(partition, "header-used-without-index-extent",
+               partition.allocation.header_addressed.marked_used_without_index_extent);
+        append(partition, "index-extent-references-free-cluster-in-header",
+               partition.allocation.header_addressed.index_extent_marked_free);
+        append(partition, "fixed-used-header-free", partition.allocation.fixed_not_header);
+        append(partition, "header-used-fixed-free", partition.allocation.header_not_fixed);
         const auto claim_kind = [](axk::AllocationClaimKind kind) {
             switch (kind) {
             case axk::AllocationClaimKind::reserved:
@@ -181,18 +207,19 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
             if (record.directory_id)
                 directories.emplace(record.directory_id->value, &record);
         }
-        const axk::IndexRecord *root{};
-        for (const auto &[id, directory] : directories) {
-            if (directory->parent_directory_id && directory->parent_directory_id->value == id) {
-                root = directory;
-                break;
-            }
-        }
-        if (root == nullptr || !root->directory_id)
+        const auto located_root = axk::locate_partition_root_record(partition);
+        if (!located_root)
             continue;
+        const auto root_record = std::ranges::find(partition.records, *located_root, &axk::IndexRecord::sfs_id);
+        if (root_record == partition.records.end())
+            continue;
+        const auto *root = &*root_record;
         for (const auto &entry : root->directory_entries) {
-            const auto found = directories.find(entry.link_id.value);
-            if (entry.name == "." || entry.name == ".." || found == directories.end())
+            if (!entry.target_link_id)
+                continue;
+            const auto found = directories.find(entry.target_link_id->value);
+            if (entry.name == "." || entry.name == ".." || axk::is_partition_support_root_entry(entry.name) ||
+                found == directories.end())
                 continue;
             const auto *volume = found->second;
             if (!volume->parent_directory_id || volume->parent_directory_id->value != root->directory_id->value)
@@ -244,23 +271,23 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
                 return axk::ObjectType::unknown;
             };
             for (const auto &category_entry : volume_record->directory_entries) {
-                if (category_entry.name == "." || category_entry.name == "..")
+                if (category_entry.name == "." || category_entry.name == ".." || !category_entry.target_link_id)
                     continue;
                 ++category_count;
                 const auto type = category_type(category_entry.name);
                 if (type == axk::ObjectType::unknown)
                     continue;
-                const auto category = std::ranges::find(partition->records, category_entry.link_id.value,
+                const auto category = std::ranges::find(partition->records, category_entry.target_link_id->value,
                                                         [](const auto &record) { return record.sfs_id.value; });
                 if (category == partition->records.end())
                     continue;
                 ++category_directory_count;
                 for (const auto &entry : category->directory_entries) {
-                    if (entry.name == "." || entry.name == "..")
+                    if (entry.name == "." || entry.name == ".." || !entry.target_link_id)
                         continue;
                     ++object_entry_count;
                     ++checked_entry_count;
-                    const auto target = std::ranges::find(partition->records, entry.link_id.value,
+                    const auto target = std::ranges::find(partition->records, entry.target_link_id->value,
                                                           [](const auto &record) { return record.sfs_id.value; });
                     if (target == partition->records.end() ||
                         (target->payload_kind != axk::PayloadKind::object &&
@@ -276,13 +303,9 @@ std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &
             }
         }
         const auto allocation_issues =
-            partition == container.partitions().end()
+            partition == container.partitions().end() || !axk::allocation_is_safe_for_mutation(partition->allocation)
                 ? std::uint64_t{1}
-                : static_cast<std::uint64_t>(partition->allocation.invalid_extent_record_count) +
-                      partition->allocation.extent_total_mismatch_count +
-                      partition->allocation.conflicting_cluster_count +
-                      mismatch_cluster_count(partition->allocation.stored_not_reconstructed) +
-                      mismatch_cluster_count(partition->allocation.reconstructed_not_stored);
+                : std::uint64_t{0};
         std::uint64_t artifact_count{};
         for (const auto &[type, count] : artifact_counts) {
             static_cast<void>(type);

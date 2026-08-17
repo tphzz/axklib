@@ -20,6 +20,16 @@ using namespace alteration_internal;
 
 namespace alteration_internal {
 
+std::optional<PartitionIndex> placement_repair_partition(const AlterationManifest &manifest) {
+    for (const auto &operation : manifest.operations) {
+        const auto *repair = std::get_if<RepairObjectPlacementsOperation>(&operation.data);
+        if (repair == nullptr)
+            continue;
+        return std::get<PartitionIndex>(repair->partition);
+    }
+    return std::nullopt;
+}
+
 Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessReader> source,
                                             const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
@@ -27,8 +37,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                                             std::optional<std::string> progress_path) {
     if (auto valid = detail::validate_alteration_manifest(manifest); !valid)
         return std::unexpected{valid.error()};
-    auto opened =
-        open_transaction_state(std::move(source), source_path, cancellation, progress, requires_object_graph(manifest));
+    auto opened = open_transaction_state(std::move(source), source_path, cancellation, progress,
+                                         requires_object_graph(manifest), placement_repair_partition(manifest));
     if (!opened)
         return std::unexpected{opened.error()};
     auto state = std::move(*opened);
@@ -83,6 +93,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_volume(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, RepairObjectPlacementsOperation>)
                     return repair_object_placements(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ImportTx16wDiskSetOperation>)
+                    return import_tx16w_disk_set(state, context, operation, cancellation);
                 else
                     return rename_partition(state, context, operation, cancellation);
             },

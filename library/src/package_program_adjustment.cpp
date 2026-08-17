@@ -42,9 +42,8 @@ bool existing_in_scope(const ObjectSnapshot &snapshot, const PackageRootDestinat
            snapshot.placement->volume_name == destination.volume_name;
 }
 
-bool active_program_row(const ProgAssignment &assignment) {
-    return !assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U) &&
-           std::to_integer<std::uint8_t>(assignment.raw_row[0x28U]) == 0xffU;
+bool program_assignment_row(const ProgAssignment &assignment) {
+    return !assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U);
 }
 
 std::string_view assignment_target_type(const ProgAssignment &assignment) {
@@ -164,7 +163,7 @@ Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candida
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
             const auto ordinal = static_cast<std::uint32_t>(index);
-            if (!active_program_row(assignment) || package_row_has_edge(candidate, ordinal, assignment))
+            if (!program_assignment_row(assignment) || package_row_has_edge(candidate, ordinal, assignment))
                 continue;
             const auto type = assignment_target_type(assignment);
             if (!candidate_target_exists(candidate, candidates, type, assignment.name) &&
@@ -194,7 +193,7 @@ Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candida
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
             const auto ordinal = static_cast<std::uint32_t>(index);
-            if (!active_program_row(assignment) || assignment.raw_handle != 0U)
+            if (!program_assignment_row(assignment) || assignment.raw_handle != 0U)
                 continue;
             const auto target = std::ranges::find_if(candidates, [&](const Candidate &candidate) {
                 return candidate.node->object_type == assignment_target_type(assignment) &&

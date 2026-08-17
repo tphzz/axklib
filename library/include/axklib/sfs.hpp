@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/error.hpp"
@@ -53,9 +54,21 @@ struct Extent {
     std::uint32_t byte_count{};
 };
 
+enum class DirectoryEntryState : std::uint8_t { live, deleted };
+
+inline constexpr std::uint32_t sfs_deleted_directory_link_prefix = 0xf0000000U;
+
+[[nodiscard]] constexpr DirectoryEntryState directory_entry_state(LinkId raw_link_id) noexcept {
+    return (raw_link_id.value & sfs_deleted_directory_link_prefix) == sfs_deleted_directory_link_prefix
+               ? DirectoryEntryState::deleted
+               : DirectoryEntryState::live;
+}
+
 struct DirectoryEntry {
     std::uint16_t flags{};
-    LinkId link_id;
+    LinkId raw_link_id;
+    std::optional<LinkId> target_link_id;
+    DirectoryEntryState state{DirectoryEntryState::live};
     std::string name;
     std::uint64_t payload_relative_offset{};
 };
@@ -73,6 +86,7 @@ struct IndexRecord {
     std::uint16_t extent_count{};
     std::uint16_t cluster_count{};
     std::uint32_t data_size{};
+    std::uint64_t extent_byte_count_total{};
     std::vector<Extent> extents;
     std::vector<std::uint32_t> continuation_clusters;
     PayloadKind payload_kind{PayloadKind::unknown};
@@ -111,16 +125,29 @@ struct SfsFreeSpace {
     std::uint64_t sampler_visible_free_kib{};
 };
 
+struct AllocationBitmapSummary {
+    std::uint32_t used_cluster_count{};
+    std::vector<AllocationMismatchRange> used_cluster_ranges;
+    std::uint32_t marked_used_without_index_extent_count{};
+    std::uint32_t index_extent_marked_free_count{};
+    std::vector<AllocationMismatchRange> marked_used_without_index_extent;
+    std::vector<AllocationMismatchRange> index_extent_marked_free;
+};
+
 struct AllocationSummary {
-    std::uint32_t stored_used_cluster_count{};
+    AllocationBitmapSummary fixed_location;
+    AllocationBitmapSummary header_addressed;
+    bool stored_copies_match{};
+    std::uint64_t stored_copy_mismatch_byte_count{};
+    std::vector<AllocationMismatchRange> fixed_not_header;
+    std::vector<AllocationMismatchRange> header_not_fixed;
     std::uint32_t reconstructed_used_cluster_count{};
     std::uint32_t invalid_extent_record_count{};
     std::uint32_t extent_total_mismatch_count{};
+    std::uint32_t extent_byte_total_mismatch_count{};
     std::uint32_t conflicting_cluster_count{};
     std::vector<AllocationConflict> conflicts;
     bool conflicts_truncated{};
-    std::vector<AllocationMismatchRange> stored_not_reconstructed;
-    std::vector<AllocationMismatchRange> reconstructed_not_stored;
     std::optional<SfsFreeSpace> free_space;
 };
 
@@ -172,6 +199,11 @@ class AXK_API Container {
 AXK_API Result<SfsFreeSpace> calculate_sfs_free_space(std::uint32_t cluster_count, std::uint32_t first_payload_cluster,
                                                       std::uint32_t allocated_cluster_count,
                                                       std::uint32_t cluster_size_bytes = 1024);
+
+[[nodiscard]] AXK_API bool allocation_is_safe_for_mutation(const AllocationSummary &allocation) noexcept;
+
+[[nodiscard]] AXK_API bool is_partition_support_root_entry(std::string_view name) noexcept;
+[[nodiscard]] AXK_API Result<SfsId> locate_partition_root_record(const Partition &partition);
 
 AXK_API Result<Container> open_image(const std::filesystem::path &path, const OpenOptions &options = {});
 AXK_API Result<Container> open_image(std::shared_ptr<const RandomAccessReader> reader,

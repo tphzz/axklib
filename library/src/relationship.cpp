@@ -205,6 +205,7 @@ std::vector<std::string> keys(const Match &match) {
 Relationship edge(const ObjectSnapshot &source, std::string type, const Match &match,
                   std::optional<std::size_t> assignment_index = std::nullopt, std::string assignment_name = {},
                   AssignmentState assignment_state = AssignmentState::unknown,
+                  std::optional<ProgramReceiveSelector> receive_selector = std::nullopt,
                   std::string receive_channel_display = {}) {
     const auto target = match.target ? std::optional<std::string>{match.target->key} : std::nullopt;
     const auto discriminator = target.value_or(match.candidates.empty() ? "missing" : "candidates");
@@ -221,33 +222,42 @@ Relationship edge(const ObjectSnapshot &source, std::string type, const Match &m
         assignment_index,
         std::move(assignment_name),
         assignment_state,
+        receive_selector,
         std::move(receive_channel_display),
     };
 }
 
 AssignmentState assignment_state(const ProgAssignment &row) {
-    const auto gate = std::to_integer<std::uint8_t>(row.raw_row[0x28]);
-    if (gate == 0xffU)
-        return AssignmentState::active;
-    if (gate == 0U)
-        return AssignmentState::visible_off;
+    if (!row.name.empty() && (row.kind == 0x10U || row.kind == 0x11U))
+        return AssignmentState::stored_assignment;
     return AssignmentState::unknown;
 }
 
-std::string receive_channel(const ProgAssignment &row) {
-    const auto gate = std::to_integer<std::uint8_t>(row.raw_row[0x28]);
-    if (gate == 0U)
-        return "off";
-    if (gate != 0xffU)
+ProgramReceiveSelector decode_receive_selector(std::uint8_t selector) {
+    if (selector == 0xffU)
+        return {ProgramReceiveSelectorKind::sample, std::nullopt, selector};
+    if (selector <= 15U)
+        return {ProgramReceiveSelectorKind::a_channel, static_cast<std::uint8_t>(selector + 1U), selector};
+    if (selector == 16U)
+        return {ProgramReceiveSelectorKind::basic_channel, std::nullopt, selector};
+    if (selector <= 32U)
+        return {ProgramReceiveSelectorKind::b_channel, static_cast<std::uint8_t>(selector - 16U), selector};
+    return {ProgramReceiveSelectorKind::unknown, std::nullopt, selector};
+}
+
+std::string receive_selector_display(const ProgramReceiveSelector &selector) {
+    switch (selector.kind) {
+    case ProgramReceiveSelectorKind::sample:
+        return "=Smp";
+    case ProgramReceiveSelectorKind::a_channel:
+        return std::format("A{:02}", *selector.channel);
+    case ProgramReceiveSelectorKind::basic_channel:
+        return "Bch";
+    case ProgramReceiveSelectorKind::b_channel:
+        return std::format("B{:02}", *selector.channel);
+    case ProgramReceiveSelectorKind::unknown:
         return "unknown";
-    if (row.flags == 0xffU)
-        return "=SMP";
-    if (row.flags <= 15U)
-        return std::format("{:02}", row.flags + 1U);
-    if (row.flags == 16U)
-        return "BasicRch";
-    if (row.flags <= 32U)
-        return std::format("B{:02}", row.flags - 16U);
+    }
     return "unknown";
 }
 
@@ -338,9 +348,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                                                     : std::format("assignment-kind-0x{:02x}+name", row.kind),
                         type == ObjectType::unknown ? "assignment-name-ambiguous"
                                                     : std::format("assignment-kind-0x{:02x}+name-ambiguous", row.kind),
-                        decoded_state == AssignmentState::active ||
-                            (decoded_state == AssignmentState::visible_off && type != ObjectType::unknown) ||
-                            item->scope_key.starts_with("iso:"));
+                        decoded_state == AssignmentState::stored_assignment || item->scope_key.starts_with("iso:"));
                     if (match.target != nullptr && match.basis.ends_with("+same-folder") &&
                         type != ObjectType::unknown) {
                         match.quality = RelationshipQuality::known;
@@ -366,126 +374,28 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     const auto rel_type = type == ObjectType::sbac   ? "PROG_ASSIGNMENT_TO_SBAC"
                                           : type == ObjectType::sbnk ? "PROG_ASSIGNMENT_TO_SBNK"
                                                                      : "PROG_ASSIGNMENT_TO_OBJECT";
+                    const auto selector = decode_receive_selector(row.flags);
                     auto state = decoded_state;
-                    auto channel = receive_channel(row);
-                    if (match.target != nullptr && item->scope_key.starts_with("iso:") &&
-                        state != AssignmentState::active) {
-                        state = AssignmentState::source_load;
-                        channel = "unknown";
+                    if (match.target != nullptr && item->scope_key.starts_with("iso:") && type == ObjectType::sbnk &&
+                        match.target->object.header.type != ObjectType::sbnk) {
+                        state = AssignmentState::source_load_assignment;
                     }
-                    result.relationships.push_back(
-                        edge(*item, rel_type, match, index, row.name, state, std::move(channel)));
+                    result.relationships.push_back(edge(*item, rel_type, match, index, row.name, state, selector,
+                                                        receive_selector_display(selector)));
                 }
-                const auto last_program_edge = result.relationships.size();
-                for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge; ++edge_index) {
-                    auto &relationship = result.relationships[edge_index];
-                    if (relationship.assignment_state != AssignmentState::visible_off || relationship.target_key ||
-                        relationship.quality != RelationshipQuality::tentative) {
-                        continue;
-                    }
-                    std::size_t same_volume_candidates{};
-                    for (const auto &key : relationship.candidate_keys) {
-                        const auto candidate = scope_index.keys.find(key);
-                        if (candidate != scope_index.keys.end() && same_volume(*item, *candidate->second))
-                            ++same_volume_candidates;
-                    }
-                    if (relationship.basis == "assignment-kind-0x11+name-ambiguous") {
-                        relationship.basis = same_volume_candidates == 1U
-                                                 ? "assignment-visible-off-same-volume-sbac-"
-                                                   "diagnostic"
-                                                 : "assignment-visible-off-name-ambiguous-sbac";
-                    } else if (relationship.basis == "assignment-kind-0x10+name-ambiguous") {
-                        relationship.basis = same_volume_candidates == 1U
-                                                 ? "assignment-visible-off-same-volume-sbnk-"
-                                                   "diagnostic"
-                                                 : "assignment-visible-off-name-ambiguous-sbnk";
-                    } else if (relationship.basis == "assignment-name-ambiguous") {
-                        bool only_waveforms = !relationship.candidate_keys.empty();
-                        for (const auto &key : relationship.candidate_keys) {
-                            const auto candidate = scope_index.keys.find(key);
-                            only_waveforms = only_waveforms && candidate != scope_index.keys.end() &&
-                                             candidate->second->object.header.type == ObjectType::smpl;
-                        }
-                        relationship.basis = only_waveforms ? "assignment-visible-off-name-"
-                                                              "ambiguous-smpl-candidates"
-                                                            : "assignment-visible-off-name-"
-                                                              "ambiguous-non-target-category";
-                    } else {
-                        continue;
-                    }
-                    relationship.key = std::format("{}|{}|ambiguous|{}", relationship.source_key, relationship.type,
-                                                   relationship.basis);
-                }
-                for (const auto rel_type :
-                     {std::string_view{"PROG_ASSIGNMENT_TO_SBNK"}, std::string_view{"PROG_ASSIGNMENT_TO_SBAC"}}) {
-                    std::set<std::string> resolved_targets;
-                    for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge; ++edge_index) {
-                        const auto &relationship = result.relationships[edge_index];
-                        if (relationship.type == rel_type && relationship.target_key &&
-                            (relationship.quality == RelationshipQuality::known ||
-                             relationship.quality == RelationshipQuality::likely)) {
-                            resolved_targets.insert(*relationship.target_key);
-                        }
-                    }
-                    if (resolved_targets.size() != 1U)
-                        continue;
-                    const auto target_key = *resolved_targets.begin();
-                    for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge; ++edge_index) {
-                        auto &relationship = result.relationships[edge_index];
-                        if (relationship.type != rel_type || relationship.target_key ||
-                            !relationship.candidate_keys.empty() ||
-                            relationship.quality != RelationshipQuality::unknown)
-                            continue;
-                        relationship.target_key = target_key;
-                        relationship.candidate_keys = {target_key};
-                        relationship.quality = RelationshipQuality::likely;
-                        const auto kind = rel_type.ends_with("SBAC") ? 0x11U : 0x10U;
-                        relationship.basis = std::format("assignment-kind-0x{:02x}+program-"
-                                                         "local-target-context",
-                                                         kind);
-                        relationship.notes = "unmatched assignment shares a "
-                                             "Program with one resolved target";
-                        relationship.key = std::format("{}|{}|{}|{}", relationship.source_key, relationship.type,
-                                                       target_key, relationship.basis);
-                    }
-                }
-                for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge; ++edge_index) {
+                for (auto edge_index = first_program_edge; edge_index < result.relationships.size(); ++edge_index) {
                     auto &relationship = result.relationships[edge_index];
                     if (relationship.quality != RelationshipQuality::unknown)
                         continue;
-                    if (relationship.assignment_state == AssignmentState::active &&
+                    if (relationship.assignment_state == AssignmentState::stored_assignment &&
                         (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" ||
                          relationship.type == "PROG_ASSIGNMENT_TO_SBAC")) {
-                        relationship.basis = "assignment-active-missing-local-target";
-                    } else if (relationship.assignment_state == AssignmentState::visible_off &&
-                               relationship.type == "PROG_ASSIGNMENT_TO_SBAC") {
-                        relationship.basis = item->scope_key.starts_with("iso:")
-                                                 ? "assignment-visible-off-iso-missing-local-"
-                                                   "sbac"
-                                                 : "assignment-visible-off-missing-local-sbac";
-                    } else if (relationship.assignment_state == AssignmentState::visible_off &&
-                               relationship.type == "PROG_ASSIGNMENT_TO_SBNK") {
-                        relationship.basis = "assignment-visible-off-missing-local-sbnk";
+                        relationship.basis = "assignment-stored-missing-local-target";
                     } else {
                         continue;
                     }
                     relationship.key =
                         std::format("{}|{}|missing|{}", relationship.source_key, relationship.type, relationship.basis);
-                }
-                std::set<std::tuple<std::string, std::string, std::string>> active_targets;
-                for (std::size_t edge_index = first_program_edge; edge_index < last_program_edge; ++edge_index) {
-                    auto &relationship = result.relationships[edge_index];
-                    if (!relationship.target_key)
-                        continue;
-                    const auto identity =
-                        std::tuple{relationship.type, *relationship.target_key, relationship.assignment_name};
-                    if (relationship.assignment_state == AssignmentState::active) {
-                        active_targets.insert(identity);
-                    } else if ((relationship.assignment_state == AssignmentState::source_load ||
-                                relationship.assignment_state == AssignmentState::visible_off) &&
-                               !active_targets.insert(identity).second) {
-                        relationship.assignment_state = AssignmentState::duplicate_not_active;
-                    }
                 }
             }
         }
@@ -618,6 +528,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     {},
                     AssignmentState::unknown,
                     {},
+                    {},
                 });
             }
             result.bitmap_comparisons.push_back(std::move(comparison));
@@ -646,18 +557,26 @@ std::string_view relationship_quality_name(RelationshipQuality quality) noexcept
 
 std::string_view assignment_state_name(AssignmentState state) noexcept {
     switch (state) {
-    case AssignmentState::active:
-        return "confirmed-active";
-    case AssignmentState::source_load:
+    case AssignmentState::stored_assignment:
+        return "stored-assignment";
+    case AssignmentState::source_load_assignment:
         return "source-load-assignment";
-    case AssignmentState::visible_off:
-        return "confirmed-visible-off";
-    case AssignmentState::duplicate_not_active:
-        return "confirmed-duplicate-not-active";
     case AssignmentState::unknown:
         return "unknown";
     }
     return "unknown";
+}
+
+bool is_program_assignment_row(const Relationship &relationship) noexcept {
+    return relationship.type.starts_with("PROG_ASSIGNMENT_TO_") &&
+           (relationship.assignment_state == AssignmentState::stored_assignment ||
+            relationship.assignment_state == AssignmentState::source_load_assignment);
+}
+
+bool is_effective_program_assignment(const Relationship &relationship) noexcept {
+    return (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
+           is_program_assignment_row(relationship) && relationship.quality == RelationshipQuality::known &&
+           relationship.target_key.has_value();
 }
 
 } // namespace axk

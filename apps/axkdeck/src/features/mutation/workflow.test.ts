@@ -245,6 +245,7 @@ describe('MutationWorkflow', () => {
                     targetObjectId: 'sample-direct',
                     relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
                     quality: 'KNOWN',
+                    assignmentState: 'stored-assignment',
                 },
             ],
             membersForBank: () => [],
@@ -261,6 +262,63 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([
             { sampleName: 'Direct Sample', programName: '001: Lead' },
         ]);
+    });
+
+    it('does not block Sample Bank assignment for an unresolved Program row', () => {
+        const selected = {
+            id: 'sample-inactive',
+            objectId: 'sample-inactive',
+            name: 'Inactive Sample',
+            objectType: 'SBNK' as const,
+            sampleBankObjectIds: [],
+            object: {
+                key: 'sample-inactive',
+                objectType: 'SBNK',
+                name: 'Inactive Sample',
+                partitionIndex: 0,
+                partitionName: 'Partition 1',
+                volumeName: 'Samples',
+                categoryName: 'SBNK',
+                sfsId: 1,
+                storedSizeBytes: 512,
+                sampleRate: 44_100,
+                rootKey: 60,
+                frameCount: 1,
+                sampleWidthBytes: 2,
+            },
+        };
+        const bank = {
+            ...selected,
+            id: 'bank-1',
+            objectId: 'bank-1',
+            name: 'Bank 1',
+            objectType: 'SBAC' as const,
+            object: { ...selected.object, key: 'bank-1', objectType: 'SBAC', name: 'Bank 1' },
+        };
+        const catalog = {
+            sampleBanks: [bank],
+            programs: [{ objectId: 'program-1', name: 'Lead', slot: '001' }],
+            relationships: [
+                {
+                    sourceObjectId: 'program-1',
+                    targetObjectId: 'sample-inactive',
+                    relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
+                    quality: 'KNOWN',
+                    assignmentState: 'unknown',
+                },
+            ],
+            membersForBank: () => [],
+        };
+        const { workflow } = workflowWith({}, catalog);
+        workflow.setCapabilities({
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectRenameAvailable: true,
+        });
+
+        workflow.requestSampleBankAssignment([selected]);
+
+        expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([]);
     });
 
     it('keeps deletion blocked and does not implicitly repair placement', async () => {

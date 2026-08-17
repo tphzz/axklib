@@ -61,6 +61,8 @@ bool admitted_extension(axk::app::UploadKind kind, const std::filesystem::path &
         return std::ranges::find(package_extensions, extension) != package_extensions.end();
     case axk::app::UploadKind::manifest:
         return extension == ".json";
+    case axk::app::UploadKind::disk_image:
+        return extension == ".img" || extension == ".ima";
     }
     return false;
 }
@@ -77,6 +79,8 @@ bool valid_media_type(axk::app::UploadKind kind, std::string_view value) {
         return value == "application/vnd.axklib.package" || value == "application/octet-stream";
     case axk::app::UploadKind::manifest:
         return value == "application/json";
+    case axk::app::UploadKind::disk_image:
+        return value == "application/octet-stream" || value == "application/x-raw-disk-image";
     }
     return false;
 }
@@ -91,6 +95,8 @@ std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
         return "package uploads require an axklib package file";
     case axk::app::UploadKind::manifest:
         return "manifest uploads require a JSON file";
+    case axk::app::UploadKind::disk_image:
+        return "disk image uploads require an IMG or IMA file";
     }
     return "upload type is not allowed";
 }
@@ -596,6 +602,8 @@ std::string_view axk::app::upload_kind_name(UploadKind kind) noexcept {
         return "PACKAGE";
     case UploadKind::manifest:
         return "MANIFEST";
+    case UploadKind::disk_image:
+        return "DISK_IMAGE";
     }
     return "AUDIO";
 }

@@ -19,7 +19,8 @@ bool session_operation(std::string_view id) {
            id == "images.audio_export.inspect" || id == "images.audio_export" ||
            id == "images.volume_package_export.inspect" || id == "images.volume_package_export" ||
            id == "images.volume_floppy_export.inspect" || id == "images.volume_floppy_export" ||
-           id == "images.sequence_export" || id == "images.media_conversion.inspect" || id == "images.media_conversion";
+           id == "images.sequence_export" || id == "images.tx16w.inspect" || id == "images.media_conversion.inspect" ||
+           id == "images.media_conversion" || id == "images.extent_layout.repair";
 }
 
 class TemporaryDirectory {

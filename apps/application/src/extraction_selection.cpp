@@ -137,10 +137,8 @@ axk::app::ExactExportClosure axk::app::build_exact_export_closure(const Relation
     while (changed) {
         changed = false;
         for (const auto &row : graph.relationships) {
-            const auto active_program_assignment = closure.programs.contains(row.source_key) &&
-                                                   row.type.starts_with("PROG_ASSIGNMENT_TO_") &&
-                                                   (row.assignment_state == AssignmentState::active ||
-                                                    row.assignment_state == AssignmentState::source_load);
+            const auto active_program_assignment =
+                closure.programs.contains(row.source_key) && axk::is_effective_program_assignment(row);
             const auto sample_bank_member =
                 closure.sample_banks.contains(row.source_key) && row.type == "SBAC_SLOT_TO_SBNK";
             const auto sample_wave_data =

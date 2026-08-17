@@ -141,7 +141,7 @@
                                         >
                                     {/if}
                                 </span>
-                                <span class="program-generation-assignment" role="cell">=SMP</span>
+                                <span class="program-generation-assignment" role="cell">=Smp</span>
                             </div>
                         {/each}
                     </div>

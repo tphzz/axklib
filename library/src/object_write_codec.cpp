@@ -389,9 +389,8 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
 }
 
 Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
-    constexpr std::size_t maximum_assignments = 11U;
     if (program.number == 0U || program.number > 128U || program.name.empty() || program.name.size() > 8U ||
-        program.assignments.empty() || program.assignments.size() > maximum_assignments) {
+        program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Program number or assignment count exceeds the encoded capacity")};
     }
@@ -404,15 +403,19 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
                                               "Program assignment cannot be represented by the object codec")};
         }
     }
-    std::vector<std::byte> result(0x390);
+    constexpr std::size_t assignment_offset = 0x120U;
+    constexpr std::size_t assignment_stride = 0x38U;
+    constexpr std::size_t payload_tail_size = 8U;
+    const auto payload_size = assignment_offset + program.assignments.size() * assignment_stride + payload_tail_size;
+    std::vector<std::byte> result(std::max<std::size_t>(0x390U, payload_size));
     ObjectPayloadWriter writer{result};
     std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
                            [](char value) { return static_cast<std::byte>(value); });
     std::ranges::transform(std::string_view{"PROG"}, result.begin() + 0x0c,
                            [](char value) { return static_cast<std::byte>(value); });
     writer.be32(0x14, 4);
-    writer.be32(0x18, 0x2b0);
-    writer.be32(0x1c, 0x360);
+    writer.be32(0x18, static_cast<std::uint32_t>(result.size() - 0xe0U));
+    writer.be32(0x1c, static_cast<std::uint32_t>(result.size() - 0x30U));
     result[0x30] = std::byte{0x14};
     result[0x31] = std::byte{0x0c};
     const auto object_name = std::format("{:03}", program.number);
@@ -432,7 +435,7 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
     std::ranges::copy(defaults, result.begin() + 0x80);
     for (std::size_t index = 0; index < program.assignments.size(); ++index) {
         const auto &assignment = program.assignments[index];
-        const auto offset = 0x120U + index * 0x38U;
+        const auto offset = assignment_offset + index * assignment_stride;
         auto target = ascii(assignment.target_name, 16);
         if (!target)
             return std::unexpected{target.error()};

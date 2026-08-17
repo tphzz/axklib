@@ -23,9 +23,7 @@ bool dependency_relationship(const Relationship &relationship) {
         relationship.type == "SBAC_SLOT_TO_SBNK") {
         return true;
     }
-    return (relationship.type == "PROG_ASSIGNMENT_TO_SBNK" || relationship.type == "PROG_ASSIGNMENT_TO_SBAC") &&
-           (relationship.assignment_state == AssignmentState::active ||
-            relationship.assignment_state == AssignmentState::source_load);
+    return is_effective_program_assignment(relationship);
 }
 
 Result<std::vector<detail::PreparedMediaObject>> prepare_transfer(const SavedObjectTransferSpec &transfer,

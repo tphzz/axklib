@@ -4,11 +4,13 @@ import { reportDiagnostic, reportError } from '../../lib/diagnostics';
 import { midiMediaType } from '../../lib/midiImport';
 import { listenForNativeMediaDrops, type NativeDropPosition } from '../../lib/nativeMediaDrop';
 import type { AudioImportTarget } from '../../lib/transport';
+import { tx16wDiskMediaType } from '../../lib/tx16wImport';
 import type { WorkspaceView } from '../../lib/types';
 import type { AudioImportWorkflow } from './audioWorkflow.svelte';
 import type { SequenceImportWorkflow } from './sequenceWorkflow.svelte';
+import type { Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
 
-export type MediaDropKind = 'audio' | 'midi' | 'mixed';
+export type MediaDropKind = 'audio' | 'midi' | 'tx16w' | 'mixed';
 type ClassifiedMedia = MediaDropKind | 'none';
 
 export interface MediaDropNotice {
@@ -21,6 +23,7 @@ interface MediaDropDependencies {
     workspaceView: () => WorkspaceView;
     audioImport: AudioImportWorkflow;
     sequenceImport: SequenceImportWorkflow;
+    tx16wImport: Tx16wImportWorkflow;
     setStatus: (status: string) => void;
 }
 
@@ -50,7 +53,7 @@ export class MediaDropWorkflow {
                     mediaKind: kind,
                 });
                 if (droppedPathCount > 0 && files.length === 0) {
-                    this.dependencies.setStatus('No supported audio or MIDI files were dropped');
+                    this.dependencies.setStatus('No supported audio, MIDI, or TX16W disk files were dropped');
                     return;
                 }
                 void this.route(files, position ? this.nativeDroppedTarget(position, kind) : null);
@@ -92,7 +95,7 @@ export class MediaDropWorkflow {
         this.dragKind = kind;
         this.dragTarget = kind === 'mixed' ? null : this.targetForElement(event.target, kind);
         this.dragActive = true;
-        dataTransfer.dropEffect = kind === 'mixed' || this.dragTarget === null ? 'none' : 'copy';
+        dataTransfer.dropEffect = kind === 'mixed' || (kind !== 'tx16w' && this.dragTarget === null) ? 'none' : 'copy';
     }
 
     leave(event: DragEvent): void {
@@ -114,14 +117,26 @@ export class MediaDropWorkflow {
         if (this.importDialogOpen() || files.length === 0) return;
         const kind = classifyDroppedNames(files.map((file) => file.name));
         if (kind === 'mixed') {
-            this.dependencies.setStatus('Drop audio and MIDI files separately');
-            this.notice = { title: 'Import unavailable', message: 'Drop audio and MIDI files separately.' };
+            this.dependencies.setStatus('Drop one media type at a time');
+            this.notice = { title: 'Import unavailable', message: 'Drop audio, MIDI, and TX16W disks separately.' };
             return;
         }
         const selectedKind = kind === 'none' ? this.defaultKind() : kind;
         if (kind === 'none') {
             if (selectedKind === 'midi') await this.dependencies.sequenceImport.requestDroppedFiles(files, target);
             else await this.dependencies.audioImport.requestDroppedFiles(files, target);
+            return;
+        }
+        if (selectedKind === 'tx16w') {
+            if (!this.dependencies.tx16wImport.dropAvailable()) {
+                this.dependencies.setStatus('TX16W import requires a writable SFS hard-disk image');
+                this.notice = {
+                    title: 'TX16W import unavailable',
+                    message: 'Open a writable SFS hard-disk image, then drop the TX16W disk again.',
+                };
+                return;
+            }
+            await this.dependencies.tx16wImport.requestDroppedFiles(files, target);
             return;
         }
         if (selectedKind === 'midi') {
@@ -170,13 +185,18 @@ export class MediaDropWorkflow {
         this.dragActive = true;
     }
 
-    private defaultKind(): Exclude<MediaDropKind, 'mixed'> {
+    private defaultKind(): 'audio' | 'midi' {
         return this.dependencies.workspaceView() === 'sequences' ? 'midi' : 'audio';
     }
 
     private targetForElement(target: EventTarget | null, kind: ClassifiedMedia): AudioImportTarget | null {
         if (kind === 'mixed' || kind === 'none') return null;
-        const workflow = kind === 'midi' ? this.dependencies.sequenceImport : this.dependencies.audioImport;
+        const workflow =
+            kind === 'midi'
+                ? this.dependencies.sequenceImport
+                : kind === 'tx16w'
+                  ? this.dependencies.tx16wImport
+                  : this.dependencies.audioImport;
         if (!workflow.dropAvailable()) return null;
         const element = target instanceof Element ? target.closest<HTMLElement>('[data-import-drop-volume]') : null;
         const partition = element?.dataset.importDropPartition;
@@ -195,7 +215,8 @@ export class MediaDropWorkflow {
         return (
             this.notice !== null ||
             this.dependencies.audioImport.request !== null ||
-            this.dependencies.sequenceImport.request !== null
+            this.dependencies.sequenceImport.request !== null ||
+            this.dependencies.tx16wImport.request !== null
         );
     }
 
@@ -209,13 +230,16 @@ export class MediaDropWorkflow {
 export function classifyDroppedNames(names: readonly string[]): ClassifiedMedia {
     let audio = false;
     let midi = false;
+    let tx16w = false;
     for (const name of names) {
         audio ||= audioMediaType(name) !== null;
         midi ||= midiMediaType(name) !== null;
+        tx16w ||= tx16wDiskMediaType(name) !== null;
     }
-    if (audio && midi) return 'mixed';
+    if (Number(audio) + Number(midi) + Number(tx16w) > 1) return 'mixed';
     if (audio) return 'audio';
     if (midi) return 'midi';
+    if (tx16w) return 'tx16w';
     return 'none';
 }
 

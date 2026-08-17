@@ -207,9 +207,7 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
             continue;
         std::map<VolumeKey, std::vector<std::string>> targets_by_volume;
         for (const auto *relation : graph.children(item.key)) {
-            if (!relation->type.starts_with("PROG_ASSIGNMENT_TO_") || !relation->target_key ||
-                (relation->assignment_state != AssignmentState::active &&
-                 relation->assignment_state != AssignmentState::source_load)) {
+            if (!is_effective_program_assignment(*relation)) {
                 continue;
             }
             const auto &destinations = relation->type == "PROG_ASSIGNMENT_TO_SBAC"

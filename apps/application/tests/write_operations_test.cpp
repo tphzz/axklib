@@ -16,12 +16,15 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/path_reservations.hpp"
+#include "axklib/application/session_extent_layout_repair_operations.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/sfs_repair.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -258,6 +261,9 @@ class WriteOperationsTest : public testing::Test {
         uploads_ = std::make_unique<axk::app::UploadStore>(root_ / "uploads", 16U * 1024U * 1024U, 8U * 1024U * 1024U,
                                                            8U, 2U * 1024U * 1024U, std::chrono::seconds{5},
                                                            [this] { return now_; });
+        downloads_ = std::make_unique<axk::app::DownloadArchiveStore>(root_ / "downloads", 16U * 1024U * 1024U,
+                                                                      8U * 1024U * 1024U, 8U, std::chrono::seconds{5},
+                                                                      [this] { return now_; });
         registry_ = axk::app::make_operation_registry();
         ASSERT_TRUE(axk::app::bind_write_operations(registry_, *sandbox_, *uploads_));
         reservations_ = std::make_unique<axk::app::PathReservationCoordinator>();
@@ -266,12 +272,15 @@ class WriteOperationsTest : public testing::Test {
         journals_ = std::make_unique<axk::app::AlterationJournalStore>(root_ / "journals");
         ASSERT_TRUE(journals_->storage_ready());
         ASSERT_TRUE(axk::app::bind_session_write_operations(registry_, *sandbox_, *uploads_, *images_, *journals_));
+        ASSERT_TRUE(
+            axk::app::bind_session_extent_layout_repair_operations(registry_, *sandbox_, *images_, *downloads_));
     }
 
     void TearDown() override {
         images_.reset();
         journals_.reset();
         reservations_.reset();
+        downloads_.reset();
         uploads_.reset();
         std::error_code error;
         std::filesystem::remove_all(root_, error);
@@ -286,11 +295,63 @@ class WriteOperationsTest : public testing::Test {
     std::chrono::steady_clock::time_point now_;
     std::unique_ptr<axk::app::Sandbox> sandbox_;
     std::unique_ptr<axk::app::UploadStore> uploads_;
+    std::unique_ptr<axk::app::DownloadArchiveStore> downloads_;
     std::unique_ptr<axk::app::PathReservationCoordinator> reservations_;
     std::unique_ptr<axk::app::ImageSessionManager> images_;
     std::unique_ptr<axk::app::AlterationJournalStore> journals_;
     axk::app::OperationRegistry registry_;
 };
+
+TEST_F(WriteOperationsTest, SessionExtentLayoutRepairPublishesAValidatedCopyWithoutChangingTheSource) {
+    write_tone(root_ / "extent-repair.wav");
+    const auto source = root_ / "extent-repair.hds";
+    ASSERT_TRUE(axk::write_hds_image(placement_repair_manifest(root_ / "extent-repair.wav"), source));
+    auto container = axk::open_image(source);
+    ASSERT_TRUE(container) << container.error().message;
+    const auto volume_root = std::ranges::find_if(container->partitions().front().records, [](const auto &record) {
+        return record.payload_kind == axk::PayloadKind::directory && record.extents.size() == 1U &&
+               std::ranges::contains(record.directory_entries, "Samples", &axk::DirectoryEntry::name);
+    });
+    ASSERT_NE(volume_root, container->partitions().front().records.end());
+    ASSERT_LT(volume_root->data_size, volume_root->extents.front().cluster_count * axk::sfs_default_sector_size *
+                                          container->partitions().front().sectors_per_cluster);
+    patch_index_be32(source, *volume_root, 0x12U, volume_root->extents.front().byte_count + 1U);
+    const auto source_bytes = read_bytes(source);
+
+    const auto opened = images_->open({"workspace", "extent-repair.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto repaired =
+        registry_.invoke("images.extent_layout.repair",
+                         {{"imageId", opened->image_id},
+                          {"expectedRevision", opened->revision},
+                          {"destination",
+                           {{"kind", "WORKSPACE"},
+                            {"output", {{"rootId", "workspace"}, {"relativePath", "extent-repaired.hds"}}},
+                            {"overwrite", false}}}},
+                         context());
+    ASSERT_TRUE(repaired) << repaired.error().message;
+    EXPECT_EQ(repaired->at("imageId"), opened->image_id);
+    EXPECT_EQ(repaired->at("revision"), opened->revision);
+    EXPECT_EQ(repaired->at("destination"), "WORKSPACE");
+    EXPECT_EQ(repaired->at("output").at("relativePath"), "extent-repaired.hds");
+    ASSERT_EQ(repaired->at("repairs").size(), 1U);
+    const auto &repair = repaired->at("repairs").front();
+    EXPECT_EQ(repair.at("partitionIndex"), 0U);
+    EXPECT_EQ(repair.at("recordId"), volume_root->sfs_id.value);
+    EXPECT_EQ(repair.at("logicalSize"), volume_root->data_size);
+    ASSERT_EQ(repair.at("sourceExtents").size(), 1U);
+    ASSERT_EQ(repair.at("replacementExtents").size(), 1U);
+    EXPECT_EQ(repair.at("sourceExtents").front().at("byteCount"), volume_root->extents.front().byte_count + 1U);
+    EXPECT_EQ(repair.at("replacementExtents").front().at("byteCount"), volume_root->data_size);
+
+    EXPECT_EQ(read_bytes(source), source_bytes);
+    const auto repaired_container = axk::open_image(root_ / "extent-repaired.hds");
+    ASSERT_TRUE(repaired_container) << repaired_container.error().message;
+    EXPECT_TRUE(std::ranges::all_of(repaired_container->partitions(), [](const auto &partition) {
+        return axk::allocation_is_safe_for_mutation(partition.allocation);
+    }));
+    EXPECT_FALSE(axk::inspect_sfs_extent_layout_repair(*repaired_container));
+}
 
 TEST_F(WriteOperationsTest, StarterManifestsAreInlineAndHdsStarterBuildsPersistentValidatedImage) {
     const auto starter = registry_.invoke("create.manifest", {{"kind", "HDS"}}, context());
@@ -845,8 +906,9 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     const auto sample_entry =
         std::ranges::find(sample_directory->directory_entries, "Old Sample", &axk::DirectoryEntry::name);
     ASSERT_NE(sample_entry, sample_directory->directory_entries.end());
-    const auto sample_sfs_id = axk::SfsId{sample_entry->link_id.value};
+    const auto sample_sfs_id = axk::SfsId{sample_entry->raw_link_id.value};
     patch_index_be32(source, *sample_directory, 6U, 64U);
+    patch_index_be32(source, *sample_directory, 0x12U, 64U);
 
     container = axk::open_image(source);
     ASSERT_TRUE(container) << container.error().message;
@@ -938,8 +1000,9 @@ TEST_F(WriteOperationsTest, SessionPartitionPlacementRepairRecoversOwnerlessWave
     const auto waveform_entry =
         std::ranges::find(waveform_directory->directory_entries, "Wave", &axk::DirectoryEntry::name);
     ASSERT_NE(waveform_entry, waveform_directory->directory_entries.end());
-    const auto waveform_sfs_id = axk::SfsId{waveform_entry->link_id.value};
+    const auto waveform_sfs_id = axk::SfsId{waveform_entry->raw_link_id.value};
     patch_index_be32(source, *waveform_directory, 6U, 64U);
+    patch_index_be32(source, *waveform_directory, 0x12U, 64U);
 
     const auto opened = images_->open({"workspace", "partition-placement-repair.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;

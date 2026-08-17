@@ -34,6 +34,146 @@ const common = {
 };
 
 describe('ObjectWorkspace', () => {
+    it('moves through Programs with arrows and extends selection with Shift', async () => {
+        const programObjects = ['001', '002', '003'].map((slot) => object('PROG', slot));
+        const programs = programObjects.map((programObject, index) => ({
+            id: `program-${index + 1}`,
+            objectId: programObject.key,
+            slot: programObject.name,
+            programNumber: index + 1,
+            name: `Program ${index + 1}`,
+            object: programObject,
+        }));
+        const onprogramselect = vi.fn();
+        const onselectionchange = vi.fn();
+        const props = {
+            ...common,
+            programs,
+            view: 'programs' as const,
+            onprogramselect,
+            onselectionchange,
+        };
+        const rendered = render(ObjectWorkspace, { props });
+        const rows = () => screen.getAllByRole('button', { name: /Program \d/ });
+
+        rows()[0]!.focus();
+        await fireEvent.keyDown(rows()[0]!, { key: 'ArrowDown' });
+        let selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        expect(onprogramselect).toHaveBeenLastCalledWith(programs[1]);
+        expect(selection.items.map((item) => item.objectId)).toEqual([programObjects[1]!.key]);
+        expect(document.activeElement).toBe(rows()[1]);
+
+        await rendered.rerender({ ...props, activeObjectId: programObjects[1]!.key, selection });
+        await fireEvent.keyDown(rows()[1]!, { key: 'ArrowDown', shiftKey: true });
+        selection = onselectionchange.mock.calls.at(-1)?.[0] as PackageExportSelectionState;
+        expect(selection.items.map((item) => item.objectId)).toEqual([programObjects[1]!.key, programObjects[2]!.key]);
+        expect(onprogramselect).toHaveBeenCalledTimes(1);
+        expect(document.activeElement).toBe(rows()[2]);
+    });
+
+    it('moves to the end of a virtualized Wave Data list and scrolls it into view', async () => {
+        const waveData = Array.from({ length: 80 }, (_, index) => {
+            const name = `SMP ${String(index + 1).padStart(3, '0')}`;
+            const waveObject = {
+                ...object('SMPL', name),
+                sampleRate: 44_100,
+                sampleWidthBytes: 2,
+                frameCount: 1,
+            };
+            return {
+                id: waveObject.key,
+                objectKey: waveObject.key,
+                name,
+                note: 'C3',
+                duration: '0.00 s',
+                sampleRate: '44.1 kHz',
+                bitDepth: '16-bit',
+                channels: 'Mono' as const,
+                storedSizeBytes: 2,
+                waveform: [],
+                previewState: 'idle' as const,
+                object: waveObject,
+            };
+        });
+        const onwavedataselect = vi.fn();
+        const onselectionchange = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData,
+                view: 'wave-data',
+                onwavedataselect,
+                onselectionchange,
+            },
+        });
+
+        const first = screen.getByRole('button', { name: 'Inspect SMP 001' });
+        const list = document.querySelector('.collection-body') as HTMLElement;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
+        first.focus();
+        await fireEvent.keyDown(first, { key: 'End' });
+
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[79]);
+        expect(screen.getByRole('button', { name: 'Inspect SMP 080' })).toBe(document.activeElement);
+        expect(list.scrollTop).toBeGreaterThan(0);
+    });
+
+    it('retains selection and focus across repeated paging in virtualized Wave Data', async () => {
+        const waveData = Array.from({ length: 80 }, (_, index) => {
+            const name = `SMP ${String(index + 1).padStart(3, '0')}`;
+            const waveObject = {
+                ...object('SMPL', name),
+                sampleRate: 44_100,
+                sampleWidthBytes: 2,
+                frameCount: 1,
+            };
+            return {
+                id: waveObject.key,
+                objectKey: waveObject.key,
+                name,
+                note: 'C3',
+                duration: '0.00 s',
+                sampleRate: '44.1 kHz',
+                bitDepth: '16-bit',
+                channels: 'Mono' as const,
+                storedSizeBytes: 2,
+                waveform: [],
+                previewState: 'idle' as const,
+                object: waveObject,
+            };
+        });
+        const onwavedataselect = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData,
+                view: 'wave-data',
+                onwavedataselect,
+                onselectionchange: vi.fn(),
+            },
+        });
+
+        const list = document.querySelector('.collection-body') as HTMLElement;
+        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
+        screen.getByRole('button', { name: 'Inspect SMP 001' }).focus();
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 005' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[8]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 009' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageUp' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 005' }));
+
+        await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+        expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[79]);
+        expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 080' }));
+    });
+
     it('mounts and scrolls a bounded window of Wave Data rows and canvases', async () => {
         const waveData = Array.from({ length: 200 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
@@ -186,6 +326,7 @@ describe('ObjectWorkspace', () => {
                         id: 'program-1',
                         objectId: programObject.key,
                         slot: '001',
+                        programNumber: 1,
                         name: 'Grand Piano',
                         object: programObject,
                     },
@@ -211,6 +352,7 @@ describe('ObjectWorkspace', () => {
             id: `program-${index + 1}`,
             objectId: programObject.key,
             slot: programObject.name,
+            programNumber: index + 1,
             name: `Program ${index + 1}`,
             object: programObject,
         }));
@@ -269,6 +411,7 @@ describe('ObjectWorkspace', () => {
                         id: 'program-1',
                         objectId: programObject.key,
                         slot: '001',
+                        programNumber: 1,
                         name: 'Grand',
                         object: programObject,
                     },
@@ -307,7 +450,14 @@ describe('ObjectWorkspace', () => {
             props: {
                 ...common,
                 programs: [
-                    { id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject },
+                    {
+                        id: 'program-1',
+                        objectId: firstObject.key,
+                        slot: '001',
+                        programNumber: 1,
+                        name: 'Piano',
+                        object: firstObject,
+                    },
                 ],
                 view: 'programs',
                 packageExportAvailable: true,
@@ -326,7 +476,16 @@ describe('ObjectWorkspace', () => {
 
         await rendered.rerender({
             ...common,
-            programs: [{ id: 'program-1', objectId: firstObject.key, slot: '001', name: 'Piano', object: firstObject }],
+            programs: [
+                {
+                    id: 'program-1',
+                    objectId: firstObject.key,
+                    slot: '001',
+                    programNumber: 1,
+                    name: 'Piano',
+                    object: firstObject,
+                },
+            ],
             view: 'programs',
             packageExportAvailable: true,
             objectDeletionAvailable: true,

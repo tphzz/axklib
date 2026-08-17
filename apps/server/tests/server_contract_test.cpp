@@ -144,6 +144,30 @@ TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
     EXPECT_EQ(inspection.at("enum"), nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
 }
 
+TEST(ServerContract, AlterationJobReportsIncludeTx16wDiskSetImports) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator{document};
+    const auto &type =
+        document.at("components").at("schemas").at("AlterationOperationReport").at("properties").at("type");
+    EXPECT_TRUE(std::ranges::contains(type.at("enum"), "IMPORT_TX16W_DISK_SET"));
+    EXPECT_EQ(type.at("x-axklib-application-enum").at("IMPORT_TX16W_DISK_SET"), "import_tx16w_disk_set");
+    const auto application_report = nlohmann::json{{"id", "tx16w-import"},
+                                                   {"type", "import_tx16w_disk_set"},
+                                                   {"partitionIndex", 0U},
+                                                   {"volumeName", "TX16W"},
+                                                   {"objectName", ""},
+                                                   {"removedSfsIds", nlohmann::json::array()},
+                                                   {"insertedSfsIds", nlohmann::json::array({4U, 5U})},
+                                                   {"placedSfsIds", nlohmann::json::array()},
+                                                   {"freedClusters", 0U},
+                                                   {"allocatedClusters", 2U},
+                                                   {"audioImport", nullptr}};
+    const auto wire_report = validator.wire_value("AlterationOperationReport", application_report);
+    EXPECT_EQ(wire_report.at("type"), "IMPORT_TX16W_DISK_SET");
+    EXPECT_TRUE(validator.validate("AlterationOperationReport", wire_report));
+}
+
 TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
@@ -167,10 +191,35 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
     EXPECT_EQ(item.at("properties").at("receiveChannelDisplay").at("type"), "string");
 }
 
+TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvailable) {
+    const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
+    const auto &path = document.at("paths").at("/images/{imageId}/system-program-contexts");
+    EXPECT_EQ(path.at("get").at("operationId"), "images.systemProgramContexts");
+    const auto &parameters = path.at("parameters");
+    const auto partition = std::ranges::find_if(parameters, [](const auto &candidate) {
+        return candidate.is_object() && candidate.value("name", "") == "partitionIndex";
+    });
+    ASSERT_NE(partition, parameters.end());
+    EXPECT_TRUE(partition->at("required"));
+    EXPECT_EQ(partition->at("schema").at("minimum"), 0U);
+    EXPECT_EQ(partition->at("schema").at("maximum"), 7U);
+
+    const auto &response =
+        path.at("get").at("responses").at("200").at("content").at("application/json").at("schema").at("$ref");
+    EXPECT_EQ(response, "#/components/schemas/SystemProgramContextsResponse");
+    const auto &contexts = document.at("components").at("schemas").at("SystemProgramContexts");
+    EXPECT_TRUE(std::ranges::contains(contexts.at("required"), "files"));
+    const auto &files = contexts.at("properties").at("files");
+    EXPECT_EQ(files.at("maxItems"), 2U);
+    EXPECT_EQ(files.at("items").at("$ref"), "#/components/schemas/SystemProgramContext");
+    const auto &context = document.at("components").at("schemas").at("SystemProgramContext");
+    ASSERT_EQ(context.at("oneOf").size(), 4U);
+}
+
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 54U);
+    EXPECT_EQ(entries.size(), 56U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

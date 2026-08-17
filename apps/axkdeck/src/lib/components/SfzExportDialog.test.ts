@@ -103,13 +103,12 @@ describe('SfzExportDialog', () => {
             message: 'Unconfirmed relationship excluded from exact export',
             fatal: false as const,
             relationshipType: 'PROG_ASSIGNMENT_TO_SBAC',
-            relationshipQuality: 'LIKELY' as const,
+            relationshipQuality: 'UNKNOWN' as const,
             reason: 'exact export requires a Known relationship',
             sourceObjectKey: 'program-002',
-            targetObjectKey: 'bank-sqr2b',
-            candidateObjectKeys: ['bank-sqr2b'],
-            basis: 'assignment-kind-0x11+program-local-target-context',
-            assignmentState: 'CONFIRMED_ACTIVE' as const,
+            candidateObjectKeys: [],
+            basis: 'assignment-stored-missing-local-target',
+            assignmentState: 'STORED_ASSIGNMENT' as const,
         };
 
         render(SfzExportDialog, {
@@ -132,7 +131,6 @@ describe('SfzExportDialog', () => {
                             ...relationshipIssue,
                             relationshipType: 'PROG_ASSIGNMENT_TO_SBNK',
                             sourceObjectKey: 'program-005',
-                            targetObjectKey: 'sample-astro',
                         },
                     ],
                 },

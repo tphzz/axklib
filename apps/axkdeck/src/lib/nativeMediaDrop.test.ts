@@ -141,4 +141,25 @@ describe('native media drops', () => {
             { name: 'finale.MIDI', type: 'audio/midi' },
         ]);
     });
+
+    it('admits TX16W disk images without reading them eagerly', async () => {
+        const onDrop = vi.fn();
+
+        await listenForNativeMediaDrops({ onHover: vi.fn(), onDrop, onError: vi.fn() });
+        mocks.dragHandler!({
+            payload: {
+                type: 'drop',
+                paths: ['/disks/native.ima', '/disks/backup.IMG'],
+                position: { x: 15, y: 25 },
+            },
+        });
+
+        await vi.waitFor(() => expect(onDrop).toHaveBeenCalledOnce());
+        const files = onDrop.mock.calls[0][0] as { name: string; type: string }[];
+        expect(files.map((file) => ({ name: file.name, type: file.type }))).toEqual([
+            { name: 'native.ima', type: 'application/x-raw-disk-image' },
+            { name: 'backup.IMG', type: 'application/x-raw-disk-image' },
+        ]);
+        expect(mocks.open).not.toHaveBeenCalled();
+    });
 });

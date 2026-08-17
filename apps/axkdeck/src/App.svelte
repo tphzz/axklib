@@ -16,13 +16,17 @@
     import { PackageBatchImportWorkflow } from './features/import/packageBatchWorkflow.svelte';
     import { PackagePickerHistory } from './features/import/packagePickerHistory';
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
+    import { Tx16wImportWorkflow } from './features/import/tx16wWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
+    import { ExtentLayoutRepairWorkflow } from './features/image-session/extentLayoutRepairWorkflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
+    import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
     import { createTransport } from './lib/createTransport';
+    import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
     import {
@@ -94,6 +98,16 @@
         isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
+    });
+    const extentLayoutRepairWorkflow = new ExtentLayoutRepairWorkflow({
+        transport,
+        jobs: jobController,
+        picker: pickerController,
+        isDesktop,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageLocation: () => imageSessionWorkflow.location,
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        closeDialog: () => imageSessionWorkflow.closeIntegrity(),
     });
     const volumePackageExportWorkflow = new VolumePackageExportWorkflow({
         transport,
@@ -249,11 +263,26 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const tx16wImportWorkflow = new Tx16wImportWorkflow({
+        transport,
+        jobs: jobController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageLocation: () => imageSessionWorkflow.location,
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        selectWorkspace: (view) => auditionWorkflow.selectWorkspaceView(view),
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     const mediaDropWorkflow = new MediaDropWorkflow({
         isDesktop,
         workspaceView: () => workspaceView,
         audioImport: audioImportWorkflow,
         sequenceImport: sequenceImportWorkflow,
+        tx16wImport: tx16wImportWorkflow,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({
@@ -267,6 +296,7 @@
         packageImport: packageImportWorkflow,
         deletion: deletionWorkflow,
         programGeneration: programGenerationWorkflow,
+        extentRepairs: extentLayoutRepairWorkflow,
         clearExportSelection: clearPackageExportSelection,
     });
     const programs = $derived(catalog.programs);
@@ -280,11 +310,13 @@
         volumePackageExportWorkflow.dispose();
         volumeFloppyExportWorkflow.dispose();
         mediaExportWorkflow.dispose();
+        extentLayoutRepairWorkflow.dispose();
         deletionWorkflow.dispose();
         programGenerationWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
+        void tx16wImportWorkflow.close();
         void jobController.dispose();
         void imageSessionWorkflow
             .dispose()
@@ -353,6 +385,28 @@
 
     function requestImageAction(item: DiskTreeItem, action: ImageTreeAction): void {
         if (item.partitionIndex === undefined) return;
+        if (action === 'inspect-allocation') {
+            const sessionId = imageSessionWorkflow.sessionId;
+            if (
+                !isDesktop ||
+                sessionId === null ||
+                !imageSessionWorkflow.allocationInspectionAvailable ||
+                item.kind !== 'partition'
+            )
+                return;
+            imageSessionWorkflow.selectedSource = item;
+            void transport
+                .allocationMapReference(sessionId)
+                .then((reference) =>
+                    openAllocationInspector({
+                        ...reference,
+                        partitionIndex: item.partitionIndex!,
+                        partitionName: item.name,
+                    }),
+                )
+                .catch((error) => imageSessionWorkflow.setStatus(userFacingMessage(error)));
+            return;
+        }
         if (action === 'import-package') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
@@ -554,10 +608,12 @@
     audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
+    allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
     closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
+    showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
     manageLocations={() => (workspaceManagerOpen = true)}
     selectSource={(item) => imageSessionWorkflow.selectSource(item)}
     imageAction={requestImageAction}
@@ -575,6 +631,20 @@
 
 {#if experimentalWarningOpen}
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningOpen = false)} />
+{/if}
+
+{#if imageSessionWorkflow.integrityDialogOpen}
+    <ImageIntegrityDialog
+        issues={imageSessionWorkflow.integrityIssues}
+        loading={imageSessionWorkflow.integrityLoading}
+        error={imageSessionWorkflow.integrityError}
+        repairAvailable={imageSessionWorkflow.extentLayoutRepairAvailable}
+        repairing={extentLayoutRepairWorkflow.busy}
+        repairLabel={extentLayoutRepairWorkflow.progressLabel}
+        repairError={extentLayoutRepairWorkflow.error}
+        onrepair={() => void extentLayoutRepairWorkflow.repair()}
+        onclose={() => imageSessionWorkflow.closeIntegrity()}
+    />
 {/if}
 
 <AppDialogs
@@ -608,6 +678,7 @@
     deletion={deletionWorkflow}
     programGeneration={programGenerationWorkflow}
     mediaDrop={mediaDropWorkflow}
+    tx16wImport={tx16wImportWorkflow}
     audioImport={audioImportWorkflow}
     {audioFileInput}
     sequenceImport={sequenceImportWorkflow}

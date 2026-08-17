@@ -1,5 +1,6 @@
 import type {
     AudioImportGrouping,
+    AllocationMapReference,
     AudioImportItem,
     AudioImportTarget,
     AudioSourceInfo,
@@ -21,6 +22,7 @@ import type {
     ImageSessionAudioExportInspection,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
+    ImageSessionExtentLayoutRepairDestination,
     ImageSessionMediaConversionInspection,
     ImageSessionMediaConversionSelection,
     ImageSessionPackageImportDestination,
@@ -48,12 +50,15 @@ import type {
     PreviewEnvelope,
     RelationshipPage,
     RelationshipPageFilter,
+    SystemProgramContexts,
     SampleBankAssignment,
     SampleBankCreation,
     SequenceImportItem,
     SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
+    Tx16wImportInspection,
+    Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
     WaveDataOrphanInspection,
@@ -78,6 +83,7 @@ export interface InMemoryImageTransportOptions {
     opened: Omit<
         OpenedImage,
         | 'sessionId'
+        | 'revision'
         | 'companionSources'
         | 'floppySet'
         | 'volumeMutationsAvailable'
@@ -93,7 +99,10 @@ export interface InMemoryImageTransportOptions {
         | 'audioExportAvailable'
         | 'sequenceExportAvailable'
         | 'mediaConversionAvailable'
+        | 'extentLayoutRepairAvailable'
+        | 'allocationInspectionAvailable'
     > & {
+        revision?: number;
         volumeMutationsAvailable?: boolean;
         partitionMutationsAvailable?: boolean;
         objectRenameAvailable?: boolean;
@@ -107,6 +116,8 @@ export interface InMemoryImageTransportOptions {
         audioExportAvailable?: boolean;
         sequenceExportAvailable?: boolean;
         mediaConversionAvailable?: boolean;
+        extentLayoutRepairAvailable?: boolean;
+        allocationInspectionAvailable?: boolean;
         companionSources?: ImageLocation[];
         floppySet?: OpenedImage['floppySet'];
     };
@@ -157,6 +168,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId: this.nextSessionId++,
+            revision: this.options.opened.revision ?? 1,
             companionSources: this.options.opened.companionSources ?? [],
             floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
@@ -172,6 +184,8 @@ export class InMemoryImageTransport implements ImageTransport {
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
+            extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
+            allocationInspectionAvailable: this.options.opened.allocationInspectionAvailable ?? false,
         };
     }
 
@@ -182,6 +196,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return {
             ...this.options.opened,
             sessionId,
+            revision: this.options.opened.revision ?? 1,
             companionSources: this.options.opened.companionSources ?? [],
             floppySet: this.options.opened.floppySet ?? null,
             volumeMutationsAvailable: this.options.opened.volumeMutationsAvailable ?? false,
@@ -197,6 +212,8 @@ export class InMemoryImageTransport implements ImageTransport {
             audioExportAvailable: this.options.opened.audioExportAvailable ?? false,
             sequenceExportAvailable: this.options.opened.sequenceExportAvailable ?? false,
             mediaConversionAvailable: this.options.opened.mediaConversionAvailable ?? false,
+            extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
+            allocationInspectionAvailable: this.options.opened.allocationInspectionAvailable ?? false,
         };
     }
 
@@ -206,6 +223,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage> {
         return this.invoke('contentChildren', [sessionId, parentId, offset, limit]);
+    }
+
+    validationIssues(sessionId: number): ReturnType<ImageTransport['validationIssues']> {
+        return this.invoke('validationIssues', [sessionId]);
     }
 
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage> {
@@ -219,6 +240,14 @@ export class InMemoryImageTransport implements ImageTransport {
         filter?: RelationshipPageFilter,
     ): Promise<RelationshipPage> {
         return this.invoke('relationshipPage', [sessionId, offset, limit, filter]);
+    }
+
+    systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
+        return this.invoke('systemProgramContexts', [sessionId, partitionIndex]);
+    }
+
+    allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
+        return Promise.resolve({ imageId: `in-memory-${sessionId}`, revision: this.options.opened.revision ?? 1 });
     }
 
     async closeImage(sessionId: number): Promise<void> {
@@ -341,6 +370,15 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectMidi', [source]);
     }
 
+    inspectTx16wDiskSet(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<Tx16wImportInspection> {
+        return this.invoke('inspectTx16wDiskSet', [sessionId, sources, target, importMode]);
+    }
+
     startAudioImport(
         sessionId: number,
         target: AudioImportTarget,
@@ -367,6 +405,15 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy]);
     }
 
+    startTx16wDiskSetImport(
+        sessionId: number,
+        sources: InputFileLocation[],
+        target: AudioImportTarget,
+        importMode: Tx16wImportMode,
+    ): Promise<JobState> {
+        return this.invoke('startTx16wDiskSetImport', [sessionId, sources, target, importMode]);
+    }
+
     startImageSequenceExport(
         sessionId: number,
         objectIds: string[],
@@ -388,6 +435,13 @@ export class InMemoryImageTransport implements ImageTransport {
         destination: ImageSessionMediaConversionDestination,
     ): Promise<JobState> {
         return this.invoke('startImageMediaConversion', [sessionId, selection, destination]);
+    }
+
+    startExtentLayoutRepair(
+        sessionId: number,
+        destination: ImageSessionExtentLayoutRepairDestination,
+    ): Promise<JobState> {
+        return this.invoke('startExtentLayoutRepair', [sessionId, destination]);
     }
 
     downloadFile(source: FileLocation): Promise<ClientDownload> {

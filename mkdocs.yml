@@ -88,6 +88,7 @@ nav:
       - A3K Volume Archives: axklib/a3k-archive.md
       - SFS Filesystem: axklib/sfs-filesystem.md
       - FAT12 Floppy Images: axklib/floppy.md
+      - TX16W Disk Import: axklib/tx16w-import.md
       - CD-ROM Images: axklib/cdrom.md
       - Sampler Data Structures: axklib/sampler-data.md
       - Sequence Data And MIDI: axklib/sequences.md

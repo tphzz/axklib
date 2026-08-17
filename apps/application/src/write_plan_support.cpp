@@ -421,6 +421,8 @@ std::vector<std::filesystem::path> external_paths(const axk::AlterationManifest 
                         result.push_back(*value.sample.interleaved_audio_path);
                 } else if constexpr (std::same_as<Value, axk::InsertWaveformOperation>) {
                     result.push_back(value.waveform.path);
+                } else if constexpr (std::same_as<Value, axk::ImportTx16wDiskSetOperation>) {
+                    result.insert(result.end(), value.disk_paths.begin(), value.disk_paths.end());
                 }
             },
             operation.data);

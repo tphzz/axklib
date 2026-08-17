@@ -10,6 +10,7 @@
     import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
     import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
     import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
+    import type { Tx16wImportWorkflow } from '../import/tx16wWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
@@ -28,6 +29,7 @@
     import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
+    import Tx16wImportDialog from '../../lib/components/Tx16wImportDialog.svelte';
     import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
     import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
     import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
@@ -84,6 +86,7 @@
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
         sequenceImport: SequenceImportWorkflow;
+        tx16wImport: Tx16wImportWorkflow;
         sequenceFileInput?: HTMLInputElement;
         sampleNames: string[];
         sampleBankNames: string[];
@@ -125,6 +128,7 @@
         audioImport,
         audioFileInput,
         sequenceImport,
+        tx16wImport,
         sequenceFileInput,
         sampleNames,
         sampleBankNames,
@@ -449,6 +453,18 @@
         oncancel={() => (sequenceImport.request = null)}
     />
 {/if}
+{#if tx16wImport.request}
+    <Tx16wImportDialog
+        request={tx16wImport.request}
+        volumeOptions={tx16wImport.volumeOptions()}
+        ontarget={(target) => void tx16wImport.selectTarget(target)}
+        onmode={(mode) => void tx16wImport.selectImportMode(mode)}
+        onadd={(files) => void tx16wImport.addFiles(files)}
+        onremove={(memberId) => void tx16wImport.removeMember(memberId)}
+        onconfirm={() => void tx16wImport.commit()}
+        oncancel={() => void tx16wImport.close()}
+    />
+{/if}
 {#if mediaDrop.notice}
     <ImportUnavailableDialog
         title={mediaDrop.notice.title}
@@ -456,12 +472,19 @@
         onclose={() => mediaDrop.closeNotice()}
     />
 {/if}
-{#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request}
+{#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request && !tx16wImport.request}
     <div class="media-drop-overlay" aria-hidden="true">
         <Icon name="upload" size={24} />
         {#if mediaDrop.dragKind === 'mixed'}
-            <strong>Drop audio and MIDI files separately</strong>
+            <strong>Drop one media type at a time</strong>
             <span>Use one media type per drop</span>
+        {:else if mediaDrop.dragKind === 'tx16w'}
+            <strong
+                >{mediaDrop.dragTarget
+                    ? `Import TX16W disk set into ${mediaDrop.dragTarget.volumeName}`
+                    : 'Choose a target volume after dropping'}</strong
+            >
+            <span>One or more TX16W Yamaha-format disk images (.img, .ima)</span>
         {:else if mediaDrop.dragKind === 'midi'}
             <strong
                 >{mediaDrop.dragTarget

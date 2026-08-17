@@ -80,12 +80,13 @@ Result<void> ensure_directory_entry_for_repair(TransactionState &state, MutableP
     auto entries = parse_directory(*payload, directory);
     if (!entries)
         return std::unexpected{entries.error()};
-    const auto exact = std::ranges::count_if(
-        *entries, [&](const ParsedDirectoryEntry &entry) { return entry.id == child && entry.name == name; });
+    const auto exact = std::ranges::count_if(*entries, [&](const ParsedDirectoryEntry &entry) {
+        return entry.target_sfs_id == child && entry.name == name;
+    });
     if (exact == 1U)
         return {};
     if (exact != 0U || std::ranges::any_of(*entries, [&](const ParsedDirectoryEntry &entry) {
-            return entry.id == child || entry.name == name;
+            return entry.target_sfs_id == child || (entry.state == DirectoryEntryState::live && entry.name == name);
         })) {
         return std::unexpected{transaction_error("placement repair directory entry conflicts with recovered data")};
     }

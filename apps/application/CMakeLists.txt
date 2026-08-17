@@ -17,9 +17,11 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/filesystem_file_publication.cpp src/filesystem_native.cpp
                                    src/filesystem_native_publication.cpp src/filesystem_paths.cpp
                                    src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
-                                   src/image_session_access.cpp src/image_session_audition.cpp
+                                   src/image_session_access.cpp src/image_session_allocation_map.cpp src/image_session_audition.cpp
+                                   src/image_allocation_map.cpp
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
                                    src/image_session_program_generation.cpp
+                                   src/image_session_system_program_contexts.cpp
                                    src/image_session_object_reader.cpp src/image_session_open.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
                                    src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
@@ -29,9 +31,11 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp
-                                   src/session_audio_export_operations.cpp src/session_media_conversion_operations.cpp
+                                   src/session_audio_export_operations.cpp src/session_extent_layout_repair_operations.cpp
+                                   src/session_media_conversion_operations.cpp
                                    src/session_placement_operations.cpp src/session_placement_plan.cpp
                                    src/session_sequence_operations.cpp src/session_volume_package_operations.cpp
+                                   src/session_tx16w_operations.cpp
                                    src/session_volume_floppy_export_operations.cpp
                                    src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp
@@ -74,7 +78,7 @@ if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
-                                       tests/content_id_test.cpp
+                                       tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp

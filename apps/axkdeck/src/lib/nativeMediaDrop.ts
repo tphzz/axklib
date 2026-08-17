@@ -4,6 +4,7 @@ import { audioExtensions, audioMediaType } from './audioImport';
 import type { ClientUploadSource } from './clientUploadSource';
 import { midiExtensions, midiMediaType } from './midiImport';
 import { nativeExtension, nativeFileSource } from './nativeFileSource';
+import { tx16wDiskExtensions, tx16wDiskMediaType } from './tx16wImport';
 
 export interface NativeDropPosition {
     x: number;
@@ -20,12 +21,12 @@ interface NativeMediaDropCallbacks {
     onError: (reason: unknown) => void;
 }
 
-const supportedExtensions = new Set<string>([...audioExtensions, ...midiExtensions]);
+const supportedExtensions = new Set<string>([...audioExtensions, ...midiExtensions, ...tx16wDiskExtensions]);
 const maximumNativeDropFileBytes = 4 * 1024 * 1024 * 1024;
 const maximumNativeDropTotalBytes = 8 * 1024 * 1024 * 1024;
 
 function mediaType(path: string): string {
-    return audioMediaType(path) ?? midiMediaType(path) ?? 'application/octet-stream';
+    return audioMediaType(path) ?? midiMediaType(path) ?? tx16wDiskMediaType(path) ?? 'application/octet-stream';
 }
 
 function supported(path: string): boolean {

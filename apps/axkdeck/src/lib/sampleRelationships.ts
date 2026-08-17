@@ -8,6 +8,10 @@ const memberRelationships = [
     { relationshipType: 'SBNK_RIGHT_MEMBER_TO_SMPL', role: 'right' },
 ] as const;
 
+export function isStandaloneSample(sample: SampleStructureItem): boolean {
+    return (sample.sampleBankObjectIds?.length ?? 0) === 0;
+}
+
 export function auditionableSampleIds(
     relationships: readonly SamplerRelationship[],
     waveData: readonly WaveDataItem[],
