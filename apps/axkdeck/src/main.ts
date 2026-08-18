@@ -6,6 +6,7 @@ import { installDiagnostics, reportDiagnostic, reportError, reportInfo } from '.
 import { createInterfaceScaleController, type InterfaceScaleController } from './lib/interfaceScale';
 import { prepareServerConnection, prepareStartup } from './lib/startupCoordinator';
 import { frontendStartup, type StartupView } from './lib/startupDiagnostics';
+import { revealAfterInterfaceScale } from './lib/startupVisibility';
 import { createTauriInterfaceScaleAdapter } from './lib/tauriInterfaceScale';
 
 type ServerConnection = NonNullable<Window['__AXKLIB_SERVER__']>;
@@ -64,7 +65,6 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     };
     renderShell();
     frontendStartup.markShellMounted();
-    const shellFirstFrame = frontendStartup.waitForShellFirstFrame();
     const diagnosticsReady = installDiagnostics().finally(() => frontendStartup.markDiagnosticsInstalled());
     const interfaceScalingReady = (async () => {
         if (!isDesktop) return;
@@ -78,6 +78,9 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
             reportDiagnostic('interface_scale_initialization_failed', { message: String(error) }, 'warn');
         }
     })().finally(() => frontendStartup.markInterfaceScaleComplete());
+    const shellFirstFrame = revealAfterInterfaceScale(interfaceScalingReady, () =>
+        frontendStartup.waitForShellFirstFrame(),
+    );
 
     const view: StartupView =
         new URLSearchParams(window.location.search).get('view') === 'allocation' ? 'allocation' : 'workspace';
