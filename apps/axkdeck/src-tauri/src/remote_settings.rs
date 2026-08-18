@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex};
 use url::{Host, Url};
 
 use crate::server_sidecar::{FrontendConnection, ServerSidecar};
+use crate::startup_diagnostics::{
+    CredentialOutcome, ServerOutcome, StartupDiagnostics, StartupMilestone,
+};
 
 const KEYRING_SERVICE: &str = "app.axkdeck.desktop.axklib-server";
 const KEYRING_USER: &str = "remote-server-v1";
@@ -40,18 +44,143 @@ pub struct ServerConnectionManager {
     state_directory: PathBuf,
 }
 
-impl ServerConnectionManager {
-    pub fn initialize(log_directory: PathBuf, state_directory: PathBuf) -> Result<Self, String> {
-        match load_remote_settings() {
-            Ok(Some(settings)) => Ok(Self {
-                sidecar: None,
-                connection: Some(frontend_connection(&settings)),
-                secure_storage_error: None,
+struct ServerConnectionStateInner {
+    manager: Mutex<Option<ServerConnectionManager>>,
+    ready: Condvar,
+}
+
+#[derive(Clone)]
+pub struct ServerConnectionState {
+    inner: Arc<ServerConnectionStateInner>,
+}
+
+impl ServerConnectionState {
+    pub fn pending() -> Self {
+        Self {
+            inner: Arc::new(ServerConnectionStateInner {
+                manager: Mutex::new(None),
+                ready: Condvar::new(),
+            }),
+        }
+    }
+
+    pub fn initialize_in_background(
+        &self,
+        log_directory: PathBuf,
+        state_directory: PathBuf,
+        startup: StartupDiagnostics,
+    ) {
+        let worker_state = self.clone();
+        let worker_log_directory = log_directory.clone();
+        let worker_state_directory = state_directory.clone();
+        let worker = std::thread::Builder::new()
+            .name("axkdeck-server-startup".to_owned())
+            .spawn(move || {
+                let manager = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ServerConnectionManager::initialize(
+                        worker_log_directory.clone(),
+                        worker_state_directory.clone(),
+                        &startup,
+                    )
+                }))
+                .map_err(|_| "axklib-server initialization panicked".to_owned())
+                .and_then(|result| result)
+                .unwrap_or_else(|error| {
+                    log::error!("local axklib-server initialization failed: {error}");
+                    ServerConnectionManager::unavailable(
+                        error,
+                        worker_log_directory,
+                        worker_state_directory,
+                    )
+                });
+                worker_state.complete(manager);
+            });
+        if let Err(error) = worker {
+            let message = format!("start axklib-server initialization worker: {error}");
+            log::error!("{message}");
+            self.complete(ServerConnectionManager::unavailable(
+                message,
                 log_directory,
                 state_directory,
-            }),
-            Ok(None) => Self::local(log_directory, state_directory, None),
-            Err(error) => Self::local(log_directory, state_directory, Some(error)),
+            ));
+        }
+    }
+
+    pub fn connection(&self) -> Result<Option<FrontendConnection>, String> {
+        self.with_manager(ServerConnectionManager::connection)
+    }
+
+    pub fn settings(&self) -> RemoteServerSettingsView {
+        self.with_manager(|manager| manager.settings())
+    }
+
+    pub fn configure_remote(
+        &self,
+        input: RemoteServerSettingsInput,
+    ) -> Result<RemoteServerSettingsView, String> {
+        self.with_manager(|manager| manager.configure_remote(input))
+    }
+
+    pub fn use_local(&self) -> Result<RemoteServerSettingsView, String> {
+        self.with_manager(ServerConnectionManager::use_local)
+    }
+
+    fn complete(&self, manager: ServerConnectionManager) {
+        let mut current = self
+            .inner
+            .manager
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if current.is_none() {
+            *current = Some(manager);
+            self.inner.ready.notify_all();
+        }
+    }
+
+    fn with_manager<T>(&self, operation: impl FnOnce(&mut ServerConnectionManager) -> T) -> T {
+        let mut current = self
+            .inner
+            .manager
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while current.is_none() {
+            current = self
+                .inner
+                .ready
+                .wait(current)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        operation(current.as_mut().expect("server connection state completed"))
+    }
+}
+
+impl ServerConnectionManager {
+    pub fn initialize(
+        log_directory: PathBuf,
+        state_directory: PathBuf,
+        startup: &StartupDiagnostics,
+    ) -> Result<Self, String> {
+        startup.record(StartupMilestone::CredentialLookupStarted);
+        let settings = load_remote_settings();
+        startup.set_credential_outcome(match &settings {
+            Ok(Some(_)) => CredentialOutcome::Found,
+            Ok(None) => CredentialOutcome::Missing,
+            Err(_) => CredentialOutcome::Error,
+        });
+        startup.record(StartupMilestone::CredentialLookupCompleted);
+        match settings {
+            Ok(Some(settings)) => {
+                startup.set_server_outcome(ServerOutcome::RemoteReady);
+                Ok(Self {
+                    sidecar: None,
+                    connection: Some(frontend_connection(&settings)),
+                    secure_storage_error: None,
+                    log_directory,
+                    state_directory,
+                })
+            }
+            Ok(None) => Self::local(log_directory, state_directory, None, Some(startup)),
+            Err(error) => Self::local(log_directory, state_directory, Some(error), Some(startup)),
         }
     }
 
@@ -59,8 +188,14 @@ impl ServerConnectionManager {
         log_directory: PathBuf,
         state_directory: PathBuf,
         secure_storage_error: Option<String>,
+        startup: Option<&StartupDiagnostics>,
     ) -> Result<Self, String> {
-        let sidecar = ServerSidecar::launch_if_available(&log_directory, &state_directory)?;
+        let sidecar = match startup {
+            Some(startup) => {
+                ServerSidecar::launch_at_startup(&log_directory, &state_directory, startup)?
+            }
+            None => ServerSidecar::launch_if_available(&log_directory, &state_directory)?,
+        };
         let connection = sidecar.as_ref().map(|server| server.connection().clone());
         Ok(Self {
             sidecar,
@@ -228,7 +363,14 @@ fn delete_remote_settings() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RemoteServerSettingsInput, validate_remote_settings};
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use super::{
+        RemoteServerSettingsInput, ServerConnectionManager, ServerConnectionState,
+        validate_remote_settings,
+    };
 
     fn settings(base_url: &str) -> RemoteServerSettingsInput {
         RemoteServerSettingsInput {
@@ -274,5 +416,43 @@ mod tests {
         let mut whitespace = settings("https://sampler.example.test");
         whitespace.bearer_token = "0123456789abcdef 0123456789abcdef".to_owned();
         assert!(validate_remote_settings(whitespace).is_err());
+    }
+
+    #[test]
+    fn pending_connection_state_releases_waiters_when_initialization_completes() {
+        let state = ServerConnectionState::pending();
+        let waiter_state = state.clone();
+        let (started_sender, started_receiver) = mpsc::channel();
+        let (result_sender, result_receiver) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            started_sender.send(()).expect("report waiter start");
+            result_sender
+                .send(waiter_state.settings())
+                .expect("report completed settings");
+        });
+
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("waiter started");
+        assert!(
+            result_receiver
+                .recv_timeout(Duration::from_millis(20))
+                .is_err()
+        );
+
+        state.complete(ServerConnectionManager::unavailable(
+            "sidecar unavailable".to_owned(),
+            PathBuf::from("logs"),
+            PathBuf::from("state"),
+        ));
+        let settings = result_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("waiter released");
+        assert_eq!(settings.mode, "local");
+        assert_eq!(
+            settings.secure_storage_error.as_deref(),
+            Some("sidecar unavailable")
+        );
+        waiter.join().expect("join waiter");
     }
 }

@@ -1,23 +1,73 @@
 import './app.css';
-import { mount } from 'svelte';
-import App from './App.svelte';
-import AllocationInspector from './AllocationInspector.svelte';
 import { invoke } from '@tauri-apps/api/core';
+import { mount, unmount } from 'svelte';
+import StartupShell from './StartupShell.svelte';
 import { installDiagnostics, reportDiagnostic, reportError, reportInfo } from './lib/diagnostics';
 import { createInterfaceScaleController, type InterfaceScaleController } from './lib/interfaceScale';
+import { prepareServerConnection, prepareStartup } from './lib/startupCoordinator';
+import { frontendStartup, type StartupView } from './lib/startupDiagnostics';
 import { createTauriInterfaceScaleAdapter } from './lib/tauriInterfaceScale';
 
-const target = document.getElementById('app');
+type ServerConnection = NonNullable<Window['__AXKLIB_SERVER__']>;
+type AppModule = typeof import('./App.svelte');
 
-if (!target) {
-    throw new Error('Unable to find the application mount point.');
+const target = document.getElementById('app');
+if (!target) throw new Error('Unable to find the application mount point.');
+
+async function connectServer(restartLocal: boolean): Promise<ServerConnection | null> {
+    try {
+        const connection = await prepareServerConnection(
+            restartLocal,
+            () => invoke('use_local_server'),
+            async () => (await invoke<Window['__AXKLIB_SERVER__'] | null>('server_connection')) ?? null,
+        );
+        window.__AXKLIB_SERVER__ = connection ?? undefined;
+        frontendStartup.markServerConnectionComplete();
+        reportInfo(
+            connection ? `Connected to ${connection.mode} axklib-server.` : 'No axklib-server connection is available.',
+        );
+        return connection;
+    } catch (error) {
+        window.__AXKLIB_SERVER__ = undefined;
+        frontendStartup.markServerConnectionComplete();
+        reportError('axklib-server is unavailable', error);
+        return null;
+    }
 }
 
 async function bootstrap(mountTarget: HTMLElement): Promise<void> {
-    await installDiagnostics();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let interfaceScaling: InterfaceScaleController | null = null;
-    if (isDesktop) {
+    let warningOpen = true;
+    let shellStatus: 'starting' | 'unavailable' = 'starting';
+    let shellMessage = '';
+    let shell: ReturnType<typeof mount> | null = null;
+    const renderShell = () => {
+        shell = mount(StartupShell, {
+            target: mountTarget,
+            props: {
+                status: shellStatus,
+                message: shellMessage,
+                warningOpen,
+                onacknowledge: () => {
+                    warningOpen = false;
+                    void replaceShell();
+                },
+                onretry: () => void startWorkspace(false, true),
+                onopensettings: () => void startWorkspace(true),
+            },
+        });
+    };
+    const replaceShell = async () => {
+        if (shell) await unmount(shell);
+        renderShell();
+    };
+    renderShell();
+    frontendStartup.markShellMounted();
+    const shellFirstFrame = frontendStartup.waitForShellFirstFrame();
+    const diagnosticsReady = installDiagnostics().finally(() => frontendStartup.markDiagnosticsInstalled());
+    const interfaceScalingReady = (async () => {
+        if (!isDesktop) return;
         try {
             interfaceScaling = await createInterfaceScaleController(
                 createTauriInterfaceScaleAdapter(),
@@ -27,27 +77,78 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
         } catch (error) {
             reportDiagnostic('interface_scale_initialization_failed', { message: String(error) }, 'warn');
         }
-    }
-    if (isDesktop) {
+    })().finally(() => frontendStartup.markInterfaceScaleComplete());
+
+    const view: StartupView =
+        new URLSearchParams(window.location.search).get('view') === 'allocation' ? 'allocation' : 'workspace';
+    if (view === 'allocation') {
         try {
-            window.__AXKLIB_SERVER__ =
-                (await invoke<Window['__AXKLIB_SERVER__'] | null>('server_connection')) ?? undefined;
-            reportInfo(
-                window.__AXKLIB_SERVER__
-                    ? `Connected to ${window.__AXKLIB_SERVER__.mode} axklib-server.`
-                    : 'No axklib-server connection is available.',
+            const moduleReady = shellFirstFrame.then(() =>
+                import('./AllocationInspector.svelte').then((module) => {
+                    frontendStartup.markAppModuleReady();
+                    return module;
+                }),
             );
+            const [module] = await Promise.all([moduleReady, diagnosticsReady, interfaceScalingReady]);
+            if (shell) await unmount(shell);
+            mount(module.default, { target: mountTarget });
+            frontendStartup.markAppMounted();
         } catch (error) {
-            window.__AXKLIB_SERVER__ = undefined;
-            reportError('axklib-server is unavailable', error);
+            shellStatus = 'unavailable';
+            shellMessage = `The allocation inspector could not be loaded: ${String(error)}`;
+            await replaceShell();
+        }
+        return;
+    }
+
+    async function startWorkspace(openSettings: boolean, restartLocal = false): Promise<void> {
+        const refreshShell = shellStatus !== 'starting' || shellMessage.length > 0;
+        shellStatus = 'starting';
+        shellMessage = '';
+        if (refreshShell) await replaceShell();
+        const connectionPromise = isDesktop ? connectServer(restartLocal) : Promise.resolve(null);
+        let prepared: { connection: ServerConnection | null; module: AppModule };
+        try {
+            const workspaceReady = prepareStartup(
+                connectionPromise,
+                () => shellFirstFrame,
+                () =>
+                    import('./App.svelte').then((module) => {
+                        frontendStartup.markAppModuleReady();
+                        return module;
+                    }),
+            );
+            [prepared] = await Promise.all([workspaceReady, diagnosticsReady, interfaceScalingReady]);
+        } catch (error) {
+            shellStatus = 'unavailable';
+            shellMessage = `The application workspace could not be loaded: ${String(error)}`;
+            await replaceShell();
+            return;
+        }
+        if (isDesktop && !prepared.connection && !openSettings) {
+            shellStatus = 'unavailable';
+            shellMessage = 'Check the local service or configure a remote axklib-server connection.';
+            await replaceShell();
+            return;
+        }
+        if (shell) await unmount(shell);
+        mount(prepared.module.default, {
+            target: mountTarget,
+            props: {
+                interfaceScaling,
+                initialExperimentalWarningOpen: warningOpen,
+                openConnectionSettingsOnStart: openSettings,
+            },
+        });
+        frontendStartup.markAppMounted();
+        if (isDesktop) {
+            void frontendStartup.reportAfterAppFirstFrame('workspace').catch((error) => {
+                reportDiagnostic('desktop_startup_report_failed', { message: String(error) }, 'warn');
+            });
         }
     }
-    const view = new URLSearchParams(window.location.search).get('view');
-    if (view === 'allocation') {
-        mount(AllocationInspector, { target: mountTarget });
-    } else {
-        mount(App, { target: mountTarget, props: { interfaceScaling } });
-    }
+
+    await startWorkspace(false);
 }
 
 void bootstrap(target);

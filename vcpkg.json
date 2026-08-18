@@ -32,14 +32,14 @@
     "server": {
       "description": "Dependencies used only by the Crow REST and WebSocket server",
       "dependencies": [
-        "crow",
-        "json-schema-validator"
+        "crow"
       ]
     },
     "tests": {
       "description": "Dependencies used only by native test targets",
       "dependencies": [
-        "gtest"
+        "gtest",
+        "json-schema-validator"
       ]
     }
   }

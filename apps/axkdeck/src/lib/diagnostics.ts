@@ -62,6 +62,16 @@ export function reportDiagnostic(
     }
 }
 
+export function reportMutationTiming(operation: string, started: number, itemCount: number): void {
+    if (!diagnosticsEnabled()) return;
+    reportDiagnostic('image_mutation_completed', {
+        operation,
+        itemCount,
+        durationMs: Math.round(performance.now() - started),
+        strategy: 'journaled-in-place',
+    });
+}
+
 export async function installDiagnostics(): Promise<void> {
     window.addEventListener('error', (event) => {
         reportError('Unhandled frontend error', event.error ?? event.message);

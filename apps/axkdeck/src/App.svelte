@@ -1,11 +1,12 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
+    import type { AppProps } from './appProps';
     import { AuditionWorkflow } from './features/audition/workflow.svelte';
     import { CatalogWorkflow } from './features/catalog/workflow.svelte';
     import { createConnectionActions } from './features/connection/actions';
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
-    import AppDialogs from './features/dialogs/AppDialogs.svelte';
+    import { hasOpenAppDialog } from './features/dialogs/visibility';
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
     import { VolumePackageExportWorkflow } from './features/export/volumePackageWorkflow.svelte';
@@ -23,19 +24,19 @@
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
+    import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
     import { createTransport } from './lib/createTransport';
     import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
-    import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
+    import { reportMutationTiming } from './lib/diagnostics';
     import {
         emptyPackageExportSelection,
         maximumPackageExportRoots,
         type PackageExportSelectionState,
     } from './lib/objectSelection';
     import { userFacingMessage } from './lib/userFacingMessage';
-    import type { InterfaceScaleController } from './lib/interfaceScale';
     import { midiExtensions } from './lib/midiImport';
     import type {
         DiskTreeItem,
@@ -46,27 +47,16 @@
         WorkspaceView,
     } from './lib/types';
 
-    interface Props {
-        interfaceScaling?: InterfaceScaleController | null;
-    }
-
-    let { interfaceScaling = null }: Props = $props();
-
-    const workspaceTabs: {
-        id: WorkspaceView;
-        label: string;
-        icon: 'music' | 'layers' | 'archive' | 'waveform' | 'list';
-    }[] = [
-        { id: 'programs', label: 'Programs', icon: 'music' },
-        { id: 'sample-banks', label: 'Sample Banks', icon: 'layers' },
-        { id: 'samples', label: 'Samples', icon: 'archive' },
-        { id: 'wave-data', label: 'Wave Data', icon: 'waveform' },
-        { id: 'sequences', label: 'Sequences', icon: 'list' },
-    ];
+    let {
+        interfaceScaling = null,
+        initialExperimentalWarningOpen = true,
+        openConnectionSettingsOnStart = false,
+    }: AppProps = $props();
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
-    let experimentalWarningOpen = $state(true);
+    let experimentalWarningAcknowledged = $state(false);
+    const experimentalWarningOpen = $derived(initialExperimentalWarningOpen && !experimentalWarningAcknowledged);
     let workspaceView = $state<WorkspaceView>('programs');
     let inspectorOpen = $state(true);
     let connectionSettings = $state<RemoteServerSettingsView | null>(null);
@@ -325,7 +315,9 @@
     });
 
     onMount(() => {
-        return mediaDropWorkflow.mountNativeDrops();
+        const unmountNativeDrops = mediaDropWorkflow.mountNativeDrops();
+        if (openConnectionSettingsOnStart) void openConnectionSettings();
+        return unmountNativeDrops;
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
@@ -333,6 +325,27 @@
     const selectedSample = $derived(samples.find((item) => item.objectId === catalog.selectedSampleId));
     const auditionableSampleObjectIds = $derived(auditionWorkflow.auditionableSampleObjectIds);
     const auditionableSampleBankObjectIds = $derived(auditionWorkflow.auditionableSampleBankObjectIds);
+    const appDialogsOpen = $derived(
+        hasOpenAppDialog({
+            pickerRequest,
+            imageSession: imageSessionWorkflow,
+            workspaceManagerOpen,
+            connectionSettings,
+            mutation: mutationWorkflow,
+            packageImport: packageImportWorkflow,
+            packageBatchImport: packageBatchImportWorkflow,
+            exports: exportWorkflow,
+            volumePackages: volumePackageExportWorkflow,
+            volumeFloppies: volumeFloppyExportWorkflow,
+            mediaExports: mediaExportWorkflow,
+            deletion: deletionWorkflow,
+            programGeneration: programGenerationWorkflow,
+            audioImport: audioImportWorkflow,
+            sequenceImport: sequenceImportWorkflow,
+            tx16wImport: tx16wImportWorkflow,
+            mediaDrop: mediaDropWorkflow,
+        }),
+    );
     const bankMembers = $derived(selectedBank ? catalog.membersForBank(selectedBank.objectId) : []);
     const bankMemberWaveData = $derived(
         catalog.selectedBankMemberId ? catalog.waveDataForSample(catalog.selectedBankMemberId) : [],
@@ -511,16 +524,6 @@
         deletionWorkflow.requestCleanup();
     }
 
-    function reportMutationTiming(operation: string, started: number, itemCount: number): void {
-        if (!diagnosticsEnabled()) return;
-        reportDiagnostic('image_mutation_completed', {
-            operation,
-            itemCount,
-            durationMs: Math.round(performance.now() - started),
-            strategy: 'journaled-in-place',
-        });
-    }
-
     function suppressDesktopContextMenu(event: MouseEvent): void {
         if (isDesktop) event.preventDefault();
     }
@@ -630,7 +633,7 @@
 />
 
 {#if experimentalWarningOpen}
-    <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningOpen = false)} />
+    <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
 {/if}
 
 {#if imageSessionWorkflow.integrityDialogOpen}
@@ -647,44 +650,49 @@
     />
 {/if}
 
-<AppDialogs
-    {transport}
-    {isDesktop}
-    {pickerRequest}
-    finishPicker={(selection) => pickerController.finish(selection)}
-    manageLocations={() => (workspaceManagerOpen = true)}
-    companionRequest={imageSessionWorkflow.companionRequest}
-    addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
-    removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
-    attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
-    cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
-    hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
-    finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
-    cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
-    {workspaceManagerOpen}
-    activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
-    closeWorkspaceManager={() => (workspaceManagerOpen = false)}
-    {connectionSettings}
-    {saveRemoteConnection}
-    {switchToLocalConnection}
-    closeConnectionSettings={() => (connectionSettings = null)}
-    mutation={mutationWorkflow}
-    packageImport={packageImportWorkflow}
-    packageBatchImport={packageBatchImportWorkflow}
-    exports={exportWorkflow}
-    volumePackages={volumePackageExportWorkflow}
-    volumeFloppies={volumeFloppyExportWorkflow}
-    mediaExports={mediaExportWorkflow}
-    deletion={deletionWorkflow}
-    programGeneration={programGenerationWorkflow}
-    mediaDrop={mediaDropWorkflow}
-    tx16wImport={tx16wImportWorkflow}
-    audioImport={audioImportWorkflow}
-    {audioFileInput}
-    sequenceImport={sequenceImportWorkflow}
-    {sequenceFileInput}
-    sampleNames={samples.map((item) => item.name)}
-    sampleBankNames={sampleBanks.map((item) => item.name)}
-    waveDataNames={waveData.map((item) => item.name)}
-    sequenceNames={sequences.map((item) => item.name)}
-/>
+{#if appDialogsOpen}
+    {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
+        {@const AppDialogs = dialogs.default}
+        <AppDialogs
+            {transport}
+            {isDesktop}
+            {pickerRequest}
+            finishPicker={(selection) => pickerController.finish(selection)}
+            manageLocations={() => (workspaceManagerOpen = true)}
+            companionRequest={imageSessionWorkflow.companionRequest}
+            addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
+            removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
+            attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
+            cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
+            hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
+            finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
+            cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
+            {workspaceManagerOpen}
+            activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
+            closeWorkspaceManager={() => (workspaceManagerOpen = false)}
+            {connectionSettings}
+            {saveRemoteConnection}
+            {switchToLocalConnection}
+            closeConnectionSettings={() => (connectionSettings = null)}
+            mutation={mutationWorkflow}
+            packageImport={packageImportWorkflow}
+            packageBatchImport={packageBatchImportWorkflow}
+            exports={exportWorkflow}
+            volumePackages={volumePackageExportWorkflow}
+            volumeFloppies={volumeFloppyExportWorkflow}
+            mediaExports={mediaExportWorkflow}
+            deletion={deletionWorkflow}
+            programGeneration={programGenerationWorkflow}
+            mediaDrop={mediaDropWorkflow}
+            tx16wImport={tx16wImportWorkflow}
+            audioImport={audioImportWorkflow}
+            {audioFileInput}
+            sequenceImport={sequenceImportWorkflow}
+            {sequenceFileInput}
+            sampleNames={samples.map((item) => item.name)}
+            sampleBankNames={sampleBanks.map((item) => item.name)}
+            waveDataNames={waveData.map((item) => item.name)}
+            sequenceNames={sequences.map((item) => item.name)}
+        />
+    {/await}
+{/if}

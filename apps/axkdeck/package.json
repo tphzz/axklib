@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "pnpm contract:check && svelte-check --tsconfig ./tsconfig.app.json && vite build",
+    "build": "pnpm contract:check && svelte-check --tsconfig ./tsconfig.app.json && vite build && pnpm bundle:check",
+    "bundle:check": "node tools/check-startup-bundle.mjs",
     "contract:check": "node tools/openapi-contract.mjs check",
     "contract:generate": "node tools/openapi-contract.mjs write",
     "version:check": "node tools/check-versions.mjs",

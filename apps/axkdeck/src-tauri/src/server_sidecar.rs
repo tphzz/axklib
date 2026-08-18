@@ -14,6 +14,7 @@ use url::{Host, Url};
 #[path = "server_sidecar_runtime.rs"]
 mod runtime;
 
+use crate::startup_diagnostics::{ServerOutcome, StartupDiagnostics, StartupMilestone};
 use runtime::PrivateRuntimeDirectory;
 
 const CONNECTION_SCHEMA_VERSION: u32 = 1;
@@ -115,23 +116,59 @@ impl ServerSidecar {
         log_directory: &Path,
         state_directory: &Path,
     ) -> Result<Option<Self>, String> {
+        Self::launch_if_available_inner(log_directory, state_directory, None)
+    }
+
+    pub fn launch_at_startup(
+        log_directory: &Path,
+        state_directory: &Path,
+        startup: &StartupDiagnostics,
+    ) -> Result<Option<Self>, String> {
+        Self::launch_if_available_inner(log_directory, state_directory, Some(startup))
+    }
+
+    fn launch_if_available_inner(
+        log_directory: &Path,
+        state_directory: &Path,
+        startup: Option<&StartupDiagnostics>,
+    ) -> Result<Option<Self>, String> {
+        if let Some(startup) = startup {
+            startup.record(StartupMilestone::SidecarStartupStarted);
+        }
         if std::env::var("AXKDECK_HTTP_SERVER").is_ok_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
                 "0" | "false" | "no"
             )
         }) {
+            complete_sidecar_startup(startup, ServerOutcome::Disabled);
             return Ok(None);
         }
         let Some(binary) = server_binary() else {
+            complete_sidecar_startup(startup, ServerOutcome::BinaryUnavailable);
             return Ok(None);
         };
-        Self::launch(&binary, log_directory, state_directory).map(Some)
+        match Self::launch(&binary, log_directory, state_directory, startup) {
+            Ok(sidecar) => {
+                complete_sidecar_startup(startup, ServerOutcome::LocalReady);
+                Ok(Some(sidecar))
+            }
+            Err(error) => {
+                complete_sidecar_startup(startup, ServerOutcome::Failed);
+                Err(error)
+            }
+        }
     }
 
-    fn launch(binary: &Path, log_directory: &Path, state_directory: &Path) -> Result<Self, String> {
+    fn launch(
+        binary: &Path,
+        log_directory: &Path,
+        state_directory: &Path,
+        startup: Option<&StartupDiagnostics>,
+    ) -> Result<Self, String> {
         prepare_persistent_state_directory(state_directory)?;
         let runtime_directory = PrivateRuntimeDirectory::create(&std::env::temp_dir())?;
+        record_startup(startup, StartupMilestone::SidecarStatePrepared);
         let connection_path = runtime_directory.connection_path();
         let arguments = sidecar_arguments(state_directory, &connection_path);
         let mut command = Command::new(binary);
@@ -147,6 +184,7 @@ impl ServerSidecar {
         let mut child = command
             .spawn()
             .map_err(|error| format!("start axklib-server: {error}"))?;
+        record_startup(startup, StartupMilestone::SidecarSpawned);
         let log_threads = match capture_child_logs(&mut child, log_directory) {
             Ok(threads) => threads,
             Err(error) => {
@@ -166,6 +204,7 @@ impl ServerSidecar {
                     return Err(error);
                 }
             };
+        record_startup(startup, StartupMilestone::SidecarReadinessReceived);
         if let Err(error) = validate_connection(
             &metadata,
             child.id(),
@@ -179,6 +218,7 @@ impl ServerSidecar {
             join_log_threads(log_threads);
             return Err(error);
         }
+        record_startup(startup, StartupMilestone::SidecarConnectionValidated);
         let connection = FrontendConnection {
             base_url: metadata.base_url,
             bearer_token: metadata.bearer_token,
@@ -215,6 +255,19 @@ impl ServerSidecar {
             )),
             None => Ok(()),
         }
+    }
+}
+
+fn record_startup(startup: Option<&StartupDiagnostics>, milestone: StartupMilestone) {
+    if let Some(startup) = startup {
+        startup.record(milestone);
+    }
+}
+
+fn complete_sidecar_startup(startup: Option<&StartupDiagnostics>, outcome: ServerOutcome) {
+    if let Some(startup) = startup {
+        startup.set_server_outcome(outcome);
+        startup.record(StartupMilestone::SidecarStartupCompleted);
     }
 }
 

@@ -80,7 +80,7 @@ function renderAcknowledgedApp() {
 
 async function chooseNestedImage(buttonName: 'Open image' | 'Open another image' = 'Open image'): Promise<void> {
     await fireEvent.click(screen.getByRole('button', { name: buttonName }));
-    const picker = await screen.findByRole('dialog', { name: 'Open image' });
+    const picker = await screen.findByRole('dialog', { name: 'Open image' }, { timeout: 5_000 });
     if (buttonName === 'Open image') {
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('images'));
@@ -1264,7 +1264,8 @@ describe('App panel layout', () => {
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
-        await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
+        const importDialog = await screen.findByRole('dialog', { name: 'Import axklib package' });
+        await fireEvent.click(within(importDialog).getByRole('button', { name: /Storage location/ }));
         const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
         expect(screen.queryByRole('dialog', { name: 'Import axklib package' })).toBeNull();
         expect(screen.getAllByRole('dialog')).toHaveLength(1);
@@ -1327,7 +1328,7 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Import volume packages' });
+        const dialog = await screen.findByRole('dialog', { name: 'Import volume packages' });
         expect(within(dialog).getByText('Create volumes in My Partition from selected .axkvol packages.')).toBeTruthy();
         expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
@@ -1493,7 +1494,7 @@ describe('App panel layout', () => {
         expect(screen.getByRole('status').textContent).toContain('2 selected');
         await fireEvent.click(screen.getByRole('button', { name: 'Export 2 selected objects' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Partition 0 · Piano')).toBeTruthy();
         expect(within(dialog).getByText('Partition 1 · Drums')).toBeTruthy();
         expect(within(dialog).getByText('1 Program · 1 Sample Bank')).toBeTruthy();
@@ -1550,7 +1551,7 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Export “Object directory”')).toBeTruthy();
         expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
@@ -1886,7 +1887,8 @@ describe('App panel layout', () => {
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
-        await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
+        const sourceDialog = await screen.findByRole('dialog', { name: 'Import audio' });
+        await fireEvent.click(within(sourceDialog).getByRole('button', { name: /This computer/ }));
 
         const input = container.querySelector<HTMLInputElement>('input[type="file"]');
         expect(input).toBeTruthy();

@@ -3,14 +3,13 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
-#include <memory>
 #include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <nlohmann/json-schema.hpp>
+#include "validation_plan.hpp"
 
 namespace {
 
@@ -150,68 +149,6 @@ Json schema_example(const Json &document, const Json &schema, std::size_t depth 
             merge_example(result, schema_example(document, variants->front(), depth + 1U));
             if (result.is_object())
                 add_required_properties(variants->front(), result);
-        }
-    }
-    return result;
-}
-
-Json validation_root(const Json &document, const Json &schema) {
-    auto root = schema;
-    root["$schema"] = "http://json-schema.org/draft-07/schema#";
-    root["components"] = document.at("components");
-    return root;
-}
-
-axk::app::Result<void> validate_value(const Json &document, const Json &schema, const Json &value) {
-    try {
-        nlohmann::json_schema::json_validator validator;
-        validator.set_root_schema(validation_root(document, schema));
-        static_cast<void>(validator.validate(value));
-    } catch (const std::exception &) {
-        return std::unexpected(
-            axk::app::Error{"invalid_request", "request body does not match the declared OpenAPI schema"});
-    }
-    return {};
-}
-
-Json translate_value(const Json &document, const Json &schema, const Json &value, bool to_application) {
-    const auto &resolved = resolve_schema_reference(document, schema);
-    if (const auto mapping = resolved.find("x-axklib-application-enum");
-        mapping != resolved.end() && mapping->is_object() && value.is_string()) {
-        const auto text = value.get<std::string>();
-        if (to_application) {
-            if (const auto found = mapping->find(text); found != mapping->end() && found->is_string())
-                return *found;
-        } else {
-            for (const auto &[wire, application] : mapping->items()) {
-                if (application.is_string() && application.get_ref<const std::string &>() == text)
-                    return wire;
-            }
-        }
-        return value;
-    }
-
-    auto result = value;
-    for (const auto keyword : {"allOf", "oneOf", "anyOf"}) {
-        const auto variants = resolved.find(keyword);
-        if (variants == resolved.end() || !variants->is_array())
-            continue;
-        for (const auto &variant : *variants)
-            result = translate_value(document, variant, result, to_application);
-    }
-    if (result.is_object()) {
-        const auto properties = resolved.find("properties");
-        if (properties != resolved.end() && properties->is_object()) {
-            for (const auto &[name, property_schema] : properties->items()) {
-                if (result.contains(name))
-                    result[name] = translate_value(document, property_schema, result.at(name), to_application);
-            }
-        }
-    } else if (result.is_array()) {
-        const auto items = resolved.find("items");
-        if (items != resolved.end()) {
-            for (auto &item : result)
-                item = translate_value(document, *items, item, to_application);
         }
     }
     return result;
@@ -358,49 +295,33 @@ void add_infrastructure_error_responses(Json &document) {
 
 } // namespace
 
-struct axk::server::OpenApiValidator::Impl {
-    explicit Impl(Json value) : document(std::move(value)) {
-        for (const auto &[name, schema] : document.at("components").at("schemas").items()) {
-            auto validator = std::make_unique<nlohmann::json_schema::json_validator>();
-            validator->set_root_schema(validation_root(document, schema));
-            validators.emplace(name, std::move(validator));
-        }
-    }
-
-    Json document;
-    std::map<std::string, std::unique_ptr<nlohmann::json_schema::json_validator>, std::less<>> validators;
-};
-
-axk::server::OpenApiValidator::OpenApiValidator(nlohmann::json document)
-    : impl_(std::make_unique<Impl>(std::move(document))) {}
-
-axk::server::OpenApiValidator::~OpenApiValidator() = default;
-axk::server::OpenApiValidator::OpenApiValidator(OpenApiValidator &&) noexcept = default;
-axk::server::OpenApiValidator &axk::server::OpenApiValidator::operator=(OpenApiValidator &&) noexcept = default;
-
 axk::app::Result<void> axk::server::OpenApiValidator::validate(std::string_view schema_name,
                                                                const nlohmann::json &value) const {
-    const auto found = impl_->validators.find(schema_name);
-    if (found == impl_->validators.end())
+    const auto &plan = detail::generated_validation_plan();
+    const auto *schema = detail::find_schema(plan, schema_name);
+    if (schema == nullptr)
         return std::unexpected(app::Error{"contract_error", "OpenAPI schema is not available"});
-    try {
-        static_cast<void>(found->second->validate(value));
-    } catch (const std::exception &) {
+    if (!detail::validate(plan, *schema, value))
         return std::unexpected(app::Error{"invalid_request", "request body does not match its declared schema"});
-    }
     return {};
 }
 
 nlohmann::json axk::server::OpenApiValidator::application_value(std::string_view schema_name,
                                                                 const nlohmann::json &wire_value) const {
-    const auto &schema = impl_->document.at("components").at("schemas").at(schema_name);
-    return translate_value(impl_->document, schema, wire_value, true);
+    const auto &plan = detail::generated_validation_plan();
+    const auto *schema = detail::find_schema(plan, schema_name);
+    if (schema == nullptr)
+        throw std::out_of_range{"OpenAPI schema is not available"};
+    return detail::translate(plan, *schema, wire_value, true);
 }
 
 nlohmann::json axk::server::OpenApiValidator::wire_value(std::string_view schema_name,
                                                          const nlohmann::json &application_value) const {
-    const auto &schema = impl_->document.at("components").at("schemas").at(schema_name);
-    return translate_value(impl_->document, schema, application_value, false);
+    const auto &plan = detail::generated_validation_plan();
+    const auto *schema = detail::find_schema(plan, schema_name);
+    if (schema == nullptr)
+        throw std::out_of_range{"OpenAPI schema is not available"};
+    return detail::translate(plan, *schema, application_value, false);
 }
 
 nlohmann::json axk::server::build_openapi_document(std::string_view base_document,
@@ -471,18 +392,4 @@ nlohmann::json axk::server::build_openapi_document(std::string_view base_documen
     add_infrastructure_error_responses(document);
     add_request_id_headers(document);
     return document;
-}
-
-axk::app::Result<void> axk::server::validate_openapi_value(const nlohmann::json &document, std::string_view schema_name,
-                                                           const nlohmann::json &value) {
-    try {
-        return validate_value(document, schema_reference(schema_name), value);
-    } catch (const std::exception &) {
-        return std::unexpected(app::Error{"contract_error", "OpenAPI schema is not available"});
-    }
-}
-
-axk::app::Result<void> axk::server::validate_openapi_schema(const nlohmann::json &document,
-                                                            const nlohmann::json &schema, const nlohmann::json &value) {
-    return validate_value(document, schema, value);
 }

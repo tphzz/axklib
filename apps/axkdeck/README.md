@@ -346,6 +346,57 @@ Development runs also mirror `axklib-server` stdout and stderr to the terminal.
 Workspace setup failures remain visible in the Workspaces dialog and include
 the server request ID when one is available.
 
+### Startup profiling
+
+Every completed desktop launch writes one structured `desktop_startup_completed`
+event at the default `info` log level. It reports native setup, protected-settings
+lookup, local-server startup, WebView navigation, frontend initialization, mount,
+and first-painted-frame timings. Outcomes are categorical and the event never
+contains filesystem paths, server URLs, credentials, user names, host names, or
+raw errors. Set `AXKDECK_LOG_LEVEL=debug` to additionally record each fixed
+`desktop_startup_milestone` as it occurs. Explicit `warn`, `error`, and `off`
+settings continue to suppress the informational summary.
+
+The built-in timeline begins when Rust enters axkdeck. Use Windows Performance
+Recorder (WPR) when the delay may precede that point or involve process startup,
+storage, antivirus scanning, WebView2, or DLL loading. Profile a packaged build,
+not a Vite development session:
+
+1. Record the axkdeck version and source identity, machine model, CPU, memory,
+   storage type, Windows version, WebView2 version, and active security software.
+2. Collect at least five first-launch-after-reboot (cold) samples and five
+   subsequent (warm) samples with the normal local server.
+3. Repeat both sets after launching from PowerShell with
+   `$env:AXKDECK_HTTP_SERVER='0'`. This diagnostic comparison disables the local
+   sidecar for that process; it is not a normal operating configuration.
+4. Keep each startup trace separate and retain the corresponding
+   `desktop_startup_completed` log line.
+
+From an elevated PowerShell terminal, first confirm the available WPR profiles,
+then capture one launch:
+
+```powershell
+wpr -profiles
+wpr -start GeneralProfile -filemode
+# Launch axkdeck, wait for the workspace to finish its first paint, then:
+wpr -stop "$env:TEMP\axkdeck-startup.etl"
+```
+
+Run `wpr -cancel` if a capture must be abandoned. In Windows Performance
+Analyzer, inspect process lifetime, CPU usage, disk/file I/O, image/DLL loading,
+and wait analysis for `axkdeck.exe`, `axklib-server.exe`,
+`msedgewebview2.exe`, and the active antivirus process. Correlate those spans
+with the structured log milestones:
+
+- delay before `native_entry` is outside the built-in timeline and belongs to
+  OS process creation, loading, security scanning, or runtime initialization;
+- a long `credentialLookupMs` isolates protected-settings access;
+- a long `sidecarStartupMs` isolates local server spawn/readiness;
+- a gap between `pageLoadStartedMs` and `pageLoadFinishedMs` isolates WebView
+  navigation and asset loading;
+- large frontend module-to-mount or mount-to-first-frame intervals isolate
+  renderer initialization and painting.
+
 ## Verify and build
 
 ```bash
