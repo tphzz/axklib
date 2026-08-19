@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import workspaceManagerSource from './WorkspaceManager.svelte?raw';
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
@@ -74,6 +75,46 @@ describe('WorkspaceManager', () => {
             (await screen.findByRole('dialog', { name: 'Storage locations' })).classList.contains('dialog-shell'),
         ).toBe(true);
         expect(screen.queryByText('Server storage')).toBeNull();
+    });
+
+    it('renders configured storage locations as a compact undivided list', async () => {
+        vi.mocked(fetch).mockResolvedValue(activeWorkspaceResponse());
+        render(WorkspaceManager, { props: { open: true, onclose: vi.fn() } });
+
+        const list = await screen.findByRole('list', { name: 'Configured storage locations' });
+        const rows = list.querySelectorAll<HTMLElement>('.workspace-row');
+        expect(rows).toHaveLength(2);
+
+        const listGeometry = workspaceManagerSource.match(/\.workspace-list\s*\{[^}]+\}/)?.[0];
+        const rowGeometry = workspaceManagerSource.match(/\.workspace-row\s*\{[^}]+\}/)?.[0];
+        const nameGeometry = workspaceManagerSource.match(/\.workspace-row strong\s*\{[^}]+\}/)?.[0];
+        const statusGeometry = workspaceManagerSource.match(/\.workspace-row small\s*\{[^}]+\}/)?.[0];
+        expect(listGeometry).toBeDefined();
+        expect(rowGeometry).toBeDefined();
+        expect(nameGeometry).toBeDefined();
+        expect(statusGeometry).toBeDefined();
+        const style = document.createElement('style');
+        style.textContent = `${listGeometry}\n${rowGeometry}\n${nameGeometry}\n${statusGeometry}`;
+        document.head.append(style);
+
+        const listStyle = getComputedStyle(list);
+        expect(listStyle.minHeight).toBe('auto');
+        expect(listStyle.paddingTop).toBe('6px');
+        expect(listStyle.paddingBottom).toBe('6px');
+        expect(listStyle.gap).toBe('2px');
+
+        const rowStyle = getComputedStyle(rows[0]);
+        expect(rowStyle.minHeight).toBe('32px');
+        expect(rowStyle.borderBottomStyle).toBe('none');
+
+        const name = screen.getByText('Open image location');
+        const status = rows[0].querySelector('small');
+        expect(status).not.toBeNull();
+        expect(getComputedStyle(name).lineHeight).toBe('11px');
+        expect(getComputedStyle(status!).lineHeight).toBe('9px');
+        expect(getComputedStyle(status!).marginTop).toBe('0px');
+
+        style.remove();
     });
 
     it('opens the native picker and presents the selected directory for confirmation', async () => {
