@@ -166,7 +166,8 @@ WebView2:
    and select the **Desktop development with C++** workload.
 2. Ensure the
    [WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
-   is installed. It is already included with Windows 10 version 1803 and newer.
+   version 111 or newer is installed. WebView2 is already included with current
+   Windows releases.
 3. Install Rust with the MSVC host toolchain and use Node.js LTS.
 
 Open a new PowerShell terminal and verify the toolchain:
@@ -183,6 +184,15 @@ corepack pnpm tauri info
 See the official
 [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows)
 for installer details and troubleshooting.
+
+The packaged NSIS installer checks for WebView2 version `111.0.0.0` or newer.
+When an interactive installation finds no runtime or an older runtime, axkdeck
+discloses the installed and required versions and asks before continuing. If
+accepted, the installer downloads Microsoft's current Evergreen bootstrapper;
+the runtime is not bundled in the installer. An unattended `/S` installation
+performs the same check and installation without a prompt. A newer installed
+runtime is retained, and the shared Evergreen Runtime continues to receive its
+normal Microsoft updates.
 
 Tauri desktop packages are native to the build host. The native CI matrix builds
 the C++ targets once per platform and then reuses the resulting server for the
