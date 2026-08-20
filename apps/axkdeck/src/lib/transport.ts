@@ -472,6 +472,7 @@ export interface ImageTransport {
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
     openImage(source: ImageLocation): Promise<OpenedImage>;
+    keepImageAlive(sessionId: number): Promise<void>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;

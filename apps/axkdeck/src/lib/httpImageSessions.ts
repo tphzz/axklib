@@ -88,6 +88,15 @@ export class HttpImageSessions {
         return this.openedImage(sessionId, summary);
     }
 
+    async keepAlive(sessionId: number): Promise<void> {
+        const session = this.get(sessionId);
+        const summary = await this.client.request<ApiImageSummary>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}`,
+        );
+        if (summary.revision > session.revision) this.replaceRevision(session, summary.revision);
+    }
+
     async attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
         const session = this.get(sessionId);
         const wireSelection: components['schemas']['CompanionSelection'] =

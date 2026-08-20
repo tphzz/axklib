@@ -218,6 +218,11 @@ export class InMemoryImageTransport implements ImageTransport {
         };
     }
 
+    async keepImageAlive(sessionId: number): Promise<void> {
+        this.calls.push('keepImageAlive');
+        await this.options.operations?.keepImageAlive?.(sessionId);
+    }
+
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
         return this.invoke('attachCompanions', [sessionId, selection]);
     }

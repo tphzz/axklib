@@ -1,0 +1,94 @@
+import { describe, expect, it, vi } from 'vitest';
+import { AxklibApiError } from '../../lib/httpErrors';
+import type { ImageLocation } from '../../lib/storageLocations';
+import type { ImageTransport, OpenedImage } from '../../lib/transport';
+import type { PickerController } from '../dialogs/picker';
+import { ImageSessionWorkflow } from './workflow.svelte';
+
+const location: ImageLocation = {
+    kind: 'server-file',
+    reference: { rootId: 'root', relativePath: 'test-disk.hds' },
+    displayName: 'test-disk.hds',
+};
+
+function opened(sessionId: number): OpenedImage {
+    const volume = {
+        id: `volume-${sessionId}`,
+        name: 'newvolume',
+        kind: 'volume' as const,
+        childCount: 0,
+        partitionIndex: 0,
+    };
+    return {
+        sessionId,
+        allocationInspectionAvailable: true,
+        revision: 1,
+        companionSources: [],
+        floppySet: null,
+        tree: [
+            {
+                id: `disk-${sessionId}`,
+                name: 'test-disk.hds',
+                kind: 'disk',
+                childCount: 1,
+                children: [volume],
+            },
+        ],
+        validation: {
+            valid: true,
+            issueCount: 0,
+            errorCount: 0,
+            warningCount: 0,
+            objectCount: 49,
+            relationshipCount: 48,
+        },
+        objects: [],
+        objectTotalCount: 0,
+        initialVolume: volume,
+        volumeMutationsAvailable: true,
+        partitionMutationsAvailable: true,
+        objectRenameAvailable: true,
+        objectDeletionAvailable: true,
+        waveDataCleanupAvailable: true,
+        programGenerationAvailable: true,
+        packageImportAvailable: true,
+        packageExportAvailable: true,
+        volumePackageExportAvailable: true,
+        volumeFloppyExportAvailable: true,
+        audioExportAvailable: true,
+        sequenceExportAvailable: true,
+        mediaConversionAvailable: true,
+        extentLayoutRepairAvailable: true,
+        format: 'sfs',
+    };
+}
+
+describe('ImageSessionWorkflow lease maintenance', () => {
+    it('reopens an expired image session at the selected volume', async () => {
+        const openImage = vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValueOnce(opened(2));
+        const loadVolume = vi.fn(async () => undefined);
+        const transport = {
+            openImage,
+            keepImageAlive: vi.fn(async () => {
+                throw new AxklibApiError('image_not_found', 'Image session does not exist', 404);
+            }),
+            closeImage: vi.fn(async () => undefined),
+        } as unknown as ImageTransport;
+        const workflow = new ImageSessionWorkflow(transport, {} as PickerController);
+        workflow.connect({
+            catalog: { loadVolume, clear: vi.fn() },
+            audition: { invalidateSession: vi.fn(async () => undefined) },
+            mutation: { setCapabilities: vi.fn() },
+            clearExportSelection: vi.fn(),
+        } as never);
+
+        await workflow.open(location, { partitionIndex: 0, volumeName: 'newvolume' });
+        await workflow.maintainLease();
+
+        expect(openImage).toHaveBeenCalledTimes(2);
+        expect(workflow.sessionId).toBe(2);
+        expect(workflow.selectedSource).toMatchObject({ name: 'newvolume', partitionIndex: 0 });
+        expect(loadVolume).toHaveBeenLastCalledWith('volume-2', 0);
+        await workflow.dispose();
+    });
+});

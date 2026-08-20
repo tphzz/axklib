@@ -225,6 +225,23 @@ describe('HttpImageTransport', () => {
                     expect(url.searchParams.get('cursor')).toBe('objects-next');
                     return json({ items: [], totalCount: 2, nextCursor: null });
                 }
+                if (url.pathname.endsWith('/images/image-remote') && init?.method !== 'DELETE') {
+                    return json({
+                        imageId: 'image-remote',
+                        revision: 1,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 1,
+                        objectCount: 2,
+                        relationshipCount: 1,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
                 if (url.pathname.endsWith('/images/image-remote') && init?.method === 'DELETE') {
                     return json({ closed: true });
                 }
@@ -269,8 +286,10 @@ describe('HttpImageTransport', () => {
             items: [{ id: 'volume-1', partitionIndex: 0 }],
             totalCount: 1,
         });
+        await transport.keepImageAlive(1);
         await transport.closeImage(1);
-        expect(requests).toHaveLength(6);
+        expect(requests).toHaveLength(7);
+        expect(requests.filter((request) => request.includes('/content'))).toHaveLength(3);
     });
 
     it('opens an AXK object directory through the explicit directory source contract', async () => {

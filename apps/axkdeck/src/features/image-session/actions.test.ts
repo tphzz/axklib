@@ -51,6 +51,26 @@ function opened(sessionId: number): OpenedImage {
 }
 
 describe('ImageSessionController', () => {
+    it('keeps only the active session alive', async () => {
+        const keepImageAlive = vi.fn(async () => undefined);
+        const controller = new ImageSessionController(
+            {
+                openImage: vi.fn(async () => opened(7)),
+                keepImageAlive,
+                refreshImage: vi.fn(),
+                closeImage: vi.fn(),
+            },
+            async () => undefined,
+            () => undefined,
+        );
+
+        await expect(controller.keepAlive()).resolves.toBe(false);
+        await controller.open(firstLocation);
+        await expect(controller.keepAlive()).resolves.toBe(true);
+        expect(keepImageAlive).toHaveBeenCalledOnce();
+        expect(keepImageAlive).toHaveBeenCalledWith(7);
+    });
+
     it('closes a stale late open without replacing the current session', async () => {
         let resolveFirst: ((value: OpenedImage) => void) | undefined;
         const openImage = vi
@@ -64,7 +84,7 @@ describe('ImageSessionController', () => {
             .mockResolvedValueOnce(opened(2));
         const closeImage = vi.fn(async () => undefined);
         const controller = new ImageSessionController(
-            { openImage, refreshImage: vi.fn(), closeImage },
+            { openImage, keepImageAlive: vi.fn(), refreshImage: vi.fn(), closeImage },
             async () => undefined,
             () => undefined,
         );
@@ -81,7 +101,12 @@ describe('ImageSessionController', () => {
         const closeImage = vi.fn(async () => undefined);
         const invalidate = vi.fn(async () => undefined);
         const controller = new ImageSessionController(
-            { openImage: vi.fn(async () => opened(9)), refreshImage: vi.fn(), closeImage },
+            {
+                openImage: vi.fn(async () => opened(9)),
+                keepImageAlive: vi.fn(),
+                refreshImage: vi.fn(),
+                closeImage,
+            },
             invalidate,
             () => undefined,
         );
