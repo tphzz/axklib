@@ -34,6 +34,7 @@ url = "2.5.7"
 rustix = { version = "1", features = ["fs", "process"] }
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = "0.38.2"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",

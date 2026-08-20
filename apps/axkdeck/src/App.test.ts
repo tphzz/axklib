@@ -210,6 +210,8 @@ describe('App panel layout', () => {
             sourceIdentity: 'v0.4.0-1234567',
             releaseTag: 'v0.4.0',
             isRelease: true,
+            webviewEngine: 'WebKitGTK',
+            webviewVersion: '2.50.4',
         });
     });
 

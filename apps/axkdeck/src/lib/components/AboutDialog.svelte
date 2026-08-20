@@ -46,6 +46,13 @@
                         <dt>Build</dt>
                         <dd>{state.buildInfo.sourceIdentity}</dd>
                     </div>
+                    <div>
+                        <dt>Web view</dt>
+                        <dd>
+                            {state.buildInfo.webviewEngine}
+                            {state.buildInfo.webviewVersion ?? 'unavailable'}
+                        </dd>
+                    </div>
                 </dl>
             {/if}
         </div>

@@ -30,6 +30,8 @@ describe('AboutDialog', () => {
                         sourceIdentity: 'v0.4.0-1234567-mod',
                         releaseTag: '',
                         isRelease: false,
+                        webviewEngine: 'Microsoft Edge WebView2',
+                        webviewVersion: '120.0.2210.144',
                     },
                 },
                 onclose,
@@ -39,9 +41,35 @@ describe('AboutDialog', () => {
         const dialog = screen.getByRole('dialog', { name: 'About axkdeck' });
         expect(within(dialog).getByText('0.4.0')).toBeTruthy();
         expect(within(dialog).getByText('v0.4.0-1234567-mod')).toBeTruthy();
+        expect(within(dialog).getByText('Microsoft Edge WebView2 120.0.2210.144')).toBeTruthy();
 
         await fireEvent.keyDown(dialog, { key: 'Escape' });
         expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('keeps build information available when webview introspection fails', () => {
+        render(AboutDialog, {
+            props: {
+                state: {
+                    status: 'ready',
+                    buildInfo: {
+                        schemaVersion: 1,
+                        semanticVersion: '0.4.0',
+                        projectVersion: '0.4.0',
+                        sourceIdentity: 'v0.4.0-1234567-mod',
+                        releaseTag: '',
+                        isRelease: false,
+                        webviewEngine: 'WebKitGTK',
+                        webviewVersion: null,
+                    },
+                },
+                onclose: vi.fn(),
+            },
+        });
+
+        const dialog = screen.getByRole('dialog', { name: 'About axkdeck' });
+        expect(within(dialog).getByText('WebKitGTK unavailable')).toBeTruthy();
+        expect(within(dialog).getByText('v0.4.0-1234567-mod')).toBeTruthy();
     });
 
     it('shows a stable fallback when build information cannot be loaded', () => {

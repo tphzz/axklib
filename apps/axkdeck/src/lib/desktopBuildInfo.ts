@@ -7,6 +7,8 @@ export interface DesktopBuildInfo {
     sourceIdentity: string;
     releaseTag: string;
     isRelease: boolean;
+    webviewEngine: string;
+    webviewVersion: string | null;
 }
 
 export type DesktopBuildInfoState =

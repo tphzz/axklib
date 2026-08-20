@@ -8,6 +8,7 @@ mod remote_settings;
 mod retained_download;
 mod server_sidecar;
 mod startup_diagnostics;
+mod webview_runtime;
 
 use std::sync::Mutex;
 
@@ -42,6 +43,8 @@ struct DesktopBuildInfo {
     source_identity: &'static str,
     release_tag: &'static str,
     is_release: bool,
+    webview_engine: &'static str,
+    webview_version: Option<String>,
 }
 
 fn current_build_info() -> DesktopBuildInfo {
@@ -52,6 +55,8 @@ fn current_build_info() -> DesktopBuildInfo {
         source_identity: env!("AXKDECK_SOURCE_IDENTITY"),
         release_tag: env!("AXKDECK_RELEASE_TAG"),
         is_release: env!("AXKDECK_IS_RELEASE") == "true",
+        webview_engine: webview_runtime::ENGINE,
+        webview_version: None,
     }
 }
 
@@ -124,6 +129,8 @@ mod tests {
         assert!(!build.project_version.is_empty());
         assert!(!build.source_identity.is_empty());
         assert_eq!(build.is_release, !build.release_tag.is_empty());
+        assert!(!build.webview_engine.is_empty());
+        assert!(build.webview_version.is_none());
     }
 
     #[test]
@@ -318,8 +325,10 @@ fn diagnostic_log_level() -> &'static str {
 }
 
 #[tauri::command]
-fn desktop_build_info() -> DesktopBuildInfo {
-    current_build_info()
+async fn desktop_build_info(window: WebviewWindow) -> DesktopBuildInfo {
+    let mut build = current_build_info();
+    build.webview_version = webview_runtime::version(&window).await;
+    build
 }
 
 #[tauri::command]
