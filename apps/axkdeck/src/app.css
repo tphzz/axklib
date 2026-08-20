@@ -133,6 +133,18 @@ input:focus-visible {
   align-items: center;
   gap: 10px;
   padding: 0 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.brand:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.brand:focus-visible {
+  outline-offset: -3px;
 }
 
 .brand-mark {

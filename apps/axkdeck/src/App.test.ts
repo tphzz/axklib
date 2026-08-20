@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
     audioImportCapabilities: vi.fn(),
     inspectAudio: vi.fn(),
     uploadClientFile: vi.fn(),
+    desktopBuildInfo: vi.fn(),
 }));
 
 vi.mock('./lib/createTransport', () => ({
@@ -67,6 +68,10 @@ vi.mock('./lib/createTransport', () => ({
 
 vi.mock('./lib/nativeMediaDrop', () => ({
     listenForNativeMediaDrops: mocks.listenForNativeMediaDrops,
+}));
+
+vi.mock('./lib/desktopBuildInfo', () => ({
+    desktopBuildInfo: mocks.desktopBuildInfo,
 }));
 
 import App from './App.svelte';
@@ -197,6 +202,14 @@ describe('App panel layout', () => {
             issues: [],
         });
         mocks.uploadClientFile.mockReset();
+        mocks.desktopBuildInfo.mockReset().mockResolvedValue({
+            schemaVersion: 1,
+            semanticVersion: '0.4.0',
+            projectVersion: '0.4.0',
+            sourceIdentity: 'v0.4.0-1234567',
+            releaseTag: 'v0.4.0',
+            isRelease: true,
+        });
     });
 
     it('requires acknowledgement on every application start', async () => {
@@ -212,6 +225,27 @@ describe('App panel layout', () => {
         first.unmount();
         render(App);
         expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+    });
+
+    it('opens About from the brand and reuses the authoritative build information', async () => {
+        renderAcknowledgedApp();
+        const brand = screen.getByRole('button', { name: 'About axkdeck' });
+
+        brand.focus();
+        expect(document.activeElement).toBe(brand);
+        await fireEvent.click(brand);
+        const firstDialog = await screen.findByRole('dialog', { name: 'About axkdeck' });
+        expect(within(firstDialog).getByText('0.4.0')).toBeTruthy();
+        expect(within(firstDialog).getByText('v0.4.0-1234567')).toBeTruthy();
+        expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
+
+        await fireEvent.click(within(firstDialog).getByRole('button', { name: 'Close' }));
+        expect(screen.queryByRole('dialog', { name: 'About axkdeck' })).toBeNull();
+        await waitFor(() => expect(document.activeElement).toBe(brand));
+
+        await fireEvent.click(brand);
+        expect(await screen.findByRole('dialog', { name: 'About axkdeck' })).toBeTruthy();
+        expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
     });
 
     it('keeps one stable toolbar across all side-panel combinations', async () => {

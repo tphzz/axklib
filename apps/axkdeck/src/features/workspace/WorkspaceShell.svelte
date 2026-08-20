@@ -5,6 +5,7 @@
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
     import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
+    import AboutDialog from '../../lib/components/AboutDialog.svelte';
     import AuditionBar from '../../lib/components/AuditionBar.svelte';
     import ContainedObjectWorkspace from '../../lib/components/ContainedObjectWorkspace.svelte';
     import Icon from '../../lib/components/Icon.svelte';
@@ -32,6 +33,7 @@
         WorkspaceView,
     } from '../../lib/types';
     import type { PackageExportSelectionState } from '../../lib/objectSelection';
+    import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../lib/desktopBuildInfo';
 
     interface WorkspaceTab {
         id: WorkspaceView;
@@ -173,6 +175,10 @@
     let observedSessionId = $state<number | null>(null);
     let observedVolumeId = $state('');
     let observedSystemProgramContexts = $state<SystemProgramContexts | null>(null);
+    let aboutDialogOpen = $state(false);
+    let aboutBuildInfoState = $state<DesktopBuildInfoState>({ status: 'loading' });
+    let cachedDesktopBuildInfo: DesktopBuildInfo | null = null;
+    let desktopBuildInfoRequest: Promise<DesktopBuildInfo> | null = null;
     const lowerPanelAvailable = $derived(workspaceView !== 'wave-data' && workspaceView !== 'sequences');
     const auditionAvailable = $derived(workspaceView !== 'programs' && workspaceView !== 'sequences');
     const multiPartEditorContext = $derived(
@@ -271,13 +277,31 @@
         catalog.inspectorObjectId = '';
         catalog.editorObjectIds.programs = '';
     }
+
+    async function openAbout(): Promise<void> {
+        aboutDialogOpen = true;
+        if (cachedDesktopBuildInfo) {
+            aboutBuildInfoState = { status: 'ready', buildInfo: cachedDesktopBuildInfo };
+            return;
+        }
+
+        aboutBuildInfoState = { status: 'loading' };
+        desktopBuildInfoRequest ??= desktopBuildInfo();
+        try {
+            cachedDesktopBuildInfo = await desktopBuildInfoRequest;
+            aboutBuildInfoState = { status: 'ready', buildInfo: cachedDesktopBuildInfo };
+        } catch {
+            desktopBuildInfoRequest = null;
+            aboutBuildInfoState = { status: 'error' };
+        }
+    }
 </script>
 
 <div class:sidebar-closed={!sidebarOpen} class:inspector-closed={!inspectorOpen} class="app-shell">
     <header class="app-header">
-        <div class="brand">
+        <button class="brand" type="button" aria-label="About axkdeck" title="About axkdeck" onclick={openAbout}>
             <span class="brand-mark"><Icon name="waveform" size={20} strokeWidth={2.1} /></span><strong>axkdeck</strong>
-        </div>
+        </button>
         <nav class="workspace-tabs" aria-label="Workspace views">
             {#each workspaceTabs as tab (tab.id)}
                 <button class:active={workspaceView === tab.id} type="button" onclick={() => selectWorkspace(tab.id)}>
@@ -542,3 +566,7 @@
         >
     </footer>
 </div>
+
+{#if aboutDialogOpen}
+    <AboutDialog state={aboutBuildInfoState} onclose={() => (aboutDialogOpen = false)} />
+{/if}
