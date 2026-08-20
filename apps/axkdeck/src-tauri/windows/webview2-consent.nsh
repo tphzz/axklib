@@ -1,9 +1,11 @@
 !define AXKDECK_WEBVIEW2_APP_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !define AXKDECK_MINIMUM_WEBVIEW2_VERSION "111.0.0.0"
+!define MUI_CUSTOMFUNCTION_GUIINIT axkdeck_webview2_consent
 
 ; Tauri's WebView2 section runs before NSIS_HOOK_PREINSTALL. Use the GUI
 ; callback so an interactive user can decline before any runtime is changed.
-Function .onGUIInit
+; Modern UI owns .onGUIInit and calls this registered callback from it.
+Function axkdeck_webview2_consent
   IfSilent axkdeck_webview2_consent_done 0
 
   StrCpy $0 ""

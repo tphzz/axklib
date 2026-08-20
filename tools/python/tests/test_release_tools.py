@@ -880,7 +880,11 @@ def test_windows_desktop_bundle_uses_branded_gui_startup() -> None:
     installer_hook = (desktop / "src-tauri" / nsis["installerHooks"]).read_text(
         encoding="utf-8"
     )
-    assert "Function .onGUIInit" in installer_hook
+    assert (
+        "!define MUI_CUSTOMFUNCTION_GUIINIT axkdeck_webview2_consent" in installer_hook
+    )
+    assert "Function axkdeck_webview2_consent" in installer_hook
+    assert "Function .onGUIInit" not in installer_hook
     assert "IfSilent" in installer_hook
     assert minimum_webview2_version in installer_hook
     assert "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" in installer_hook
