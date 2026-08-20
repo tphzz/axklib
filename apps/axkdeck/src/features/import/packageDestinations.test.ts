@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { packageImportDestination } from './packageDestinations';
+import { importDestination, initialImportDestination } from './packageDestinations';
 
-describe('packageImportDestination', () => {
+describe('importDestination', () => {
+    it('leaves the chooser unresolved without a partition or volume selection', () => {
+        expect(initialImportDestination(null)).toBeNull();
+    });
+
     it('preserves the exact name of an existing sampler volume', () => {
-        expect(packageImportDestination('existing', 2, '  Existing Volume  ')).toEqual({
+        expect(importDestination('existing', 2, '  Existing Volume  ')).toEqual({
             kind: 'EXISTING_VOLUME',
             partitionIndex: 2,
             volumeName: '  Existing Volume  ',
@@ -11,7 +15,7 @@ describe('packageImportDestination', () => {
     });
 
     it('accepts a valid new sampler volume name without rewriting it', () => {
-        expect(packageImportDestination('create', 0, 'New Volume')).toEqual({
+        expect(importDestination('create', 0, 'New Volume')).toEqual({
             kind: 'CREATE_VOLUME',
             partitionIndex: 0,
             volumeName: 'New Volume',
@@ -21,7 +25,7 @@ describe('packageImportDestination', () => {
     it.each([' New Volume', 'New Volume ', '12345678901234567', 'New\nVolume'])(
         'rejects the invalid new sampler volume name %j',
         (volumeName) => {
-            expect(packageImportDestination('create', 0, volumeName)).toBeNull();
+            expect(importDestination('create', 0, volumeName)).toBeNull();
         },
     );
 });

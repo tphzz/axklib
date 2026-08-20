@@ -75,6 +75,29 @@ function transport(): ImageTransport {
     } as unknown as ImageTransport;
 }
 
+function destinationProps(volumeName: string, partitionIndex = 0) {
+    const partitionName = `Partition ${partitionIndex + 1}`;
+    return {
+        target: { kind: 'EXISTING_VOLUME' as const, partitionIndex, volumeName },
+        destinationMode: 'existing' as const,
+        destinationPartitionIndex: partitionIndex,
+        destinationVolumeName: volumeName,
+        partitionOptions: [{ partitionIndex, name: partitionName }],
+        volumeOptions: [
+            {
+                partitionIndex,
+                name: partitionName,
+                volumeName,
+                label: `${partitionName} / ${volumeName}`,
+            },
+        ],
+        ondestinationmode: vi.fn(),
+        ondestinationvolume: vi.fn(),
+        ondestinationpartition: vi.fn(),
+        ondestinationname: vi.fn(),
+    };
+}
+
 describe('AudioImportDialog', () => {
     it('keeps sampler fields aligned while reserving clearance for the scrollbar', () => {
         expect(audioSamplerSettingsSource).toContain('grid-template-columns: repeat(7, minmax(0, 1fr));');
@@ -89,7 +112,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: transport(),
                 files: [new File([new Uint8Array(64)], 'Bass.wav', { type: 'audio/wav' })],
-                target: { partitionIndex: 0, volumeName: 'Sounds' },
+                ...destinationProps('Sounds'),
                 existingSampleNames: [],
                 existingSampleBankNames: ['Existing'],
                 existingWaveformNames: [],
@@ -131,7 +154,7 @@ describe('AudioImportDialog', () => {
                     new File([new Uint8Array(64)], 'Second.wav', { type: 'audio/wav' }),
                     new File([new Uint8Array(64)], 'Third.wav', { type: 'audio/wav' }),
                 ],
-                target: { partitionIndex: 0, volumeName: 'Bulk' },
+                ...destinationProps('Bulk'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit: vi.fn(),
@@ -152,7 +175,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: transport(),
                 files: [],
-                target: { partitionIndex: 0, volumeName: 'My Volume' },
+                ...destinationProps('My Volume'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 onchooseworkspace,
@@ -193,7 +216,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [workspaceFile],
-                target: { partitionIndex: 0, volumeName: 'My Volume' },
+                ...destinationProps('My Volume'),
                 existingSampleNames: ['16bit_11k'],
                 existingWaveformNames: ['16bit_11k'],
                 oncommit,
@@ -238,7 +261,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [first, second],
-                target: { partitionIndex: 0, volumeName: 'Batch' },
+                ...destinationProps('Batch'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit: vi.fn(),
@@ -313,7 +336,7 @@ describe('AudioImportDialog', () => {
                     new File([new Uint8Array(64)], monoFilename, { type: 'audio/wav' }),
                     new File([new Uint8Array(128)], 'Stereo pad.wav', { type: 'audio/wav' }),
                 ],
-                target: { partitionIndex: 0, volumeName: 'Mixed' },
+                ...destinationProps('Mixed'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit: vi.fn(),
@@ -356,7 +379,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [file],
-                target: { partitionIndex: 2, volumeName: 'Keys' },
+                ...destinationProps('Keys', 2),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit,
@@ -416,7 +439,7 @@ describe('AudioImportDialog', () => {
         const baseProps = {
             transport: imageTransport,
             files: [file],
-            target: { partitionIndex: 0, volumeName: 'Import' },
+            ...destinationProps('Import'),
             existingSampleNames: [] as string[],
             existingWaveformNames: [] as string[],
             oncommit,
@@ -457,7 +480,7 @@ describe('AudioImportDialog', () => {
         const baseProps = {
             transport: imageTransport,
             files: [file],
-            target: { partitionIndex: 0, volumeName: 'Import' },
+            ...destinationProps('Import'),
             existingSampleNames: [] as string[],
             existingWaveformNames: [] as string[],
             oncommit,
@@ -520,7 +543,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [new File([new Uint8Array(128)], 'Mapped.wav', { type: 'audio/wav' })],
-                target: { partitionIndex: 0, volumeName: 'Mapped' },
+                ...destinationProps('Mapped'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit,
@@ -605,7 +628,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [file],
-                target: { partitionIndex: 0, volumeName: 'Rates' },
+                ...destinationProps('Rates'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit,
@@ -649,7 +672,7 @@ describe('AudioImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [new File([new Uint8Array(64)], 'voice.wav', { type: 'audio/wav' })],
-                target: { partitionIndex: 0, volumeName: 'Voice' },
+                ...destinationProps('Voice'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit: vi.fn(),
@@ -728,7 +751,7 @@ describe('AudioImportDialog', () => {
                     new File([new Uint8Array(64)], 'Too large.wav', { type: 'audio/wav' }),
                     new File([new Uint8Array(64)], 'Valid.wav', { type: 'audio/wav' }),
                 ],
-                target: { partitionIndex: 0, volumeName: 'Mixed' },
+                ...destinationProps('Mixed'),
                 existingSampleNames: [],
                 existingWaveformNames: [],
                 oncommit: vi.fn(),

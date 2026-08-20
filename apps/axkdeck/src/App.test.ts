@@ -112,6 +112,7 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             sessionId: 17,
+            format: 'sfs',
             revision: 1,
             companionSources: [],
             floppySet: null,
@@ -1590,9 +1591,9 @@ describe('App panel layout', () => {
         Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
         window.dispatchEvent(drop);
         expect(drop.defaultPrevented).toBe(true);
-        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        const dialog = await screen.findByRole('dialog', { name: 'Open a hard-disk image' });
         expect(
-            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+            within(dialog).getByText('Open a writable SFS hard-disk image before importing dropped files.'),
         ).toBeTruthy();
     });
 
@@ -1605,9 +1606,9 @@ describe('App panel layout', () => {
         const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
         callbacks.onDrop([new File(['audio'], 'take.wav', { type: 'audio/wav' })], { x: 20, y: 30 }, 1);
 
-        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        const dialog = await screen.findByRole('dialog', { name: 'Open a hard-disk image' });
         expect(
-            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+            within(dialog).getByText('Open a writable SFS hard-disk image before importing dropped files.'),
         ).toBeTruthy();
         delete runtime.__TAURI_INTERNALS__;
     });
@@ -1695,7 +1696,17 @@ describe('App panel layout', () => {
     });
 
     it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
         renderAcknowledgedApp();
+        await chooseNestedImage();
+        await screen.findByText('My Volume');
 
         const midiTransfer = {
             types: ['Files'],
@@ -1734,7 +1745,7 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
     });
 
-    it('switches to a dropped-on volume before opening MIDI import review', async () => {
+    it('keeps the explicitly selected volume when a MIDI file is dropped over another volume', async () => {
         const firstVolume = {
             id: 'volume-1',
             name: 'First Volume',
@@ -1770,8 +1781,8 @@ describe('App panel layout', () => {
         screen.getByText('Second Volume').dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume Second Volume')).toBeTruthy();
-        expect(mocks.objectPage).toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
+        expect(within(dialog).getByText('Volume First Volume')).toBeTruthy();
+        expect(mocks.objectPage).not.toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
     });
 
     it('selects several workspace audio files and inspects them without uploading', async () => {
@@ -1784,6 +1795,7 @@ describe('App panel layout', () => {
         };
         mocks.openImage.mockResolvedValueOnce({
             sessionId: 17,
+            format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
                 valid: true,
@@ -1861,6 +1873,7 @@ describe('App panel layout', () => {
         };
         mocks.openImage.mockResolvedValueOnce({
             sessionId: 17,
+            format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
                 valid: true,
@@ -1905,7 +1918,17 @@ describe('App panel layout', () => {
     });
 
     it('consumes unsupported and empty file drops without opening the import dialog', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
         renderAcknowledgedApp();
+        await chooseNestedImage();
+        await screen.findByText('My Volume');
 
         const unsupportedTransfer = {
             types: ['text/uri-list'],
@@ -1970,6 +1993,7 @@ function openedImageWithVolumes(
 ) {
     return {
         sessionId: 17,
+        format: 'sfs',
         companionSources: [],
         floppySet: null,
         tree: [

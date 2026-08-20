@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
-import PackageImportDestination from './PackageImportDestination.svelte';
+import ImportDestinationChooser from './ImportDestinationChooser.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
@@ -37,9 +37,9 @@ function props(overrides: Record<string, unknown> = {}) {
     };
 }
 
-describe('PackageImportDestination', () => {
+describe('ImportDestinationChooser', () => {
     it('preselects the exact volume and exposes every partition volume through an autocomplete', async () => {
-        render(PackageImportDestination, { props: props() });
+        render(ImportDestinationChooser, { props: props() });
 
         const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
         expect(combobox.value).toBe('SOUNDS 01 / Strings');
@@ -52,7 +52,7 @@ describe('PackageImportDestination', () => {
 
     it('filters volumes and selects an exact destination with the keyboard', async () => {
         const onvolume = vi.fn();
-        render(PackageImportDestination, { props: props({ partitionIndex: null, volumeName: '', onvolume }) });
+        render(ImportDestinationChooser, { props: props({ partitionIndex: null, volumeName: '', onvolume }) });
 
         const combobox = screen.getByRole('combobox', { name: 'Volume' });
         await fireEvent.input(combobox, { target: { value: 'sounds 02' } });
@@ -64,8 +64,21 @@ describe('PackageImportDestination', () => {
         expect(onvolume).toHaveBeenLastCalledWith(1, 'Pianos');
     });
 
+    it('clears the selected volume, reopens all options, and retains keyboard focus', async () => {
+        const onvolume = vi.fn();
+        render(ImportDestinationChooser, { props: props({ onvolume }) });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Clear volume' }));
+
+        const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
+        expect(onvolume).toHaveBeenLastCalledWith(null, '');
+        expect(combobox.value).toBe('');
+        expect(document.activeElement).toBe(combobox);
+        expect(screen.getAllByRole('option')).toHaveLength(3);
+    });
+
     it('uses the same dark dialog control treatment for a new volume name', async () => {
-        render(PackageImportDestination, {
+        render(ImportDestinationChooser, {
             props: props({ mode: 'create', partitionIndex: 0, volumeName: '' }),
         });
 
@@ -74,7 +87,7 @@ describe('PackageImportDestination', () => {
     });
 
     it('uses the shared compact dialog typography and dark autocomplete palette', async () => {
-        render(PackageImportDestination, { props: props() });
+        render(ImportDestinationChooser, { props: props() });
 
         const combobox = screen.getByRole('combobox', { name: 'Volume' });
         await fireEvent.focus(combobox);

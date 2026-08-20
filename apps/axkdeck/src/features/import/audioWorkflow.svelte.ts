@@ -1,16 +1,30 @@
 import { audioExtensions, audioMediaType } from '../../lib/audioImport';
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
-import type { AudioImportGrouping, AudioImportItem, AudioImportTarget, ImageTransport } from '../../lib/transport';
+import type {
+    AudioImportDestination,
+    AudioImportGrouping,
+    AudioImportItem,
+    AudioImportTarget,
+    ImageTransport,
+} from '../../lib/transport';
 import type { DiskTreeItem, SampleStructureItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
+import {
+    collectImportDestinations,
+    importDestination,
+    initialImportDestination,
+    type ImportDestinationMode,
+} from './packageDestinations';
 import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 
 export interface AudioImportRequest {
     files: (ClientUploadSource | FileLocation)[];
-    target: AudioImportTarget;
+    destinationMode: ImportDestinationMode;
+    destinationPartitionIndex: number | null;
+    destinationVolumeName: string;
 }
 
 interface AudioImportDependencies {
@@ -19,6 +33,7 @@ interface AudioImportDependencies {
     picker: PickerController;
     sessionId: () => number | null;
     imageLocation: () => ImageLocation | null;
+    imageFormat: () => string | null;
     mutationsAvailable: () => boolean;
     selectedSource: () => DiskTreeItem;
     setSelectedSource: (item: DiskTreeItem) => void;
@@ -43,7 +58,11 @@ export class AudioImportWorkflow {
     constructor(private readonly dependencies: AudioImportDependencies) {}
 
     dropAvailable(): boolean {
-        return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
+        return (
+            this.dependencies.mutationsAvailable() &&
+            this.dependencies.imageLocation() !== null &&
+            this.dependencies.imageFormat() === 'sfs'
+        );
     }
 
     activeTarget(): AudioImportTarget | null {
@@ -56,19 +75,20 @@ export class AudioImportWorkflow {
     }
 
     chooseFiles(): void {
-        const target = this.activeTarget();
-        if (!target || !this.dependencies.imageLocation()) {
-            this.dependencies.setStatus('Select a writable volume first');
+        if (!this.dropAvailable()) {
+            this.dependencies.setStatus('Open a writable SFS hard-disk image first');
             return;
         }
-        this.request = { files: [], target };
+        this.request = this.newRequest([], this.dependencies.selectedSource());
     }
 
     filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
+        const request = this.request;
         void this.requestDroppedFiles(
             Array.from(input.files ?? []).map(browserUploadSource),
-            this.request?.target ?? this.activeTarget(),
+            null,
+            request ?? undefined,
         );
         input.value = '';
     }
@@ -82,7 +102,7 @@ export class AudioImportWorkflow {
             ondirectorychange: (directory) => (this.lastDirectory = directory),
         });
         if (!selections || !this.request) return;
-        await this.requestDroppedFiles(selections, request.target);
+        await this.requestDroppedFiles(selections, null, request);
     }
 
     chooseLocal(input: HTMLInputElement): void {
@@ -94,7 +114,8 @@ export class AudioImportWorkflow {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('Audio import target is no longer available');
-        const target = request.target;
+        const target = this.destination();
+        if (!target) throw new Error('Choose a valid audio import destination');
         const firstName = items[0]?.sampleName;
         const started = performance.now();
         this.dependencies.setStatus('Importing audio');
@@ -108,7 +129,10 @@ export class AudioImportWorkflow {
             );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
             this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
-            await this.dependencies.refreshSession(target);
+            await this.dependencies.refreshSession({
+                partitionIndex: target.partitionIndex,
+                volumeName: target.volumeName,
+            });
             if (grouping.kind === 'SAMPLE_BANK') {
                 const inserted = this.dependencies
                     .sampleBanks()
@@ -127,7 +151,8 @@ export class AudioImportWorkflow {
 
     async requestDroppedFiles(
         files: (ClientUploadSource | FileLocation)[],
-        target = this.activeTarget(),
+        selected: DiskTreeItem | null = this.dependencies.selectedSource(),
+        destinationRequest?: AudioImportRequest,
     ): Promise<void> {
         const admitted: (ClientUploadSource | FileLocation)[] = [];
         for (const source of files) {
@@ -138,27 +163,94 @@ export class AudioImportWorkflow {
             this.dependencies.setStatus('No supported WAV, FLAC, or AIFF files were selected');
             return;
         }
-        if (!target || admitted.length === 0 || !this.dependencies.imageLocation()) {
-            this.dependencies.setStatus(
-                target ? 'Drop WAV, FLAC, or AIFF audio files' : 'Select a writable volume first',
-            );
+        if (admitted.length === 0 || !this.dropAvailable()) {
+            this.dependencies.setStatus('Drop WAV, FLAC, or AIFF audio files onto a writable SFS hard-disk image');
             return;
         }
-        const active = this.activeTarget();
-        if (!sameVolumeTarget(active, target)) {
-            const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
-            if (!item) {
-                this.dependencies.setStatus('Audio import target is no longer available');
-                return;
-            }
-            this.dependencies.setSelectedSource(item);
-            await this.dependencies.loadVolume(item.id);
-            if (this.dependencies.activeVolumeId() !== item.id) {
-                this.dependencies.setStatus('Audio import target is no longer available');
-                return;
+        this.request = destinationRequest
+            ? { ...destinationRequest, files: admitted }
+            : this.newRequest(admitted, selected);
+        const target = this.destination();
+        if (target?.kind === 'EXISTING_VOLUME') await this.loadExistingVolume(target);
+    }
+
+    destination(): AudioImportDestination | null {
+        const request = this.request;
+        if (!request) return null;
+        return importDestination(
+            request.destinationMode,
+            request.destinationPartitionIndex,
+            request.destinationVolumeName,
+        );
+    }
+
+    partitionOptions() {
+        return collectImportDestinations(this.dependencies.sourceItems()).partitions;
+    }
+
+    volumeOptions() {
+        return collectImportDestinations(this.dependencies.sourceItems()).volumes;
+    }
+
+    setDestinationMode(mode: ImportDestinationMode): void {
+        const request = this.request;
+        if (!request) return;
+        const destinations = collectImportDestinations(this.dependencies.sourceItems());
+        request.destinationMode = mode;
+        request.destinationVolumeName = '';
+        request.destinationPartitionIndex =
+            mode === 'create'
+                ? (request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null)
+                : null;
+    }
+
+    async setExistingVolume(partitionIndex: number | null, volumeName: string): Promise<void> {
+        const request = this.request;
+        if (!request) return;
+        request.destinationPartitionIndex = partitionIndex;
+        request.destinationVolumeName = volumeName;
+        if (partitionIndex !== null && volumeName) {
+            try {
+                await this.loadExistingVolume({ partitionIndex, volumeName });
+            } catch (error) {
+                request.destinationPartitionIndex = null;
+                request.destinationVolumeName = '';
+                this.dependencies.setStatus(userFacingMessage(error));
             }
         }
-        this.request = { files: admitted, target };
+    }
+
+    setDestinationPartition(partitionIndex: number): void {
+        if (this.request) this.request.destinationPartitionIndex = partitionIndex;
+    }
+
+    setDestinationVolumeName(volumeName: string): void {
+        if (this.request) this.request.destinationVolumeName = volumeName.slice(0, 16);
+    }
+
+    private newRequest(
+        files: (ClientUploadSource | FileLocation)[],
+        selected: DiskTreeItem | null,
+    ): AudioImportRequest {
+        const initial = selected ? initialImportDestination(selected) : null;
+        return {
+            files,
+            destinationMode: initial?.mode ?? 'existing',
+            destinationPartitionIndex: initial?.partitionIndex ?? null,
+            destinationVolumeName: initial?.volumeName ?? '',
+        };
+    }
+
+    private async loadExistingVolume(target: AudioImportTarget): Promise<void> {
+        const active = this.activeTarget();
+        if (sameVolumeTarget(active, target)) return;
+        const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
+        if (!item) throw new Error('Audio import target is no longer available');
+        this.dependencies.setSelectedSource(item);
+        await this.dependencies.loadVolume(item.id);
+        if (this.dependencies.activeVolumeId() !== item.id) {
+            throw new Error('Audio import target is no longer available');
+        }
     }
 }
 

@@ -2,23 +2,23 @@
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
     import {
-        packageImportDestination,
-        type PackageImportDestinationMode,
-        type PackageImportPartitionOption,
-        type PackageImportVolumeOption,
+        importDestination,
+        type ImportDestinationMode,
+        type ImportPartitionOption,
+        type ImportVolumeOption,
     } from '../../features/import/packageDestinations';
     import type { ImageSessionPackageImportPlan, PackageInspection, PackageOpaqueSequenceDecision } from '../transport';
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
-    import PackageImportDestination from './PackageImportDestination.svelte';
+    import ImportDestinationChooser from './ImportDestinationChooser.svelte';
 
     interface Props {
         targetName: string;
-        destinationMode: PackageImportDestinationMode;
+        destinationMode: ImportDestinationMode;
         destinationPartitionIndex: number | null;
         destinationVolumeName: string;
-        partitionOptions: PackageImportPartitionOption[];
-        volumeOptions: PackageImportVolumeOption[];
+        partitionOptions: ImportPartitionOption[];
+        volumeOptions: ImportVolumeOption[];
         desktop: boolean;
         canChangeSource: boolean;
         sourceName: string;
@@ -34,7 +34,7 @@
         onchooseworkspace: () => void;
         onchooselocal: () => void;
         onchange: () => void;
-        ondestinationmode: (mode: PackageImportDestinationMode) => void;
+        ondestinationmode: (mode: ImportDestinationMode) => void;
         ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
         ondestinationpartition: (partitionIndex: number) => void;
         ondestinationname: (name: string) => void;
@@ -177,7 +177,7 @@
         hasUnvalidatedChanges || renameActions.length > 0 || editableProgramPlacements.length > 0,
     );
     const destinationReady = $derived(
-        packageImportDestination(destinationMode, destinationPartitionIndex, destinationVolumeName) !== null,
+        importDestination(destinationMode, destinationPartitionIndex, destinationVolumeName) !== null,
     );
     const canCheckConflicts = $derived(
         status === 'ready' &&
@@ -307,7 +307,7 @@
                     {/if}
                 </section>
 
-                <PackageImportDestination
+                <ImportDestinationChooser
                     mode={destinationMode}
                     partitionIndex={destinationPartitionIndex}
                     volumeName={destinationVolumeName}

@@ -2,7 +2,7 @@ import { audioMediaType } from '../../lib/audioImport';
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
 import { reportDiagnostic, reportError } from '../../lib/diagnostics';
 import { midiMediaType } from '../../lib/midiImport';
-import { listenForNativeMediaDrops, type NativeDropPosition } from '../../lib/nativeMediaDrop';
+import { listenForNativeMediaDrops } from '../../lib/nativeMediaDrop';
 import { packageImportUploadKind } from '../../lib/packageImportMedia';
 import type { AudioImportTarget } from '../../lib/transport';
 import { tx16wDiskMediaType } from '../../lib/tx16wImport';
@@ -14,7 +14,6 @@ import type { Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
 
 export type MediaDropKind = 'audio' | 'midi' | 'tx16w' | 'package' | 'mixed';
 type ClassifiedMedia = MediaDropKind | 'none';
-type DropTarget = AudioImportTarget | DiskTreeItem;
 
 export interface MediaDropNotice {
     title: string;
@@ -28,6 +27,10 @@ interface MediaDropDependencies {
     sequenceImport: SequenceImportWorkflow;
     tx16wImport: Tx16wImportWorkflow;
     packageImport: PackageImportWorkflow;
+    sessionId: () => number | null;
+    imageFormat: () => string | null;
+    mutationsAvailable: () => boolean;
+    selectedSource: () => DiskTreeItem;
     setStatus: (status: string) => void;
 }
 
@@ -48,8 +51,8 @@ export class MediaDropWorkflow {
         let disposed = false;
         let unlisten: (() => void) | null = null;
         void listenForNativeMediaDrops({
-            onHover: (paths, position) => this.updateHover(paths, position),
-            onDrop: (files, position, droppedPathCount) => {
+            onHover: (paths) => this.updateHover(paths),
+            onDrop: (files, _position, droppedPathCount) => {
                 const kind = classifyDroppedNames(files.map((file) => file.name));
                 reportDiagnostic('native_media_drop_received', {
                     droppedPathCount,
@@ -62,7 +65,7 @@ export class MediaDropWorkflow {
                     );
                     return;
                 }
-                void this.route(files, position ? this.nativeDroppedTarget(position, kind) : null);
+                void this.route(files);
             },
             onError: (reason) => {
                 this.clearHover();
@@ -99,11 +102,9 @@ export class MediaDropWorkflow {
             return;
         }
         this.dragKind = kind;
-        const target = kind === 'mixed' ? null : this.targetForElement(event.target, kind);
-        this.dragTarget = target && !('kind' in target) ? target : null;
+        this.dragTarget = kind === 'mixed' ? null : this.selectedVolumeTarget();
         this.dragActive = true;
-        const dropAvailable = kind === 'package' ? this.dependencies.packageImport.dropAvailable() : target !== null;
-        dataTransfer.dropEffect = kind === 'mixed' || !dropAvailable ? 'none' : 'copy';
+        dataTransfer.dropEffect = kind === 'mixed' || this.admission() ? 'none' : 'copy';
     }
 
     leave(event: DragEvent): void {
@@ -116,13 +117,18 @@ export class MediaDropWorkflow {
         event.preventDefault();
         const files = Array.from(dataTransfer.files).map(browserUploadSource);
         const kind = classifyDroppedNames(files.map((file) => file.name));
-        const target = this.targetForElement(event.target, kind === 'none' ? this.defaultKind() : kind);
         this.clearHover();
-        if (files.length > 0) void this.route(files, target);
+        if (files.length > 0) void this.route(files);
     }
 
-    private async route(files: ClientUploadSource[], target: DropTarget | null): Promise<void> {
+    private async route(files: ClientUploadSource[]): Promise<void> {
         if (this.importDialogOpen() || files.length === 0) return;
+        const admission = this.admission();
+        if (admission) {
+            this.dependencies.setStatus(admission.message);
+            this.notice = admission;
+            return;
+        }
         const kind = classifyDroppedNames(files.map((file) => file.name));
         if (kind === 'mixed') {
             this.dependencies.setStatus('Drop one media type at a time');
@@ -134,10 +140,10 @@ export class MediaDropWorkflow {
         }
         const selectedKind = kind === 'none' ? this.defaultKind() : kind;
         if (kind === 'none') {
-            const volumeTarget = target && !('kind' in target) ? target : null;
+            const volumeTarget = this.selectedVolumeTarget();
             if (selectedKind === 'midi')
                 await this.dependencies.sequenceImport.requestDroppedFiles(files, volumeTarget);
-            else await this.dependencies.audioImport.requestDroppedFiles(files, volumeTarget);
+            else await this.dependencies.audioImport.requestDroppedFiles(files, this.dependencies.selectedSource());
             return;
         }
         if (selectedKind === 'package') {
@@ -157,13 +163,10 @@ export class MediaDropWorkflow {
                 };
                 return;
             }
-            await this.dependencies.packageImport.requestDroppedFile(
-                files[0],
-                target && 'kind' in target ? target : null,
-            );
+            await this.dependencies.packageImport.requestDroppedFile(files[0], this.dependencies.selectedSource());
             return;
         }
-        const volumeTarget = target && !('kind' in target) ? target : null;
+        const volumeTarget = this.selectedVolumeTarget();
         if (selectedKind === 'tx16w') {
             if (!this.dependencies.tx16wImport.dropAvailable()) {
                 this.dependencies.setStatus('TX16W import requires a writable SFS hard-disk image');
@@ -196,18 +199,10 @@ export class MediaDropWorkflow {
             await this.dependencies.sequenceImport.requestDroppedFiles(files, volumeTarget);
             return;
         }
-        if (!volumeTarget) {
-            this.dependencies.setStatus('Select a writable volume first');
-            this.notice = {
-                title: 'Audio import unavailable',
-                message: 'Select a writable volume in Contents, then drop the audio files again.',
-            };
-            return;
-        }
-        await this.dependencies.audioImport.requestDroppedFiles(files, volumeTarget);
+        await this.dependencies.audioImport.requestDroppedFiles(files, this.dependencies.selectedSource());
     }
 
-    private updateHover(paths: readonly string[], position?: NativeDropPosition): void {
+    private updateHover(paths: readonly string[]): void {
         if (paths.length === 0 || this.importDialogOpen()) {
             this.clearHover();
             return;
@@ -218,8 +213,7 @@ export class MediaDropWorkflow {
             return;
         }
         this.dragKind = kind;
-        const target = kind === 'mixed' || !position ? null : this.nativeDroppedTarget(position, kind);
-        this.dragTarget = target && !('kind' in target) ? target : null;
+        this.dragTarget = kind === 'mixed' ? null : this.selectedVolumeTarget();
         this.dragActive = true;
     }
 
@@ -227,43 +221,19 @@ export class MediaDropWorkflow {
         return this.dependencies.workspaceView() === 'sequences' ? 'midi' : 'audio';
     }
 
-    private targetForElement(target: EventTarget | null, kind: ClassifiedMedia): DropTarget | null {
-        if (kind === 'mixed' || kind === 'none') return null;
-        if (kind === 'package') {
-            if (!this.dependencies.packageImport.dropAvailable()) return null;
-            const element = target instanceof Element ? target.closest<HTMLElement>('[data-import-drop-kind]') : null;
-            const partition = element?.dataset.importDropPartition;
-            const itemKind = element?.dataset.importDropKind;
-            const name = element?.dataset.importDropName;
-            if ((itemKind === 'partition' || itemKind === 'volume') && partition !== undefined && name) {
-                return {
-                    id: `drop-${itemKind}-${partition}-${name}`,
-                    name,
-                    kind: itemKind,
-                    partitionIndex: Number(partition),
-                    childCount: 0,
-                };
-            }
-            return null;
-        }
-        const workflow =
-            kind === 'midi'
-                ? this.dependencies.sequenceImport
-                : kind === 'tx16w'
-                  ? this.dependencies.tx16wImport
-                  : this.dependencies.audioImport;
-        if (!workflow.dropAvailable()) return null;
-        const element = target instanceof Element ? target.closest<HTMLElement>('[data-import-drop-volume]') : null;
-        const partition = element?.dataset.importDropPartition;
-        if (element?.dataset.importDropVolume && partition !== undefined) {
-            return { partitionIndex: Number(partition), volumeName: element.dataset.importDropVolume };
-        }
-        return workflow.activeTarget();
+    private selectedVolumeTarget(): AudioImportTarget | null {
+        const selected = this.dependencies.selectedSource();
+        return selected.kind === 'volume' && selected.partitionIndex !== undefined
+            ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
+            : null;
     }
 
-    private nativeDroppedTarget(position: NativeDropPosition, kind: ClassifiedMedia): DropTarget | null {
-        const scale = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
-        return this.targetForElement(document.elementFromPoint?.(position.x / scale, position.y / scale) ?? null, kind);
+    private admission(): MediaDropNotice | null {
+        return mediaDropAdmission(
+            this.dependencies.sessionId(),
+            this.dependencies.imageFormat(),
+            this.dependencies.mutationsAvailable(),
+        );
     }
 
     private importDialogOpen(): boolean {
@@ -281,6 +251,32 @@ export class MediaDropWorkflow {
         this.dragKind = null;
         this.dragTarget = null;
     }
+}
+
+export function mediaDropAdmission(
+    sessionId: number | null,
+    imageFormat: string | null,
+    mutationsAvailable: boolean,
+): MediaDropNotice | null {
+    if (sessionId === null) {
+        return {
+            title: 'Open a hard-disk image',
+            message: 'Open a writable SFS hard-disk image before importing dropped files.',
+        };
+    }
+    if (imageFormat !== 'sfs') {
+        return {
+            title: 'Drag and drop unavailable',
+            message: 'Drag and drop import can only be performed on SFS hard-disk images.',
+        };
+    }
+    if (!mutationsAvailable) {
+        return {
+            title: 'Image is read-only',
+            message: 'Drag and drop import requires a writable SFS hard-disk image.',
+        };
+    }
+    return null;
 }
 
 export function classifyDroppedNames(names: readonly string[]): ClassifiedMedia {

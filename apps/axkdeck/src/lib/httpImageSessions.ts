@@ -443,6 +443,7 @@ export class HttpImageSessions {
             mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
             extentLayoutRepairAvailable: (summary.availableOperations ?? []).includes('images.extent_layout.repair'),
             allocationInspectionAvailable: summary.format === 'sfs',
+            format: summary.format,
             tree: [disk],
         };
     }

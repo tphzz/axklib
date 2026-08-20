@@ -213,6 +213,7 @@
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
         setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
@@ -274,6 +275,10 @@
         sequenceImport: sequenceImportWorkflow,
         tx16wImport: tx16wImportWorkflow,
         packageImport: packageImportWorkflow,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
+        mutationsAvailable: () => mutationWorkflow.volumeAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({
@@ -498,7 +503,6 @@
     function clearPackageExportSelection(): void {
         packageExportSelection = emptyPackageExportSelection();
     }
-
     function reportPackageExportSelectionLimit(): void {
         imageSessionWorkflow.setStatus(
             `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`,
@@ -509,7 +513,6 @@
         if (!imageSessionWorkflow.audioExportAvailable) return;
         await exportWorkflow.requestAudio(items);
     }
-
     function requestSequenceExport(items: PackageExportObject[]): void {
         if (!imageSessionWorkflow.sequenceExportAvailable) return;
         exportWorkflow.requestSequence(items);
@@ -519,7 +522,6 @@
         if (!imageSessionWorkflow.objectDeletionAvailable) return;
         deletionWorkflow.requestObjects(targets);
     }
-
     function requestWaveDataCleanup(): void {
         if (!imageSessionWorkflow.waveDataCleanupAvailable) return;
         deletionWorkflow.requestCleanup();
@@ -528,7 +530,6 @@
     function suppressDesktopContextMenu(event: MouseEvent): void {
         if (isDesktop) event.preventDefault();
     }
-
     async function openConnectionSettings(): Promise<void> {
         try {
             connectionSettings = await connectionActions.load();

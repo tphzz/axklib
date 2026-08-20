@@ -9,6 +9,7 @@ import type {
     AudioImportGrouping,
     AudioImportItem,
     AudioImportCapabilities,
+    AudioImportDestination,
     AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
@@ -170,7 +171,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {

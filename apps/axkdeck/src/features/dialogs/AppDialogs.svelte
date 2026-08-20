@@ -438,14 +438,24 @@
     <AudioImportDialog
         {transport}
         files={audioImport.request.files}
-        target={audioImport.request.target}
-        existingSampleNames={sampleNames}
-        existingSampleBankNames={sampleBankNames}
-        existingWaveformNames={waveDataNames}
+        target={audioImport.destination()}
+        destinationMode={audioImport.request.destinationMode}
+        destinationPartitionIndex={audioImport.request.destinationPartitionIndex}
+        destinationVolumeName={audioImport.request.destinationVolumeName}
+        partitionOptions={audioImport.partitionOptions()}
+        volumeOptions={audioImport.volumeOptions()}
+        existingSampleNames={audioImport.request.destinationMode === 'existing' ? sampleNames : []}
+        existingSampleBankNames={audioImport.request.destinationMode === 'existing' ? sampleBankNames : []}
+        existingWaveformNames={audioImport.request.destinationMode === 'existing' ? waveDataNames : []}
         onchooseworkspace={() => void audioImport.chooseWorkspace()}
         onchooselocal={transport.supportsClientUploads && audioFileInput
             ? () => audioImport.chooseLocal(audioFileInput)
             : undefined}
+        ondestinationmode={(mode) => audioImport.setDestinationMode(mode)}
+        ondestinationvolume={(partitionIndex, volumeName) =>
+            void audioImport.setExistingVolume(partitionIndex, volumeName)}
+        ondestinationpartition={(partitionIndex) => audioImport.setDestinationPartition(partitionIndex)}
+        ondestinationname={(volumeName) => audioImport.setDestinationVolumeName(volumeName)}
         oncommit={(items, grouping) => audioImport.commit(items, grouping)}
         oncancel={() => (audioImport.request = null)}
     />
@@ -510,7 +520,7 @@
             <strong
                 >{mediaDrop.dragTarget
                     ? `Import audio into ${mediaDrop.dragTarget.volumeName}`
-                    : 'Select a writable volume'}</strong
+                    : 'Choose a target volume after dropping'}</strong
             >
             <span>WAV, FLAC, and AIFF</span>
         {/if}

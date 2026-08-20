@@ -822,18 +822,11 @@ describe('PackageImportWorkflow', () => {
 
         await workflow.requestDroppedFile(dropped);
 
-        expect(workflow.request?.destinationMode).toBe('create');
-        expect(workflow.request?.destinationPartitionIndex).toBe(0);
-        expect(workflow.request?.destinationVolumeName).toBe('');
-        expect(workflow.request?.plan).toBeNull();
-        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
-        expect(planImagePackageImport).not.toHaveBeenCalled();
-
-        workflow.setDestinationMode('existing');
-
         expect(workflow.request?.destinationMode).toBe('existing');
         expect(workflow.request?.destinationPartitionIndex).toBeNull();
         expect(workflow.request?.destinationVolumeName).toBe('');
+        expect(workflow.request?.plan).toBeNull();
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
         expect(planImagePackageImport).not.toHaveBeenCalled();
 
         workflow.setDestinationMode('create');

@@ -1,30 +1,30 @@
 import type { DiskTreeItem } from '../../lib/types';
 import type { PackageInspection } from '../../lib/transport';
 
-export type PackageImportDestinationMode = 'existing' | 'create';
+export type ImportDestinationMode = 'existing' | 'create';
 
-export interface PackageImportPartitionOption {
+export interface ImportPartitionOption {
     partitionIndex: number;
     name: string;
 }
 
-export interface PackageImportVolumeOption extends PackageImportPartitionOption {
+export interface ImportVolumeOption extends ImportPartitionOption {
     volumeName: string;
     label: string;
 }
 
-export interface PackageImportDestinations {
-    partitions: PackageImportPartitionOption[];
-    volumes: PackageImportVolumeOption[];
+export interface ImportDestinations {
+    partitions: ImportPartitionOption[];
+    volumes: ImportVolumeOption[];
     partitionItems: DiskTreeItem[];
     volumeItems: DiskTreeItem[];
 }
 
-export type PackageImportDestination =
+export type ImportDestination =
     | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
     | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
-export function collectPackageImportDestinations(sourceItems: readonly DiskTreeItem[]): PackageImportDestinations {
+export function collectImportDestinations(sourceItems: readonly DiskTreeItem[]): ImportDestinations {
     const partitionItems: DiskTreeItem[] = [];
     const volumeItems: DiskTreeItem[] = [];
     const visit = (item: DiskTreeItem): void => {
@@ -51,25 +51,25 @@ export function collectPackageImportDestinations(sourceItems: readonly DiskTreeI
     };
 }
 
-export function initialPackageImportDestination(item: DiskTreeItem): {
-    mode: PackageImportDestinationMode;
+export function initialImportDestination(item: DiskTreeItem | null | undefined): {
+    mode: ImportDestinationMode;
     partitionIndex: number | null;
     volumeName: string;
 } | null {
-    if (item.kind === 'volume' && item.partitionIndex !== undefined) {
+    if (item?.kind === 'volume' && item.partitionIndex !== undefined) {
         return { mode: 'existing', partitionIndex: item.partitionIndex, volumeName: item.name };
     }
-    if (item.kind === 'partition' && item.partitionIndex !== undefined) {
+    if (item?.kind === 'partition' && item.partitionIndex !== undefined) {
         return { mode: 'create', partitionIndex: item.partitionIndex, volumeName: '' };
     }
     return null;
 }
 
-export function packageImportDestination(
-    mode: PackageImportDestinationMode,
+export function importDestination(
+    mode: ImportDestinationMode,
     partitionIndex: number | null,
     rawVolumeName: string,
-): PackageImportDestination | null {
+): ImportDestination | null {
     if (partitionIndex === null || rawVolumeName.length === 0) return null;
     if (
         mode === 'create' &&

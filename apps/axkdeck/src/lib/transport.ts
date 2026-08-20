@@ -48,7 +48,12 @@ export interface OpenedImage {
     mediaConversionAvailable: boolean;
     extentLayoutRepairAvailable: boolean;
     allocationInspectionAvailable: boolean;
+    format?: string;
 }
+
+export type AudioImportDestination =
+    | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
+    | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
 export interface AllocationMapReference {
     imageId: string;
@@ -538,7 +543,7 @@ export interface ImageTransport {
     ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState>;

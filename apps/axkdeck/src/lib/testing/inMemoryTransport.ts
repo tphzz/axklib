@@ -2,6 +2,7 @@ import type {
     AudioImportGrouping,
     AllocationMapReference,
     AudioImportItem,
+    AudioImportDestination,
     AudioImportTarget,
     AudioSourceInfo,
     AudioImportCapabilities,
@@ -381,7 +382,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {

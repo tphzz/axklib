@@ -19,26 +19,26 @@ import { reportError } from '../../lib/diagnostics';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
 import {
-    collectPackageImportDestinations,
-    initialPackageImportDestination,
-    packageImportDestination,
+    collectImportDestinations,
+    importDestination,
+    initialImportDestination,
     suggestedPackageVolumeName,
-    type PackageImportDestinationMode,
-    type PackageImportPartitionOption,
-    type PackageImportVolumeOption,
+    type ImportDestinationMode,
+    type ImportPartitionOption,
+    type ImportVolumeOption,
 } from './packageDestinations';
 import { PackagePickerHistory } from './packagePickerHistory';
 
 const packageExtensionSet = packageImportExtensionSetCopy();
 
 export interface PackageImportRequest {
-    item: DiskTreeItem;
+    item: DiskTreeItem | null;
     canChangeSource: boolean;
     source: InputFileLocation | null;
     upload: ClientUploadLocation | null;
     localSourcePath: string | null;
     sourceName: string;
-    destinationMode: PackageImportDestinationMode;
+    destinationMode: ImportDestinationMode;
     destinationPartitionIndex: number | null;
     destinationVolumeName: string;
     inspection: PackageInspection | null;
@@ -77,12 +77,12 @@ export class PackageImportWorkflow {
         this.pickerHistory = dependencies.pickerHistory ?? new PackagePickerHistory();
     }
 
-    open(item: DiskTreeItem): void {
+    open(item: DiskTreeItem | null): void {
         ++this.generation;
         this.abortController?.abort();
         this.abortController = null;
-        const destination = initialPackageImportDestination(item) ?? {
-            mode: 'create' as const,
+        const destination = initialImportDestination(item) ?? {
+            mode: 'existing' as const,
             partitionIndex: null,
             volumeName: '',
         };
@@ -112,11 +112,11 @@ export class PackageImportWorkflow {
         return this.dependencies.mutationsAvailable?.() ?? false;
     }
 
-    partitionOptions(): PackageImportPartitionOption[] {
+    partitionOptions(): ImportPartitionOption[] {
         return this.destinations().partitions;
     }
 
-    volumeOptions(): PackageImportVolumeOption[] {
+    volumeOptions(): ImportVolumeOption[] {
         return this.destinations().volumes;
     }
 
@@ -128,7 +128,7 @@ export class PackageImportWorkflow {
             : request.destinationVolumeName;
     }
 
-    setDestinationMode(mode: PackageImportDestinationMode): void {
+    setDestinationMode(mode: ImportDestinationMode): void {
         const request = this.request;
         if (!request || request.status === 'applying' || request.destinationMode === mode) return;
         const destinations = this.destinations();
@@ -286,14 +286,8 @@ export class PackageImportWorkflow {
     async requestDroppedFile(file: ClientUploadSource, target?: DiskTreeItem | null): Promise<void> {
         if (this.request || !this.dropAvailable()) return;
         const selected = this.dependencies.selectedSource?.();
-        const item =
-            target ??
-            (selected && (selected.kind === 'partition' || selected.kind === 'volume') ? selected : null) ??
-            this.fallbackDestinationItem();
-        if (!item || (item.kind !== 'partition' && item.kind !== 'volume')) {
-            this.dependencies.setStatus('Choose an import destination first');
-            return;
-        }
+        const candidate = target ?? selected;
+        const item = candidate && (candidate.kind === 'partition' || candidate.kind === 'volume') ? candidate : null;
         const uploadKind = packageImportUploadKind(file.name);
         if (!uploadKind) return;
         this.open(item);
@@ -423,7 +417,7 @@ export class PackageImportWorkflow {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         const destination = request
-            ? packageImportDestination(
+            ? importDestination(
                   request.destinationMode,
                   request.destinationPartitionIndex,
                   request.destinationVolumeName,
@@ -504,7 +498,7 @@ export class PackageImportWorkflow {
             status: request.source ? ('ready' as const) : request.status,
             error: '',
         };
-        const destination = packageImportDestination(
+        const destination = importDestination(
             next.destinationMode,
             next.destinationPartitionIndex,
             next.destinationVolumeName,
@@ -599,7 +593,7 @@ export class PackageImportWorkflow {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         const destination = request
-            ? packageImportDestination(
+            ? importDestination(
                   request.destinationMode,
                   request.destinationPartitionIndex,
                   request.destinationVolumeName,
@@ -686,14 +680,7 @@ export class PackageImportWorkflow {
         return checkSuggestedProgramSlots ? plan.planToken : null;
     }
 
-    private fallbackDestinationItem(): DiskTreeItem | null {
-        const selected = this.dependencies.selectedSource?.();
-        if (selected && (selected.kind === 'partition' || selected.kind === 'volume')) return selected;
-        const destinations = this.destinations();
-        return destinations.partitionItems[0] ?? destinations.volumeItems[0] ?? null;
-    }
-
     private destinations() {
-        return collectPackageImportDestinations(this.dependencies.sourceItems?.() ?? []);
+        return collectImportDestinations(this.dependencies.sourceItems?.() ?? []);
     }
 }

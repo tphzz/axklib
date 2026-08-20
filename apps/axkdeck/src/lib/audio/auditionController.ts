@@ -56,6 +56,12 @@ interface SequenceCompletion {
     oncomplete: (result: AuditionSequenceResult) => void;
 }
 
+interface OutputContextAccess {
+    context: AudioContext;
+    reused: boolean;
+    creationDurationMs: number;
+}
+
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
 const minimumForwardLoopSequenceSeconds = 0.5;
@@ -93,7 +99,6 @@ function bufferLevelSummary(buffer: AudioBuffer): { peak: number; rms: number; s
 
 export class AuditionController {
     private readonly assets: AuditionAssetStore;
-    private readonly closingContexts = new Set<Promise<void>>();
     private context?: AudioContext;
     private active?: ActivePlayback;
     private sequence?: ActiveSequence;
@@ -142,12 +147,10 @@ export class AuditionController {
         if (objectIds.length === 0) {
             this.generation += 1;
             this.assets.cancelActiveRequest();
-            const run = this.run;
             this.releaseActive('replaced');
             this.releaseSequence('replaced');
             this.run = undefined;
             this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-            void this.retireOutputContext('replaced', run);
             this.settleSequence(sequenceGeneration, { status: 'completed', playedCount: 0, skippedCount: 0 });
             return;
         }
@@ -162,10 +165,8 @@ export class AuditionController {
     ): Promise<void> {
         const generation = ++this.generation;
         this.assets.cancelActiveRequest();
-        const previousRun = this.run;
         this.releaseActive('replaced');
         this.releaseSequence('replaced');
-        const previousContextClosed = this.retireOutputContext('replaced', previousRun);
         const firstObjectId = objectIds[0]!;
         const run: PlaybackRun = {
             id: newPlaybackId(),
@@ -180,10 +181,11 @@ export class AuditionController {
 
         let failedObjectId = firstObjectId;
         try {
-            const context = this.ensureContext();
-            const resumed = this.resumeContext(context, run);
-            await Promise.all([previousContextClosed, resumed]);
-            const entries = await this.assets.loadSequence(sessionId, objectIds, context, run);
+            const output = this.ensureContext();
+            const context = output.context;
+            const resumed = this.resumeContext(output, run);
+            const loading = this.assets.loadSequence(sessionId, objectIds, context, run);
+            const [, entries] = await Promise.all([resumed, loading]);
             this.assets.finishRequest();
             if (generation !== this.generation || sequenceGeneration !== this.sequenceGeneration) return;
             const retainedDecodedBytes = entries.reduce((total, entry) => total + entry.weightBytes, 0);
@@ -211,7 +213,7 @@ export class AuditionController {
             this.emit(run, 'sequence_failed', { message, failedObjectId }, 'error');
             this.releaseSequence('failed');
             this.run = undefined;
-            await this.retireOutputContext('failed', run);
+            await this.discardOutputContext('failed', run);
             this.update({
                 objectId: failedObjectId,
                 status: 'failed',
@@ -234,10 +236,8 @@ export class AuditionController {
         const generation = ++this.generation;
         const requestKey = this.assets.key(sessionId, objectId);
         this.assets.cancelActiveRequest(requestKey);
-        const previousRun = this.run;
         this.releaseActive('replaced');
         this.releaseSequence('replaced');
-        const previousContextClosed = this.retireOutputContext('replaced', previousRun);
         const run: PlaybackRun = {
             id: newPlaybackId(),
             objectId,
@@ -251,11 +251,12 @@ export class AuditionController {
         this.update({ objectId, status: 'preparing', playheadFrame: 0 });
 
         try {
-            const context = this.ensureContext();
+            const output = this.ensureContext();
+            const context = output.context;
             // Resume synchronously from the click handler before any network await.
-            const resumed = this.resumeContext(context, run);
+            const resumed = this.resumeContext(output, run);
             const loaded = this.assets.load(sessionId, objectId, context, false, run);
-            let [, , entry] = await Promise.all([previousContextClosed, resumed, loaded]);
+            let [, entry] = await Promise.all([resumed, loaded]);
             if (generation !== this.generation) return;
             // An oversized speculative request may finish just as an explicit play promotes it.
             if (!entry) entry = await this.assets.load(sessionId, objectId, context, false, run);
@@ -285,12 +286,10 @@ export class AuditionController {
         this.cancelSequenceCompletion();
         const run = this.run;
         if (run) this.emit(run, 'playback_stop_requested');
-        const hadActivePlayback = Boolean(this.active || this.sequence);
         this.releaseActive('stopped');
         this.releaseSequence('stopped');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-        await this.retireOutputContext('stopped', run, hadActivePlayback ? fadeSeconds : 0);
     }
 
     async invalidateSession(sessionId: number): Promise<void> {
@@ -307,19 +306,29 @@ export class AuditionController {
     async dispose(): Promise<void> {
         await this.stop();
         await this.assets.dispose();
-        await Promise.allSettled([...this.closingContexts]);
+        await this.discardOutputContext('disposed');
     }
 
-    private ensureContext(): AudioContext {
-        if (this.context && this.context.state !== 'closed') return this.context;
+    private ensureContext(): OutputContextAccess {
+        if (this.context && this.context.state !== 'closed') {
+            return { context: this.context, reused: true, creationDurationMs: 0 };
+        }
+        const started = monotonicNow();
         const context = new AudioContext();
         this.context = context;
-        return context;
+        return {
+            context,
+            reused: false,
+            creationDurationMs: Math.round(monotonicNow() - started),
+        };
     }
 
-    private async resumeContext(context: AudioContext, run: PlaybackRun): Promise<void> {
+    private async resumeContext(output: OutputContextAccess, run: PlaybackRun): Promise<void> {
+        const { context, reused, creationDurationMs } = output;
         this.emit(run, 'audio_context_ready', {
             state: context.state,
+            reused,
+            creationDurationMs,
             outputSampleRate: context.sampleRate,
             baseLatencySeconds: context.baseLatency,
             outputLatencySeconds: 'outputLatency' in context ? context.outputLatency : null,
@@ -575,7 +584,7 @@ export class AuditionController {
         if (this.run) this.emit(this.run, 'sequence_released', { reason, memberCount: sequence.segments.length });
     }
 
-    private async handleEnded(active: ActivePlayback, run: PlaybackRun): Promise<void> {
+    private handleEnded(active: ActivePlayback, run: PlaybackRun): void {
         active.source.disconnect();
         active.gain.disconnect();
         if (this.active !== active) return;
@@ -586,7 +595,6 @@ export class AuditionController {
         this.emit(run, 'playback_ended');
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-        await this.retireOutputContext('ended', run);
     }
 
     private async handleSequenceEnded(sequence: ActiveSequence, run: PlaybackRun): Promise<void> {
@@ -600,7 +608,7 @@ export class AuditionController {
         this.emit(run, 'sequence_ended', { memberCount: sequence.segments.length });
         this.run = undefined;
         this.update({ objectId: null, status: 'idle', playheadFrame: 0 });
-        await this.retireOutputContext('ended', run);
+        await Promise.resolve();
         this.settleSequence(sequence.completionGeneration, {
             status: 'completed',
             playedCount: sequence.segments.length,
@@ -608,33 +616,17 @@ export class AuditionController {
         });
     }
 
-    private retireOutputContext(reason: string, run?: PlaybackRun, delaySeconds = 0): Promise<void> {
+    private async discardOutputContext(reason: string, run?: PlaybackRun): Promise<void> {
         const context = this.context;
-        if (!context) return Promise.resolve();
+        if (!context) return;
         this.context = undefined;
         context.onstatechange = null;
-        const closing = this.closeOutputContext(context, reason, run, delaySeconds)
-            .catch((error) => {
-                reportDiagnostic('audio_context_close_failed', { reason, message: userFacingMessage(error) }, 'warn');
-            })
-            .finally(() => {
-                this.closingContexts.delete(closing);
-            });
-        this.closingContexts.add(closing);
-        return closing;
-    }
-
-    private async closeOutputContext(
-        context: AudioContext,
-        reason: string,
-        run?: PlaybackRun,
-        delaySeconds = 0,
-    ): Promise<void> {
-        if (delaySeconds > 0) {
-            await new Promise<void>((resolve) => window.setTimeout(resolve, delaySeconds * 1000));
+        try {
+            if (context.state !== 'closed') await context.close();
+            if (run) this.emit(run, 'audio_context_closed', { reason });
+        } catch (error) {
+            reportDiagnostic('audio_context_close_failed', { reason, message: userFacingMessage(error) }, 'warn');
         }
-        if (context.state !== 'closed') await context.close();
-        if (run) this.emit(run, 'audio_context_closed', { reason });
     }
 
     private settleSequence(generation: number, result: AuditionSequenceResult): void {
@@ -661,7 +653,7 @@ export class AuditionController {
         const typed = this.typedError(error);
         this.emit(run, 'playback_failed', { message }, 'error');
         this.run = undefined;
-        await this.retireOutputContext('failed', run);
+        await this.discardOutputContext('failed', run);
         this.update({ objectId, status: 'failed', playheadFrame: 0, error: message, ...typed });
     }
 

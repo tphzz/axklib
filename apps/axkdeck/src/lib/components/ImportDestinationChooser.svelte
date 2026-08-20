@@ -1,18 +1,19 @@
 <script lang="ts">
     import type {
-        PackageImportDestinationMode,
-        PackageImportPartitionOption,
-        PackageImportVolumeOption,
+        ImportDestinationMode,
+        ImportPartitionOption,
+        ImportVolumeOption,
     } from '../../features/import/packageDestinations';
+    import Icon from './Icon.svelte';
 
     interface Props {
-        mode: PackageImportDestinationMode;
+        mode: ImportDestinationMode;
         partitionIndex: number | null;
         volumeName: string;
-        partitions: PackageImportPartitionOption[];
-        volumes: PackageImportVolumeOption[];
+        partitions: ImportPartitionOption[];
+        volumes: ImportVolumeOption[];
         disabled: boolean;
-        onmode: (mode: PackageImportDestinationMode) => void;
+        onmode: (mode: ImportDestinationMode) => void;
         onvolume: (partitionIndex: number | null, volumeName: string) => void;
         onpartition: (partitionIndex: number) => void;
         onname: (name: string) => void;
@@ -36,6 +37,7 @@
     let listOpen = $state(false);
     let filtering = $state(false);
     let synchronizedSelection = $state('');
+    let volumeInput = $state<HTMLInputElement>();
     const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
     const filteredVolumes = $derived(
         filtering ? volumes.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery)) : volumes,
@@ -54,15 +56,15 @@
         synchronizedSelection = nextSelection;
     });
 
-    function volumeKey(option: PackageImportVolumeOption): string {
+    function volumeKey(option: ImportVolumeOption): string {
         return `${option.partitionIndex}:${option.volumeName}`;
     }
 
-    function optionId(option: PackageImportVolumeOption): string {
-        return `package-volume-option-${option.partitionIndex}-${volumes.indexOf(option)}`;
+    function optionId(option: ImportVolumeOption): string {
+        return `import-volume-option-${option.partitionIndex}-${volumes.indexOf(option)}`;
     }
 
-    function selectVolume(option: PackageImportVolumeOption): void {
+    function selectVolume(option: ImportVolumeOption): void {
         if (disabled) return;
         query = option.label;
         filtering = false;
@@ -84,6 +86,17 @@
         if (selectedVolume) filtering = false;
         listOpen = true;
         activeIndex = selectedVolume ? filteredVolumes.indexOf(selectedVolume) : -1;
+    }
+
+    function clearVolume(): void {
+        if (disabled) return;
+        query = '';
+        filtering = false;
+        activeIndex = -1;
+        listOpen = volumes.length > 0;
+        synchronizedSelection = selectedVolume ? volumeKey(selectedVolume) : '';
+        onvolume(null, '');
+        queueMicrotask(() => volumeInput?.focus());
     }
 
     function handleKey(event: KeyboardEvent): void {
@@ -108,10 +121,10 @@
     }
 </script>
 
-<section class="package-import-destination" aria-label="Import destination">
-    <div class="package-destination-heading">
+<section class="import-destination" aria-label="Import destination">
+    <div class="destination-heading">
         <strong>Destination</strong>
-        <div class="package-destination-mode" role="group" aria-label="Destination type">
+        <div class="destination-mode" role="group" aria-label="Destination type">
             <button
                 type="button"
                 class:active={mode === 'existing'}
@@ -130,16 +143,17 @@
     </div>
 
     {#if mode === 'existing'}
-        <label class="target-field" for="package-volume-search">Volume</label>
-        <div class="package-volume-combobox">
+        <label class="target-field" for="import-volume-search">Volume</label>
+        <div class="volume-combobox">
             <input
-                id="package-volume-search"
+                bind:this={volumeInput}
+                id="import-volume-search"
                 class="dialog-field-control"
                 type="text"
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={listOpen}
-                aria-controls="package-volume-options"
+                aria-controls="import-volume-options"
                 aria-activedescendant={listOpen && filteredVolumes[activeIndex]
                     ? optionId(filteredVolumes[activeIndex])
                     : undefined}
@@ -152,10 +166,20 @@
                 onclick={openList}
                 onkeydown={handleKey}
             />
+            {#if query.length > 0 || selectedVolume}
+                <button
+                    class="volume-clear"
+                    type="button"
+                    aria-label="Clear volume"
+                    title="Clear volume"
+                    {disabled}
+                    onclick={clearVolume}><Icon name="close" size={14} /></button
+                >
+            {/if}
             {#if listOpen}
                 <div
-                    id="package-volume-options"
-                    class="package-volume-options dialog-autocomplete-list"
+                    id="import-volume-options"
+                    class="volume-options dialog-autocomplete-list"
                     role="listbox"
                     aria-label="Volumes"
                 >
@@ -179,7 +203,7 @@
             {/if}
         </div>
     {:else}
-        <div class="package-new-volume-fields">
+        <div class="new-volume-fields">
             <label class="target-field">
                 <span>Partition</span>
                 <select
@@ -212,7 +236,7 @@
 </section>
 
 <style>
-    .package-import-destination {
+    .import-destination {
         display: grid;
         gap: 9px;
         margin-bottom: 12px;
@@ -222,19 +246,19 @@
         background: rgb(255 255 255 / 2%);
     }
 
-    .package-destination-heading {
+    .destination-heading {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
     }
 
-    .package-destination-heading > strong {
+    .destination-heading > strong {
         color: var(--color-text-strong);
         font-size: 11px;
     }
 
-    .package-destination-mode {
+    .destination-mode {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         overflow: hidden;
@@ -243,7 +267,7 @@
         background: var(--color-bg-deep);
     }
 
-    .package-destination-mode button {
+    .destination-mode button {
         min-height: 27px;
         padding: 0 10px;
         color: var(--color-text-muted);
@@ -254,29 +278,51 @@
         font-size: 10px;
     }
 
-    .package-destination-mode button:last-child {
+    .destination-mode button:last-child {
         border-right: 0;
     }
 
-    .package-destination-mode button.active {
+    .destination-mode button.active {
         color: #fff;
         background: var(--color-accent-strong);
     }
 
-    .package-destination-mode button:disabled {
+    .destination-mode button:disabled {
         cursor: default;
         opacity: 0.45;
     }
 
-    .package-volume-combobox {
+    .volume-combobox {
         position: relative;
     }
 
-    .package-volume-combobox > input {
+    .volume-combobox > input {
         width: 100%;
+        padding-right: 30px;
     }
 
-    .package-volume-options {
+    .volume-clear {
+        position: absolute;
+        z-index: 5;
+        top: 1px;
+        right: 1px;
+        display: grid;
+        width: 25px;
+        height: 24px;
+        padding: 0;
+        place-items: center;
+        color: var(--color-text-muted);
+        border: 0;
+        background: var(--color-bg-deep);
+        cursor: pointer;
+        font-size: 15px;
+    }
+
+    .volume-clear:hover:not(:disabled) {
+        color: var(--color-text-strong);
+    }
+
+    .volume-options {
         position: absolute;
         z-index: 4;
         top: calc(100% + 4px);
@@ -284,12 +330,12 @@
         left: 0;
     }
 
-    .package-volume-options p {
+    .volume-options p {
         margin: 0;
         padding: 9px;
     }
 
-    .package-new-volume-fields {
+    .new-volume-fields {
         display: grid;
         grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1fr);
         gap: 10px;
@@ -303,18 +349,18 @@
         font-size: var(--dialog-label-font-size);
     }
 
-    .package-new-volume-fields :global(.dialog-field-control) {
+    .new-volume-fields :global(.dialog-field-control) {
         min-width: 0;
         width: 100%;
     }
 
     @media (max-width: 640px) {
-        .package-destination-heading,
-        .package-new-volume-fields {
+        .destination-heading,
+        .new-volume-fields {
             grid-template-columns: 1fr;
         }
 
-        .package-destination-heading {
+        .destination-heading {
             display: grid;
         }
     }

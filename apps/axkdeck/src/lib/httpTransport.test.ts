@@ -1772,7 +1772,7 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(serverFile('images/base.hds'));
         const job = await transport.startAudioImport(
             opened.sessionId,
-            { partitionIndex: 3, volumeName: 'Imported' },
+            { kind: 'EXISTING_VOLUME', partitionIndex: 3, volumeName: 'Imported' },
             [
                 {
                     source: mono,
