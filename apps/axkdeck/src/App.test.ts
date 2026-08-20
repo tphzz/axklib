@@ -623,7 +623,7 @@ describe('App panel layout', () => {
         expect(screen.getByRole('button', { name: 'Create image' }).closest('aside')).toBe(navigator);
         expect(screen.queryByRole('textbox', { name: 'Disk image path' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
-        expect(screen.getByText('Partitions, volumes and objects')).toBeTruthy();
+        expect(screen.getByText('Partitions and volumes')).toBeTruthy();
     });
 
     it('closes the active image and returns to the initial empty state', async () => {
@@ -1727,7 +1727,9 @@ describe('App panel layout', () => {
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
         unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
-        expect(within(unavailable).getByText('Drop audio, MIDI, and TX16W disks separately.')).toBeTruthy();
+        expect(
+            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
+        ).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
     });

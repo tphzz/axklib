@@ -35,7 +35,7 @@
         <p>IMAGE</p>
         <div class="startup-placeholder">Open Image</div>
         <p>CONTENTS</p>
-        <strong>Partitions, volumes and objects</strong>
+        <strong>Partitions and volumes</strong>
     </aside>
     <main class="startup-workspace">
         <header><strong>Programs</strong><span>0 items</span></header>

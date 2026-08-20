@@ -255,8 +255,14 @@
 {/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import'}
     <PackageImportDialog
-        targetName={packageImport.request.item.name}
+        targetName={packageImport.targetName()}
+        destinationMode={packageImport.request.destinationMode}
+        destinationPartitionIndex={packageImport.request.destinationPartitionIndex}
+        destinationVolumeName={packageImport.request.destinationVolumeName}
+        partitionOptions={packageImport.partitionOptions()}
+        volumeOptions={packageImport.volumeOptions()}
         desktop={isDesktop}
+        canChangeSource={packageImport.request.canChangeSource}
         sourceName={packageImport.request.sourceName}
         inspection={packageImport.request.inspection}
         plan={packageImport.request.plan}
@@ -270,6 +276,11 @@
         onchooseworkspace={() => void packageImport.chooseWorkspace()}
         onchooselocal={() => void packageImport.chooseLocal()}
         onchange={() => void packageImport.resetSource()}
+        ondestinationmode={(mode) => packageImport.setDestinationMode(mode)}
+        ondestinationvolume={(partitionIndex, volumeName) =>
+            packageImport.setExistingVolume(partitionIndex, volumeName)}
+        ondestinationpartition={(partitionIndex) => packageImport.setDestinationPartition(partitionIndex)}
+        ondestinationname={(name) => packageImport.setDestinationVolumeName(name)}
         onrename={(nodeId, name) => packageImport.rename(nodeId, name)}
         onprogramslot={(nodeId, slot) => packageImport.programSlot(nodeId, slot)}
         onprogramstart={(placementId, start) => packageImport.programStart(placementId, start)}
@@ -472,7 +483,7 @@
         onclose={() => mediaDrop.closeNotice()}
     />
 {/if}
-{#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request && !tx16wImport.request}
+{#if mediaDrop.dragActive && !audioImport.request && !sequenceImport.request && !tx16wImport.request && !packageImport.request}
     <div class="media-drop-overlay" aria-hidden="true">
         <Icon name="upload" size={24} />
         {#if mediaDrop.dragKind === 'mixed'}
@@ -492,6 +503,9 @@
                     : 'Select a writable volume'}</strong
             >
             <span>Standard MIDI Files (.mid, .midi)</span>
+        {:else if mediaDrop.dragKind === 'package'}
+            <strong>Import package or A3K archive</strong>
+            <span>Choose an existing volume or create a new one after dropping</span>
         {:else}
             <strong
                 >{mediaDrop.dragTarget

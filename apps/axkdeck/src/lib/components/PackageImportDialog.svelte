@@ -1,13 +1,26 @@
 <script lang="ts">
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
+    import {
+        packageImportDestination,
+        type PackageImportDestinationMode,
+        type PackageImportPartitionOption,
+        type PackageImportVolumeOption,
+    } from '../../features/import/packageDestinations';
     import type { ImageSessionPackageImportPlan, PackageInspection, PackageOpaqueSequenceDecision } from '../transport';
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
+    import PackageImportDestination from './PackageImportDestination.svelte';
 
     interface Props {
         targetName: string;
+        destinationMode: PackageImportDestinationMode;
+        destinationPartitionIndex: number | null;
+        destinationVolumeName: string;
+        partitionOptions: PackageImportPartitionOption[];
+        volumeOptions: PackageImportVolumeOption[];
         desktop: boolean;
+        canChangeSource: boolean;
         sourceName: string;
         inspection: PackageInspection | null;
         plan: ImageSessionPackageImportPlan | null;
@@ -21,6 +34,10 @@
         onchooseworkspace: () => void;
         onchooselocal: () => void;
         onchange: () => void;
+        ondestinationmode: (mode: PackageImportDestinationMode) => void;
+        ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
+        ondestinationpartition: (partitionIndex: number) => void;
+        ondestinationname: (name: string) => void;
         onrename: (nodeId: string, name: string) => void;
         onprogramslot: (nodeId: string, slot: number) => void;
         onprogramstart: (placementId: string, start: number) => void;
@@ -48,7 +65,13 @@
 
     let {
         targetName,
+        destinationMode,
+        destinationPartitionIndex,
+        destinationVolumeName,
+        partitionOptions,
+        volumeOptions,
         desktop,
+        canChangeSource,
         sourceName,
         inspection,
         plan,
@@ -62,6 +85,10 @@
         onchooseworkspace,
         onchooselocal,
         onchange,
+        ondestinationmode,
+        ondestinationvolume,
+        ondestinationpartition,
+        ondestinationname,
         onrename,
         onprogramslot,
         onprogramstart,
@@ -146,7 +173,12 @@
     const visibleConflictCount = $derived(
         placementIssues.length + renameActions.length + nonRenameConflicts.length + undecidedOpaqueSequences.length,
     );
-    const showConflictCheck = $derived(renameActions.length > 0 || editableProgramPlacements.length > 0);
+    const showConflictCheck = $derived(
+        hasUnvalidatedChanges || renameActions.length > 0 || editableProgramPlacements.length > 0,
+    );
+    const destinationReady = $derived(
+        packageImportDestination(destinationMode, destinationPartitionIndex, destinationVolumeName) !== null,
+    );
     const canCheckConflicts = $derived(
         status === 'ready' &&
             (hasUnvalidatedChanges ||
@@ -268,8 +300,25 @@
                         <small>Package</small>
                         <strong>{sourceName}</strong>
                     </div>
-                    <button class="secondary-button" type="button" disabled={locked} onclick={onchange}>Change</button>
+                    {#if canChangeSource}
+                        <button class="secondary-button" type="button" disabled={locked} onclick={onchange}
+                            >Change</button
+                        >
+                    {/if}
                 </section>
+
+                <PackageImportDestination
+                    mode={destinationMode}
+                    partitionIndex={destinationPartitionIndex}
+                    volumeName={destinationVolumeName}
+                    partitions={partitionOptions}
+                    volumes={volumeOptions}
+                    disabled={locked || status === 'loading' || status === 'planning'}
+                    onmode={ondestinationmode}
+                    onvolume={ondestinationvolume}
+                    onpartition={ondestinationpartition}
+                    onname={ondestinationname}
+                />
 
                 {#if status === 'loading'}
                     <p class="dialog-progress" role="status">
@@ -539,8 +588,22 @@
                                             : warning.message}
                                     </p>
                                 {/each}
-                            {:else}
+                            {:else if !destinationReady}
+                                <p class="dialog-progress" role="status">Choose a valid import destination.</p>
+                                <div class="package-conflict-actions">
+                                    <button class="secondary-button" type="button" disabled>Check conflicts</button>
+                                </div>
+                            {:else if status === 'planning'}
                                 <p class="dialog-progress" role="status">Planning import…</p>
+                            {:else}
+                                <p class="dialog-progress" role="status">
+                                    Check the selected destination for conflicts and available image space.
+                                </p>
+                                <div class="package-conflict-actions">
+                                    <button class="secondary-button" type="button" disabled={busy} onclick={onreplan}
+                                        >Check conflicts</button
+                                    >
+                                </div>
                             {/if}
                         </section>
                     </div>

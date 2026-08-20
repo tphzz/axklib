@@ -95,6 +95,7 @@
                     <label>
                         <span>{subject} name</span>
                         <input
+                            class="dialog-field-control"
                             bind:value
                             data-dialog-initial-focus={action.startsWith('rename-') ? 'select' : 'caret'}
                             disabled={busy}

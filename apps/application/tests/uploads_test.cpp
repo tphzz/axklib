@@ -113,6 +113,14 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                           .sha256 = std::nullopt});
     ASSERT_TRUE(tx16w_disk) << tx16w_disk.error().message;
     ASSERT_TRUE(value.remove(tx16w_disk->reference, "owner"));
+    const auto a3k_archive = value.create({.owner_id = "owner",
+                                           .filename = "JupiterPad.a3k",
+                                           .kind = axk::app::UploadKind::disk_image,
+                                           .media_type = "application/octet-stream",
+                                           .declared_size = 1U,
+                                           .sha256 = std::nullopt});
+    ASSERT_TRUE(a3k_archive) << a3k_archive.error().message;
+    ASSERT_TRUE(value.remove(a3k_archive->reference, "owner"));
     const auto wrong_disk_extension = value.create({.owner_id = "owner",
                                                     .filename = "tx16w.iso",
                                                     .kind = axk::app::UploadKind::disk_image,
@@ -120,7 +128,7 @@ TEST_F(UploadStoreTest, RejectsDiskImagesWrongOwnersOffsetsAndOversizedChunks) {
                                                     .declared_size = 1U,
                                                     .sha256 = std::nullopt});
     ASSERT_FALSE(wrong_disk_extension);
-    EXPECT_EQ(wrong_disk_extension.error().message, "disk image uploads require an IMG or IMA file");
+    EXPECT_EQ(wrong_disk_extension.error().message, "media uploads require an IMG, IMA, or A3K file");
 
     const auto mislabeled_audio = value.create({.owner_id = "owner",
                                                 .filename = "sample.wav",

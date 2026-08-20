@@ -616,6 +616,7 @@ describe('AudioImportDialog', () => {
         const selector = await screen.findByRole('combobox', {
             name: `Target sample rate for ${file.name}`,
         });
+        expect(selector.classList).toContain('dialog-field-control');
         expect((selector as HTMLSelectElement).value).toBe('44100');
 
         await fireEvent.change(selector, { target: { value: '22050' } });

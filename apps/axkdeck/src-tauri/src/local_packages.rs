@@ -14,8 +14,8 @@ use crate::desktop_preferences::DesktopPreferencesStore;
 use crate::{file_publication, remote_settings, retained_download, server_sidecar};
 
 const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 7] = [
-    "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 8] = [
+    "a3k", "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
 ];
 const SUPPORTED_MEDIA_EXTENSIONS: [&str; 3] = ["iso", "ima", "zip"];
 
@@ -118,7 +118,10 @@ pub(crate) async fn select_local_package(
             .dialog()
             .file()
             .set_title("Choose axklib package")
-            .add_filter("axklib packages", &SUPPORTED_PACKAGE_EXTENSIONS)
+            .add_filter(
+                "axklib packages and A3K archives",
+                &SUPPORTED_PACKAGE_EXTENSIONS,
+            )
             .set_parent(&window);
         if let Some(directory) = starting_directory {
             dialog = dialog.set_directory(directory);

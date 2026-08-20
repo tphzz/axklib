@@ -1,8 +1,15 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { render, screen } from '@testing-library/svelte';
 import { createRawSnippet } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import CollectionToolbar from './CollectionToolbar.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 describe('CollectionToolbar', () => {
     it('keeps search as the rightmost collection action', () => {
@@ -89,5 +96,44 @@ describe('CollectionToolbar', () => {
         expect(
             title?.children.item(2)?.contains(screen.getByRole('button', { name: 'Saved System File details' })),
         ).toBe(true);
+    });
+
+    it('keeps the compact filter checkmark centered inside its box', () => {
+        render(CollectionToolbar, {
+            props: {
+                title: 'Samples',
+                count: 4,
+                query: '',
+                onquerychange: vi.fn(),
+                filterLabel: 'Show only standalone',
+                filterChecked: true,
+                onfilterchange: vi.fn(),
+            },
+        });
+
+        const checkbox = screen.getByRole('checkbox', { name: 'Show only standalone' });
+        expect(checkbox.classList).toContain('compact-checkbox');
+
+        const controlRule = appStyles.match(/\.compact-checkbox\s*\{[^}]+\}/)?.[0];
+        const glyphRule = appStyles.match(/\.compact-checkbox::before\s*\{[^}]+\}/)?.[0];
+        expect(controlRule).toContain('width: 12px');
+        expect(controlRule).toContain('height: 12px');
+        expect(controlRule).toContain('appearance: none');
+        expect(controlRule).toContain('place-content: center');
+        expect(controlRule).toContain('overflow: hidden');
+        expect(glyphRule).toContain('width: 3px');
+        expect(glyphRule).toContain('height: 6px');
+
+        const style = document.createElement('style');
+        style.textContent = controlRule ?? '';
+        document.head.append(style);
+
+        const checkboxStyle = getComputedStyle(checkbox);
+        expect(checkboxStyle.width).toBe('12px');
+        expect(checkboxStyle.height).toBe('12px');
+        expect(checkboxStyle.display).toBe('grid');
+        expect(checkboxStyle.overflow).toBe('hidden');
+
+        style.remove();
     });
 });

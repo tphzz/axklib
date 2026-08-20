@@ -1,5 +1,7 @@
 #include "package_plan_store.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <limits>
 #include <optional>
 #include <set>
@@ -160,8 +162,15 @@ axk::app::package_plan_internal::retain_sources(std::span<const PackageInput> in
             auto snapshot = uploads.inspect(upload, owner_id);
             if (!snapshot)
                 return std::unexpected(snapshot.error());
-            if (snapshot->state != UploadState::ready || snapshot->kind != UploadKind::package)
-                return std::unexpected(plan_error("upload_kind_mismatch", "upload is not a ready portable package"));
+            auto extension = std::filesystem::path{snapshot->filename}.extension().string();
+            std::ranges::transform(extension, extension.begin(),
+                                   [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+            const auto supported_kind = snapshot->kind == UploadKind::package ||
+                                        (snapshot->kind == UploadKind::disk_image && extension == ".a3k");
+            if (snapshot->state != UploadState::ready || !supported_kind) {
+                return std::unexpected(
+                    plan_error("upload_kind_mismatch", "upload is not a ready portable package or A3K archive"));
+            }
             auto lease = uploads.lease(upload, owner_id);
             if (!lease)
                 return std::unexpected(lease.error());

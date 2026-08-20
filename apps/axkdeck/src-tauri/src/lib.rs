@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn package_picker_accepts_every_current_package_extension() {
         for extension in [
-            "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+            "a3k", "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
         ] {
             assert_eq!(
                 supported_package_extension(&format!("Package.{extension}")),

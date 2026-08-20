@@ -107,6 +107,7 @@
                 <div class="sample-bank-combobox">
                     <input
                         id="sample-bank-search"
+                        class="dialog-field-control"
                         value={query}
                         role="combobox"
                         aria-autocomplete="list"
@@ -125,7 +126,7 @@
                     {#if listOpen}
                         <div
                             id="sample-bank-options"
-                            class="sample-bank-options"
+                            class="sample-bank-options dialog-autocomplete-list"
                             role="listbox"
                             aria-label="Sample Banks"
                         >
@@ -133,6 +134,7 @@
                                 <button
                                     id={`sample-bank-option-${option.objectId}`}
                                     type="button"
+                                    class="dialog-autocomplete-option"
                                     role="option"
                                     aria-selected={selectedObjectId === option.objectId}
                                     aria-disabled={option.finalMemberCount > 127}
@@ -151,7 +153,7 @@
                                     </small>
                                 </button>
                             {:else}
-                                <p class="empty-copy">No matching Sample Banks</p>
+                                <p class="empty-copy dialog-autocomplete-empty">No matching Sample Banks</p>
                             {/each}
                         </div>
                     {/if}
@@ -224,8 +226,8 @@
     }
 
     .assign-sample-bank-content > label {
-        color: var(--text-muted);
-        font-size: 13px;
+        color: var(--color-text-muted);
+        font-size: var(--dialog-label-font-size);
     }
 
     .sample-bank-combobox {
@@ -237,45 +239,17 @@
     }
 
     .sample-bank-options {
-        display: grid;
-        max-height: 220px;
         margin-top: 4px;
-        overflow-y: auto;
-        border: 1px solid var(--color-border);
-        background: var(--color-panel);
     }
 
-    .sample-bank-options button {
+    .sample-bank-options :global(.dialog-autocomplete-option) {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
         align-items: center;
-        min-height: 42px;
-        padding: 7px 10px;
-        border: 0;
-        border-bottom: 1px solid rgb(61 68 72 / 72%);
-        border-radius: 0;
-        color: var(--color-text-strong);
-        text-align: left;
-        background: transparent;
-    }
-
-    .sample-bank-options button:last-of-type {
-        border-bottom: 0;
-    }
-
-    .sample-bank-options button:hover:not(:disabled),
-    .sample-bank-options button.active:not(:disabled) {
-        background: rgb(104 151 187 / 14%);
-    }
-
-    .sample-bank-options button:disabled {
-        color: var(--text-muted);
-        cursor: not-allowed;
-    }
-
-    .sample-bank-options small {
-        color: var(--text-muted);
+        min-height: 38px;
+        padding-top: 4px;
+        padding-bottom: 4px;
     }
 
     .assignment-blockers,

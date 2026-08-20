@@ -2,6 +2,7 @@
     import { onDestroy, onMount } from 'svelte';
     import type { AppProps } from './appProps';
     import { AuditionWorkflow } from './features/audition/workflow.svelte';
+    import { createCatalogHooks } from './features/catalog/hooks';
     import { CatalogWorkflow } from './features/catalog/workflow.svelte';
     import { createConnectionActions } from './features/connection/actions';
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
@@ -115,11 +116,7 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
-    const catalogHooks = {
-        stopPlayback: () => Promise.resolve(),
-        resetPreviews: () => {},
-        resetCleanup: () => {},
-    };
+    const catalogHooks = createCatalogHooks();
     const catalog = new CatalogWorkflow({
         transport,
         sessionId: () => imageSessionWorkflow.sessionId,
@@ -164,6 +161,9 @@
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         pickerHistory: packagePickerHistory,
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
     });
     const packageBatchImportWorkflow = new PackageBatchImportWorkflow({
         transport,
@@ -273,6 +273,7 @@
         audioImport: audioImportWorkflow,
         sequenceImport: sequenceImportWorkflow,
         tx16wImport: tx16wImportWorkflow,
+        packageImport: packageImportWorkflow,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({

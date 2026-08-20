@@ -2754,8 +2754,14 @@ export interface components {
             totalPayloadBytes: number;
             valid: boolean;
         };
-        /** @description Either one existing SFS volume shared by every package root or one new SFS volume per volume package, named from its placement hint with optional indexed overrides. */
+        /** @description One existing SFS volume, one explicitly named new SFS volume, or one new SFS volume per volume package placement hint. */
         ImageSessionPackageImportDestination:
+            | {
+                  /** @constant */
+                  kind: 'CREATE_VOLUME';
+                  partitionIndex: number;
+                  volumeName: string;
+              }
             | {
                   /** @constant */
                   kind: 'EXISTING_VOLUME';

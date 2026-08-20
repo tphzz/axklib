@@ -62,7 +62,7 @@ bool admitted_extension(axk::app::UploadKind kind, const std::filesystem::path &
     case axk::app::UploadKind::manifest:
         return extension == ".json";
     case axk::app::UploadKind::disk_image:
-        return extension == ".img" || extension == ".ima";
+        return extension == ".img" || extension == ".ima" || extension == ".a3k";
     }
     return false;
 }
@@ -96,7 +96,7 @@ std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
     case axk::app::UploadKind::manifest:
         return "manifest uploads require a JSON file";
     case axk::app::UploadKind::disk_image:
-        return "disk image uploads require an IMG or IMA file";
+        return "media uploads require an IMG, IMA, or A3K file";
     }
     return "upload type is not allowed";
 }

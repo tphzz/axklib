@@ -709,6 +709,44 @@ TEST_F(PackageOperationsTest, SessionExportsA3kArchiveVolumeAsDirectPackage) {
     EXPECT_EQ(package->source_media_kind, "a3k-archive");
 }
 
+TEST_F(PackageOperationsTest, InspectsA3kArchiveAsAnImportableVolumePackage) {
+    const auto inspected = registry_.invoke(
+        "package.inspect", {{"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "archive.a3k"}}}}}},
+        context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("packageKind"), "volume");
+    EXPECT_EQ(inspected->at("requiredExtension"), ".axkvol");
+    EXPECT_EQ(inspected->at("sourceMediaKind"), "a3k-archive");
+    ASSERT_EQ(inspected->at("roots").size(), 1U);
+    EXPECT_EQ(inspected->at("roots").front().at("displayName"), "Archive Volume");
+}
+
+TEST_F(PackageOperationsTest, SessionImportCreatesOneExplicitlyNamedVolumeForA3kArchive) {
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto request = nlohmann::json{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"packages", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "archive.a3k"}}}}}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Imported A3K"}}},
+        {"renames", nlohmann::json::array()},
+        {"programSlotAssignments", nlohmann::json::array()},
+        {"opaqueSequenceDecisions", nlohmann::json::array()},
+    };
+    const auto planned = registry_.invoke("images.package_import.plan", request, context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    ASSERT_TRUE(planned->at("valid").get<bool>());
+    ASSERT_EQ(planned->at("packages").size(), 1U);
+    EXPECT_EQ(planned->at("packages").front().at("destinationVolumeName"), "Imported A3K");
+
+    const auto applied = registry_.invoke("images.package_import",
+                                          {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto refreshed = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    EXPECT_FALSE(volume_content_id(*refreshed, "Imported A3K").empty());
+}
+
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWithReport) {
     const auto opened = images_->open({"workspace", "batch-volumes.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;

@@ -42,8 +42,12 @@ describe('AssignSampleBankDialog', () => {
 
         const input = screen.getByRole('combobox', { name: 'Sample Bank' });
         await waitFor(() => expect(document.activeElement).toBe(input));
+        expect(input.classList).toContain('dialog-field-control');
         await fireEvent.input(input, { target: { value: 'bank 2' } });
-        await fireEvent.click(screen.getByRole('option', { name: /Bank 2.*12 members/ }));
+        const option = screen.getByRole('option', { name: /Bank 2.*12 members/ });
+        expect(screen.getByRole('listbox', { name: 'Sample Banks' }).classList).toContain('dialog-autocomplete-list');
+        expect(option.classList).toContain('dialog-autocomplete-option');
+        await fireEvent.click(option);
 
         expect(
             screen.getByText('1 selected Sample is already in this Sample Bank and will remain in place.'),
