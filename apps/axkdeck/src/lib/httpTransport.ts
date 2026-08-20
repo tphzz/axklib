@@ -60,6 +60,7 @@ import type {
     Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
+    ConnectionMode,
 } from './transport';
 import {
     clientUploadLocation,
@@ -92,9 +93,10 @@ import {
     serverInputBindings,
     volumeMutationOperation,
 } from './httpTransportWire';
-type HttpImageTransportConnection = AxklibApiConnection;
+type HttpImageTransportConnection = AxklibApiConnection & { mode: Exclude<ConnectionMode, 'unavailable'> };
 export class HttpImageTransport extends HttpImageSessionReads implements ImageTransport {
     readonly storageMode = 'server' as const;
+    readonly connectionMode: Exclude<ConnectionMode, 'unavailable'>;
     readonly supportsClientUploads = true;
     private readonly client: AxklibHttpApiClient;
     private readonly jobs: HttpJobController;
@@ -111,6 +113,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
         this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
         this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
+        this.connectionMode = connection.mode;
     }
     sandboxRoots(): Promise<SandboxRoot[]> {
         return this.client.roots();

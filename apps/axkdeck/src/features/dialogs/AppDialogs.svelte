@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { onDestroy } from 'svelte';
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
     import type { PickerRequest, PickerSelection } from './picker';
     import type { ExportWorkflow } from '../export/workflow.svelte';
@@ -23,6 +24,7 @@
     import ObjectDeletionDialog from '../../lib/components/ObjectDeletionDialog.svelte';
     import ObjectRenameDialog from '../../lib/components/ObjectRenameDialog.svelte';
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
+    import ExportProgressDialog from '../../lib/components/ExportProgressDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
@@ -42,6 +44,11 @@
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
     import type { DirectoryLocation, FileLocation, ImageLocation } from '../../lib/storageLocations';
     import type { CompanionSelection, ImageTransport } from '../../lib/transport';
+    import {
+        directComputerDialogVisible,
+        type DirectComputerOperation,
+    } from '../file-operations/directComputerWorkflow';
+    import { DelayedExportProgressVisibility, type ExportProgressOperation } from '../export/progressVisibility.svelte';
 
     interface CompanionDialogState {
         sources: ImageLocation[];
@@ -55,6 +62,7 @@
     interface Props {
         transport: ImageTransport;
         isDesktop: boolean;
+        directComputerOperation: DirectComputerOperation | null;
         pickerRequest: PickerRequest | null;
         finishPicker: (selection: PickerSelection | null) => void;
         manageLocations: () => void;
@@ -97,6 +105,7 @@
     let {
         transport,
         isDesktop,
+        directComputerOperation,
         pickerRequest,
         finishPicker,
         manageLocations,
@@ -135,6 +144,25 @@
         waveDataNames,
         sequenceNames,
     }: Props = $props();
+
+    function directChoiceVisible(operation: DirectComputerOperation, contentAvailable: boolean): boolean {
+        return directComputerDialogVisible(directComputerOperation, operation, contentAvailable);
+    }
+
+    const exportProgressVisibility = new DelayedExportProgressVisibility();
+
+    function busyExportOperation(): ExportProgressOperation | null {
+        if (exports.packageRequest?.busy) return 'package-export';
+        if (volumePackages.request?.busy) return 'volume-package-export';
+        if (volumeFloppies.request?.busy) return 'volume-floppy-export';
+        if (exports.audioRequest?.busy) return 'audio-export';
+        if (exports.sequenceRequest?.busy) return 'sequence-export';
+        if (mediaExports.request?.busy) return 'media-export';
+        return null;
+    }
+
+    $effect(() => exportProgressVisibility.update(busyExportOperation()));
+    onDestroy(() => exportProgressVisibility.dispose());
 </script>
 
 {#if pickerRequest}
@@ -253,7 +281,7 @@
         onsubmit={(bankObjectId) => void mutation.submitSampleBankAssignment(bankObjectId)}
     />
 {/if}
-{#if packageImport.request && pickerRequest?.parentDialog !== 'package-import'}
+{#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}
     <PackageImportDialog
         targetName={packageImport.targetName()}
         destinationMode={packageImport.request.destinationMode}
@@ -290,7 +318,7 @@
         onconfirm={() => void packageImport.apply()}
     />
 {/if}
-{#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import'}
+{#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-batch-import', packageBatchImport.request.status !== 'choosing' || packageBatchImport.request.items.length > 0 || Boolean(packageBatchImport.request.error))}
     <PackageBatchImportDialog
         partitionName={packageBatchImport.request.partition.name}
         desktop={isDesktop}
@@ -316,54 +344,46 @@
         onconfirm={() => void packageBatchImport.apply()}
     />
 {/if}
-{#if exports.packageRequest && pickerRequest?.parentDialog !== 'package-export' && !companionRequest}
+{#if exports.packageRequest && !exports.packageRequest.busy && pickerRequest?.parentDialog !== 'package-export' && !companionRequest && directChoiceVisible('package-export', Boolean(exports.packageRequest.error))}
     <PackageExportDialog
         items={exports.packageRequest.items}
         desktop={isDesktop}
-        busy={exports.packageRequest.busy}
-        progressLabel={exports.packageRequest.progressLabel}
         error={exports.packageRequest.error}
         onworkspace={() => void exports.packageToWorkspace()}
         onlocal={() => void exports.packageToComputer()}
         oncancel={() => exports.closePackage()}
     />
 {/if}
-{#if volumePackages.request && pickerRequest?.parentDialog !== 'volume-package-export'}
+{#if volumePackages.request && !volumePackages.request.busy && pickerRequest?.parentDialog !== 'volume-package-export' && directChoiceVisible('volume-package-export', Boolean(volumePackages.request.error))}
     <VolumePackageExportDialog
         scopeName={volumePackages.request.scope.name}
         inspection={volumePackages.request.inspection}
         desktop={isDesktop}
         loading={volumePackages.request.loading}
-        busy={volumePackages.request.busy}
-        progressLabel={volumePackages.request.progressLabel}
         error={volumePackages.request.error}
         onworkspace={() => void volumePackages.toWorkspace()}
         onlocal={() => void volumePackages.toComputer()}
         oncancel={() => volumePackages.cancel()}
     />
 {/if}
-{#if volumeFloppies.request && pickerRequest?.parentDialog !== 'volume-floppy-export'}
+{#if volumeFloppies.request && !volumeFloppies.request.busy && pickerRequest?.parentDialog !== 'volume-floppy-export' && directChoiceVisible('volume-floppy-export', Boolean(volumeFloppies.request.error))}
     <VolumeFloppyExportDialog
         scopeName={volumeFloppies.request.scope.name}
         inspection={volumeFloppies.request.inspection}
         desktop={isDesktop}
         loading={volumeFloppies.request.loading}
-        busy={volumeFloppies.request.busy}
-        progressLabel={volumeFloppies.request.progressLabel}
         error={volumeFloppies.request.error}
         onworkspace={() => void volumeFloppies.toWorkspace()}
         onlocal={() => void volumeFloppies.toComputer()}
         oncancel={() => volumeFloppies.cancel()}
     />
 {/if}
-{#if exports.audioRequest && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest}
+{#if exports.audioRequest && !exports.audioRequest.busy && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest && directChoiceVisible('audio-export', Boolean(exports.audioRequest.error))}
     <SfzExportDialog
         items={exports.audioRequest.items}
         inspection={exports.audioRequest.inspection}
         desktop={isDesktop}
         loading={exports.audioRequest.loading}
-        busy={exports.audioRequest.busy}
-        progressLabel={exports.audioRequest.progressLabel}
         error={exports.audioRequest.error}
         format={exports.audioRequest.format}
         onformatchange={(format) => exports.setAudioFormat(format)}
@@ -372,24 +392,65 @@
         oncancel={() => exports.cancelAudio()}
     />
 {/if}
-{#if exports.sequenceRequest && pickerRequest?.parentDialog !== 'sequence-export'}
+{#if exports.sequenceRequest && !exports.sequenceRequest.busy && pickerRequest?.parentDialog !== 'sequence-export' && directChoiceVisible('sequence-export', Boolean(exports.sequenceRequest.error))}
     <MidiExportDialog
         items={exports.sequenceRequest.items}
         desktop={isDesktop}
-        busy={exports.sequenceRequest.busy}
-        progressLabel={exports.sequenceRequest.progressLabel}
         error={exports.sequenceRequest.error}
         onworkspace={() => void exports.sequenceToWorkspace()}
         onlocal={() => void exports.sequenceToComputer()}
         oncancel={() => exports.cancelSequence()}
     />
 {/if}
-{#if mediaExports.request && pickerRequest?.parentDialog !== 'media-export'}
+{#if mediaExports.request && !mediaExports.request.busy && pickerRequest?.parentDialog !== 'media-export' && directChoiceVisible('media-export', Boolean(mediaExports.request.error))}
     <MediaExportDialog
         request={mediaExports.request}
         desktop={isDesktop}
         onworkspace={() => void mediaExports.toWorkspace()}
         onlocal={() => void mediaExports.toComputer()}
+        oncancel={() => mediaExports.cancel()}
+    />
+{/if}
+{#if exportProgressVisibility.operation === 'package-export' && exports.packageRequest?.busy}
+    <ExportProgressDialog
+        title="Export package"
+        progressLabel={exports.packageRequest.progressLabel || 'Exporting package…'}
+        cancellable={false}
+        oncancel={() => undefined}
+    />
+{:else if exportProgressVisibility.operation === 'volume-package-export' && volumePackages.request?.busy}
+    <ExportProgressDialog
+        title="Export volume packages"
+        progressLabel={volumePackages.request.progressLabel || 'Exporting packages…'}
+        cancellable={true}
+        oncancel={() => volumePackages.cancel()}
+    />
+{:else if exportProgressVisibility.operation === 'volume-floppy-export' && volumeFloppies.request?.busy}
+    <ExportProgressDialog
+        title="Export volumes to floppies"
+        progressLabel={volumeFloppies.request.progressLabel || 'Exporting floppy sets…'}
+        cancellable={true}
+        oncancel={() => volumeFloppies.cancel()}
+    />
+{:else if exportProgressVisibility.operation === 'audio-export' && exports.audioRequest?.busy}
+    <ExportProgressDialog
+        title="Export audio"
+        progressLabel={exports.audioRequest.progressLabel || 'Exporting audio…'}
+        cancellable={true}
+        oncancel={() => exports.cancelAudio()}
+    />
+{:else if exportProgressVisibility.operation === 'sequence-export' && exports.sequenceRequest?.busy}
+    <ExportProgressDialog
+        title="Export MIDI"
+        progressLabel={exports.sequenceRequest.progressLabel || 'Exporting MIDI…'}
+        cancellable={true}
+        oncancel={() => exports.cancelSequence()}
+    />
+{:else if exportProgressVisibility.operation === 'media-export' && mediaExports.request?.busy}
+    <ExportProgressDialog
+        title="Export sampler media"
+        progressLabel={mediaExports.request.progressLabel || 'Exporting sampler media…'}
+        cancellable={true}
         oncancel={() => mediaExports.cancel()}
     />
 {/if}
@@ -434,7 +495,7 @@
         onconfirm={() => void programGeneration.submit()}
     />
 {/if}
-{#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import'}
+{#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import' && directChoiceVisible('audio-import', audioImport.request.files.length > 0)}
     <AudioImportDialog
         {transport}
         files={audioImport.request.files}
@@ -460,7 +521,7 @@
         oncancel={() => (audioImport.request = null)}
     />
 {/if}
-{#if sequenceImport.request && pickerRequest?.parentDialog !== 'sequence-import'}
+{#if sequenceImport.request && pickerRequest?.parentDialog !== 'sequence-import' && directChoiceVisible('sequence-import', sequenceImport.request.files.length > 0)}
     <MidiImportDialog
         {transport}
         files={sequenceImport.request.files}

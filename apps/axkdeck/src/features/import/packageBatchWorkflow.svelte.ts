@@ -168,7 +168,7 @@ export class PackageBatchImportWorkflow {
         );
     }
 
-    async chooseLocal(): Promise<void> {
+    async chooseLocal(closeOnCancel = false): Promise<void> {
         if (!this.request || !this.dependencies.isDesktop) return;
         const staged: Array<{
             source: InputFileLocation;
@@ -178,7 +178,11 @@ export class PackageBatchImportWorkflow {
         }> = [];
         try {
             const paths = await selectLocalVolumePackages(this.dependencies.pickerHistory.lastImportedLocalPath);
-            if (!paths.length || !this.request) return;
+            if (!paths.length) {
+                if (closeOnCancel) await this.close();
+                return;
+            }
+            if (!this.request) return;
             if (paths.length > maximumBatchPackages) {
                 this.request = {
                     ...this.request,

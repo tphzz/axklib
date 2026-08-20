@@ -10,8 +10,6 @@
         inspection: ImageSessionAudioExportInspection | null;
         desktop: boolean;
         loading: boolean;
-        busy: boolean;
-        progressLabel: string;
         error: string;
         format: 'SFZ' | 'WAV';
         onformatchange: (format: 'SFZ' | 'WAV') => void;
@@ -26,20 +24,8 @@
         fatal: boolean;
     }
 
-    let {
-        items,
-        inspection,
-        desktop,
-        loading,
-        busy,
-        progressLabel,
-        error,
-        format,
-        onformatchange,
-        onworkspace,
-        onlocal,
-        oncancel,
-    }: Props = $props();
+    let { items, inspection, desktop, loading, error, format, onformatchange, onworkspace, onlocal, oncancel }: Props =
+        $props();
 
     const singleItem = $derived(items.length === 1 ? items[0] : undefined);
     const counts = $derived.by(() => {
@@ -93,15 +79,15 @@
         role="dialog"
         aria-modal="true"
         aria-label="Export SFZ"
-        aria-busy={loading || busy}
-        use:modal={{ onescape: busy ? undefined : oncancel }}
+        aria-busy={loading}
+        use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="music" size={16} />
                 <h2>Export SFZ</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
 
         <div class="package-dialog-content">
@@ -117,14 +103,13 @@
                         <button
                             class:active={format === 'SFZ'}
                             type="button"
-                            disabled={busy || !inspection.sfzEligible}
+                            disabled={!inspection.sfzEligible}
                             aria-pressed={format === 'SFZ'}
                             onclick={() => onformatchange('SFZ')}>SFZ + WAV</button
                         >
                         <button
                             class:active={format === 'WAV'}
                             type="button"
-                            disabled={busy}
                             aria-pressed={format === 'WAV'}
                             onclick={() => onformatchange('WAV')}>WAV files</button
                         >
@@ -144,17 +129,14 @@
                     {#each displayIssues as issue (issue.key)}
                         <p class:dialog-error={issue.fatal} class="audio-export-issue">{issue.message}</p>
                     {/each}
-                    <ExportDestinationChooser {desktop} {busy} {onworkspace} {onlocal} />
+                    <ExportDestinationChooser {desktop} {onworkspace} {onlocal} />
                 {/if}
-                {#if busy}<p class="dialog-progress" role="status">{progressLabel || 'Exporting audio…'}</p>{/if}
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </section>
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" onclick={oncancel}
-                >{busy ? 'Cancel export' : 'Cancel'}</button
-            >
+            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>
     </div>
 </div>

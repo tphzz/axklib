@@ -303,7 +303,7 @@ describe('ImageTransport shared read contract', () => {
             }),
         );
         await exerciseReadContract(
-            new HttpImageTransport({ baseUrl: 'http://127.0.0.1:7300/api/v1', bearerToken: 'secret' }),
+            new HttpImageTransport({ baseUrl: 'http://127.0.0.1:7300/api/v1', bearerToken: 'secret', mode: 'remote' }),
             serverFileLocation({ rootId: 'workspace', relativePath: 'images/fixture.hds' }),
         );
     });

@@ -8,11 +8,13 @@
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
     import { hasOpenAppDialog } from './features/dialogs/visibility';
+    import ClientFileInputs from './features/file-operations/ClientFileInputs.svelte';
+    import { DirectComputerWorkflow } from './features/file-operations/directComputerWorkflow';
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
     import { VolumePackageExportWorkflow } from './features/export/volumePackageWorkflow.svelte';
     import { VolumeFloppyExportWorkflow } from './features/export/volumeFloppyWorkflow.svelte';
-    import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
+    import { AudioImportWorkflow } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
     import { PackageBatchImportWorkflow } from './features/import/packageBatchWorkflow.svelte';
@@ -38,7 +40,6 @@
         type PackageExportSelectionState,
     } from './lib/objectSelection';
     import { userFacingMessage } from './lib/userFacingMessage';
-    import { midiExtensions } from './lib/midiImport';
     import type {
         DiskTreeItem,
         InspectorSelection,
@@ -268,6 +269,8 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const directComputerWorkflow = new DirectComputerWorkflow(isDesktop, transport.connectionMode);
+    const pendingDirectComputerOperation = directComputerWorkflow.pendingOperation;
     const mediaDropWorkflow = new MediaDropWorkflow({
         isDesktop,
         workspaceView: () => workspaceView,
@@ -429,19 +432,19 @@
         if (action === 'import-package') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            packageImportWorkflow.open(item);
+            directComputerWorkflow.importPackage(packageImportWorkflow, item);
             return;
         }
         if (action === 'import-packages') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            packageBatchImportWorkflow.open(item);
+            directComputerWorkflow.importVolumePackages(packageBatchImportWorkflow, item);
             return;
         }
         if (action === 'export-package') {
             if (!imageSessionWorkflow.packageExportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            exportWorkflow.requestPackage([
+            directComputerWorkflow.exportPackage(exportWorkflow, [
                 {
                     kind: 'VOLUME',
                     contentId: item.id,
@@ -456,19 +459,19 @@
         if (action === 'export-volume-packages') {
             if (!imageSessionWorkflow.volumePackageExportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            void volumePackageExportWorkflow.open(item);
+            void directComputerWorkflow.exportVolumePackages(volumePackageExportWorkflow, item);
             return;
         }
         if (action === 'export-volume-floppies') {
             if (!imageSessionWorkflow.volumeFloppyExportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            void volumeFloppyExportWorkflow.open(item);
+            void directComputerWorkflow.exportVolumeFloppies(volumeFloppyExportWorkflow, item);
             return;
         }
         if (action === 'export-sfz') {
             if (!imageSessionWorkflow.audioExportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            void exportWorkflow.requestAudio([
+            void requestAudioExport([
                 {
                     kind: 'VOLUME',
                     contentId: item.id,
@@ -483,7 +486,7 @@
         if (action === 'export-cdrom' || action === 'export-floppy') {
             if (!imageSessionWorkflow.mediaConversionAvailable) return;
             imageSessionWorkflow.selectedSource = item;
-            void mediaExportWorkflow.open(item);
+            void directComputerWorkflow.exportMedia(mediaExportWorkflow, item);
             return;
         }
         if (mutationWorkflow.requestVolumeAction(item, action)) imageSessionWorkflow.selectedSource = item;
@@ -497,7 +500,7 @@
         ) {
             return;
         }
-        exportWorkflow.requestPackage(items);
+        directComputerWorkflow.exportPackage(exportWorkflow, items);
     }
 
     function clearPackageExportSelection(): void {
@@ -511,11 +514,11 @@
 
     async function requestAudioExport(items: PackageExportSelection[]): Promise<void> {
         if (!imageSessionWorkflow.audioExportAvailable) return;
-        await exportWorkflow.requestAudio(items);
+        await directComputerWorkflow.exportAudio(exportWorkflow, items);
     }
     function requestSequenceExport(items: PackageExportObject[]): void {
         if (!imageSessionWorkflow.sequenceExportAvailable) return;
-        exportWorkflow.requestSequence(items);
+        directComputerWorkflow.exportMidi(exportWorkflow, items);
     }
 
     function requestObjectDeletion(targets: PackageExportObject[]): void {
@@ -556,21 +559,13 @@
     ondrop={(event) => mediaDropWorkflow.drop(event)}
 />
 
-<input
-    bind:this={audioFileInput}
-    class="sr-only"
-    type="file"
-    multiple
-    accept={audioExtensions.map((extension) => `.${extension}`).join(',')}
-    onchange={(event) => audioImportWorkflow.filesChosen(event)}
-/>
-<input
-    bind:this={sequenceFileInput}
-    class="sr-only"
-    type="file"
-    multiple
-    accept={midiExtensions.map((extension) => `.${extension}`).join(',')}
-    onchange={(event) => sequenceImportWorkflow.filesChosen(event)}
+<ClientFileInputs
+    bind:audioInput={audioFileInput}
+    bind:sequenceInput={sequenceFileInput}
+    audioChanged={(event) => directComputerWorkflow.audioFilesChosen(audioImportWorkflow, event)}
+    audioCancelled={() => directComputerWorkflow.cancelAudioSelection(audioImportWorkflow)}
+    sequenceChanged={(event) => directComputerWorkflow.midiFilesChosen(sequenceImportWorkflow, event)}
+    sequenceCancelled={() => directComputerWorkflow.cancelMidiSelection(sequenceImportWorkflow)}
 />
 
 <WorkspaceShell
@@ -590,6 +585,8 @@
     mutation={mutationWorkflow}
     audioImport={audioImportWorkflow}
     sequenceImport={sequenceImportWorkflow}
+    importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
+    importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
     {programs}
     {sampleBanks}
     {samples}
@@ -658,6 +655,7 @@
         <AppDialogs
             {transport}
             {isDesktop}
+            directComputerOperation={$pendingDirectComputerOperation}
             {pickerRequest}
             finishPicker={(selection) => pickerController.finish(selection)}
             manageLocations={() => (workspaceManagerOpen = true)}

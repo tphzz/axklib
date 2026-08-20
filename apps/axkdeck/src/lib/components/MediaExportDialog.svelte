@@ -43,17 +43,15 @@
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        aria-busy={request.loading || request.busy}
-        use:modal={{ onescape: request.busy ? undefined : oncancel }}
+        aria-busy={request.loading}
+        use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="hard-drive" size={16} />
                 <h2>{title}</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={request.busy} onclick={oncancel}
-                >×</button
-            >
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
 
         <div class="package-dialog-content">
@@ -90,22 +88,17 @@
                     {/each}
                     <ExportDestinationChooser
                         {desktop}
-                        busy={request.busy || !request.inspection.canExport}
+                        disabled={!request.inspection.canExport}
                         {onworkspace}
                         {onlocal}
                     />
-                {/if}
-                {#if request.busy}
-                    <p class="dialog-progress" role="status">{request.progressLabel || 'Exporting sampler media…'}</p>
                 {/if}
                 {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
             </section>
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" onclick={oncancel}
-                >{request.busy ? 'Cancel export' : 'Cancel'}</button
-            >
+            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>
     </div>
 </div>

@@ -19,8 +19,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: true,
-                busy: false,
-                progressLabel: '',
                 error: '',
                 onworkspace,
                 onlocal,
@@ -35,7 +33,7 @@ describe('PackageExportDialog', () => {
         expect(onlocal).toHaveBeenCalledOnce();
     });
 
-    it('hides local save in browser mode and disables actions while exporting', () => {
+    it('hides local save in browser mode', () => {
         render(PackageExportDialog, {
             props: {
                 items: [
@@ -50,8 +48,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: true,
-                progressLabel: 'Writing package',
                 error: '',
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),
@@ -60,9 +56,8 @@ describe('PackageExportDialog', () => {
         });
 
         expect(screen.queryByRole('button', { name: /This computer/ })).toBeNull();
-        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(true);
-        expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
-        expect(screen.getByRole('status').textContent).toContain('Writing package');
+        expect((screen.getByRole('button', { name: /Storage location/ }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('summarizes every root in a multi-object package', () => {
@@ -89,8 +84,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: false,
-                progressLabel: '',
                 error: '',
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),
@@ -130,8 +123,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: false,
-                progressLabel: '',
                 error: '',
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),
@@ -168,8 +159,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: false,
-                progressLabel: '',
                 error: '',
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),
@@ -198,8 +187,6 @@ describe('PackageExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: false,
-                progressLabel: '',
                 error,
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),

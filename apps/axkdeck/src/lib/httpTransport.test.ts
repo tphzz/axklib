@@ -114,7 +114,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
 
         await expect(transport.audioImportCapabilities()).resolves.toEqual({
             supportedSampleRates: [44_100],
@@ -252,6 +256,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://127.0.0.1:4000/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/test.hds'));
         expect(opened).toMatchObject({ sessionId: 1, objectTotalCount: 0, initialVolume: { id: 'volume-1' } });
@@ -331,7 +336,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const opened = await transport.openImage(
             axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'unpacked/volume' }),
         );
@@ -402,7 +411,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const opened = await transport.openImage(
             axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK2' }),
         );
@@ -476,6 +489,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://127.0.0.1:4000/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
 
         const audio = await transport.readAuditionContent('audition-1', 10);
@@ -526,6 +540,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://127.0.0.1:4000/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const result = await transport.downloadFile(serverFile('exports/tone.wav'));
 
@@ -562,6 +577,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://127.0.0.1:4000/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
 
         await expect(transport.readAuditionContent('audition-1', 4)).rejects.toThrow('returned 3 bytes; expected 4');
@@ -600,6 +616,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://127.0.0.1:4000/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const request = transport.readAuditionContent('audition-1', 4, controller.signal);
         await requestStarted;
@@ -722,6 +739,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const manifest = serverFile('authoring/build.json');
         const output = serverFile('images/new.hds');
@@ -870,7 +888,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const profiles = await transport.hardDiskCreationProfiles();
         expect(profiles[0]).toMatchObject({ profileId: 'CD_R_700', defaultPartitionCount: 1 });
         const plan = await transport.planHardDiskCreation('CD_R_700', 1, serverFile('images/new.hds'));
@@ -978,6 +1000,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const source = serverFile('images/base.hds');
         const opened = await transport.openImage(source);
@@ -1324,7 +1347,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         const deletion = await transport.inspectVolumeDeletion(opened.sessionId, 0, 'Samples');
         expect(deletion).toMatchObject({ canDelete: false, crossingRelationshipCount: 1 });
@@ -1475,6 +1502,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened.objectDeletionAvailable).toBe(true);
@@ -1574,6 +1602,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened.waveDataCleanupAvailable).toBe(true);
@@ -1692,6 +1721,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened.programGenerationAvailable).toBe(true);
@@ -1785,6 +1815,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
         const stereo = serverFile('audio/stereo.flac');
@@ -2000,6 +2031,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'http://localhost/api/v1',
             bearerToken: 'secret',
+            mode: 'remote',
         });
         const uploaded = clientUploadLocation({ uploadId: 'upload-midi' }, 'MIDI', 'Intro.mid');
         const workspace = serverFile('midi/Ending.midi');
@@ -2057,7 +2089,11 @@ describe('HttpImageTransport', () => {
     });
 
     it('rejects desktop paths instead of relabeling them as sandbox paths', async () => {
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const desktopPath = { kind: 'native-file', path: 'C:\\Users\\example\\disk.hds' } as unknown as FileLocation;
         await expect(transport.openImage(desktopPath)).rejects.toThrow('server sandbox file selection');
     });
@@ -2107,7 +2143,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const manifest = clientUploadLocation({ uploadId: 'upload-manifest' }, 'MANIFEST', 'build.json');
         const audio = clientUploadLocation({ uploadId: 'upload-audio' }, 'AUDIO', 'tone.wav');
         await expect(
@@ -2212,7 +2252,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const file = await transport.downloadFile(serverFile('exports/tone.wav'));
         expect(file.filename).toBe('tone.wav');
         expect(await file.blob.text()).toBe('wave-bytes');
@@ -2344,7 +2388,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const uploaded = clientUploadLocation({ uploadId: 'upload-package' }, 'PACKAGE', 'volume.axkvol');
         await expect(transport.inspectPackage(uploaded, true)).resolves.toMatchObject({
             packageId: 'package-one',
@@ -2657,7 +2705,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened).toMatchObject({
             packageImportAvailable: true,
@@ -2965,6 +3017,7 @@ describe('HttpImageTransport', () => {
         const transport = new HttpImageTransport({
             baseUrl: 'https://sampler.example.test/api/v1',
             bearerToken: 'remote-secret',
+            mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
         const audio = clientUploadLocation({ uploadId: 'audio-upload' }, 'AUDIO', 'tone.wav');
@@ -3090,7 +3143,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const manifest = serverFile('authoring/build.json');
         const output = serverFile('images/new.hds');
         await transport.planCreate(manifest, output, false);
@@ -3190,7 +3247,11 @@ describe('HttpImageTransport', () => {
             }),
         );
 
-        const transport = new HttpImageTransport({ baseUrl: 'http://localhost/api/v1', bearerToken: 'secret' });
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
         const manifest = serverFile('authoring/build.json');
         const output = serverFile('images/new.hds');
         await transport.planCreate(manifest, output, false);

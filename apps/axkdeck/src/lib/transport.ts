@@ -462,8 +462,11 @@ export interface SequenceImportTarget {
     volumeName: string;
 }
 
+export type ConnectionMode = 'local' | 'remote' | 'unavailable';
+
 export interface ImageTransport {
     readonly storageMode: 'server' | 'unavailable';
+    readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
     sandboxRoots(): Promise<SandboxRoot[]>;
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing>;

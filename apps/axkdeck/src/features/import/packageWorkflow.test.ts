@@ -659,10 +659,11 @@ describe('PackageImportWorkflow', () => {
         await workflow.chooseLocal();
         await workflow.apply();
         workflow.open(target);
-        await workflow.chooseLocal();
+        await workflow.chooseLocal(true);
 
         expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(1, null);
         expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(2, localPath);
+        expect(workflow.request).toBeNull();
     });
 
     it('plans a dropped A3K archive into a new volume named from its archive root', async () => {

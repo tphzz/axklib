@@ -159,7 +159,7 @@ export class VolumePackageExportWorkflow {
         await this.run({ kind: 'WORKSPACE', output: selection.reference });
     }
 
-    async toComputer(): Promise<void> {
+    async toComputer(closeOnCancel = false): Promise<void> {
         const request = this.request;
         if (
             !request?.inspection ||
@@ -175,7 +175,11 @@ export class VolumePackageExportWorkflow {
                 request.inspection.defaultDirectoryName,
                 'Packages',
             );
-            if (!destination || generation !== this.generation || !this.request) return;
+            if (!destination) {
+                if (closeOnCancel) this.cancel();
+                return;
+            }
+            if (generation !== this.generation || !this.request) return;
             await this.run(
                 { kind: 'DOWNLOAD', directoryName: destination.directoryName },
                 { candidateId: destination.candidateId },

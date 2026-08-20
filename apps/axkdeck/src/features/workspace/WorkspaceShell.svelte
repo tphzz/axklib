@@ -58,6 +58,8 @@
         mutation: MutationWorkflow;
         audioImport: AudioImportWorkflow;
         sequenceImport: SequenceImportWorkflow;
+        importAudio: () => void;
+        importMidi: () => void;
         programs: Program[];
         sampleBanks: SampleStructureItem[];
         samples: SampleStructureItem[];
@@ -119,6 +121,8 @@
         mutation,
         audioImport,
         sequenceImport,
+        importAudio,
+        importMidi,
         programs,
         sampleBanks,
         samples,
@@ -409,7 +413,7 @@
                 onplaysample={(item) => void audition.playSample(item)}
                 onplaywavedata={(item) => void audition.playContainedWaveData(item)}
                 onstop={() => void audition.stop()}
-                onimportaudio={() => audioImport.chooseFiles()}
+                onimportaudio={importAudio}
                 playingSampleBankId={audition.playingSampleBankId}
                 playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
                 preparingObjectId={audition.state.status === 'preparing' ? audition.state.objectId : null}
@@ -451,7 +455,7 @@
                 {sequenceExportAvailable}
                 onexportmidi={exportMidi}
                 sequenceImportAvailable={mutation.objectRenameAvailable && sequenceImport.activeTarget() !== null}
-                onimportmidi={() => sequenceImport.chooseFiles()}
+                onimportmidi={importMidi}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}

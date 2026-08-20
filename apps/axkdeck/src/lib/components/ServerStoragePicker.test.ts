@@ -14,6 +14,8 @@ const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 function transport(withRoots = true): ImageTransport {
     return {
         storageMode: 'server',
+        connectionMode: 'remote',
+        supportsClientUploads: false,
         sandboxRoots: vi.fn().mockResolvedValue(
             withRoots
                 ? [

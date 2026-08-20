@@ -9,17 +9,14 @@
         inspection: ImageSessionVolumePackageExportInspection | null;
         desktop: boolean;
         loading: boolean;
-        busy: boolean;
-        progressLabel: string;
         error: string;
         onworkspace: () => void;
         onlocal: () => void;
         oncancel: () => void;
     }
 
-    let { scopeName, inspection, desktop, loading, busy, progressLabel, error, onworkspace, onlocal, oncancel }: Props =
-        $props();
-    const unavailable = $derived(loading || busy || !inspection || inspection.exportableCount === 0);
+    let { scopeName, inspection, desktop, loading, error, onworkspace, onlocal, oncancel }: Props = $props();
+    const unavailable = $derived(loading || !inspection || inspection.exportableCount === 0);
 </script>
 
 <div class="dialog-backdrop" role="presentation">
@@ -28,15 +25,15 @@
         role="dialog"
         aria-modal="true"
         aria-label="Export volume packages"
-        aria-busy={loading || busy}
-        use:modal={{ onescape: busy ? undefined : oncancel }}
+        aria-busy={loading}
+        use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="archive" size={16} />
                 <h2>Export volume packages</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
 
         <div class="package-dialog-content">
@@ -60,10 +57,9 @@
                     </div>
                 {/if}
                 {#if !unavailable}
-                    <ExportDestinationChooser {desktop} {busy} {onworkspace} {onlocal} />
+                    <ExportDestinationChooser {desktop} {onworkspace} {onlocal} />
                 {/if}
                 {#if loading}<p class="dialog-progress" role="status">Inspecting volumes…</p>{/if}
-                {#if busy}<p class="dialog-progress" role="status">{progressLabel || 'Exporting packages…'}</p>{/if}
                 {#if inspection?.exportableCount === 0}
                     <p class="dialog-error" role="alert">The selected scope has no non-empty volumes.</p>
                 {/if}
@@ -72,9 +68,7 @@
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" onclick={oncancel}
-                >{busy ? 'Cancel export' : 'Cancel'}</button
-            >
+            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>
     </div>
 </div>

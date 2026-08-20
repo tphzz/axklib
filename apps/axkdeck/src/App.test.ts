@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('./lib/createTransport', () => ({
     createTransport: () => ({
         storageMode: 'server',
+        connectionMode: 'remote',
         supportsClientUploads: true,
         sandboxRoots: mocks.sandboxRoots,
         sandboxDirectory: mocks.sandboxDirectory,

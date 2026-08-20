@@ -345,13 +345,17 @@ export class PackageImportWorkflow {
         await this.inspect(selection, selection.displayName);
     }
 
-    async chooseLocal(): Promise<void> {
+    async chooseLocal(closeOnCancel = false): Promise<void> {
         if (!this.request || !this.dependencies.isDesktop) return;
         let controller: AbortController | null = null;
         let generation = -1;
         try {
             const path = await selectLocalPackage(this.pickerHistory.lastImportedLocalPath);
-            if (!path || !this.request) return;
+            if (!path) {
+                if (closeOnCancel) await this.close();
+                return;
+            }
+            if (!this.request) return;
             const file = await nativeFileSource(path, packageExtensionSet, 'application/octet-stream');
             controller = new AbortController();
             this.abortController?.abort();
