@@ -320,11 +320,20 @@
 {/if}
 {#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-batch-import', packageBatchImport.request.status !== 'choosing' || packageBatchImport.request.items.length > 0 || Boolean(packageBatchImport.request.error))}
     <PackageBatchImportDialog
-        partitionName={packageBatchImport.request.partition.name}
         desktop={isDesktop}
+        canChangeSources={packageBatchImport.request.canChangeSources}
         items={packageBatchImport.request.items}
         plan={packageBatchImport.request.plan}
+        destinationStrategy={packageBatchImport.request.destinationStrategy}
+        destinationMode={packageBatchImport.request.destinationMode}
+        destinationPartitionIndex={packageBatchImport.request.destinationPartitionIndex}
+        destinationVolumeName={packageBatchImport.request.destinationVolumeName}
+        partitionOptions={packageBatchImport.partitionOptions()}
+        volumeOptions={packageBatchImport.volumeOptions()}
+        separateVolumesAvailable={packageBatchImport.canUseSeparateVolumes()}
         volumeNames={packageBatchImport.request.volumeNames}
+        renames={packageBatchImport.request.renames}
+        programSlots={packageBatchImport.request.programSlots}
         opaqueSequenceActions={packageBatchImport.request.opaqueSequenceActions}
         hasUnvalidatedChanges={packageBatchImport.request.hasUnvalidatedChanges}
         status={packageBatchImport.request.status}
@@ -334,7 +343,16 @@
         error={packageBatchImport.request.error}
         onchooseworkspace={() => void packageBatchImport.chooseWorkspace()}
         onchooselocal={() => void packageBatchImport.chooseLocal()}
-        onrename={(itemId, name) => packageBatchImport.renameVolume(itemId, name)}
+        ondestinationstrategy={(strategy) => packageBatchImport.setDestinationStrategy(strategy)}
+        ondestinationmode={(mode) => packageBatchImport.setDestinationMode(mode)}
+        ondestinationvolume={(partitionIndex, volumeName) =>
+            packageBatchImport.setExistingVolume(partitionIndex, volumeName)}
+        ondestinationpartition={(partitionIndex) => packageBatchImport.setDestinationPartition(partitionIndex)}
+        ondestinationname={(name) => packageBatchImport.setDestinationVolumeName(name)}
+        onrenamevolume={(itemId, name) => packageBatchImport.renameVolume(itemId, name)}
+        onrename={(itemId, nodeId, name) => packageBatchImport.rename(itemId, nodeId, name)}
+        onprogramslot={(itemId, nodeId, slot) => packageBatchImport.programSlot(itemId, nodeId, slot)}
+        onprogramstart={(placementId, start) => packageBatchImport.programStart(placementId, start)}
         ontoggleselected={(itemId, selected) => packageBatchImport.setSelected(itemId, selected)}
         ontoggleall={(selected) => packageBatchImport.setAllSelected(selected)}
         onopaquesequenceaction={(itemId, nodeId, action) =>

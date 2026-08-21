@@ -157,7 +157,7 @@ pub(crate) async fn select_local_package(
 }
 
 #[tauri::command]
-pub(crate) async fn select_local_volume_packages(
+pub(crate) async fn select_local_packages(
     app: AppHandle,
     window: WebviewWindow,
     preferred_path: Option<String>,
@@ -168,8 +168,11 @@ pub(crate) async fn select_local_volume_packages(
         let mut dialog = app
             .dialog()
             .file()
-            .set_title("Choose volume packages")
-            .add_filter("axklib volume packages", &["axkvol"])
+            .set_title("Choose axklib packages")
+            .add_filter(
+                "axklib packages and A3K archives",
+                &SUPPORTED_PACKAGE_EXTENSIONS,
+            )
             .set_parent(&window);
         if let Some(directory) = starting_directory {
             dialog = dialog.set_directory(directory);
@@ -177,7 +180,7 @@ pub(crate) async fn select_local_volume_packages(
         dialog.blocking_pick_files()
     })
     .await
-    .map_err(|error| format!("open volume package file picker: {error}"))?;
+    .map_err(|error| format!("open package file picker: {error}"))?;
     selected
         .unwrap_or_default()
         .into_iter()
@@ -188,12 +191,16 @@ pub(crate) async fn select_local_volume_packages(
                 .canonicalize()
                 .map_err(|error| format!("resolve selected package: {error}"))?;
             if !path.is_file()
-                || !path
-                    .extension()
+                || path
+                    .file_name()
                     .and_then(|value| value.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("axkvol"))
+                    .and_then(supported_package_extension)
+                    .is_none()
             {
-                return Err("every selected package must be a regular .axkvol file".to_owned());
+                return Err(
+                    "every selected file must be a supported axklib package or A3K archive"
+                        .to_owned(),
+                );
             }
             scope_window
                 .fs_scope()

@@ -176,6 +176,8 @@
         invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
     });
     const deletionWorkflow = new DeletionWorkflow({
         transport,
@@ -278,6 +280,7 @@
         sequenceImport: sequenceImportWorkflow,
         tx16wImport: tx16wImportWorkflow,
         packageImport: packageImportWorkflow,
+        packageBatchImport: packageBatchImportWorkflow,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
@@ -491,7 +494,6 @@
         }
         if (mutationWorkflow.requestVolumeAction(item, action)) imageSessionWorkflow.selectedSource = item;
     }
-
     function requestObjectPackageExport(items: PackageExportObject[]): void {
         if (
             !imageSessionWorkflow.packageExportAvailable ||

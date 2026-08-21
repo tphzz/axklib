@@ -108,9 +108,6 @@ prepare_session_import(const Json &input, std::span<const axk::PortablePackage> 
                 }
             }
         } else if (kind == "CREATE_VOLUME") {
-            if (packages.size() != 1U)
-                return std::unexpected(
-                    operation_error("invalid_request", "CREATE_VOLUME requires exactly one import source"));
             const auto volume_name = destination.at("volumeName").get<std::string>();
             if (!valid_volume_name(volume_name))
                 return std::unexpected(operation_error("invalid_request", "destination volume name is invalid"));
@@ -120,9 +117,12 @@ prepare_session_import(const Json &input, std::span<const axk::PortablePackage> 
                 return std::unexpected(
                     operation_error("package_destination_conflict", "destination volume name already exists"));
             }
-            result.destination_volume_names.assign(1U, volume_name);
-            for (std::size_t root_index = 0U; root_index < packages.front().roots.size(); ++root_index) {
-                result.request.root_destinations.push_back({0U, root_index, *partition, {}, volume_name, {}, {}, true});
+            result.destination_volume_names.assign(packages.size(), volume_name);
+            for (std::size_t package_index = 0U; package_index < packages.size(); ++package_index) {
+                for (std::size_t root_index = 0U; root_index < packages[package_index].roots.size(); ++root_index) {
+                    result.request.root_destinations.push_back(
+                        {package_index, root_index, *partition, {}, volume_name, {}, {}, true});
+                }
             }
         } else if (kind == "CREATE_VOLUMES_FROM_HINTS") {
             std::map<std::size_t, std::string> overrides;

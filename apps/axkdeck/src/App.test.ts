@@ -1366,8 +1366,10 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
 
-        const dialog = await screen.findByRole('dialog', { name: 'Import volume packages' });
-        expect(within(dialog).getByText('Create volumes in My Partition from selected .axkvol packages.')).toBeTruthy();
+        const dialog = await screen.findByRole('dialog', { name: 'Import packages' });
+        expect(
+            within(dialog).getByText('Import portable axklib packages or A3K archives into the open SFS image.'),
+        ).toBeTruthy();
         expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
 

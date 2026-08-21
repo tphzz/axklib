@@ -597,6 +597,45 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
     EXPECT_FALSE(volume_content_id(*refreshed, "Percussion").empty());
 }
 
+TEST_F(PackageOperationsTest, SessionBatchImportCreatesOneSharedVolumeFromMultiplePackages) {
+    for (const auto filename : {"shared-one.axkvol", "shared-two.axkvol"}) {
+        const auto exported =
+            registry_.invoke("package.export",
+                             {{"source", {{"rootId", "workspace"}, {"relativePath", "mixed-roots.hds"}}},
+                              {"output", {{"rootId", "workspace"}, {"relativePath", filename}}},
+                              {"roots", {{{"kind", "volume"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}}}},
+                             context());
+        ASSERT_TRUE(exported) << exported.error().message;
+    }
+
+    const auto target = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(target) << target.error().message;
+    const auto request = nlohmann::json{
+        {"imageId", target->image_id},
+        {"expectedRevision", target->revision},
+        {"packages",
+         {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "shared-one.axkvol"}}}},
+          {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "shared-two.axkvol"}}}}}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Shared"}}},
+        {"renames", nlohmann::json::array()},
+        {"programSlotAssignments", nlohmann::json::array()},
+        {"opaqueSequenceDecisions", nlohmann::json::array()},
+    };
+    const auto planned = registry_.invoke("images.package_import.plan", request, context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    ASSERT_TRUE(planned->at("valid").get<bool>());
+    ASSERT_EQ(planned->at("packages").size(), 2U);
+    EXPECT_EQ(planned->at("packages").at(0).at("destinationVolumeName"), "Shared");
+    EXPECT_EQ(planned->at("packages").at(1).at("destinationVolumeName"), "Shared");
+
+    const auto applied = registry_.invoke("images.package_import",
+                                          {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto refreshed = images_->inspect(target->image_id, "owner");
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    EXPECT_FALSE(volume_content_id(*refreshed, "Shared").empty());
+}
+
 TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWorkspaceOrRetainedDownload) {
     const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;

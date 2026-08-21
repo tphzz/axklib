@@ -4,10 +4,11 @@ import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { serverFileLocation } from '../storageLocations';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
-import type { BatchPackageItem } from '../../features/import/packageBatchWorkflow.svelte';
+import type { BatchPackageItem } from '../../features/import/packageBatchTypes';
 import PackageBatchImportDialog from './PackageBatchImportDialog.svelte';
 
 const dialogSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchImportDialog.svelte'), 'utf8');
+const tableSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchItemsTable.svelte'), 'utf8');
 
 function inspection(packageId: string, volumeName: string): PackageInspection {
     return {
@@ -114,7 +115,15 @@ const plan: ImageSessionPackageImportPlan = {
 const callbacks = {
     onchooseworkspace: vi.fn(),
     onchooselocal: vi.fn(),
+    ondestinationstrategy: vi.fn(),
+    ondestinationmode: vi.fn(),
+    ondestinationvolume: vi.fn(),
+    ondestinationpartition: vi.fn(),
+    ondestinationname: vi.fn(),
+    onrenamevolume: vi.fn(),
     onrename: vi.fn(),
+    onprogramslot: vi.fn(),
+    onprogramstart: vi.fn(),
     ontoggleselected: vi.fn(),
     ontoggleall: vi.fn(),
     onopaquesequenceaction: vi.fn(),
@@ -125,11 +134,27 @@ const callbacks = {
 
 function props() {
     return {
-        partitionName: 'Partition 1',
         desktop: false,
+        canChangeSources: true,
         items,
         plan,
+        destinationStrategy: 'separate' as const,
+        destinationMode: 'create' as const,
+        destinationPartitionIndex: 0,
+        destinationVolumeName: '',
+        partitionOptions: [{ partitionIndex: 0, name: 'Partition 1' }],
+        volumeOptions: [
+            {
+                partitionIndex: 0,
+                name: 'Partition 1',
+                volumeName: 'Existing',
+                label: 'Partition 1 / Existing',
+            },
+        ],
+        separateVolumesAvailable: true,
         volumeNames: { 'item-0': 'Drums', 'item-1': 'Drums 2' },
+        renames: {},
+        programSlots: {},
         opaqueSequenceActions: {},
         hasUnvalidatedChanges: false,
         status: 'ready' as const,
@@ -147,7 +172,7 @@ describe('PackageBatchImportDialog', () => {
     it('previews every destination and its object counts before one batch import', async () => {
         render(PackageBatchImportDialog, { props: props() });
 
-        expect(screen.getByRole('heading', { name: 'Import volume packages' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Import packages' })).toBeTruthy();
         expect(screen.getByText('2 of 2 packages selected')).toBeTruthy();
         expect(screen.getByText(/2 volumes will be created/)).toBeTruthy();
         expect(screen.getAllByText('1 Programs')).toHaveLength(2);
@@ -167,7 +192,43 @@ describe('PackageBatchImportDialog', () => {
         await fireEvent.input(screen.getByLabelText('New volume name for two.axkvol'), {
             target: { value: 'Percussion' },
         });
-        expect(callbacks.onrename).toHaveBeenCalledWith('item-1', 'Percussion');
+        expect(callbacks.onrenamevolume).toHaveBeenCalledWith('item-1', 'Percussion');
+    });
+
+    it('uses the shared destination chooser for mixed package batches', async () => {
+        render(PackageBatchImportDialog, {
+            props: {
+                ...props(),
+                destinationStrategy: 'shared',
+                destinationMode: 'existing',
+                destinationVolumeName: 'Existing',
+                separateVolumesAvailable: false,
+            },
+        });
+
+        expect(screen.getByText(/2 packages will be imported into one volume/)).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'One volume' }).getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByRole('button', { name: 'Separate volumes' }).hasAttribute('disabled')).toBe(true);
+        expect((screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement).value).toBe(
+            'Partition 1 / Existing',
+        );
+
+        await fireEvent.click(screen.getByRole('button', { name: 'New volume' }));
+        expect(callbacks.ondestinationmode).toHaveBeenCalledWith('create');
+    });
+
+    it('changes native package selections with the native picker', async () => {
+        render(PackageBatchImportDialog, {
+            props: {
+                ...props(),
+                items: items.map((item) => ({ ...item, localPath: `/packages/${item.sourceName}` })),
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Change files' }));
+
+        expect(callbacks.onchooselocal).toHaveBeenCalledOnce();
+        expect(callbacks.onchooseworkspace).not.toHaveBeenCalled();
     });
 
     it('keeps unchecked packages visible and exposes an indeterminate select-all control', async () => {
@@ -229,8 +290,8 @@ describe('PackageBatchImportDialog', () => {
         ).toEqual(['Check conflicts', 'Cancel', 'Import 2 packages']);
         expect(footer?.querySelector('.batch-package-footer-actions')).toBeTruthy();
         expect(screen.getByText('21').tagName).toBe('SPAN');
-        expect(dialogSource).toMatch(/\.batch-table-row\s*\{[^}]*align-items:\s*start;/s);
-        expect(dialogSource).toMatch(/\.batch-table-row\s*\{[^}]*padding-block:\s*6px;/s);
+        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*align-items:\s*start;/s);
+        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*padding-block:\s*6px;/s);
         expect(dialogSource).toMatch(/\.batch-package-footer\s*\{[^}]*flex-wrap:\s*wrap;/s);
     });
 
@@ -288,6 +349,7 @@ describe('PackageBatchImportDialog', () => {
 
         expect(screen.queryByText('Ready to import')).toBeNull();
         expect(screen.getByRole('alert').textContent).toContain('Alteration journal storage is full');
+        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('summarizes record exhaustion without repeating every blocked object', () => {

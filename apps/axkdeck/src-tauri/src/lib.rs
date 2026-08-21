@@ -26,7 +26,7 @@ use local_directory_exports::{
 use local_packages::{
     PackageSaveCandidateStore, save_retained_media, save_retained_package,
     select_local_media_destination, select_local_package, select_local_package_destination,
-    select_local_volume_packages,
+    select_local_packages,
 };
 use local_workspaces::{WorkspaceCandidateStore, commit_local_workspace, select_local_workspace};
 use startup_diagnostics::{StartupDiagnostics, StartupMilestone, complete_startup};
@@ -490,7 +490,7 @@ pub fn run() {
             select_local_workspace,
             commit_local_workspace,
             select_local_package,
-            select_local_volume_packages,
+            select_local_packages,
             select_local_package_destination,
             save_retained_package,
             select_local_media_destination,

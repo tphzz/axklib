@@ -8,6 +8,7 @@ import type { AudioImportTarget } from '../../lib/transport';
 import { tx16wDiskMediaType } from '../../lib/tx16wImport';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import type { AudioImportWorkflow } from './audioWorkflow.svelte';
+import type { PackageBatchImportWorkflow } from './packageBatchWorkflow.svelte';
 import type { PackageImportWorkflow } from './packageWorkflow.svelte';
 import type { SequenceImportWorkflow } from './sequenceWorkflow.svelte';
 import type { Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
@@ -27,6 +28,7 @@ interface MediaDropDependencies {
     sequenceImport: SequenceImportWorkflow;
     tx16wImport: Tx16wImportWorkflow;
     packageImport: PackageImportWorkflow;
+    packageBatchImport: PackageBatchImportWorkflow;
     sessionId: () => number | null;
     imageFormat: () => string | null;
     mutationsAvailable: () => boolean;
@@ -147,14 +149,6 @@ export class MediaDropWorkflow {
             return;
         }
         if (selectedKind === 'package') {
-            if (files.length !== 1) {
-                this.dependencies.setStatus('Drop one package or A3K archive at a time');
-                this.notice = {
-                    title: 'Import unavailable',
-                    message: 'Choose one portable package or A3K archive for each import.',
-                };
-                return;
-            }
             if (!this.dependencies.packageImport.dropAvailable()) {
                 this.dependencies.setStatus('Package import requires a writable SFS hard-disk image');
                 this.notice = {
@@ -163,7 +157,14 @@ export class MediaDropWorkflow {
                 };
                 return;
             }
-            await this.dependencies.packageImport.requestDroppedFile(files[0], this.dependencies.selectedSource());
+            if (files.length === 1) {
+                await this.dependencies.packageImport.requestDroppedFile(files[0], this.dependencies.selectedSource());
+            } else {
+                await this.dependencies.packageBatchImport.requestDroppedFiles(
+                    files,
+                    this.dependencies.selectedSource(),
+                );
+            }
             return;
         }
         const volumeTarget = this.selectedVolumeTarget();
@@ -242,7 +243,8 @@ export class MediaDropWorkflow {
             this.dependencies.audioImport.request !== null ||
             this.dependencies.sequenceImport.request !== null ||
             this.dependencies.tx16wImport.request !== null ||
-            this.dependencies.packageImport.request !== null
+            this.dependencies.packageImport.request !== null ||
+            this.dependencies.packageBatchImport.request !== null
         );
     }
 

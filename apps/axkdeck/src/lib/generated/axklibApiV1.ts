@@ -2754,7 +2754,7 @@ export interface components {
             totalPayloadBytes: number;
             valid: boolean;
         };
-        /** @description One existing SFS volume, one explicitly named new SFS volume, or one new SFS volume per volume package placement hint. */
+        /** @description One existing SFS volume, one explicitly named new SFS volume receiving all selected packages, or one new SFS volume per volume package placement hint. */
         ImageSessionPackageImportDestination:
             | {
                   /** @constant */
