@@ -173,6 +173,7 @@
                     <label>
                         <span>Target rate</span>
                         <select
+                            class="dialog-field-control"
                             aria-label={`Target sample rate for ${row.fileName}`}
                             value={row.targetSampleRate}
                             disabled={busy || row.status === 'checking'}
@@ -186,6 +187,7 @@
                     <label>
                         <span>Sample name</span>
                         <input
+                            class="dialog-field-control"
                             aria-label={`Sample name for ${row.fileName}`}
                             data-dialog-initial-focus={index === 0 ? 'select' : undefined}
                             value={row.sampleName}
@@ -200,6 +202,7 @@
                     <label>
                         <span>Wave Data (mono/left)</span>
                         <input
+                            class="dialog-field-control"
                             aria-label={`Wave data (mono/left) for ${row.fileName}`}
                             value={row.waveformNames[0]}
                             maxlength="16"
@@ -211,6 +214,7 @@
                         <label>
                             <span>Wave Data (right)</span>
                             <input
+                                class="dialog-field-control"
                                 aria-label={`Wave data (right) for ${row.fileName}`}
                                 value={row.waveformNames[1]}
                                 maxlength="16"
@@ -317,27 +321,15 @@
         min-width: 0;
         gap: 4px;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-label-font-size);
     }
     input,
     select {
         width: 100%;
         min-width: 0;
-        height: var(--density-control);
-        padding: 0 8px;
-        color: var(--color-text-strong);
-        border: 1px solid var(--color-border);
-        border-radius: 5px;
-        outline: none;
-        background: var(--color-bg-deep);
-        font-size: 12px;
     }
     select {
         appearance: auto;
-    }
-    input:focus,
-    select:focus {
-        border-color: var(--color-accent);
     }
     .status-message {
         display: flex;

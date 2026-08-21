@@ -390,7 +390,7 @@ pub(crate) async fn save_retained_directory_export(
     content_path: String,
     expected_size: u64,
     candidates: State<'_, Mutex<DirectorySaveCandidateStore>>,
-    connections: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+    connections: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<(), String> {
     let destination = candidates
         .lock()
@@ -400,12 +400,11 @@ pub(crate) async fn save_retained_directory_export(
         .filter(|(_, created)| created.elapsed() < Duration::from_secs(300))
         .map(|(path, _)| path)
         .ok_or_else(|| "export destination expired; choose it again".to_owned())?;
-    let connection = connections
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .connection()?
-        .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
+    let connections = connections.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let connection = connections
+            .connection()?
+            .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
         download_retained_directory_export(connection, destination, content_path, expected_size)
     })
     .await

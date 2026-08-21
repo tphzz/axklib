@@ -107,6 +107,23 @@ prepare_session_import(const Json &input, std::span<const axk::PortablePackage> 
                         {package_index, root_index, *partition, {}, volume_name, {}, {}, false});
                 }
             }
+        } else if (kind == "CREATE_VOLUME") {
+            const auto volume_name = destination.at("volumeName").get<std::string>();
+            if (!valid_volume_name(volume_name))
+                return std::unexpected(operation_error("invalid_request", "destination volume name is invalid"));
+            if (std::ranges::any_of(volume_scopes_by_id, [&](const auto &entry) {
+                    return entry.second.partition_index == *partition && entry.second.display_name == volume_name;
+                })) {
+                return std::unexpected(
+                    operation_error("package_destination_conflict", "destination volume name already exists"));
+            }
+            result.destination_volume_names.assign(packages.size(), volume_name);
+            for (std::size_t package_index = 0U; package_index < packages.size(); ++package_index) {
+                for (std::size_t root_index = 0U; root_index < packages[package_index].roots.size(); ++root_index) {
+                    result.request.root_destinations.push_back(
+                        {package_index, root_index, *partition, {}, volume_name, {}, {}, true});
+                }
+            }
         } else if (kind == "CREATE_VOLUMES_FROM_HINTS") {
             std::map<std::size_t, std::string> overrides;
             for (const auto &override_value : destination.value("volumeNameOverrides", Json::array())) {

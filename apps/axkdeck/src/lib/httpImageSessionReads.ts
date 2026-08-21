@@ -20,6 +20,10 @@ export class HttpImageSessionReads {
         return this.imageSessions.open(location);
     }
 
+    keepImageAlive(sessionId: number): Promise<void> {
+        return this.imageSessions.keepAlive(sessionId);
+    }
+
     refreshImage(sessionId: number): Promise<OpenedImage> {
         return this.imageSessions.refresh(sessionId);
     }

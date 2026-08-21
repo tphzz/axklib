@@ -258,11 +258,17 @@ describe('AuditionController', () => {
         vi.stubGlobal('cancelAnimationFrame', vi.fn());
     }
 
-    it('creates and closes one output context per audition while reusing decoded audio', async () => {
+    it('reuses one output context across auditions and closes it only on disposal', async () => {
         installAudio();
         const transport = transportFor(descriptor());
         const updates: AuditionState[] = [];
-        const controller = new AuditionController(transport, (state) => updates.push(state));
+        const diagnostics: Record<string, unknown>[] = [];
+        const controller = new AuditionController(
+            transport,
+            (state) => updates.push(state),
+            (event) => diagnostics.push(event),
+            () => true,
+        );
 
         await controller.play(1, 'SMPL-1');
 
@@ -278,20 +284,22 @@ describe('AuditionController', () => {
         await controller.stop();
         await controller.play(1, 'SMPL-1');
 
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
-        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(transport.readAuditionContent).toHaveBeenCalledTimes(1);
         expect(MockAudioContext.instances[0]?.decodeAudioData).toHaveBeenCalledTimes(1);
         expect(MockAudioBufferSourceNode.instances).toHaveLength(2);
+        expect(diagnostics.filter((event) => event.event === 'audio_context_ready')).toMatchObject([
+            { reused: false, creationDurationMs: expect.any(Number) },
+            { reused: true, creationDurationMs: 0 },
+        ]);
 
         MockAudioBufferSourceNode.instances[1]?.onended?.();
-        await vi.waitFor(() => expect(MockAudioContext.instances[1]?.state).toBe('closed'));
+        await vi.waitFor(() => expect(MockAudioContext.instances[0]?.state).toBe('running'));
 
         await controller.dispose();
         expect(MockAudioContext.instances[0]?.close).toHaveBeenCalledTimes(1);
-        expect(MockAudioContext.instances[1]?.close).toHaveBeenCalledTimes(1);
     });
 
     it('resumes each explicit audition from its initiating user action', async () => {
@@ -322,27 +330,22 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
-    it('does not let a pending stop close the next audition context', async () => {
+    it('keeps the output context available during an immediate replay', async () => {
         installAudio();
-        vi.useFakeTimers();
         const transport = transportFor(descriptor());
         const controller = new AuditionController(transport, () => undefined);
 
         await controller.play(1, 'SMPL-1');
         const stopping = controller.stop();
         const replaying = controller.play(1, 'SMPL-1');
-        await vi.advanceTimersByTimeAsync(5);
         await Promise.all([stopping, replaying]);
 
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
-        expect(MockAudioContext.instances[1]?.state).toBe('running');
-        const disposing = controller.dispose();
-        await vi.advanceTimersByTimeAsync(5);
-        await disposing;
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
+        await controller.dispose();
     });
 
-    it('replaces an active audition only after closing its context', async () => {
+    it('replaces an active audition without reopening its output context', async () => {
         installAudio();
         const transport = transportFor(descriptor());
         const controller = new AuditionController(transport, () => undefined);
@@ -350,10 +353,9 @@ describe('AuditionController', () => {
         await controller.play(1, 'SMPL-1');
         await controller.play(1, 'SMPL-2');
 
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
-        expect(MockAudioContext.instances[1]?.state).toBe('running');
-        expect(events.indexOf('close')).toBeLessThan(events.lastIndexOf('context'));
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
+        expect(events).not.toContain('close');
         await controller.dispose();
     });
 
@@ -452,7 +454,7 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
-    it('schedules Sample Bank members gaplessly on one temporary output context', async () => {
+    it('schedules Sample Bank members gaplessly on one retained output context', async () => {
         installAudio();
         const transport = transportFor(
             descriptor({
@@ -485,7 +487,7 @@ describe('AuditionController', () => {
         );
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], expect.any(AbortSignal));
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
         await controller.dispose();
     });
 
@@ -819,7 +821,7 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
-    it('stops every scheduled Sample Bank member before closing the sequence context', async () => {
+    it('stops every scheduled Sample Bank member while retaining the output context', async () => {
         installAudio();
         const transport = transportFor(descriptor());
         const completed = vi.fn();
@@ -833,7 +835,7 @@ describe('AuditionController', () => {
         expect(MockAudioBufferSourceNode.instances[1]?.stop).toHaveBeenCalledWith(1.005);
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
         expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
         await controller.dispose();
     });
 
@@ -863,7 +865,7 @@ describe('AuditionController', () => {
 
         expect(completed).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 2 });
         expect(MockAudioBufferSourceNode.instances).toHaveLength(0);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
         await controller.dispose();
     });
 
@@ -940,9 +942,8 @@ describe('AuditionController', () => {
 
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(2);
         expect(transport.readAuditionContent).toHaveBeenCalledTimes(2);
-        expect(MockAudioContext.instances).toHaveLength(2);
-        expect(MockAudioContext.instances[0]?.state).toBe('closed');
-        expect(MockAudioContext.instances[1]?.state).toBe('running');
+        expect(MockAudioContext.instances).toHaveLength(1);
+        expect(MockAudioContext.instances[0]?.state).toBe('running');
         await controller.dispose();
     });
 

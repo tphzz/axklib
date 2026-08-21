@@ -597,6 +597,45 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
     EXPECT_FALSE(volume_content_id(*refreshed, "Percussion").empty());
 }
 
+TEST_F(PackageOperationsTest, SessionBatchImportCreatesOneSharedVolumeFromMultiplePackages) {
+    for (const auto filename : {"shared-one.axkvol", "shared-two.axkvol"}) {
+        const auto exported =
+            registry_.invoke("package.export",
+                             {{"source", {{"rootId", "workspace"}, {"relativePath", "mixed-roots.hds"}}},
+                              {"output", {{"rootId", "workspace"}, {"relativePath", filename}}},
+                              {"roots", {{{"kind", "volume"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}}}},
+                             context());
+        ASSERT_TRUE(exported) << exported.error().message;
+    }
+
+    const auto target = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(target) << target.error().message;
+    const auto request = nlohmann::json{
+        {"imageId", target->image_id},
+        {"expectedRevision", target->revision},
+        {"packages",
+         {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "shared-one.axkvol"}}}},
+          {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "shared-two.axkvol"}}}}}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Shared"}}},
+        {"renames", nlohmann::json::array()},
+        {"programSlotAssignments", nlohmann::json::array()},
+        {"opaqueSequenceDecisions", nlohmann::json::array()},
+    };
+    const auto planned = registry_.invoke("images.package_import.plan", request, context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    ASSERT_TRUE(planned->at("valid").get<bool>());
+    ASSERT_EQ(planned->at("packages").size(), 2U);
+    EXPECT_EQ(planned->at("packages").at(0).at("destinationVolumeName"), "Shared");
+    EXPECT_EQ(planned->at("packages").at(1).at("destinationVolumeName"), "Shared");
+
+    const auto applied = registry_.invoke("images.package_import",
+                                          {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto refreshed = images_->inspect(target->image_id, "owner");
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    EXPECT_FALSE(volume_content_id(*refreshed, "Shared").empty());
+}
+
 TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWorkspaceOrRetainedDownload) {
     const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
@@ -707,6 +746,44 @@ TEST_F(PackageOperationsTest, SessionExportsA3kArchiveVolumeAsDirectPackage) {
     ASSERT_TRUE(package) << package.error().message;
     EXPECT_EQ(package->kind, axk::PackageKind::volume);
     EXPECT_EQ(package->source_media_kind, "a3k-archive");
+}
+
+TEST_F(PackageOperationsTest, InspectsA3kArchiveAsAnImportableVolumePackage) {
+    const auto inspected = registry_.invoke(
+        "package.inspect", {{"package", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "archive.a3k"}}}}}},
+        context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("packageKind"), "volume");
+    EXPECT_EQ(inspected->at("requiredExtension"), ".axkvol");
+    EXPECT_EQ(inspected->at("sourceMediaKind"), "a3k-archive");
+    ASSERT_EQ(inspected->at("roots").size(), 1U);
+    EXPECT_EQ(inspected->at("roots").front().at("displayName"), "Archive Volume");
+}
+
+TEST_F(PackageOperationsTest, SessionImportCreatesOneExplicitlyNamedVolumeForA3kArchive) {
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto request = nlohmann::json{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"packages", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "archive.a3k"}}}}}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Imported A3K"}}},
+        {"renames", nlohmann::json::array()},
+        {"programSlotAssignments", nlohmann::json::array()},
+        {"opaqueSequenceDecisions", nlohmann::json::array()},
+    };
+    const auto planned = registry_.invoke("images.package_import.plan", request, context());
+    ASSERT_TRUE(planned) << planned.error().message;
+    ASSERT_TRUE(planned->at("valid").get<bool>());
+    ASSERT_EQ(planned->at("packages").size(), 1U);
+    EXPECT_EQ(planned->at("packages").front().at("destinationVolumeName"), "Imported A3K");
+
+    const auto applied = registry_.invoke("images.package_import",
+                                          {{"planToken", planned->at("planToken").get<std::string>()}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto refreshed = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    EXPECT_FALSE(volume_content_id(*refreshed, "Imported A3K").empty());
 }
 
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWithReport) {

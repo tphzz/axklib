@@ -4,11 +4,12 @@ get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." A
 
 find_package(Crow CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(nlohmann_json_schema_validator CONFIG REQUIRED)
 
 set(AXK_SERVER_OPENAPI_BASE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/contracts/openapi-v1.base.json")
 set(AXK_SERVER_OPENAPI_PATH "${CMAKE_CURRENT_SOURCE_DIR}/contracts/openapi-v1.json")
 set(AXK_SERVER_GENERATED_OPENAPI_PATH "${CMAKE_CURRENT_BINARY_DIR}/generated/openapi-v1.json")
+set(AXK_SERVER_GENERATED_VALIDATION_PLAN_PATH
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/validation_plan.cpp")
 set_property(
   DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${AXK_SERVER_OPENAPI_BASE_PATH}"
                                       "${AXK_SERVER_OPENAPI_PATH}"
@@ -37,13 +38,40 @@ while(AXK_SERVER_OPENAPI_HEX_OFFSET LESS AXK_SERVER_OPENAPI_HEX_LENGTH)
 endwhile()
 configure_file(src/embedded_contract.cpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/embedded_contract.cpp" @ONLY)
 
-add_library(axk_server_contract STATIC src/contract.cpp)
+add_executable(axk_server_validation_plan_generator EXCLUDE_FROM_ALL src/validation_plan_generator.cpp)
+target_compile_features(axk_server_validation_plan_generator PRIVATE cxx_std_23)
+target_include_directories(axk_server_validation_plan_generator PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(axk_server_validation_plan_generator PRIVATE nlohmann_json::nlohmann_json)
+axk_set_project_warnings(axk_server_validation_plan_generator)
+axk_enable_sanitizers(axk_server_validation_plan_generator)
+axk_enable_coverage(axk_server_validation_plan_generator)
+add_custom_command(
+  OUTPUT "${AXK_SERVER_GENERATED_VALIDATION_PLAN_PATH}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/generated"
+  COMMAND "$<TARGET_FILE:axk_server_validation_plan_generator>" "${AXK_SERVER_OPENAPI_PATH}"
+          "${AXK_SERVER_GENERATED_VALIDATION_PLAN_PATH}"
+  DEPENDS axk_server_validation_plan_generator "${AXK_SERVER_OPENAPI_PATH}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/validation_plan.hpp"
+  COMMENT "Compiling the axklib-server OpenAPI validation plan"
+  VERBATIM
+)
+
+add_library(
+  axk_server_contract
+  STATIC
+  src/contract.cpp
+  src/validation_plan.cpp
+  "${AXK_SERVER_GENERATED_VALIDATION_PLAN_PATH}"
+)
 target_compile_features(axk_server_contract PUBLIC cxx_std_23)
-target_include_directories(axk_server_contract PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(
+  axk_server_contract
+  PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
 target_link_libraries(
   axk_server_contract
   PUBLIC axklib::application nlohmann_json::nlohmann_json
-  PRIVATE nlohmann_json_schema_validator::validator
 )
 axk_set_project_warnings(axk_server_contract)
 axk_enable_sanitizers(axk_server_contract)
@@ -189,12 +217,14 @@ if(BUILD_TESTING)
   endfunction()
 
   find_package(GTest CONFIG REQUIRED)
+  find_package(nlohmann_json_schema_validator CONFIG REQUIRED)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   include(GoogleTest)
   add_executable(
     axk_server_tests
     tests/archive_download_budget_test.cpp
     tests/config_test.cpp
+    tests/contract_test_support.cpp
     tests/download_reader_test.cpp
     tests/event_delivery_budget_test.cpp
     tests/event_dispatcher_test.cpp
@@ -212,7 +242,7 @@ if(BUILD_TESTING)
   target_compile_definitions(axk_server_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
   target_link_libraries(
     axk_server_tests
-    PRIVATE axk_server_adapter GTest::gtest_main
+    PRIVATE axk_server_adapter GTest::gtest_main nlohmann_json_schema_validator::validator
   )
   target_include_directories(axk_server_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   axk_set_project_warnings(axk_server_tests)
@@ -279,7 +309,7 @@ endif()
 install(TARGETS axklib_server RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT server)
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT server)
-foreach(package crow asio json-schema-validator hash-library openssl nlohmann-json libsndfile soxr utfcpp
+foreach(package crow asio hash-library openssl nlohmann-json libsndfile soxr utfcpp
                 libflac libogg libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

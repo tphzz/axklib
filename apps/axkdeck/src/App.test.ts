@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,11 +30,13 @@ const mocks = vi.hoisted(() => ({
     audioImportCapabilities: vi.fn(),
     inspectAudio: vi.fn(),
     uploadClientFile: vi.fn(),
+    desktopBuildInfo: vi.fn(),
 }));
 
 vi.mock('./lib/createTransport', () => ({
     createTransport: () => ({
         storageMode: 'server',
+        connectionMode: 'remote',
         supportsClientUploads: true,
         sandboxRoots: mocks.sandboxRoots,
         sandboxDirectory: mocks.sandboxDirectory,
@@ -69,6 +71,10 @@ vi.mock('./lib/nativeMediaDrop', () => ({
     listenForNativeMediaDrops: mocks.listenForNativeMediaDrops,
 }));
 
+vi.mock('./lib/desktopBuildInfo', () => ({
+    desktopBuildInfo: mocks.desktopBuildInfo,
+}));
+
 import App from './App.svelte';
 import { AuditionController } from './lib/audio/auditionController';
 
@@ -80,7 +86,7 @@ function renderAcknowledgedApp() {
 
 async function chooseNestedImage(buttonName: 'Open image' | 'Open another image' = 'Open image'): Promise<void> {
     await fireEvent.click(screen.getByRole('button', { name: buttonName }));
-    const picker = await screen.findByRole('dialog', { name: 'Open image' });
+    const picker = await screen.findByRole('dialog', { name: 'Open image' }, { timeout: 5_000 });
     if (buttonName === 'Open image') {
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('images'));
@@ -112,6 +118,7 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             sessionId: 17,
+            format: 'sfs',
             revision: 1,
             companionSources: [],
             floppySet: null,
@@ -196,6 +203,16 @@ describe('App panel layout', () => {
             issues: [],
         });
         mocks.uploadClientFile.mockReset();
+        mocks.desktopBuildInfo.mockReset().mockResolvedValue({
+            schemaVersion: 1,
+            semanticVersion: '0.4.0',
+            projectVersion: '0.4.0',
+            sourceIdentity: 'v0.4.0-1234567',
+            releaseTag: 'v0.4.0',
+            isRelease: true,
+            webviewEngine: 'WebKitGTK',
+            webviewVersion: '2.50.4',
+        });
     });
 
     it('requires acknowledgement on every application start', async () => {
@@ -211,6 +228,27 @@ describe('App panel layout', () => {
         first.unmount();
         render(App);
         expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+    });
+
+    it('opens About from the brand and reuses the authoritative build information', async () => {
+        renderAcknowledgedApp();
+        const brand = screen.getByRole('button', { name: 'About axkdeck' });
+
+        brand.focus();
+        expect(document.activeElement).toBe(brand);
+        await fireEvent.click(brand);
+        const firstDialog = await screen.findByRole('dialog', { name: 'About axkdeck' });
+        expect(within(firstDialog).getByText('0.4.0')).toBeTruthy();
+        expect(within(firstDialog).getByText('v0.4.0-1234567')).toBeTruthy();
+        expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
+
+        await fireEvent.click(within(firstDialog).getByRole('button', { name: 'Close' }));
+        expect(screen.queryByRole('dialog', { name: 'About axkdeck' })).toBeNull();
+        await waitFor(() => expect(document.activeElement).toBe(brand));
+
+        await fireEvent.click(brand);
+        expect(await screen.findByRole('dialog', { name: 'About axkdeck' })).toBeTruthy();
+        expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
     });
 
     it('keeps one stable toolbar across all side-panel combinations', async () => {
@@ -623,7 +661,7 @@ describe('App panel layout', () => {
         expect(screen.getByRole('button', { name: 'Create image' }).closest('aside')).toBe(navigator);
         expect(screen.queryByRole('textbox', { name: 'Disk image path' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
-        expect(screen.getByText('Partitions, volumes and objects')).toBeTruthy();
+        expect(screen.getByText('Partitions and volumes')).toBeTruthy();
     });
 
     it('closes the active image and returns to the initial empty state', async () => {
@@ -1264,7 +1302,8 @@ describe('App panel layout', () => {
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
-        await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
+        const importDialog = await screen.findByRole('dialog', { name: 'Import axklib package' });
+        await fireEvent.click(within(importDialog).getByRole('button', { name: /Storage location/ }));
         const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
         expect(screen.queryByRole('dialog', { name: 'Import axklib package' })).toBeNull();
         expect(screen.getAllByRole('dialog')).toHaveLength(1);
@@ -1327,8 +1366,10 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Import volume packages' });
-        expect(within(dialog).getByText('Create volumes in My Partition from selected .axkvol packages.')).toBeTruthy();
+        const dialog = await screen.findByRole('dialog', { name: 'Import packages' });
+        expect(
+            within(dialog).getByText('Import portable axklib packages or A3K archives into the open SFS image.'),
+        ).toBeTruthy();
         expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
 
@@ -1493,7 +1534,7 @@ describe('App panel layout', () => {
         expect(screen.getByRole('status').textContent).toContain('2 selected');
         await fireEvent.click(screen.getByRole('button', { name: 'Export 2 selected objects' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Partition 0 · Piano')).toBeTruthy();
         expect(within(dialog).getByText('Partition 1 · Drums')).toBeTruthy();
         expect(within(dialog).getByText('1 Program · 1 Sample Bank')).toBeTruthy();
@@ -1550,7 +1591,7 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
-        const dialog = screen.getByRole('dialog', { name: 'Export axklib package' });
+        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Export “Object directory”')).toBeTruthy();
         expect(within(dialog).getByRole('button', { name: /Storage location/ })).toBeTruthy();
     });
@@ -1589,9 +1630,9 @@ describe('App panel layout', () => {
         Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer });
         window.dispatchEvent(drop);
         expect(drop.defaultPrevented).toBe(true);
-        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        const dialog = await screen.findByRole('dialog', { name: 'Open a hard-disk image' });
         expect(
-            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+            within(dialog).getByText('Open a writable SFS hard-disk image before importing dropped files.'),
         ).toBeTruthy();
     });
 
@@ -1604,9 +1645,9 @@ describe('App panel layout', () => {
         const callbacks = mocks.listenForNativeMediaDrops.mock.calls[0][0];
         callbacks.onDrop([new File(['audio'], 'take.wav', { type: 'audio/wav' })], { x: 20, y: 30 }, 1);
 
-        const dialog = await screen.findByRole('dialog', { name: 'Audio import unavailable' });
+        const dialog = await screen.findByRole('dialog', { name: 'Open a hard-disk image' });
         expect(
-            within(dialog).getByText('Select a writable volume in Contents, then drop the audio files again.'),
+            within(dialog).getByText('Open a writable SFS hard-disk image before importing dropped files.'),
         ).toBeTruthy();
         delete runtime.__TAURI_INTERNALS__;
     });
@@ -1694,7 +1735,17 @@ describe('App panel layout', () => {
     });
 
     it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
         renderAcknowledgedApp();
+        await chooseNestedImage();
+        await screen.findByText('My Volume');
 
         const midiTransfer = {
             types: ['Files'],
@@ -1726,12 +1777,14 @@ describe('App panel layout', () => {
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
         unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
-        expect(within(unavailable).getByText('Drop audio, MIDI, and TX16W disks separately.')).toBeTruthy();
+        expect(
+            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
+        ).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();
     });
 
-    it('switches to a dropped-on volume before opening MIDI import review', async () => {
+    it('keeps the explicitly selected volume when a MIDI file is dropped over another volume', async () => {
         const firstVolume = {
             id: 'volume-1',
             name: 'First Volume',
@@ -1767,8 +1820,8 @@ describe('App panel layout', () => {
         screen.getByText('Second Volume').dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume Second Volume')).toBeTruthy();
-        expect(mocks.objectPage).toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
+        expect(within(dialog).getByText('Volume First Volume')).toBeTruthy();
+        expect(mocks.objectPage).not.toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
     });
 
     it('selects several workspace audio files and inspects them without uploading', async () => {
@@ -1781,6 +1834,7 @@ describe('App panel layout', () => {
         };
         mocks.openImage.mockResolvedValueOnce({
             sessionId: 17,
+            format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
                 valid: true,
@@ -1858,6 +1912,7 @@ describe('App panel layout', () => {
         };
         mocks.openImage.mockResolvedValueOnce({
             sessionId: 17,
+            format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
                 valid: true,
@@ -1886,7 +1941,8 @@ describe('App panel layout', () => {
         await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Import audio' }));
-        await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
+        const sourceDialog = await screen.findByRole('dialog', { name: 'Import audio' });
+        await fireEvent.click(within(sourceDialog).getByRole('button', { name: /This computer/ }));
 
         const input = container.querySelector<HTMLInputElement>('input[type="file"]');
         expect(input).toBeTruthy();
@@ -1901,7 +1957,17 @@ describe('App panel layout', () => {
     });
 
     it('consumes unsupported and empty file drops without opening the import dialog', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'My Volume',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        mocks.openImage.mockResolvedValueOnce(openedImageWithVolumes([volume], volume));
         renderAcknowledgedApp();
+        await chooseNestedImage();
+        await screen.findByText('My Volume');
 
         const unsupportedTransfer = {
             types: ['text/uri-list'],
@@ -1966,6 +2032,7 @@ function openedImageWithVolumes(
 ) {
     return {
         sessionId: 17,
+        format: 'sfs',
         companionSources: [],
         floppySet: null,
         tree: [

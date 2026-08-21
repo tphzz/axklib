@@ -193,9 +193,26 @@ function programSlotPlan(
 }
 
 const callbacks = {
+    canChangeSource: true,
+    destinationMode: 'existing' as const,
+    destinationPartitionIndex: 0,
+    destinationVolumeName: 'TARGET',
+    partitionOptions: [{ partitionIndex: 0, name: 'PARTITION 1' }],
+    volumeOptions: [
+        {
+            partitionIndex: 0,
+            name: 'PARTITION 1',
+            volumeName: 'TARGET',
+            label: 'PARTITION 1 / TARGET',
+        },
+    ],
     onchooseworkspace: vi.fn(),
     onchooselocal: vi.fn(),
     onchange: vi.fn(),
+    ondestinationmode: vi.fn(),
+    ondestinationvolume: vi.fn(),
+    ondestinationpartition: vi.fn(),
+    ondestinationname: vi.fn(),
     onrename: vi.fn(),
     onprogramslot: vi.fn(),
     onprogramstart: vi.fn(),
@@ -206,6 +223,28 @@ const callbacks = {
 };
 
 describe('PackageImportDialog', () => {
+    it('does not offer to replace a package that was explicitly dropped', () => {
+        render(PackageImportDialog, {
+            props: {
+                targetName: 'TARGET',
+                desktop: true,
+                sourceName: 'drums.axkvol',
+                inspection,
+                plan: plan(),
+                renames: {},
+                programSlots: {},
+                status: 'ready',
+                progress: 1,
+                error: '',
+                ...callbacks,
+                canChangeSource: false,
+            },
+        });
+
+        expect(screen.getByText('drums.axkvol')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Change' })).toBeNull();
+    });
+
     it('presents local and workspace sources before a package is selected', async () => {
         render(PackageImportDialog, {
             props: {

@@ -88,6 +88,15 @@ export class HttpImageSessions {
         return this.openedImage(sessionId, summary);
     }
 
+    async keepAlive(sessionId: number): Promise<void> {
+        const session = this.get(sessionId);
+        const summary = await this.client.request<ApiImageSummary>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}`,
+        );
+        if (summary.revision > session.revision) this.replaceRevision(session, summary.revision);
+    }
+
     async attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
         const session = this.get(sessionId);
         const wireSelection: components['schemas']['CompanionSelection'] =
@@ -443,6 +452,7 @@ export class HttpImageSessions {
             mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
             extentLayoutRepairAvailable: (summary.availableOperations ?? []).includes('images.extent_layout.repair'),
             allocationInspectionAvailable: summary.format === 'sfs',
+            format: summary.format,
             tree: [disk],
         };
     }

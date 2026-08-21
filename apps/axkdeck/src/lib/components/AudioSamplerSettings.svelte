@@ -21,6 +21,7 @@
             <span>Root key</span>
             <span class="note-input">
                 <input
+                    class="dialog-field-control"
                     aria-label={`Root key for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -36,6 +37,7 @@
             <span>Fine tune</span>
             <span class="unit-input">
                 <input
+                    class="dialog-field-control"
                     aria-label={`Fine tune for ${row.fileName}`}
                     type="number"
                     min="-63"
@@ -51,6 +53,7 @@
             <span>Key range</span>
             <span class="range-inputs">
                 <input
+                    class="dialog-field-control"
                     aria-label={`Lowest key for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -61,6 +64,7 @@
                 />
                 <span>to</span>
                 <input
+                    class="dialog-field-control"
                     aria-label={`Highest key for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -75,6 +79,7 @@
             <span>Velocity range</span>
             <span class="range-inputs">
                 <input
+                    class="dialog-field-control"
                     aria-label={`Lowest velocity for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -85,6 +90,7 @@
                 />
                 <span>to</span>
                 <input
+                    class="dialog-field-control"
                     aria-label={`Highest velocity for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -98,6 +104,7 @@
         <label>
             <span>Playback</span>
             <select
+                class="dialog-field-control"
                 aria-label={`Playback mode for ${row.fileName}`}
                 value={row.loopMode}
                 {disabled}
@@ -117,6 +124,7 @@
             <label>
                 <span>Loop start</span>
                 <input
+                    class="dialog-field-control"
                     aria-label={`Loop start for ${row.fileName}`}
                     type="number"
                     min="0"
@@ -129,6 +137,7 @@
             <label>
                 <span>Loop length</span>
                 <input
+                    class="dialog-field-control"
                     aria-label={`Loop length for ${row.fileName}`}
                     type="number"
                     min="1"
@@ -156,24 +165,12 @@
         display: grid;
         gap: 4px;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-label-font-size);
     }
     input,
     select {
         width: 100%;
         min-width: 0;
-        height: var(--density-control);
-        padding: 0 8px;
-        color: var(--color-text-strong);
-        border: 1px solid var(--color-border);
-        border-radius: 5px;
-        outline: none;
-        background: var(--color-bg-deep);
-        font-size: 12px;
-    }
-    input:focus,
-    select:focus {
-        border-color: var(--color-accent);
     }
     .note-input,
     .unit-input,

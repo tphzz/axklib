@@ -91,13 +91,17 @@ export class MediaExportWorkflow {
         await this.run({ kind: 'WORKSPACE', output: selection.reference, overwrite: false });
     }
 
-    async toComputer(): Promise<void> {
+    async toComputer(closeOnCancel = false): Promise<void> {
         const request = this.request;
         if (!request?.inspection?.canExport || request.busy || !this.dependencies.isDesktop) return;
         const generation = this.generation;
         try {
             const destination = await selectLocalMediaDestination(request.inspection.defaultFilename);
-            if (!destination || generation !== this.generation || !this.request) return;
+            if (!destination) {
+                if (closeOnCancel) this.cancel();
+                return;
+            }
+            if (generation !== this.generation || !this.request) return;
             await this.run(
                 { kind: 'DOWNLOAD', filename: destination.filename },
                 { candidateId: destination.candidateId },

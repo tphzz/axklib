@@ -2,10 +2,59 @@ import { describe, expect, it } from 'vitest';
 
 import { clientUploadLocation, serverFileLocation } from './storageLocations';
 import {
+    audioImportRequest,
     sampleBankAssignmentRequest,
     sampleBankCreationRequest,
     tx16wDiskSetImportRequest,
 } from './httpImportOperations';
+
+describe('audioImportRequest', () => {
+    it('creates a new volume and imports its audio in one alteration manifest', () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'audio/Tone.wav' });
+
+        const result = audioImportRequest(
+            'image-1',
+            8,
+            { kind: 'CREATE_VOLUME', partitionIndex: 1, volumeName: 'Imported' },
+            [
+                {
+                    source,
+                    sampleName: 'Tone',
+                    waveformNames: ['Tone Wave'],
+                    rootKey: 60,
+                    fineTuneCents: 0,
+                    keyLow: 0,
+                    keyHigh: 127,
+                    velocityLow: 0,
+                    velocityHigh: 127,
+                    loopMode: 4,
+                    loopStartFrame: 0,
+                    loopLengthFrames: 0,
+                    targetSampleRate: 44_100,
+                },
+            ],
+            { kind: 'SAMPLES' },
+        );
+
+        expect(result.manifest.inline.operations.map((operation) => operation.type)).toEqual([
+            'insert_volume',
+            'insert_waveform',
+            'insert_sbnk',
+        ]);
+        expect(result.manifest.inline.operations[0]).toEqual({
+            id: 'volume-audio-import',
+            type: 'insert_volume',
+            partition_index: 1,
+            volume: { name: 'Imported', waveforms: [], samples: [] },
+        });
+        expect(result.inputBindings).toEqual([
+            {
+                manifestPath: 'audio/import-0',
+                input: { fileRef: { rootId: 'workspace', relativePath: 'audio/Tone.wav' } },
+            },
+        ]);
+    });
+});
 
 describe('sampleBankCreationRequest', () => {
     it('creates one ordered Sample Bank insertion without input bindings', () => {

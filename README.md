@@ -79,6 +79,12 @@ the source tree and its CMake package, keeping the compiler, standard library,
 and dependency choices under their own control. The local `axklib-server` is an
 axkdeck sidecar and is not published as a standalone download.
 
+Windows installers require Microsoft Edge WebView2 Evergreen Runtime version
+111 or newer. An interactive installation asks before downloading or updating
+an insufficient runtime from Microsoft; silent `/S` installations perform that
+prerequisite step without a prompt. The installer does not bundle a fixed
+WebView2 runtime and does not replace a newer installed version.
+
 ## Command Line
 
 The CLI exposes the same image and object operations for scripts and batch

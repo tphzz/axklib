@@ -7,15 +7,13 @@
     interface Props {
         items: PackageExportSelection[];
         desktop: boolean;
-        busy: boolean;
-        progressLabel: string;
         error: string;
         onworkspace: () => void;
         onlocal: () => void;
         oncancel: () => void;
     }
 
-    let { items, desktop, busy, progressLabel, error, onworkspace, onlocal, oncancel }: Props = $props();
+    let { items, desktop, error, onworkspace, onlocal, oncancel }: Props = $props();
     const singleItem = $derived(items.length === 1 ? items[0] : undefined);
     const typeSummary = $derived.by(() => {
         const labels = ['Program', 'Sequence', 'Sample Bank', 'Sample', 'Wave Data'] as const;
@@ -52,15 +50,14 @@
         role="dialog"
         aria-modal="true"
         aria-label="Export axklib package"
-        aria-busy={busy}
-        use:modal={{ onescape: busy ? undefined : oncancel }}
+        use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="archive" size={16} />
                 <h2>Export package</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
 
         <div class="package-dialog-content">
@@ -84,14 +81,13 @@
                         {/each}
                     </div>
                 {/if}
-                <ExportDestinationChooser {desktop} {busy} {onworkspace} {onlocal} />
-                {#if busy}<p class="dialog-progress" role="status">{progressLabel || 'Exporting package…'}</p>{/if}
+                <ExportDestinationChooser {desktop} {onworkspace} {onlocal} />
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </section>
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
+            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         </footer>
     </div>
 </div>

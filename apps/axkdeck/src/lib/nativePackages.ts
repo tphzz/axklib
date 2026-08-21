@@ -9,8 +9,8 @@ export function selectLocalPackage(preferredPath: string | null): Promise<string
     return invoke('select_local_package', { preferredPath });
 }
 
-export function selectLocalVolumePackages(preferredPath: string | null): Promise<string[]> {
-    return invoke('select_local_volume_packages', { preferredPath });
+export function selectLocalPackages(preferredPath: string | null): Promise<string[]> {
+    return invoke('select_local_packages', { preferredPath });
 }
 
 export function selectLocalPackageDestination(suggestedName: string): Promise<LocalPackageDestination | null> {

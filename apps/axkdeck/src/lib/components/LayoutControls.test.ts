@@ -85,9 +85,9 @@ describe('LayoutControls', () => {
         expect(document.activeElement).toBe(trigger);
 
         await fireEvent.click(trigger);
-        await fireEvent.click(screen.getByRole('menuitemradio', { name: '125%' }));
+        await fireEvent.click(screen.getByRole('menuitemradio', { name: '115%' }));
 
-        expect(oninterfacescalechange).toHaveBeenCalledWith('1.25');
+        expect(oninterfacescalechange).toHaveBeenCalledWith('1.15');
         expect(screen.queryByRole('menu', { name: 'Interface scale' })).toBeNull();
     });
 

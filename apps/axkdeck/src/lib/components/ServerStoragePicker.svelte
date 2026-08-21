@@ -453,6 +453,16 @@
             <button
                 class="icon-button"
                 type="button"
+                aria-label="Go to all workspaces"
+                title="All workspaces"
+                disabled={!activeRoot || loading}
+                onclick={goHome}
+            >
+                <Icon name="home" size={15} />
+            </button>
+            <button
+                class="icon-button"
+                type="button"
                 aria-label="Parent directory"
                 disabled={!activeRoot || !directory || loading}
                 onclick={() => void goUp()}
@@ -499,16 +509,6 @@
                         New folder
                     </button>
                 {/if}
-                <button
-                    class="icon-button"
-                    type="button"
-                    aria-label="Go to all workspaces"
-                    title="All workspaces"
-                    disabled={!activeRoot || loading}
-                    onclick={goHome}
-                >
-                    <Icon name="home" size={15} />
-                </button>
             </div>
         </nav>
 

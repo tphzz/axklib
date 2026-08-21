@@ -14,8 +14,8 @@ use crate::desktop_preferences::DesktopPreferencesStore;
 use crate::{file_publication, remote_settings, retained_download, server_sidecar};
 
 const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
-const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 7] = [
-    "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 8] = [
+    "a3k", "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
 ];
 const SUPPORTED_MEDIA_EXTENSIONS: [&str; 3] = ["iso", "ima", "zip"];
 
@@ -118,7 +118,10 @@ pub(crate) async fn select_local_package(
             .dialog()
             .file()
             .set_title("Choose axklib package")
-            .add_filter("axklib packages", &SUPPORTED_PACKAGE_EXTENSIONS)
+            .add_filter(
+                "axklib packages and A3K archives",
+                &SUPPORTED_PACKAGE_EXTENSIONS,
+            )
             .set_parent(&window);
         if let Some(directory) = starting_directory {
             dialog = dialog.set_directory(directory);
@@ -154,7 +157,7 @@ pub(crate) async fn select_local_package(
 }
 
 #[tauri::command]
-pub(crate) async fn select_local_volume_packages(
+pub(crate) async fn select_local_packages(
     app: AppHandle,
     window: WebviewWindow,
     preferred_path: Option<String>,
@@ -165,8 +168,11 @@ pub(crate) async fn select_local_volume_packages(
         let mut dialog = app
             .dialog()
             .file()
-            .set_title("Choose volume packages")
-            .add_filter("axklib volume packages", &["axkvol"])
+            .set_title("Choose axklib packages")
+            .add_filter(
+                "axklib packages and A3K archives",
+                &SUPPORTED_PACKAGE_EXTENSIONS,
+            )
             .set_parent(&window);
         if let Some(directory) = starting_directory {
             dialog = dialog.set_directory(directory);
@@ -174,7 +180,7 @@ pub(crate) async fn select_local_volume_packages(
         dialog.blocking_pick_files()
     })
     .await
-    .map_err(|error| format!("open volume package file picker: {error}"))?;
+    .map_err(|error| format!("open package file picker: {error}"))?;
     selected
         .unwrap_or_default()
         .into_iter()
@@ -185,12 +191,16 @@ pub(crate) async fn select_local_volume_packages(
                 .canonicalize()
                 .map_err(|error| format!("resolve selected package: {error}"))?;
             if !path.is_file()
-                || !path
-                    .extension()
+                || path
+                    .file_name()
                     .and_then(|value| value.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("axkvol"))
+                    .and_then(supported_package_extension)
+                    .is_none()
             {
-                return Err("every selected package must be a regular .axkvol file".to_owned());
+                return Err(
+                    "every selected file must be a supported axklib package or A3K archive"
+                        .to_owned(),
+                );
             }
             scope_window
                 .fs_scope()
@@ -459,7 +469,7 @@ pub(crate) async fn save_retained_package(
     content_path: String,
     expected_size: u64,
     candidates: State<'_, Mutex<PackageSaveCandidateStore>>,
-    connections: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+    connections: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<(), String> {
     let destination = candidates
         .lock()
@@ -469,12 +479,11 @@ pub(crate) async fn save_retained_package(
         .filter(|(_, created)| created.elapsed() < Duration::from_secs(300))
         .map(|(path, _)| path)
         .ok_or_else(|| "package destination expired; choose it again".to_owned())?;
-    let connection = connections
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .connection()?
-        .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
+    let connections = connections.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let connection = connections
+            .connection()?
+            .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
         download_retained_file(connection, destination, content_path, expected_size)
     })
     .await
@@ -487,7 +496,7 @@ pub(crate) async fn save_retained_media(
     content_path: String,
     expected_size: u64,
     candidates: State<'_, Mutex<PackageSaveCandidateStore>>,
-    connections: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+    connections: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<(), String> {
     let destination = candidates
         .lock()
@@ -497,12 +506,11 @@ pub(crate) async fn save_retained_media(
         .filter(|(_, created)| created.elapsed() < Duration::from_secs(300))
         .map(|(path, _)| path)
         .ok_or_else(|| "media destination expired; choose it again".to_owned())?;
-    let connection = connections
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .connection()?
-        .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
+    let connections = connections.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let connection = connections
+            .connection()?
+            .ok_or_else(|| "axklib-server is unavailable".to_owned())?;
         download_retained_file(connection, destination, content_path, expected_size)
     })
     .await

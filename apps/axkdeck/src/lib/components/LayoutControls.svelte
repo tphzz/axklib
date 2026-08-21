@@ -31,6 +31,7 @@
     let scaleTrigger: HTMLButtonElement | undefined = $state();
     const scaleOptions: readonly { mode: InterfaceScaleMode; label: string }[] = [
         { mode: '1', label: '100%' },
+        { mode: '1.15', label: '115%' },
         { mode: '1.25', label: '125%' },
         { mode: '1.5', label: '150%' },
     ];

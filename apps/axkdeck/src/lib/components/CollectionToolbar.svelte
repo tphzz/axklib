@@ -52,6 +52,7 @@
         {#if filterLabel}
             <label class="collection-filter">
                 <input
+                    class="compact-checkbox"
                     type="checkbox"
                     checked={filterChecked}
                     onchange={(event) => onfilterchange(event.currentTarget.checked)}

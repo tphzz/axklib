@@ -244,12 +244,11 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                                  {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
                                   config_.maximum_media_build_output_bytes})),
       openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
-      openapi_validator_(openapi_document_),
-      jobs_(
-          registry_, config_.job_worker_threads, config_.write_job_worker_threads, config_.maximum_queued_jobs,
-          config_.replay_events_per_job, config_.maximum_retained_jobs,
-          std::chrono::seconds{config_.job_retention_seconds}, [] { return axk::app::JobManager::Clock::now(); },
-          &uploads_, &path_reservations_),
+      openapi_validator_(), jobs_(
+                                registry_, config_.job_worker_threads, config_.write_job_worker_threads,
+                                config_.maximum_queued_jobs, config_.replay_events_per_job,
+                                config_.maximum_retained_jobs, std::chrono::seconds{config_.job_retention_seconds},
+                                [] { return axk::app::JobManager::Clock::now(); }, &uploads_, &path_reservations_),
       event_tickets_(std::chrono::seconds{config_.event_ticket_ttl_seconds}, config_.maximum_event_tickets),
       event_dispatcher_(config_.maximum_websocket_delivery_events,
                         [this](const axk::app::JobEvent &event) { broadcast(event); }) {

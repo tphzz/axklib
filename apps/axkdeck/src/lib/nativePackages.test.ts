@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 
-import { selectLocalPackage } from './nativePackages';
+import { selectLocalPackage, selectLocalPackages } from './nativePackages';
 
 describe('nativePackages', () => {
     beforeEach(() => mocks.invoke.mockReset());
@@ -25,5 +25,15 @@ describe('nativePackages', () => {
         await selectLocalPackage(null);
 
         expect(mocks.invoke).toHaveBeenCalledWith('select_local_package', { preferredPath: null });
+    });
+
+    it('passes the preferred package path to the multi-file native chooser', async () => {
+        mocks.invoke.mockResolvedValue([]);
+
+        await selectLocalPackages('previous-package.axkprg');
+
+        expect(mocks.invoke).toHaveBeenCalledWith('select_local_packages', {
+            preferredPath: 'previous-package.axkprg',
+        });
     });
 });

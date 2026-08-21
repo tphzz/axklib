@@ -155,6 +155,7 @@
             <label class="target-field">
                 <span>Target volume</span>
                 <input
+                    class="dialog-field-control"
                     type="text"
                     list="tx16w-volume-options"
                     placeholder="Select a volume"
@@ -382,11 +383,15 @@
 
     small,
     .disk-set > small,
-    .target-field > span,
     summary span,
     .tx16w-footer > span {
         color: var(--color-text-muted);
         font-size: 12px;
+    }
+
+    .target-field > span {
+        color: var(--color-text-muted);
+        font-size: var(--dialog-label-font-size);
     }
 
     .target-field input {

@@ -35,6 +35,7 @@ import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './sto
 
 class UnavailableTransport implements ImageTransport {
     readonly storageMode = 'unavailable' as const;
+    readonly connectionMode = 'unavailable' as const;
     readonly supportsClientUploads = false;
     private unavailable<T>(): Promise<T> {
         return Promise.reject(new Error('axklib-server is unavailable; configure or restart the server connection'));
@@ -174,6 +175,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     openImage(): Promise<OpenedImage> {
+        return this.unavailable();
+    }
+    keepImageAlive(): Promise<void> {
         return this.unavailable();
     }
     refreshImage(): Promise<OpenedImage> {

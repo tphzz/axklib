@@ -245,7 +245,7 @@
         <div class="panel-heading">
             <div>
                 <p class="eyebrow">Contents</p>
-                <h2>Partitions, volumes and objects</h2>
+                <h2>Partitions and volumes</h2>
             </div>
         </div>
 

@@ -1,18 +1,44 @@
 <script lang="ts">
     import { tick } from 'svelte';
-    import type { BatchPackageItem } from '../../features/import/packageBatchWorkflow.svelte';
+    import type { BatchPackageItem, PackageBatchDestinationStrategy } from '../../features/import/packageBatchTypes';
+    import type {
+        ImportDestinationMode,
+        ImportPartitionOption,
+        ImportVolumeOption,
+    } from '../../features/import/packageDestinations';
     import { formatStoredSize } from '../formatBytes';
     import { modal } from '../modal';
     import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../transport';
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
+    import PackageBatchConflictControls from './PackageBatchConflictControls.svelte';
+    import PackageBatchDestinationChooser from './PackageBatchDestinationChooser.svelte';
+    import PackageBatchItemsTable from './PackageBatchItemsTable.svelte';
+
+    const renameConflictCodes = new Set([
+        'SFS_NAME_CONFLICT',
+        'SFS_TARGET_NAME_AMBIGUOUS',
+        'FAT12_NAME_CONFLICT',
+        'FAT12_TARGET_NAME_AMBIGUOUS',
+        'ISO9660_NAME_CONFLICT',
+        'ISO9660_TARGET_NAME_AMBIGUOUS',
+    ]);
 
     interface Props {
-        partitionName: string;
         desktop: boolean;
+        canChangeSources: boolean;
         items: BatchPackageItem[];
         plan: ImageSessionPackageImportPlan | null;
+        destinationStrategy: PackageBatchDestinationStrategy;
+        destinationMode: ImportDestinationMode;
+        destinationPartitionIndex: number | null;
+        destinationVolumeName: string;
+        partitionOptions: ImportPartitionOption[];
+        volumeOptions: ImportVolumeOption[];
+        separateVolumesAvailable: boolean;
         volumeNames: Record<string, string>;
+        renames: Record<string, string>;
+        programSlots: Record<string, number>;
         opaqueSequenceActions: Record<string, PackageOpaqueSequenceDecision['action']>;
         hasUnvalidatedChanges: boolean;
         status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
@@ -22,7 +48,15 @@
         error: string;
         onchooseworkspace: () => void;
         onchooselocal: () => void;
-        onrename: (itemId: string, name: string) => void;
+        ondestinationstrategy: (strategy: PackageBatchDestinationStrategy) => void;
+        ondestinationmode: (mode: ImportDestinationMode) => void;
+        ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
+        ondestinationpartition: (partitionIndex: number) => void;
+        ondestinationname: (name: string) => void;
+        onrenamevolume: (itemId: string, name: string) => void;
+        onrename: (itemId: string, nodeId: string, name: string) => void;
+        onprogramslot: (itemId: string, nodeId: string, slot: number) => void;
+        onprogramstart: (placementId: string, start: number) => void;
         ontoggleselected: (itemId: string, selected: boolean) => void;
         ontoggleall: (selected: boolean) => void;
         onopaquesequenceaction: (
@@ -36,11 +70,20 @@
     }
 
     let {
-        partitionName,
         desktop,
+        canChangeSources,
         items,
         plan,
+        destinationStrategy,
+        destinationMode,
+        destinationPartitionIndex,
+        destinationVolumeName,
+        partitionOptions,
+        volumeOptions,
+        separateVolumesAvailable,
         volumeNames,
+        renames,
+        programSlots,
         opaqueSequenceActions,
         hasUnvalidatedChanges,
         status,
@@ -50,7 +93,15 @@
         error,
         onchooseworkspace,
         onchooselocal,
+        ondestinationstrategy,
+        ondestinationmode,
+        ondestinationvolume,
+        ondestinationpartition,
+        ondestinationname,
+        onrenamevolume,
         onrename,
+        onprogramslot,
+        onprogramstart,
         ontoggleselected,
         ontoggleall,
         onopaquesequenceaction,
@@ -58,20 +109,15 @@
         oncancel,
         onconfirm,
     }: Props = $props();
-    let selectAllCheckbox = $state<HTMLInputElement>();
     let batchPackageContent = $state<HTMLDivElement>();
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
     const locked = $derived(status === 'applying');
+    const changeSources = $derived(items.some((item) => item.localPath !== null) ? onchooselocal : onchooseworkspace);
     const selectedItems = $derived(items.filter((item) => item.selected));
     const selectedCount = $derived(selectedItems.length);
-    const allSelected = $derived(items.length > 0 && selectedCount === items.length);
-    const someSelected = $derived(selectedCount > 0 && !allSelected);
-    const selectedPackageIndexById = $derived(
-        new Map(selectedItems.map((item, packageIndex) => [item.id, packageIndex])),
-    );
     const canImport = $derived(
-        status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges && selectedCount > 0,
+        status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges && selectedCount > 0 && !error,
     );
     const summaries = $derived(hasUnvalidatedChanges ? [] : (plan?.packages ?? []));
     const totalObjects = $derived(
@@ -84,36 +130,34 @@
             ? selectedItems.reduce((total, item) => total + item.inspection.totalPayloadBytes, 0)
             : summaries.reduce((total, item) => total + item.payloadBytes, 0),
     );
-    const capacityReports = $derived(
-        hasUnvalidatedChanges ? [] : (plan?.sfsIndexCapacity.filter((capacity) => capacity.packages.length > 0) ?? []),
+    const placementNodes = $derived(
+        new Set(
+            plan?.programSlotPlacements.flatMap((placement) =>
+                placement.mappings.map((mapping) => `${mapping.packageIndex}:${mapping.nodeId}`),
+            ) ?? [],
+        ),
     );
-    const capacityByPackage = $derived.by(() => {
-        const result = new Map<number, (typeof capacityReports)[number]['packages'][number]>();
-        for (const capacity of capacityReports) {
-            for (const usage of capacity.packages) result.set(usage.packageIndex, usage);
-        }
-        return result;
-    });
-    const allocatableRecordsByPackage = $derived.by(() => {
-        const result = new Map<number, number>();
-        for (const capacity of capacityReports) {
-            for (const usage of capacity.packages) result.set(usage.packageIndex, capacity.allocatableRecordSlots);
-        }
-        return result;
-    });
+    const actionableRenameNodes = $derived(
+        new Set(
+            plan?.actions
+                .filter((action) => action.actions.includes('CONFLICT'))
+                .map((action) => `${action.packageIndex}:${action.nodeId}`) ?? [],
+        ),
+    );
     const visibleConflicts = $derived(
         hasUnvalidatedChanges
             ? []
             : (plan?.conflicts.filter(
                   (conflict) =>
                       conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
-                      conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED',
+                      conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
+                      !(
+                          renameConflictCodes.has(conflict.code) &&
+                          (placementNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`) ||
+                              actionableRenameNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`))
+                      ),
               ) ?? []),
     );
-
-    $effect(() => {
-        if (selectAllCheckbox) selectAllCheckbox.indeterminate = someSelected;
-    });
 
     function opaqueKey(itemId: string, nodeId: string): string {
         return `${itemId}:${nodeId}`;
@@ -141,7 +185,7 @@
         <header class="dialog-header">
             <div>
                 <Icon name="archive" size={16} />
-                <h2 id="batch-package-title">Import volume packages</h2>
+                <h2 id="batch-package-title">Import packages</h2>
             </div>
             <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}>×</button>
         </header>
@@ -149,18 +193,18 @@
         <div class="batch-package-content" bind:this={batchPackageContent}>
             {#if items.length === 0 && status === 'choosing'}
                 <ImportSourceChoice
-                    label="Volume package sources"
-                    heading="Choose volume packages"
-                    description={`Create volumes in ${partitionName} from selected .axkvol packages.`}
-                    workspaceDetail="Select one or more .axkvol files"
-                    computerDetail="Select local .axkvol files and upload them"
+                    label="Package sources"
+                    heading="Choose packages"
+                    description="Import portable axklib packages or A3K archives into the open SFS image."
+                    workspaceDetail="Select one or more package files"
+                    computerDetail="Select local package files and upload them"
                     computerAvailable={desktop}
                     {onchooseworkspace}
                     {onchooselocal}
                 />
             {:else if status === 'loading'}
                 <section class="batch-progress" aria-live="polite">
-                    <strong>Preparing volume packages</strong>
+                    <strong>Preparing packages</strong>
                     <progress value={Math.max(completedFiles, progress)} max={Math.max(1, totalFiles)}></progress>
                     <small>{completedFiles} of {totalFiles} files inspected</small>
                 </section>
@@ -171,14 +215,35 @@
                             >{selectedCount} of {items.length} package{items.length === 1 ? '' : 's'} selected</strong
                         >
                         <small>
-                            {selectedCount} volume{selectedCount === 1 ? '' : 's'} will be created · {totalObjects}
-                            objects · {formatStoredSize(totalPayload)}
+                            {destinationStrategy === 'separate'
+                                ? `${selectedCount} volume${selectedCount === 1 ? '' : 's'} will be created`
+                                : `${selectedCount} package${selectedCount === 1 ? '' : 's'} will be imported into one volume`}
+                            · {totalObjects} objects · {formatStoredSize(totalPayload)}
                         </small>
                     </div>
-                    <button class="secondary-button" type="button" disabled={busy} onclick={onchooseworkspace}>
-                        Change files
-                    </button>
+                    {#if canChangeSources}<button
+                            class="secondary-button"
+                            type="button"
+                            disabled={busy}
+                            onclick={changeSources}>Change files</button
+                        >{/if}
                 </section>
+
+                <PackageBatchDestinationChooser
+                    strategy={destinationStrategy}
+                    mode={destinationMode}
+                    partitionIndex={destinationPartitionIndex}
+                    volumeName={destinationVolumeName}
+                    partitions={partitionOptions}
+                    volumes={volumeOptions}
+                    separateAvailable={separateVolumesAvailable}
+                    disabled={busy}
+                    onstrategy={ondestinationstrategy}
+                    onmode={ondestinationmode}
+                    onvolume={ondestinationvolume}
+                    onpartition={ondestinationpartition}
+                    onname={ondestinationname}
+                />
 
                 {#if hasUnvalidatedChanges}
                     <p class="batch-plan-stale" role="status">
@@ -188,131 +253,18 @@
                     </p>
                 {/if}
 
-                {#each capacityReports as capacity (capacity.partitionIndex)}
-                    <section
-                        class:capacity-unavailable={capacity.shortfallRecordSlots > 0}
-                        class="capacity-summary"
-                        aria-label={`SFS record capacity for partition ${capacity.partitionIndex + 1}`}
-                    >
-                        <div class="capacity-heading">
-                            <strong>SFS record capacity</strong>
-                            <small
-                                >Partition {capacity.partitionIndex + 1} · {capacity.indexBlockCount} blocks ×
-                                {capacity.recordsPerIndexBlock} records · {capacity.reservedRecordSlots} reserved</small
-                            >
-                        </div>
-                        <div class="capacity-metrics">
-                            <span>{capacity.freeRecordSlots} free</span>
-                            <span>{capacity.requiredRecordSlots} required</span>
-                            {#if capacity.shortfallRecordSlots > 0}
-                                <strong>{capacity.shortfallRecordSlots} short</strong>
-                            {:else}
-                                <span>{capacity.remainingRecordSlots} remaining</span>
-                            {/if}
-                        </div>
-                    </section>
-                {/each}
-
-                <div class="batch-table" role="table" aria-label="Volumes to create">
-                    <div class="batch-table-header" role="row">
-                        <span class="selection-cell" role="columnheader">
-                            <input
-                                bind:this={selectAllCheckbox}
-                                type="checkbox"
-                                checked={allSelected}
-                                disabled={busy}
-                                aria-label="Select all packages"
-                                onchange={(event) => ontoggleall(event.currentTarget.checked)}
-                            />
-                        </span>
-                        <span role="columnheader">Package</span>
-                        <span role="columnheader">New volume</span>
-                        <span role="columnheader">Contents</span>
-                        <span role="columnheader">SFS records</span>
-                    </div>
-                    {#each items as item (item.id)}
-                        {@const packageIndex = selectedPackageIndexById.get(item.id)}
-                        {@const summary = summaries.find((entry) => entry.packageIndex === packageIndex)}
-                        {@const recordUsage =
-                            packageIndex === undefined ? undefined : capacityByPackage.get(packageIndex)}
-                        {@const allocatableRecords =
-                            packageIndex === undefined ? 0 : (allocatableRecordsByPackage.get(packageIndex) ?? 0)}
-                        {@const cannotFitEmptyPartition =
-                            recordUsage !== undefined && recordUsage.standaloneRequiredRecordSlots > allocatableRecords}
-                        <div class:row-excluded={!item.selected} class="batch-table-row" role="row">
-                            <div class="selection-cell" role="cell">
-                                <input
-                                    type="checkbox"
-                                    checked={item.selected}
-                                    disabled={busy}
-                                    aria-label={`Include ${item.sourceName}`}
-                                    onchange={(event) => ontoggleselected(item.id, event.currentTarget.checked)}
-                                />
-                            </div>
-                            <div role="cell">
-                                <strong>{item.sourceName}</strong>
-                                <small>{formatStoredSize(item.inspection.totalPayloadBytes)}</small>
-                            </div>
-                            <div role="cell">
-                                <label>
-                                    <span class="sr-only">New volume name for {item.sourceName}</span>
-                                    <input
-                                        type="text"
-                                        value={volumeNames[item.id] ??
-                                            summary?.destinationVolumeName ??
-                                            item.inspection.roots[0]?.displayName ??
-                                            ''}
-                                        maxlength="16"
-                                        disabled={busy || !item.selected}
-                                        oninput={(event) => onrename(item.id, event.currentTarget.value)}
-                                    />
-                                </label>
-                            </div>
-                            <div class="object-counts" role="cell">
-                                {#if summary}
-                                    <span>{summary.objectCounts.programs} Programs</span>
-                                    <span>{summary.objectCounts.sampleBanks} Sample Banks</span>
-                                    <span>{summary.objectCounts.samples} Samples</span>
-                                    <span>{summary.objectCounts.waveData} Wave Data</span>
-                                    <span>{summary.objectCounts.sequences} Sequences</span>
-                                {:else}
-                                    <span>{item.inspection.objects.length} objects</span>
-                                {/if}
-                            </div>
-                            <div
-                                class:record-unavailable={Boolean(recordUsage?.shortfallRecordSlots)}
-                                class:record-impossible={cannotFitEmptyPartition}
-                                class="record-usage"
-                                role="cell"
-                                title={cannotFitEmptyPartition
-                                    ? `Requires ${recordUsage?.standaloneRequiredRecordSlots} records on an empty partition; maximum ${allocatableRecords}`
-                                    : undefined}
-                            >
-                                {#if !item.selected}
-                                    <span>Not included</span>
-                                {:else if hasUnvalidatedChanges}
-                                    <span>Pending check</span>
-                                {:else if recordUsage}
-                                    <span>{recordUsage.plannedRecordSlots}</span>
-                                    <small>
-                                        {recordUsage.plannedObjectRecordSlots} objects
-                                        {#if recordUsage.volumeScaffoldingRecordSlots > 0}
-                                            + {recordUsage.volumeScaffoldingRecordSlots} volume
-                                        {/if}
-                                        {#if recordUsage.reusedObjectCount > 0}
-                                            · {recordUsage.reusedObjectCount} reused
-                                        {/if}
-                                        {#if recordUsage.shortfallRecordSlots > 0}
-                                            · {recordUsage.shortfallRecordSlots} short
-                                        {/if}
-                                    </small>
-                                {:else}
-                                    <span>—</span>
-                                {/if}
-                            </div>
-                        </div>
-                    {/each}
-                </div>
+                <PackageBatchItemsTable
+                    {items}
+                    {plan}
+                    {destinationStrategy}
+                    {destinationVolumeName}
+                    {volumeNames}
+                    {hasUnvalidatedChanges}
+                    {busy}
+                    {onrenamevolume}
+                    {ontoggleselected}
+                    {ontoggleall}
+                />
 
                 {#if !hasUnvalidatedChanges && plan?.opaqueSequences.length}
                     <section class="batch-sequence-decisions" aria-label="Sequence decisions">
@@ -349,6 +301,19 @@
                                 </fieldset>{/if}
                         {/each}
                     </section>
+                {/if}
+
+                {#if !hasUnvalidatedChanges && plan}
+                    <PackageBatchConflictControls
+                        items={selectedItems}
+                        {plan}
+                        {renames}
+                        {programSlots}
+                        disabled={busy}
+                        {onrename}
+                        {onprogramslot}
+                        {onprogramstart}
+                    />
                 {/if}
 
                 {#if visibleConflicts.length > 0}
@@ -427,126 +392,14 @@
         margin-bottom: 10px;
     }
 
-    .capacity-summary {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 10px;
-        padding: 8px 10px;
-        border: 1px solid var(--border-strong);
-        border-radius: 6px;
-        background: var(--color-panel-raised);
-    }
-
-    .capacity-heading {
-        display: grid;
-        gap: 3px;
-    }
-
-    .capacity-heading small,
-    .record-usage small {
-        color: var(--text-muted);
-    }
-
-    .capacity-metrics {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 6px 16px;
-        white-space: nowrap;
-    }
-
-    .capacity-unavailable {
-        border-color: #765d2d;
-        background: rgb(150 108 26 / 10%);
-    }
-
-    .capacity-unavailable .capacity-metrics strong,
-    .record-unavailable,
-    .record-impossible {
-        color: var(--color-danger);
-    }
-
-    .batch-summary div,
-    .batch-table-row > div:first-child {
+    .batch-summary div {
         display: grid;
         gap: 4px;
     }
 
     .batch-summary small,
-    .batch-table-row small,
     .batch-sequence-decisions small {
         color: var(--text-muted);
-    }
-
-    .batch-table {
-        border: 1px solid var(--border-strong);
-        border-radius: 6px;
-        overflow: hidden;
-    }
-
-    .batch-table-header,
-    .batch-table-row {
-        display: grid;
-        grid-template-columns:
-            30px minmax(170px, 1.1fr) minmax(160px, 0.8fr) minmax(240px, 1.4fr)
-            minmax(105px, 0.55fr);
-        gap: 12px;
-        padding-inline: 10px;
-    }
-
-    .batch-table-header {
-        align-items: center;
-        padding-block: 7px;
-        color: var(--text-muted);
-        background: var(--color-panel-raised);
-        font-size: 12px;
-    }
-
-    .batch-table-row {
-        align-items: start;
-        padding-block: 6px;
-    }
-
-    .batch-table-row + .batch-table-row {
-        border-top: 1px solid var(--border-subtle);
-    }
-
-    .batch-table-row input[type='text'] {
-        width: 100%;
-        min-width: 0;
-    }
-
-    .selection-cell {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .selection-cell input {
-        margin: 0;
-    }
-
-    .batch-table-row .selection-cell {
-        padding-top: 2px;
-    }
-
-    .row-excluded > :not(.selection-cell) {
-        opacity: 0.55;
-    }
-
-    .object-counts {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 2px 10px;
-        color: var(--text-muted);
-        font-size: 12px;
-    }
-
-    .record-usage {
-        display: grid;
-        gap: 3px;
     }
 
     .batch-plan-stale {
@@ -599,33 +452,5 @@
         align-items: center;
         gap: 8px;
         margin-left: auto;
-    }
-
-    @media (max-width: 760px) {
-        .batch-table-header {
-            display: none;
-        }
-
-        .batch-table-row {
-            grid-template-columns: 30px 1fr;
-        }
-
-        .batch-table-row > :not(.selection-cell) {
-            grid-column: 2;
-        }
-
-        .capacity-summary {
-            align-items: flex-start;
-            flex-direction: column;
-        }
-
-        .capacity-metrics {
-            justify-content: flex-start;
-        }
-
-        .selection-cell {
-            grid-column: 1;
-            grid-row: 1;
-        }
     }
 </style>

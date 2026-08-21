@@ -165,6 +165,7 @@ describe('PackageImportWorkflow', () => {
         };
 
         workflow.open(target);
+        expect(workflow.request?.canChangeSource).toBe(true);
         const choosing = workflow.chooseWorkspace();
         picker.finish(source);
         await choosing;
@@ -658,9 +659,191 @@ describe('PackageImportWorkflow', () => {
         await workflow.chooseLocal();
         await workflow.apply();
         workflow.open(target);
-        await workflow.chooseLocal();
+        await workflow.chooseLocal(true);
 
         expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(1, null);
         expect(nativeMocks.selectLocalPackage).toHaveBeenNthCalledWith(2, localPath);
+        expect(workflow.request).toBeNull();
+    });
+
+    it('plans a dropped A3K archive into a new volume named from its archive root', async () => {
+        const dropped: ClientUploadSource = {
+            name: 'archive.a3k',
+            type: 'application/octet-stream',
+            size: 2048,
+            readChunk: vi.fn(),
+        };
+        const upload = clientUploadLocation({ uploadId: 'upload-a3k' }, 'DISK_IMAGE', 'archive.a3k');
+        const a3kInspection: PackageInspection = {
+            ...inspection,
+            packageKind: 'VOLUME',
+            requiredExtension: '.axkvol',
+            roots: [{ kind: 'VOLUME', displayName: 'Archive Volume', nodeIds: [] }],
+        };
+        const releaseImagePackageImportPlan = vi.fn().mockResolvedValue(undefined);
+        const transport = {
+            uploadClientFile: vi.fn().mockResolvedValue(upload),
+            inspectPackage: vi.fn().mockResolvedValue(a3kInspection),
+            planImagePackageImport: vi.fn().mockResolvedValue(programPlan(true)),
+            releaseImagePackageImportPlan,
+            releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 1,
+            partitionIndex: 0,
+        };
+        partition.children = [
+            {
+                id: 'volume-existing',
+                name: 'Existing',
+                kind: 'volume',
+                childCount: 0,
+                partitionIndex: 0,
+            },
+        ];
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: { run: vi.fn() } as unknown as JobController,
+            picker: new PickerController(() => undefined),
+            isDesktop: true,
+            sessionId: () => 17,
+            mutationsAvailable: () => true,
+            selectedSource: () => partition,
+            sourceItems: () => [partition],
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        await workflow.requestDroppedFile(dropped, partition);
+
+        expect(workflow.request?.canChangeSource).toBe(false);
+        expect(transport.uploadClientFile).toHaveBeenCalledWith(
+            dropped,
+            'DISK_IMAGE',
+            expect.any(Function),
+            expect.any(AbortSignal),
+        );
+        expect(workflow.request?.destinationMode).toBe('create');
+        expect(workflow.request?.destinationVolumeName).toBe('Archive Volume');
+        expect(transport.planImagePackageImport).toHaveBeenCalledWith(
+            17,
+            [upload],
+            { kind: 'CREATE_VOLUME', partitionIndex: 0, volumeName: 'Archive Volume' },
+            [],
+            [],
+            undefined,
+            [],
+        );
+
+        workflow.setExistingVolume(0, 'Existing');
+
+        await vi.waitFor(() => expect(transport.planImagePackageImport).toHaveBeenCalledTimes(2));
+        expect(releaseImagePackageImportPlan).toHaveBeenCalledWith('checked-plan');
+        expect(transport.planImagePackageImport).toHaveBeenNthCalledWith(
+            2,
+            17,
+            [upload],
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Existing' },
+            [],
+            [],
+            undefined,
+            [],
+        );
+
+        workflow.setDestinationMode('create');
+
+        await vi.waitFor(() => expect(transport.planImagePackageImport).toHaveBeenCalledTimes(3));
+        expect(workflow.request?.destinationVolumeName).toBe('Archive Volume');
+        expect(transport.planImagePackageImport).toHaveBeenNthCalledWith(
+            3,
+            17,
+            [upload],
+            { kind: 'CREATE_VOLUME', partitionIndex: 0, volumeName: 'Archive Volume' },
+            [],
+            [],
+            undefined,
+            [],
+        );
+
+        workflow.setExistingVolume(null, 'Not a volume');
+
+        await vi.waitFor(() => expect(releaseImagePackageImportPlan).toHaveBeenCalledTimes(3));
+        expect(workflow.request?.plan).toBeNull();
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
+        expect(transport.planImagePackageImport).toHaveBeenCalledTimes(3);
+    });
+
+    it('requires an explicit destination when a non-volume package is dropped without a selected volume', async () => {
+        const dropped: ClientUploadSource = {
+            name: 'Programs.axkprg',
+            type: 'application/octet-stream',
+            size: 1024,
+            readChunk: vi.fn(),
+        };
+        const upload = clientUploadLocation({ uploadId: 'upload-programs' }, 'PACKAGE', 'Programs.axkprg');
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 1,
+            partitionIndex: 0,
+            children: [
+                {
+                    id: 'volume-existing',
+                    name: 'Existing',
+                    kind: 'volume',
+                    childCount: 0,
+                    partitionIndex: 0,
+                },
+            ],
+        };
+        const planImagePackageImport = vi.fn().mockResolvedValue(programPlan(true));
+        const transport = {
+            uploadClientFile: vi.fn().mockResolvedValue(upload),
+            inspectPackage: vi.fn().mockResolvedValue(inspection),
+            planImagePackageImport,
+            releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+        } as unknown as ImageTransport;
+        const workflow = new PackageImportWorkflow({
+            transport,
+            jobs: { run: vi.fn() } as unknown as JobController,
+            picker: new PickerController(() => undefined),
+            isDesktop: true,
+            sessionId: () => 17,
+            mutationsAvailable: () => true,
+            sourceItems: () => [partition],
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        await workflow.requestDroppedFile(dropped);
+
+        expect(workflow.request?.destinationMode).toBe('existing');
+        expect(workflow.request?.destinationPartitionIndex).toBeNull();
+        expect(workflow.request?.destinationVolumeName).toBe('');
+        expect(workflow.request?.plan).toBeNull();
+        expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
+        expect(planImagePackageImport).not.toHaveBeenCalled();
+
+        workflow.setDestinationMode('create');
+        expect(workflow.request?.destinationPartitionIndex).toBe(0);
+
+        workflow.setDestinationVolumeName('Imported Programs');
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenCalledWith(
+            17,
+            [upload],
+            { kind: 'CREATE_VOLUME', partitionIndex: 0, volumeName: 'Imported Program' },
+            [],
+            [],
+            undefined,
+            [],
+        );
     });
 });

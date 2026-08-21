@@ -29,6 +29,9 @@
   --density-table-header: 20px;
   --density-metadata-row: 22px;
   --density-gap: 4px;
+  --dialog-control-font-size: 11px;
+  --dialog-label-font-size: 10px;
+  --dialog-option-metadata-font-size: 10px;
   --overlay-scrollbar-clearance: 16px;
   --contained-playback-clearance: 10px;
   font-family: var(--font-sans);
@@ -70,7 +73,9 @@ textarea,
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -128,6 +133,18 @@ input:focus-visible {
   align-items: center;
   gap: 10px;
   padding: 0 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.brand:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.brand:focus-visible {
+  outline-offset: -3px;
 }
 
 .brand-mark {
@@ -2123,13 +2140,71 @@ input:focus-visible {
   font-size: 10px;
 }
 
-.volume-action-content input {
+.dialog-field-control {
+  min-width: 0;
   height: var(--density-control);
   padding: 0 8px;
   color: var(--color-text-strong);
   border: 1px solid var(--color-border);
   border-radius: 5px;
+  outline: none;
   background: var(--color-bg-deep);
+  color-scheme: dark;
+  font-family: inherit;
+  font-size: var(--dialog-control-font-size);
+  line-height: 1.2;
+}
+
+.dialog-field-control:focus {
+  border-color: var(--color-accent);
+}
+
+.dialog-autocomplete-list {
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  color: var(--color-text-strong);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-deep);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 36%);
+}
+
+.dialog-autocomplete-option {
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--color-text-strong);
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--dialog-control-font-size);
+  line-height: 1.25;
+  text-align: left;
+}
+
+.dialog-autocomplete-option:last-of-type {
+  border-bottom: 0;
+}
+
+.dialog-autocomplete-option:hover:not(:disabled),
+.dialog-autocomplete-option.active:not(:disabled) {
+  background: rgb(104 151 187 / 14%);
+}
+
+.dialog-autocomplete-option:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.dialog-autocomplete-option small,
+.dialog-autocomplete-empty {
+  color: var(--color-text-muted);
+  font-size: var(--dialog-option-metadata-font-size);
+}
+
+.volume-action-content input {
+  width: 100%;
 }
 
 .volume-action-content strong {
@@ -2781,11 +2856,44 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.collection-filter input {
+.compact-checkbox {
+  display: grid;
   width: 12px;
   height: 12px;
+  flex: none;
   margin: 0;
-  accent-color: var(--color-accent);
+  padding: 0;
+  overflow: hidden;
+  appearance: none;
+  place-content: center;
+  color: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg-deep);
+  cursor: pointer;
+}
+
+.compact-checkbox::before {
+  width: 3px;
+  height: 6px;
+  content: '';
+  border: solid currentcolor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-0.5px) rotate(45deg) scale(0);
+}
+
+.compact-checkbox:checked {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.compact-checkbox:checked::before {
+  transform: translateY(-0.5px) rotate(45deg) scale(1);
+}
+
+.compact-checkbox:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .collection-actions .collection-search {

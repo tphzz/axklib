@@ -77,13 +77,13 @@ pub(crate) async fn select_local_workspace(
 }
 
 #[tauri::command]
-pub(crate) fn commit_local_workspace(
+pub(crate) async fn commit_local_workspace(
     candidate_id: String,
     display_name: String,
     writable: bool,
     revision: u64,
     candidates: State<'_, Mutex<WorkspaceCandidateStore>>,
-    connections: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+    connections: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<(), String> {
     if display_name.trim().is_empty() {
         return Err("enter a workspace name".to_owned());
@@ -96,12 +96,17 @@ pub(crate) fn commit_local_workspace(
         .filter(|(_, created)| created.elapsed() < Duration::from_secs(300))
         .map(|(path, _)| path)
         .ok_or_else(|| "workspace selection expired; choose the folder again".to_owned())?;
-    let connection = connections
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .connection()?
-        .ok_or_else(|| "local axklib-server is unavailable".to_owned())?;
-    server_sidecar::create_workspace(&connection, &path, display_name.trim(), writable, revision)?;
-    log::info!("local workspace committed: {display_name}");
+    let display_name = display_name.trim().to_owned();
+    let connections = connections.inner().clone();
+    let logged_name = display_name.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let connection = connections
+            .connection()?
+            .ok_or_else(|| "local axklib-server is unavailable".to_owned())?;
+        server_sidecar::create_workspace(&connection, &path, &display_name, writable, revision)
+    })
+    .await
+    .map_err(|error| format!("create workspace worker failed: {error}"))??;
+    log::info!("local workspace committed: {logged_name}");
     Ok(())
 }

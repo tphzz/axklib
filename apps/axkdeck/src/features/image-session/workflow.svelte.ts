@@ -8,6 +8,7 @@ import type {
     OpenedImage,
 } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
+import { AxklibApiError } from '../../lib/httpErrors';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
@@ -35,6 +36,7 @@ const allocationBlockerCodes = new Set([
     'SFS_ALLOCATION_MISMATCH',
     'SFS_EXTENT_BYTE_TOTAL_MISMATCH',
 ]);
+const imageSessionKeepAliveIntervalMs = 5 * 60 * 1000;
 
 interface SessionCollaborators {
     catalog: CatalogWorkflow;
@@ -88,6 +90,7 @@ export class ImageSessionWorkflow {
     mediaConversionAvailable = $state(false);
     extentLayoutRepairAvailable = $state(false);
     allocationInspectionAvailable = $state(false);
+    imageFormat = $state<string | null>(null);
     integrityDialogOpen = $state(false);
     integrityIssues = $state<ImageValidationIssue[]>([]);
     integrityLoading = $state(false);
@@ -100,6 +103,11 @@ export class ImageSessionWorkflow {
     private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
     private lastAutomaticIntegrityKey = '';
+    private leaseMaintenanceActive = false;
+    private leaseTimer: number | null = null;
+    private readonly renewVisibleLease = (): void => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') void this.maintainLease();
+    };
 
     constructor(
         private readonly transport: ImageTransport,
@@ -119,6 +127,7 @@ export class ImageSessionWorkflow {
     connect(collaborators: SessionCollaborators): void {
         if (this.collaborators) throw new Error('Image session workflow is already connected');
         this.collaborators = collaborators;
+        this.startLeaseMaintenance();
     }
 
     setStatus(status: string): void {
@@ -175,6 +184,21 @@ export class ImageSessionWorkflow {
         if (this.sessionId === null) throw new Error('Image session is no longer available');
         const opened = await this.controller.refresh();
         if (opened) await this.applyOpenedImage(opened, preferred);
+    }
+
+    async maintainLease(): Promise<void> {
+        if (this.leaseMaintenanceActive || this.sessionId === null || this.opening) return;
+        const sessionId = this.sessionId;
+        this.leaseMaintenanceActive = true;
+        try {
+            await this.controller.keepAlive();
+        } catch (error) {
+            if (error instanceof AxklibApiError && error.code === 'image_not_found' && this.sessionId === sessionId) {
+                await this.reopen(this.currentSourcePreference());
+            }
+        } finally {
+            this.leaseMaintenanceActive = false;
+        }
     }
 
     async chooseAndOpen(): Promise<void> {
@@ -293,7 +317,23 @@ export class ImageSessionWorkflow {
     }
 
     async dispose(): Promise<void> {
+        this.stopLeaseMaintenance();
         await this.controller.dispose();
+    }
+
+    private startLeaseMaintenance(): void {
+        if (typeof window === 'undefined' || this.leaseTimer !== null) return;
+        this.leaseTimer = window.setInterval(() => void this.maintainLease(), imageSessionKeepAliveIntervalMs);
+        window.addEventListener('focus', this.renewVisibleLease);
+        document.addEventListener('visibilitychange', this.renewVisibleLease);
+    }
+
+    private stopLeaseMaintenance(): void {
+        if (typeof window === 'undefined' || this.leaseTimer === null) return;
+        window.clearInterval(this.leaseTimer);
+        this.leaseTimer = null;
+        window.removeEventListener('focus', this.renewVisibleLease);
+        document.removeEventListener('visibilitychange', this.renewVisibleLease);
     }
 
     private requireCollaborators(): SessionCollaborators {
@@ -355,6 +395,7 @@ export class ImageSessionWorkflow {
         this.mediaConversionAvailable = opened.mediaConversionAvailable;
         this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
         this.allocationInspectionAvailable = opened.allocationInspectionAvailable;
+        this.imageFormat = opened.format ?? null;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -443,6 +484,7 @@ export class ImageSessionWorkflow {
         this.mediaConversionAvailable = false;
         this.extentLayoutRepairAvailable = false;
         this.allocationInspectionAvailable = false;
+        this.imageFormat = null;
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;

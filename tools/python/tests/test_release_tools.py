@@ -862,11 +862,45 @@ def test_windows_desktop_bundle_uses_branded_gui_startup() -> None:
     configuration = json.loads(
         (desktop / "src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     )
-    nsis = configuration["bundle"]["windows"]["nsis"]
+    windows = configuration["bundle"]["windows"]
+    nsis = windows["nsis"]
 
     assert nsis["installerIcon"] == "icons/icon.ico"
     assert nsis["uninstallerIcon"] == "icons/icon.ico"
     assert (desktop / "src-tauri" / nsis["installerIcon"]).is_file()
+
+    minimum_webview2_version = "111.0.0.0"
+    assert windows["minimumWebview2Version"] == minimum_webview2_version
+    assert windows["webviewInstallMode"] == {
+        "type": "downloadBootstrapper",
+        "silent": True,
+    }
+    assert nsis["installerHooks"] == "windows/webview2-consent.nsh"
+
+    installer_hook = (desktop / "src-tauri" / nsis["installerHooks"]).read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "!define MUI_CUSTOMFUNCTION_GUIINIT axkdeck_webview2_consent" in installer_hook
+    )
+    assert "Function axkdeck_webview2_consent" in installer_hook
+    assert "Function .onGUIInit" not in installer_hook
+    assert "IfSilent" in installer_hook
+    assert minimum_webview2_version in installer_hook
+    assert "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" in installer_hook
+    assert "Microsoft" in installer_hook
+    assert "EdgeUpdate" in installer_hook
+    assert "Clients" in installer_hook
+    assert '"pv"' in installer_hook
+    assert "Installed version:" in installer_hook
+    assert "Minimum required version:" in installer_hook
+    assert "download and install or update" in installer_hook
+    assert "MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION" in installer_hook
+    assert "Quit" in installer_hook
+
+    vite = (desktop / "vite.config.ts").read_text(encoding="utf-8")
+    assert "'chrome111'" in vite
+    assert "'safari16.4'" in vite
 
     main = (desktop / "src-tauri/src/main.rs").read_text(encoding="utf-8")
     assert '#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]' in main

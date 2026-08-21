@@ -1,6 +1,8 @@
 #include "package_operations_internal.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdint>
 #include <format>
 #include <fstream>
@@ -108,8 +110,13 @@ axk::app::Result<ResolvedPackage> resolve_package(const PackageInput &input, std
     auto snapshot = uploads.inspect(upload, owner_id);
     if (!snapshot)
         return std::unexpected(snapshot.error());
-    if (snapshot->kind != axk::app::UploadKind::package) {
-        return std::unexpected(operation_error("upload_kind_mismatch", "upload is not a portable package"));
+    auto extension = std::filesystem::path{snapshot->filename}.extension().string();
+    std::ranges::transform(extension, extension.begin(),
+                           [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+    if (snapshot->kind != axk::app::UploadKind::package &&
+        !(snapshot->kind == axk::app::UploadKind::disk_image && extension == ".a3k")) {
+        return std::unexpected(
+            operation_error("upload_kind_mismatch", "upload is not a portable package or A3K archive"));
     }
     auto lease = uploads.lease(upload, owner_id);
     if (!lease)
@@ -122,6 +129,23 @@ axk::app::Result<ResolvedPackage> resolve_package(const PackageInput &input, std
 
 axk::app::Result<axk::PortablePackage> read_package(const ResolvedPackage &resolved, bool verify,
                                                     const axk::app::OperationContext &context) {
+    auto extension = std::filesystem::path{resolved.filename}.extension().string();
+    std::ranges::transform(extension, extension.begin(),
+                           [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+    if (extension == ".a3k") {
+        auto media = axk::open_media(resolved.reader, std::filesystem::path{resolved.filename}, context.cancellation);
+        if (!media)
+            return std::unexpected(core_error(media.error()));
+        if (media->kind() != axk::MediaKind::a3k_archive)
+            return std::unexpected(operation_error("package_read_failed", "source is not an A3K volume archive"));
+        axk::PackageRootSelector root;
+        root.kind = axk::PackageRootKind::volume;
+        const std::array roots{std::move(root)};
+        auto package = axk::build_portable_package(*media, roots, context.cancellation);
+        if (!package)
+            return std::unexpected(core_error(package.error()));
+        return std::move(package->package);
+    }
     auto package = verify ? axk::open_portable_package(*resolved.reader, resolved.filename, context.cancellation)
                           : axk::inspect_portable_package(*resolved.reader, resolved.filename, context.cancellation);
     if (!package)

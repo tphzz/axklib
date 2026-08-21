@@ -22,6 +22,13 @@ a separately validated repaired copy without changing the source image.
 
 [Download axkdeck](https://github.com/tphzz/axklib/releases)
 
+On Windows, axkdeck requires Microsoft Edge WebView2 Evergreen Runtime version
+111 or newer. The interactive NSIS installer reports a missing or outdated
+runtime and asks before downloading or updating it from Microsoft. Silent `/S`
+installations perform the prerequisite step without a prompt. The installer
+uses the online Evergreen bootstrapper rather than bundling a fixed runtime and
+leaves newer installed versions in place.
+
 ## Other Interfaces
 
 - The [CLI reference](axklib/cli.md) covers scripted and batch workflows.

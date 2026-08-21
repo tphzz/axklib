@@ -1,16 +1,20 @@
 <script lang="ts">
     import { onDestroy, onMount } from 'svelte';
+    import type { AppProps } from './appProps';
     import { AuditionWorkflow } from './features/audition/workflow.svelte';
+    import { createCatalogHooks } from './features/catalog/hooks';
     import { CatalogWorkflow } from './features/catalog/workflow.svelte';
     import { createConnectionActions } from './features/connection/actions';
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
-    import AppDialogs from './features/dialogs/AppDialogs.svelte';
+    import { hasOpenAppDialog } from './features/dialogs/visibility';
+    import ClientFileInputs from './features/file-operations/ClientFileInputs.svelte';
+    import { DirectComputerWorkflow } from './features/file-operations/directComputerWorkflow';
     import { ExportWorkflow } from './features/export/workflow.svelte';
     import { MediaExportWorkflow } from './features/export/mediaWorkflow.svelte';
     import { VolumePackageExportWorkflow } from './features/export/volumePackageWorkflow.svelte';
     import { VolumeFloppyExportWorkflow } from './features/export/volumeFloppyWorkflow.svelte';
-    import { AudioImportWorkflow, audioExtensions } from './features/import/audioWorkflow.svelte';
+    import { AudioImportWorkflow } from './features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from './features/import/mediaDropWorkflow.svelte';
     import { PackageImportWorkflow } from './features/import/packageWorkflow.svelte';
     import { PackageBatchImportWorkflow } from './features/import/packageBatchWorkflow.svelte';
@@ -23,20 +27,19 @@
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
+    import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
     import { createTransport } from './lib/createTransport';
     import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
-    import { diagnosticsEnabled, reportDiagnostic } from './lib/diagnostics';
+    import { reportMutationTiming } from './lib/diagnostics';
     import {
         emptyPackageExportSelection,
         maximumPackageExportRoots,
         type PackageExportSelectionState,
     } from './lib/objectSelection';
     import { userFacingMessage } from './lib/userFacingMessage';
-    import type { InterfaceScaleController } from './lib/interfaceScale';
-    import { midiExtensions } from './lib/midiImport';
     import type {
         DiskTreeItem,
         InspectorSelection,
@@ -46,27 +49,16 @@
         WorkspaceView,
     } from './lib/types';
 
-    interface Props {
-        interfaceScaling?: InterfaceScaleController | null;
-    }
-
-    let { interfaceScaling = null }: Props = $props();
-
-    const workspaceTabs: {
-        id: WorkspaceView;
-        label: string;
-        icon: 'music' | 'layers' | 'archive' | 'waveform' | 'list';
-    }[] = [
-        { id: 'programs', label: 'Programs', icon: 'music' },
-        { id: 'sample-banks', label: 'Sample Banks', icon: 'layers' },
-        { id: 'samples', label: 'Samples', icon: 'archive' },
-        { id: 'wave-data', label: 'Wave Data', icon: 'waveform' },
-        { id: 'sequences', label: 'Sequences', icon: 'list' },
-    ];
+    let {
+        interfaceScaling = null,
+        initialExperimentalWarningOpen = true,
+        openConnectionSettingsOnStart = false,
+    }: AppProps = $props();
     const transport = createTransport();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
-    let experimentalWarningOpen = $state(true);
+    let experimentalWarningAcknowledged = $state(false);
+    const experimentalWarningOpen = $derived(initialExperimentalWarningOpen && !experimentalWarningAcknowledged);
     let workspaceView = $state<WorkspaceView>('programs');
     let inspectorOpen = $state(true);
     let connectionSettings = $state<RemoteServerSettingsView | null>(null);
@@ -125,11 +117,7 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
-    const catalogHooks = {
-        stopPlayback: () => Promise.resolve(),
-        resetPreviews: () => {},
-        resetCleanup: () => {},
-    };
+    const catalogHooks = createCatalogHooks();
     const catalog = new CatalogWorkflow({
         transport,
         sessionId: () => imageSessionWorkflow.sessionId,
@@ -174,6 +162,9 @@
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         pickerHistory: packagePickerHistory,
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
     });
     const packageBatchImportWorkflow = new PackageBatchImportWorkflow({
         transport,
@@ -185,6 +176,8 @@
         invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
         refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
+        sourceItems: () => imageSessionWorkflow.sourceItems,
     });
     const deletionWorkflow = new DeletionWorkflow({
         transport,
@@ -223,6 +216,7 @@
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
         setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
@@ -277,12 +271,20 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const directComputerWorkflow = new DirectComputerWorkflow(isDesktop, transport.connectionMode);
+    const pendingDirectComputerOperation = directComputerWorkflow.pendingOperation;
     const mediaDropWorkflow = new MediaDropWorkflow({
         isDesktop,
         workspaceView: () => workspaceView,
         audioImport: audioImportWorkflow,
         sequenceImport: sequenceImportWorkflow,
         tx16wImport: tx16wImportWorkflow,
+        packageImport: packageImportWorkflow,
+        packageBatchImport: packageBatchImportWorkflow,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
+        mutationsAvailable: () => mutationWorkflow.volumeAvailable,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     imageSessionWorkflow.connect({
@@ -325,7 +327,9 @@
     });
 
     onMount(() => {
-        return mediaDropWorkflow.mountNativeDrops();
+        const unmountNativeDrops = mediaDropWorkflow.mountNativeDrops();
+        if (openConnectionSettingsOnStart) void openConnectionSettings();
+        return unmountNativeDrops;
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
@@ -333,6 +337,27 @@
     const selectedSample = $derived(samples.find((item) => item.objectId === catalog.selectedSampleId));
     const auditionableSampleObjectIds = $derived(auditionWorkflow.auditionableSampleObjectIds);
     const auditionableSampleBankObjectIds = $derived(auditionWorkflow.auditionableSampleBankObjectIds);
+    const appDialogsOpen = $derived(
+        hasOpenAppDialog({
+            pickerRequest,
+            imageSession: imageSessionWorkflow,
+            workspaceManagerOpen,
+            connectionSettings,
+            mutation: mutationWorkflow,
+            packageImport: packageImportWorkflow,
+            packageBatchImport: packageBatchImportWorkflow,
+            exports: exportWorkflow,
+            volumePackages: volumePackageExportWorkflow,
+            volumeFloppies: volumeFloppyExportWorkflow,
+            mediaExports: mediaExportWorkflow,
+            deletion: deletionWorkflow,
+            programGeneration: programGenerationWorkflow,
+            audioImport: audioImportWorkflow,
+            sequenceImport: sequenceImportWorkflow,
+            tx16wImport: tx16wImportWorkflow,
+            mediaDrop: mediaDropWorkflow,
+        }),
+    );
     const bankMembers = $derived(selectedBank ? catalog.membersForBank(selectedBank.objectId) : []);
     const bankMemberWaveData = $derived(
         catalog.selectedBankMemberId ? catalog.waveDataForSample(catalog.selectedBankMemberId) : [],
@@ -410,19 +435,19 @@
         if (action === 'import-package') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            packageImportWorkflow.open(item);
+            directComputerWorkflow.importPackage(packageImportWorkflow, item);
             return;
         }
         if (action === 'import-packages') {
             if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            packageBatchImportWorkflow.open(item);
+            directComputerWorkflow.importVolumePackages(packageBatchImportWorkflow, item);
             return;
         }
         if (action === 'export-package') {
             if (!imageSessionWorkflow.packageExportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            exportWorkflow.requestPackage([
+            directComputerWorkflow.exportPackage(exportWorkflow, [
                 {
                     kind: 'VOLUME',
                     contentId: item.id,
@@ -437,19 +462,19 @@
         if (action === 'export-volume-packages') {
             if (!imageSessionWorkflow.volumePackageExportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            void volumePackageExportWorkflow.open(item);
+            void directComputerWorkflow.exportVolumePackages(volumePackageExportWorkflow, item);
             return;
         }
         if (action === 'export-volume-floppies') {
             if (!imageSessionWorkflow.volumeFloppyExportAvailable || item.kind !== 'partition') return;
             imageSessionWorkflow.selectedSource = item;
-            void volumeFloppyExportWorkflow.open(item);
+            void directComputerWorkflow.exportVolumeFloppies(volumeFloppyExportWorkflow, item);
             return;
         }
         if (action === 'export-sfz') {
             if (!imageSessionWorkflow.audioExportAvailable || item.kind !== 'volume') return;
             imageSessionWorkflow.selectedSource = item;
-            void exportWorkflow.requestAudio([
+            void requestAudioExport([
                 {
                     kind: 'VOLUME',
                     contentId: item.id,
@@ -464,12 +489,11 @@
         if (action === 'export-cdrom' || action === 'export-floppy') {
             if (!imageSessionWorkflow.mediaConversionAvailable) return;
             imageSessionWorkflow.selectedSource = item;
-            void mediaExportWorkflow.open(item);
+            void directComputerWorkflow.exportMedia(mediaExportWorkflow, item);
             return;
         }
         if (mutationWorkflow.requestVolumeAction(item, action)) imageSessionWorkflow.selectedSource = item;
     }
-
     function requestObjectPackageExport(items: PackageExportObject[]): void {
         if (
             !imageSessionWorkflow.packageExportAvailable ||
@@ -478,13 +502,12 @@
         ) {
             return;
         }
-        exportWorkflow.requestPackage(items);
+        directComputerWorkflow.exportPackage(exportWorkflow, items);
     }
 
     function clearPackageExportSelection(): void {
         packageExportSelection = emptyPackageExportSelection();
     }
-
     function reportPackageExportSelectionLimit(): void {
         imageSessionWorkflow.setStatus(
             `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`,
@@ -493,38 +516,25 @@
 
     async function requestAudioExport(items: PackageExportSelection[]): Promise<void> {
         if (!imageSessionWorkflow.audioExportAvailable) return;
-        await exportWorkflow.requestAudio(items);
+        await directComputerWorkflow.exportAudio(exportWorkflow, items);
     }
-
     function requestSequenceExport(items: PackageExportObject[]): void {
         if (!imageSessionWorkflow.sequenceExportAvailable) return;
-        exportWorkflow.requestSequence(items);
+        directComputerWorkflow.exportMidi(exportWorkflow, items);
     }
 
     function requestObjectDeletion(targets: PackageExportObject[]): void {
         if (!imageSessionWorkflow.objectDeletionAvailable) return;
         deletionWorkflow.requestObjects(targets);
     }
-
     function requestWaveDataCleanup(): void {
         if (!imageSessionWorkflow.waveDataCleanupAvailable) return;
         deletionWorkflow.requestCleanup();
     }
 
-    function reportMutationTiming(operation: string, started: number, itemCount: number): void {
-        if (!diagnosticsEnabled()) return;
-        reportDiagnostic('image_mutation_completed', {
-            operation,
-            itemCount,
-            durationMs: Math.round(performance.now() - started),
-            strategy: 'journaled-in-place',
-        });
-    }
-
     function suppressDesktopContextMenu(event: MouseEvent): void {
         if (isDesktop) event.preventDefault();
     }
-
     async function openConnectionSettings(): Promise<void> {
         try {
             connectionSettings = await connectionActions.load();
@@ -551,21 +561,13 @@
     ondrop={(event) => mediaDropWorkflow.drop(event)}
 />
 
-<input
-    bind:this={audioFileInput}
-    class="sr-only"
-    type="file"
-    multiple
-    accept={audioExtensions.map((extension) => `.${extension}`).join(',')}
-    onchange={(event) => audioImportWorkflow.filesChosen(event)}
-/>
-<input
-    bind:this={sequenceFileInput}
-    class="sr-only"
-    type="file"
-    multiple
-    accept={midiExtensions.map((extension) => `.${extension}`).join(',')}
-    onchange={(event) => sequenceImportWorkflow.filesChosen(event)}
+<ClientFileInputs
+    bind:audioInput={audioFileInput}
+    bind:sequenceInput={sequenceFileInput}
+    audioChanged={(event) => directComputerWorkflow.audioFilesChosen(audioImportWorkflow, event)}
+    audioCancelled={() => directComputerWorkflow.cancelAudioSelection(audioImportWorkflow)}
+    sequenceChanged={(event) => directComputerWorkflow.midiFilesChosen(sequenceImportWorkflow, event)}
+    sequenceCancelled={() => directComputerWorkflow.cancelMidiSelection(sequenceImportWorkflow)}
 />
 
 <WorkspaceShell
@@ -585,6 +587,8 @@
     mutation={mutationWorkflow}
     audioImport={audioImportWorkflow}
     sequenceImport={sequenceImportWorkflow}
+    importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
+    importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
     {programs}
     {sampleBanks}
     {samples}
@@ -630,7 +634,7 @@
 />
 
 {#if experimentalWarningOpen}
-    <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningOpen = false)} />
+    <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
 {/if}
 
 {#if imageSessionWorkflow.integrityDialogOpen}
@@ -647,44 +651,50 @@
     />
 {/if}
 
-<AppDialogs
-    {transport}
-    {isDesktop}
-    {pickerRequest}
-    finishPicker={(selection) => pickerController.finish(selection)}
-    manageLocations={() => (workspaceManagerOpen = true)}
-    companionRequest={imageSessionWorkflow.companionRequest}
-    addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
-    removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
-    attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
-    cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
-    hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
-    finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
-    cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
-    {workspaceManagerOpen}
-    activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
-    closeWorkspaceManager={() => (workspaceManagerOpen = false)}
-    {connectionSettings}
-    {saveRemoteConnection}
-    {switchToLocalConnection}
-    closeConnectionSettings={() => (connectionSettings = null)}
-    mutation={mutationWorkflow}
-    packageImport={packageImportWorkflow}
-    packageBatchImport={packageBatchImportWorkflow}
-    exports={exportWorkflow}
-    volumePackages={volumePackageExportWorkflow}
-    volumeFloppies={volumeFloppyExportWorkflow}
-    mediaExports={mediaExportWorkflow}
-    deletion={deletionWorkflow}
-    programGeneration={programGenerationWorkflow}
-    mediaDrop={mediaDropWorkflow}
-    tx16wImport={tx16wImportWorkflow}
-    audioImport={audioImportWorkflow}
-    {audioFileInput}
-    sequenceImport={sequenceImportWorkflow}
-    {sequenceFileInput}
-    sampleNames={samples.map((item) => item.name)}
-    sampleBankNames={sampleBanks.map((item) => item.name)}
-    waveDataNames={waveData.map((item) => item.name)}
-    sequenceNames={sequences.map((item) => item.name)}
-/>
+{#if appDialogsOpen}
+    {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
+        {@const AppDialogs = dialogs.default}
+        <AppDialogs
+            {transport}
+            {isDesktop}
+            directComputerOperation={$pendingDirectComputerOperation}
+            {pickerRequest}
+            finishPicker={(selection) => pickerController.finish(selection)}
+            manageLocations={() => (workspaceManagerOpen = true)}
+            companionRequest={imageSessionWorkflow.companionRequest}
+            addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
+            removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
+            attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
+            cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
+            hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
+            finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
+            cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
+            {workspaceManagerOpen}
+            activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
+            closeWorkspaceManager={() => (workspaceManagerOpen = false)}
+            {connectionSettings}
+            {saveRemoteConnection}
+            {switchToLocalConnection}
+            closeConnectionSettings={() => (connectionSettings = null)}
+            mutation={mutationWorkflow}
+            packageImport={packageImportWorkflow}
+            packageBatchImport={packageBatchImportWorkflow}
+            exports={exportWorkflow}
+            volumePackages={volumePackageExportWorkflow}
+            volumeFloppies={volumeFloppyExportWorkflow}
+            mediaExports={mediaExportWorkflow}
+            deletion={deletionWorkflow}
+            programGeneration={programGenerationWorkflow}
+            mediaDrop={mediaDropWorkflow}
+            tx16wImport={tx16wImportWorkflow}
+            audioImport={audioImportWorkflow}
+            {audioFileInput}
+            sequenceImport={sequenceImportWorkflow}
+            {sequenceFileInput}
+            sampleNames={samples.map((item) => item.name)}
+            sampleBankNames={sampleBanks.map((item) => item.name)}
+            waveDataNames={waveData.map((item) => item.name)}
+            sequenceNames={sequences.map((item) => item.name)}
+        />
+    {/await}
+{/if}

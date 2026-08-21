@@ -1,7 +1,7 @@
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, OpenedImage } from '../../lib/transport';
 
-type SessionTransport = Pick<ImageTransport, 'openImage' | 'refreshImage' | 'closeImage'>;
+type SessionTransport = Pick<ImageTransport, 'openImage' | 'keepImageAlive' | 'refreshImage' | 'closeImage'>;
 
 export interface ImageSessionSnapshot {
     sessionId: number | null;
@@ -62,6 +62,13 @@ export class ImageSessionController {
         if (sessionId === null || this.disposed) return null;
         const opened = await this.transport.refreshImage(sessionId);
         return this.snapshotValue.sessionId === sessionId && !this.disposed ? opened : null;
+    }
+
+    async keepAlive(): Promise<boolean> {
+        const sessionId = this.snapshotValue.sessionId;
+        if (sessionId === null || this.disposed) return false;
+        await this.transport.keepImageAlive(sessionId);
+        return this.snapshotValue.sessionId === sessionId && !this.disposed;
     }
 
     async close(): Promise<void> {

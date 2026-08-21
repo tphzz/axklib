@@ -20,8 +20,6 @@ describe('MidiExportDialog', () => {
                     },
                 ],
                 desktop: true,
-                busy: false,
-                progressLabel: '',
                 error: '',
                 onworkspace,
                 onlocal,
@@ -37,7 +35,7 @@ describe('MidiExportDialog', () => {
         expect(onlocal).toHaveBeenCalledOnce();
     });
 
-    it('summarizes a multi-Sequence export and permits cancellation while busy', async () => {
+    it('summarizes a multi-Sequence export and permits closing the destination chooser', async () => {
         const oncancel = vi.fn();
         render(MidiExportDialog, {
             props: {
@@ -62,8 +60,6 @@ describe('MidiExportDialog', () => {
                     },
                 ],
                 desktop: false,
-                busy: true,
-                progressLabel: 'Writing MIDI files',
                 error: '',
                 onworkspace: vi.fn(),
                 onlocal: vi.fn(),
@@ -72,9 +68,8 @@ describe('MidiExportDialog', () => {
         });
 
         expect(screen.getByText('Export 2 Sequences')).toBeTruthy();
-        expect(screen.getByRole('status').textContent).toContain('Writing MIDI files');
         expect(screen.queryByRole('button', { name: /This computer/ })).toBeNull();
-        await fireEvent.click(screen.getByRole('button', { name: 'Cancel export' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
         expect(oncancel).toHaveBeenCalledOnce();
     });
 });

@@ -186,7 +186,7 @@ export class ExportWorkflow {
         await this.runPackage({ kind: 'WORKSPACE', output: selection.reference, overwrite: false });
     }
 
-    async packageToComputer(): Promise<void> {
+    async packageToComputer(closeOnCancel = false): Promise<void> {
         const request = this.packageRequest;
         if (!request || request.busy || !this.dependencies.isDesktop) return;
         const generation = this.generation;
@@ -194,7 +194,11 @@ export class ExportWorkflow {
             const destination = await selectLocalPackageDestination(
                 packageExportFilename(request.items, this.dependencies.imageLocation()),
             );
-            if (!destination || generation !== this.generation || !this.packageRequest) return;
+            if (!destination) {
+                if (closeOnCancel) this.closePackage();
+                return;
+            }
+            if (generation !== this.generation || !this.packageRequest) return;
             await this.runPackage(
                 { kind: 'DOWNLOAD', filename: destination.filename },
                 { candidateId: destination.candidateId },
@@ -361,7 +365,7 @@ export class ExportWorkflow {
         await this.runAudio({ kind: 'WORKSPACE', output: selection.reference }, this.audioRequest.format);
     }
 
-    async audioToComputer(): Promise<void> {
+    async audioToComputer(closeOnCancel = false): Promise<void> {
         const request = this.audioRequest;
         if (!request?.inspection || request.busy || !this.dependencies.isDesktop) return;
         const generation = this.audioGeneration;
@@ -370,7 +374,11 @@ export class ExportWorkflow {
                 request.inspection.defaultDirectoryName,
                 'SFZ',
             );
-            if (!destination || generation !== this.audioGeneration || !this.audioRequest) return;
+            if (!destination) {
+                if (closeOnCancel) this.cancelAudio();
+                return;
+            }
+            if (generation !== this.audioGeneration || !this.audioRequest) return;
             await this.runAudio(
                 { kind: 'DOWNLOAD', directoryName: destination.directoryName },
                 this.audioRequest.format,
@@ -520,7 +528,7 @@ export class ExportWorkflow {
         await this.runSequence({ kind: 'WORKSPACE', output: selection.reference });
     }
 
-    async sequenceToComputer(): Promise<void> {
+    async sequenceToComputer(closeOnCancel = false): Promise<void> {
         const request = this.sequenceRequest;
         if (!request || request.busy || !this.dependencies.isDesktop) return;
         const generation = this.sequenceGeneration;
@@ -529,7 +537,11 @@ export class ExportWorkflow {
                 sequenceDirectoryName(request.items),
                 'MIDI',
             );
-            if (!destination || generation !== this.sequenceGeneration || !this.sequenceRequest) return;
+            if (!destination) {
+                if (closeOnCancel) this.cancelSequence();
+                return;
+            }
+            if (generation !== this.sequenceGeneration || !this.sequenceRequest) return;
             await this.runSequence(
                 { kind: 'DOWNLOAD', directoryName: destination.directoryName },
                 { candidateId: destination.candidateId },

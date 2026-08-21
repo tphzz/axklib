@@ -195,7 +195,11 @@
         class="tree-row group"
         style:--tree-depth={depth}
         data-import-drop-volume={item.kind === 'volume' ? item.name : undefined}
-        data-import-drop-partition={item.kind === 'volume' ? item.partitionIndex : undefined}
+        data-import-drop-partition={item.kind === 'volume' || item.kind === 'partition'
+            ? item.partitionIndex
+            : undefined}
+        data-import-drop-kind={item.kind === 'volume' || item.kind === 'partition' ? item.kind : undefined}
+        data-import-drop-name={item.kind === 'volume' || item.kind === 'partition' ? item.name : undefined}
     >
         {#if hasChildren}
             <button

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte';
+    import { flushSync, onDestroy, onMount } from 'svelte';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
 
@@ -46,6 +46,8 @@
     let rootTop = $state(0);
     let submenuLeft = $state(0);
     let submenuTop = $state(0);
+    let rootPositioned = $state(false);
+    let submenuPositioned = $state(false);
     let activeSubmenu = $state<Submenu | null>(null);
     const invoker =
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
@@ -106,15 +108,18 @@
 
     function openSubmenu(kind: Submenu, focusFirst: boolean): void {
         activeSubmenu = kind;
-        queueMicrotask(() => {
-            positionSubmenu(submenuParent(kind));
-            if (focusFirst) focusItem(submenuMenu, 0);
-        });
+        submenuPositioned = false;
+        flushSync();
+        positionSubmenu(submenuParent(kind));
+        submenuPositioned = true;
+        flushSync();
+        if (focusFirst) focusItem(submenuMenu, 0);
     }
 
     function closeSubmenu(restoreParent: boolean): void {
         const parent = activeSubmenu ? submenuParent(activeSubmenu) : undefined;
         activeSubmenu = null;
+        submenuPositioned = false;
         if (restoreParent) queueMicrotask(() => parent?.focus());
     }
 
@@ -176,17 +181,25 @@
     }
 
     onMount(() => {
-        queueMicrotask(() => {
-            positionRoot();
-            focusItem(rootMenu, 0);
-        });
+        positionRoot();
+        rootPositioned = true;
+        flushSync();
+        focusItem(rootMenu, 0);
         const dismissFromOutsidePointer = (event: PointerEvent): void => {
             const path = event.composedPath();
             if ((rootMenu && path.includes(rootMenu)) || (submenuMenu && path.includes(submenuMenu))) return;
             onclose();
         };
+        const reposition = (): void => {
+            positionRoot();
+            if (activeSubmenu) positionSubmenu(submenuParent(activeSubmenu));
+        };
         window.addEventListener('pointerdown', dismissFromOutsidePointer, true);
-        return () => window.removeEventListener('pointerdown', dismissFromOutsidePointer, true);
+        window.addEventListener('resize', reposition);
+        return () => {
+            window.removeEventListener('pointerdown', dismissFromOutsidePointer, true);
+            window.removeEventListener('resize', reposition);
+        };
     });
 
     onDestroy(() => {
@@ -200,7 +213,7 @@
     role="menu"
     aria-label={`${item.name} actions`}
     tabindex="-1"
-    style={`left: ${rootLeft}px; top: ${rootTop}px;`}
+    style={`left: ${rootLeft}px; top: ${rootTop}px; visibility: ${rootPositioned ? 'visible' : 'hidden'}; pointer-events: ${rootPositioned ? 'auto' : 'none'};`}
     onclick={(event) => event.stopPropagation()}
     onkeydown={handleRootKey}
 >
@@ -308,7 +321,7 @@
         role="menu"
         aria-label={`${activeSubmenu === 'import' ? 'Import' : 'Export'} actions`}
         tabindex="-1"
-        style={`left: ${submenuLeft}px; top: ${submenuTop}px;`}
+        style={`left: ${submenuLeft}px; top: ${submenuTop}px; visibility: ${submenuPositioned ? 'visible' : 'hidden'}; pointer-events: ${submenuPositioned ? 'auto' : 'none'};`}
         onclick={(event) => event.stopPropagation()}
         onkeydown={handleSubmenuKey}
     >

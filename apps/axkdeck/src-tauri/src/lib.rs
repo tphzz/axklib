@@ -7,10 +7,13 @@ mod local_workspaces;
 mod remote_settings;
 mod retained_download;
 mod server_sidecar;
+mod startup_diagnostics;
+mod webview_runtime;
 
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
@@ -23,9 +26,10 @@ use local_directory_exports::{
 use local_packages::{
     PackageSaveCandidateStore, save_retained_media, save_retained_package,
     select_local_media_destination, select_local_package, select_local_package_destination,
-    select_local_volume_packages,
+    select_local_packages,
 };
 use local_workspaces::{WorkspaceCandidateStore, commit_local_workspace, select_local_workspace};
+use startup_diagnostics::{StartupDiagnostics, StartupMilestone, complete_startup};
 
 const LOG_FILE_SIZE: u128 = 5 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
@@ -39,6 +43,8 @@ struct DesktopBuildInfo {
     source_identity: &'static str,
     release_tag: &'static str,
     is_release: bool,
+    webview_engine: &'static str,
+    webview_version: Option<String>,
 }
 
 fn current_build_info() -> DesktopBuildInfo {
@@ -49,6 +55,8 @@ fn current_build_info() -> DesktopBuildInfo {
         source_identity: env!("AXKDECK_SOURCE_IDENTITY"),
         release_tag: env!("AXKDECK_RELEASE_TAG"),
         is_release: env!("AXKDECK_IS_RELEASE") == "true",
+        webview_engine: webview_runtime::ENGINE,
+        webview_version: None,
     }
 }
 
@@ -121,6 +129,8 @@ mod tests {
         assert!(!build.project_version.is_empty());
         assert!(!build.source_identity.is_empty());
         assert_eq!(build.is_release, !build.release_tag.is_empty());
+        assert!(!build.webview_engine.is_empty());
+        assert!(build.webview_version.is_none());
     }
 
     #[test]
@@ -155,7 +165,7 @@ mod tests {
     #[test]
     fn package_picker_accepts_every_current_package_extension() {
         for extension in [
-            "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
+            "a3k", "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
         ] {
             assert_eq!(
                 supported_package_extension(&format!("Package.{extension}")),
@@ -315,28 +325,30 @@ fn diagnostic_log_level() -> &'static str {
 }
 
 #[tauri::command]
-fn desktop_build_info() -> DesktopBuildInfo {
-    current_build_info()
+async fn desktop_build_info(window: WebviewWindow) -> DesktopBuildInfo {
+    let mut build = current_build_info();
+    build.webview_version = webview_runtime::version(&window).await;
+    build
 }
 
 #[tauri::command]
-fn server_connection(
-    state: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+async fn server_connection(
+    state: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<Option<server_sidecar::FrontendConnection>, String> {
-    state
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .connection()
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.connection())
+        .await
+        .map_err(|error| format!("wait for server connection: {error}"))?
 }
 
 #[tauri::command]
-fn remote_server_settings(
-    state: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+async fn remote_server_settings(
+    state: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<remote_settings::RemoteServerSettingsView, String> {
-    state
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())
-        .map(|manager| manager.settings())
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.settings())
+        .await
+        .map_err(|error| format!("wait for server settings: {error}"))
 }
 
 #[tauri::command]
@@ -347,24 +359,24 @@ fn validate_remote_server_settings(
 }
 
 #[tauri::command]
-fn configure_remote_server(
+async fn configure_remote_server(
     settings: remote_settings::RemoteServerSettingsInput,
-    state: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+    state: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<remote_settings::RemoteServerSettingsView, String> {
-    state
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .configure_remote(settings)
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.configure_remote(settings))
+        .await
+        .map_err(|error| format!("configure remote server worker failed: {error}"))?
 }
 
 #[tauri::command]
-fn use_local_server(
-    state: State<'_, Mutex<remote_settings::ServerConnectionManager>>,
+async fn use_local_server(
+    state: State<'_, remote_settings::ServerConnectionState>,
 ) -> Result<remote_settings::RemoteServerSettingsView, String> {
-    state
-        .lock()
-        .map_err(|_| "server connection settings are unavailable".to_owned())?
-        .use_local()
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.use_local())
+        .await
+        .map_err(|error| format!("start local server worker failed: {error}"))?
 }
 
 #[cfg(target_os = "linux")]
@@ -386,8 +398,11 @@ fn configure_linux_webkit() {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let startup = StartupDiagnostics::new();
+    startup.record(StartupMilestone::NativeEntry);
     #[cfg(target_os = "linux")]
     configure_linux_webkit();
+    startup.record(StartupMilestone::PlatformConfigurationCompleted);
     let log_level = configured_log_level();
     let log_targets = vec![
         Target::new(TargetKind::LogDir {
@@ -396,21 +411,28 @@ pub fn run() {
         #[cfg(debug_assertions)]
         Target::new(TargetKind::Stdout),
     ];
+    startup.record(StartupMilestone::LogPluginBuildStarted);
     let log_plugin = tauri_plugin_log::Builder::new()
         .targets(log_targets)
         .level(log_level)
         .max_file_size(LOG_FILE_SIZE)
         .rotation_strategy(RotationStrategy::KeepSome(RETAINED_LOG_FILES))
         .build();
+    startup.record(StartupMilestone::LogPluginBuildCompleted);
 
-    tauri::Builder::default()
+    let setup_startup = startup.clone();
+    let page_load_startup = startup.clone();
+    let builder = tauri::Builder::default()
         .plugin(log_plugin)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(Mutex::new(WorkspaceCandidateStore::default()))
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
         .manage(Mutex::new(DirectorySaveCandidateStore::default()))
-        .setup(|app| {
+        .manage(startup.clone())
+        .setup(move |app| {
+            setup_startup.enable_logging();
+            setup_startup.record(StartupMilestone::TauriSetupStarted);
             let log_directory = app
                 .path()
                 .app_log_dir()
@@ -419,35 +441,47 @@ pub fn run() {
                 .path()
                 .app_local_data_dir()
                 .map_err(|error| format!("resolve application state directory: {error}"))?;
+            setup_startup.record(StartupMilestone::PathsResolved);
             let preferences_path = application_data_directory.join("desktop-preferences.json");
+            setup_startup.record(StartupMilestone::PreferencesLoadStarted);
             let preferences = DesktopPreferencesStore::load(preferences_path.clone()).unwrap_or_else(|error| {
                 log::warn!("desktop preferences are unavailable and will be reset on the next update: {error}");
                 DesktopPreferencesStore::empty(preferences_path)
             });
+            setup_startup.record(StartupMilestone::PreferencesLoadCompleted);
             app.manage(Mutex::new(preferences));
             let state_directory = application_data_directory.join("server-state");
-            let manager = remote_settings::ServerConnectionManager::initialize(
-                log_directory.clone(),
-                state_directory.clone(),
-            )
-            .unwrap_or_else(|error| {
-                log::error!("local axklib-server initialization failed: {error}");
-                remote_settings::ServerConnectionManager::unavailable(
-                    error,
-                    log_directory,
-                    state_directory,
-                )
-            });
-            app.manage(Mutex::new(manager));
+            let connections = remote_settings::ServerConnectionState::pending();
+            connections.initialize_in_background(
+                log_directory,
+                state_directory,
+                setup_startup.clone(),
+            );
+            app.manage(connections);
             let build = current_build_info();
             log::info!(
                 "axkdeck desktop shell initialized: version={} source={}",
                 build.semantic_version,
                 build.source_identity
             );
+            setup_startup.record(StartupMilestone::TauriSetupCompleted);
             Ok(())
         })
+        .on_page_load(move |webview, payload| {
+            if webview.label() != "main" {
+                return;
+            }
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    page_load_startup.record(StartupMilestone::PageLoadStarted);
+                }
+                PageLoadEvent::Finished => {
+                    page_load_startup.record(StartupMilestone::PageLoadFinished);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            complete_startup,
             server_connection,
             remote_server_settings,
             validate_remote_server_settings,
@@ -456,7 +490,7 @@ pub fn run() {
             select_local_workspace,
             commit_local_workspace,
             select_local_package,
-            select_local_volume_packages,
+            select_local_packages,
             select_local_package_destination,
             save_retained_package,
             select_local_media_destination,
@@ -468,7 +502,9 @@ pub fn run() {
             desktop_build_info,
             open_allocation_inspector,
             save_allocation_map_json
-        ])
+        ]);
+    startup.record(StartupMilestone::TauriBuilderConfigured);
+    builder
         .run(tauri::generate_context!())
         .expect("failed to run axkdeck");
 }

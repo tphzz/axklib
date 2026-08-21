@@ -48,7 +48,12 @@ export interface OpenedImage {
     mediaConversionAvailable: boolean;
     extentLayoutRepairAvailable: boolean;
     allocationInspectionAvailable: boolean;
+    format?: string;
 }
+
+export type AudioImportDestination =
+    | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
+    | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
 export interface AllocationMapReference {
     imageId: string;
@@ -457,8 +462,11 @@ export interface SequenceImportTarget {
     volumeName: string;
 }
 
+export type ConnectionMode = 'local' | 'remote' | 'unavailable';
+
 export interface ImageTransport {
     readonly storageMode: 'server' | 'unavailable';
+    readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
     sandboxRoots(): Promise<SandboxRoot[]>;
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing>;
@@ -467,6 +475,7 @@ export interface ImageTransport {
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
     openImage(source: ImageLocation): Promise<OpenedImage>;
+    keepImageAlive(sessionId: number): Promise<void>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
@@ -538,7 +547,7 @@ export interface ImageTransport {
     ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState>;

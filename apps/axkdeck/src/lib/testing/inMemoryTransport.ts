@@ -2,6 +2,7 @@ import type {
     AudioImportGrouping,
     AllocationMapReference,
     AudioImportItem,
+    AudioImportDestination,
     AudioImportTarget,
     AudioSourceInfo,
     AudioImportCapabilities,
@@ -79,6 +80,7 @@ import type { ClientUploadSource } from '../clientUploadSource';
 
 export interface InMemoryImageTransportOptions {
     storageMode?: ImageTransport['storageMode'];
+    connectionMode?: ImageTransport['connectionMode'];
     supportsClientUploads?: boolean;
     opened: Omit<
         OpenedImage,
@@ -128,12 +130,14 @@ export interface InMemoryImageTransportOptions {
 
 export class InMemoryImageTransport implements ImageTransport {
     readonly storageMode: ImageTransport['storageMode'];
+    readonly connectionMode: ImageTransport['connectionMode'];
     readonly supportsClientUploads: boolean;
     readonly calls: string[] = [];
     private nextSessionId = 1;
 
     constructor(private readonly options: InMemoryImageTransportOptions) {
         this.storageMode = options.storageMode ?? 'server';
+        this.connectionMode = options.connectionMode ?? 'remote';
         this.supportsClientUploads = options.supportsClientUploads ?? false;
     }
 
@@ -215,6 +219,11 @@ export class InMemoryImageTransport implements ImageTransport {
             extentLayoutRepairAvailable: this.options.opened.extentLayoutRepairAvailable ?? false,
             allocationInspectionAvailable: this.options.opened.allocationInspectionAvailable ?? false,
         };
+    }
+
+    async keepImageAlive(sessionId: number): Promise<void> {
+        this.calls.push('keepImageAlive');
+        await this.options.operations?.keepImageAlive?.(sessionId);
     }
 
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
@@ -381,7 +390,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {

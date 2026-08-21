@@ -3,30 +3,45 @@
     import { defaultAudioImportNames, defaultAudioSamplerSettings, validSamplerName } from '../audioImport';
     import { AudioImportAuditionController, type AudioImportAuditionState } from '../audio/audioImportAudition';
     import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
+    import type {
+        ImportDestinationMode,
+        ImportPartitionOption,
+        ImportVolumeOption,
+    } from '../../features/import/packageDestinations';
     import { modal } from '../modal';
     import type { FileLocation, InputFileLocation } from '../storageLocations';
     import type {
         AudioImportCapabilities,
+        AudioImportDestination,
         AudioImportGrouping,
         AudioImportItem,
-        AudioImportTarget,
         AudioSourceInfo,
         ImageTransport,
     } from '../transport';
     import AudioImportRows from './AudioImportRows.svelte';
     import type { AudioImportRow } from './audioImportDialogTypes';
     import Icon from './Icon.svelte';
+    import ImportDestinationChooser from './ImportDestinationChooser.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
         transport: ImageTransport;
         files: (File | ClientUploadSource | FileLocation)[];
-        target: AudioImportTarget;
+        target: AudioImportDestination | null;
+        destinationMode: ImportDestinationMode;
+        destinationPartitionIndex: number | null;
+        destinationVolumeName: string;
+        partitionOptions: ImportPartitionOption[];
+        volumeOptions: ImportVolumeOption[];
         existingSampleNames: string[];
         existingSampleBankNames?: string[];
         existingWaveformNames: string[];
         onchooseworkspace?: () => void;
         onchooselocal?: () => void;
+        ondestinationmode: (mode: ImportDestinationMode) => void;
+        ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
+        ondestinationpartition: (partitionIndex: number) => void;
+        ondestinationname: (volumeName: string) => void;
         oncommit: (items: AudioImportItem[], grouping: AudioImportGrouping) => Promise<void>;
         oncancel: () => void;
     }
@@ -35,11 +50,20 @@
         transport,
         files,
         target,
+        destinationMode,
+        destinationPartitionIndex,
+        destinationVolumeName,
+        partitionOptions,
+        volumeOptions,
         existingSampleNames,
         existingSampleBankNames = [],
         existingWaveformNames,
         onchooseworkspace,
         onchooselocal,
+        ondestinationmode,
+        ondestinationvolume,
+        ondestinationpartition,
+        ondestinationname,
         oncommit,
         oncancel,
     }: Props = $props();
@@ -63,6 +87,7 @@
     const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
+            target !== null &&
             rows.every((row) => row.status === 'ready') &&
             validationErrors.every((error) => error === '') &&
             sampleBankError === '',
@@ -425,20 +450,29 @@
         use:modal={{ onescape: () => void cancel() }}
     >
         <header class="dialog-header">
-            <div>
-                <h2>Import audio</h2>
-                <p>Volume {target.volumeName}</p>
-            </div>
+            <h2>Import audio</h2>
             <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={() => void cancel()}>
                 <Icon name="close" size={15} />
             </button>
         </header>
         <div class="audio-import-body">
+            <ImportDestinationChooser
+                mode={destinationMode}
+                partitionIndex={destinationPartitionIndex}
+                volumeName={destinationVolumeName}
+                partitions={partitionOptions}
+                volumes={volumeOptions}
+                disabled={busy}
+                onmode={ondestinationmode}
+                onvolume={ondestinationvolume}
+                onpartition={ondestinationpartition}
+                onname={ondestinationname}
+            />
             {#if files.length === 0}
                 <ImportSourceChoice
                     label="Audio source"
                     heading="Choose audio files"
-                    description={`Import into ${target.volumeName} from a configured storage location or this computer.`}
+                    description="Choose audio files from a configured storage location or this computer."
                     workspaceDetail="Choose one or more files from a configured workspace"
                     computerDetail="Choose local audio files and upload them"
                     computerAvailable={onchooselocal !== undefined}
@@ -511,11 +545,6 @@
         width: min(1280px, calc(100vw - 32px));
         max-width: none;
         max-height: min(720px, calc(100vh - 48px));
-    }
-    .dialog-header p {
-        margin: 2px 0 0;
-        color: var(--color-text-muted);
-        font-size: 11px;
     }
     .audio-import-body {
         min-height: 0;

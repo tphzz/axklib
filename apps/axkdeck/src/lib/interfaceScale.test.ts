@@ -174,6 +174,15 @@ describe('InterfaceScaleController', () => {
         await controller.dispose();
     });
 
+    it('restores and applies the fixed 115% mode', async () => {
+        const { adapter } = adapterFor(monitor(1920, 1080));
+        const controller = await createInterfaceScaleController(adapter, storageWith('1.15'));
+
+        expect(controller.state()).toEqual({ mode: '1.15', appliedZoom: 1.15 });
+        expect(adapter.setZoom).toHaveBeenCalledWith(1.15);
+        await controller.dispose();
+    });
+
     it.each(['', '125%', '2', 'invalid'])('falls back to Auto for an invalid stored mode %j', async (stored) => {
         const { adapter } = adapterFor(monitor(2560, 1440));
 
@@ -241,7 +250,7 @@ describe('InterfaceScaleController', () => {
         await controller.dispose();
     });
 
-    it.each<InterfaceScaleMode>(['auto', '1', '1.25', '1.5'])(
+    it.each<InterfaceScaleMode>(['auto', '1', '1.15', '1.25', '1.5'])(
         'does not mutate the native window when maximizing in %s mode',
         async (mode) => {
             const { adapter, emitMoved, emitResized, setMaximized } = adapterFor(monitor(1920, 1080));
@@ -341,7 +350,7 @@ describe('InterfaceScaleController', () => {
     it('accepts every declared fixed mode', async () => {
         const { adapter } = adapterFor();
         const controller = await createInterfaceScaleController(adapter, storageWith());
-        const modes: InterfaceScaleMode[] = ['1', '1.25', '1.5', 'auto'];
+        const modes: InterfaceScaleMode[] = ['1', '1.15', '1.25', '1.5', 'auto'];
 
         for (const mode of modes) await controller.setMode(mode);
 

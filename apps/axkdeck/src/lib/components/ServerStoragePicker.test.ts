@@ -14,6 +14,8 @@ const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 function transport(withRoots = true): ImageTransport {
     return {
         storageMode: 'server',
+        connectionMode: 'remote',
+        supportsClientUploads: false,
         sandboxRoots: vi.fn().mockResolvedValue(
             withRoots
                 ? [
@@ -305,7 +307,7 @@ describe('ServerStoragePicker', () => {
         });
     });
 
-    it('keeps a persistent location bar with the path before the right-aligned home action', async () => {
+    it('keeps a persistent location bar ordered home, parent, then path', async () => {
         render(ServerStoragePicker, {
             props: {
                 transport: transport(),
@@ -330,8 +332,9 @@ describe('ServerStoragePicker', () => {
         const home = within(location).getByRole('button', { name: 'Go to all workspaces' });
         expect(parent.hasAttribute('disabled')).toBe(false);
         expect(home.hasAttribute('disabled')).toBe(false);
-        expect(path.compareDocumentPosition(home) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(location.lastElementChild?.contains(home)).toBe(true);
+        expect(location.firstElementChild).toBe(home);
+        expect(home.compareDocumentPosition(parent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(parent.compareDocumentPosition(path) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('uses parent navigation to return from a workspace root to the workspace list', async () => {

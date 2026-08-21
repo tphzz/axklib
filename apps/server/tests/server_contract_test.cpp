@@ -14,6 +14,7 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/server/contract.hpp"
 #include "axklib/server/server.hpp"
+#include "contract_test_support.hpp"
 
 namespace {
 
@@ -89,6 +90,58 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(headers.contains("XRequestId"));
 }
 
+TEST(ServerContract, GeneratedValidationPlanMatchesTheSchemaCompilerForRepresentativeValues) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const axk::server::OpenApiValidator generated;
+    const axk::server::OracleOpenApiValidator oracle{document};
+    const auto representatives = std::to_array<nlohmann::json>({
+        nullptr,
+        false,
+        true,
+        -1,
+        0,
+        1,
+        1.5,
+        "",
+        "x",
+        "é",
+        "A01",
+        "A16",
+        "A00",
+        "A17",
+        "B01",
+        "B16",
+        "Bch",
+        "01",
+        "16",
+        "00",
+        "17",
+        ".iso",
+        ".axkvol",
+        ".AXKVOL",
+        "/api/v1/",
+        "/api/v1/system/version",
+        "/api/v2/system/version",
+        "/api/v1/download-archives/archive1/content",
+        "/api/v1/download-archives/archive-1/content",
+        "00-43-10",
+        "0A",
+        "0a",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        nlohmann::json::array(),
+        nlohmann::json::object(),
+        nlohmann::json{{"unexpected", true}},
+    });
+    for (const auto &[name, schema] : document.at("components").at("schemas").items()) {
+        static_cast<void>(schema);
+        for (const auto &value : representatives) {
+            EXPECT_EQ(static_cast<bool>(generated.validate(name, value)), oracle.validate(name, value))
+                << name << ": " << value.dump();
+        }
+    }
+}
+
 TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
@@ -147,7 +200,7 @@ TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
 TEST(ServerContract, AlterationJobReportsIncludeTx16wDiskSetImports) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto &type =
         document.at("components").at("schemas").at("AlterationOperationReport").at("properties").at("type");
     EXPECT_TRUE(std::ranges::contains(type.at("enum"), "IMPORT_TX16W_DISK_SET"));
@@ -417,7 +470,7 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
 TEST(ServerContract, RelationshipDiagnosticsValidateForInspectionAndTerminalExtractionResults) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto diagnostic = nlohmann::json{
         {"code", "unconfirmed_relationship_excluded"},
         {"message", "Unconfirmed relationship excluded from exact export"},
@@ -479,7 +532,7 @@ TEST(ServerContract, RelationshipDiagnosticsValidateForInspectionAndTerminalExtr
 TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResults) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto adjustment = nlohmann::json{
         {"adjustmentId", "adjustment-1"},
         {"origin", "existing-program"},
@@ -821,9 +874,7 @@ TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
 }
 
 TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
-    const auto document =
-        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto request =
         nlohmann::json{{"displayName", "Samples"}, {"path", "/samples"}, {"writable", false}, {"revision", 0U}};
     EXPECT_TRUE(validator.validate("WorkspaceCreateRequest", request));
@@ -835,9 +886,7 @@ TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
 }
 
 TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas) {
-    const auto document =
-        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto inspection_request = nlohmann::json{{"imageId", "image-one"},
                                                    {"expectedRevision", 3U},
                                                    {"format", "FAT12_FLOPPY"},
@@ -886,7 +935,7 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
     expect_upper_snake_enums(document.at("components").at("schemas"));
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
 
     const auto wire_request =
         nlohmann::json{{"source", file_ref()},
@@ -933,9 +982,7 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
 }
 
 TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {
-    const auto document =
-        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    axk::server::OpenApiValidator validator{document};
+    axk::server::OpenApiValidator validator;
     const auto exact = nlohmann::json{{"kind", "VOLUME"}, {"contentId", "content-volume-1"}};
     EXPECT_TRUE(validator.validate("ImageSessionExportRoot", exact));
     EXPECT_FALSE(

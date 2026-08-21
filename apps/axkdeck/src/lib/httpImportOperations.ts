@@ -1,6 +1,7 @@
 import type {
     AudioImportItem,
     AudioImportGrouping,
+    AudioImportDestination,
     AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
@@ -83,7 +84,7 @@ export class HttpImportOperations {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportTarget,
+        target: AudioImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -179,12 +180,20 @@ function request(
 export function audioImportRequest(
     imageId: string,
     expectedRevision: number,
-    target: AudioImportTarget,
+    target: AudioImportDestination,
     items: AudioImportItem[],
     grouping: AudioImportGrouping,
 ): ImportAlterationRequest {
     const operations: Record<string, unknown>[] = [];
     const inputBindings: ImportAlterationRequest['inputBindings'] = [];
+    if (target.kind === 'CREATE_VOLUME') {
+        operations.push({
+            id: 'volume-audio-import',
+            type: 'insert_volume',
+            partition_index: target.partitionIndex,
+            volume: { name: target.volumeName, waveforms: [], samples: [] },
+        });
+    }
     items.forEach((item, index) => {
         const logicalPath = `audio/import-${index}`;
         operations.push({

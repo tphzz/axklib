@@ -28,6 +28,9 @@ describe('WorkspaceShell layout contract', () => {
         expect(shellRule).toContain('--library-column-width: 248px');
         expect(shellRule).toContain('grid-template-columns: var(--library-column-width) minmax(520px, 1fr) 268px');
         expect(headerRule).toContain('grid-template-columns: var(--library-column-width) minmax(0, 1fr) auto auto');
+        expect(brandRule).toContain('height: 100%');
+        expect(brandRule).toContain('border: 0');
+        expect(brandRule).toContain('background: transparent');
         expect(brandRule).not.toMatch(/(?:^|\n)\s*width:/);
         expect(mediumLayout).toContain('--library-column-width: 220px');
         expect(compactLayout).toContain('--library-column-width: 205px');

@@ -1,4 +1,4 @@
-export type InterfaceScaleMode = 'auto' | '1' | '1.25' | '1.5';
+export type InterfaceScaleMode = 'auto' | '1' | '1.15' | '1.25' | '1.5';
 
 export interface InterfaceScaleState {
     mode: InterfaceScaleMode;
@@ -49,7 +49,7 @@ const storageKey = 'axkdeck.interface-scale.v1';
 const minimumWindowWidth = 800;
 const minimumWindowHeight = 600;
 const windowEventDebounceMs = 150;
-const fixedModes = new Set<InterfaceScaleMode>(['1', '1.25', '1.5']);
+const fixedModes = new Set<InterfaceScaleMode>(['1', '1.15', '1.25', '1.5']);
 
 function finitePositive(value: number): boolean {
     return Number.isFinite(value) && value > 0;

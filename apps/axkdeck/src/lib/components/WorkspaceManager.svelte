@@ -379,37 +379,48 @@
         border-color: rgb(190 80 80 / 35%);
         background: rgb(120 35 35 / 20%);
     }
-    .workspace-list,
+    .workspace-list {
+        display: grid;
+        gap: 2px;
+        max-height: 200px;
+        overflow: auto;
+        padding: 6px 12px;
+    }
     .host-browser {
         min-height: 72px;
         overflow: auto;
         padding: 6px 12px;
     }
-    .workspace-list {
-        max-height: 200px;
+    .workspace-row {
+        min-height: 32px;
+        display: grid;
+        grid-template-columns: 20px 1fr auto;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 0;
     }
-    .workspace-row,
+    .workspace-row span {
+        min-width: 0;
+        display: grid;
+        gap: 0;
+    }
+    .workspace-row strong {
+        font-size: 10px;
+        line-height: 11px;
+    }
+    .workspace-row small {
+        display: block;
+        margin: 0;
+        color: var(--color-text-muted);
+        font-size: 8px;
+        line-height: 9px;
+    }
     .host-row {
         min-height: 36px;
         display: grid;
         grid-template-columns: 20px 1fr auto;
         align-items: center;
         gap: 8px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .workspace-row span,
-    .workspace-row small {
-        display: block;
-    }
-    .workspace-row strong {
-        font-size: 10px;
-    }
-    .workspace-row small {
-        margin-top: 1px;
-        color: var(--color-text-muted);
-        font-size: 8px;
-    }
-    .host-row {
         width: 100%;
         color: inherit;
         text-align: left;

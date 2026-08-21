@@ -5478,8 +5478,32 @@
         "type": "object"
       },
       "ImageSessionPackageImportDestination": {
-        "description": "Either one existing SFS volume shared by every package root or one new SFS volume per volume package, named from its placement hint with optional indexed overrides.",
+        "description": "One existing SFS volume, one explicitly named new SFS volume receiving all selected packages, or one new SFS volume per volume package placement hint.",
         "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "CREATE_VOLUME"
+              },
+              "partitionIndex": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "volumeName": {
+                "maxLength": 16,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "partitionIndex",
+              "volumeName"
+            ],
+            "type": "object"
+          },
           {
             "additionalProperties": false,
             "properties": {
@@ -22969,7 +22993,7 @@
                 "default": {
                   "value": {
                     "destination": {
-                      "kind": "EXISTING_VOLUME",
+                      "kind": "CREATE_VOLUME",
                       "partitionIndex": 0,
                       "volumeName": "x"
                     },
