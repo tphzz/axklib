@@ -99,19 +99,15 @@
                     <p class="dialog-progress" role="status">Inspecting audio export…</p>
                 {:else if inspection}
                     <p class="package-export-type-summary">{counts}</p>
-                    <div class="audio-export-format" role="group" aria-label="Export format">
+                    <div class="audio-export-format dialog-segmented-control" role="group" aria-label="Export format">
                         <button
-                            class:active={format === 'SFZ'}
                             type="button"
                             disabled={!inspection.sfzEligible}
                             aria-pressed={format === 'SFZ'}
                             onclick={() => onformatchange('SFZ')}>SFZ + WAV</button
                         >
-                        <button
-                            class:active={format === 'WAV'}
-                            type="button"
-                            aria-pressed={format === 'WAV'}
-                            onclick={() => onformatchange('WAV')}>WAV files</button
+                        <button type="button" aria-pressed={format === 'WAV'} onclick={() => onformatchange('WAV')}
+                            >WAV files</button
                         >
                     </div>
                     {#if inspection.sfzEligible}

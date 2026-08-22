@@ -43,17 +43,12 @@
 <section class="batch-destination" aria-label="Batch destination">
     <div class="strategy-heading">
         <strong>Placement</strong>
-        <div class="strategy-control" role="group" aria-label="Package placement">
-            <button
-                type="button"
-                class:active={strategy === 'shared'}
-                aria-pressed={strategy === 'shared'}
-                {disabled}
-                onclick={() => onstrategy('shared')}>One volume</button
+        <div class="strategy-control dialog-segmented-control" role="group" aria-label="Package placement">
+            <button type="button" aria-pressed={strategy === 'shared'} {disabled} onclick={() => onstrategy('shared')}
+                >One volume</button
             >
             <button
                 type="button"
-                class:active={strategy === 'separate'}
                 aria-pressed={strategy === 'separate'}
                 disabled={disabled || !separateAvailable}
                 title={separateAvailable
@@ -98,9 +93,8 @@
 <style>
     .batch-destination {
         display: grid;
-        gap: 10px;
-        margin-bottom: 10px;
-        padding: 10px;
+        gap: 8px;
+        padding: 8px;
         border: 1px solid var(--color-border);
         border-radius: 6px;
         background: rgb(255 255 255 / 2%);
@@ -114,29 +108,7 @@
     }
 
     .strategy-control {
-        display: flex;
-    }
-
-    .strategy-control button {
-        min-height: 32px;
-        padding: 0 12px;
-        border: 1px solid var(--color-border);
-        color: var(--color-text-muted);
-        background: var(--color-bg-deep);
-    }
-
-    .strategy-control button:first-child {
-        border-radius: 5px 0 0 5px;
-    }
-
-    .strategy-control button:last-child {
-        margin-left: -1px;
-        border-radius: 0 5px 5px 0;
-    }
-
-    .strategy-control button.active {
-        color: #fff;
-        background: var(--color-accent-strong);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .partition-field {

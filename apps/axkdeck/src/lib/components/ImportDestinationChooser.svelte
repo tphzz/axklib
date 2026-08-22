@@ -124,20 +124,15 @@
 <section class="import-destination" aria-label="Import destination">
     <div class="destination-heading">
         <strong>Destination</strong>
-        <div class="destination-mode" role="group" aria-label="Destination type">
+        <div class="destination-mode dialog-segmented-control" role="group" aria-label="Destination type">
             <button
                 type="button"
-                class:active={mode === 'existing'}
                 aria-pressed={mode === 'existing'}
                 disabled={disabled || volumes.length === 0}
                 onclick={() => onmode('existing')}>Existing volume</button
             >
-            <button
-                type="button"
-                class:active={mode === 'create'}
-                aria-pressed={mode === 'create'}
-                {disabled}
-                onclick={() => onmode('create')}>New volume</button
+            <button type="button" aria-pressed={mode === 'create'} {disabled} onclick={() => onmode('create')}
+                >New volume</button
             >
         </div>
     </div>
@@ -259,37 +254,7 @@
     }
 
     .destination-mode {
-        display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 4px;
-        background: var(--color-bg-deep);
-    }
-
-    .destination-mode button {
-        min-height: 27px;
-        padding: 0 10px;
-        color: var(--color-text-muted);
-        border: 0;
-        border-right: 1px solid var(--color-border);
-        background: transparent;
-        cursor: pointer;
-        font-size: 10px;
-    }
-
-    .destination-mode button:last-child {
-        border-right: 0;
-    }
-
-    .destination-mode button.active {
-        color: #fff;
-        background: var(--color-accent-strong);
-    }
-
-    .destination-mode button:disabled {
-        cursor: default;
-        opacity: 0.45;
     }
 
     .volume-combobox {

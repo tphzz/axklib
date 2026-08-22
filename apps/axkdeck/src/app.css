@@ -29,8 +29,13 @@
   --density-table-header: 20px;
   --density-metadata-row: 22px;
   --density-gap: 4px;
+  --dialog-title-font-size: 13px;
+  --dialog-body-font-size: 11px;
+  --dialog-section-font-size: 11px;
   --dialog-control-font-size: 11px;
   --dialog-label-font-size: 10px;
+  --dialog-table-header-font-size: 10px;
+  --dialog-metadata-font-size: 10px;
   --dialog-option-metadata-font-size: 10px;
   --overlay-scrollbar-clearance: 16px;
   --contained-playback-clearance: 10px;
@@ -1319,6 +1324,8 @@ input:focus-visible {
   border-radius: 8px;
   background: var(--color-panel);
   box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+  font-size: var(--dialog-body-font-size);
+  line-height: 1.35;
 }
 
 .dialog-shell-wide {
@@ -1362,7 +1369,95 @@ input:focus-visible {
 .dialog-header h2 {
   margin: 0;
   color: var(--color-text-strong);
-  font-size: 13px;
+  font-size: var(--dialog-title-font-size);
+}
+
+.dialog-checkbox {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  appearance: none;
+  place-content: center;
+  color: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  background: var(--color-bg-deep);
+  cursor: pointer;
+}
+
+.dialog-checkbox::before {
+  width: 4px;
+  height: 7px;
+  content: '';
+  border: solid currentcolor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: translateY(-0.75px) rotate(45deg) scale(0);
+}
+
+.dialog-checkbox:checked,
+.dialog-checkbox:indeterminate {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.dialog-checkbox:checked::before {
+  transform: translateY(-0.75px) rotate(45deg) scale(1);
+}
+
+.dialog-checkbox:indeterminate::before {
+  width: 7px;
+  height: 0;
+  border: 0;
+  border-top: 1.5px solid currentcolor;
+  transform: none;
+}
+
+.dialog-checkbox:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.dialog-segmented-control {
+  display: grid;
+  grid-auto-flow: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-deep);
+}
+
+.dialog-segmented-control > button {
+  min-width: 0;
+  min-height: 27px;
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--dialog-table-header-font-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-segmented-control > button:first-child {
+  border-left: 0;
+}
+
+.dialog-segmented-control > button[aria-pressed='true'] {
+  color: #fff;
+  background: var(--color-accent-strong);
+}
+
+.dialog-segmented-control > button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .package-dialog {
@@ -1387,14 +1482,14 @@ input:focus-visible {
 .package-plan-section h3 {
   margin: 0;
   color: var(--color-text-strong);
-  font-size: 12px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .import-source-choice > p,
 .package-source-choice > p {
   margin: 0 0 4px;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
 }
 
 .package-export-items {
@@ -1416,7 +1511,7 @@ input:focus-visible {
 .package-export-group h4 {
   margin: 0 0 2px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
   font-weight: 600;
 }
 
@@ -1434,7 +1529,7 @@ input:focus-visible {
 .package-export-items strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1442,7 +1537,7 @@ input:focus-visible {
 .package-export-items span {
   flex: none;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .source-choice-button {
@@ -1464,36 +1559,7 @@ input:focus-visible {
 }
 
 .audio-export-format {
-  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
-}
-
-.audio-export-format button {
-  min-height: 32px;
-  padding: 0 10px;
-  color: var(--color-text-muted);
-  border: 0;
-  border-right: 1px solid var(--color-border);
-  background: transparent;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.audio-export-format button:last-child {
-  border-right: 0;
-}
-
-.audio-export-format button.active {
-  color: var(--color-text-strong);
-  background: var(--color-selection);
-}
-
-.audio-export-format button:disabled {
-  cursor: default;
-  opacity: 0.45;
 }
 
 .audio-export-guidance,
@@ -1515,12 +1581,12 @@ input:focus-visible {
 
 .source-choice-button strong {
   color: var(--color-text-strong);
-  font-size: 12px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .source-choice-button small {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .package-source-summary {
@@ -1541,14 +1607,14 @@ input:focus-visible {
 
 .package-source-summary small {
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-label-font-size);
   text-transform: uppercase;
 }
 
 .package-source-summary strong {
   overflow: hidden;
   color: var(--color-text-strong);
-  font-size: 12px;
+  font-size: var(--dialog-section-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1574,7 +1640,7 @@ input:focus-visible {
 
 .package-section-heading small {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .package-tree {
@@ -1602,14 +1668,14 @@ input:focus-visible {
 .package-tree-row strong {
   overflow: hidden;
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .package-tree-row small {
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-metadata-font-size);
   white-space: nowrap;
 }
 
@@ -1629,7 +1695,7 @@ input:focus-visible {
 .package-plan-summary dt,
 .package-plan-summary dd {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .package-plan-summary dt {
@@ -1642,7 +1708,7 @@ input:focus-visible {
   gap: 6px;
   margin: 12px 0 0;
   color: #85d8ad;
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
 }
 
 .opaque-sequence-choices {
@@ -1666,7 +1732,7 @@ input:focus-visible {
   max-width: 100%;
   padding: 0 4px;
   color: #e4c17c;
-  font-size: 11px;
+  font-size: var(--dialog-section-font-size);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -1674,7 +1740,7 @@ input:focus-visible {
 .opaque-sequence-choices fieldset > p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
   line-height: 1.4;
 }
 
@@ -1701,12 +1767,12 @@ input:focus-visible {
 
 .opaque-sequence-choices strong {
   color: var(--color-text-strong);
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .opaque-sequence-choices small {
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-metadata-font-size);
   line-height: 1.35;
 }
 
@@ -1739,7 +1805,7 @@ input:focus-visible {
 
 .program-slot-placement-heading strong {
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .program-slot-placement-heading small,
@@ -1747,7 +1813,7 @@ input:focus-visible {
 .program-slot-placements section > p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .program-slot-placements dl {
@@ -1765,7 +1831,7 @@ input:focus-visible {
 .program-slot-placements dt,
 .program-slot-placements dd {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .program-slot-placements dt {
@@ -1788,7 +1854,7 @@ input:focus-visible {
 .program-slot-start span,
 .program-slot-exception span {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .program-slot-start input,
@@ -1800,7 +1866,7 @@ input:focus-visible {
   border-radius: 4px;
   background: var(--color-surface);
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-control-font-size);
 }
 
 .package-conflicts {
@@ -1815,7 +1881,7 @@ input:focus-visible {
 
 .package-conflicts > strong {
   color: #e4c17c;
-  font-size: 11px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .package-conflicts label {
@@ -1825,7 +1891,7 @@ input:focus-visible {
 
 .package-conflicts label span {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .package-conflicts input {
@@ -1836,7 +1902,7 @@ input:focus-visible {
   border-radius: 4px;
   background: var(--color-surface);
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-control-font-size);
 }
 
 .package-conflict-actions {
@@ -1849,7 +1915,7 @@ input:focus-visible {
 
 .package-conflict-actions small {
   color: #e4c17c;
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .package-conflict-actions .secondary-button {
@@ -1866,7 +1932,7 @@ input:focus-visible {
 
 .package-adjustments > strong {
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .package-adjustments p {
@@ -1877,19 +1943,19 @@ input:focus-visible {
 
 .package-adjustments span {
   color: var(--color-text);
-  font-size: 10px;
+  font-size: var(--dialog-body-font-size);
 }
 
 .package-adjustments small {
   overflow-wrap: anywhere;
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .package-warning {
   margin: 9px 0 0;
   color: #dfbd7b;
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .volume-action-dialog {
@@ -1917,14 +1983,14 @@ input:focus-visible {
 
 .destructive-summary strong {
   color: var(--color-text-strong);
-  font-size: 13px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .destructive-summary p,
 .deletion-notices p {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
   line-height: 1.45;
 }
 
@@ -1938,13 +2004,13 @@ input:focus-visible {
 .deletion-impact-section h3 {
   margin: 0;
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .deletion-section-help {
   margin: -2px 0 0;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
   line-height: 1.4;
 }
 
@@ -1958,7 +2024,7 @@ input:focus-visible {
   border-radius: 4px;
   background: rgb(255 255 255 / 3%);
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .deletion-blockers {
@@ -2005,53 +2071,6 @@ input:focus-visible {
   color: var(--color-text-muted);
 }
 
-.deletion-checkbox {
-  width: 16px;
-  height: 16px;
-  display: grid;
-  flex: none;
-  margin: 1px;
-  padding: 0;
-  appearance: none;
-  place-content: center;
-  color: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: 3px;
-  background: var(--color-bg-deep);
-  cursor: pointer;
-}
-
-.deletion-checkbox::before {
-  width: 4px;
-  height: 7px;
-  content: "";
-  border: solid currentcolor;
-  border-width: 0 2px 2px 0;
-  transform: translateY(-1px) rotate(45deg) scale(0);
-}
-
-.deletion-checkbox:checked {
-  border-color: var(--color-accent);
-  background: var(--color-accent);
-}
-
-.deletion-checkbox:checked::before {
-  transform: translateY(-1px) rotate(45deg) scale(1);
-}
-
-.deletion-checkbox:indeterminate::before {
-  width: 8px;
-  height: 2px;
-  border: 0;
-  background: currentcolor;
-  transform: none;
-}
-
-.deletion-checkbox:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
 .deletion-impact-icon {
   display: grid;
   width: 18px;
@@ -2080,7 +2099,7 @@ input:focus-visible {
 .deletion-impact-heading strong {
   overflow: hidden;
   color: var(--color-text-strong);
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2088,13 +2107,13 @@ input:focus-visible {
 .deletion-impact-heading small,
 .deletion-impact-copy > small {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .deletion-outcome {
   margin-left: auto;
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-label-font-size);
   text-transform: uppercase;
 }
 
@@ -2116,14 +2135,14 @@ input:focus-visible {
 .deletion-footer-summary strong {
   overflow: hidden;
   color: var(--color-text-strong);
-  font-size: 10px;
+  font-size: var(--dialog-section-font-size);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .deletion-footer-summary span {
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: var(--dialog-metadata-font-size);
 }
 
 .object-deletion-actions {
@@ -2147,7 +2166,7 @@ input:focus-visible {
   display: grid;
   gap: 5px;
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: var(--dialog-label-font-size);
 }
 
 .dialog-field-control {
@@ -2219,12 +2238,12 @@ input:focus-visible {
 
 .volume-action-content strong {
   color: var(--color-text-strong);
-  font-size: 12px;
+  font-size: var(--dialog-section-font-size);
 }
 
 .volume-action-content p {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--dialog-body-font-size);
 }
 
 .field-help-error,

@@ -558,7 +558,7 @@
         display: grid;
         gap: 5px;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
     .import-target-settings {
         display: grid;
@@ -569,7 +569,7 @@
         display: grid;
         gap: 5px;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-label-font-size);
     }
     .import-target-settings select,
     .import-target-settings input {
@@ -578,7 +578,7 @@
     .field-error {
         margin: 0;
         color: var(--color-danger);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
     .inspection-progress progress {
         width: 100%;

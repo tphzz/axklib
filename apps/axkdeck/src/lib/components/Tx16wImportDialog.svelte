@@ -366,7 +366,7 @@
     .import-mode legend {
         padding: 0 4px;
         color: var(--color-text-muted);
-        font-size: 12px;
+        font-size: var(--dialog-label-font-size);
     }
 
     .import-mode label,
@@ -386,7 +386,7 @@
     summary span,
     .tx16w-footer > span {
         color: var(--color-text-muted);
-        font-size: 12px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .target-field > span {
@@ -477,7 +477,7 @@
         gap: 10px;
         padding: 7px 10px;
         border-top: 1px solid rgb(61 68 72 / 65%);
-        font-size: 13px;
+        font-size: var(--dialog-body-font-size);
     }
 
     .mapping-notice.notice-blocked,

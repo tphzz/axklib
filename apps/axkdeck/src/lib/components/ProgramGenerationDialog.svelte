@@ -91,6 +91,7 @@
                     <div class="program-generation-header" role="row">
                         <span class="selection-cell" role="columnheader">
                             <input
+                                class="dialog-checkbox"
                                 type="checkbox"
                                 aria-label="Select all targets"
                                 checked={allSelected}
@@ -109,6 +110,7 @@
                             <div class:excluded={!row.selected} class="program-generation-row" role="row">
                                 <div class="selection-cell" role="cell">
                                     <input
+                                        class="dialog-checkbox"
                                         type="checkbox"
                                         aria-label={`Generate Program for ${row.targetObjectName}`}
                                         checked={row.selected}
@@ -207,7 +209,7 @@
     .program-generation-state,
     .program-generation-notices {
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
 
     .program-generation-state {
@@ -231,15 +233,15 @@
 
     .program-generation-header {
         align-items: center;
-        padding-block: 7px;
+        padding-block: 6px;
         color: var(--color-text-muted);
         background: var(--color-panel-raised);
-        font-size: 12px;
+        font-size: var(--dialog-table-header-font-size);
     }
 
     .program-generation-row {
         align-items: start;
-        padding-block: 6px;
+        padding-block: 5px;
     }
 
     .program-generation-row + .program-generation-row {
@@ -280,7 +282,7 @@
     .program-generation-target small,
     .program-generation-name-error {
         color: var(--color-text-muted);
-        font-size: 10px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .program-generation-slot,
@@ -312,7 +314,7 @@
 
     .program-generation-footer > span {
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
 
     .program-generation-footer-actions {

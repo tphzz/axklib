@@ -130,7 +130,7 @@
 
     .companion-disk-content h3 {
         margin: 0 0 8px;
-        font-size: 12px;
+        font-size: var(--dialog-section-font-size);
         font-weight: 600;
     }
 

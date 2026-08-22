@@ -231,7 +231,7 @@
                         <label class="deletion-select-all">
                             <input
                                 bind:this={selectAllCheckbox}
-                                class="deletion-checkbox"
+                                class="dialog-checkbox"
                                 type="checkbox"
                                 checked={allOptionalSelected}
                                 disabled={loading || busy}
@@ -259,7 +259,7 @@
                                     style={`--deletion-depth: ${depth}`}
                                 >
                                     <input
-                                        class="deletion-checkbox"
+                                        class="dialog-checkbox"
                                         type="checkbox"
                                         checked={impact.selected}
                                         {disabled}
