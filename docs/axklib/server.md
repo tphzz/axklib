@@ -244,6 +244,25 @@ file-prefix inspection recognizes Yamaha object data, otherwise `null`.
 Inspection does not decode complete payloads or recurse beyond one related
 disk-folder level.
 
+### Image browsing size accounting
+
+Image object responses expose `sizeBytes` as the complete logical stored size
+of that object file or SFS record, including its object metadata and stored
+payload. Programs, Sample Banks, and Samples also expose
+`sizeWithDependenciesBytes`. This is an exact, deduplicated forward-closure
+total using the same known relationship requirements as portable-package
+export: a Program includes its assigned Sample Banks and Samples, a Sample Bank
+includes its member Samples, and a Sample includes its left and right Wave
+Data. The value is `null` when any required relationship is missing,
+ambiguous, cyclic, or otherwise unavailable; clients must not present an
+incomplete lower bound as an exact total.
+
+Volume content nodes expose nullable `sizeBytes` as the deduplicated sum of all
+contained object sizes. These values describe logical stored bytes and apply to
+all readable media. They do not include SFS cluster rounding, allocation slack,
+or filesystem support structures and therefore must not be used as physical
+free-space or import-capacity figures.
+
 ### Image integrity and mutation admission
 
 Every readable image session advertises `images.validation.issues`. Retrieve

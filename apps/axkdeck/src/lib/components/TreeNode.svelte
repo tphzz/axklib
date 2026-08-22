@@ -1,6 +1,8 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import { formatAllocationBytes } from '../allocationInspector';
     import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
+    import { formatStoredSize } from '../formatBytes';
     import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem } from '../types';
     import Icon from './Icon.svelte';
@@ -65,6 +67,36 @@
               ? '[Volume]'
               : '',
     );
+    const partitionCapacity = $derived(item.kind === 'partition' ? item.partitionCapacity : undefined);
+    const usableClusters = $derived(
+        partitionCapacity ? partitionCapacity.allocatedClusters + partitionCapacity.freeClusters : 0,
+    );
+    const usedPercent = $derived(
+        partitionCapacity && usableClusters > 0
+            ? Math.min(100, Math.round((partitionCapacity.allocatedClusters / usableClusters) * 100))
+            : 0,
+    );
+    const capacityLevel = $derived(usedPercent >= 90 ? 'critical' : usedPercent >= 80 ? 'warning' : 'normal');
+    const partitionTooltipId = $derived(`partition-capacity-${item.id}`);
+    const volumeTooltipId = $derived(`volume-size-${item.id}`);
+    const tooltipId = $derived(
+        loadCompletePartition
+            ? partitionTooltipId
+            : item.kind === 'volume' && item.sizeBytes !== undefined
+              ? volumeTooltipId
+              : undefined,
+    );
+    const partitionVolumeText = $derived(`${item.childCount} ${item.childCount === 1 ? 'volume' : 'volumes'}`);
+    const partitionCapacityText = $derived(
+        partitionCapacity
+            ? `${partitionCapacity.allocatedClusters.toLocaleString()} of ${usableClusters.toLocaleString()} clusters used`
+            : 'Capacity unavailable',
+    );
+    const partitionSpaceText = $derived(
+        partitionCapacity
+            ? `${formatAllocationBytes(partitionCapacity.allocatedClusters * partitionCapacity.clusterSizeBytes)} of ${formatAllocationBytes(usableClusters * partitionCapacity.clusterSizeBytes)} used`
+            : '',
+    );
 
     function containsSelected(nodes: DiskTreeItem[]): boolean {
         return nodes.some((node) => node.id === selectedId || containsSelected(node.children ?? []));
@@ -72,7 +104,11 @@
 
     $effect(() => {
         if (initialized) return;
-        expanded = item.kind === 'disk' || item.id === selectedId || containsSelected(item.children ?? []);
+        expanded =
+            item.kind === 'disk' ||
+            loadCompletePartition ||
+            item.id === selectedId ||
+            containsSelected(item.children ?? []);
         children = item.children ?? [];
         totalCount = item.childCount;
         initialized = true;
@@ -235,9 +271,13 @@
             class="tree-item-select"
             type="button"
             aria-current={selectedId === item.id ? 'true' : undefined}
+            aria-describedby={tooltipId}
             data-tree-id={item.id}
             data-tree-parent-id={parentId}
             onclick={() => onselect(item)}
+            ondblclick={() => {
+                if (item.kind === 'partition') void toggle();
+            }}
             onkeydown={(event) => void handleTreeKeyboard(event)}
             oncontextmenu={openContextMenu}
         >
@@ -252,6 +292,33 @@
             {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
                 ></span>{/if}
         </button>
+        {#if loadCompletePartition}
+            {#if partitionCapacity}
+                <span
+                    class:warning={capacityLevel === 'warning'}
+                    class:critical={capacityLevel === 'critical'}
+                    class="partition-capacity"
+                    role="progressbar"
+                    aria-label={`${usedPercent}% used`}
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow={usedPercent}
+                >
+                    <span class="partition-capacity-fill" style:width={`${usedPercent}%`}></span>
+                </span>
+            {:else}
+                <span class="partition-capacity unavailable" aria-hidden="true"></span>
+            {/if}
+            <span id={partitionTooltipId} class="tree-item-tooltip" role="tooltip">
+                <span>{partitionVolumeText}</span>
+                <span>{partitionCapacityText}</span>
+                {#if partitionSpaceText}<span>{partitionSpaceText}</span>{/if}
+            </span>
+        {:else if item.kind === 'volume' && item.sizeBytes !== undefined}
+            <span id={volumeTooltipId} class="tree-item-tooltip" role="tooltip">
+                <span>Size: {formatStoredSize(item.sizeBytes)}</span>
+            </span>
+        {/if}
     </div>
 
     {#if expanded && hasChildren}
@@ -298,3 +365,67 @@
         </div>
     {/if}
 </div>
+
+<style>
+    .tree-row {
+        position: relative;
+    }
+
+    .partition-capacity {
+        width: 42px;
+        height: 6px;
+        flex: none;
+        overflow: hidden;
+        border: 1px solid var(--color-border);
+        border-radius: 2px;
+        background: var(--color-bg-deep);
+    }
+
+    .partition-capacity.unavailable {
+        border-style: dashed;
+        opacity: 0.55;
+    }
+
+    .partition-capacity-fill {
+        display: block;
+        height: 100%;
+        background: var(--color-accent);
+    }
+
+    .partition-capacity.warning .partition-capacity-fill {
+        background: var(--color-brand);
+    }
+
+    .partition-capacity.critical .partition-capacity-fill {
+        background: var(--color-danger);
+    }
+
+    .tree-item-tooltip {
+        position: absolute;
+        z-index: 70;
+        top: calc(100% + 3px);
+        right: 4px;
+        display: grid;
+        width: max-content;
+        max-width: 230px;
+        gap: 2px;
+        padding: 6px 8px;
+        color: var(--color-text);
+        border: 1px solid var(--color-border);
+        border-radius: 5px;
+        background: var(--color-panel-raised);
+        box-shadow: 0 8px 20px rgb(0 0 0 / 35%);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-2px);
+        transition:
+            opacity 100ms ease,
+            transform 100ms ease;
+    }
+
+    .tree-row:hover > .tree-item-tooltip,
+    .tree-item-select:focus-visible ~ .tree-item-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+    }
+</style>

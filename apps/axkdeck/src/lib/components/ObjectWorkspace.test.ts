@@ -16,6 +16,7 @@ function object(objectType: string, name: string): SamplerObject {
         categoryName: objectType,
         sfsId: 0,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,
@@ -90,6 +91,7 @@ describe('ObjectWorkspace', () => {
                 bitDepth: '16-bit',
                 channels: 'Mono' as const,
                 storedSizeBytes: 2,
+                sizeWithDependenciesBytes: null,
                 waveform: [],
                 previewState: 'idle' as const,
                 object: waveObject,
@@ -137,6 +139,7 @@ describe('ObjectWorkspace', () => {
                 bitDepth: '16-bit',
                 channels: 'Mono' as const,
                 storedSizeBytes: 2,
+                sizeWithDependenciesBytes: null,
                 waveform: [],
                 previewState: 'idle' as const,
                 object: waveObject,
@@ -193,6 +196,7 @@ describe('ObjectWorkspace', () => {
                 bitDepth: '16-bit',
                 channels: 'Mono' as const,
                 storedSizeBytes: 2,
+                sizeWithDependenciesBytes: null,
                 waveform: [],
                 previewState: 'idle' as const,
                 object: waveObject,
@@ -242,6 +246,7 @@ describe('ObjectWorkspace', () => {
                     bitDepth: '16-bit',
                     channels: 'Mono' as const,
                     storedSizeBytes: 2,
+                    sizeWithDependenciesBytes: null,
                     waveform: [],
                     previewState: 'idle' as const,
                     object: waveObject,
@@ -317,7 +322,7 @@ describe('ObjectWorkspace', () => {
     });
 
     it('renders Programs as factual list rows without fabricated keyboard metadata', () => {
-        const programObject = object('PROG', '001');
+        const programObject = { ...object('PROG', '001'), sizeWithDependenciesBytes: 4096 };
         render(ObjectWorkspace, {
             props: {
                 ...common,
@@ -342,6 +347,8 @@ describe('ObjectWorkspace', () => {
         expect(document.querySelector('.program-keyboard')).toBeNull();
         expect(document.querySelector('.program-list')).toBeTruthy();
         expect(document.querySelector('.program-row')).toBeTruthy();
+        expect(screen.getByText('128 B · 4 KiB incl. deps.')).toBeTruthy();
+        expect(document.querySelector('[title*="Object size with deps.: 4 KiB"]')).toBeTruthy();
         expect(document.querySelector('.object-card')).toBeNull();
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
     });
@@ -582,6 +589,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
             waveform: [],
             previewState: 'idle' as const,
             object: waveObject,
@@ -631,6 +639,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 200,
+            sizeWithDependenciesBytes: null,
             waveform: [{ minimum: -10, maximum: 10 }],
             previewState: 'ready' as const,
             object: waveObject,
@@ -765,6 +774,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
             waveform: [],
             previewState: 'idle' as const,
             object: waveObject,
@@ -807,6 +817,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
             waveform: [],
             previewState: 'idle' as const,
             object: waveObject,
@@ -846,6 +857,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
             waveform: [],
             previewState: 'idle' as const,
             object: waveObject,
@@ -889,6 +901,7 @@ describe('ObjectWorkspace', () => {
             bitDepth: '16-bit',
             channels: 'Mono' as const,
             storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
             waveform: [],
             previewState: 'idle' as const,
             object: waveObject,

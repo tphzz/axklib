@@ -172,6 +172,11 @@ describe('HttpImageTransport', () => {
                                 name: 'PARTITION 1',
                                 displayName: 'partition 0: PARTITION 1',
                                 partitionIndex: 0,
+                                partitionCapacity: {
+                                    allocatedClusters: 80,
+                                    freeClusters: 20,
+                                    clusterSizeBytes: 1024,
+                                },
                                 childCount: 1,
                                 scopeRole: 'CONTAINED',
                             },
@@ -193,6 +198,7 @@ describe('HttpImageTransport', () => {
                                 partitionIndex: 0,
                                 childCount: 0,
                                 scopeRole: 'CONTAINED',
+                                sizeBytes: 1_048_576,
                             },
                         ],
                         totalCount: 1,
@@ -213,6 +219,7 @@ describe('HttpImageTransport', () => {
                                 volumeName: 'Volume',
                                 categoryName: 'SMPL',
                                 sizeBytes: 88_064,
+                                sizeWithDependenciesBytes: null,
                                 waveform: {
                                     sampleRate: 44100,
                                     sampleWidthBytes: 2,
@@ -266,12 +273,18 @@ describe('HttpImageTransport', () => {
             childCount: 1,
             partitionIndex: 0,
             scopeRole: 'CONTAINED',
+            partitionCapacity: {
+                allocatedClusters: 80,
+                freeClusters: 20,
+                clusterSizeBytes: 1024,
+            },
         });
         expect(opened.tree[0]?.children?.[0]?.children?.[0]).toMatchObject({
             id: 'volume-1',
             name: 'drumloops',
             volumeName: 'drumloops',
             scopeRole: 'CONTAINED',
+            sizeBytes: 1_048_576,
         });
         expect(opened.objects).toEqual([]);
         await expect(
@@ -283,6 +296,7 @@ describe('HttpImageTransport', () => {
                     sampleRate: 44100,
                     rootKey: 60,
                     storedSizeBytes: 88_064,
+                    sizeWithDependenciesBytes: null,
                 },
             ],
             totalCount: 2,

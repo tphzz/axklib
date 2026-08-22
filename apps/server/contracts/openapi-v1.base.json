@@ -1107,7 +1107,7 @@
       "ImageObjectItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "name", "format", "partitionIndex", "partitionName", "volumeName", "categoryName", "entryName", "sizeBytes", "waveform", "sequence"],
+        "required": ["id", "type", "name", "format", "partitionIndex", "partitionName", "volumeName", "categoryName", "entryName", "sizeBytes", "sizeWithDependenciesBytes", "waveform", "sequence"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {"type": "string", "minLength": 1, "maxLength": 16},
@@ -1119,6 +1119,7 @@
           "categoryName": {"type": "string"},
           "entryName": {"type": "string"},
           "sizeBytes": {"type": "integer", "minimum": 0, "description": "Complete stored object file or record size, including object metadata and stored payload bytes."},
+          "sizeWithDependenciesBytes": {"type": ["integer", "null"], "minimum": 0, "description": "Deduplicated stored size of this Program, Sample Bank, or Sample and its exact forward dependency closure; null when the closure is unavailable."},
           "waveform": {"oneOf": [{"$ref": "#/components/schemas/WaveDataMetadata"}, {"type": "null"}]},
           "sequence": {"oneOf": [{"$ref": "#/components/schemas/SequenceMetadata"}, {"type": "null"}]}
         }
@@ -1370,16 +1371,33 @@
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
+      "ImagePartitionCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["allocatedClusters", "freeClusters", "clusterSizeBytes"],
+        "properties": {
+          "allocatedClusters": {"type": "integer", "minimum": 0},
+          "freeClusters": {"type": "integer", "minimum": 0},
+          "clusterSizeBytes": {"type": "integer", "minimum": 1}
+        }
+      },
       "ImageContentItem": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "parentId", "depth", "partitionIndex", "volumeDirectoryId", "kind", "displayName", "childCount", "objectId", "objectType", "scopeRole", "quality", "basis", "notes", "details"],
+        "required": ["id", "parentId", "depth", "partitionIndex", "volumeDirectoryId", "partitionCapacity", "sizeBytes", "kind", "displayName", "childCount", "objectId", "objectType", "scopeRole", "quality", "basis", "notes", "details"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "parentId": {"type": ["string", "null"]},
           "depth": {"type": "integer", "minimum": 0},
           "partitionIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 255},
           "volumeDirectoryId": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
+          "partitionCapacity": {
+            "oneOf": [
+              {"$ref": "#/components/schemas/ImagePartitionCapacity"},
+              {"type": "null"}
+            ]
+          },
+          "sizeBytes": {"type": ["integer", "null"], "minimum": 0, "description": "Deduplicated stored size of objects contained by a volume; null for other content nodes or when unavailable."},
           "kind": {"type": "string", "minLength": 1},
           "name": {"type": "string"},
           "displayName": {"type": "string"},

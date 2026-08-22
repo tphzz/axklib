@@ -36,6 +36,7 @@ function waveData(id: string): WaveDataItem {
         categoryName: 'SMPL',
         sfsId: 0,
         storedSizeBytes: 2,
+        sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
         frameCount: 1,

@@ -14,6 +14,7 @@ function object(objectType: string, name: string): SamplerObject {
         categoryName: objectType,
         sfsId: 0,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
         frameCount: 44_100,

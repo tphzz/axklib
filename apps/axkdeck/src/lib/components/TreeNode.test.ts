@@ -1,6 +1,13 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import TreeNode from './TreeNode.svelte';
+
+const treeNodeSource = readFileSync(resolve(process.cwd(), 'src/lib/components/TreeNode.svelte'), 'utf8');
 
 describe('TreeNode', () => {
     it('uses conventional tree arrow navigation and selects the focused row', async () => {
@@ -98,7 +105,6 @@ describe('TreeNode', () => {
             },
         });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
         await waitFor(() => expect(screen.getByText('!foo')).toBeTruthy());
         expect(onloadchildren).toHaveBeenNthCalledWith(1, 'p0', 0, 64);
         expect(onloadchildren).toHaveBeenNthCalledWith(2, 'p0', 2, 64);
@@ -135,7 +141,6 @@ describe('TreeNode', () => {
             },
         });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
         await waitFor(() => expect(screen.getByText('!foo')).toBeTruthy());
         expect(onloadchildren).toHaveBeenCalledWith('p0', 1, 64);
         expect([...container.querySelectorAll('.tree-item-name')].map((name) => name.textContent)).toEqual([
@@ -143,6 +148,131 @@ describe('TreeNode', () => {
             '!foo',
             'a_foo',
         ]);
+    });
+
+    it('toggles an SFS partition when its row is double-clicked', async () => {
+        render(TreeNode, {
+            props: {
+                item: {
+                    id: 'p0',
+                    name: 'Partition 0',
+                    kind: 'partition',
+                    childCount: 1,
+                    children: [{ id: 'v0', name: 'Volume 0', kind: 'volume', childCount: 0 }],
+                },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn(),
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        const partition = screen.getByRole('button', { name: 'Partition 0' });
+        expect(screen.getByRole('button', { name: /Volume 0 \[Volume/ })).toBeTruthy();
+
+        await fireEvent.dblClick(partition);
+        expect(screen.queryByRole('button', { name: /Volume 0 \[Volume/ })).toBeNull();
+
+        await fireEvent.dblClick(partition);
+        expect(screen.getByRole('button', { name: /Volume 0 \[Volume/ })).toBeTruthy();
+    });
+
+    it('shows partition volume and usable-capacity details with warning thresholds', () => {
+        const { container } = render(TreeNode, {
+            props: {
+                item: {
+                    id: 'p0',
+                    name: 'Partition 0',
+                    kind: 'partition',
+                    childCount: 3,
+                    partitionCapacity: {
+                        allocatedClusters: 80,
+                        freeClusters: 20,
+                        clusterSizeBytes: 1024,
+                    },
+                },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn().mockResolvedValue({ items: [], totalCount: 0 }),
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        const capacity = screen.getByRole('progressbar', { name: '80% used' });
+        expect(capacity.getAttribute('aria-valuenow')).toBe('80');
+        expect(capacity.getAttribute('aria-valuemax')).toBe('100');
+        expect(capacity.classList.contains('warning')).toBe(true);
+        expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('3 volumes');
+        expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('80 of 100 clusters used');
+        expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('80 KiB of 100 KiB used');
+    });
+
+    it('marks partitions at ninety percent usage as critical', () => {
+        render(TreeNode, {
+            props: {
+                item: {
+                    id: 'p0',
+                    name: 'Partition 0',
+                    kind: 'partition',
+                    childCount: 1,
+                    partitionCapacity: {
+                        allocatedClusters: 90,
+                        freeClusters: 10,
+                        clusterSizeBytes: 1024,
+                    },
+                },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn().mockResolvedValue({ items: [], totalCount: 0 }),
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        expect(screen.getByRole('progressbar', { name: '90% used' }).classList.contains('critical')).toBe(true);
+    });
+
+    it('keeps partition capacity alignment when the summary is unavailable', () => {
+        const { container } = render(TreeNode, {
+            props: {
+                item: { id: 'p0', name: 'Partition 0', kind: 'partition', childCount: 2 },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn().mockResolvedValue({ items: [], totalCount: 0 }),
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        expect(screen.queryByRole('progressbar')).toBeNull();
+        expect(container.querySelector('.partition-capacity.unavailable')).toBeTruthy();
+        expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('2 volumes');
+        expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('Capacity unavailable');
+    });
+
+    it('hides capacity affordances for non-SFS partitions', () => {
+        const { container } = render(TreeNode, {
+            props: {
+                item: {
+                    id: 'p0',
+                    name: 'Partition 0',
+                    kind: 'partition',
+                    childCount: 2,
+                    partitionCapacity: {
+                        allocatedClusters: 80,
+                        freeClusters: 20,
+                        clusterSizeBytes: 1024,
+                    },
+                },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn().mockResolvedValue({ items: [], totalCount: 0 }),
+                samplerOrderingEnabled: false,
+            },
+        });
+
+        expect(screen.queryByRole('progressbar')).toBeNull();
+        expect(container.querySelector('.partition-capacity')).toBeNull();
+        expect(container.querySelector('[role="tooltip"]')).toBeNull();
+        expect(screen.getByRole('button', { name: 'Partition 0' }).getAttribute('aria-describedby')).toBeNull();
     });
 
     it('treats volumes as terminal browser entries even when they contain objects', () => {
@@ -158,6 +288,28 @@ describe('TreeNode', () => {
 
         expect(screen.queryByRole('button', { name: 'Expand Strings' })).toBeNull();
         expect(onloadchildren).not.toHaveBeenCalled();
+    });
+
+    it('shows a compact volume size tooltip without adding a capacity bar', () => {
+        const { container } = render(TreeNode, {
+            props: {
+                item: { id: 'v0', name: 'Strings', kind: 'volume', childCount: 12, sizeBytes: 1_572_864 },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren: vi.fn(),
+            },
+        });
+
+        const volume = screen.getByRole('button', { name: 'Strings [Volume]' });
+        const tooltip = screen.getByRole('tooltip');
+        expect(tooltip.textContent).toContain('Size: 1.5 MiB');
+        expect(volume.getAttribute('aria-describedby')).toBe(tooltip.id);
+        expect(container.querySelector('.partition-capacity')).toBeNull();
+    });
+
+    it('does not keep a tooltip visible merely because a pointer-selected row retains focus', () => {
+        expect(treeNodeSource).not.toContain('.tree-row:focus-within > .tree-item-tooltip');
+        expect(treeNodeSource).toContain('.tree-item-select:focus-visible ~ .tree-item-tooltip');
     });
 
     it('opens volume actions from pointer and keyboard context requests', async () => {

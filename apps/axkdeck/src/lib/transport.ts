@@ -238,6 +238,7 @@ export interface SamplerObject {
     categoryName: string;
     sfsId: number;
     storedSizeBytes: number;
+    sizeWithDependenciesBytes: number | null;
     sampleRate: number;
     rootKey: number;
     frameCount: number;

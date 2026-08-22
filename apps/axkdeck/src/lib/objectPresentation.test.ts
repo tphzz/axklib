@@ -13,6 +13,7 @@ function object(objectType: string, name: string): SamplerObject {
         categoryName: objectType,
         sfsId: 0,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,

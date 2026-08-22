@@ -2844,6 +2844,16 @@
               "null"
             ]
           },
+          "partitionCapacity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImagePartitionCapacity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "partitionIndex": {
             "maximum": 255,
             "minimum": 0,
@@ -2863,6 +2873,14 @@
             ],
             "type": "string"
           },
+          "sizeBytes": {
+            "description": "Deduplicated stored size of objects contained by a volume; null for other content nodes or when unavailable.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "volumeDirectoryId": {
             "maximum": 4294967295,
             "minimum": 0,
@@ -2878,6 +2896,8 @@
           "depth",
           "partitionIndex",
           "volumeDirectoryId",
+          "partitionCapacity",
+          "sizeBytes",
           "kind",
           "displayName",
           "childCount",
@@ -3479,6 +3499,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sizeWithDependenciesBytes": {
+            "description": "Deduplicated stored size of this Program, Sample Bank, or Sample and its exact forward dependency closure; null when the closure is unavailable.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "type": {
             "maxLength": 16,
             "minLength": 1,
@@ -3509,6 +3537,7 @@
           "categoryName",
           "entryName",
           "sizeBytes",
+          "sizeWithDependenciesBytes",
           "waveform",
           "sequence"
         ],
@@ -3566,6 +3595,29 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "ImagePartitionCapacity": {
+        "additionalProperties": false,
+        "properties": {
+          "allocatedClusters": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "clusterSizeBytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "freeClusters": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "allocatedClusters",
+          "freeClusters",
+          "clusterSizeBytes"
         ],
         "type": "object"
       },

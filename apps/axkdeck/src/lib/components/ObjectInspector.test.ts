@@ -15,6 +15,7 @@ function object(objectType: string, name: string): SamplerObject {
         categoryName: objectType,
         sfsId: 0,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: 1024,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,
@@ -159,6 +160,32 @@ describe('ObjectInspector', () => {
         expect(screen.getByRole('group', { name: 'Wave Data Strings C3 Wave' })).toBeTruthy();
         expect(document.querySelectorAll('.inspector-inline-heading')).toHaveLength(2);
         expect(screen.getByText('1')).toBeTruthy();
+        expect(screen.getByText('128 B')).toBeTruthy();
+        expect(screen.getByText('1 KiB')).toBeTruthy();
+    });
+
+    it('marks an incomplete dependency closure as unavailable', () => {
+        const sampleObject = { ...object('SBNK', 'Incomplete'), sizeWithDependenciesBytes: null };
+        const item = {
+            id: sampleObject.key,
+            objectId: sampleObject.key,
+            name: sampleObject.name,
+            objectType: 'SBNK' as const,
+            object: sampleObject,
+        };
+        render(ObjectInspector, {
+            props: {
+                selection: {
+                    kind: 'sample',
+                    item,
+                    memberships: [],
+                    preview: samplePreview(item, [], 'failed'),
+                },
+            },
+        });
+
+        expect(screen.getByText('Object size with deps.')).toBeTruthy();
+        expect(screen.getByText('Unavailable')).toBeTruthy();
     });
 
     it('switches the Sample Bank waveform to the currently playing member', async () => {

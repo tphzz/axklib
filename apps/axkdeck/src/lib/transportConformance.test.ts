@@ -16,6 +16,7 @@ const object: SamplerObject = {
     categoryName: 'SMPL',
     sfsId: 9,
     storedSizeBytes: 128,
+    sizeWithDependenciesBytes: null,
     sampleRate: 44_100,
     rootKey: 60,
     frameCount: 4,

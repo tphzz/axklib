@@ -2198,6 +2198,7 @@ export interface components {
             objectId: string | null;
             objectType: string | null;
             parentId: string | null;
+            partitionCapacity: components['schemas']['ImagePartitionCapacity'] | null;
             partitionIndex: number | null;
             quality: string;
             /**
@@ -2205,6 +2206,8 @@ export interface components {
              * @enum {string}
              */
             scopeRole: 'CONTAINED' | 'REFERENCE';
+            /** @description Deduplicated stored size of objects contained by a volume; null for other content nodes or when unavailable. */
+            sizeBytes: number | null;
             volumeDirectoryId: number | null;
         };
         ImageContentPage: {
@@ -2324,6 +2327,8 @@ export interface components {
             sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
             sizeBytes: number;
+            /** @description Deduplicated stored size of this Program, Sample Bank, or Sample and its exact forward dependency closure; null when the closure is unavailable. */
+            sizeWithDependenciesBytes: number | null;
             type: string;
             volumeName: string;
             waveform: components['schemas']['WaveDataMetadata'] | null;
@@ -2339,6 +2344,11 @@ export interface components {
         };
         ImageOpenRequest: {
             source: components['schemas']['ImageSourceRef'];
+        };
+        ImagePartitionCapacity: {
+            allocatedClusters: number;
+            clusterSizeBytes: number;
+            freeClusters: number;
         };
         ImagePlacementDestination: {
             createsVolume: boolean;

@@ -24,6 +24,12 @@ export interface PackageExportVolume {
 
 export type PackageExportSelection = PackageExportObject | PackageExportVolume;
 
+export interface PartitionCapacity {
+    allocatedClusters: number;
+    freeClusters: number;
+    clusterSizeBytes: number;
+}
+
 export interface DiskTreeItem {
     id: string;
     name: string;
@@ -37,6 +43,8 @@ export interface DiskTreeItem {
     volumeDirectoryId?: number;
     volumeName?: string;
     partitionIndex?: number;
+    partitionCapacity?: PartitionCapacity;
+    sizeBytes?: number;
 }
 
 export type ImageTreeAction =

@@ -226,6 +226,14 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
     ASSERT_FALSE(sfs->partitions().empty());
     EXPECT_EQ(content->items.front().name, sfs->partitions().front().name);
     EXPECT_NE(content->items.front().display_name, content->items.front().name);
+    ASSERT_TRUE(sfs->partitions().front().allocation.free_space);
+    ASSERT_TRUE(content->items.front().partition_capacity);
+    EXPECT_EQ(content->items.front().partition_capacity->allocated_clusters,
+              sfs->partitions().front().allocation.free_space->allocated_cluster_count);
+    EXPECT_EQ(content->items.front().partition_capacity->free_clusters,
+              sfs->partitions().front().allocation.free_space->free_cluster_count);
+    EXPECT_EQ(content->items.front().partition_capacity->cluster_size_bytes,
+              sfs->partitions().front().allocation.free_space->cluster_size_bytes);
     for (const auto &item : content->items) {
         EXPECT_TRUE(item.id.starts_with("content-"));
         if (item.object_id) {
@@ -938,6 +946,31 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     ASSERT_TRUE(reference_scope) << reference_scope.error().message;
     ASSERT_EQ(reference_scope->items.size(), 1U);
     EXPECT_NE(reference_scope->items.front().type, "PROG");
+
+    const auto volume_objects =
+        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, volume->id);
+    ASSERT_TRUE(volume_objects) << volume_objects.error().message;
+    std::uint64_t stored_volume_size{};
+    for (const auto &object : volume_objects->items)
+        stored_volume_size += object.stored_size_bytes;
+    ASSERT_TRUE(volume->size_bytes);
+    EXPECT_EQ(*volume->size_bytes, stored_volume_size);
+
+    const auto dependency_size = [&](std::string_view type, std::string_view name) -> std::uint64_t {
+        const auto object = std::ranges::find_if(volume_objects->items, [&](const auto &candidate) {
+            return candidate.type == type && candidate.name == name;
+        });
+        EXPECT_NE(object, volume_objects->items.end());
+        if (object == volume_objects->items.end())
+            return 0U;
+        EXPECT_TRUE(object->size_with_dependencies_bytes);
+        return object->size_with_dependencies_bytes.value_or(0U);
+    };
+    EXPECT_EQ(program_scope->items.front().size_with_dependencies_bytes, volume->size_bytes);
+    EXPECT_GT(dependency_size("SBAC", "Bank"), dependency_size("SBNK", "Sample"));
+    EXPECT_GT(dependency_size("SBNK", "Sample"),
+              std::ranges::find(volume_objects->items, "Sample", &axk::app::ImageObjectItem::name)->stored_size_bytes);
+    EXPECT_GT(dependency_size("SBNK", "Direct Sample"), 0U);
 }
 
 TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSamples) {

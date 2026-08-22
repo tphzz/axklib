@@ -167,8 +167,18 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
 
     const auto &content_item = document.at("components").at("schemas").at("ImageContentItem");
     EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "scopeRole"));
+    EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "partitionCapacity"));
+    EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "sizeBytes"));
+    EXPECT_EQ(content_item.at("properties").at("sizeBytes").at("type"), nlohmann::json::array({"integer", "null"}));
+    const auto &partition_capacity = document.at("components").at("schemas").at("ImagePartitionCapacity");
+    EXPECT_EQ(partition_capacity.at("required"),
+              nlohmann::json::array({"allocatedClusters", "freeClusters", "clusterSizeBytes"}));
     EXPECT_EQ(content_item.at("properties").at("scopeRole").at("enum"),
               nlohmann::json::array({"CONTAINED", "REFERENCE"}));
+    const auto &object_item = document.at("components").at("schemas").at("ImageObjectItem");
+    EXPECT_TRUE(std::ranges::contains(object_item.at("required"), "sizeWithDependenciesBytes"));
+    EXPECT_EQ(object_item.at("properties").at("sizeWithDependenciesBytes").at("type"),
+              nlohmann::json::array({"integer", "null"}));
 }
 
 TEST(ServerContract, SequenceMetadataSeparatesHeaderAndTimelineTempo) {

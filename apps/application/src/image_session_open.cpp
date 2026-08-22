@@ -5,6 +5,64 @@
 
 #include <charconv>
 #include <iterator>
+#include <limits>
+#include <map>
+#include <set>
+
+#include "axklib/package_closure.hpp"
+
+namespace {
+
+std::optional<std::uint64_t>
+exact_dependency_size(const axk::ObjectSnapshot &root, const axk::RelationshipGraph &graph,
+                      const std::map<std::string, const axk::ObjectSnapshot *, std::less<>> &objects,
+                      const std::map<std::string, std::uint64_t, std::less<>> &sizes) {
+    if (root.object.header.type != axk::ObjectType::prog && root.object.header.type != axk::ObjectType::sbac &&
+        root.object.header.type != axk::ObjectType::sbnk) {
+        return std::nullopt;
+    }
+    std::set<std::string, std::less<>> visited;
+    std::set<std::string, std::less<>> active;
+    std::uint64_t total{};
+    const auto visit = [&](const auto &self, const axk::ObjectSnapshot &object) -> bool {
+        const auto has_exact_closure_payload = [&]() {
+            switch (object.object.header.type) {
+            case axk::ObjectType::prog:
+                return std::holds_alternative<axk::CurrentProg>(object.object.payload);
+            case axk::ObjectType::sbac:
+                return std::holds_alternative<axk::CurrentSbac>(object.object.payload);
+            case axk::ObjectType::sbnk:
+                return std::holds_alternative<axk::CurrentSbnk>(object.object.payload);
+            default:
+                return true;
+            }
+        };
+        if (!has_exact_closure_payload())
+            return false;
+        if (active.contains(object.key))
+            return false;
+        if (!visited.emplace(object.key).second)
+            return true;
+        const auto size = sizes.find(object.key);
+        if (size == sizes.end() || size->second > std::numeric_limits<std::uint64_t>::max() - total)
+            return false;
+        total += size->second;
+        active.emplace(object.key);
+        auto required = axk::package_internal::required_relationships(object, graph, objects);
+        if (!required)
+            return false;
+        for (const auto *relationship : *required) {
+            const auto target = relationship->target_key ? objects.find(*relationship->target_key) : objects.end();
+            if (target == objects.end() || !self(self, *target->second))
+                return false;
+        }
+        active.erase(object.key);
+        return true;
+    };
+    return visit(visit, root) ? std::optional{total} : std::nullopt;
+}
+
+} // namespace
 
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
@@ -163,10 +221,21 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
     auto graph = axk::build_relationship_graph(inventory->catalog);
     auto tree = axk::build_content_tree(*media, inventory->catalog, graph);
     std::unordered_map<std::uint8_t, std::string> partition_names;
+    std::unordered_map<std::uint8_t, ImagePartitionCapacity> partition_capacities;
     if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
         partition_names.reserve(sfs->partitions().size());
-        for (const auto &partition : sfs->partitions())
+        partition_capacities.reserve(sfs->partitions().size());
+        for (const auto &partition : sfs->partitions()) {
             partition_names.emplace(partition.index.value, partition.name);
+            if (partition.allocation.free_space) {
+                const auto &free_space = *partition.allocation.free_space;
+                partition_capacities.emplace(
+                    partition.index.value,
+                    ImagePartitionCapacity{.allocated_clusters = free_space.allocated_cluster_count,
+                                           .free_clusters = free_space.free_cluster_count,
+                                           .cluster_size_bytes = free_space.cluster_size_bytes});
+            }
+        }
     }
 
     auto session = std::make_shared<Implementation::Session>();
@@ -193,6 +262,12 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
     }
     for (const auto &descriptor : inventory->objects)
         session->descriptors_by_id.emplace(object_ids.at(descriptor.key), descriptor);
+    std::map<std::string, const axk::ObjectSnapshot *, std::less<>> objects_by_key;
+    std::map<std::string, std::uint64_t, std::less<>> sizes_by_key;
+    for (const auto &object : inventory->catalog.objects)
+        objects_by_key.emplace(object.key, &object);
+    for (const auto &descriptor : inventory->objects)
+        sizes_by_key.emplace(descriptor.key, descriptor.size);
     session->catalog_issues = inventory->catalog.issues;
     if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
         const auto orphan_report = axk::analyze_waveform_orphans(*sfs, inventory->catalog, graph);
@@ -216,6 +291,7 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
         item.name = object.object.header.name;
         item.format = object_format_name(object.object.format);
         item.stored_size_bytes = session->descriptors_by_id.at(item.id).size;
+        item.size_with_dependencies_bytes = exact_dependency_size(object, graph, objects_by_key, sizes_by_key);
         if (object.placement) {
             item.partition_index = object.partition.value;
             item.partition_name = object.placement->partition_name;
@@ -315,11 +391,20 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
             const auto converted = std::from_chars(first, last, result);
             return converted.ec == std::errc{} && converted.ptr == last ? std::optional{result} : std::nullopt;
         }();
+        const auto partition_capacity = [&]() -> std::optional<ImagePartitionCapacity> {
+            if (node.node_type != "partition" || !partition_index)
+                return std::nullopt;
+            if (const auto found = partition_capacities.find(*partition_index); found != partition_capacities.end())
+                return found->second;
+            return std::nullopt;
+        }();
         ImageContentItem item{.id = id,
                               .parent_id = parent_id,
                               .depth = depth,
                               .partition_index = partition_index,
                               .volume_directory_id = volume_directory_id,
+                              .partition_capacity = partition_capacity,
+                              .size_bytes = std::nullopt,
                               .kind = node.node_type,
                               .name = canonical_name,
                               .display_name = node.display_name,
@@ -355,6 +440,18 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
         std::ranges::sort(scoped_indices);
         const auto unique_end = std::ranges::unique(scoped_indices).begin();
         scoped_indices.erase(unique_end, scoped_indices.end());
+        if (session->content[item_index].kind == "volume") {
+            std::uint64_t size{};
+            const auto complete = std::ranges::all_of(scoped_indices, [&](std::size_t object_index) {
+                const auto object_size = session->objects[object_index].stored_size_bytes;
+                if (object_size > std::numeric_limits<std::uint64_t>::max() - size)
+                    return false;
+                size += object_size;
+                return true;
+            });
+            if (complete)
+                session->content[item_index].size_bytes = size;
+        }
         if (session->content[item_index].kind == "volume" && !session->content[item_index].partition_index &&
             !scoped_indices.empty()) {
             const auto inferred_partition_index = session->objects[scoped_indices.front()].partition_index;
