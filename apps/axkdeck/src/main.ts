@@ -85,6 +85,7 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const view: StartupView =
         new URLSearchParams(window.location.search).get('view') === 'allocation' ? 'allocation' : 'workspace';
     if (view === 'allocation') {
+        const connectionReady = isDesktop ? connectServer(false) : Promise.resolve(null);
         try {
             const moduleReady = shellFirstFrame.then(() =>
                 import('./AllocationInspector.svelte').then((module) => {
@@ -92,7 +93,18 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
                     return module;
                 }),
             );
-            const [module] = await Promise.all([moduleReady, diagnosticsReady, interfaceScalingReady]);
+            const [module, connection] = await Promise.all([
+                moduleReady,
+                connectionReady,
+                diagnosticsReady,
+                interfaceScalingReady,
+            ]);
+            if (isDesktop && !connection) {
+                shellStatus = 'unavailable';
+                shellMessage = 'Check the local service or configure a remote axklib-server connection.';
+                await replaceShell();
+                return;
+            }
             if (shell) await unmount(shell);
             mount(module.default, { target: mountTarget });
             frontendStartup.markAppMounted();

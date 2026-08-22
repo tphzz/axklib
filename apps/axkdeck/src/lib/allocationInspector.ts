@@ -12,6 +12,15 @@ export interface AllocationMapSaveRequest {
     document: unknown;
 }
 
+type ServerConnection = NonNullable<Window['__AXKLIB_SERVER__']>;
+
+export async function resolveAllocationServerConnection(): Promise<ServerConnection | null> {
+    if (window.__AXKLIB_SERVER__) return window.__AXKLIB_SERVER__;
+    const connection = await invoke<ServerConnection | null>('server_connection');
+    window.__AXKLIB_SERVER__ = connection ?? undefined;
+    return connection;
+}
+
 export function formatAllocationBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes.toLocaleString()} B`;
     const units = ['KiB', 'MiB', 'GiB'];

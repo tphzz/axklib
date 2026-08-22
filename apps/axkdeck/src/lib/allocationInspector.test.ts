@@ -8,11 +8,39 @@ import {
     allocationExportFilename,
     allocationSpaceStatistic,
     formatAllocationBytes,
+    resolveAllocationServerConnection,
     saveAllocationMap,
 } from './allocationInspector';
 
 describe('allocation inspector presentation', () => {
-    beforeEach(() => mocks.invoke.mockReset());
+    beforeEach(() => {
+        mocks.invoke.mockReset();
+        delete window.__AXKLIB_SERVER__;
+    });
+
+    it('retrieves the shared desktop connection for a secondary allocation window', async () => {
+        const connection = {
+            mode: 'local',
+            baseUrl: 'http://127.0.0.1:42101/api/v1',
+            bearerToken: 'test-token',
+        } as const;
+        mocks.invoke.mockResolvedValue(connection);
+
+        await expect(resolveAllocationServerConnection()).resolves.toEqual(connection);
+        expect(mocks.invoke).toHaveBeenCalledWith('server_connection');
+        expect(window.__AXKLIB_SERVER__).toEqual(connection);
+    });
+
+    it('reuses a connection already available in the allocation window', async () => {
+        window.__AXKLIB_SERVER__ = {
+            mode: 'remote',
+            baseUrl: 'https://example.test/api/v1',
+            bearerToken: 'test-token',
+        };
+
+        await expect(resolveAllocationServerConnection()).resolves.toEqual(window.__AXKLIB_SERVER__);
+        expect(mocks.invoke).not.toHaveBeenCalled();
+    });
 
     it('presents free clusters as allocatable bytes with the cluster count retained', () => {
         expect(allocationSpaceStatistic(10, 1024)).toEqual({ primary: '10 KiB', secondary: '10 clusters' });
