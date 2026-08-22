@@ -20,7 +20,7 @@
         onclose: () => void;
     }
 
-    type Submenu = 'import' | 'export';
+    type Submenu = 'import' | 'export' | 'expert';
 
     let {
         item,
@@ -42,6 +42,7 @@
     let submenuMenu = $state<HTMLDivElement>();
     let importParent = $state<HTMLButtonElement>();
     let exportParent = $state<HTMLButtonElement>();
+    let expertParent = $state<HTMLButtonElement>();
     let rootLeft = $state(0);
     let rootTop = $state(0);
     let submenuLeft = $state(0);
@@ -64,6 +65,15 @@
     const partitionHasTools = $derived(
         item.kind === 'partition' && (allocationInspectionEnabled || partitionActionsEnabled),
     );
+    const volumeHasImport = $derived(item.kind === 'volume' && packageImportEnabled);
+    const volumeHasExport = $derived(
+        item.kind === 'volume' &&
+            (packageExportEnabled ||
+                audioExportEnabled ||
+                (mediaConversionEnabled && item.volumeDirectoryId !== undefined)),
+    );
+    const volumeHasMutation = $derived(item.kind === 'volume' && volumeActionsEnabled);
+    const volumeHasTools = $derived(item.kind === 'volume' && volumeActionsEnabled);
 
     function directMenuItems(menu: HTMLDivElement | undefined): HTMLButtonElement[] {
         if (!menu) return [];
@@ -103,7 +113,15 @@
     }
 
     function submenuParent(kind: Submenu): HTMLButtonElement | undefined {
-        return kind === 'import' ? importParent : exportParent;
+        if (kind === 'import') return importParent;
+        if (kind === 'export') return exportParent;
+        return expertParent;
+    }
+
+    function submenuLabel(kind: Submenu): string {
+        if (kind === 'import') return 'Import';
+        if (kind === 'export') return 'Export';
+        return 'Expert';
     }
 
     function openSubmenu(kind: Submenu, focusFirst: boolean): void {
@@ -270,46 +288,87 @@
         {#if partitionHasMutation && partitionHasTools}
             <div class="context-menu-separator" role="separator"></div>
         {/if}
-        {#if allocationInspectionEnabled}
+        {#if partitionHasTools}
             <button
+                bind:this={expertParent}
+                class="context-submenu-trigger"
                 type="button"
                 role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('inspect-allocation')}>Visualize partition allocation</button
+                aria-haspopup="menu"
+                aria-expanded={activeSubmenu === 'expert'}
+                data-submenu="expert"
+                onmouseenter={() => openSubmenu('expert', false)}
+                onclick={() => openSubmenu('expert', true)}
             >
-        {/if}
-        {#if partitionActionsEnabled}
-            <button
-                type="button"
-                role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('repair-placement')}>Repair object placement…</button
-            >
+                <span>Expert</span><Icon name="chevron" size={13} />
+            </button>
         {/if}
     {:else}
-        {#if packageImportEnabled}
-            <button type="button" role="menuitem" onclick={() => choose('import-package')}>Import package…</button>
-        {/if}
-        {#if packageExportEnabled}
-            <button type="button" role="menuitem" onclick={() => choose('export-package')}>Export package…</button>
-        {/if}
-        {#if audioExportEnabled}
-            <button type="button" role="menuitem" onclick={() => choose('export-sfz')}>Export SFZ…</button>
-        {/if}
-        {#if mediaConversionEnabled && item.volumeDirectoryId !== undefined}
-            <button type="button" role="menuitem" onclick={() => choose('export-floppy')}>Export floppy image…</button>
-        {/if}
-        {#if volumeActionsEnabled}
-            {#if packageImportEnabled || packageExportEnabled || audioExportEnabled || mediaConversionEnabled}
-                <div class="context-menu-separator" role="separator"></div>
-            {/if}
-            <button type="button" role="menuitem" onclick={() => choose('repair-placement')}
-                >Repair object placement…</button
+        {#if volumeHasImport}
+            <button
+                bind:this={importParent}
+                class="context-submenu-trigger"
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={activeSubmenu === 'import'}
+                data-submenu="import"
+                onmouseenter={() => openSubmenu('import', false)}
+                onclick={() => openSubmenu('import', true)}
             >
-            <button type="button" role="menuitem" onclick={() => choose('rename-volume')}>Rename volume…</button>
-            <button class="danger-menu-item" type="button" role="menuitem" onclick={() => choose('delete-volume')}
-                >Delete volume</button
+                <span>Import</span><Icon name="chevron" size={13} />
+            </button>
+        {/if}
+        {#if volumeHasExport}
+            <button
+                bind:this={exportParent}
+                class="context-submenu-trigger"
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={activeSubmenu === 'export'}
+                data-submenu="export"
+                onmouseenter={() => openSubmenu('export', false)}
+                onclick={() => openSubmenu('export', true)}
             >
+                <span>Export</span><Icon name="chevron" size={13} />
+            </button>
+        {/if}
+        {#if (volumeHasImport || volumeHasExport) && (volumeHasMutation || volumeHasTools)}
+            <div class="context-menu-separator" role="separator"></div>
+        {/if}
+        {#if volumeHasMutation}
+            <button
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('rename-volume')}>Rename volume…</button
+            >
+            <button
+                class="danger-menu-item"
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('delete-volume')}>Delete volume</button
+            >
+        {/if}
+        {#if volumeHasMutation && volumeHasTools}
+            <div class="context-menu-separator" role="separator"></div>
+        {/if}
+        {#if volumeHasTools}
+            <button
+                bind:this={expertParent}
+                class="context-submenu-trigger"
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={activeSubmenu === 'expert'}
+                data-submenu="expert"
+                onmouseenter={() => openSubmenu('expert', false)}
+                onclick={() => openSubmenu('expert', true)}
+            >
+                <span>Expert</span><Icon name="chevron" size={13} />
+            </button>
         {/if}
     {/if}
 </div>
@@ -319,30 +378,66 @@
         bind:this={submenuMenu}
         class="tree-context-menu tree-context-submenu"
         role="menu"
-        aria-label={`${activeSubmenu === 'import' ? 'Import' : 'Export'} actions`}
+        aria-label={`${submenuLabel(activeSubmenu)} actions`}
         tabindex="-1"
         style={`left: ${submenuLeft}px; top: ${submenuTop}px; visibility: ${submenuPositioned ? 'visible' : 'hidden'}; pointer-events: ${submenuPositioned ? 'auto' : 'none'};`}
         onclick={(event) => event.stopPropagation()}
         onkeydown={handleSubmenuKey}
     >
         {#if activeSubmenu === 'import'}
-            <button type="button" role="menuitem" onclick={() => choose('import-packages')}>Import packages…</button>
+            {#if item.kind === 'partition'}
+                <button type="button" role="menuitem" onclick={() => choose('import-packages')}>Import packages…</button
+                >
+            {:else}
+                <button type="button" role="menuitem" onclick={() => choose('import-package')}>Import package…</button>
+            {/if}
+        {:else if activeSubmenu === 'export'}
+            {#if item.kind === 'partition'}
+                {#if volumePackageExportEnabled}
+                    <button type="button" role="menuitem" onclick={() => choose('export-volume-packages')}
+                        >Export volume packages…</button
+                    >
+                {/if}
+                {#if volumeFloppyExportEnabled}
+                    <button type="button" role="menuitem" onclick={() => choose('export-volume-floppies')}
+                        >Export volumes to floppies…</button
+                    >
+                {/if}
+                {#if mediaConversionEnabled}
+                    <button type="button" role="menuitem" onclick={() => choose('export-cdrom')}
+                        >Export CD-ROM image…</button
+                    >
+                {/if}
+            {:else}
+                {#if packageExportEnabled}
+                    <button type="button" role="menuitem" onclick={() => choose('export-package')}
+                        >Export volume package…</button
+                    >
+                {/if}
+                {#if mediaConversionEnabled && item.volumeDirectoryId !== undefined}
+                    <button type="button" role="menuitem" onclick={() => choose('export-floppy')}
+                        >Export floppy image…</button
+                    >
+                {/if}
+                {#if audioExportEnabled}
+                    <button type="button" role="menuitem" onclick={() => choose('export-sfz')}>Export SFZ…</button>
+                {/if}
+            {/if}
+        {:else if item.kind === 'partition'}
+            {#if allocationInspectionEnabled}
+                <button type="button" role="menuitem" onclick={() => choose('inspect-allocation')}
+                    >Visualize partition allocation</button
+                >
+            {/if}
+            {#if partitionActionsEnabled}
+                <button type="button" role="menuitem" onclick={() => choose('repair-placement')}
+                    >Repair object placement…</button
+                >
+            {/if}
         {:else}
-            {#if volumePackageExportEnabled}
-                <button type="button" role="menuitem" onclick={() => choose('export-volume-packages')}
-                    >Export volume packages…</button
-                >
-            {/if}
-            {#if volumeFloppyExportEnabled}
-                <button type="button" role="menuitem" onclick={() => choose('export-volume-floppies')}
-                    >Export volumes to floppies…</button
-                >
-            {/if}
-            {#if mediaConversionEnabled}
-                <button type="button" role="menuitem" onclick={() => choose('export-cdrom')}
-                    >Export CD-ROM image…</button
-                >
-            {/if}
+            <button type="button" role="menuitem" onclick={() => choose('repair-placement')}
+                >Repair object placement…</button
+            >
         {/if}
     </div>
 {/if}

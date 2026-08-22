@@ -199,12 +199,26 @@ describe('TreeNode', () => {
         });
 
         const capacity = screen.getByRole('progressbar', { name: '80% used' });
+        const partitionRow = capacity.closest('.tree-row');
+        const partitionStack = capacity.closest('.tree-item-stack');
         expect(capacity.getAttribute('aria-valuenow')).toBe('80');
         expect(capacity.getAttribute('aria-valuemax')).toBe('100');
         expect(capacity.classList.contains('warning')).toBe(true);
+        expect(partitionRow?.classList.contains('partition-summary-row')).toBe(true);
+        expect(partitionStack).toBeTruthy();
+        expect(partitionStack?.querySelector('.tree-item-name')?.textContent).toBe('Partition 0');
+        expect(partitionStack?.querySelector('.partition-capacity')).toBe(capacity);
         expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('3 volumes');
         expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('80 of 100 clusters used');
         expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('80 KiB of 100 KiB used');
+    });
+
+    it('renders SFS capacity as a slim full-width second line without narrowing the partition name', () => {
+        expect(treeNodeSource).toMatch(/\.partition-summary-row\s*\{[^}]*height:\s*27px/s);
+        expect(treeNodeSource).toMatch(
+            /\.partition-capacity\s*\{[^}]*position:\s*absolute[^}]*left:\s*0[^}]*right:\s*0[^}]*bottom:\s*1px[^}]*height:\s*3px/s,
+        );
+        expect(treeNodeSource).not.toContain('width: 42px');
     });
 
     it('marks partitions at ninety percent usage as critical', () => {
@@ -271,6 +285,7 @@ describe('TreeNode', () => {
 
         expect(screen.queryByRole('progressbar')).toBeNull();
         expect(container.querySelector('.partition-capacity')).toBeNull();
+        expect(container.querySelector('.partition-summary-row')).toBeNull();
         expect(container.querySelector('[role="tooltip"]')).toBeNull();
         expect(screen.getByRole('button', { name: 'Partition 0' }).getAttribute('aria-describedby')).toBeNull();
     });

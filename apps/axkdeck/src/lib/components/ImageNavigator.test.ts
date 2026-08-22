@@ -275,6 +275,7 @@ describe('ImageNavigator', () => {
             clientX: 20,
             clientY: 20,
         });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'import-package');
 
@@ -282,9 +283,57 @@ describe('ImageNavigator', () => {
             clientX: 20,
             clientY: 20,
         });
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume package…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'export-package');
         expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
+    });
+
+    it('groups volume workflows and expert tools with consistent ordering and separators', async () => {
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                items: [
+                    {
+                        id: 'volume',
+                        name: 'DRUMS',
+                        kind: 'volume',
+                        childCount: 0,
+                        partitionIndex: 0,
+                        volumeDirectoryId: 17,
+                    },
+                ],
+                packageImportEnabled: true,
+                packageExportEnabled: true,
+                audioExportEnabled: true,
+                mediaConversionEnabled: true,
+                volumeActionsEnabled: true,
+                onimageaction,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }));
+        const rootMenu = screen.getByRole('menu', { name: 'DRUMS actions' });
+        expect(
+            within(rootMenu)
+                .getAllByRole('menuitem')
+                .map((item) => item.textContent?.trim()),
+        ).toEqual(['Import', 'Export', 'Rename volume…', 'Delete volume', 'Expert']);
+        expect(rootMenu.querySelectorAll(':scope > [role="separator"]')).toHaveLength(2);
+
+        await fireEvent.click(within(rootMenu).getByRole('menuitem', { name: 'Export' }));
+        const exportMenu = screen.getByRole('menu', { name: 'Export actions' });
+        expect(
+            within(exportMenu)
+                .getAllByRole('menuitem')
+                .map((item) => item.textContent?.trim()),
+        ).toEqual(['Export volume package…', 'Export floppy image…', 'Export SFZ…']);
+
+        await fireEvent.click(within(rootMenu).getByRole('menuitem', { name: 'Expert' }));
+        const expertMenu = screen.getByRole('menu', { name: 'Expert actions' });
+        expect(within(expertMenu).getByRole('menuitem', { name: 'Repair object placement…' })).toBeTruthy();
     });
 
     it('offers only volume package export for a read-only AXK object directory', async () => {
@@ -319,10 +368,11 @@ describe('ImageNavigator', () => {
         });
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Object directory/ }));
-        expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
         expect(screen.queryByRole('menuitem', { name: 'Rename volume…' })).toBeNull();
         expect(screen.queryByRole('menuitem', { name: 'Delete volume' })).toBeNull();
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume package…' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'object-directory-volume', partitionIndex: 0 }),
             'export-package',
@@ -366,14 +416,7 @@ describe('ImageNavigator', () => {
             within(rootMenu)
                 .getAllByRole('menuitem')
                 .map((item) => item.textContent?.trim()),
-        ).toEqual([
-            'Import',
-            'Export',
-            'Rename partition…',
-            'Add volume…',
-            'Visualize partition allocation',
-            'Repair object placement…',
-        ]);
+        ).toEqual(['Import', 'Export', 'Rename partition…', 'Add volume…', 'Expert']);
         expect(rootMenu.querySelectorAll(':scope > [role="separator"]')).toHaveLength(2);
         const menuGeometry = appStyles.match(/\.tree-context-menu\s*\{[^}]+\}/)?.[0];
         const menuActionGeometry = appStyles.match(/\.tree-context-menu button\s*\{[^}]+\}/)?.[0];
@@ -407,7 +450,14 @@ describe('ImageNavigator', () => {
         expect(treeScroll?.classList.contains('context-menu-open')).toBe(false);
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition-0' }), 'import-packages');
         await fireEvent.contextMenu(partitionButton!);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Visualize partition allocation' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Expert' }));
+        const expertMenu = screen.getByRole('menu', { name: 'Expert actions' });
+        expect(
+            within(expertMenu)
+                .getAllByRole('menuitem')
+                .map((item) => item.textContent?.trim()),
+        ).toEqual(['Visualize partition allocation', 'Repair object placement…']);
+        await fireEvent.click(within(expertMenu).getByRole('menuitem', { name: 'Visualize partition allocation' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'partition-0' }),
             'inspect-allocation',
@@ -440,6 +490,7 @@ describe('ImageNavigator', () => {
                 packageImportEnabled: true,
                 volumePackageExportEnabled: true,
                 volumeFloppyExportEnabled: true,
+                allocationInspectionEnabled: true,
                 onimageaction,
             },
         });
@@ -454,7 +505,16 @@ describe('ImageNavigator', () => {
         expect(document.activeElement).toBe(importParent);
         expect(screen.queryByRole('menu', { name: 'Import actions' })).toBeNull();
         await fireEvent.keyDown(importParent, { key: 'ArrowDown' });
-        expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Export' }));
+        const exportParent = screen.getByRole('menuitem', { name: 'Export' });
+        expect(document.activeElement).toBe(exportParent);
+        await fireEvent.keyDown(exportParent, { key: 'End' });
+        const expertParent = screen.getByRole('menuitem', { name: 'Expert' });
+        expect(document.activeElement).toBe(expertParent);
+        await fireEvent.keyDown(expertParent, { key: 'ArrowRight' });
+        const expertLeaf = screen.getByRole('menuitem', { name: 'Visualize partition allocation' });
+        expect(document.activeElement).toBe(expertLeaf);
+        await fireEvent.keyDown(expertLeaf, { key: 'ArrowLeft' });
+        expect(document.activeElement).toBe(expertParent);
     });
 
     it('does not render empty partition workflow submenus', async () => {
@@ -526,6 +586,7 @@ describe('ImageNavigator', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: /Expand PARTITION 1/ }));
         await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export floppy image…' }));
         expect(onimageaction).toHaveBeenCalledWith(
             expect.objectContaining({ id: 'volume', volumeDirectoryId: 17 }),
@@ -564,11 +625,13 @@ describe('ImageNavigator', () => {
         });
 
         await fireEvent.contextMenu(screen.getByText('PARTITION 1').closest('button')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Expert' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Repair object placement…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'partition' }), 'repair-placement');
 
         await fireEvent.click(screen.getByRole('button', { name: /Expand PARTITION 1/ }));
         await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Expert' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Repair object placement…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'repair-placement');
     });

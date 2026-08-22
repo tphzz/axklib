@@ -243,6 +243,7 @@
 <div>
     <div
         class:selected={selectedId === item.id}
+        class:partition-summary-row={loadCompletePartition}
         class="tree-row group"
         style:--tree-depth={depth}
         data-import-drop-volume={item.kind === 'volume' ? item.name : undefined}
@@ -267,58 +268,60 @@
         {:else}
             <span class="tree-chevron" aria-hidden="true"></span>
         {/if}
-        <button
-            class="tree-item-select"
-            type="button"
-            aria-current={selectedId === item.id ? 'true' : undefined}
-            aria-describedby={tooltipId}
-            data-tree-id={item.id}
-            data-tree-parent-id={parentId}
-            onclick={() => onselect(item)}
-            ondblclick={() => {
-                if (item.kind === 'partition') void toggle();
-            }}
-            onkeydown={(event) => void handleTreeKeyboard(event)}
-            oncontextmenu={openContextMenu}
-        >
-            <span class:volume={item.kind === 'volume'} class="tree-icon"
-                ><Icon
-                    name={item.kind === 'disk' ? 'disc' : item.kind === 'object' ? 'waveform' : 'folder'}
-                    size={14}
-                /></span
+        <div class="tree-item-stack">
+            <button
+                class="tree-item-select"
+                type="button"
+                aria-current={selectedId === item.id ? 'true' : undefined}
+                aria-describedby={tooltipId}
+                data-tree-id={item.id}
+                data-tree-parent-id={parentId}
+                onclick={() => onselect(item)}
+                ondblclick={() => {
+                    if (item.kind === 'partition') void toggle();
+                }}
+                onkeydown={(event) => void handleTreeKeyboard(event)}
+                oncontextmenu={openContextMenu}
             >
-            <span class="tree-item-name" style:white-space="pre">{item.name}</span>
-            {#if metadata}<span class="tree-item-metadata">{metadata}</span>{/if}
-            {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
-                ></span>{/if}
-        </button>
-        {#if loadCompletePartition}
-            {#if partitionCapacity}
-                <span
-                    class:warning={capacityLevel === 'warning'}
-                    class:critical={capacityLevel === 'critical'}
-                    class="partition-capacity"
-                    role="progressbar"
-                    aria-label={`${usedPercent}% used`}
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow={usedPercent}
+                <span class:volume={item.kind === 'volume'} class="tree-icon"
+                    ><Icon
+                        name={item.kind === 'disk' ? 'disc' : item.kind === 'object' ? 'waveform' : 'folder'}
+                        size={14}
+                    /></span
                 >
-                    <span class="partition-capacity-fill" style:width={`${usedPercent}%`}></span>
+                <span class="tree-item-name" style:white-space="pre">{item.name}</span>
+                {#if metadata}<span class="tree-item-metadata">{metadata}</span>{/if}
+                {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
+                    ></span>{/if}
+            </button>
+            {#if loadCompletePartition}
+                {#if partitionCapacity}
+                    <span
+                        class:warning={capacityLevel === 'warning'}
+                        class:critical={capacityLevel === 'critical'}
+                        class="partition-capacity"
+                        role="progressbar"
+                        aria-label={`${usedPercent}% used`}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow={usedPercent}
+                    >
+                        <span class="partition-capacity-fill" style:width={`${usedPercent}%`}></span>
+                    </span>
+                {:else}
+                    <span class="partition-capacity unavailable" aria-hidden="true"></span>
+                {/if}
+                <span id={partitionTooltipId} class="tree-item-tooltip" role="tooltip">
+                    <span>{partitionVolumeText}</span>
+                    <span>{partitionCapacityText}</span>
+                    {#if partitionSpaceText}<span>{partitionSpaceText}</span>{/if}
                 </span>
-            {:else}
-                <span class="partition-capacity unavailable" aria-hidden="true"></span>
+            {:else if item.kind === 'volume' && item.sizeBytes !== undefined}
+                <span id={volumeTooltipId} class="tree-item-tooltip" role="tooltip">
+                    <span>Size: {formatStoredSize(item.sizeBytes)}</span>
+                </span>
             {/if}
-            <span id={partitionTooltipId} class="tree-item-tooltip" role="tooltip">
-                <span>{partitionVolumeText}</span>
-                <span>{partitionCapacityText}</span>
-                {#if partitionSpaceText}<span>{partitionSpaceText}</span>{/if}
-            </span>
-        {:else if item.kind === 'volume' && item.sizeBytes !== undefined}
-            <span id={volumeTooltipId} class="tree-item-tooltip" role="tooltip">
-                <span>Size: {formatStoredSize(item.sizeBytes)}</span>
-            </span>
-        {/if}
+        </div>
     </div>
 
     {#if expanded && hasChildren}
@@ -371,18 +374,47 @@
         position: relative;
     }
 
+    .partition-summary-row {
+        height: 27px;
+    }
+
+    .partition-summary-row > .tree-chevron {
+        align-self: flex-start;
+        margin-top: 4px;
+    }
+
+    .tree-item-stack {
+        position: relative;
+        min-width: 0;
+        height: 100%;
+        flex: 1;
+    }
+
+    .tree-item-stack > .tree-item-select {
+        width: 100%;
+        height: 100%;
+    }
+
+    .partition-summary-row .tree-item-select {
+        box-sizing: border-box;
+        padding-bottom: 6px;
+    }
+
     .partition-capacity {
-        width: 42px;
-        height: 6px;
-        flex: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 1px;
+        height: 3px;
         overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 2px;
-        background: var(--color-bg-deep);
+        border-radius: 1px;
+        background: var(--color-border);
+        pointer-events: none;
     }
 
     .partition-capacity.unavailable {
-        border-style: dashed;
+        border-bottom: 1px dashed var(--color-border);
+        background: transparent;
         opacity: 0.55;
     }
 
@@ -423,7 +455,7 @@
             transform 100ms ease;
     }
 
-    .tree-row:hover > .tree-item-tooltip,
+    .tree-row:hover > .tree-item-stack > .tree-item-tooltip,
     .tree-item-select:focus-visible ~ .tree-item-tooltip {
         opacity: 1;
         transform: translateY(0);

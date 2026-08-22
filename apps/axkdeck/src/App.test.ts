@@ -1301,6 +1301,7 @@ describe('App panel layout', () => {
             nextCursor: null,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
         const importDialog = await screen.findByRole('dialog', { name: 'Import axklib package' });
         await fireEvent.click(within(importDialog).getByRole('button', { name: /Storage location/ }));
@@ -1588,8 +1589,9 @@ describe('App panel layout', () => {
 
         await chooseNestedImage();
         await fireEvent.contextMenu(await screen.findByRole('button', { name: /Object directory/ }));
-        expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume package…' }));
 
         const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Export “Object directory”')).toBeTruthy();
