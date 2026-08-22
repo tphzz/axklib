@@ -1,5 +1,17 @@
 {
   "bundle": {
+    "linux": {
+      "deb": {
+        "depends": [
+          "libc++1-18",
+          "libc++abi1-18",
+          "libunwind-18"
+        ]
+      },
+      "rpm": {
+        "depends": ["libcxx", "llvm-libunwind"]
+      }
+    },
     "targets": ["deb", "rpm"]
   }
 }

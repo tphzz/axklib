@@ -842,6 +842,11 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     root = Path(__file__).resolve().parents[3]
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     prettier = json.loads((root / "apps/axkdeck/.prettierrc.json").read_text(encoding="utf-8"))
+    linux_bundle = json.loads(
+        (root / "apps/axkdeck/src-tauri/tauri.linux.conf.json").read_text(
+            encoding="utf-8"
+        )
+    )
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
@@ -850,7 +855,18 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
 
     assert "/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf" in attributes
     assert prettier["endOfLine"] == "lf"
+    assert linux_bundle["bundle"]["linux"]["deb"]["depends"] == [
+        "libc++1-18",
+        "libc++abi1-18",
+        "libunwind-18",
+    ]
+    assert linux_bundle["bundle"]["linux"]["rpm"]["depends"] == [
+        "libcxx",
+        "llvm-libunwind",
+    ]
     assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow_with_platform
+    assert 'dpkg-deb -f "$deb" Depends' in workflow_with_platform
+    assert 'rpm -qp --requires "$rpm"' in workflow_with_platform
     assert 'rpm -Kv "$rpm"' in workflow_with_platform
     assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow_with_platform
     assert "rpm2cpio" not in workflow_with_platform

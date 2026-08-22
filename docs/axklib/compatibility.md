@@ -17,7 +17,7 @@ version. See [Versioning And Build Identity](versioning.md).
 | Reference build | Build toolchain | Architectures |
 | --- | --- | --- |
 | Windows library and CLI | Visual Studio 18 MSVC, dynamic CRT | x64, ARM64 |
-| Linux library and CLI | GCC 14, distribution libstdc++/glibc | x64, ARM64 |
+| Linux library and CLI | Clang 18, LLVM libc++ 18, distribution glibc | x64, ARM64 |
 | macOS library and CLI | Apple Clang from Xcode 16.4 | universal x64 + ARM64 |
 
 A shared library built from source is compatible only with the matching
