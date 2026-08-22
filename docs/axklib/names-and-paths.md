@@ -172,6 +172,13 @@ Or11 Argent (F002)
 
 ## Content Tree Sorting
 
+For SFS hard-disk images, axkdeck presents partition names and the direct Volume
+children of each partition in bytewise ASCII order. This matches the display
+order observed in the A-series UI: punctuation, digits, uppercase names,
+underscore, and lowercase names retain their byte values as the sort key. This
+is presentation order only; physical partition indexes and on-disk directory
+order remain unchanged.
+
 Within a category, nodes sort by category order (Programs, Sample Banks/Samples,
 Wave Data, Sequences), Program slot number, display name, object type, and
 object key. This keeps Program slots numerically stable. Missing Program targets

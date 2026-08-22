@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ImageLocation } from '../storageLocations';
+    import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
     import ImageTreeContextMenu from './ImageTreeContextMenu.svelte';
@@ -31,6 +32,7 @@
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         allocationInspectionEnabled?: boolean;
+        samplerOrderingEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
     }
 
@@ -56,6 +58,7 @@
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         allocationInspectionEnabled = false,
+        samplerOrderingEnabled = false,
         onimageaction,
     }: Props = $props();
     let filter = $state('');
@@ -72,6 +75,9 @@
         if (items.length !== 1 || items[0]?.kind !== 'disk') return items;
         return items[0].children ?? loadedRootChildren;
     });
+    const orderedContentItems = $derived(
+        samplerOrderingEnabled ? orderSamplerTreeItems(contentItems, 'partition') : contentItems,
+    );
 
     $effect(() => {
         const root = items.length === 1 && items[0]?.kind === 'disk' ? items[0] : null;
@@ -108,7 +114,7 @@
 
     const visibleItems = $derived.by(() => {
         const query = filter.trim().toLocaleLowerCase();
-        return query ? contentItems.filter((item) => matches(item, query)) : contentItems;
+        return query ? orderedContentItems.filter((item) => matches(item, query)) : orderedContentItems;
     });
 
     function requestTreeMenu(item: DiskTreeItem, x: number, y: number): void {
@@ -277,6 +283,7 @@
                         {audioExportEnabled}
                         {mediaConversionEnabled}
                         {allocationInspectionEnabled}
+                        {samplerOrderingEnabled}
                         onrequestmenu={requestTreeMenu}
                     />
                 {:else}

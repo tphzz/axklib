@@ -67,6 +67,84 @@ describe('TreeNode', () => {
         expect(screen.getByRole('button', { name: /Volume α \[Volume/ })).toBe(document.activeElement);
     });
 
+    it('loads every volume page before rendering sampler display order', async () => {
+        const onloadchildren = vi
+            .fn()
+            .mockResolvedValueOnce({
+                items: [
+                    { id: 'v-dollar', name: '$foo', kind: 'volume', childCount: 0 },
+                    { id: 'v-a', name: 'a_foo', kind: 'volume', childCount: 0 },
+                ],
+                totalCount: 5,
+            })
+            .mockResolvedValueOnce({
+                items: [
+                    { id: 'v-number', name: '001_foo', kind: 'volume', childCount: 0 },
+                    { id: 'v-c', name: 'c_foo', kind: 'volume', childCount: 0 },
+                ],
+                totalCount: 5,
+            })
+            .mockResolvedValueOnce({
+                items: [{ id: 'v-bang', name: '!foo', kind: 'volume', childCount: 0 }],
+                totalCount: 5,
+            });
+        const { container } = render(TreeNode, {
+            props: {
+                item: { id: 'p0', name: 'Partition 0', kind: 'partition', childCount: 5 },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren,
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
+        await waitFor(() => expect(screen.getByText('!foo')).toBeTruthy());
+        expect(onloadchildren).toHaveBeenNthCalledWith(1, 'p0', 0, 64);
+        expect(onloadchildren).toHaveBeenNthCalledWith(2, 'p0', 2, 64);
+        expect(onloadchildren).toHaveBeenNthCalledWith(3, 'p0', 4, 64);
+        expect([...container.querySelectorAll('.tree-item-name')].map((name) => name.textContent)).toEqual([
+            'Partition 0',
+            '!foo',
+            '$foo',
+            '001_foo',
+            'a_foo',
+            'c_foo',
+        ]);
+        expect(screen.queryByRole('button', { name: /Load more/ })).toBeNull();
+    });
+
+    it('completes a partially embedded SFS volume list when its partition opens', async () => {
+        const onloadchildren = vi.fn().mockResolvedValue({
+            items: [{ id: 'v-bang', name: '!foo', kind: 'volume', childCount: 0 }],
+            totalCount: 2,
+        });
+        const { container } = render(TreeNode, {
+            props: {
+                item: {
+                    id: 'p0',
+                    name: 'Partition 0',
+                    kind: 'partition',
+                    childCount: 2,
+                    children: [{ id: 'v-a', name: 'a_foo', kind: 'volume', childCount: 0 }],
+                },
+                selectedId: '',
+                onselect: vi.fn(),
+                onloadchildren,
+                samplerOrderingEnabled: true,
+            },
+        });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Expand Partition 0' }));
+        await waitFor(() => expect(screen.getByText('!foo')).toBeTruthy());
+        expect(onloadchildren).toHaveBeenCalledWith('p0', 1, 64);
+        expect([...container.querySelectorAll('.tree-item-name')].map((name) => name.textContent)).toEqual([
+            'Partition 0',
+            '!foo',
+            'a_foo',
+        ]);
+    });
+
     it('treats volumes as terminal browser entries even when they contain objects', () => {
         const onloadchildren = vi.fn();
         render(TreeNode, {

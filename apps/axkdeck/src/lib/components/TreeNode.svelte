@@ -1,6 +1,7 @@
 <script lang="ts">
     import { tick } from 'svelte';
     import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
+    import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem } from '../types';
     import Icon from './Icon.svelte';
     import TreeNode from './TreeNode.svelte';
@@ -25,6 +26,7 @@
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         allocationInspectionEnabled?: boolean;
+        samplerOrderingEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
@@ -44,6 +46,7 @@
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         allocationInspectionEnabled = false,
+        samplerOrderingEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -53,6 +56,8 @@
     let loadError = $state('');
     let initialized = false;
     const hasChildren = $derived(item.kind !== 'volume' && totalCount > 0);
+    const loadCompletePartition = $derived(samplerOrderingEnabled && item.kind === 'partition');
+    const orderedChildren = $derived(loadCompletePartition ? orderSamplerTreeItems(children, 'volume') : children);
     const metadata = $derived(
         item.kind === 'partition' && item.partitionIndex !== undefined
             ? `[Partition ${item.partitionIndex}]`
@@ -71,7 +76,9 @@
         children = item.children ?? [];
         totalCount = item.childCount;
         initialized = true;
-        if (expanded && children.length === 0 && hasChildren) void loadMore();
+        if (expanded && children.length < totalCount && (children.length === 0 || loadCompletePartition)) {
+            void loadMore();
+        }
     });
 
     async function loadMore(): Promise<void> {
@@ -79,15 +86,21 @@
         loading = true;
         loadError = '';
         try {
-            const page = await onloadchildren(item.id, children.length, 64);
-            if (!Number.isSafeInteger(page.totalCount) || page.totalCount < children.length + page.items.length) {
-                throw new Error('The server returned an invalid tree page');
-            }
-            if (page.items.length === 0 && children.length < page.totalCount) {
-                throw new Error('The server returned an incomplete tree page');
-            }
-            children = [...children, ...page.items];
-            totalCount = page.totalCount;
+            const loaded = [...children];
+            let loadedTotalCount = totalCount;
+            do {
+                const page = await onloadchildren(item.id, loaded.length, 64);
+                if (!Number.isSafeInteger(page.totalCount) || page.totalCount < loaded.length + page.items.length) {
+                    throw new Error('The server returned an invalid tree page');
+                }
+                if (page.items.length === 0 && loaded.length < page.totalCount) {
+                    throw new Error('The server returned an incomplete tree page');
+                }
+                loaded.push(...page.items);
+                loadedTotalCount = page.totalCount;
+            } while (loadCompletePartition && loaded.length < loadedTotalCount);
+            children = loaded;
+            totalCount = loadedTotalCount;
         } catch (reason) {
             loadError = reason instanceof Error ? reason.message : String(reason);
         } finally {
@@ -98,7 +111,9 @@
     async function toggle(): Promise<void> {
         if (!hasChildren) return;
         expanded = !expanded;
-        if (expanded && children.length === 0) await loadMore();
+        if (expanded && children.length < totalCount && (children.length === 0 || loadCompletePartition)) {
+            await loadMore();
+        }
     }
 
     function canOpenMenu(): boolean {
@@ -247,7 +262,7 @@
                     <button type="button" onclick={() => void loadMore()}>Retry</button>
                 </div>
             {/if}
-            {#each children as child (child.id)}
+            {#each orderedChildren as child (child.id)}
                 <TreeNode
                     item={child}
                     {selectedId}
@@ -264,6 +279,7 @@
                     {audioExportEnabled}
                     {mediaConversionEnabled}
                     {allocationInspectionEnabled}
+                    {samplerOrderingEnabled}
                     {onrequestmenu}
                 />
             {/each}

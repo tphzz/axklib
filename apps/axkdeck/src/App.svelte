@@ -546,7 +546,6 @@
     async function saveRemoteConnection(input: RemoteServerSettingsInput): Promise<void> {
         await connectionActions.saveRemote(input);
     }
-
     async function switchToLocalConnection(): Promise<void> {
         await connectionActions.useLocal();
     }
@@ -613,6 +612,7 @@
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
     allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
+    samplerOrderingEnabled={imageSessionWorkflow.imageFormat === 'sfs'}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}

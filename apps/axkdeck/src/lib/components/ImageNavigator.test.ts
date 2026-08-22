@@ -139,6 +139,60 @@ describe('ImageNavigator', () => {
         expect(screen.getByRole('searchbox', { name: 'Search image contents' })).toBeTruthy();
     });
 
+    it('renders SFS partitions in sampler display order and preserves physical selection identity', async () => {
+        const onselect = vi.fn();
+        const { container } = render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                samplerOrderingEnabled: true,
+                onselect,
+                items: [
+                    {
+                        id: 'disk',
+                        name: 'disk.hds',
+                        kind: 'disk',
+                        childCount: 4,
+                        children: [
+                            { id: 'p0', name: '001_PARTITION 1', kind: 'partition', partitionIndex: 0, childCount: 0 },
+                            { id: 'p2', name: 'A_PARTITION 3', kind: 'partition', partitionIndex: 2, childCount: 0 },
+                            { id: 'p3', name: '_PARTITION 4', kind: 'partition', partitionIndex: 3, childCount: 0 },
+                            { id: 'p7', name: '$PARTITION 8', kind: 'partition', partitionIndex: 7, childCount: 0 },
+                        ],
+                    },
+                ],
+            },
+        });
+
+        expect([...container.querySelectorAll('.tree-item-name')].map((name) => name.textContent)).toEqual([
+            '$PARTITION 8',
+            '001_PARTITION 1',
+            'A_PARTITION 3',
+            '_PARTITION 4',
+        ]);
+
+        await fireEvent.click(screen.getByRole('button', { name: '$PARTITION 8 [Partition 7]' }));
+        expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ id: 'p7', partitionIndex: 7 }));
+    });
+
+    it('does not reorder partitions when sampler ordering is disabled', () => {
+        const { container } = render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'library.iso' }),
+                items: [
+                    { id: 'p3', name: '_PARTITION 4', kind: 'partition', partitionIndex: 3, childCount: 0 },
+                    { id: 'p7', name: '$PARTITION 8', kind: 'partition', partitionIndex: 7, childCount: 0 },
+                ],
+            },
+        });
+
+        expect([...container.querySelectorAll('.tree-item-name')].map((name) => name.textContent)).toEqual([
+            '_PARTITION 4',
+            '$PARTITION 8',
+        ]);
+    });
+
     it('preserves sampler-significant repeated spaces in volume names', () => {
         const { container } = render(ImageNavigator, {
             props: {

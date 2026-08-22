@@ -84,6 +84,7 @@
         sequenceExportAvailable: boolean;
         mediaConversionAvailable: boolean;
         allocationInspectionAvailable: boolean;
+        samplerOrderingEnabled?: boolean;
         openConnectionSettings: () => void;
         openImage: () => void;
         createImage: () => void;
@@ -147,6 +148,7 @@
         sequenceExportAvailable,
         mediaConversionAvailable,
         allocationInspectionAvailable,
+        samplerOrderingEnabled = false,
         openConnectionSettings,
         openImage,
         createImage,
@@ -371,6 +373,7 @@
             audioExportEnabled={audioExportAvailable}
             mediaConversionEnabled={mediaConversionAvailable}
             allocationInspectionEnabled={allocationInspectionAvailable}
+            {samplerOrderingEnabled}
             onimageaction={imageAction}
             onloadchildren={(parentId, offset, limit) =>
                 sessionId === null
