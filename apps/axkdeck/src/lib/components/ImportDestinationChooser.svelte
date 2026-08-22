@@ -122,23 +122,18 @@
 </script>
 
 <section class="import-destination" aria-label="Import destination">
-    <div class="destination-heading">
-        <strong>Destination</strong>
-        <div class="destination-mode dialog-segmented-control" role="group" aria-label="Destination type">
-            <button
-                type="button"
-                aria-pressed={mode === 'existing'}
-                disabled={disabled || volumes.length === 0}
-                onclick={() => onmode('existing')}>Existing volume</button
-            >
-            <button type="button" aria-pressed={mode === 'create'} {disabled} onclick={() => onmode('create')}
-                >New volume</button
-            >
-        </div>
+    <strong class="destination-label">Destination volume</strong>
+    <div class="destination-mode dialog-segmented-control" role="group" aria-label="Destination volume type">
+        <button
+            type="button"
+            aria-pressed={mode === 'existing'}
+            disabled={disabled || volumes.length === 0}
+            onclick={() => onmode('existing')}>Existing</button
+        >
+        <button type="button" aria-pressed={mode === 'create'} {disabled} onclick={() => onmode('create')}>New</button>
     </div>
 
     {#if mode === 'existing'}
-        <label class="target-field" for="import-volume-search">Volume</label>
         <div class="volume-combobox">
             <input
                 bind:this={volumeInput}
@@ -146,6 +141,7 @@
                 class="dialog-field-control"
                 type="text"
                 role="combobox"
+                aria-label="Destination volume"
                 aria-autocomplete="list"
                 aria-expanded={listOpen}
                 aria-controls="import-volume-options"
@@ -199,33 +195,29 @@
         </div>
     {:else}
         <div class="new-volume-fields">
-            <label class="target-field">
-                <span>Partition</span>
-                <select
-                    class="dialog-field-control"
-                    value={partitionIndex ?? ''}
-                    disabled={disabled || partitions.length === 0}
-                    onchange={(event) => onpartition(Number(event.currentTarget.value))}
-                >
-                    {#each partitions as option (option.partitionIndex)}
-                        <option value={option.partitionIndex}>{option.name}</option>
-                    {/each}
-                </select>
-            </label>
-            <label class="target-field">
-                <span>Volume name</span>
-                <input
-                    class="dialog-field-control"
-                    type="text"
-                    minlength="1"
-                    maxlength="16"
-                    value={volumeName}
-                    placeholder="Enter a volume name"
-                    {disabled}
-                    autocomplete="off"
-                    oninput={(event) => onname(event.currentTarget.value)}
-                />
-            </label>
+            <select
+                class="dialog-field-control"
+                aria-label="Destination partition"
+                value={partitionIndex ?? ''}
+                disabled={disabled || partitions.length === 0}
+                onchange={(event) => onpartition(Number(event.currentTarget.value))}
+            >
+                {#each partitions as option (option.partitionIndex)}
+                    <option value={option.partitionIndex}>{option.name}</option>
+                {/each}
+            </select>
+            <input
+                class="dialog-field-control"
+                type="text"
+                aria-label="New volume name"
+                minlength="1"
+                maxlength="16"
+                value={volumeName}
+                placeholder="Enter a volume name"
+                {disabled}
+                autocomplete="off"
+                oninput={(event) => onname(event.currentTarget.value)}
+            />
         </div>
     {/if}
 </section>
@@ -233,24 +225,19 @@
 <style>
     .import-destination {
         display: grid;
-        gap: 9px;
-        margin-bottom: 12px;
+        grid-template-columns: max-content max-content minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
         padding: 10px;
         border: 1px solid var(--color-border);
         border-radius: 5px;
         background: rgb(255 255 255 / 2%);
     }
 
-    .destination-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-    }
-
-    .destination-heading > strong {
+    .destination-label {
         color: var(--color-text-strong);
-        font-size: 11px;
+        font-size: var(--dialog-section-font-size);
+        white-space: nowrap;
     }
 
     .destination-mode {
@@ -259,6 +246,7 @@
 
     .volume-combobox {
         position: relative;
+        min-width: 0;
     }
 
     .volume-combobox > input {
@@ -303,15 +291,8 @@
     .new-volume-fields {
         display: grid;
         grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1fr);
-        gap: 10px;
-    }
-
-    .target-field {
-        display: grid;
         min-width: 0;
-        gap: 4px;
-        color: var(--color-text-muted);
-        font-size: var(--dialog-label-font-size);
+        gap: 8px;
     }
 
     .new-volume-fields :global(.dialog-field-control) {
@@ -320,13 +301,17 @@
     }
 
     @media (max-width: 640px) {
-        .destination-heading,
-        .new-volume-fields {
-            grid-template-columns: 1fr;
+        .import-destination {
+            grid-template-columns: minmax(0, 1fr) max-content;
         }
 
-        .destination-heading {
-            display: grid;
+        .volume-combobox,
+        .new-volume-fields {
+            grid-column: 1 / -1;
+        }
+
+        .new-volume-fields {
+            grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr);
         }
     }
 </style>

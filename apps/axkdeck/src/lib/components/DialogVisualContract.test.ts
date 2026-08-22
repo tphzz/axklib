@@ -63,6 +63,9 @@ describe('dialog visual contract', () => {
         expect(appStyles).toMatch(
             /\.dialog-segmented-control\s*>\s*button\s*\{[^}]*min-height:\s*27px[^}]*font-size:\s*var\(--dialog-table-header-font-size\)/s,
         );
+        expect(appStyles).toMatch(
+            /\.dialog-segmented-control\s*>\s*button:focus-visible\s*\{[^}]*outline-offset:\s*-2px/s,
+        );
         for (const path of segmentedControls) {
             expect(source(path), path).toContain('dialog-segmented-control');
         }

@@ -220,11 +220,11 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByText(/2 packages will be imported into one volume/)).toBeTruthy();
         expect(screen.getByRole('button', { name: 'One volume' }).getAttribute('aria-pressed')).toBe('true');
         expect(screen.getByRole('button', { name: 'Separate volumes' }).hasAttribute('disabled')).toBe(true);
-        expect((screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement).value).toBe(
+        expect((screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
             'Partition 1 / Existing',
         );
 
-        await fireEvent.click(screen.getByRole('button', { name: 'New volume' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'New' }));
         expect(callbacks.ondestinationmode).toHaveBeenCalledWith('create');
     });
 

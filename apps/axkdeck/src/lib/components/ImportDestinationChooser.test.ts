@@ -9,6 +9,10 @@ import { describe, expect, it, vi } from 'vitest';
 import ImportDestinationChooser from './ImportDestinationChooser.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+const destinationSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/ImportDestinationChooser.svelte'),
+    'utf8',
+);
 
 const partitions = [
     { partitionIndex: 0, name: 'SOUNDS 01' },
@@ -38,10 +42,24 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ImportDestinationChooser', () => {
+    it('uses one compact destination-volume row with concise mode labels', () => {
+        render(ImportDestinationChooser, { props: props() });
+
+        expect(screen.getByText('Destination volume')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Existing' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'New' })).toBeTruthy();
+        expect(screen.getByRole('combobox', { name: 'Destination volume' })).toBeTruthy();
+        expect(destinationSource).toMatch(
+            /\.import-destination\s*\{[^}]*grid-template-columns:\s*max-content max-content minmax\(0, 1fr\)/s,
+        );
+        const destinationRule = destinationSource.match(/\.import-destination\s*\{[^}]*\}/s)?.[0];
+        expect(destinationRule).not.toContain('margin-bottom');
+    });
+
     it('preselects the exact volume and exposes every partition volume through an autocomplete', async () => {
         render(ImportDestinationChooser, { props: props() });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
         expect(combobox.value).toBe('SOUNDS 01 / Strings');
         await fireEvent.focus(combobox);
 
@@ -54,7 +72,7 @@ describe('ImportDestinationChooser', () => {
         const onvolume = vi.fn();
         render(ImportDestinationChooser, { props: props({ partitionIndex: null, volumeName: '', onvolume }) });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' });
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
         await fireEvent.input(combobox, { target: { value: 'sounds 02' } });
         expect(onvolume).toHaveBeenLastCalledWith(null, '');
         expect(screen.getAllByRole('option')).toHaveLength(1);
@@ -70,7 +88,7 @@ describe('ImportDestinationChooser', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Clear volume' }));
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
         expect(onvolume).toHaveBeenLastCalledWith(null, '');
         expect(combobox.value).toBe('');
         expect(document.activeElement).toBe(combobox);
@@ -82,14 +100,16 @@ describe('ImportDestinationChooser', () => {
             props: props({ mode: 'create', partitionIndex: 0, volumeName: '' }),
         });
 
-        expect(screen.getByRole('textbox', { name: 'Volume name' }).classList).toContain('dialog-field-control');
-        expect(screen.getByRole('combobox', { name: 'Partition' }).classList).toContain('dialog-field-control');
+        expect(screen.getByRole('textbox', { name: 'New volume name' }).classList).toContain('dialog-field-control');
+        expect(screen.getByRole('combobox', { name: 'Destination partition' }).classList).toContain(
+            'dialog-field-control',
+        );
     });
 
     it('uses the shared compact dialog typography and dark autocomplete palette', async () => {
         render(ImportDestinationChooser, { props: props() });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' });
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
         await fireEvent.focus(combobox);
         const listbox = screen.getByRole('listbox', { name: 'Volumes' });
         const option = screen.getAllByRole('option')[0];

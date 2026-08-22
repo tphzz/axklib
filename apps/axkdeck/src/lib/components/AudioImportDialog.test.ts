@@ -9,6 +9,10 @@ import type { ClientUploadSource } from '../clientUploadSource';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
 
+const audioImportDialogSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/AudioImportDialog.svelte'),
+    'utf8',
+);
 const audioImportRowsSource = readFileSync(resolve(process.cwd(), 'src/lib/components/AudioImportRows.svelte'), 'utf8');
 const audioSamplerSettingsSource = readFileSync(
     resolve(process.cwd(), 'src/lib/components/AudioSamplerSettings.svelte'),
@@ -99,11 +103,29 @@ function destinationProps(volumeName: string, partitionIndex = 0) {
 }
 
 describe('AudioImportDialog', () => {
-    it('keeps sampler fields aligned while reserving clearance for the scrollbar', () => {
-        expect(audioSamplerSettingsSource).toContain('grid-template-columns: repeat(7, minmax(0, 1fr));');
-        expect(audioSamplerSettingsSource).not.toContain('repeat(auto-fit');
+    it('owns the compact spacing around the reusable destination chooser', () => {
+        expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*10px;/s);
+    });
+
+    it('left-packs sampler fields independently from the identity columns', () => {
+        expect(audioSamplerSettingsSource).toMatch(
+            /\.settings-fields\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*justify-content:\s*flex-start;/s,
+        );
+        expect(audioSamplerSettingsSource).toMatch(/\.settings-fields\s*>\s*label\s*\{[^}]*flex:\s*0 0 auto;/s);
+        expect(audioSamplerSettingsSource).not.toContain('grid-template-columns: repeat(7');
         expect(audioImportRowsSource).toContain('padding-right: 12px;');
         expect(audioImportRowsSource).toContain('scrollbar-gutter: stable;');
+    });
+
+    it('keeps each audio file compact while allowing its source details to wrap', () => {
+        expect(audioImportRowsSource).toContain('<small class="audio-import-file-metadata">');
+        expect(audioImportRowsSource).toMatch(
+            /\.audio-import-file-heading\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/,
+        );
+        expect(audioImportRowsSource).toMatch(/\.audio-import-rows\s*\{[^}]*gap:\s*6px;/);
+        expect(audioImportRowsSource).toMatch(/\.audio-import-card\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*8px 10px;/);
+        expect(audioImportRowsSource).toMatch(/\.identity-fields\s*\{[^}]*gap:\s*6px 10px;/);
+        expect(audioSamplerSettingsSource).toMatch(/\.settings-fields\s*\{[^}]*gap:\s*6px 10px;/);
     });
 
     it('imports inspected Samples into a newly named Sample Bank', async () => {
