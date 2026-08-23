@@ -556,6 +556,21 @@ export class PackageBatchImportWorkflow {
     }
 
     private async plan(generation: number, replacePlanToken?: string): Promise<void> {
+        try {
+            const automaticPlanToken = await this.planOnce(generation, replacePlanToken, true);
+            if (automaticPlanToken) await this.planOnce(generation, automaticPlanToken, false);
+        } catch (error) {
+            if (generation === this.generation && this.request) {
+                this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
+            }
+        }
+    }
+
+    private async planOnce(
+        generation: number,
+        replacePlanToken: string | undefined,
+        allowAutomaticProgramSlotCheck: boolean,
+    ): Promise<string | null> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         const selectedItems = request?.items.filter((item) => item.selected) ?? [];
@@ -564,40 +579,42 @@ export class PackageBatchImportWorkflow {
             if (request && generation === this.generation) {
                 this.request = { ...request, status: 'ready', hasUnvalidatedChanges: true };
             }
-            return;
+            return null;
         }
+        if (generation !== this.generation) return null;
         this.request = { ...request, status: 'planning', error: '' };
-        try {
-            const plan = await this.dependencies.transport.planImagePackageImport(
-                sessionId,
-                selectedItems.map((item) => item.source),
-                arguments_.destination,
-                arguments_.renames,
-                arguments_.programSlotAssignments,
-                replacePlanToken,
-                arguments_.opaqueSequenceDecisions,
-            );
-            if (generation !== this.generation || !this.request) {
-                await this.releasePlan(plan);
-                return;
-            }
-            const merged = mergeBatchPlanSuggestions(request, selectedItems, plan);
-            this.request = {
-                ...this.request,
-                plan,
-                volumeNames: merged.volumeNames,
-                renames: merged.renames,
-                programSlots: merged.programSlots,
-                hasUnvalidatedChanges: merged.suggestedSlotsAdded,
-                status: 'ready',
-                error: '',
-            };
-            this.plannedItemIds = selectedItems.map((item) => item.id);
-        } catch (error) {
-            if (generation === this.generation && this.request) {
-                this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
-            }
+        const plan = await this.dependencies.transport.planImagePackageImport(
+            sessionId,
+            selectedItems.map((item) => item.source),
+            arguments_.destination,
+            arguments_.renames,
+            arguments_.programSlotAssignments,
+            replacePlanToken,
+            arguments_.opaqueSequenceDecisions,
+        );
+        if (generation !== this.generation || !this.request) {
+            await this.releasePlan(plan);
+            return null;
         }
+        const merged = mergeBatchPlanSuggestions(request, selectedItems, plan);
+        const checkSuggestedProgramSlots =
+            allowAutomaticProgramSlotCheck &&
+            merged.suggestedSlotsAdded &&
+            plan.programSlotPlacements.some(
+                (placement) => !placement.applied && placement.mode !== 'UNAVAILABLE' && placement.mappings.length > 0,
+            );
+        this.request = {
+            ...this.request,
+            plan,
+            volumeNames: merged.volumeNames,
+            renames: merged.renames,
+            programSlots: merged.programSlots,
+            hasUnvalidatedChanges: merged.suggestedSlotsAdded,
+            status: checkSuggestedProgramSlots ? 'planning' : 'ready',
+            error: '',
+        };
+        this.plannedItemIds = selectedItems.map((item) => item.id);
+        return checkSuggestedProgramSlots ? plan.planToken : null;
     }
 
     private updateDestination(

@@ -177,11 +177,105 @@ describe('PackageBatchImportWorkflow', () => {
         });
     });
 
-    it('keeps suggested program slots as a draft until another explicit conflict check', async () => {
-        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol');
-        const suggestedPlan = plan(['One'], 'suggested-plan');
+    it('checks suggested Program slots once within an explicit batch conflict check', async () => {
+        const sources = [
+            serverFileLocation({ rootId: 'workspace', relativePath: 'pads-1.axkvol' }, 'pads-1.axkvol'),
+            serverFileLocation({ rootId: 'workspace', relativePath: 'pads-2.axkvol' }, 'pads-2.axkvol'),
+            serverFileLocation({ rootId: 'workspace', relativePath: 'pads-3.axkvol' }, 'pads-3.axkvol'),
+        ];
+        const suggestedPlan = plan(['Pads 1', 'Pads 2', 'Pads 3'], 'suggested-plan');
         suggestedPlan.valid = false;
         suggestedPlan.programSlotPlacements = [
+            {
+                placementId: 'placement-1',
+                partitionIndex: 0,
+                volumeName: 'Target',
+                mode: 'CONTIGUOUS',
+                applied: false,
+                suggestedStartSlot: 21,
+                requiredSlotCount: 3,
+                availableSlotCount: 108,
+                occupiedRanges: [{ first: 1, last: 20 }],
+                sourceRanges: [{ first: 1, last: 3 }],
+                destinationRanges: [{ first: 21, last: 23 }],
+                mappings: sources.map((_, packageIndex) => ({
+                    packageIndex,
+                    nodeId: `package-${packageIndex}-0`,
+                    sourceSlot: packageIndex + 1,
+                    destinationSlot: packageIndex + 21,
+                    requiresUserAction: false,
+                })),
+            },
+        ];
+        const checkedPlan = plan(['Pads 1', 'Pads 2', 'Pads 3'], 'checked-plan');
+        checkedPlan.programSlotPlacements = suggestedPlan.programSlotPlacements.map((placement) => ({
+            ...placement,
+            applied: true,
+        }));
+        const planImagePackageImport = vi.fn().mockResolvedValueOnce(suggestedPlan).mockResolvedValueOnce(checkedPlan);
+        const picker = new PickerController(() => undefined);
+        const volume: DiskTreeItem = {
+            id: 'volume-0',
+            name: 'Target',
+            kind: 'volume',
+            childCount: 20,
+            partitionIndex: 0,
+        };
+        const workflow = new PackageBatchImportWorkflow({
+            transport: {
+                inspectPackage: vi
+                    .fn()
+                    .mockResolvedValueOnce(inspection('package-0', 'Pads 1', 1))
+                    .mockResolvedValueOnce(inspection('package-1', 'Pads 2', 1))
+                    .mockResolvedValueOnce(inspection('package-2', 'Pads 3', 1)),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn().mockResolvedValue(undefined),
+            refreshSession: vi.fn().mockResolvedValue(undefined),
+            setStatus: vi.fn(),
+            sourceItems: () => [volume],
+        });
+
+        workflow.open(volume);
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(sources);
+        await choosing;
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(2);
+        expect(planImagePackageImport).toHaveBeenNthCalledWith(
+            2,
+            17,
+            sources,
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Target' },
+            [],
+            sources.map((_, packageIndex) => ({
+                packageIndex,
+                nodeId: `package-${packageIndex}-0`,
+                destinationSlot: packageIndex + 21,
+            })),
+            'suggested-plan',
+            [],
+        );
+        expect(workflow.request).toMatchObject({
+            plan: { planToken: 'checked-plan', valid: true },
+            status: 'ready',
+            hasUnvalidatedChanges: false,
+        });
+        expect(Object.values(workflow.request!.programSlots)).toEqual([21, 22, 23]);
+    });
+
+    it('limits automatic batch Program slot checks to one replacement plan', async () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol');
+        const firstPlan = plan(['One'], 'suggested-plan-1');
+        firstPlan.valid = false;
+        firstPlan.programSlotPlacements = [
             {
                 placementId: 'placement-1',
                 partitionIndex: 0,
@@ -205,7 +299,12 @@ describe('PackageBatchImportWorkflow', () => {
                 ],
             },
         ];
-        const planImagePackageImport = vi.fn().mockResolvedValue(suggestedPlan);
+        const secondPlan = {
+            ...firstPlan,
+            planToken: 'suggested-plan-2',
+            planId: 'suggested-plan-2-id',
+        };
+        const planImagePackageImport = vi.fn().mockResolvedValueOnce(firstPlan).mockResolvedValueOnce(secondPlan);
         const picker = new PickerController(() => undefined);
         const workflow = new PackageBatchImportWorkflow({
             transport: {
@@ -222,28 +321,25 @@ describe('PackageBatchImportWorkflow', () => {
             refreshSession: vi.fn().mockResolvedValue(undefined),
             setStatus: vi.fn(),
         });
-        const partition: DiskTreeItem = {
+
+        workflow.open({
             id: 'partition-0',
             name: 'Partition 1',
             kind: 'partition',
             childCount: 0,
             partitionIndex: 0,
-        };
-
-        workflow.open(partition);
+        });
         const choosing = workflow.chooseWorkspace();
         picker.finish([source]);
         await choosing;
         await workflow.replan();
-        await Promise.resolve();
 
-        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+        expect(planImagePackageImport).toHaveBeenCalledTimes(2);
         expect(workflow.request).toMatchObject({
-            plan: { planToken: 'suggested-plan' },
+            plan: { planToken: 'suggested-plan-2', valid: false },
             status: 'ready',
-            hasUnvalidatedChanges: true,
+            hasUnvalidatedChanges: false,
         });
-        expect(Object.values(workflow.request!.programSlots)).toEqual([5]);
     });
 
     it('previews unique server suggestions, replans edited names, and applies one atomic plan', async () => {
