@@ -252,6 +252,7 @@ struct ImageObjectDeletionImpact {
     std::string volume_name;
     std::string role;
     std::string status;
+    bool requested{};
     bool selected{};
     std::uint64_t stored_size_bytes{};
     std::uint64_t freed_clusters{};
@@ -276,6 +277,8 @@ struct ImageObjectDeletionInspection {
     std::string image_id;
     std::uint64_t revision{};
     std::vector<std::string> target_object_ids;
+    std::vector<std::string> referrer_object_ids;
+    std::vector<std::string> cleanup_object_ids;
     std::vector<std::string> selected_object_ids;
     std::vector<ImageObjectDeletionImpact> impacts;
     std::vector<ImageObjectDeletionReference> references;
@@ -436,6 +439,7 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const std::vector<std::string> &target_object_ids,
+                                                                const std::vector<std::string> &referrer_object_ids,
                                                                 const std::vector<std::string> &cleanup_object_ids);
     [[nodiscard]] Result<ImageWaveDataOrphanInspection>
     inspect_wave_data_orphans(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,

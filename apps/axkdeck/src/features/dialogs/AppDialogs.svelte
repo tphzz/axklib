@@ -470,8 +470,8 @@
         loading={deletion.objectRequest.loading}
         busy={deletion.objectRequest.busy}
         error={deletion.objectRequest.error}
-        onselectionchange={(objectId, selected) => deletion.updateObjectSelection(objectId, selected)}
-        onselectall={(selected) => deletion.updateAllObjectDependencies(selected)}
+        onselectionchange={(role, objectId, selected) => deletion.updateObjectSelection(role, objectId, selected)}
+        onselectall={(role, selected) => deletion.updateAllObjectSelections(role, selected)}
         oncancel={() => deletion.cancelObjects()}
         onconfirm={() => void deletion.submitObjects()}
     />

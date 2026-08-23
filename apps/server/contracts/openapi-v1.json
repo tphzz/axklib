@@ -3103,9 +3103,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "requested": {
+            "type": "boolean"
+          },
           "role": {
             "enum": [
               "TARGET",
+              "REFERRER",
               "DEPENDENCY"
             ]
           },
@@ -3137,6 +3141,7 @@
           "volumeName",
           "role",
           "status",
+          "requested",
           "selected",
           "storedSizeBytes",
           "freedClusters",
@@ -3157,6 +3162,15 @@
           "canApply": {
             "description": "True when at least one requested object can be deleted safely",
             "type": "boolean"
+          },
+          "cleanupObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
           },
           "estimatedFreedBytes": {
             "description": "Allocated storage bytes expected to become free for the selected deletion closure",
@@ -3184,6 +3198,15 @@
               "$ref": "#/components/schemas/ImageObjectDeletionReference"
             },
             "type": "array"
+          },
+          "referrerObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
           },
           "revision": {
             "minimum": 1,
@@ -3218,6 +3241,8 @@
           "imageId",
           "revision",
           "targetObjectIds",
+          "referrerObjectIds",
+          "cleanupObjectIds",
           "selectedObjectIds",
           "impacts",
           "references",
@@ -3354,6 +3379,15 @@
             "minLength": 1,
             "type": "string"
           },
+          "referrerObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
+          },
           "targetObjectIds": {
             "items": {
               "minLength": 1,
@@ -3369,6 +3403,7 @@
           "imageId",
           "expectedRevision",
           "targetObjectIds",
+          "referrerObjectIds",
           "cleanupObjectIds"
         ],
         "type": "object"
@@ -17877,6 +17912,7 @@
                     "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
+                    "referrerObjectIds": [],
                     "targetObjectIds": [
                       "x"
                     ]
@@ -17900,6 +17936,7 @@
                       "data": {
                         "blockers": [],
                         "canApply": false,
+                        "cleanupObjectIds": [],
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -17913,6 +17950,7 @@
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
                             "reason": "x",
+                            "requested": false,
                             "role": "TARGET",
                             "selected": false,
                             "status": "REQUIRED",
@@ -17921,6 +17959,7 @@
                           }
                         ],
                         "references": [],
+                        "referrerObjectIds": [],
                         "revision": 1,
                         "selectedObjectIds": [],
                         "targetObjectIds": [
@@ -17938,6 +17977,7 @@
                       "data": {
                         "blockers": [],
                         "canApply": false,
+                        "cleanupObjectIds": [],
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -17951,6 +17991,7 @@
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
                             "reason": "x",
+                            "requested": false,
                             "role": "TARGET",
                             "selected": false,
                             "status": "REQUIRED",
@@ -17959,6 +18000,7 @@
                           }
                         ],
                         "references": [],
+                        "referrerObjectIds": [],
                         "revision": 1,
                         "selectedObjectIds": [],
                         "targetObjectIds": [
@@ -18287,6 +18329,7 @@
                     "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
+                    "referrerObjectIds": [],
                     "targetObjectIds": [
                       "x"
                     ]

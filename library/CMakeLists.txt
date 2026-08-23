@@ -229,6 +229,8 @@ add_library(
   src/alteration_validation.cpp
   src/alteration_volume.cpp
   src/deletion.cpp
+  src/deletion_contract.cpp
+  src/deletion_manifest.cpp
   src/media_build.cpp
   src/media_conversion.cpp
   src/media_floppy_set.cpp

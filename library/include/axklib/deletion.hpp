@@ -13,7 +13,7 @@
 
 namespace axk {
 
-enum class ObjectDeletionRole : std::uint8_t { target, dependency };
+enum class ObjectDeletionRole : std::uint8_t { target, referrer, dependency };
 enum class ObjectDeletionStatus : std::uint8_t { required, optional, preserved, blocked };
 enum class ObjectDeletionReferenceEffect : std::uint8_t { blocking, removed, preserved };
 
@@ -32,6 +32,7 @@ struct ObjectDeletionImpact {
     std::string volume_name;
     ObjectDeletionRole role{ObjectDeletionRole::dependency};
     ObjectDeletionStatus status{ObjectDeletionStatus::preserved};
+    bool requested{};
     bool selected{};
     std::uint64_t stored_size_bytes{};
     std::uint64_t freed_clusters{};
@@ -49,6 +50,7 @@ struct ObjectDeletionReference {
 
 struct ObjectDeletionSelection {
     std::vector<std::string> target_keys;
+    std::vector<std::string> referrer_keys;
     std::vector<std::string> cleanup_keys;
 };
 

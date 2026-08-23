@@ -128,8 +128,9 @@ export interface ObjectDeletionImpact {
     partitionIndex: number | null;
     partitionName: string;
     volumeName: string;
-    role: 'TARGET' | 'DEPENDENCY';
+    role: 'TARGET' | 'REFERRER' | 'DEPENDENCY';
     status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
+    requested: boolean;
     selected: boolean;
     storedSizeBytes: number;
     freedClusters: number;
@@ -154,6 +155,8 @@ export interface ObjectDeletionInspection {
     imageId: string;
     revision: number;
     targetObjectIds: string[];
+    referrerObjectIds: string[];
+    cleanupObjectIds: string[];
     selectedObjectIds: string[];
     impacts: ObjectDeletionImpact[];
     references: ObjectDeletionReference[];
@@ -509,10 +512,16 @@ export interface ImageTransport {
     inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection>;
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection>;
-    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        referrerObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<JobState>;
     inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection>;
     startProgramGeneration(
         sessionId: number,

@@ -2250,8 +2250,9 @@ export interface components {
             partitionName: string;
             prerequisiteObjectIds: string[];
             reason: string;
+            requested: boolean;
             /** @enum {unknown} */
-            role: 'TARGET' | 'DEPENDENCY';
+            role: 'TARGET' | 'REFERRER' | 'DEPENDENCY';
             selected: boolean;
             /** @enum {unknown} */
             status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
@@ -2262,6 +2263,7 @@ export interface components {
             blockers: components['schemas']['ImageObjectDeletionNotice'][];
             /** @description True when at least one requested object can be deleted safely */
             canApply: boolean;
+            cleanupObjectIds: string[];
             /** @description Allocated storage bytes expected to become free for the selected deletion closure */
             estimatedFreedBytes: number;
             /** @description Allocated storage clusters expected to become free for the selected deletion closure */
@@ -2269,6 +2271,7 @@ export interface components {
             imageId: string;
             impacts: components['schemas']['ImageObjectDeletionImpact'][];
             references: components['schemas']['ImageObjectDeletionReference'][];
+            referrerObjectIds: string[];
             revision: number;
             selectedObjectIds: string[];
             targetObjectIds: string[];
@@ -2296,6 +2299,7 @@ export interface components {
             cleanupObjectIds: string[];
             expectedRevision: number;
             imageId: string;
+            referrerObjectIds: string[];
             targetObjectIds: string[];
         };
         ImageObjectDeletionResult: {

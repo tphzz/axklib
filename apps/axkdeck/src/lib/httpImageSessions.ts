@@ -291,6 +291,7 @@ export class HttpImageSessions {
     async inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
         const session = this.get(sessionId);
@@ -298,6 +299,7 @@ export class HttpImageSessions {
             imageId: session.remoteId,
             expectedRevision: session.revision,
             targetObjectIds,
+            referrerObjectIds,
             cleanupObjectIds,
         });
         if (this.jobs.isJob(result)) throw new Error('images.deletion.inspect unexpectedly returned a job');
@@ -318,6 +320,7 @@ export class HttpImageSessions {
     async startObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<JobState> {
         const session = this.get(sessionId);
@@ -327,6 +330,7 @@ export class HttpImageSessions {
                 imageId: session.remoteId,
                 expectedRevision: session.revision,
                 targetObjectIds,
+                referrerObjectIds,
                 cleanupObjectIds,
             },
             { idempotencyKey: randomIdempotencyKey() },

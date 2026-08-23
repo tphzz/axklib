@@ -399,17 +399,28 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
-        return this.imageSessions.inspectObjectDeletion(sessionId, targetObjectIds, cleanupObjectIds);
+        return this.imageSessions.inspectObjectDeletion(
+            sessionId,
+            targetObjectIds,
+            referrerObjectIds,
+            cleanupObjectIds,
+        );
     }
 
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
         return this.imageSessions.inspectWaveDataOrphans(sessionId, contentScopeId);
     }
 
-    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState> {
-        return this.imageSessions.startObjectDeletion(sessionId, targetObjectIds, cleanupObjectIds);
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        referrerObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<JobState> {
+        return this.imageSessions.startObjectDeletion(sessionId, targetObjectIds, referrerObjectIds, cleanupObjectIds);
     }
 
     inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection> {

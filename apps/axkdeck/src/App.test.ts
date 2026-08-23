@@ -923,6 +923,8 @@ describe('App panel layout', () => {
             imageId: 'image-1',
             revision: 1,
             targetObjectIds: [sample.key],
+            referrerObjectIds: [],
+            cleanupObjectIds: [],
             selectedObjectIds: [sample.key],
             impacts: [
                 {
@@ -934,6 +936,7 @@ describe('App panel layout', () => {
                     volumeName: 'Piano',
                     role: 'TARGET',
                     status: 'REQUIRED',
+                    requested: true,
                     selected: true,
                     storedSizeBytes: 512,
                     freedClusters: 1,
@@ -949,6 +952,7 @@ describe('App panel layout', () => {
                     volumeName: 'Piano',
                     role: 'DEPENDENCY',
                     status: 'OPTIONAL',
+                    requested: false,
                     selected: false,
                     storedSizeBytes: 4096,
                     freedClusters: 4,
@@ -964,9 +968,10 @@ describe('App panel layout', () => {
         };
         const selectedInspection = {
             ...inspection,
+            cleanupObjectIds: ['wave-1'],
             selectedObjectIds: [sample.key, 'wave-1'],
             impacts: inspection.impacts.map((impact) =>
-                impact.objectId === 'wave-1' ? { ...impact, selected: true } : impact,
+                impact.objectId === 'wave-1' ? { ...impact, requested: true, selected: true } : impact,
             ),
             estimatedFreedBytes: 5120,
             estimatedFreedClusters: 5,
@@ -1000,12 +1005,14 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
-        await vi.waitFor(() => expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']));
+        await vi.waitFor(() =>
+            expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, [sample.key], [], ['wave-1']),
+        );
         await fireEvent.click(screen.getByRole('button', { name: 'Delete 2 objects' }));
 
         await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
         expect(mocks.inspectObjectDeletion).toHaveBeenCalledTimes(3);
-        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, [sample.key], [], ['wave-1']);
         await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();
@@ -1082,6 +1089,8 @@ describe('App panel layout', () => {
             imageId: 'image-1',
             revision: 1,
             targetObjectIds: ['wave-unused-a'],
+            referrerObjectIds: [],
+            cleanupObjectIds: [],
             selectedObjectIds: ['wave-unused-a'],
             impacts: [
                 {
@@ -1093,6 +1102,7 @@ describe('App panel layout', () => {
                     volumeName: volume.name,
                     role: 'TARGET',
                     status: 'REQUIRED',
+                    requested: true,
                     selected: true,
                     storedSizeBytes: 4096,
                     freedClusters: 4,
@@ -1133,9 +1143,9 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.inspectWaveDataOrphans).toHaveBeenCalledTimes(2));
         expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(1, 17, volume.id);
         expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(2, 17, volume.id);
-        expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], [], []);
         await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
-        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], [], []);
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Clean up Wave Data' })).toBeNull());
     });

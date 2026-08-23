@@ -64,7 +64,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
 
 axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManager::plan_deletion(
     std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
-    const std::vector<std::string> &target_object_ids, const std::vector<std::string> &cleanup_object_ids) {
+    const std::vector<std::string> &target_object_ids, const std::vector<std::string> &referrer_object_ids,
+    const std::vector<std::string> &cleanup_object_ids) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
@@ -81,6 +82,15 @@ axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManage
         if (found == (*session)->snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "deletion target does not exist"));
         target_keys.push_back(found->second.key);
+    }
+    std::vector<std::string> referrer_keys;
+    referrer_keys.reserve(referrer_object_ids.size());
+    for (const auto &object_id : referrer_object_ids) {
+        const auto found = (*session)->snapshots_by_id.find(object_id);
+        if (found == (*session)->snapshots_by_id.end()) {
+            return std::unexpected(session_error("object_not_found", "deletion referrer object does not exist"));
+        }
+        referrer_keys.push_back(found->second.key);
     }
     std::vector<std::string> cleanup_keys;
     cleanup_keys.reserve(cleanup_object_ids.size());
@@ -104,8 +114,10 @@ axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManage
     if (container == nullptr)
         return std::unexpected(
             session_error("image_mutation_unsupported", "object deletion requires an SFS container"));
-    const auto inspected = inspect_object_deletion(
-        *container, catalog, graph, {.target_keys = std::move(target_keys), .cleanup_keys = std::move(cleanup_keys)});
+    const auto inspected = inspect_object_deletion(*container, catalog, graph,
+                                                   {.target_keys = std::move(target_keys),
+                                                    .referrer_keys = std::move(referrer_keys),
+                                                    .cleanup_keys = std::move(cleanup_keys)});
     if (!inspected)
         return std::unexpected(session_error("deletion_invalid", inspected.error().message));
 
@@ -133,6 +145,8 @@ axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManage
     result.image_id = std::string{image_id};
     result.revision = expected_revision;
     result.target_object_ids = target_object_ids;
+    result.referrer_object_ids = referrer_object_ids;
+    result.cleanup_object_ids = cleanup_object_ids;
     result.selected_object_ids = map_keys(inspected->selected_keys);
     result.estimated_freed_bytes = inspected->estimated_freed_bytes;
     result.estimated_freed_clusters = inspected->estimated_freed_clusters;
@@ -149,6 +163,7 @@ axk::app::Result<axk::app::ImageObjectDeletionPlan> axk::app::ImageSessionManage
                                   .volume_name = impact.volume_name,
                                   .role = std::string{object_deletion_role_name(impact.role)},
                                   .status = std::string{object_deletion_status_name(impact.status)},
+                                  .requested = impact.requested,
                                   .selected = impact.selected,
                                   .stored_size_bytes = impact.stored_size_bytes,
                                   .freed_clusters = impact.freed_clusters,

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "axklib/bytes.hpp"
+#include "axklib/deletion_manifest.hpp"
 #include "axklib/semantic.hpp"
 
 namespace {
@@ -429,43 +430,62 @@ std::vector<std::string> prerequisites(const DeletionIndex &index, const axk::Ob
     return {result.begin(), result.end()};
 }
 
+std::set<std::string> direct_referrers(const DeletionIndex &index, const axk::ObjectSnapshot &object) {
+    std::set<std::string> result;
+    if (const auto incoming = index.incoming.find(object.key); incoming != index.incoming.end()) {
+        for (const auto *relationship : incoming->second) {
+            if (relevant_incoming(object.object.header.type, relationship->type))
+                result.insert(relationship->source_key);
+        }
+    }
+    if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload)) {
+        for (const auto number : sample->linked_program_numbers) {
+            if (const auto key = index.program_key(object, number))
+                result.insert(*key);
+        }
+    }
+    return result;
+}
+
+std::set<std::string> reachable_referrers(const DeletionIndex &index, const std::set<std::string> &targets) {
+    std::set<std::string> result;
+    std::vector<std::string> pending(targets.begin(), targets.end());
+    for (std::size_t cursor = 0; cursor < pending.size(); ++cursor) {
+        const auto *object = index.find(pending[cursor]);
+        if (object == nullptr)
+            continue;
+        for (const auto &key : direct_referrers(index, *object)) {
+            const auto *referrer = index.find(key);
+            if (referrer == nullptr || !supported_type(referrer->object.header.type) || targets.contains(key) ||
+                !index.same_scope(*object, *referrer)) {
+                continue;
+            }
+            if (result.insert(key).second)
+                pending.push_back(key);
+        }
+    }
+    return result;
+}
+
+std::set<std::string> contributing_referrers(const DeletionIndex &index, const std::set<std::string> &eligible_targets,
+                                             const std::set<std::string> &available) {
+    std::set<std::string> result;
+    std::vector<std::string> pending(eligible_targets.begin(), eligible_targets.end());
+    for (std::size_t cursor = 0; cursor < pending.size(); ++cursor) {
+        const auto *object = index.find(pending[cursor]);
+        if (object == nullptr)
+            continue;
+        for (const auto &key : direct_referrers(index, *object)) {
+            if (!available.contains(key))
+                continue;
+            if (result.insert(key).second)
+                pending.push_back(key);
+        }
+    }
+    return result;
+}
+
 } // namespace
-
-std::string_view axk::object_deletion_role_name(ObjectDeletionRole role) noexcept {
-    switch (role) {
-    case ObjectDeletionRole::target:
-        return "TARGET";
-    case ObjectDeletionRole::dependency:
-        return "DEPENDENCY";
-    }
-    return "DEPENDENCY";
-}
-
-std::string_view axk::object_deletion_status_name(ObjectDeletionStatus status) noexcept {
-    switch (status) {
-    case ObjectDeletionStatus::required:
-        return "REQUIRED";
-    case ObjectDeletionStatus::optional:
-        return "OPTIONAL";
-    case ObjectDeletionStatus::preserved:
-        return "PRESERVED";
-    case ObjectDeletionStatus::blocked:
-        return "BLOCKED";
-    }
-    return "BLOCKED";
-}
-
-std::string_view axk::object_deletion_reference_effect_name(ObjectDeletionReferenceEffect effect) noexcept {
-    switch (effect) {
-    case ObjectDeletionReferenceEffect::blocking:
-        return "BLOCKING";
-    case ObjectDeletionReferenceEffect::removed:
-        return "REMOVED";
-    case ObjectDeletionReferenceEffect::preserved:
-        return "PRESERVED";
-    }
-    return "PRESERVED";
-}
 
 axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Container &container,
                                                                         const ObjectCatalog &catalog,
@@ -473,7 +493,8 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
                                                                         const ObjectDeletionSelection &selection) {
     if (selection.target_keys.empty())
         return std::unexpected(deletion_error("deletion requires at least one target"));
-    if (selection.target_keys.size() + selection.cleanup_keys.size() > maximum_deletion_objects)
+    if (selection.target_keys.size() + selection.referrer_keys.size() + selection.cleanup_keys.size() >
+        maximum_deletion_objects)
         return std::unexpected(deletion_error("deletion selection exceeds the 1024 object limit"));
 
     const DeletionIndex index{container, catalog, graph};
@@ -489,26 +510,63 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
             return std::unexpected(deletion_error("deletion targets must be unique"));
     }
     std::set<std::string> requested_cleanup;
+    std::set<std::string> requested_referrers;
+    for (const auto &key : selection.referrer_keys) {
+        if (requested_targets.contains(key) || !requested_referrers.insert(key).second)
+            return std::unexpected(deletion_error("referrer objects must be unique and exclude deletion targets"));
+        if (index.find(key) == nullptr)
+            return std::unexpected(deletion_error("referrer object does not exist"));
+    }
     for (const auto &key : selection.cleanup_keys) {
-        if (requested_targets.contains(key) || !requested_cleanup.insert(key).second)
-            return std::unexpected(deletion_error("cleanup objects must be unique and exclude deletion targets"));
+        if (requested_targets.contains(key) || requested_referrers.contains(key) ||
+            !requested_cleanup.insert(key).second)
+            return std::unexpected(
+                deletion_error("cleanup objects must be unique and exclude deletion targets and referrers"));
         if (index.find(key) == nullptr)
             return std::unexpected(deletion_error("cleanup object does not exist"));
     }
 
     ObjectDeletionInspection result;
     result.target_keys.assign(requested_targets.begin(), requested_targets.end());
-    result.manifest.schema_version = std::string{alteration_manifest_schema_version};
 
-    const auto eligible_targets = stable_deletion_set(index, requested_targets);
+    const auto upstream = reachable_referrers(index, requested_targets);
+    for (const auto &key : requested_referrers) {
+        if (!upstream.contains(key))
+            return std::unexpected(deletion_error("referrer object is not in the target reference closure"));
+    }
+
+    auto complete_candidates = requested_targets;
+    complete_candidates.insert(upstream.begin(), upstream.end());
+    const auto complete_stable = stable_deletion_set(index, complete_candidates);
+    std::set<std::string> completely_eligible_targets;
+    std::ranges::copy_if(requested_targets,
+                         std::inserter(completely_eligible_targets, completely_eligible_targets.end()),
+                         [&](const auto &key) { return complete_stable.contains(key); });
+    const auto optional_referrers = contributing_referrers(index, completely_eligible_targets, complete_stable);
+
+    auto explicit_candidates = requested_targets;
+    explicit_candidates.insert(requested_referrers.begin(), requested_referrers.end());
+    const auto explicit_stable = stable_deletion_set(index, explicit_candidates);
+    std::set<std::string> eligible_targets;
+    std::ranges::copy_if(requested_targets, std::inserter(eligible_targets, eligible_targets.end()),
+                         [&](const auto &key) { return explicit_stable.contains(key); });
+    const auto selected_referrers = contributing_referrers(index, eligible_targets, explicit_stable);
+    auto selected = eligible_targets;
+    selected.insert(selected_referrers.begin(), selected_referrers.end());
+
     for (const auto &key : requested_targets) {
         const auto *object = index.find(key);
         const auto eligible = eligible_targets.contains(key);
-        result.impacts.push_back(make_impact(container, *object, ObjectDeletionRole::target,
-                                             eligible ? ObjectDeletionStatus::required : ObjectDeletionStatus::blocked,
-                                             eligible ? "Selected object" : "Deletion constraints are not satisfied"));
+        const auto resolvable = completely_eligible_targets.contains(key);
+        auto impact = make_impact(container, *object, ObjectDeletionRole::target,
+                                  eligible ? ObjectDeletionStatus::required : ObjectDeletionStatus::blocked,
+                                  eligible     ? "Selected object"
+                                  : resolvable ? "References must be resolved"
+                                               : "Deletion constraints are not satisfied");
+        impact.requested = true;
+        result.impacts.push_back(std::move(impact));
         if (!eligible) {
-            auto blockers = evaluate_object(index, *object, eligible_targets);
+            auto blockers = evaluate_object(index, *object, explicit_stable);
             if (blockers.empty()) {
                 add_notice(blockers, "DEPENDENCY_BLOCKED", "A selected referencing object cannot be deleted safely",
                            {key});
@@ -518,13 +576,34 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
         }
     }
 
-    const auto reachable = reachable_cleanup(index, eligible_targets, requested_targets);
-    auto potential = eligible_targets;
+    for (const auto &key : upstream) {
+        const auto *object = index.find(key);
+        const auto optional = optional_referrers.contains(key);
+        auto impact = make_impact(container, *object, ObjectDeletionRole::referrer,
+                                  optional ? ObjectDeletionStatus::optional : ObjectDeletionStatus::preserved,
+                                  optional ? std::format("Delete this {} to resolve an incoming reference",
+                                                         object_type_label(object->object.header.type))
+                                           : std::format("This {} cannot safely resolve the selected target",
+                                                         object_type_label(object->object.header.type)));
+        impact.requested = requested_referrers.contains(key);
+        if (optional)
+            impact.prerequisite_keys = prerequisites(index, *object, complete_stable);
+        result.impacts.push_back(std::move(impact));
+    }
+
+    auto cleanup_sources = requested_targets;
+    cleanup_sources.insert(selected_referrers.begin(), selected_referrers.end());
+    auto cleanup_excluded = requested_targets;
+    cleanup_excluded.insert(upstream.begin(), upstream.end());
+    const auto reachable = reachable_cleanup(index, cleanup_sources, cleanup_excluded);
+    auto potential = completely_eligible_targets;
+    potential.insert(optional_referrers.begin(), optional_referrers.end());
+    const auto protected_keys = potential;
     potential.insert(reachable.begin(), reachable.end());
-    potential = stable_deletion_set(index, std::move(potential), eligible_targets);
+    potential = stable_deletion_set(index, std::move(potential), protected_keys);
     const std::set<std::string> optional_keys = [&] {
         auto value = potential;
-        for (const auto &key : eligible_targets)
+        for (const auto &key : protected_keys)
             value.erase(key);
         return value;
     }();
@@ -539,6 +618,7 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
                                                          object_type_label(object->object.header.type)));
         if (optional)
             impact.prerequisite_keys = prerequisites(index, *object, potential);
+        impact.requested = requested_cleanup.contains(key);
         result.impacts.push_back(std::move(impact));
     }
 
@@ -546,7 +626,6 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
         if (!optional_keys.contains(key))
             return std::unexpected(deletion_error("cleanup object is not an optional dependency of this deletion"));
     }
-    std::set<std::string> selected = eligible_targets;
     bool changed = true;
     while (changed) {
         changed = false;
@@ -562,17 +641,16 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
             }
         }
     }
-    if (!std::ranges::all_of(requested_cleanup, [&](const auto &key) { return selected.contains(key); }))
-        return std::unexpected(deletion_error("cleanup selection requires every prerequisite object"));
-
     for (auto &impact : result.impacts)
         impact.selected = selected.contains(impact.object_key);
     result.selected_keys.assign(selected.begin(), selected.end());
-    result.can_apply = !selected.empty();
+    result.can_apply = !eligible_targets.empty();
 
     std::ranges::sort(result.impacts, {}, [](const auto &impact) {
         return std::tuple{impact.status == ObjectDeletionStatus::blocked ? 1 : 0,
-                          impact.role == ObjectDeletionRole::target ? 0 : 1,
+                          impact.role == ObjectDeletionRole::target     ? 0
+                          : impact.role == ObjectDeletionRole::referrer ? 1
+                                                                        : 2,
                           impact.partition.value,
                           impact.volume_name,
                           object_type_order(impact.object_type),
@@ -611,61 +689,11 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
         }
     }
 
-    std::vector<const ObjectDeletionImpact *> ordered;
-    for (const auto &impact : result.impacts) {
-        if (impact.selected)
-            ordered.push_back(&impact);
-    }
-    std::ranges::sort(ordered, {}, [](const auto *impact) {
-        return std::tuple{impact->partition.value, impact->volume_name, object_type_order(impact->object_type),
-                          impact->object_name, impact->object_key};
-    });
-    std::size_t program_index{};
-    std::size_t bank_index{};
-    std::size_t sample_index{};
-    std::size_t wave_index{};
-    std::size_t sequence_index{};
-    for (const auto *impact : ordered) {
-        const auto partition = std::ranges::find(container.partitions(), impact->partition, &Partition::index);
-        if (partition == container.partitions().end())
-            return std::unexpected(deletion_error("deletion impact partition is not available"));
-        const auto cluster_size =
-            checked_multiply(container.superblock().sector_size_bytes, partition->sectors_per_cluster);
-        const auto freed_bytes = cluster_size ? checked_multiply(impact->freed_clusters, *cluster_size)
-                                              : Result<std::uint64_t>{std::unexpected{cluster_size.error()}};
-        const auto total_bytes = freed_bytes ? checked_add(result.estimated_freed_bytes, *freed_bytes)
-                                             : Result<std::uint64_t>{std::unexpected{freed_bytes.error()}};
-        const auto total_clusters = checked_add(result.estimated_freed_clusters, impact->freed_clusters);
-        if (!total_bytes || !total_clusters)
-            return std::unexpected(deletion_error("deletion recovery estimate exceeds supported limits"));
-        result.estimated_freed_bytes = *total_bytes;
-        result.estimated_freed_clusters = *total_clusters;
-
-        const auto *object = index.find(impact->object_key);
-        if (impact->object_type == ObjectType::prog) {
-            const auto number = object == nullptr ? std::nullopt : program_number(*object);
-            if (!number)
-                return std::unexpected(deletion_error("selected Program number is unreadable"));
-            result.manifest.operations.push_back(
-                {std::format("delete-program-{}", ++program_index),
-                 DeleteProgramOperation{impact->partition, impact->volume_name, *number}});
-        } else if (impact->object_type == ObjectType::sbac) {
-            result.manifest.operations.push_back(
-                {std::format("delete-sample-bank-{}", ++bank_index),
-                 DeleteSampleBankOperation{impact->partition, impact->volume_name, object->object.header.name}});
-        } else if (impact->object_type == ObjectType::sbnk) {
-            result.manifest.operations.push_back(
-                {std::format("delete-sample-{}", ++sample_index),
-                 DeleteSampleOperation{impact->partition, impact->volume_name, object->object.header.name}});
-        } else if (impact->object_type == ObjectType::smpl) {
-            result.manifest.operations.push_back(
-                {std::format("delete-wave-data-{}", ++wave_index),
-                 DeleteWaveformOperation{impact->partition, impact->volume_name, object->object.header.name}});
-        } else {
-            result.manifest.operations.push_back(
-                {std::format("delete-sequence-{}", ++sequence_index),
-                 DeleteSequenceOperation{impact->partition, impact->volume_name, object->object.header.name}});
-        }
-    }
+    const auto manifest = detail::build_object_deletion_manifest(container, catalog, result.impacts);
+    if (!manifest)
+        return std::unexpected(manifest.error());
+    result.manifest = manifest->manifest;
+    result.estimated_freed_bytes = manifest->estimated_freed_bytes;
+    result.estimated_freed_clusters = manifest->estimated_freed_clusters;
     return result;
 }

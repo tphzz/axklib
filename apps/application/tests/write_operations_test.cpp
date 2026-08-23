@@ -1135,6 +1135,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
                                              {{"imageId", opened->image_id},
                                               {"expectedRevision", opened->revision},
                                               {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                              {"referrerObjectIds", nlohmann::json::array()},
                                               {"cleanupObjectIds", nlohmann::json::array()}},
                                              context());
     ASSERT_TRUE(inspection) << inspection.error().message;
@@ -1156,6 +1157,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
                                                {{"imageId", opened->image_id},
                                                 {"expectedRevision", opened->revision},
                                                 {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                                {"referrerObjectIds", nlohmann::json::array()},
                                                 {"cleanupObjectIds", included}},
                                                context());
     ASSERT_TRUE(deleted) << deleted.error().message;

@@ -706,6 +706,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
     const auto request = nlohmann::json{{"imageId", "image-1"},
                                         {"expectedRevision", 4U},
                                         {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                                        {"referrerObjectIds", nlohmann::json::array()},
                                         {"cleanupObjectIds", nlohmann::json::array({"wave-1"})}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionRequest", request));
 
@@ -722,6 +723,8 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                        {"imageId", "image-1"},
                        {"revision", 4U},
                        {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                       {"referrerObjectIds", nlohmann::json::array()},
+                       {"cleanupObjectIds", nlohmann::json::array({"wave-1"})},
                        {"selectedObjectIds", nlohmann::json::array({"program-1"})},
                        {"impacts", nlohmann::json::array({{{"objectId", "program-1"},
                                                            {"objectType", "PROG"},
@@ -731,6 +734,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                                                            {"volumeName", "Piano"},
                                                            {"role", "TARGET"},
                                                            {"status", "REQUIRED"},
+                                                           {"requested", true},
                                                            {"selected", true},
                                                            {"storedSizeBytes", 512U},
                                                            {"freedClusters", 1U},
@@ -744,6 +748,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                                                            {"volumeName", "Piano"},
                                                            {"role", "TARGET"},
                                                            {"status", "BLOCKED"},
+                                                           {"requested", true},
                                                            {"selected", false},
                                                            {"storedSizeBytes", 512U},
                                                            {"freedClusters", 1U},

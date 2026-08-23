@@ -1481,6 +1481,7 @@ describe('HttpImageTransport', () => {
                                 volumeName: 'Volume',
                                 role: 'TARGET',
                                 status: 'REQUIRED',
+                                requested: true,
                                 selected: true,
                                 storedSizeBytes: 512,
                                 freedClusters: 1,
@@ -1496,6 +1497,7 @@ describe('HttpImageTransport', () => {
                                 volumeName: 'Volume',
                                 role: 'DEPENDENCY',
                                 status: 'OPTIONAL',
+                                requested: true,
                                 selected: true,
                                 storedSizeBytes: 4096,
                                 freedClusters: 4,
@@ -1537,19 +1539,25 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(serverFile('images/base.hds'));
         expect(opened.objectDeletionAvailable).toBe(true);
 
-        const inspection = await transport.inspectObjectDeletion(opened.sessionId, ['object-sample'], ['object-wave']);
+        const inspection = await transport.inspectObjectDeletion(
+            opened.sessionId,
+            ['object-sample'],
+            [],
+            ['object-wave'],
+        );
         expect(inspection).toMatchObject({
             canApply: true,
             selectedObjectIds: ['object-sample', 'object-wave'],
             estimatedFreedClusters: 5,
         });
-        const job = await transport.startObjectDeletion(opened.sessionId, ['object-sample'], ['object-wave']);
+        const job = await transport.startObjectDeletion(opened.sessionId, ['object-sample'], [], ['object-wave']);
         expect(job).toMatchObject({ kind: 'images.delete', status: 'queued' });
 
         const expected = {
             imageId: 'image-delete',
             expectedRevision: 7,
             targetObjectIds: ['object-sample'],
+            referrerObjectIds: [],
             cleanupObjectIds: ['object-wave'],
         };
         expect(bodies.get('inspect')).toEqual(expected);

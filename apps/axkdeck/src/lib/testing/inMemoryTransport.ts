@@ -302,17 +302,23 @@ export class InMemoryImageTransport implements ImageTransport {
     inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection> {
-        return this.invoke('inspectObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
+        return this.invoke('inspectObjectDeletion', [sessionId, targetObjectIds, referrerObjectIds, cleanupObjectIds]);
     }
 
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
         return this.invoke('inspectWaveDataOrphans', [sessionId, contentScopeId]);
     }
 
-    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState> {
-        return this.invoke('startObjectDeletion', [sessionId, targetObjectIds, cleanupObjectIds]);
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        referrerObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<JobState> {
+        return this.invoke('startObjectDeletion', [sessionId, targetObjectIds, referrerObjectIds, cleanupObjectIds]);
     }
 
     inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection> {
