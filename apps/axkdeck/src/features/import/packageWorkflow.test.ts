@@ -824,7 +824,7 @@ describe('PackageImportWorkflow', () => {
         await workflow.requestDroppedFile(dropped);
 
         expect(workflow.request?.destinationMode).toBe('existing');
-        expect(workflow.request?.destinationPartitionIndex).toBeNull();
+        expect(workflow.request?.destinationPartitionIndex).toBe(0);
         expect(workflow.request?.destinationVolumeName).toBe('');
         expect(workflow.request?.plan).toBeNull();
         expect(workflow.request?.hasUnvalidatedChanges).toBe(true);
@@ -845,5 +845,43 @@ describe('PackageImportWorkflow', () => {
             undefined,
             [],
         );
+    });
+
+    it('clears an existing volume atomically when its destination partition changes', () => {
+        const firstVolume: DiskTreeItem = {
+            id: 'volume-0',
+            name: 'First',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const secondVolume: DiskTreeItem = {
+            id: 'volume-1',
+            name: 'Second',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 1,
+        };
+        const workflow = new PackageImportWorkflow({
+            transport: {} as ImageTransport,
+            jobs: {} as JobController,
+            picker: new PickerController(() => undefined),
+            isDesktop: false,
+            sessionId: () => 17,
+            sourceItems: () => [firstVolume, secondVolume],
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+        });
+
+        workflow.open(firstVolume);
+        workflow.setDestinationPartition(1);
+
+        expect(workflow.request).toMatchObject({
+            destinationMode: 'existing',
+            destinationPartitionIndex: 1,
+            destinationVolumeName: '',
+            plan: null,
+        });
     });
 });

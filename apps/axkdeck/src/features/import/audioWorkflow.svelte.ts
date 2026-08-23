@@ -199,9 +199,7 @@ export class AudioImportWorkflow {
         request.destinationMode = mode;
         request.destinationVolumeName = '';
         request.destinationPartitionIndex =
-            mode === 'create'
-                ? (request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null)
-                : null;
+            request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null;
     }
 
     async setExistingVolume(partitionIndex: number | null, volumeName: string): Promise<void> {
@@ -221,7 +219,9 @@ export class AudioImportWorkflow {
     }
 
     setDestinationPartition(partitionIndex: number): void {
-        if (this.request) this.request.destinationPartitionIndex = partitionIndex;
+        if (!this.request) return;
+        this.request.destinationPartitionIndex = partitionIndex;
+        if (this.request.destinationMode === 'existing') this.request.destinationVolumeName = '';
     }
 
     setDestinationVolumeName(volumeName: string): void {
@@ -233,10 +233,11 @@ export class AudioImportWorkflow {
         selected: DiskTreeItem | null,
     ): AudioImportRequest {
         const initial = selected ? initialImportDestination(selected) : null;
+        const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
         return {
             files,
             destinationMode: initial?.mode ?? 'existing',
-            destinationPartitionIndex: initial?.partitionIndex ?? null,
+            destinationPartitionIndex: initial?.partitionIndex ?? firstPartition?.partitionIndex ?? null,
             destinationVolumeName: initial?.volumeName ?? '',
         };
     }

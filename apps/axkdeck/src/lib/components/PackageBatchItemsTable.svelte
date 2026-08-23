@@ -34,10 +34,8 @@
     const allSelected = $derived(items.length > 0 && selectedItems.length === items.length);
     const someSelected = $derived(selectedItems.length > 0 && !allSelected);
     const packageIndexById = $derived(new Map(selectedItems.map((item, index) => [item.id, index])));
-    const summaries = $derived(hasUnvalidatedChanges ? [] : (plan?.packages ?? []));
-    const capacityReports = $derived(
-        hasUnvalidatedChanges ? [] : (plan?.sfsIndexCapacity.filter((capacity) => capacity.packages.length > 0) ?? []),
-    );
+    const summaries = $derived(plan?.packages ?? []);
+    const capacityReports = $derived(plan?.sfsIndexCapacity.filter((capacity) => capacity.packages.length > 0) ?? []);
     const capacityByPackage = $derived.by(() => {
         const result = new Map<number, (typeof capacityReports)[number]['packages'][number]>();
         for (const capacity of capacityReports) {
@@ -172,8 +170,6 @@
                     >
                         {#if !item.selected}
                             <span>Not included</span>
-                        {:else if hasUnvalidatedChanges}
-                            <span>Pending check</span>
                         {:else if recordUsage}
                             <span>{recordUsage.plannedRecordSlots}</span>
                             <small>
@@ -184,6 +180,8 @@
                                 {#if recordUsage.reusedObjectCount > 0}· {recordUsage.reusedObjectCount} reused{/if}
                                 {#if recordUsage.shortfallRecordSlots > 0}· {recordUsage.shortfallRecordSlots} short{/if}
                             </small>
+                        {:else if hasUnvalidatedChanges}
+                            <span>Pending check</span>
                         {:else}
                             <span>—</span>
                         {/if}

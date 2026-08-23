@@ -117,55 +117,63 @@
     const changeSources = $derived(items.some((item) => item.localPath !== null) ? onchooselocal : onchooseworkspace);
     const selectedItems = $derived(items.filter((item) => item.selected));
     const selectedCount = $derived(selectedItems.length);
+    const displayPlan = $derived.by(() => {
+        if (!plan || plan.packages.length !== selectedItems.length) return null;
+        return plan.packages.every(
+            (summary, packageIndex) =>
+                summary.packageIndex === packageIndex &&
+                summary.packageId === selectedItems[packageIndex]?.inspection.packageId,
+        )
+            ? plan
+            : null;
+    });
     const canImport = $derived(
         status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges && selectedCount > 0 && !error,
     );
-    const summaries = $derived(hasUnvalidatedChanges ? [] : (plan?.packages ?? []));
+    const summaries = $derived(displayPlan?.packages ?? []);
     const totalObjects = $derived(
-        hasUnvalidatedChanges
-            ? selectedItems.reduce((total, item) => total + item.inspection.objects.length, 0)
-            : summaries.reduce((total, item) => total + item.objectCount, 0),
+        displayPlan
+            ? summaries.reduce((total, item) => total + item.objectCount, 0)
+            : selectedItems.reduce((total, item) => total + item.inspection.objects.length, 0),
     );
     const totalPayload = $derived(
-        hasUnvalidatedChanges
-            ? selectedItems.reduce((total, item) => total + item.inspection.totalPayloadBytes, 0)
-            : summaries.reduce((total, item) => total + item.payloadBytes, 0),
+        displayPlan
+            ? summaries.reduce((total, item) => total + item.payloadBytes, 0)
+            : selectedItems.reduce((total, item) => total + item.inspection.totalPayloadBytes, 0),
     );
     const placementNodes = $derived(
         new Set(
-            plan?.programSlotPlacements.flatMap((placement) =>
+            displayPlan?.programSlotPlacements.flatMap((placement) =>
                 placement.mappings.map((mapping) => `${mapping.packageIndex}:${mapping.nodeId}`),
             ) ?? [],
         ),
     );
     const actionableRenameNodes = $derived(
         new Set(
-            plan?.actions
+            displayPlan?.actions
                 .filter((action) => action.actions.includes('CONFLICT'))
                 .map((action) => `${action.packageIndex}:${action.nodeId}`) ?? [],
         ),
     );
     const visibleConflicts = $derived(
-        hasUnvalidatedChanges
-            ? []
-            : (plan?.conflicts.filter(
-                  (conflict) =>
-                      conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
-                      conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
-                      !(
-                          renameConflictCodes.has(conflict.code) &&
-                          (placementNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`) ||
-                              actionableRenameNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`))
-                      ),
-              ) ?? []),
+        displayPlan?.conflicts.filter(
+            (conflict) =>
+                conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
+                conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
+                !(
+                    renameConflictCodes.has(conflict.code) &&
+                    (placementNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`) ||
+                        actionableRenameNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`))
+                ),
+        ) ?? [],
     );
     const showResults = $derived(
         Boolean(error) ||
-            (!hasUnvalidatedChanges &&
-                Boolean(plan) &&
+            (Boolean(displayPlan) &&
                 (visibleConflicts.length > 0 ||
-                    (plan?.opaqueSequences.length ?? 0) > 0 ||
-                    (plan?.programSlotPlacements.length ?? 0) > 0)),
+                    actionableRenameNodes.size > 0 ||
+                    (displayPlan?.opaqueSequences.length ?? 0) > 0 ||
+                    (displayPlan?.programSlotPlacements.length ?? 0) > 0)),
     );
     const footerStatus = $derived.by(() => {
         if (status === 'loading') return 'Preparing packages…';
@@ -173,7 +181,8 @@
         if (status === 'applying') return 'Importing packages…';
         if (error) return 'Import failed';
         if (hasUnvalidatedChanges) {
-            return selectedCount === 0 ? 'Select at least one package' : 'Changes need checking';
+            if (selectedCount === 0) return 'Select at least one package';
+            return displayPlan ? 'Review import issues' : 'Check import conflicts';
         }
         if (visibleConflicts.length > 0) {
             return `${visibleConflicts.length} issue${visibleConflicts.length === 1 ? '' : 's'} prevent import`;
@@ -276,7 +285,7 @@
                     <div class="batch-table-region">
                         <PackageBatchItemsTable
                             {items}
-                            {plan}
+                            plan={displayPlan}
                             {destinationStrategy}
                             {destinationVolumeName}
                             {volumeNames}
@@ -290,9 +299,9 @@
 
                     {#if showResults}
                         <section class="batch-results" aria-label="Import results" bind:this={batchResults}>
-                            {#if !hasUnvalidatedChanges && plan?.opaqueSequences.length}
+                            {#if displayPlan?.opaqueSequences.length}
                                 <section class="batch-sequence-decisions" aria-label="Sequence decisions">
-                                    {#each plan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
+                                    {#each displayPlan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
                                         {@const packageIndex = sequence.packageIndex ?? 0}
                                         {@const item = selectedItems[packageIndex]}
                                         {@const selected = item
@@ -337,10 +346,10 @@
                                 </section>
                             {/if}
 
-                            {#if !hasUnvalidatedChanges && plan}
+                            {#if displayPlan}
                                 <PackageBatchConflictControls
                                     items={selectedItems}
-                                    {plan}
+                                    plan={displayPlan}
                                     {renames}
                                     {programSlots}
                                     disabled={busy}

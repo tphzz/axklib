@@ -78,6 +78,174 @@ function plan(names: string[], token: string): ImageSessionPackageImportPlan {
 }
 
 describe('PackageBatchImportWorkflow', () => {
+    it('clears a shared existing volume without planning when its partition changes', () => {
+        const firstVolume: DiskTreeItem = {
+            id: 'volume-0',
+            name: 'First',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const secondVolume: DiskTreeItem = {
+            id: 'volume-1',
+            name: 'Second',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 1,
+        };
+        const planImagePackageImport = vi.fn();
+        const workflow = new PackageBatchImportWorkflow({
+            transport: { planImagePackageImport } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker: new PickerController(() => undefined),
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+            sourceItems: () => [firstVolume, secondVolume],
+        });
+
+        workflow.open(firstVolume);
+        workflow.setDestinationPartition(1);
+
+        expect(workflow.request).toMatchObject({
+            destinationStrategy: 'shared',
+            destinationMode: 'existing',
+            destinationPartitionIndex: 1,
+            destinationVolumeName: '',
+            plan: null,
+        });
+        expect(planImagePackageImport).not.toHaveBeenCalled();
+    });
+
+    it('waits for an explicit conflict check after loading packages', async () => {
+        const sources = [serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol')];
+        const planImagePackageImport = vi.fn().mockResolvedValue(plan(['One'], 'explicit-plan'));
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageBatchImportWorkflow({
+            transport: {
+                inspectPackage: vi.fn().mockResolvedValue(inspection('package-0', 'One', 1)),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn().mockResolvedValue(undefined),
+            refreshSession: vi.fn().mockResolvedValue(undefined),
+            setStatus: vi.fn(),
+        });
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 0,
+            partitionIndex: 0,
+        };
+
+        workflow.open(partition);
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(sources);
+        await choosing;
+
+        expect(planImagePackageImport).not.toHaveBeenCalled();
+        expect(workflow.request).toMatchObject({
+            plan: null,
+            status: 'ready',
+            hasUnvalidatedChanges: true,
+        });
+
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+        expect(workflow.request?.plan?.planToken).toBe('explicit-plan');
+
+        const itemId = workflow.request!.items[0].id;
+        workflow.opaqueSequenceAction(itemId, 'sequence-1', 'SKIP');
+        workflow.setDestinationPartition(1);
+        await Promise.resolve();
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+        expect(workflow.request).toMatchObject({
+            plan: null,
+            status: 'ready',
+            hasUnvalidatedChanges: true,
+        });
+    });
+
+    it('keeps suggested program slots as a draft until another explicit conflict check', async () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol');
+        const suggestedPlan = plan(['One'], 'suggested-plan');
+        suggestedPlan.valid = false;
+        suggestedPlan.programSlotPlacements = [
+            {
+                placementId: 'placement-1',
+                partitionIndex: 0,
+                volumeName: 'One',
+                mode: 'CONTIGUOUS',
+                applied: false,
+                suggestedStartSlot: 5,
+                requiredSlotCount: 1,
+                availableSlotCount: 124,
+                occupiedRanges: [{ first: 1, last: 4 }],
+                sourceRanges: [{ first: 1, last: 1 }],
+                destinationRanges: [{ first: 5, last: 5 }],
+                mappings: [
+                    {
+                        packageIndex: 0,
+                        nodeId: 'package-0-0',
+                        sourceSlot: 1,
+                        destinationSlot: 5,
+                        requiresUserAction: false,
+                    },
+                ],
+            },
+        ];
+        const planImagePackageImport = vi.fn().mockResolvedValue(suggestedPlan);
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageBatchImportWorkflow({
+            transport: {
+                inspectPackage: vi.fn().mockResolvedValue(inspection('package-0', 'One', 1)),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn().mockResolvedValue(undefined),
+            refreshSession: vi.fn().mockResolvedValue(undefined),
+            setStatus: vi.fn(),
+        });
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 0,
+            partitionIndex: 0,
+        };
+
+        workflow.open(partition);
+        const choosing = workflow.chooseWorkspace();
+        picker.finish([source]);
+        await choosing;
+        await workflow.replan();
+        await Promise.resolve();
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+        expect(workflow.request).toMatchObject({
+            plan: { planToken: 'suggested-plan' },
+            status: 'ready',
+            hasUnvalidatedChanges: true,
+        });
+        expect(Object.values(workflow.request!.programSlots)).toEqual([5]);
+    });
+
     it('previews unique server suggestions, replans edited names, and applies one atomic plan', async () => {
         const sources = [
             serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol'),
@@ -129,6 +297,9 @@ describe('PackageBatchImportWorkflow', () => {
         const choosing = workflow.chooseWorkspace();
         picker.finish(sources);
         await choosing;
+
+        expect(planImagePackageImport).not.toHaveBeenCalled();
+        await workflow.replan();
 
         expect(workflow.request?.plan?.packages.map((item) => item.destinationVolumeName)).toEqual([
             'Drums',
@@ -182,6 +353,68 @@ describe('PackageBatchImportWorkflow', () => {
             relativePath: 'two.axkvol',
         });
         expect(workflow.request).toBeNull();
+    });
+
+    it('accumulates multiple object rename drafts before one explicit replan', async () => {
+        const sources = [
+            serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol'),
+            serverFileLocation({ rootId: 'workspace', relativePath: 'two.axkvol' }, 'two.axkvol'),
+        ];
+        const planImagePackageImport = vi
+            .fn()
+            .mockResolvedValueOnce(plan(['One', 'Two'], 'initial-plan'))
+            .mockResolvedValueOnce(plan(['One', 'Two'], 'renamed-plan'));
+        const picker = new PickerController(() => undefined);
+        const workflow = new PackageBatchImportWorkflow({
+            transport: {
+                inspectPackage: vi
+                    .fn()
+                    .mockResolvedValueOnce(inspection('package-0', 'One', 1))
+                    .mockResolvedValueOnce(inspection('package-1', 'Two', 1)),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn().mockResolvedValue(undefined),
+            refreshSession: vi.fn().mockResolvedValue(undefined),
+            setStatus: vi.fn(),
+        });
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 1,
+            partitionIndex: 0,
+        };
+
+        workflow.open(partition);
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(sources);
+        await choosing;
+
+        await workflow.replan();
+
+        const [one, two] = workflow.request!.items;
+        workflow.rename(one.id, 'sample-1', 'Kick fixed');
+        workflow.rename(two.id, 'sample-2', 'Snare fixed');
+
+        expect(workflow.request?.renames).toEqual({
+            [`${one.id}:sample-1`]: 'Kick fixed',
+            [`${two.id}:sample-2`]: 'Snare fixed',
+        });
+        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenCalledTimes(2);
+        expect(planImagePackageImport.mock.calls[1][3]).toEqual([
+            { packageIndex: 0, nodeId: 'sample-1', destinationName: 'Kick fixed' },
+            { packageIndex: 1, nodeId: 'sample-2', destinationName: 'Snare fixed' },
+        ]);
     });
 
     it('preserves package state while replanning and importing only selected packages', async () => {
@@ -239,6 +472,8 @@ describe('PackageBatchImportWorkflow', () => {
         const choosing = workflow.chooseWorkspace();
         picker.finish(sources);
         await choosing;
+
+        await workflow.replan();
 
         const [one, two, three] = workflow.request!.items;
         expect(workflow.request?.items.every((item) => item.selected)).toBe(true);
@@ -334,6 +569,8 @@ describe('PackageBatchImportWorkflow', () => {
         picker.finish(sources);
         await choosing;
 
+        await workflow.replan();
+
         expect(workflow.request?.destinationStrategy).toBe('shared');
         expect(workflow.canUseSeparateVolumes()).toBe(false);
         expect(planImagePackageImport).toHaveBeenCalledWith(
@@ -404,7 +641,7 @@ describe('PackageBatchImportWorkflow', () => {
         );
     });
 
-    it('refreshes and replans automatically when the image changed before apply', async () => {
+    it('refreshes and waits for an explicit conflict check when the image changed before apply', async () => {
         const source = serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol');
         const planImagePackageImport = vi
             .fn()
@@ -452,10 +689,21 @@ describe('PackageBatchImportWorkflow', () => {
         const choosing = workflow.chooseWorkspace();
         picker.finish([source]);
         await choosing;
+        await workflow.replan();
         await workflow.apply();
 
         expect(refreshSession).toHaveBeenCalledWith({ partitionIndex: 0 });
         expect(releaseImagePackageImportPlan).toHaveBeenCalledWith('stale-plan');
+        expect(planImagePackageImport).toHaveBeenCalledTimes(1);
+        expect(workflow.request).toMatchObject({
+            plan: null,
+            status: 'ready',
+            hasUnvalidatedChanges: true,
+        });
+        expect(setStatus).toHaveBeenLastCalledWith('Image changed; check import conflicts again');
+
+        await workflow.replan();
+
         expect(planImagePackageImport).toHaveBeenCalledTimes(2);
         expect(planImagePackageImport).toHaveBeenLastCalledWith(
             17,
@@ -472,7 +720,6 @@ describe('PackageBatchImportWorkflow', () => {
         );
         expect(workflow.request?.plan?.planToken).toBe('fresh-plan');
         expect(workflow.request?.status).toBe('ready');
-        expect(setStatus).toHaveBeenLastCalledWith('Image changed; import conflicts checked again');
     });
 
     it('refreshes and closes after an already-submitted job cannot be confirmed', async () => {
@@ -521,6 +768,7 @@ describe('PackageBatchImportWorkflow', () => {
         const choosing = workflow.chooseWorkspace();
         picker.finish([source]);
         await choosing;
+        await workflow.replan();
         await workflow.apply();
 
         expect(refreshSession).toHaveBeenCalledWith({ partitionIndex: 0, volumeName: 'One' });
