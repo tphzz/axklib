@@ -29,6 +29,14 @@ class WorkspaceStoreTest : public testing::Test {
     std::filesystem::path store_path_;
 };
 
+TEST(WorkspaceStoreDefaults, UsesVendorScopedConfigurationDirectory) {
+    const auto path = axk::server::WorkspaceStore::default_path();
+    ASSERT_TRUE(path) << path.error().message;
+    EXPECT_EQ(path->filename(), "workspaces.json");
+    EXPECT_EQ(path->parent_path().filename(), "axklib-server");
+    EXPECT_EQ(path->parent_path().parent_path().filename(), "tphzz");
+}
+
 TEST_F(WorkspaceStoreTest, MissingStoreStartsWithoutAnAvailableWorkspace) {
     auto store = axk::server::WorkspaceStore::open(store_path_);
     ASSERT_TRUE(store) << store.error().message;

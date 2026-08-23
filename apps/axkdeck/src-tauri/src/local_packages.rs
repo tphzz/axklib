@@ -230,7 +230,7 @@ pub(crate) async fn select_local_package_destination(
     let starting_directory = match preferences.lock() {
         Ok(preferences) => preferences.package_export_directory(),
         Err(_) => {
-            log::warn!("desktop preference state is unavailable; using the platform save location");
+            log::warn!("axkdeck settings state is unavailable; using the platform save location");
             None
         }
     };
@@ -270,7 +270,7 @@ pub(crate) async fn select_local_package_destination(
             }
             Err(_) => {
                 log::warn!(
-                    "desktop preference state is unavailable; the package export directory was not retained"
+                    "axkdeck settings state is unavailable; the package export directory was not retained"
                 );
             }
         }
@@ -306,7 +306,7 @@ pub(crate) async fn select_local_media_destination(
     let starting_directory = match preferences.lock() {
         Ok(preferences) => preferences.media_export_directory(),
         Err(_) => {
-            log::warn!("desktop preference state is unavailable; using the platform save location");
+            log::warn!("axkdeck settings state is unavailable; using the platform save location");
             None
         }
     };
@@ -346,7 +346,7 @@ pub(crate) async fn select_local_media_destination(
             }
             Err(_) => {
                 log::warn!(
-                    "desktop preference state is unavailable; the media export directory was not retained"
+                    "axkdeck settings state is unavailable; the media export directory was not retained"
                 );
             }
         }

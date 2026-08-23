@@ -76,6 +76,7 @@ fn connection(pid: u32) -> ConnectionFile {
 fn sidecar_arguments_never_expose_the_bearer_token() {
     let arguments = sidecar_arguments(
         std::path::Path::new("state"),
+        std::path::Path::new("config/tphzz/axkdeck/axklib-server/workspaces.json"),
         std::path::Path::new("state/connection.json"),
     );
     let rendered = arguments
@@ -86,6 +87,9 @@ fn sidecar_arguments_never_expose_the_bearer_token() {
     assert!(!rendered.contains("--token"));
     assert!(!rendered.contains("--config"));
     assert!(rendered.contains("--connection-file"));
+    assert!(
+        rendered.contains("--workspace-store config/tphzz/axkdeck/axklib-server/workspaces.json")
+    );
     assert!(rendered.contains("--port 0"));
     assert!(rendered.contains(&format!("--parent-pid {}", std::process::id())));
 }
@@ -94,6 +98,7 @@ fn sidecar_arguments_never_expose_the_bearer_token() {
 fn sidecar_arguments_allow_tauri_development_and_packaged_origins() {
     let arguments = sidecar_arguments(
         std::path::Path::new("state"),
+        std::path::Path::new("config/workspaces.json"),
         std::path::Path::new("state/connection.json"),
     );
     let rendered = arguments

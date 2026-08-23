@@ -23,6 +23,7 @@ type ScaleReporter = (
     fields: Readonly<Record<string, unknown>>,
     level?: 'info' | 'warn' | 'error',
 ) => void;
+type PersistScaleMode = (mode: InterfaceScaleMode) => Promise<void>;
 
 export interface InterfaceScaleAdapter {
     currentMonitor(): Promise<InterfaceScaleMonitor | null>;
@@ -45,11 +46,9 @@ export interface InterfaceScaleController {
     dispose(): Promise<void>;
 }
 
-const storageKey = 'axkdeck.interface-scale.v1';
 const minimumWindowWidth = 800;
 const minimumWindowHeight = 600;
 const windowEventDebounceMs = 150;
-const fixedModes = new Set<InterfaceScaleMode>(['1', '1.15', '1.25', '1.5']);
 
 function finitePositive(value: number): boolean {
     return Number.isFinite(value) && value > 0;
@@ -78,10 +77,6 @@ export function automaticInterfaceZoom(monitor: InterfaceScaleMonitor | null): n
     return roundedZoom(Math.max(1, Math.min(1.5, target / monitor.scaleFactor)));
 }
 
-function validMode(value: string | null): value is InterfaceScaleMode {
-    return value === 'auto' || fixedModes.has(value as InterfaceScaleMode);
-}
-
 function fixedZoom(mode: InterfaceScaleMode): number | null {
     if (mode === 'auto') return null;
     return Number(mode);
@@ -93,17 +88,12 @@ function errorMessage(error: unknown): string {
 
 export async function createInterfaceScaleController(
     adapter: InterfaceScaleAdapter,
-    storage: Storage,
+    initialMode: InterfaceScaleMode,
+    persistMode: PersistScaleMode = async () => undefined,
     report: ScaleReporter = () => undefined,
 ): Promise<InterfaceScaleController> {
-    let stored: string | null = null;
-    try {
-        stored = storage.getItem(storageKey);
-    } catch (error) {
-        report('interface_scale_storage_failed', { message: errorMessage(error) }, 'warn');
-    }
     let current: InterfaceScaleState = {
-        mode: validMode(stored) ? stored : 'auto',
+        mode: initialMode,
         appliedZoom: 1,
     };
     const listeners = new Set<(state: InterfaceScaleState) => void>();
@@ -228,9 +218,9 @@ export async function createInterfaceScaleController(
             if (disposed) return;
             current = { ...current, mode };
             try {
-                storage.setItem(storageKey, mode);
+                await persistMode(mode);
             } catch (error) {
-                report('interface_scale_storage_failed', { message: errorMessage(error) }, 'warn');
+                report('interface_scale_persistence_failed', { message: errorMessage(error) }, 'warn');
             }
             notify();
             await queueApply();

@@ -341,6 +341,45 @@ and the normal deletion inspection immediately before starting the job; a
 changed or newly referenced candidate returns to review instead of being
 deleted. Discovery is capped at 1,024 candidates per pass.
 
+### Settings
+
+Axkdeck stores its per-user settings under one vendor-scoped configuration
+directory:
+
+- `%APPDATA%\tphzz\axkdeck` on Windows;
+- `$XDG_CONFIG_HOME/tphzz/axkdeck` on Linux, or
+  `~/.config/tphzz/axkdeck` when `XDG_CONFIG_HOME` is unset; and
+- `~/Library/Application Support/tphzz/axkdeck` on macOS.
+
+`settings.json` is the single versioned axkdeck settings document. It groups UI
+appearance settings, including interface scale, separately from last-used
+directories so future settings remain organized. The local sidecar's configured
+storage roots remain operational server data and are stored separately at
+`axklib-server/workspaces.json` below the same axkdeck directory. Axkdeck passes
+that path explicitly when it starts the sidecar.
+
+```json
+{
+  "schemaVersion": 1,
+  "appearance": {
+    "interfaceScaleMode": "auto"
+  },
+  "lastUsedDirectories": {
+    "packageExport": null,
+    "directoryExport": null,
+    "mediaExport": null,
+    "allocationExport": null
+  }
+}
+```
+
+An independently launched `axklib-server` does not share the sidecar registry.
+It uses its own `tphzz/axklib-server/workspaces.json` configuration path unless
+`--workspace-store` or `workspaceStore` explicitly selects another file. The
+earlier unreleased filenames and locations are not read or migrated. Logs,
+WebView profile/cache data, protected credentials, and sidecar operational
+state remain in their platform-specific application locations.
+
 ### Diagnostics
 
 Development builds open the web developer tools with `F12`. This shortcut is

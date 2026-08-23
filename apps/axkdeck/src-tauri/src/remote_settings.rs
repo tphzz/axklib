@@ -42,6 +42,7 @@ pub struct ServerConnectionManager {
     secure_storage_error: Option<String>,
     log_directory: PathBuf,
     state_directory: PathBuf,
+    workspace_store: PathBuf,
 }
 
 struct ServerConnectionStateInner {
@@ -68,11 +69,13 @@ impl ServerConnectionState {
         &self,
         log_directory: PathBuf,
         state_directory: PathBuf,
+        workspace_store: PathBuf,
         startup: StartupDiagnostics,
     ) {
         let worker_state = self.clone();
         let worker_log_directory = log_directory.clone();
         let worker_state_directory = state_directory.clone();
+        let worker_workspace_store = workspace_store.clone();
         let worker = std::thread::Builder::new()
             .name("axkdeck-server-startup".to_owned())
             .spawn(move || {
@@ -80,6 +83,7 @@ impl ServerConnectionState {
                     ServerConnectionManager::initialize(
                         worker_log_directory.clone(),
                         worker_state_directory.clone(),
+                        worker_workspace_store.clone(),
                         &startup,
                     )
                 }))
@@ -91,6 +95,7 @@ impl ServerConnectionState {
                         error,
                         worker_log_directory,
                         worker_state_directory,
+                        worker_workspace_store,
                     )
                 });
                 worker_state.complete(manager);
@@ -102,6 +107,7 @@ impl ServerConnectionState {
                 message,
                 log_directory,
                 state_directory,
+                workspace_store,
             ));
         }
     }
@@ -158,6 +164,7 @@ impl ServerConnectionManager {
     pub fn initialize(
         log_directory: PathBuf,
         state_directory: PathBuf,
+        workspace_store: PathBuf,
         startup: &StartupDiagnostics,
     ) -> Result<Self, String> {
         startup.record(StartupMilestone::CredentialLookupStarted);
@@ -177,24 +184,45 @@ impl ServerConnectionManager {
                     secure_storage_error: None,
                     log_directory,
                     state_directory,
+                    workspace_store,
                 })
             }
-            Ok(None) => Self::local(log_directory, state_directory, None, Some(startup)),
-            Err(error) => Self::local(log_directory, state_directory, Some(error), Some(startup)),
+            Ok(None) => Self::local(
+                log_directory,
+                state_directory,
+                workspace_store,
+                None,
+                Some(startup),
+            ),
+            Err(error) => Self::local(
+                log_directory,
+                state_directory,
+                workspace_store,
+                Some(error),
+                Some(startup),
+            ),
         }
     }
 
     fn local(
         log_directory: PathBuf,
         state_directory: PathBuf,
+        workspace_store: PathBuf,
         secure_storage_error: Option<String>,
         startup: Option<&StartupDiagnostics>,
     ) -> Result<Self, String> {
         let sidecar = match startup {
-            Some(startup) => {
-                ServerSidecar::launch_at_startup(&log_directory, &state_directory, startup)?
-            }
-            None => ServerSidecar::launch_if_available(&log_directory, &state_directory)?,
+            Some(startup) => ServerSidecar::launch_at_startup(
+                &log_directory,
+                &state_directory,
+                &workspace_store,
+                startup,
+            )?,
+            None => ServerSidecar::launch_if_available(
+                &log_directory,
+                &state_directory,
+                &workspace_store,
+            )?,
         };
         let connection = sidecar.as_ref().map(|server| server.connection().clone());
         Ok(Self {
@@ -203,16 +231,23 @@ impl ServerConnectionManager {
             secure_storage_error,
             log_directory,
             state_directory,
+            workspace_store,
         })
     }
 
-    pub fn unavailable(error: String, log_directory: PathBuf, state_directory: PathBuf) -> Self {
+    pub fn unavailable(
+        error: String,
+        log_directory: PathBuf,
+        state_directory: PathBuf,
+        workspace_store: PathBuf,
+    ) -> Self {
         Self {
             sidecar: None,
             connection: None,
             secure_storage_error: Some(error),
             log_directory,
             state_directory,
+            workspace_store,
         }
     }
 
@@ -256,8 +291,11 @@ impl ServerConnectionManager {
     }
 
     pub fn use_local(&mut self) -> Result<RemoteServerSettingsView, String> {
-        let sidecar =
-            ServerSidecar::launch_if_available(&self.log_directory, &self.state_directory)?;
+        let sidecar = ServerSidecar::launch_if_available(
+            &self.log_directory,
+            &self.state_directory,
+            &self.workspace_store,
+        )?;
         let connection = sidecar.as_ref().map(|server| server.connection().clone());
         delete_remote_settings()?;
         self.connection = connection;
@@ -444,6 +482,7 @@ mod tests {
             "sidecar unavailable".to_owned(),
             PathBuf::from("logs"),
             PathBuf::from("state"),
+            PathBuf::from("config/workspaces.json"),
         ));
         let settings = result_receiver
             .recv_timeout(Duration::from_secs(1))

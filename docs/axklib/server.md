@@ -34,12 +34,22 @@ but never files, while choosing a workspace. This temporary broad view uses the
 server process's operating-system permissions. Once a directory is committed,
 all normal reads and writes return to the relative-path sandbox above.
 
-Workspace configuration is stored per user at:
+An independently launched server stores workspace configuration per user at:
 
-- `$XDG_CONFIG_HOME/axkdeck/workspaces.json`, or
-  `~/.config/axkdeck/workspaces.json`, on Linux;
-- `%APPDATA%\axkdeck\workspaces.json` on Windows; and
-- `~/Library/Application Support/axkdeck/workspaces.json` on macOS.
+- `$XDG_CONFIG_HOME/tphzz/axklib-server/workspaces.json`, or
+  `~/.config/tphzz/axklib-server/workspaces.json`, on Linux;
+- `%APPDATA%\tphzz\axklib-server\workspaces.json` on Windows; and
+- `~/Library/Application Support/tphzz/axklib-server/workspaces.json` on macOS.
+
+Axkdeck owns the local server process it launches and passes a distinct sidecar
+registry explicitly. That registry is
+`tphzz/axkdeck/axklib-server/workspaces.json` below the platform configuration
+root. Consequently, a standalone local server can run with its own workspace
+configuration without modifying axkdeck's sidecar configuration. A remote
+server likewise keeps its registry on the remote host; axkdeck does not copy or
+reinterpret it.
+
+The earlier unreleased filenames and locations are not read or migrated.
 
 Use `--workspace-store PATH` or the JSON `workspaceStore` setting for a
 deliberate override. Missing directories remain in the registry with an

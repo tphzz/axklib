@@ -310,19 +310,23 @@ axk::app::Result<std::filesystem::path> axk::server::WorkspaceStore::default_pat
     const auto base = detail::environment_variable("APPDATA");
     if (!base || base->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "APPDATA is not available"));
-    return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*base} / "tphzz" / "axklib-server" / "workspaces.json";
 #elif defined(__APPLE__)
     const auto home = detail::environment_variable("HOME");
     if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{*home} / "Library" / "Application Support" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / "Library" / "Application Support" / "tphzz" / "axklib-server" /
+           "workspaces.json";
 #else
-    if (const auto base = detail::environment_variable("XDG_CONFIG_HOME"); base && !base->empty())
-        return std::filesystem::path{*base} / "axkdeck" / "workspaces.json";
+    if (const auto base = detail::environment_variable("XDG_CONFIG_HOME"); base && !base->empty()) {
+        const auto config = std::filesystem::path{*base};
+        if (config.is_absolute())
+            return config / "tphzz" / "axklib-server" / "workspaces.json";
+    }
     const auto home = detail::environment_variable("HOME");
     if (!home || home->empty())
         return std::unexpected(workspace_error("workspace_store_unavailable", "HOME is not available"));
-    return std::filesystem::path{*home} / ".config" / "axkdeck" / "workspaces.json";
+    return std::filesystem::path{*home} / ".config" / "tphzz" / "axklib-server" / "workspaces.json";
 #endif
 }
 
