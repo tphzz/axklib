@@ -40,11 +40,11 @@
                 <dl>
                     <div>
                         <dt>Version</dt>
-                        <dd>{state.buildInfo.semanticVersion}</dd>
-                    </div>
-                    <div>
-                        <dt>Build</dt>
-                        <dd>{state.buildInfo.sourceIdentity}</dd>
+                        <dd>
+                            {state.buildInfo.isRelease
+                                ? state.buildInfo.semanticVersion
+                                : state.buildInfo.sourceIdentity}
+                        </dd>
                     </div>
                     <div>
                         <dt>Web view</dt>

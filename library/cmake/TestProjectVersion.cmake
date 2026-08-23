@@ -97,6 +97,40 @@ unset(ENV{GITHUB_REF_NAME})
 axk_derive_project_version("${repository}")
 assert_resolution(0.0.0 0.0.0 0 0 0 "" OFF)
 
+set(version_branches
+  9.8.7
+  v9.8.7
+  release/9.8.7
+  release/v9.8.7
+  feature/9.8.7
+  feature/v9.8.7
+  features/9.8.7
+  features/v9.8.7
+  bugfix/9.8.7
+  bugfix/v9.8.7
+  bugfixes/9.8.7
+  bugfixes/v9.8.7
+)
+foreach(version_branch IN LISTS version_branches)
+  run_git("${repository}" checkout -B "${version_branch}" main)
+  axk_derive_project_version("${repository}")
+  assert_resolution(9.8.7-pre 9.8.7 9 8 7 "" ON)
+endforeach()
+
+set(non_version_branches
+  v09.8.7
+  hotfix/9.8.7
+  feature/team/9.8.7
+  feature/9.8.7-rc.1
+  features/9.8.7+build.1
+)
+foreach(non_version_branch IN LISTS non_version_branches)
+  run_git("${repository}" checkout -B "${non_version_branch}" main)
+  axk_derive_project_version("${repository}")
+  assert_resolution(0.0.0 0.0.0 0 0 0 "" OFF)
+endforeach()
+run_git("${repository}" checkout main)
+
 run_git("${repository}" tag v9.8.7)
 axk_derive_project_version("${repository}")
 assert_resolution(0.0.0 0.0.0 0 0 0 "" OFF)
@@ -107,11 +141,22 @@ assert_resolution(9.8.7 9.8.7 9 8 7 v9.8.7 OFF)
 unset(ENV{GITHUB_REF_TYPE})
 unset(ENV{GITHUB_REF_NAME})
 
+run_git("${repository}" tag -d v9.8.7)
+run_git("${repository}" tag 4.5.6)
+set(ENV{GITHUB_REF_TYPE} tag)
+set(ENV{GITHUB_REF_NAME} 4.5.6)
+axk_derive_project_version("${repository}")
+assert_resolution(4.5.6 4.5.6 4 5 6 4.5.6 OFF)
+unset(ENV{GITHUB_REF_TYPE})
+unset(ENV{GITHUB_REF_NAME})
+run_git("${repository}" tag -d 4.5.6)
+run_git("${repository}" tag v9.8.7)
+
 run_git("${repository}" checkout --detach)
 set(ENV{GITHUB_REF_TYPE} branch)
-set(ENV{GITHUB_REF_NAME} main)
+set(ENV{GITHUB_REF_NAME} features/v9.8.7)
 axk_derive_project_version("${repository}")
-assert_resolution(0.0.0 0.0.0 0 0 0 "" OFF)
+assert_resolution(9.8.7-pre 9.8.7 9 8 7 "" ON)
 unset(ENV{GITHUB_REF_TYPE})
 unset(ENV{GITHUB_REF_NAME})
 axk_derive_project_version("${repository}")
@@ -130,6 +175,11 @@ axk_derive_project_version("${repository}")
 assert_resolution("1.2.3-rc.4+build.9" 1.2.3 1 2 3 "v1.2.3-rc.4+build.9" ON)
 
 run_git("${repository}" tag -d "v1.2.3-rc.4+build.9")
+run_git("${repository}" tag 1.2.3)
+axk_derive_project_version("${repository}")
+assert_resolution(1.2.3 1.2.3 1 2 3 1.2.3 OFF)
+run_git("${repository}" tag -d 1.2.3)
+
 run_git("${repository}" tag v01.2.3)
 axk_derive_project_version("${repository}")
 assert_resolution(0.0.0 0.0.0 0 0 0 "" OFF)
@@ -145,6 +195,25 @@ unset(ENV{GITHUB_REF_NAME})
 
 run_git("${repository}" tag v2.4.7)
 expect_resolution_failure("${repository}" "multiple semantic version tags")
+execute_process(
+  COMMAND
+    "${CMAKE_COMMAND}" -E env GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v2.4.6-beta.2
+    "${CMAKE_COMMAND}"
+    "-DAXK_PROJECT_VERSION_MODULE=${AXK_PROJECT_VERSION_MODULE}"
+    "-DAXK_TEST_ROOT=${AXK_TEST_ROOT}"
+    "-DAXK_TEST_FAILURE_REPOSITORY=${repository}"
+    -P "${CMAKE_CURRENT_LIST_FILE}"
+  RESULT_VARIABLE ambiguous_github_tag_result
+  OUTPUT_VARIABLE ambiguous_github_tag_output
+  ERROR_VARIABLE ambiguous_github_tag_error
+)
+if(ambiguous_github_tag_result EQUAL 0 OR
+   NOT "${ambiguous_github_tag_output}${ambiguous_github_tag_error}" MATCHES
+       "multiple semantic version tags")
+  message(FATAL_ERROR
+    "expected ambiguous GitHub tag failure, found:\n"
+    "${ambiguous_github_tag_output}${ambiguous_github_tag_error}")
+endif()
 
 run_git("${repository}" tag -d v2.4.7)
 execute_process(

@@ -60,10 +60,18 @@ def read(path: Path) -> VersionMetadata:
         raise ValueError("numeric version components do not match project_version")
     if value.is_release != bool(value.release_tag):
         raise ValueError("release_tag and is_release disagree")
-    if value.is_release and value.release_tag != f"v{value.semantic_version}":
+    if value.is_release and value.release_tag.removeprefix("v") != value.semantic_version:
         raise ValueError("release_tag does not match semantic_version")
-    if not value.is_release and value.semantic_version != "0.0.0":
-        raise ValueError("non-release version metadata must use 0.0.0")
     if value.is_prerelease != (match.group(4) is not None):
         raise ValueError("is_prerelease does not match semantic_version")
+    valid_development_version = (
+        value.semantic_version == "0.0.0" and not value.is_prerelease
+    ) or (
+        value.semantic_version == f"{value.project_version}-pre"
+        and value.is_prerelease
+    )
+    if not value.is_release and not valid_development_version:
+        raise ValueError(
+            "non-release version metadata must use 0.0.0 or a version-branch prerelease"
+        )
     return value

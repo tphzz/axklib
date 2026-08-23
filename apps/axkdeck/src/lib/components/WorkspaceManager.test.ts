@@ -111,7 +111,7 @@ describe('WorkspaceManager', () => {
         const status = rows[0].querySelector('small');
         expect(status).not.toBeNull();
         expect(getComputedStyle(name).lineHeight).toBe('11px');
-        expect(getComputedStyle(status!).lineHeight).toBe('9px');
+        expect(getComputedStyle(status!).lineHeight).toBe('1.2');
         expect(getComputedStyle(status!).marginTop).toBe('0px');
 
         style.remove();

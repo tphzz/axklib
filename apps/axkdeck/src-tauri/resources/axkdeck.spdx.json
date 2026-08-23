@@ -3,7 +3,7 @@
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
   "name": "axkdeck-release",
-  "comment": "axklib source identity: feature-axkserver-finetuning-00ca159-mod",
+  "comment": "axklib source identity: feature-axkserver-finetuning-dirty-00ca159",
   "documentNamespace": "https://github.com/tphzz/axklib/spdx/b3d5ae714dfe90ddc5b0c0a1e171be8a8ab8fb9a9400cce5b91c6f2c0cf14102",
   "creationInfo": {
     "creators": [
@@ -21,7 +21,7 @@
       "filesAnalyzed": false,
       "licenseConcluded": "NOASSERTION",
       "licenseDeclared": "MIT OR Apache-2.0",
-      "comment": "monorepo source identity: feature-axkserver-finetuning-00ca159-mod"
+      "comment": "monorepo source identity: feature-axkserver-finetuning-dirty-00ca159"
     },
     {
       "SPDXID": "SPDXRef-axklib-axklib-0.0.0",

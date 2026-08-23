@@ -55,6 +55,10 @@ build directory.
 The same Git tag versions axklib and axkdeck. `desktop:dev` and
 `desktop:build` read `version_metadata.json` and `package_basename.txt` from the
 native build, inject that identity into Tauri, and embed it in the Rust binary.
+Recognized bare, `release/`, `feature/`, `features/`, `bugfix/`, and `bugfixes/`
+version branches accept `0.3.6` or `v0.3.6`, use semantic version `0.3.6-pre`,
+and use source identity `0.3.6-pre-<short-sha>` or
+`0.3.6-pre-dirty-<short-sha>`.
 The tracked npm and Cargo versions are `0.0.0` placeholders and are not release
 version sources. A locally launched desktop refuses a bundled sidecar whose
 semantic version or source identity differs, so rebuild the native server after

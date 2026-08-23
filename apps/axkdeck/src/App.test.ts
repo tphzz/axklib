@@ -301,7 +301,8 @@ describe('App panel layout', () => {
         await fireEvent.click(brand);
         const firstDialog = await screen.findByRole('dialog', { name: 'About axkdeck' });
         expect(within(firstDialog).getByText('0.4.0')).toBeTruthy();
-        expect(within(firstDialog).getByText('v0.4.0-1234567')).toBeTruthy();
+        expect(within(firstDialog).queryByText('v0.4.0-1234567')).toBeNull();
+        expect(within(firstDialog).queryByText('Build')).toBeNull();
         expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
 
         await fireEvent.click(within(firstDialog).getByRole('button', { name: 'Close' }));

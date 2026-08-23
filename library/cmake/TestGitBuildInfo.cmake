@@ -65,9 +65,44 @@ assert_equal("${AXK_GIT_BRANCH}" main "named branch")
 assert_false("${AXK_IS_TAGGED_RELEASE}" "named branch tag state")
 assert_false("${AXK_GIT_DIRTY}" "clean named branch")
 
+set(version_branches
+  9.8.7
+  v9.8.7
+  release/9.8.7
+  release/v9.8.7
+  feature/9.8.7
+  feature/v9.8.7
+  features/9.8.7
+  features/v9.8.7
+  bugfix/9.8.7
+  bugfix/v9.8.7
+  bugfixes/9.8.7
+  bugfixes/v9.8.7
+)
+foreach(version_branch IN LISTS version_branches)
+  run_git("${repository}" checkout -B "${version_branch}" main)
+  axk_derive_git_build_info("${repository}" axklib)
+  assert_equal("${AXK_SOURCE_IDENTITY}" "9.8.7-pre-${short_sha}" "version branch identity")
+  assert_equal("${AXK_PACKAGE_BASENAME}" "axklib-9.8.7-pre-${short_sha}" "version branch package")
+endforeach()
+
+run_git("${repository}" checkout -B feature/9.8.7 main)
 file(WRITE "${repository}/untracked.txt" "dirty\n")
 axk_derive_git_build_info("${repository}" axklib)
-assert_equal("${AXK_SOURCE_IDENTITY}" "main-${short_sha}-mod" "dirty identity")
+assert_equal("${AXK_SOURCE_IDENTITY}" "9.8.7-pre-dirty-${short_sha}" "dirty version branch identity")
+assert_equal("${AXK_PACKAGE_BASENAME}" "axklib-9.8.7-pre-dirty-${short_sha}" "dirty version branch package")
+assert_true("${AXK_GIT_DIRTY}" "dirty version branch")
+file(REMOVE "${repository}/untracked.txt")
+
+run_git("${repository}" checkout -B hotfix/9.8.7 main)
+axk_derive_git_build_info("${repository}" axklib)
+assert_equal("${AXK_SOURCE_IDENTITY}" "hotfix-9.8.7-${short_sha}" "non-version namespace identity")
+run_git("${repository}" checkout main)
+
+file(WRITE "${repository}/untracked.txt" "dirty\n")
+axk_derive_git_build_info("${repository}" axklib)
+assert_equal("${AXK_SOURCE_IDENTITY}" "main-dirty-${short_sha}" "dirty identity")
+assert_equal("${AXK_PACKAGE_BASENAME}" "axklib-main-dirty-${short_sha}" "dirty package")
 assert_true("${AXK_GIT_DIRTY}" "untracked file dirtiness")
 file(REMOVE "${repository}/untracked.txt")
 
@@ -78,14 +113,23 @@ assert_false("${AXK_IS_TAGGED_RELEASE}" "branch wins tag state")
 
 run_git("${repository}" checkout --detach)
 axk_derive_git_build_info("${repository}" axklib)
-assert_equal("${AXK_SOURCE_IDENTITY}" "preview-${short_sha}" "lightweight exact tag")
-assert_equal("${AXK_GIT_TAG}" preview "lightweight tag value")
-assert_true("${AXK_IS_TAGGED_RELEASE}" "lightweight tag state")
+assert_equal("${AXK_SOURCE_IDENTITY}" "detached-${short_sha}" "non-version exact tag")
+assert_equal("${AXK_GIT_TAG}" "" "non-version tag value")
+assert_false("${AXK_IS_TAGGED_RELEASE}" "non-version tag state")
 
 run_git("${repository}" tag -d preview)
 axk_derive_git_build_info("${repository}" axklib)
 assert_equal("${AXK_SOURCE_IDENTITY}" "detached-${short_sha}" "detached identity")
 assert_equal("${AXK_GIT_BRANCH}" detached "detached branch")
+
+set(ENV{GITHUB_REF_TYPE} branch)
+set(ENV{GITHUB_REF_NAME} "features/v9.8.7")
+axk_derive_git_build_info("${repository}" axklib)
+assert_equal("${AXK_SOURCE_IDENTITY}" "9.8.7-pre-${short_sha}" "GitHub version branch identity")
+assert_equal("${AXK_GIT_BRANCH}" features-v9.8.7 "GitHub version branch")
+assert_false("${AXK_IS_TAGGED_RELEASE}" "GitHub version branch tag state")
+unset(ENV{GITHUB_REF_TYPE})
+unset(ENV{GITHUB_REF_NAME})
 
 set(ENV{GITHUB_REF_TYPE} tag)
 set(ENV{GITHUB_REF_NAME} "nightly/test")
@@ -101,6 +145,12 @@ run_git("${repository}" tag -a v1.2.3 -m release)
 axk_derive_git_build_info("${repository}" axklib)
 assert_equal("${AXK_SOURCE_IDENTITY}" "v1.2.3-${short_sha}" "annotated exact tag")
 assert_equal("${AXK_GIT_TAG}" v1.2.3 "annotated tag value")
+
+run_git("${repository}" tag -d v1.2.3)
+run_git("${repository}" tag -a 1.2.3 -m release)
+axk_derive_git_build_info("${repository}" axklib)
+assert_equal("${AXK_SOURCE_IDENTITY}" "1.2.3-${short_sha}" "unprefixed exact tag")
+assert_equal("${AXK_GIT_TAG}" 1.2.3 "unprefixed exact tag value")
 
 if(DEFINED ENV{RUNNER_TEMP} AND NOT "$ENV{RUNNER_TEMP}" STREQUAL "")
   set(external_temporary_root "$ENV{RUNNER_TEMP}")

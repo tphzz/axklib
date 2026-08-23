@@ -37,6 +37,25 @@ test('branch builds use source identity for artifacts and 0.0.0 for Tauri', () =
     assert.deepEqual(tauriVersionConfig(identity, 'linux', '12'), { version: '0.0.0' });
 });
 
+test('version branches use their prerelease semantic version and normalized source identity', () => {
+    const identity = fixture(
+        {
+            ...metadataFixture(),
+            semantic_version: '0.3.6-pre',
+            project_version: '0.3.6',
+            major: 0,
+            minor: 3,
+            patch: 6,
+            is_prerelease: true,
+        },
+        'axklib-0.3.6-pre-a1b2c3d',
+    );
+
+    assert.equal(identity.artifactIdentity, '0.3.6-pre-a1b2c3d');
+    assert.equal(identity.desktopPackageBasename, 'axkdeck-0.3.6-pre-a1b2c3d');
+    assert.deepEqual(tauriVersionConfig(identity, 'linux', '12'), { version: '0.3.6-pre' });
+});
+
 test('native package basename accepts one LF- or CRLF-terminated line', () => {
     const directory = mkdtempSync(join(tmpdir(), 'axkdeck-version-newline-'));
     const versionPath = join(directory, 'version.json');
@@ -79,6 +98,26 @@ test('tag builds use complete semantic version while macOS uses numeric bundle f
         version: '1.2.3',
         bundle: { macOS: { bundleVersion: '42' } },
     });
+});
+
+test('release tags may omit the v prefix', () => {
+    const identity = fixture(
+        {
+            schema_version: 1,
+            semantic_version: '1.2.3',
+            project_version: '1.2.3',
+            major: 1,
+            minor: 2,
+            patch: 3,
+            release_tag: '1.2.3',
+            is_release: true,
+            is_prerelease: false,
+        },
+        'axklib-1.2.3-a1b2c3d',
+    );
+
+    assert.equal(identity.releaseTag, '1.2.3');
+    assert.equal(identity.artifactIdentity, '1.2.3');
 });
 
 test('inconsistent version metadata is rejected', () => {
