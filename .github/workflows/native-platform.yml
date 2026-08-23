@@ -533,9 +533,17 @@ jobs:
                 ;;
             esac
           done
-          for dependency in webkit2gtk4.1 gtk3 libcxx llvm-libunwind; do
+          for dependency in libcxx llvm-libunwind; do
             if ! grep -Fx "$dependency" <<< "$rpm_dependencies"; then
               echo "RPM package is missing dependency: $dependency" >&2
+              exit 1
+            fi
+          done
+          # rpmbuild derives shared-library requirements from ELF metadata.
+          # DNF resolves these SONAME capabilities to the Fedora provider packages.
+          for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do
+            if ! grep -F "${capability}()" <<< "$rpm_dependencies"; then
+              echo "RPM package is missing runtime capability: ${capability}()" >&2
               exit 1
             fi
           done

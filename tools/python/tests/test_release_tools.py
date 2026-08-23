@@ -886,6 +886,10 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow_with_platform
     assert 'dpkg-deb -f "$deb" Depends' in workflow_with_platform
     assert 'rpm -qp --requires "$rpm"' in workflow_with_platform
+    assert "for dependency in libcxx llvm-libunwind; do" in workflow_with_platform
+    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do" in workflow_with_platform
+    assert 'grep -F "${capability}()"' in workflow_with_platform
+    assert "webkit2gtk4.1 gtk3 libcxx llvm-libunwind" not in workflow_with_platform
     assert 'rpm -Kv "$rpm"' in workflow_with_platform
     assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow_with_platform
     assert "rpm2cpio" not in workflow_with_platform
