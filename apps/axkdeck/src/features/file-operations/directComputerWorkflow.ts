@@ -4,7 +4,6 @@ import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflo
 import type { ExportWorkflow } from '../export/workflow.svelte';
 import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
 import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
-import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
 import { shouldUseDirectComputerFileOperations } from '../../lib/fileOperationRouting';
 import type { ConnectionMode } from '../../lib/transport';
@@ -60,18 +59,7 @@ export class DirectComputerWorkflow {
         }
     }
 
-    importPackage(workflow: PackageImportWorkflow, target: DiskTreeItem): void {
-        if (!this.enabled) {
-            workflow.open(target);
-            return;
-        }
-        void this.run('package-import', async () => {
-            workflow.open(target);
-            await workflow.chooseLocal(true);
-        });
-    }
-
-    importVolumePackages(workflow: PackageBatchImportWorkflow, target: DiskTreeItem): void {
+    importPackages(workflow: PackageBatchImportWorkflow, target: DiskTreeItem): void {
         if (!this.enabled) {
             workflow.open(target);
             return;

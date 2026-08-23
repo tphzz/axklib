@@ -522,6 +522,77 @@ describe('PackageBatchImportWorkflow', () => {
         expect(setStatus).toHaveBeenCalledWith('Imported 2 packages');
     });
 
+    it('keeps multiple volume packages targeted at the selected existing volume', async () => {
+        const sources = [
+            serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol'),
+            serverFileLocation({ rootId: 'workspace', relativePath: 'two.axkvol' }, 'two.axkvol'),
+        ];
+        const planImagePackageImport = vi.fn().mockResolvedValue(plan(['Target', 'Target'], 'volume-plan'));
+        const picker = new PickerController(() => undefined);
+        const volume: DiskTreeItem = {
+            id: 'volume-0',
+            name: 'Target',
+            kind: 'volume',
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const partition: DiskTreeItem = {
+            id: 'partition-0',
+            name: 'Partition 1',
+            kind: 'partition',
+            childCount: 1,
+            partitionIndex: 0,
+            children: [volume],
+        };
+        const workflow = new PackageBatchImportWorkflow({
+            transport: {
+                inspectPackage: vi
+                    .fn()
+                    .mockResolvedValueOnce(inspection('package-0', 'One', 1))
+                    .mockResolvedValueOnce(inspection('package-1', 'Two', 1)),
+                planImagePackageImport,
+                releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
+            } as unknown as ImageTransport,
+            jobs: {} as JobController,
+            picker,
+            pickerHistory: new PackagePickerHistory(),
+            isDesktop: false,
+            sessionId: () => 17,
+            invalidateSession: vi.fn().mockResolvedValue(undefined),
+            refreshSession: vi.fn().mockResolvedValue(undefined),
+            setStatus: vi.fn(),
+            sourceItems: () => [partition],
+        });
+
+        workflow.open(volume);
+        const choosing = workflow.chooseWorkspace();
+        picker.finish(sources);
+        await choosing;
+
+        expect(workflow.request).toMatchObject({
+            destinationStrategy: 'shared',
+            destinationMode: 'existing',
+            destinationPartitionIndex: 0,
+            destinationVolumeName: 'Target',
+            plan: null,
+            hasUnvalidatedChanges: true,
+        });
+        expect(workflow.canUseSeparateVolumes()).toBe(true);
+        expect(planImagePackageImport).not.toHaveBeenCalled();
+
+        await workflow.replan();
+
+        expect(planImagePackageImport).toHaveBeenCalledWith(
+            17,
+            sources,
+            { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Target' },
+            [],
+            [],
+            undefined,
+            [],
+        );
+    });
+
     it('plans mixed package kinds into one selected existing volume', async () => {
         const sources = [
             serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkprg' }, 'one.axkprg'),

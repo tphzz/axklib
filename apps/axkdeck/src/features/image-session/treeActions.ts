@@ -8,7 +8,6 @@ import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
 import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
-import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ImageSessionWorkflow } from './workflow.svelte';
 
@@ -17,7 +16,6 @@ interface ImageTreeActionDependencies {
     imageSession: ImageSessionWorkflow;
     mutation: MutationWorkflow;
     directComputer: DirectComputerWorkflow;
-    packageImport: PackageImportWorkflow;
     packageBatchImport: PackageBatchImportWorkflow;
     exports: ExportWorkflow;
     volumePackages: VolumePackageExportWorkflow;
@@ -60,16 +58,10 @@ export function createImageTreeActionHandler(dependencies: ImageTreeActionDepend
                 .catch((error) => imageSession.setStatus(userFacingMessage(error)));
             return;
         }
-        if (action === 'import-package') {
-            if (!imageSession.packageImportAvailable || item.kind !== 'volume') return;
-            imageSession.selectSource(item);
-            dependencies.directComputer.importPackage(dependencies.packageImport, item);
-            return;
-        }
         if (action === 'import-packages') {
-            if (!imageSession.packageImportAvailable || item.kind !== 'partition') return;
+            if (!imageSession.packageImportAvailable || (item.kind !== 'partition' && item.kind !== 'volume')) return;
             imageSession.selectSource(item);
-            dependencies.directComputer.importVolumePackages(dependencies.packageBatchImport, item);
+            dependencies.directComputer.importPackages(dependencies.packageBatchImport, item);
             return;
         }
         if (action === 'export-package') {

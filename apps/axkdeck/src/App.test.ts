@@ -1274,7 +1274,7 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
     });
 
-    it('continues from package verification into import planning without proxy identity checks', async () => {
+    it('opens batch package import on a volume with that existing volume selected', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1310,6 +1310,7 @@ describe('App panel layout', () => {
             sourceMediaKind: 'SFS',
             valid: true,
             payloadsVerified: true,
+            totalPayloadBytes: 0,
             roots: [{ kind: 'VOLUME', displayName: 'Grand Piano', nodeIds: [] }],
             objects: [],
             relationships: [],
@@ -1344,6 +1345,7 @@ describe('App panel layout', () => {
             programAssignmentAdjustments: [],
             programSlotPlacements: [],
             allocation: [],
+            sfsIndexCapacity: [],
         });
         renderAcknowledgedApp();
 
@@ -1364,14 +1366,33 @@ describe('App panel layout', () => {
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
-        const importDialog = await screen.findByRole('dialog', { name: 'Import axklib package' });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+        const importDialog = await screen.findByRole('dialog', { name: 'Import packages' });
         await fireEvent.click(within(importDialog).getByRole('button', { name: /Storage location/ }));
-        const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
-        expect(screen.queryByRole('dialog', { name: 'Import axklib package' })).toBeNull();
+        const picker = await screen.findByRole('dialog', { name: 'Choose axklib packages' });
+        expect(screen.queryByRole('dialog', { name: 'Import packages' })).toBeNull();
         expect(screen.getAllByRole('dialog')).toHaveLength(1);
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('GrPiano Fazioli.axkvol'));
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Select 1 file' }));
+
+        const plannedDialog = await screen.findByRole('dialog', { name: 'Import packages' });
+        expect(
+            (await within(plannedDialog).findByRole('button', { name: 'One volume' })).getAttribute('aria-pressed'),
+        ).toBe('true');
+        expect(
+            (await within(plannedDialog).findByRole('button', { name: 'Existing' })).getAttribute('aria-pressed'),
+        ).toBe('true');
+        expect(
+            (
+                (await within(plannedDialog).findByRole('combobox', {
+                    name: 'Destination volume',
+                })) as HTMLInputElement
+            ).value,
+        ).toBe('My Volume');
+        expect(mocks.planImagePackageImport).not.toHaveBeenCalled();
+
+        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Check conflicts' }));
 
         await vi.waitFor(() =>
             expect(mocks.planImagePackageImport).toHaveBeenCalledWith(

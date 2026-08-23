@@ -286,7 +286,6 @@
         imageSession: imageSessionWorkflow,
         mutation: mutationWorkflow,
         directComputer: directComputerWorkflow,
-        packageImport: packageImportWorkflow,
         packageBatchImport: packageBatchImportWorkflow,
         exports: exportWorkflow,
         volumePackages: volumePackageExportWorkflow,

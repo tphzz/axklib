@@ -392,12 +392,7 @@
         onkeydown={handleSubmenuKey}
     >
         {#if activeSubmenu === 'import'}
-            {#if item.kind === 'partition'}
-                <button type="button" role="menuitem" onclick={() => choose('import-packages')}>Import packages…</button
-                >
-            {:else}
-                <button type="button" role="menuitem" onclick={() => choose('import-package')}>Import package…</button>
-            {/if}
+            <button type="button" role="menuitem" onclick={() => choose('import-packages')}>Import packages…</button>
         {:else if activeSubmenu === 'export'}
             {#if item.kind === 'partition'}
                 {#if volumePackageExportEnabled}

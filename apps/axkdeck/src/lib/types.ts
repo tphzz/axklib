@@ -54,7 +54,6 @@ export type ImageTreeAction =
     | 'rename-partition'
     | 'inspect-allocation'
     | 'repair-placement'
-    | 'import-package'
     | 'import-packages'
     | 'export-package'
     | 'export-volume-packages'

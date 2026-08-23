@@ -276,8 +276,8 @@ describe('ImageNavigator', () => {
             clientY: 20,
         });
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
-        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'import-package');
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'import-packages');
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /DRUMS/ }), {
             clientX: 20,

@@ -550,6 +550,7 @@ export class PackageBatchImportWorkflow {
         } catch (error) {
             await Promise.all(sources.map((item) => this.releaseUpload(item.upload)));
             if (generation !== this.generation || !this.request) return;
+            reportError('Inspect package batch failed', error);
             this.request = { ...this.request, items: [], status: 'choosing', error: userFacingMessage(error) };
         }
     }
