@@ -3,6 +3,7 @@
     import { formatAllocationBytes } from '../allocationInspector';
     import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
     import { formatStoredSize } from '../formatBytes';
+    import { selectionMode, type ObjectSelectionMode } from '../objectSelection';
     import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem } from '../types';
     import Icon from './Icon.svelte';
@@ -11,9 +12,11 @@
     interface Props {
         item: DiskTreeItem;
         selectedId: string;
+        selectedVolumeIds?: readonly string[];
         depth?: number;
         parentId?: string;
-        onselect: (item: DiskTreeItem) => void;
+        onselect: (item: DiskTreeItem, mode: ObjectSelectionMode) => void;
+        onregister?: (item: DiskTreeItem, present: boolean) => void;
         onloadchildren: (
             parentId: string,
             offset: number,
@@ -35,9 +38,11 @@
     let {
         item,
         selectedId,
+        selectedVolumeIds = [],
         depth = 0,
         parentId = '',
         onselect,
+        onregister = () => undefined,
         onloadchildren,
         volumeActionsEnabled = false,
         partitionActionsEnabled = false,
@@ -57,6 +62,7 @@
     let loading = $state(false);
     let loadError = $state('');
     let initialized = false;
+    const selected = $derived(item.kind === 'volume' ? selectedVolumeIds.includes(item.id) : selectedId === item.id);
     const hasChildren = $derived(item.kind !== 'volume' && totalCount > 0);
     const loadCompletePartition = $derived(samplerOrderingEnabled && item.kind === 'partition');
     const orderedChildren = $derived(loadCompletePartition ? orderSamplerTreeItems(children, 'volume') : children);
@@ -101,6 +107,11 @@
     function containsSelected(nodes: DiskTreeItem[]): boolean {
         return nodes.some((node) => node.id === selectedId || containsSelected(node.children ?? []));
     }
+
+    $effect(() => {
+        onregister(item, true);
+        return () => onregister(item, false);
+    });
 
     $effect(() => {
         if (initialized) return;
@@ -242,7 +253,7 @@
 
 <div>
     <div
-        class:selected={selectedId === item.id}
+        class:selected
         class:partition-summary-row={loadCompletePartition}
         class="tree-row group"
         style:--tree-depth={depth}
@@ -273,10 +284,12 @@
                 class="tree-item-select"
                 type="button"
                 aria-current={selectedId === item.id ? 'true' : undefined}
+                aria-pressed={item.kind === 'volume' ? selected : undefined}
                 aria-describedby={tooltipId}
                 data-tree-id={item.id}
+                data-tree-kind={item.kind}
                 data-tree-parent-id={parentId}
-                onclick={() => onselect(item)}
+                onclick={(event) => onselect(item, selectionMode(event))}
                 ondblclick={() => {
                     if (item.kind === 'partition') void toggle();
                 }}
@@ -336,9 +349,11 @@
                 <TreeNode
                     item={child}
                     {selectedId}
+                    {selectedVolumeIds}
                     depth={depth + 1}
                     parentId={item.id}
                     {onselect}
+                    {onregister}
                     {onloadchildren}
                     {volumeActionsEnabled}
                     {partitionActionsEnabled}

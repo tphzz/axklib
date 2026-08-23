@@ -32,7 +32,7 @@
         WaveDataItem,
         WorkspaceView,
     } from '../../lib/types';
-    import type { PackageExportSelectionState } from '../../lib/objectSelection';
+    import type { ObjectSelectionMode, PackageExportSelectionState } from '../../lib/objectSelection';
     import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../lib/desktopBuildInfo';
 
     interface WorkspaceTab {
@@ -51,6 +51,7 @@
         imageLocation: ImageLocation | null;
         sourceItems: DiskTreeItem[];
         selectedSource: DiskTreeItem;
+        selectedVolumeIds: readonly string[];
         imageOpening: boolean;
         sessionId: number | null;
         catalog: CatalogWorkflow;
@@ -91,7 +92,8 @@
         closeImage: () => void;
         showImageIntegrity: () => void;
         manageLocations: () => void;
-        selectSource: (item: DiskTreeItem) => void;
+        selectSource: (item: DiskTreeItem, mode: ObjectSelectionMode, visibleVolumes: readonly DiskTreeItem[]) => void;
+        selectSourceForContext: (item: DiskTreeItem, visibleVolumes: readonly DiskTreeItem[]) => void;
         imageAction: (item: DiskTreeItem, action: ImageTreeAction) => void;
         selectWorkspace: (view: WorkspaceView) => void;
         exportPackage: (items: PackageExportObject[]) => void;
@@ -115,6 +117,7 @@
         imageLocation,
         sourceItems,
         selectedSource,
+        selectedVolumeIds,
         imageOpening,
         sessionId,
         catalog,
@@ -156,6 +159,7 @@
         showImageIntegrity,
         manageLocations,
         selectSource,
+        selectSourceForContext,
         imageAction,
         selectWorkspace,
         exportPackage,
@@ -356,6 +360,7 @@
             image={imageLocation}
             items={sourceItems}
             selectedId={selectedSource.id}
+            {selectedVolumeIds}
             opening={imageOpening}
             storageLocationsAvailable={transport.storageMode === 'server'}
             onopen={openImage}
@@ -364,6 +369,7 @@
             onintegrity={showImageIntegrity}
             onmanagelocations={manageLocations}
             onselect={selectSource}
+            oncontextselect={selectSourceForContext}
             volumeActionsEnabled={mutation.volumeAvailable}
             partitionActionsEnabled={mutation.partitionAvailable}
             packageImportEnabled={packageImportAvailable}

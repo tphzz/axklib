@@ -62,6 +62,7 @@ import type {
     Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
+    VolumeDeletionTarget,
     WaveDataOrphanInspection,
 } from '../transport';
 import type {
@@ -266,8 +267,8 @@ export class InMemoryImageTransport implements ImageTransport {
         this.options.onClose?.(sessionId);
     }
 
-    startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
-        return this.invoke('startVolumeMutation', [sessionId, mutation]);
+    startVolumeMutations(sessionId: number, mutations: VolumeMutation[]): Promise<JobState> {
+        return this.invoke('startVolumeMutations', [sessionId, mutations]);
     }
 
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
@@ -278,12 +279,8 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startObjectRename', [sessionId, mutation]);
     }
 
-    inspectVolumeDeletion(
-        sessionId: number,
-        partitionIndex: number,
-        volumeName: string,
-    ): Promise<VolumeDeletionInspection> {
-        return this.invoke('inspectVolumeDeletion', [sessionId, partitionIndex, volumeName]);
+    inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
+        return this.invoke('inspectVolumeDeletion', [sessionId, targets]);
     }
 
     inspectPlacement(

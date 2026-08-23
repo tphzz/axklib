@@ -14,8 +14,7 @@ const volume = {
 const safeDeletion = {
     imageId: 'image-1',
     revision: 1,
-    partitionIndex: 2,
-    volumeName: 'ORIGINAL',
+    targets: [{ partitionIndex: 2, volumeName: 'ORIGINAL' }],
     canDelete: true,
     crossingRelationshipCount: 0,
     blockers: [],
@@ -26,7 +25,7 @@ describe('VolumeActionDialog', () => {
         render(VolumeActionDialog, {
             props: {
                 action: 'add-volume',
-                item: { ...volume, kind: 'partition' },
+                items: [{ ...volume, kind: 'partition' }],
                 busy: true,
                 phase: 'submitting',
                 error: '',
@@ -46,7 +45,7 @@ describe('VolumeActionDialog', () => {
         render(VolumeActionDialog, {
             props: {
                 action: 'add-volume',
-                item: { ...volume, kind: 'partition' },
+                items: [{ ...volume, kind: 'partition' }],
                 busy: false,
                 phase: 'idle',
                 error: '',
@@ -69,7 +68,7 @@ describe('VolumeActionDialog', () => {
         render(VolumeActionDialog, {
             props: {
                 action: 'delete-volume',
-                item: volume,
+                items: [volume],
                 busy: false,
                 phase: 'idle',
                 error: '',
@@ -90,7 +89,7 @@ describe('VolumeActionDialog', () => {
         render(VolumeActionDialog, {
             props: {
                 action: 'delete-volume',
-                item: volume,
+                items: [volume],
                 busy: false,
                 phase: 'idle',
                 error: '',
@@ -110,12 +109,40 @@ describe('VolumeActionDialog', () => {
         expect(screen.queryByRole('button', { name: 'Repair placement' })).toBeNull();
     });
 
+    it('lists every target in a multi-volume deletion confirmation', () => {
+        const second = { ...volume, id: 'volume-2', name: 'SECOND', partitionIndex: 5 };
+        render(VolumeActionDialog, {
+            props: {
+                action: 'delete-volume',
+                items: [volume, second],
+                busy: false,
+                phase: 'idle',
+                error: '',
+                deletionInspection: {
+                    ...safeDeletion,
+                    targets: [
+                        { partitionIndex: 2, volumeName: 'ORIGINAL' },
+                        { partitionIndex: 5, volumeName: 'SECOND' },
+                    ],
+                },
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('dialog', { name: 'Delete 2 volumes' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Partition 3' })).toBeTruthy();
+        expect(screen.getByText('ORIGINAL')).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Partition 6' })).toBeTruthy();
+        expect(screen.getByText('SECOND')).toBeTruthy();
+    });
+
     it('validates and submits partition renames with the same naming rules as volumes', async () => {
         const onsubmit = vi.fn();
         render(VolumeActionDialog, {
             props: {
                 action: 'rename-partition',
-                item: { ...volume, id: 'partition-2', name: 'PARTITION 3', kind: 'partition' },
+                items: [{ ...volume, id: 'partition-2', name: 'PARTITION 3', kind: 'partition' }],
                 busy: false,
                 phase: 'idle',
                 error: '',

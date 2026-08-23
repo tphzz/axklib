@@ -56,7 +56,7 @@ export class MutationWorkflow {
     volumeAvailable = $state(false);
     partitionAvailable = $state(false);
     objectRenameAvailable = $state(false);
-    volumeAction = $state<{ item: DiskTreeItem; action: ImageTreeAction } | null>(null);
+    volumeAction = $state<{ items: DiskTreeItem[]; action: ImageTreeAction } | null>(null);
     volumeActionBusy = $state(false);
     volumeActionPhase = $state<'idle' | 'checking' | 'submitting'>('idle');
     volumeActionError = $state('');
@@ -114,10 +114,27 @@ export class MutationWorkflow {
         if ((action === 'rename-volume' || action === 'delete-volume') && item.kind !== 'volume') return false;
         this.volumeActionError = '';
         this.volumeDeletionInspection = null;
-        const request = { item, action };
+        const request = { items: [item], action };
         const generation = ++this.volumeActionGeneration;
         this.volumeAction = request;
         if (action === 'delete-volume') void this.inspectVolumeDeletion(request, generation);
+        return true;
+    }
+
+    requestVolumeDeletion(items: DiskTreeItem[]): boolean {
+        if (!this.volumeAvailable || items.length === 0) return false;
+        const uniqueItems = new Map<string, DiskTreeItem>();
+        for (const item of items) {
+            if (item.kind !== 'volume' || item.partitionIndex === undefined) return false;
+            uniqueItems.set(`${item.partitionIndex}\0${item.name}`, item);
+        }
+        if (uniqueItems.size !== items.length) return false;
+        this.volumeActionError = '';
+        this.volumeDeletionInspection = null;
+        const request = { items: [...items], action: 'delete-volume' as const };
+        const generation = ++this.volumeActionGeneration;
+        this.volumeAction = request;
+        void this.inspectVolumeDeletion(request, generation);
         return true;
     }
 
@@ -328,28 +345,36 @@ export class MutationWorkflow {
         if (!this.volumeAction || !this.dependencies.imageOpen()) return;
         const requested = this.volumeAction;
         if (requested.action === 'delete-volume' && !this.volumeDeletionInspection?.canDelete) return;
-        const partitionIndex = requested.item.partitionIndex;
+        const primaryItem = requested.items[0];
+        if (!primaryItem) return;
+        const partitionIndex = primaryItem.partitionIndex;
         if (partitionIndex === undefined) return;
-        const previousVolumeName = requested.item.kind === 'volume' ? requested.item.name : undefined;
-        const volumeMutation: VolumeMutation | null =
+        const previousVolumeName = primaryItem.kind === 'volume' ? primaryItem.name : undefined;
+        const volumeMutations: VolumeMutation[] =
             requested.action === 'add-volume'
-                ? { kind: 'add', partitionIndex, volumeName: name }
+                ? [{ kind: 'add', partitionIndex, volumeName: name }]
                 : requested.action === 'rename-volume'
-                  ? {
-                        kind: 'rename',
-                        partitionIndex,
-                        volumeName: requested.item.name,
-                        newVolumeName: name,
-                    }
+                  ? [
+                        {
+                            kind: 'rename',
+                            partitionIndex,
+                            volumeName: primaryItem.name,
+                            newVolumeName: name,
+                        },
+                    ]
                   : requested.action === 'delete-volume'
-                    ? { kind: 'delete', partitionIndex, volumeName: requested.item.name }
-                    : null;
+                    ? requested.items.map((item) => ({
+                          kind: 'delete' as const,
+                          partitionIndex: item.partitionIndex!,
+                          volumeName: item.name,
+                      }))
+                    : [];
         const partitionMutation: PartitionMutation | null =
             requested.action === 'rename-partition'
                 ? {
                       kind: 'rename',
                       partitionIndex,
-                      partitionName: requested.item.name,
+                      partitionName: primaryItem.name,
                       newPartitionName: name,
                   }
                 : null;
@@ -363,7 +388,7 @@ export class MutationWorkflow {
             requested.action === 'add-volume'
                 ? 'Adding volume'
                 : requested.action === 'delete-volume'
-                  ? 'Deleting volume'
+                  ? `Deleting ${requested.items.length} ${requested.items.length === 1 ? 'volume' : 'volumes'}`
                   : requested.action === 'rename-partition'
                     ? 'Renaming partition'
                     : 'Renaming volume',
@@ -381,7 +406,7 @@ export class MutationWorkflow {
                 () =>
                     partitionMutation
                         ? this.dependencies.transport.startPartitionMutation(sessionId, partitionMutation)
-                        : this.dependencies.transport.startVolumeMutation(sessionId, volumeMutation!),
+                        : this.dependencies.transport.startVolumeMutations(sessionId, volumeMutations),
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
@@ -392,7 +417,7 @@ export class MutationWorkflow {
             ++this.volumeActionGeneration;
             this.volumeAction = null;
             await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
-            this.dependencies.reportTiming(requested.action, started, 1);
+            this.dependencies.reportTiming(requested.action, started, requested.items.length);
         } catch (error) {
             this.volumeActionError = userFacingMessage(error);
             this.dependencies.setStatus(this.volumeActionError);
@@ -408,12 +433,11 @@ export class MutationWorkflow {
     }
 
     private async inspectVolumeDeletion(
-        requested: { item: DiskTreeItem; action: ImageTreeAction },
+        requested: { items: DiskTreeItem[]; action: ImageTreeAction },
         generation: number,
     ): Promise<void> {
-        const partitionIndex = requested.item.partitionIndex;
         const sessionId = this.dependencies.sessionId();
-        if (partitionIndex === undefined || sessionId === null) {
+        if (sessionId === null) {
             if (this.isCurrentVolumeAction(generation)) {
                 this.volumeActionError = 'Image session is no longer available';
             }
@@ -425,8 +449,10 @@ export class MutationWorkflow {
         try {
             const inspection = await this.dependencies.transport.inspectVolumeDeletion(
                 sessionId,
-                partitionIndex,
-                requested.item.name,
+                requested.items.map((item) => ({
+                    partitionIndex: item.partitionIndex!,
+                    volumeName: item.name,
+                })),
             );
             if (this.isCurrentVolumeAction(generation)) this.volumeDeletionInspection = inspection;
         } catch (error) {

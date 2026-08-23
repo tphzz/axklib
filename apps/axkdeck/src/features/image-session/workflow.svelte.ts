@@ -8,6 +8,8 @@ import type {
     OpenedImage,
 } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
+import type { ObjectSelectionMode } from '../../lib/objectSelection';
+import { emptyVolumeSelection, updateVolumeSelection, type VolumeSelectionState } from '../../lib/volumeSelection';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
@@ -55,6 +57,7 @@ interface SessionCollaborators {
 
 export class ImageSessionWorkflow {
     sourceItems = $state<DiskTreeItem[]>([]);
+    volumeSelection = $state<VolumeSelectionState>(emptyVolumeSelection());
     selectedSource = $state<DiskTreeItem>({
         id: 'none',
         name: 'No image',
@@ -145,6 +148,45 @@ export class ImageSessionWorkflow {
     }
 
     selectSource(item: DiskTreeItem): void {
+        this.selectTreeSource(item, 'replace', collectVolumes(this.sourceItems));
+    }
+
+    selectTreeSource(item: DiskTreeItem, mode: ObjectSelectionMode, visibleVolumes: readonly DiskTreeItem[]): void {
+        const update = updateVolumeSelection(this.volumeSelection, visibleVolumes, item, mode);
+        this.volumeSelection = update.selection;
+        this.activateSource(update.active);
+    }
+
+    selectSourceForContext(item: DiskTreeItem, visibleVolumes: readonly DiskTreeItem[]): void {
+        if (item.kind === 'volume' && this.volumeSelection.items.some((candidate) => candidate.id === item.id)) {
+            this.activateSource(item);
+            return;
+        }
+        this.selectTreeSource(item, 'replace', visibleVolumes);
+    }
+
+    importDestinationSource(): DiskTreeItem {
+        const selected = this.volumeSelection.items;
+        if (selected.length === 1) return selected[0]!;
+        if (selected.length > 1) {
+            const partitionIndex = selected[0]?.partitionIndex;
+            if (partitionIndex !== undefined && selected.every((item) => item.partitionIndex === partitionIndex)) {
+                return (
+                    findPartition(this.sourceItems, partitionIndex) ?? {
+                        id: `selected-partition-${partitionIndex}`,
+                        name: `Partition ${partitionIndex + 1}`,
+                        kind: 'partition',
+                        childCount: 0,
+                        partitionIndex,
+                    }
+                );
+            }
+            return noImageSource();
+        }
+        return this.selectedSource.kind === 'volume' ? noImageSource() : this.selectedSource;
+    }
+
+    private activateSource(item: DiskTreeItem): void {
         const { catalog } = this.requireCollaborators();
         this.selectedSource = item;
         if (item.kind !== 'volume') {
@@ -307,7 +349,8 @@ export class ImageSessionWorkflow {
         try {
             await this.closeOpenSession();
             this.sourceItems = [];
-            this.selectedSource = { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
+            this.volumeSelection = emptyVolumeSelection();
+            this.selectedSource = noImageSource();
             this.requireCollaborators().catalog.clear();
             this.status = 'Ready';
         } catch (error) {
@@ -401,6 +444,10 @@ export class ImageSessionWorkflow {
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
             : null;
         this.selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? this.selectedSource;
+        this.volumeSelection =
+            this.selectedSource.kind === 'volume'
+                ? { items: [this.selectedSource], anchorId: this.selectedSource.id }
+                : emptyVolumeSelection();
         if (this.selectedSource.kind === 'volume')
             await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
         else catalog.clear();
@@ -497,6 +544,28 @@ function sameImageSource(left: ImageLocation, right: ImageLocation): boolean {
         left.reference.rootId === right.reference.rootId &&
         left.reference.relativePath === right.reference.relativePath
     );
+}
+
+function noImageSource(): DiskTreeItem {
+    return { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
+}
+
+function collectVolumes(items: readonly DiskTreeItem[]): DiskTreeItem[] {
+    const result: DiskTreeItem[] = [];
+    for (const item of items) {
+        if (item.kind === 'volume') result.push(item);
+        result.push(...collectVolumes(item.children ?? []));
+    }
+    return result;
+}
+
+function findPartition(items: readonly DiskTreeItem[], partitionIndex: number): DiskTreeItem | null {
+    for (const item of items) {
+        if (item.kind === 'partition' && item.partitionIndex === partitionIndex) return item;
+        const nested = findPartition(item.children ?? [], partitionIndex);
+        if (nested) return nested;
+    }
+    return null;
 }
 
 function findSourceItem(items: DiskTreeItem[], partitionIndex: number, volumeName?: string): DiskTreeItem | null {

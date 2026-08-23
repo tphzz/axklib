@@ -30,11 +30,11 @@ describe('TreeNode', () => {
         partitionButton.focus();
         await fireEvent.keyDown(partitionButton, { key: 'ArrowRight' });
         expect(screen.getByRole('button', { name: /Piano \[Volume/ })).toBe(document.activeElement);
-        expect(onselect).toHaveBeenLastCalledWith(partition.children[0]);
+        expect(onselect).toHaveBeenLastCalledWith(partition.children[0], 'replace');
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
         expect(screen.getByRole('button', { name: /Strings \[Volume/ })).toBe(document.activeElement);
-        expect(onselect).toHaveBeenLastCalledWith(partition.children[1]);
+        expect(onselect).toHaveBeenLastCalledWith(partition.children[1], 'replace');
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
         expect(partitionButton).toBe(document.activeElement);
@@ -43,7 +43,7 @@ describe('TreeNode', () => {
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowLeft' });
         expect(partitionButton).toBe(document.activeElement);
-        expect(onselect).toHaveBeenLastCalledWith(partition);
+        expect(onselect).toHaveBeenLastCalledWith(partition, 'replace');
 
         await fireEvent.keyDown(partitionButton, { key: 'ArrowLeft' });
         expect(screen.queryByRole('button', { name: /Piano \[Volume/ })).toBeNull();
@@ -352,6 +352,28 @@ describe('TreeNode', () => {
 
         await fireEvent.keyDown(item, { key: 'F10', shiftKey: true });
         expect(onrequestmenu).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports conventional modifier selection modes for volume rows', async () => {
+        const onselect = vi.fn();
+        render(TreeNode, {
+            props: {
+                item: { id: 'v0', name: 'Strings', kind: 'volume', childCount: 0 },
+                selectedId: '',
+                selectedVolumeIds: ['v0'],
+                onselect,
+                onloadchildren: vi.fn(),
+            },
+        });
+
+        const item = screen.getByRole('button', { name: 'Strings [Volume]' });
+        expect(item.getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(item, { ctrlKey: true });
+        expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'v0' }), 'toggle');
+        await fireEvent.click(item, { shiftKey: true });
+        expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'v0' }), 'range');
+        await fireEvent.click(item, { shiftKey: true, metaKey: true });
+        expect(onselect).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'v0' }), 'add-range');
     });
 
     it('shows a retry action when lazy loading fails and preserves recovery', async () => {

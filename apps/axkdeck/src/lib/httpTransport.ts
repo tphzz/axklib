@@ -58,8 +58,9 @@ import type {
     MidiInspection,
     Tx16wImportInspection,
     Tx16wImportMode,
-    VolumeMutation,
     VolumeDeletionInspection,
+    VolumeDeletionTarget,
+    VolumeMutation,
     ConnectionMode,
 } from './transport';
 import {
@@ -350,30 +351,33 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     deleteRetainedPackage(download: components['schemas']['RetainedDownload']): Promise<void> {
         return this.packages.deleteRetained(download);
     }
-    async startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState> {
-        return this.imageSessions.startMutation(sessionId, volumeMutationOperation(mutation));
+    async startVolumeMutations(sessionId: number, mutations: VolumeMutation[]): Promise<JobState> {
+        return this.imageSessions.startMutations(
+            sessionId,
+            mutations.map((mutation, index) =>
+                volumeMutationOperation(mutation, mutations.length === 1 ? undefined : index + 1),
+            ),
+        );
     }
 
     async startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState> {
-        return this.imageSessions.startMutation(sessionId, {
-            id: 'partition-rename',
-            type: 'rename_partition',
-            partition_index: mutation.partitionIndex,
-            partition_name: mutation.partitionName,
-            new_partition_name: mutation.newPartitionName,
-        });
+        return this.imageSessions.startMutations(sessionId, [
+            {
+                id: 'partition-rename',
+                type: 'rename_partition',
+                partition_index: mutation.partitionIndex,
+                partition_name: mutation.partitionName,
+                new_partition_name: mutation.newPartitionName,
+            },
+        ]);
     }
 
     async startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState> {
-        return this.imageSessions.startMutation(sessionId, objectRenameOperation(mutation));
+        return this.imageSessions.startMutations(sessionId, [objectRenameOperation(mutation)]);
     }
 
-    inspectVolumeDeletion(
-        sessionId: number,
-        partitionIndex: number,
-        volumeName: string,
-    ): Promise<VolumeDeletionInspection> {
-        return this.imageSessions.inspectVolumeDeletion(sessionId, partitionIndex, volumeName);
+    inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
+        return this.imageSessions.inspectVolumeDeletion(sessionId, targets);
     }
 
     inspectPlacement(

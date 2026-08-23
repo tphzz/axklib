@@ -1,5 +1,6 @@
 #include "axklib/application/session_placement_operations.hpp"
 
+#include <compare>
 #include <cstdint>
 #include <format>
 #include <map>
@@ -8,7 +9,6 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -33,23 +33,49 @@ struct PlacementRequest {
     std::optional<std::string> recovery_volume_name;
 };
 
+struct VolumeDeletionTarget {
+    std::uint8_t partition_index{};
+    std::string volume_name;
+
+    auto operator<=>(const VolumeDeletionTarget &) const = default;
+};
+
+struct VolumeDeletionRequest {
+    std::string image_id;
+    std::uint64_t revision{};
+    std::vector<VolumeDeletionTarget> targets;
+};
+
 axk::app::Error operation_error(std::string code, std::string message) { return {std::move(code), std::move(message)}; }
 
-axk::app::Result<std::tuple<std::string, std::uint64_t, std::uint8_t, std::string>>
-parse_volume_deletion_request(const Json &input) {
+axk::app::Result<VolumeDeletionRequest> parse_volume_deletion_request(const Json &input) {
     try {
-        const auto image_id = input.at("imageId").get<std::string>();
-        const auto revision = input.at("expectedRevision").get<std::uint64_t>();
-        const auto partition_value = input.at("partitionIndex").get<std::uint64_t>();
-        const auto volume_name = input.at("volumeName").get<std::string>();
-        if (image_id.empty() || revision == 0U || partition_value > 7U || volume_name.empty()) {
+        VolumeDeletionRequest result;
+        result.image_id = input.at("imageId").get<std::string>();
+        result.revision = input.at("expectedRevision").get<std::uint64_t>();
+        const auto &targets = input.at("targets");
+        if (result.image_id.empty() || result.revision == 0U || !targets.is_array() || targets.empty() ||
+            targets.size() > 1024U) {
             return std::unexpected(operation_error(
-                "invalid_request", "imageId, expectedRevision, partitionIndex, and volumeName are required"));
+                "invalid_request", "imageId, expectedRevision, and one or more volume targets are required"));
         }
-        return std::tuple{image_id, revision, static_cast<std::uint8_t>(partition_value), volume_name};
+        std::set<VolumeDeletionTarget> unique_targets;
+        for (const auto &target : targets) {
+            const auto partition_value = target.at("partitionIndex").get<std::uint64_t>();
+            const auto volume_name = target.at("volumeName").get<std::string>();
+            if (partition_value > 7U || volume_name.empty() || volume_name.size() > 16U) {
+                return std::unexpected(operation_error("invalid_request", "volume deletion target is invalid"));
+            }
+            const VolumeDeletionTarget parsed{static_cast<std::uint8_t>(partition_value), volume_name};
+            if (!unique_targets.insert(parsed).second) {
+                return std::unexpected(operation_error("invalid_request", "volume deletion targets must be unique"));
+            }
+            result.targets.push_back(parsed);
+        }
+        return result;
     } catch (const Json::exception &) {
         return std::unexpected(operation_error(
-            "invalid_request", "imageId, expectedRevision, partitionIndex, and volumeName are required"));
+            "invalid_request", "imageId, expectedRevision, and one or more volume targets are required"));
     }
 }
 
@@ -160,22 +186,28 @@ axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::Im
 
 axk::app::Result<Json> inspect_volume_deletion(axk::app::ImageSessionManager &images, std::string_view owner_id,
                                                std::string_view image_id, std::uint64_t revision,
-                                               std::uint8_t partition_index, std::string_view volume_name) {
+                                               const std::vector<VolumeDeletionTarget> &targets) {
     auto session = images.begin_read(image_id, owner_id, revision);
     if (!session)
         return std::unexpected(session.error());
 
-    auto closure = resolve_volume_closure(*session, partition_index, volume_name);
-    if (!closure)
-        return std::unexpected(closure.error());
+    std::set<std::pair<std::uint8_t, axk::SfsId>> closure;
+    Json target_json = Json::array();
+    for (const auto &target : targets) {
+        auto volume_closure = resolve_volume_closure(*session, target.partition_index, target.volume_name);
+        if (!volume_closure)
+            return std::unexpected(volume_closure.error());
+        for (const auto sfs_id : *volume_closure)
+            closure.emplace(target.partition_index, sfs_id);
+        target_json.push_back({{"partitionIndex", target.partition_index}, {"volumeName", target.volume_name}});
+    }
 
     axk::ObjectCatalog catalog;
     catalog.issues = session->catalog_issues;
-    std::map<std::string, axk::SfsId> object_ids;
+    std::map<std::string, std::pair<std::uint8_t, axk::SfsId>> object_ids;
     for (const auto *object : session->catalog_objects) {
         catalog.objects.push_back(*object);
-        if (object->partition.value == partition_index)
-            object_ids.emplace(object->key, object->sfs_id);
+        object_ids.emplace(object->key, std::pair{object->partition.value, object->sfs_id});
     }
     const auto graph = axk::build_relationship_graph(catalog);
     const auto crossing_count = std::ranges::count_if(graph.relationships, [&](const axk::Relationship &relationship) {
@@ -184,7 +216,7 @@ axk::app::Result<Json> inspect_volume_deletion(axk::app::ImageSessionManager &im
         const auto source = object_ids.find(relationship.source_key);
         const auto target = object_ids.find(*relationship.target_key);
         return source != object_ids.end() && target != object_ids.end() &&
-               closure->contains(source->second) != closure->contains(target->second);
+               closure.contains(source->second) != closure.contains(target->second);
     });
     Json blockers = Json::array();
     if (crossing_count != 0U) {
@@ -194,8 +226,7 @@ axk::app::Result<Json> inspect_volume_deletion(axk::app::ImageSessionManager &im
     }
     return Json{{"imageId", image_id},
                 {"revision", revision},
-                {"partitionIndex", partition_index},
-                {"volumeName", volume_name},
+                {"targets", std::move(target_json)},
                 {"canDelete", crossing_count == 0U},
                 {"crossingRelationshipCount", crossing_count},
                 {"blockers", std::move(blockers)}};
@@ -277,9 +308,8 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                                        auto request = parse_volume_deletion_request(input);
                                        if (!request)
                                            return std::unexpected(request.error());
-                                       const auto &[image_id, revision, partition, volume] = *request;
-                                       return inspect_volume_deletion(images, context.owner_id, image_id, revision,
-                                                                      partition, volume);
+                                       return inspect_volume_deletion(images, context.owner_id, request->image_id,
+                                                                      request->revision, request->targets);
                                    });
         if (!bound)
             return bound;

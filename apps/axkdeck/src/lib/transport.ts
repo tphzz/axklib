@@ -164,6 +164,7 @@ export interface ObjectDeletionInspection {
 }
 
 export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
+export type VolumeDeletionTarget = components['schemas']['ImageVolumeDeletionTarget'];
 export type ProgramGenerationCandidate = components['schemas']['ImageProgramGenerationCandidate'];
 export type ProgramGenerationInspection = components['schemas']['ImageProgramGenerationInspection'];
 export type ProgramGenerationSelection = components['schemas']['ImageProgramGenerationSelection'];
@@ -491,14 +492,10 @@ export interface ImageTransport {
     systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts>;
     allocationMapReference(sessionId: number): Promise<AllocationMapReference>;
     closeImage(sessionId: number): Promise<void>;
-    startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
+    startVolumeMutations(sessionId: number, mutations: VolumeMutation[]): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
-    inspectVolumeDeletion(
-        sessionId: number,
-        partitionIndex: number,
-        volumeName: string,
-    ): Promise<VolumeDeletionInspection>;
+    inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection>;
     inspectPlacement(
         sessionId: number,
         scope: PlacementRepairScope,

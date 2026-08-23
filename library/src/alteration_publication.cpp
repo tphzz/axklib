@@ -412,7 +412,7 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
     auto container = open_image(source, source_path, options);
     if (!container)
         return std::unexpected{container.error()};
-    TransactionState state{std::move(source), std::move(*container), {}, {}, {}, {}, {}};
+    TransactionState state{std::move(source), std::move(*container), {}, {}, {}, {}, {}, {}};
     if (state.container.superblock().sector_size_bytes != 512U) {
         return std::unexpected{
             transaction_error("source sector size is outside the supported 512-byte alteration profile")};

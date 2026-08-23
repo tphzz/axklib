@@ -3907,15 +3907,23 @@
           "inputBindings": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/components/schemas/InputBinding"}}
         }
       },
+      "ImageVolumeDeletionTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "volumeName"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
       "ImageVolumeDeletionInspectionRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "expectedRevision", "partitionIndex", "volumeName"],
+        "required": ["imageId", "expectedRevision", "targets"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "expectedRevision": {"type": "integer", "minimum": 1},
-          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
-          "volumeName": {"type": "string", "minLength": 1}
+          "targets": {"type": "array", "minItems": 1, "maxItems": 1024, "uniqueItems": true, "items": {"$ref": "#/components/schemas/ImageVolumeDeletionTarget"}}
         }
       },
       "ImagePlacementPartitionScope": {
@@ -4008,12 +4016,11 @@
       "ImageVolumeDeletionInspection": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "revision", "partitionIndex", "volumeName", "canDelete", "crossingRelationshipCount", "blockers"],
+        "required": ["imageId", "revision", "targets", "canDelete", "crossingRelationshipCount", "blockers"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
-          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
-          "volumeName": {"type": "string", "minLength": 1},
+          "targets": {"type": "array", "minItems": 1, "maxItems": 1024, "uniqueItems": true, "items": {"$ref": "#/components/schemas/ImageVolumeDeletionTarget"}},
           "canDelete": {"type": "boolean"},
           "crossingRelationshipCount": {"type": "integer", "minimum": 0},
           "blockers": {"type": "array", "maxItems": 16, "items": {"$ref": "#/components/schemas/ImagePlacementIssue"}}

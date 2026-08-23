@@ -92,3 +92,62 @@ describe('ImageSessionWorkflow lease maintenance', () => {
         await workflow.dispose();
     });
 });
+
+describe('ImageSessionWorkflow volume selection', () => {
+    it('uses one volume as an import target and only a shared partition for a multi-selection', async () => {
+        const transport = { closeImage: vi.fn(async () => undefined) } as unknown as ImageTransport;
+        const workflow = new ImageSessionWorkflow(transport, {} as PickerController);
+        workflow.connect({
+            catalog: { activeVolumeId: '', loadVolume: vi.fn(async () => undefined), clear: vi.fn() },
+        } as never);
+        const volumeA = {
+            id: 'volume-a',
+            name: 'A',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const volumeB = {
+            id: 'volume-b',
+            name: 'B',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const volumeC = {
+            id: 'volume-c',
+            name: 'C',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 1,
+        };
+        const partitionA = {
+            id: 'partition-a',
+            name: 'PARTITION 1',
+            kind: 'partition' as const,
+            childCount: 2,
+            partitionIndex: 0,
+            children: [volumeA, volumeB],
+        };
+        const partitionB = {
+            id: 'partition-b',
+            name: 'PARTITION 2',
+            kind: 'partition' as const,
+            childCount: 1,
+            partitionIndex: 1,
+            children: [volumeC],
+        };
+        workflow.sourceItems = [partitionA, partitionB];
+        const visible = [volumeA, volumeB, volumeC];
+
+        workflow.selectTreeSource(volumeA, 'replace', visible);
+        expect(workflow.importDestinationSource()).toMatchObject({ id: 'volume-a', kind: 'volume' });
+
+        workflow.selectTreeSource(volumeB, 'toggle', visible);
+        expect(workflow.importDestinationSource()).toMatchObject({ id: 'partition-a', kind: 'partition' });
+
+        workflow.selectTreeSource(volumeC, 'toggle', visible);
+        expect(workflow.importDestinationSource()).toMatchObject({ id: 'none', kind: 'disk' });
+        await workflow.dispose();
+    });
+});

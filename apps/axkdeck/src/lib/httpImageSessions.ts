@@ -240,15 +240,13 @@ export class HttpImageSessions {
 
     async inspectVolumeDeletion(
         sessionId: number,
-        partitionIndex: number,
-        volumeName: string,
+        targets: components['schemas']['ImageVolumeDeletionTarget'][],
     ): Promise<VolumeDeletionInspection> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<VolumeDeletionInspection>('images.volume_deletion.inspect', {
             imageId: session.remoteId,
             expectedRevision: session.revision,
-            partitionIndex,
-            volumeName,
+            targets,
         });
         if (this.jobs.isJob(result)) throw new Error('images.volume_deletion.inspect unexpectedly returned a job');
         return result;
@@ -388,7 +386,8 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
-    async startMutation(sessionId: number, operation: Record<string, unknown>): Promise<JobState> {
+    async startMutations(sessionId: number, operations: Record<string, unknown>[]): Promise<JobState> {
+        if (operations.length === 0) throw new Error('at least one image mutation is required');
         const session = this.get(sessionId);
         const job = await this.client.invoke<never>(
             'images.alter',
@@ -398,7 +397,7 @@ export class HttpImageSessions {
                 manifest: {
                     inline: {
                         schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
-                        operations: [operation],
+                        operations,
                     },
                 },
                 inputBindings: [],

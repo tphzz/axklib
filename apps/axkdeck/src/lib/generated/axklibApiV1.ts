@@ -3138,13 +3138,15 @@ export interface components {
             canDelete: boolean;
             crossingRelationshipCount: number;
             imageId: string;
-            partitionIndex: number;
             revision: number;
-            volumeName: string;
+            targets: components['schemas']['ImageVolumeDeletionTarget'][];
         };
         ImageVolumeDeletionInspectionRequest: {
             expectedRevision: number;
             imageId: string;
+            targets: components['schemas']['ImageVolumeDeletionTarget'][];
+        };
+        ImageVolumeDeletionTarget: {
             partitionIndex: number;
             volumeName: string;
         };

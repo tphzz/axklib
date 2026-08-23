@@ -211,10 +211,10 @@
     />
 {/if}
 {#if mutation.volumeAction}
-    {#key `${mutation.volumeAction.action}:${mutation.volumeAction.item.id}`}
+    {#key `${mutation.volumeAction.action}:${mutation.volumeAction.items.map((item) => item.id).join(':')}`}
         <VolumeActionDialog
             action={mutation.volumeAction.action}
-            item={mutation.volumeAction.item}
+            items={mutation.volumeAction.items}
             busy={mutation.volumeActionBusy}
             phase={mutation.volumeActionPhase}
             error={mutation.volumeActionError}

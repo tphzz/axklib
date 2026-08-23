@@ -7371,25 +7371,24 @@
             "minLength": 1,
             "type": "string"
           },
-          "partitionIndex": {
-            "maximum": 7,
-            "minimum": 0,
-            "type": "integer"
-          },
           "revision": {
             "minimum": 1,
             "type": "integer"
           },
-          "volumeName": {
-            "minLength": 1,
-            "type": "string"
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ImageVolumeDeletionTarget"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
           "imageId",
           "revision",
-          "partitionIndex",
-          "volumeName",
+          "targets",
           "canDelete",
           "crossingRelationshipCount",
           "blockers"
@@ -7407,19 +7406,38 @@
             "minLength": 1,
             "type": "string"
           },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ImageVolumeDeletionTarget"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "ImageVolumeDeletionTarget": {
+        "additionalProperties": false,
+        "properties": {
           "partitionIndex": {
             "maximum": 7,
             "minimum": 0,
             "type": "integer"
           },
           "volumeName": {
+            "maxLength": 16,
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "imageId",
-          "expectedRevision",
           "partitionIndex",
           "volumeName"
         ],
@@ -26111,8 +26129,12 @@
                   "value": {
                     "expectedRevision": 1,
                     "imageId": "x",
-                    "partitionIndex": 0,
-                    "volumeName": "x"
+                    "targets": [
+                      {
+                        "partitionIndex": 0,
+                        "volumeName": "x"
+                      }
+                    ]
                   }
                 }
               },
@@ -26135,9 +26157,13 @@
                         "canDelete": false,
                         "crossingRelationshipCount": 0,
                         "imageId": "x",
-                        "partitionIndex": 0,
                         "revision": 1,
-                        "volumeName": "x"
+                        "targets": [
+                          {
+                            "partitionIndex": 0,
+                            "volumeName": "x"
+                          }
+                        ]
                       },
                       "meta": {
                         "requestId": "request-1"
@@ -26151,9 +26177,13 @@
                         "canDelete": false,
                         "crossingRelationshipCount": 0,
                         "imageId": "x",
-                        "partitionIndex": 0,
                         "revision": 1,
-                        "volumeName": "x"
+                        "targets": [
+                          {
+                            "partitionIndex": 0,
+                            "volumeName": "x"
+                          }
+                        ]
                       },
                       "meta": {
                         "requestId": "request-1",

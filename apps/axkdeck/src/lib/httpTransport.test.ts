@@ -1018,24 +1018,35 @@ describe('HttpImageTransport', () => {
         });
         const source = serverFile('images/base.hds');
         const opened = await transport.openImage(source);
-        await transport.startVolumeMutation(opened.sessionId, {
-            kind: 'add',
-            partitionIndex: 2,
-            volumeName: 'New Volume',
-        });
+        await transport.startVolumeMutations(opened.sessionId, [
+            {
+                kind: 'add',
+                partitionIndex: 2,
+                volumeName: 'New Volume',
+            },
+        ]);
         const refreshed = await transport.refreshImage(opened.sessionId);
         expect(refreshed.sessionId).toBe(opened.sessionId);
-        await transport.startVolumeMutation(opened.sessionId, {
-            kind: 'rename',
-            partitionIndex: 2,
-            volumeName: 'Old Volume',
-            newVolumeName: 'Renamed Volume',
-        });
-        await transport.startVolumeMutation(opened.sessionId, {
-            kind: 'delete',
-            partitionIndex: 2,
-            volumeName: 'Renamed Volume',
-        });
+        await transport.startVolumeMutations(opened.sessionId, [
+            {
+                kind: 'rename',
+                partitionIndex: 2,
+                volumeName: 'Old Volume',
+                newVolumeName: 'Renamed Volume',
+            },
+        ]);
+        await transport.startVolumeMutations(opened.sessionId, [
+            {
+                kind: 'delete',
+                partitionIndex: 2,
+                volumeName: 'Renamed Volume',
+            },
+            {
+                kind: 'delete',
+                partitionIndex: 4,
+                volumeName: 'Second Volume',
+            },
+        ]);
         await transport.startPartitionMutation(opened.sessionId, {
             kind: 'rename',
             partitionIndex: 2,
@@ -1117,10 +1128,16 @@ describe('HttpImageTransport', () => {
                         schema_version: '1.0',
                         operations: [
                             {
-                                id: 'volume-delete',
+                                id: 'volume-delete-1',
                                 type: 'delete_volume',
                                 partition_index: 2,
                                 volume_name: 'Renamed Volume',
+                            },
+                            {
+                                id: 'volume-delete-2',
+                                type: 'delete_volume',
+                                partition_index: 4,
+                                volume_name: 'Second Volume',
                             },
                         ],
                     },
@@ -1309,8 +1326,7 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-repair',
                         revision: 4,
-                        partitionIndex: 0,
-                        volumeName: 'Samples',
+                        targets: [{ partitionIndex: 0, volumeName: 'Samples' }],
                         canDelete: false,
                         crossingRelationshipCount: 1,
                         blockers: [
@@ -1367,7 +1383,8 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
         const opened = await transport.openImage(serverFile('images/base.hds'));
-        const deletion = await transport.inspectVolumeDeletion(opened.sessionId, 0, 'Samples');
+        const deletionTargets = [{ partitionIndex: 0, volumeName: 'Samples' }];
+        const deletion = await transport.inspectVolumeDeletion(opened.sessionId, deletionTargets);
         expect(deletion).toMatchObject({ canDelete: false, crossingRelationshipCount: 1 });
         const scope = { kind: 'VOLUME' as const, partitionIndex: 0, volumeName: 'Samples' };
         const inspection = await transport.inspectPlacement(opened.sessionId, scope);
@@ -1377,8 +1394,7 @@ describe('HttpImageTransport', () => {
         expect(bodies.get('inspect')).toEqual({
             imageId: 'image-repair',
             expectedRevision: 4,
-            partitionIndex: 0,
-            volumeName: 'Samples',
+            targets: deletionTargets,
         });
         expect(bodies.get('placementInspect')).toEqual({
             imageId: 'image-repair',

@@ -172,7 +172,7 @@ describe('ImageNavigator', () => {
         ]);
 
         await fireEvent.click(screen.getByRole('button', { name: '$PARTITION 8 [Partition 7]' }));
-        expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ id: 'p7', partitionIndex: 7 }));
+        expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ id: 'p7', partitionIndex: 7 }), 'replace', []);
     });
 
     it('does not reorder partitions when sampler ordering is disabled', () => {
@@ -634,5 +634,95 @@ describe('ImageNavigator', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Expert' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Repair object placement…' }));
         expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'volume' }), 'repair-placement');
+    });
+
+    it('preserves a selected volume set for context deletion and replaces it for an unselected row', async () => {
+        const onselect = vi.fn();
+        const oncontextselect = vi.fn();
+        const onimageaction = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'disk.hds' }),
+                selectedId: 'v1',
+                selectedVolumeIds: ['v0', 'v1'],
+                items: [
+                    {
+                        id: 'partition',
+                        name: 'PARTITION 1',
+                        kind: 'partition',
+                        partitionIndex: 0,
+                        childCount: 3,
+                        children: [
+                            { id: 'v0', name: 'Piano', kind: 'volume', partitionIndex: 0, childCount: 0 },
+                            { id: 'v1', name: 'Strings', kind: 'volume', partitionIndex: 0, childCount: 0 },
+                            { id: 'v2', name: 'Brass', kind: 'volume', partitionIndex: 0, childCount: 0 },
+                        ],
+                    },
+                ],
+                samplerOrderingEnabled: true,
+                volumeActionsEnabled: true,
+                onselect,
+                oncontextselect,
+                onimageaction,
+            },
+        });
+
+        const piano = await screen.findByRole('button', { name: 'Piano [Volume]' });
+        const strings = screen.getByRole('button', { name: 'Strings [Volume]' });
+        const brass = screen.getByRole('button', { name: 'Brass [Volume]' });
+        expect(piano.getAttribute('aria-pressed')).toBe('true');
+        expect(strings.getAttribute('aria-pressed')).toBe('true');
+        expect(brass.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.contextMenu(piano, { clientX: 40, clientY: 60 });
+        expect(oncontextselect).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'v0' }),
+            expect.arrayContaining([
+                expect.objectContaining({ id: 'v0' }),
+                expect.objectContaining({ id: 'v1' }),
+                expect.objectContaining({ id: 'v2' }),
+            ]),
+        );
+        expect(screen.getAllByRole('menuitem')).toHaveLength(1);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 volumes…' }));
+        expect(onimageaction).toHaveBeenCalledWith(expect.objectContaining({ id: 'v0' }), 'delete-volume');
+
+        await fireEvent.contextMenu(brass, { clientX: 50, clientY: 70 });
+        expect(onselect).toHaveBeenLastCalledWith(
+            expect.objectContaining({ id: 'v2' }),
+            'replace',
+            expect.arrayContaining([
+                expect.objectContaining({ id: 'v0' }),
+                expect.objectContaining({ id: 'v1' }),
+                expect.objectContaining({ id: 'v2' }),
+            ]),
+        );
+        expect(screen.queryByRole('menuitem', { name: 'Delete 2 volumes…' })).toBeNull();
+        expect(screen.getByRole('menuitem', { name: 'Rename volume…' })).toBeTruthy();
+    });
+
+    it('does not advertise deletion for a multi-selection on read-only media', async () => {
+        const oncontextselect = vi.fn();
+        render(ImageNavigator, {
+            props: {
+                ...common,
+                image: serverFileLocation({ rootId: 'workspace', relativePath: 'library.iso' }),
+                selectedId: 'v1',
+                selectedVolumeIds: ['v0', 'v1'],
+                items: [
+                    { id: 'v0', name: 'Piano', kind: 'volume', partitionIndex: 0, childCount: 0 },
+                    { id: 'v1', name: 'Strings', kind: 'volume', partitionIndex: 0, childCount: 0 },
+                ],
+                packageExportEnabled: true,
+                oncontextselect,
+            },
+        });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Piano [Volume]' }));
+
+        expect(oncontextselect).toHaveBeenCalledOnce();
+        expect(screen.queryByRole('menu')).toBeNull();
+        expect(screen.queryByRole('menuitem', { name: /Delete/ })).toBeNull();
     });
 });

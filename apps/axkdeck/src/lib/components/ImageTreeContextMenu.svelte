@@ -7,6 +7,7 @@
         item: DiskTreeItem;
         left: number;
         top: number;
+        selectionCount?: number;
         volumeActionsEnabled: boolean;
         partitionActionsEnabled: boolean;
         packageImportEnabled: boolean;
@@ -26,6 +27,7 @@
         item,
         left,
         top,
+        selectionCount = 1,
         volumeActionsEnabled,
         partitionActionsEnabled,
         packageImportEnabled,
@@ -74,6 +76,7 @@
     );
     const volumeHasMutation = $derived(item.kind === 'volume' && volumeActionsEnabled);
     const volumeHasTools = $derived(item.kind === 'volume' && volumeActionsEnabled);
+    const multiVolumeSelection = $derived(item.kind === 'volume' && selectionCount > 1 && volumeActionsEnabled);
 
     function directMenuItems(menu: HTMLDivElement | undefined): HTMLButtonElement[] {
         if (!menu) return [];
@@ -235,7 +238,11 @@
     onclick={(event) => event.stopPropagation()}
     onkeydown={handleRootKey}
 >
-    {#if item.kind === 'partition'}
+    {#if multiVolumeSelection}
+        <button class="danger-menu-item" type="button" role="menuitem" onclick={() => choose('delete-volume')}
+            >Delete {selectionCount} volumes…</button
+        >
+    {:else if item.kind === 'partition'}
         {#if partitionHasImport}
             <button
                 bind:this={importParent}

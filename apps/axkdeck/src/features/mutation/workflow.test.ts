@@ -329,21 +329,57 @@ describe('MutationWorkflow', () => {
         const inspectVolumeDeletion = vi.fn().mockResolvedValue({
             imageId: 'image-1',
             revision: 1,
-            partitionIndex: 0,
-            volumeName: 'Samples',
+            targets: [{ partitionIndex: 0, volumeName: 'Samples' }],
             canDelete: false,
             crossingRelationshipCount: 1,
             blockers: [{ code: 'KNOWN_RELATIONSHIP_CROSSES_VOLUME', message: 'Crossing link', count: 1 }],
         });
-        const startVolumeMutation = vi.fn();
-        const { workflow } = workflowWith({ inspectVolumeDeletion, startVolumeMutation });
+        const startVolumeMutations = vi.fn();
+        const { workflow } = workflowWith({ inspectVolumeDeletion, startVolumeMutations });
 
         expect(workflow.requestVolumeAction(volume, 'delete-volume')).toBe(true);
         await vi.waitFor(() => expect(workflow.volumeDeletionInspection?.canDelete).toBe(false));
         await workflow.submitVolumeAction('Samples');
 
-        expect(startVolumeMutation).not.toHaveBeenCalled();
+        expect(startVolumeMutations).not.toHaveBeenCalled();
         expect(workflow.placementRepairRequest).toBeNull();
+    });
+
+    it('deletes multiple volumes in one alteration job after inspecting their union', async () => {
+        const secondVolume = { ...volume, id: 'volume-2', name: 'Programs', partitionIndex: 2 };
+        const targets = [
+            { partitionIndex: 0, volumeName: 'Samples' },
+            { partitionIndex: 2, volumeName: 'Programs' },
+        ];
+        const inspectVolumeDeletion = vi.fn().mockResolvedValue({
+            imageId: 'image-1',
+            revision: 1,
+            targets,
+            canDelete: true,
+            crossingRelationshipCount: 0,
+            blockers: [],
+        });
+        const startVolumeMutations = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
+        const { workflow, refreshSession } = workflowWith({ inspectVolumeDeletion, startVolumeMutations });
+
+        expect(workflow.requestVolumeDeletion([volume, secondVolume])).toBe(true);
+        await vi.waitFor(() => expect(workflow.volumeDeletionInspection?.canDelete).toBe(true));
+        await workflow.submitVolumeAction('');
+
+        expect(inspectVolumeDeletion).toHaveBeenCalledWith(7, targets);
+        expect(startVolumeMutations).toHaveBeenCalledWith(7, [
+            { kind: 'delete', partitionIndex: 0, volumeName: 'Samples' },
+            { kind: 'delete', partitionIndex: 2, volumeName: 'Programs' },
+        ]);
+        expect(refreshSession).toHaveBeenCalledWith({ partitionIndex: 0, volumeName: undefined });
+    });
+
+    it('rejects duplicate deletion targets even when their tree ids differ', () => {
+        const duplicateVolume = { ...volume, id: 'duplicate-volume' };
+        const { workflow } = workflowWith({});
+
+        expect(workflow.requestVolumeDeletion([volume, duplicateVolume])).toBe(false);
+        expect(workflow.volumeAction).toBeNull();
     });
 
     it('repairs a uniquely attributable volume placement through the explicit action', async () => {

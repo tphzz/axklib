@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ImageLocation } from '../storageLocations';
+    import type { ObjectSelectionMode } from '../objectSelection';
     import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
@@ -10,6 +11,7 @@
         image: ImageLocation | null;
         items: DiskTreeItem[];
         selectedId: string;
+        selectedVolumeIds?: readonly string[];
         opening: boolean;
         storageLocationsAvailable: boolean;
         onopen: () => void;
@@ -17,7 +19,8 @@
         onclose: () => void;
         onintegrity?: () => void;
         onmanagelocations: () => void;
-        onselect: (item: DiskTreeItem) => void;
+        onselect: (item: DiskTreeItem, mode: ObjectSelectionMode, visibleVolumes: readonly DiskTreeItem[]) => void;
+        oncontextselect?: (item: DiskTreeItem, visibleVolumes: readonly DiskTreeItem[]) => void;
         onloadchildren: (
             parentId: string,
             offset: number,
@@ -40,6 +43,7 @@
         image,
         items,
         selectedId,
+        selectedVolumeIds = [],
         opening,
         storageLocationsAvailable,
         onopen,
@@ -48,6 +52,7 @@
         onintegrity = () => undefined,
         onmanagelocations,
         onselect,
+        oncontextselect = (item, visibleVolumes) => onselect(item, 'replace', visibleVolumes),
         onloadchildren,
         volumeActionsEnabled,
         partitionActionsEnabled,
@@ -63,7 +68,14 @@
     }: Props = $props();
     let filter = $state('');
     let imageMenuOpen = $state(false);
-    let treeMenu = $state<{ item: DiskTreeItem; left: number; top: number } | null>(null);
+    let treeMenu = $state<{
+        item: DiskTreeItem;
+        left: number;
+        top: number;
+        selectionCount: number;
+    } | null>(null);
+    let treeScroll = $state<HTMLElement>();
+    const registeredItems = new Map<string, DiskTreeItem>();
     let loadedRootChildren = $state<DiskTreeItem[]>([]);
     let rootLoadError = $state(false);
     let rootLoadGeneration = 0;
@@ -117,8 +129,37 @@
         return query ? orderedContentItems.filter((item) => matches(item, query)) : orderedContentItems;
     });
 
+    function registerTreeItem(item: DiskTreeItem, present: boolean): void {
+        if (present) registeredItems.set(item.id, item);
+        else if (registeredItems.get(item.id) === item) registeredItems.delete(item.id);
+    }
+
+    function visibleVolumes(): DiskTreeItem[] {
+        if (!treeScroll) return [];
+        return Array.from(
+            treeScroll.querySelectorAll<HTMLElement>('.tree-item-select[data-tree-kind="volume"]'),
+        ).flatMap((element) => {
+            const item = registeredItems.get(element.dataset.treeId ?? '');
+            return item?.kind === 'volume' ? [item] : [];
+        });
+    }
+
+    function selectTreeItem(item: DiskTreeItem, mode: ObjectSelectionMode): void {
+        onselect(item, mode, visibleVolumes());
+    }
+
     function requestTreeMenu(item: DiskTreeItem, x: number, y: number): void {
-        treeMenu = { item, left: x, top: y };
+        const selected = item.kind === 'volume' && selectedVolumeIds.includes(item.id);
+        const volumes = visibleVolumes();
+        if (selected) oncontextselect(item, volumes);
+        else onselect(item, 'replace', volumes);
+        if (selected && selectedVolumeIds.length > 1 && !volumeActionsEnabled) return;
+        treeMenu = {
+            item,
+            left: x,
+            top: y,
+            selectionCount: selected ? selectedVolumeIds.length : 1,
+        };
     }
 
     function chooseTreeAction(action: ImageTreeAction): void {
@@ -263,16 +304,20 @@
         {/if}
 
         <div
+            bind:this={treeScroll}
             class="image-tree-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4"
             class:context-menu-open={treeMenu !== null}
             aria-label="Image contents tree"
+            data-multiselectable="true"
         >
             {#if image}
                 {#each visibleItems as item (item.id)}
                     <TreeNode
                         {item}
                         {selectedId}
-                        {onselect}
+                        {selectedVolumeIds}
+                        onselect={selectTreeItem}
+                        onregister={registerTreeItem}
                         {onloadchildren}
                         {volumeActionsEnabled}
                         {partitionActionsEnabled}
@@ -321,6 +366,7 @@
             item={treeMenu.item}
             left={treeMenu.left}
             top={treeMenu.top}
+            selectionCount={treeMenu.selectionCount}
             {volumeActionsEnabled}
             {partitionActionsEnabled}
             {packageImportEnabled}
