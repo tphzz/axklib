@@ -30,6 +30,7 @@
     import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
+    import WorkspaceGuard from './lib/components/WorkspaceGuard.svelte';
     import { createTransport } from './lib/createTransport';
     import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
@@ -333,6 +334,7 @@
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
+    const activeWorkspaceId = $derived(imageSessionWorkflow.location?.reference.rootId ?? null);
     const selectedBank = $derived(sampleBanks.find((item) => item.objectId === catalog.selectedBankId));
     const selectedSample = $derived(samples.find((item) => item.objectId === catalog.selectedSampleId));
     const auditionableSampleObjectIds = $derived(auditionWorkflow.auditionableSampleObjectIds);
@@ -341,7 +343,6 @@
         hasOpenAppDialog({
             pickerRequest,
             imageSession: imageSessionWorkflow,
-            workspaceManagerOpen,
             connectionSettings,
             mutation: mutationWorkflow,
             packageImport: packageImportWorkflow,
@@ -637,7 +638,7 @@
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
 {/if}
 
-{#if imageSessionWorkflow.integrityDialogOpen}
+{#if !experimentalWarningOpen && imageSessionWorkflow.integrityDialogOpen}
     <ImageIntegrityDialog
         issues={imageSessionWorkflow.integrityIssues}
         loading={imageSessionWorkflow.integrityLoading}
@@ -651,7 +652,9 @@
     />
 {/if}
 
-{#if appDialogsOpen}
+<WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
+
+{#if !experimentalWarningOpen && appDialogsOpen}
     {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
         {@const AppDialogs = dialogs.default}
         <AppDialogs
@@ -669,9 +672,6 @@
             hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
             finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
             cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
-            {workspaceManagerOpen}
-            activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
-            closeWorkspaceManager={() => (workspaceManagerOpen = false)}
             {connectionSettings}
             {saveRemoteConnection}
             {switchToLocalConnection}

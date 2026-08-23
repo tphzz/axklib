@@ -230,6 +230,68 @@ describe('App panel layout', () => {
         expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
     });
 
+    it('opens storage setup when the local sidecar has no configured workspace', async () => {
+        window.__AXKLIB_SERVER__ = {
+            baseUrl: 'http://127.0.0.1:7331/api/v1',
+            bearerToken: 'test-token',
+            mode: 'local',
+        };
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    data: {
+                        state: 'NO_AVAILABLE_WORKSPACE',
+                        revision: 0,
+                        workspaces: [],
+                        configurationIssue: null,
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const rendered = render(App, { props: { initialExperimentalWarningOpen: false } });
+
+        expect(await screen.findByRole('dialog', { name: 'Storage locations' })).toBeTruthy();
+        expect(screen.getByText('Choose a directory before opening or creating sampler images.')).toBeTruthy();
+
+        rendered.unmount();
+        fetchSpy.mockRestore();
+    });
+
+    it('defers storage setup until the experimental warning is acknowledged', async () => {
+        window.__AXKLIB_SERVER__ = {
+            baseUrl: 'http://127.0.0.1:7331/api/v1',
+            bearerToken: 'test-token',
+            mode: 'local',
+        };
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    data: {
+                        state: 'NO_AVAILABLE_WORKSPACE',
+                        revision: 0,
+                        workspaces: [],
+                        configurationIssue: null,
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const rendered = render(App);
+
+        await vi.dynamicImportSettled();
+        expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+        expect(screen.queryByRole('dialog', { name: 'Storage locations' })).toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'I understand' }));
+        expect(await screen.findByRole('dialog', { name: 'Storage locations' })).toBeTruthy();
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        rendered.unmount();
+        fetchSpy.mockRestore();
+    });
+
     it('opens About from the brand and reuses the authoritative build information', async () => {
         renderAcknowledgedApp();
         const brand = screen.getByRole('button', { name: 'About axkdeck' });

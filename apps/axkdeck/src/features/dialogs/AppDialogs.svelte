@@ -40,7 +40,6 @@
     import VolumePackageExportDialog from '../../lib/components/VolumePackageExportDialog.svelte';
     import VolumeFloppyExportDialog from '../../lib/components/VolumeFloppyExportDialog.svelte';
     import WaveDataCleanupDialog from '../../lib/components/WaveDataCleanupDialog.svelte';
-    import WorkspaceManager from '../../lib/components/WorkspaceManager.svelte';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../lib/serverSettings';
     import type { DirectoryLocation, FileLocation, ImageLocation } from '../../lib/storageLocations';
     import type { CompanionSelection, ImageTransport } from '../../lib/transport';
@@ -74,9 +73,6 @@
         hardDiskDirectory: DirectoryLocation | null;
         finishHardDisk: (file: FileLocation) => void;
         cancelHardDisk: () => void;
-        workspaceManagerOpen: boolean;
-        activeWorkspaceId: string | null;
-        closeWorkspaceManager: () => void;
         connectionSettings: RemoteServerSettingsView | null;
         saveRemoteConnection: (input: RemoteServerSettingsInput) => Promise<void>;
         switchToLocalConnection: () => Promise<void>;
@@ -117,9 +113,6 @@
         hardDiskDirectory,
         finishHardDisk,
         cancelHardDisk,
-        workspaceManagerOpen,
-        activeWorkspaceId,
-        closeWorkspaceManager,
         connectionSettings,
         saveRemoteConnection,
         switchToLocalConnection,
@@ -209,7 +202,6 @@
         oncancel={cancelHardDisk}
     />
 {/if}
-<WorkspaceManager open={workspaceManagerOpen} {activeWorkspaceId} onclose={closeWorkspaceManager} />
 {#if connectionSettings}
     <ServerConnectionSettings
         settings={connectionSettings}
