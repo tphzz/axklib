@@ -181,7 +181,9 @@ mapping. Exact reusable Programs do not consume another slot. When placement is
 needed, the planner proposes the first contiguous free block large enough for
 all imported Programs; if no such block exists but enough slots remain, it
 proposes the lowest free fragmented slots. If the volume lacks enough of its
-128 Program slots, placement is unavailable and the plan remains blocked.
+128 Program slots, placement is unavailable and the plan remains blocked. For
+multi-package imports into one volume, Programs remain grouped in caller package
+order and retain their source slot order within each package.
 
 Suggested placement is advisory until the caller replans with explicit Program
 slot assignments. This makes the accepted plan identity cover the final slot

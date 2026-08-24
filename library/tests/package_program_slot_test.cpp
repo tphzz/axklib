@@ -116,6 +116,29 @@ TEST(PackageProgramSlots, FallsBackToTheLowestFragmentedFreeSlots) {
     EXPECT_EQ(placement.mappings[2].destination_slot, 5U);
 }
 
+TEST(PackageProgramSlots, KeepsProgramsGroupedInPackageOrder) {
+    axk::package_import_internal::ProgramSlotPlanningInput input;
+    const axk::package_import_internal::DestinationKey destination{0U, "Target"};
+    for (std::size_t package_index = 0U; package_index < 2U; ++package_index) {
+        for (std::uint8_t source_slot = 1U; source_slot <= 4U; ++source_slot) {
+            input.candidates.push_back({package_index, std::format("package-{}-program-{}", package_index, source_slot),
+                                        destination, source_slot, false});
+        }
+    }
+
+    const auto placements = axk::package_import_internal::plan_program_slot_placements(input);
+
+    ASSERT_EQ(placements.size(), 1U);
+    const auto &placement = placements.front();
+    ASSERT_EQ(placement.mappings.size(), 8U);
+    for (std::size_t index = 0U; index < placement.mappings.size(); ++index) {
+        const auto &mapping = placement.mappings[index];
+        EXPECT_EQ(mapping.package_index, index / 4U);
+        EXPECT_EQ(mapping.source_slot, index % 4U + 1U);
+        EXPECT_EQ(mapping.destination_slot, index + 1U);
+    }
+}
+
 TEST(PackageProgramSlots, ExcludesExactReuseFromCompactPlacement) {
     axk::package_import_internal::ProgramSlotPlanningInput input;
     const axk::package_import_internal::DestinationKey destination{0U, "Target"};
