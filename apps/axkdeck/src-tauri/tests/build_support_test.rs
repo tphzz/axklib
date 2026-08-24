@@ -132,6 +132,50 @@ fn build_identity_accepts_a_windows_line_ending() {
 }
 
 #[test]
+fn build_identity_accepts_version_branch_prerelease_metadata() {
+    let directory = temporary_directory("version-branch");
+    std::fs::create_dir_all(&directory).expect("create test directory");
+    let metadata = directory.join("version_metadata.json");
+    let package = directory.join("package_basename.txt");
+    std::fs::write(
+        &metadata,
+        r#"{"schema_version":1,"semantic_version":"0.3.6-pre","project_version":"0.3.6","major":0,"minor":3,"patch":6,"release_tag":"","is_release":false,"is_prerelease":true}"#,
+    )
+    .expect("write version metadata");
+    std::fs::write(&package, "axklib-0.3.6-pre-a1b2c3d\n").expect("write package basename");
+
+    let identity =
+        build_support::read_build_identity(&metadata, &package).expect("read build identity");
+    assert_eq!(identity.semantic_version, "0.3.6-pre");
+    assert_eq!(identity.project_version, "0.3.6");
+    assert_eq!(identity.source_identity, "0.3.6-pre-a1b2c3d");
+    assert!(!identity.is_release);
+
+    std::fs::remove_dir_all(directory).expect("remove test directory");
+}
+
+#[test]
+fn build_identity_accepts_a_release_tag_without_v_prefix() {
+    let directory = temporary_directory("unprefixed-tag");
+    std::fs::create_dir_all(&directory).expect("create test directory");
+    let metadata = directory.join("version_metadata.json");
+    let package = directory.join("package_basename.txt");
+    std::fs::write(
+        &metadata,
+        r#"{"schema_version":1,"semantic_version":"1.2.3","project_version":"1.2.3","major":1,"minor":2,"patch":3,"release_tag":"1.2.3","is_release":true,"is_prerelease":false}"#,
+    )
+    .expect("write version metadata");
+    std::fs::write(&package, "axklib-1.2.3-a1b2c3d\n").expect("write package basename");
+
+    let identity =
+        build_support::read_build_identity(&metadata, &package).expect("read build identity");
+    assert_eq!(identity.release_tag, "1.2.3");
+    assert!(identity.is_release);
+
+    std::fs::remove_dir_all(directory).expect("remove test directory");
+}
+
+#[test]
 fn inconsistent_development_identity_is_rejected() {
     let directory = temporary_directory("invalid");
     std::fs::create_dir_all(&directory).expect("create test directory");

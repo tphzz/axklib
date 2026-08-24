@@ -70,8 +70,8 @@ std::vector<PackageProgramSlotPlacement> plan_program_slot_placements(const Prog
     std::vector<PackageProgramSlotPlacement> result;
     for (auto &[destination, candidates] : candidates_by_destination) {
         std::ranges::sort(candidates, [](const auto &left, const auto &right) {
-            return std::tie(left.source_slot, left.package_index, left.node_id) <
-                   std::tie(right.source_slot, right.package_index, right.node_id);
+            return std::tie(left.package_index, left.source_slot, left.node_id) <
+                   std::tie(right.package_index, right.source_slot, right.node_id);
         });
         candidates.erase(std::ranges::unique(candidates, {},
                                              [](const auto &candidate) {

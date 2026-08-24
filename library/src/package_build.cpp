@@ -21,13 +21,13 @@
 #include "axklib/audio.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/package_archive.hpp"
+#include "axklib/package_closure.hpp"
 #include "axklib/package_relocation.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
 
 #include "package_internal.hpp"
 #include "package_manifest_internal.hpp"
-#include "relationship_policy.hpp"
 
 namespace axk {
 namespace {
@@ -136,92 +136,6 @@ Result<std::vector<SelectedRoot>> select_roots(const ObjectCatalog &catalog,
     return result;
 }
 
-Result<std::vector<const Relationship *>>
-required_relationships(const ObjectSnapshot &object, const RelationshipGraph &graph,
-                       const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects) {
-    std::vector<const Relationship *> candidates;
-    for (const auto *relationship : graph.children(object.key)) {
-        if (!closure_relationship(relationship->type))
-            continue;
-        if (relationship->type.starts_with("PROG_ASSIGNMENT_TO_") && !is_program_assignment_row(*relationship)) {
-            continue;
-        }
-        candidates.push_back(relationship);
-    }
-
-    const auto require_one = [&](std::string_view role, std::optional<std::size_t> assignment_index =
-                                                            std::nullopt) -> Result<const Relationship *> {
-        std::vector<const Relationship *> matches;
-        for (const auto *row : candidates) {
-            if (row->type == role && (!assignment_index || row->assignment_index == assignment_index))
-                matches.push_back(row);
-        }
-        if (matches.size() != 1U || matches.front()->quality != RelationshipQuality::known ||
-            !matches.front()->target_key) {
-            ErrorContext context;
-            context.object_type = object.object.header.raw_type;
-            context.object_name = object.object.header.name;
-            return std::unexpected{make_error(
-                matches.size() > 1U ? ErrorCode::relationship_ambiguous : ErrorCode::relationship_unresolved,
-                ErrorCategory::relationship, std::format("package closure requires one known {} relationship", role),
-                std::move(context))};
-        }
-        return matches.front();
-    };
-
-    std::vector<const Relationship *> result;
-    if (const auto *sample = std::get_if<CurrentSbnk>(&object.object.payload)) {
-        if (!sample->left.wave_data_name.empty()) {
-            auto row = require_one("SBNK_LEFT_MEMBER_TO_SMPL");
-            if (!row)
-                return std::unexpected{row.error()};
-            result.push_back(*row);
-        }
-        if (sample->right && !sample->right->wave_data_name.empty()) {
-            auto row = require_one("SBNK_RIGHT_MEMBER_TO_SMPL");
-            if (!row)
-                return std::unexpected{row.error()};
-            result.push_back(*row);
-        }
-    } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.object.payload)) {
-        const auto active_slots =
-            std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
-        if (candidates.size() != static_cast<std::size_t>(active_slots)) {
-            return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                                              "Sample Bank package export cannot resolve every active "
-                                              "Sample member")};
-        }
-        for (const auto *row : candidates) {
-            if (row->type != "SBAC_SLOT_TO_SBNK" || row->quality != RelationshipQuality::known || !row->target_key) {
-                return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
-                                                  "Sample Bank package export cannot unambiguously identify "
-                                                  "every Sample member in its source volume")};
-            }
-            result.push_back(row);
-        }
-    } else if (const auto *program = std::get_if<CurrentProg>(&object.object.payload)) {
-        for (std::size_t index = 0; index < program->assignments.size(); ++index) {
-            const auto &assignment = program->assignments[index];
-            if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U))
-                continue;
-            const auto role = assignment.kind == 0x11U   ? "PROG_ASSIGNMENT_TO_SBAC"
-                              : assignment.kind == 0x10U ? "PROG_ASSIGNMENT_TO_SBNK"
-                                                         : std::string_view{};
-            const auto unresolved = std::ranges::find_if(candidates, [&](const Relationship *row) {
-                return row->type == role && row->assignment_index == index && !is_effective_program_assignment(*row) &&
-                       !detail::relationship_has_exact_named_program_target(*row, objects);
-            });
-            if (unresolved != candidates.end())
-                continue;
-            auto row = require_one(role, index);
-            if (!row)
-                return std::unexpected{row.error()};
-            result.push_back(*row);
-        }
-    }
-    return result;
-}
-
 PackagePlacementHint placement_hint(const ObjectSnapshot &object) {
     if (!object.placement)
         return {};
@@ -285,7 +199,7 @@ Result<PackageBuild> build_selected_package(const MediaContainer &source, std::s
         const auto profile = package_internal::build_relocation_profile(object->object, object->raw_payload);
         if (!profile)
             return std::unexpected{profile.error()};
-        auto required = required_relationships(*object, graph, objects);
+        auto required = package_internal::required_relationships(*object, graph, objects);
         if (!required)
             return std::unexpected{required.error()};
         std::map<std::string, std::uint32_t, std::less<>> role_ordinals;

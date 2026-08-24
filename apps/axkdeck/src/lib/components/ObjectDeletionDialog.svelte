@@ -14,14 +14,15 @@
         loading: boolean;
         busy: boolean;
         error: string;
-        onselectionchange: (objectId: string, selected: boolean) => void;
-        onselectall: (selected: boolean) => void;
+        onselectionchange: (role: 'REFERRER' | 'DEPENDENCY', objectId: string, selected: boolean) => void;
+        onselectall: (role: 'REFERRER' | 'DEPENDENCY', selected: boolean) => void;
         oncancel: () => void;
         onconfirm: () => void;
     }
 
     let { inspection, loading, busy, error, onselectionchange, onselectall, oncancel, onconfirm }: Props = $props();
-    let selectAllCheckbox = $state<HTMLInputElement>();
+    let selectAllReferrersCheckbox = $state<HTMLInputElement>();
+    let selectAllCleanupCheckbox = $state<HTMLInputElement>();
     const maximumDeletionObjects = 1024;
 
     const selectedIds = $derived(new Set(inspection?.selectedObjectIds ?? []));
@@ -29,25 +30,53 @@
     const targetImpacts = $derived(inspection?.impacts.filter((impact) => impact.role === 'TARGET') ?? []);
     const eligibleTargets = $derived(targetImpacts.filter((impact) => impact.status === 'REQUIRED'));
     const blockedTargets = $derived(targetImpacts.filter((impact) => impact.status === 'BLOCKED'));
+    const referenceBlockedTargets = $derived(
+        blockedTargets.filter((impact) => impact.reason === 'References must be resolved'),
+    );
+    const unsafeBlockedTargets = $derived(
+        blockedTargets.filter((impact) => impact.reason !== 'References must be resolved'),
+    );
+    const referrerImpacts = $derived(
+        inspection?.impacts.filter((impact) => impact.role === 'REFERRER' && impact.status === 'OPTIONAL') ?? [],
+    );
     const optionalImpacts = $derived(
         inspection?.impacts.filter((impact) => impact.role === 'DEPENDENCY' && impact.status === 'OPTIONAL') ?? [],
     );
     const retainedImpacts = $derived(
         inspection?.impacts.filter((impact) => impact.role === 'DEPENDENCY' && impact.status === 'PRESERVED') ?? [],
     );
-    const selectedOptionalCount = $derived(optionalImpacts.filter((impact) => selectedIds.has(impact.objectId)).length);
+    const requestedReferrerCount = $derived(referrerImpacts.filter((impact) => impact.requested).length);
+    const requestedCleanupCount = $derived(optionalImpacts.filter((impact) => impact.requested).length);
     const selectedObjectCount = $derived(inspection?.selectedObjectIds.length ?? 0);
+    const referrerCapacity = $derived(
+        Math.max(
+            0,
+            maximumDeletionObjects -
+                (inspection?.targetObjectIds.length ?? maximumDeletionObjects) -
+                (inspection?.cleanupObjectIds.length ?? 0),
+        ),
+    );
     const cleanupCapacity = $derived(
-        Math.max(0, maximumDeletionObjects - (inspection?.targetObjectIds.length ?? maximumDeletionObjects)),
+        Math.max(
+            0,
+            maximumDeletionObjects -
+                (inspection?.targetObjectIds.length ?? maximumDeletionObjects) -
+                (inspection?.referrerObjectIds.length ?? 0),
+        ),
     );
+    const selectableReferrerCount = $derived(Math.min(referrerImpacts.length, referrerCapacity));
     const selectableCleanupCount = $derived(Math.min(optionalImpacts.length, cleanupCapacity));
-    const allOptionalSelected = $derived(
-        selectableCleanupCount > 0 && selectedOptionalCount === selectableCleanupCount,
+    const allReferrersRequested = $derived(
+        selectableReferrerCount > 0 && requestedReferrerCount === selectableReferrerCount,
     );
-    const someOptionalSelected = $derived(selectedOptionalCount > 0 && !allOptionalSelected);
+    const someReferrersRequested = $derived(requestedReferrerCount > 0 && !allReferrersRequested);
+    const allCleanupRequested = $derived(
+        selectableCleanupCount > 0 && requestedCleanupCount === selectableCleanupCount,
+    );
+    const someCleanupRequested = $derived(requestedCleanupCount > 0 && !allCleanupRequested);
     const selectionLimitReached = $derived(
-        (inspection?.targetObjectIds.length ?? 0) + selectedOptionalCount >= maximumDeletionObjects &&
-            selectedOptionalCount < optionalImpacts.length,
+        (inspection?.targetObjectIds.length ?? 0) + requestedReferrerCount + requestedCleanupCount >=
+            maximumDeletionObjects,
     );
     const visibleWarnings = $derived(
         inspection?.warnings.filter((warning) => warning.code !== 'WAVE_DATA_WILL_BE_UNREFERENCED') ?? [],
@@ -72,7 +101,8 @@
     );
 
     $effect(() => {
-        if (selectAllCheckbox) selectAllCheckbox.indeterminate = someOptionalSelected;
+        if (selectAllReferrersCheckbox) selectAllReferrersCheckbox.indeterminate = someReferrersRequested;
+        if (selectAllCleanupCheckbox) selectAllCleanupCheckbox.indeterminate = someCleanupRequested;
     });
 
     function objectTypeLabel(objectType: string | null | undefined): string {
@@ -94,7 +124,7 @@
             .map((objectId) => impactsById.get(objectId))
             .filter(
                 (candidate): candidate is ObjectDeletionImpact =>
-                    candidate !== undefined && candidate.role === 'DEPENDENCY' && candidate.status === 'OPTIONAL',
+                    candidate !== undefined && candidate.role !== 'TARGET' && candidate.status === 'OPTIONAL',
             );
         return prerequisites.length === 0
             ? 0
@@ -191,14 +221,14 @@
                     </section>
                 {/if}
 
-                {#if blockedTargets.length > 0}
-                    <section class="deletion-impact-section deletion-blockers" aria-label="Cannot be deleted">
-                        <h3>Cannot be deleted</h3>
+                {#if referenceBlockedTargets.length > 0}
+                    <section class="deletion-impact-section deletion-blockers" aria-label="References must be resolved">
+                        <h3>References must be resolved</h3>
                         <p class="deletion-section-help">
-                            These selected objects will remain. Other eligible selections can still be deleted.
+                            Select the complete referencing chain below to make these objects eligible for deletion.
                         </p>
                         <div class="deletion-impact-list">
-                            {#each blockedTargets as impact (impact.objectId)}
+                            {#each referenceBlockedTargets as impact (impact.objectId)}
                                 <div class="blocked deletion-impact deletion-impact-static">
                                     <span class="deletion-impact-icon deletion-impact-icon-muted" aria-hidden="true">
                                         <Icon name="lock" size={14} />
@@ -222,6 +252,111 @@
                     </section>
                 {/if}
 
+                {#if unsafeBlockedTargets.length > 0}
+                    <section class="deletion-impact-section deletion-blockers" aria-label="Cannot be deleted safely">
+                        <h3>Cannot be deleted safely</h3>
+                        <p class="deletion-section-help">
+                            These selected objects will remain. Other eligible selections can still be deleted.
+                        </p>
+                        <div class="deletion-impact-list">
+                            {#each unsafeBlockedTargets as impact (impact.objectId)}
+                                <div class="blocked deletion-impact deletion-impact-static">
+                                    <span class="deletion-impact-icon deletion-impact-icon-muted" aria-hidden="true">
+                                        <Icon name="lock" size={14} />
+                                    </span>
+                                    <span class="deletion-impact-copy">
+                                        <span class="deletion-impact-heading">
+                                            <strong>{impact.objectName}</strong>
+                                            <small>{objectTypeLabel(impact.objectType)}</small>
+                                        </span>
+                                        {#if impact.reason}<small>{impact.reason}</small>{/if}
+                                        {#each noticesFor(impact) as notice (`${notice.code}\0${notice.objectIds.join('\0')}`)}
+                                            <small>{notice.message}</small>
+                                        {/each}
+                                        {#each referencesFor(impact) as reference (`${reference.sourceObjectId}\0${reference.type}\0${reference.targetObjectId ?? ''}`)}
+                                            <small class="deletion-reference">{referenceLabel(reference)}</small>
+                                        {/each}
+                                    </span>
+                                </div>
+                            {/each}
+                        </div>
+                    </section>
+                {/if}
+
+                {#if referrerImpacts.length > 0}
+                    <section class="deletion-impact-section deletion-optional-section" aria-label="Referencing objects">
+                        <h3>Referencing objects</h3>
+                        <p class="deletion-section-help">
+                            Delete a complete referencing chain to make the requested objects eligible.
+                        </p>
+                        <label class="deletion-select-all">
+                            <input
+                                bind:this={selectAllReferrersCheckbox}
+                                class="dialog-checkbox"
+                                type="checkbox"
+                                checked={allReferrersRequested}
+                                disabled={loading || busy}
+                                onchange={(event) => onselectall('REFERRER', event.currentTarget.checked)}
+                            />
+                            <span>
+                                {referrerImpacts.length > referrerCapacity
+                                    ? `Delete up to ${selectableReferrerCount} of ${referrerImpacts.length} referencing objects`
+                                    : `Delete all referencing objects (${referrerImpacts.length})`}
+                            </span>
+                        </label>
+                        <div class="deletion-impact-list">
+                            {#each referrerImpacts as impact (impact.objectId)}
+                                {@const disabled =
+                                    loading ||
+                                    busy ||
+                                    prerequisiteMissing(impact) ||
+                                    (selectionLimitReached && !impact.requested)}
+                                {@const missingNames = missingPrerequisiteNames(impact)}
+                                {@const depth = optionalDepth(impact)}
+                                <label
+                                    class:nested={depth > 0}
+                                    class:disabled
+                                    class="deletion-impact deletion-impact-selectable"
+                                    style={`--deletion-depth: ${depth}`}
+                                >
+                                    <input
+                                        class="dialog-checkbox"
+                                        type="checkbox"
+                                        checked={impact.requested}
+                                        {disabled}
+                                        aria-label={`Delete referencing ${objectTypeLabel(impact.objectType)} ${impact.objectName}`}
+                                        onchange={(event) =>
+                                            onselectionchange('REFERRER', impact.objectId, event.currentTarget.checked)}
+                                    />
+                                    <span class="deletion-impact-copy">
+                                        <span class="deletion-impact-heading">
+                                            <strong>{impact.objectName}</strong>
+                                            <small>{objectTypeLabel(impact.objectType)}</small>
+                                            <span class="deletion-outcome">
+                                                {impact.requested
+                                                    ? impact.selected
+                                                        ? 'Will delete'
+                                                        : 'Pending'
+                                                    : 'Keep'}
+                                            </span>
+                                        </span>
+                                        <small>
+                                            {missingNames.length > 0
+                                                ? `Available after deleting ${joinNames(missingNames)}`
+                                                : impact.reason}
+                                        </small>
+                                        <small
+                                            >{impact.volumeName || 'No volume'} · {formatStoredSize(
+                                                impact.storedSizeBytes,
+                                            )}</small
+                                        >
+                                    </span>
+                                </label>
+                            {/each}
+                        </div>
+                    </section>
+                {/if}
+
                 {#if optionalImpacts.length > 0}
                     <section class="deletion-impact-section deletion-optional-section" aria-label="Optional cleanup">
                         <h3>Optional cleanup</h3>
@@ -230,12 +365,12 @@
                         </p>
                         <label class="deletion-select-all">
                             <input
-                                bind:this={selectAllCheckbox}
-                                class="deletion-checkbox"
+                                bind:this={selectAllCleanupCheckbox}
+                                class="dialog-checkbox"
                                 type="checkbox"
-                                checked={allOptionalSelected}
+                                checked={allCleanupRequested}
                                 disabled={loading || busy}
-                                onchange={(event) => onselectall(event.currentTarget.checked)}
+                                onchange={(event) => onselectall('DEPENDENCY', event.currentTarget.checked)}
                             />
                             <span>
                                 {optionalImpacts.length > cleanupCapacity
@@ -249,7 +384,7 @@
                                     loading ||
                                     busy ||
                                     prerequisiteMissing(impact) ||
-                                    (selectionLimitReached && !impact.selected)}
+                                    (selectionLimitReached && !impact.requested)}
                                 {@const missingNames = missingPrerequisiteNames(impact)}
                                 {@const depth = optionalDepth(impact)}
                                 <label
@@ -259,21 +394,29 @@
                                     style={`--deletion-depth: ${depth}`}
                                 >
                                     <input
-                                        class="deletion-checkbox"
+                                        class="dialog-checkbox"
                                         type="checkbox"
-                                        checked={impact.selected}
+                                        checked={impact.requested}
                                         {disabled}
                                         aria-label={`Delete ${objectTypeLabel(impact.objectType)} ${impact.objectName}`}
                                         onchange={(event) =>
-                                            onselectionchange(impact.objectId, event.currentTarget.checked)}
+                                            onselectionchange(
+                                                'DEPENDENCY',
+                                                impact.objectId,
+                                                event.currentTarget.checked,
+                                            )}
                                     />
                                     <span class="deletion-impact-copy">
                                         <span class="deletion-impact-heading">
                                             <strong>{impact.objectName}</strong>
                                             <small>{objectTypeLabel(impact.objectType)}</small>
-                                            <span class="deletion-outcome"
-                                                >{impact.selected ? 'Will delete' : 'Keep'}</span
-                                            >
+                                            <span class="deletion-outcome">
+                                                {impact.requested
+                                                    ? impact.selected
+                                                        ? 'Will delete'
+                                                        : 'Pending'
+                                                    : 'Keep'}
+                                            </span>
                                         </span>
                                         <small>
                                             {missingNames.length > 0

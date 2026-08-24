@@ -17,7 +17,7 @@ describe('AboutDialog', () => {
         await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Close' })));
     });
 
-    it('renders version and source identity and closes with Escape', async () => {
+    it('renders the source identity as the version for a branch build and closes with Escape', async () => {
         const onclose = vi.fn();
         render(AboutDialog, {
             props: {
@@ -25,9 +25,9 @@ describe('AboutDialog', () => {
                     status: 'ready',
                     buildInfo: {
                         schemaVersion: 1,
-                        semanticVersion: '0.4.0',
+                        semanticVersion: '0.4.0-pre',
                         projectVersion: '0.4.0',
-                        sourceIdentity: 'v0.4.0-1234567-mod',
+                        sourceIdentity: '0.4.0-pre-dirty-1234567',
                         releaseTag: '',
                         isRelease: false,
                         webviewEngine: 'Microsoft Edge WebView2',
@@ -39,12 +39,38 @@ describe('AboutDialog', () => {
         });
 
         const dialog = screen.getByRole('dialog', { name: 'About axkdeck' });
-        expect(within(dialog).getByText('0.4.0')).toBeTruthy();
-        expect(within(dialog).getByText('v0.4.0-1234567-mod')).toBeTruthy();
+        expect(within(dialog).getByText('0.4.0-pre-dirty-1234567')).toBeTruthy();
+        expect(within(dialog).queryByText('0.4.0-pre')).toBeNull();
+        expect(within(dialog).queryByText('Build')).toBeNull();
         expect(within(dialog).getByText('Microsoft Edge WebView2 120.0.2210.144')).toBeTruthy();
 
         await fireEvent.keyDown(dialog, { key: 'Escape' });
         expect(onclose).toHaveBeenCalledOnce();
+    });
+
+    it('renders the canonical semantic version for a tagged release', () => {
+        render(AboutDialog, {
+            props: {
+                state: {
+                    status: 'ready',
+                    buildInfo: {
+                        schemaVersion: 1,
+                        semanticVersion: '0.4.0',
+                        projectVersion: '0.4.0',
+                        sourceIdentity: 'v0.4.0-1234567',
+                        releaseTag: 'v0.4.0',
+                        isRelease: true,
+                        webviewEngine: 'WebKitGTK',
+                        webviewVersion: '2.50.4',
+                    },
+                },
+                onclose: vi.fn(),
+            },
+        });
+
+        const dialog = screen.getByRole('dialog', { name: 'About axkdeck' });
+        expect(within(dialog).getByText('0.4.0')).toBeTruthy();
+        expect(within(dialog).queryByText('v0.4.0-1234567')).toBeNull();
     });
 
     it('keeps build information available when webview introspection fails', () => {
@@ -56,7 +82,7 @@ describe('AboutDialog', () => {
                         schemaVersion: 1,
                         semanticVersion: '0.4.0',
                         projectVersion: '0.4.0',
-                        sourceIdentity: 'v0.4.0-1234567-mod',
+                        sourceIdentity: 'main-dirty-1234567',
                         releaseTag: '',
                         isRelease: false,
                         webviewEngine: 'WebKitGTK',
@@ -69,7 +95,7 @@ describe('AboutDialog', () => {
 
         const dialog = screen.getByRole('dialog', { name: 'About axkdeck' });
         expect(within(dialog).getByText('WebKitGTK unavailable')).toBeTruthy();
-        expect(within(dialog).getByText('v0.4.0-1234567-mod')).toBeTruthy();
+        expect(within(dialog).getByText('main-dirty-1234567')).toBeTruthy();
     });
 
     it('shows a stable fallback when build information cannot be loaded', () => {

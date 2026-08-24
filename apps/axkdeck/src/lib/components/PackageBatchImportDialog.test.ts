@@ -9,6 +9,17 @@ import PackageBatchImportDialog from './PackageBatchImportDialog.svelte';
 
 const dialogSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchImportDialog.svelte'), 'utf8');
 const tableSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchItemsTable.svelte'), 'utf8');
+const destinationSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/PackageBatchDestinationChooser.svelte'),
+    'utf8',
+);
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+
+function styleRule(styles: string, selector: string): string {
+    const start = styles.indexOf(`${selector} {`);
+    const end = styles.indexOf('}', start);
+    return start < 0 || end < 0 ? '' : styles.slice(start, end + 1);
+}
 
 function inspection(packageId: string, volumeName: string): PackageInspection {
     return {
@@ -166,6 +177,44 @@ function props() {
     };
 }
 
+function planWithRenameConflicts(): ImageSessionPackageImportPlan {
+    const conflicted = structuredClone(plan);
+    conflicted.valid = false;
+    conflicted.conflicts = items.map((item, packageIndex) => ({
+        code: 'SFS_NAME_CONFLICT',
+        message: `Directory already contains entry Sample ${packageIndex + 1}`,
+        packageIndex,
+        rootIndex: 0,
+        packageId: item.inspection.packageId,
+        nodeId: `sample-${packageIndex + 1}`,
+        partitionIndex: 0,
+        groupName: '',
+        volumeName: conflicted.packages[packageIndex].destinationVolumeName,
+        rawGroup: '',
+        rawVolume: '',
+    }));
+    conflicted.actions = items.map((item, packageIndex) => ({
+        actionId: `rename-${packageIndex + 1}`,
+        actions: ['CONFLICT'],
+        canonicalActionId: null,
+        destinationName: `Sample ${packageIndex + 1}`,
+        groupName: '',
+        nodeId: `sample-${packageIndex + 1}`,
+        objectType: 'SBNK',
+        packageId: item.inspection.packageId,
+        packageIndex,
+        partitionIndex: 0,
+        rawGroup: '',
+        rawVolume: '',
+        rootIndex: 0,
+        sourceName: `Sample ${packageIndex + 1}`,
+        targetSfsId: null,
+        targetWaveDataReferenceValue: null,
+        volumeName: conflicted.packages[packageIndex].destinationVolumeName,
+    }));
+    return conflicted;
+}
+
 describe('PackageBatchImportDialog', () => {
     beforeEach(() => vi.clearAllMocks());
 
@@ -209,11 +258,12 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByText(/2 packages will be imported into one volume/)).toBeTruthy();
         expect(screen.getByRole('button', { name: 'One volume' }).getAttribute('aria-pressed')).toBe('true');
         expect(screen.getByRole('button', { name: 'Separate volumes' }).hasAttribute('disabled')).toBe(true);
-        expect((screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement).value).toBe(
-            'Partition 1 / Existing',
+        expect((screen.getByRole('combobox', { name: 'Destination partition' }) as HTMLSelectElement).value).toBe('0');
+        expect((screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
+            'Existing',
         );
 
-        await fireEvent.click(screen.getByRole('button', { name: 'New volume' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'New' }));
         expect(callbacks.ondestinationmode).toHaveBeenCalledWith('create');
     });
 
@@ -244,7 +294,7 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByText('1 of 2 packages selected')).toBeTruthy();
         expect(screen.getByText('Not included')).toBeTruthy();
         expect(screen.queryByText('SFS record capacity')).toBeNull();
-        expect(screen.getByText('Selection or volume names changed. Check conflicts to recalculate.')).toBeTruthy();
+        expect(screen.getByRole('status').textContent).toContain('Check import conflicts');
 
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Include two.axkvol' }));
         expect(callbacks.ontoggleselected).toHaveBeenCalledWith('item-1', true);
@@ -261,7 +311,7 @@ describe('PackageBatchImportDialog', () => {
             },
         });
 
-        expect(screen.getByText('Select at least one package.')).toBeTruthy();
+        expect(screen.getByRole('status').textContent).toContain('Select at least one package');
         expect(screen.getByRole('button', { name: 'Check conflicts' }).hasAttribute('disabled')).toBe(true);
         expect(screen.getByRole('button', { name: 'Import 0 packages' }).hasAttribute('disabled')).toBe(true);
     });
@@ -279,7 +329,62 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
     });
 
-    it('keeps conflict checking in the fixed footer and uses compact top-aligned rows', () => {
+    it('prompts for the first explicit conflict check before any plan exists', () => {
+        render(PackageBatchImportDialog, {
+            props: {
+                ...props(),
+                plan: null,
+                hasUnvalidatedChanges: true,
+            },
+        });
+
+        expect(screen.getByRole('status').textContent).toContain('Check import conflicts');
+        expect(callbacks.onreplan).not.toHaveBeenCalled();
+        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('keeps every rename conflict editable while draft names await one explicit check', async () => {
+        render(PackageBatchImportDialog, {
+            props: {
+                ...props(),
+                plan: planWithRenameConflicts(),
+                renames: { 'item-0:sample-1': 'Kick fixed' },
+                hasUnvalidatedChanges: true,
+            },
+        });
+
+        expect(screen.getByText('Choose unused destination names')).toBeTruthy();
+        expect((screen.getByLabelText('one.axkvol · Sample 1') as HTMLInputElement).value).toBe('Kick fixed');
+        const secondRename = screen.getByLabelText('two.axkvol · Sample 2') as HTMLInputElement;
+        expect(secondRename.value).toBe('Sample 2');
+        expect(screen.getByText('SFS record capacity')).toBeTruthy();
+        expect(screen.getByRole('status').textContent).toContain('Review import issues');
+        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+
+        await fireEvent.input(secondRename, { target: { value: 'Snare fixed' } });
+        expect(callbacks.onrename).toHaveBeenCalledWith('item-1', 'sample-2', 'Snare fixed');
+        expect(callbacks.onreplan).not.toHaveBeenCalled();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        expect(callbacks.onreplan).toHaveBeenCalledOnce();
+    });
+
+    it('hides indexed plan controls when the selected package set no longer matches the plan', () => {
+        render(PackageBatchImportDialog, {
+            props: {
+                ...props(),
+                items: items.map((item, index) => ({ ...item, selected: index === 0 })),
+                plan: planWithRenameConflicts(),
+                hasUnvalidatedChanges: true,
+            },
+        });
+
+        expect(screen.queryByText('Choose unused destination names')).toBeNull();
+        expect(screen.queryByText('SFS record capacity')).toBeNull();
+        expect(screen.getByText('Pending check')).toBeTruthy();
+    });
+
+    it('keeps conflict checking and readiness in the fixed footer', () => {
         render(PackageBatchImportDialog, { props: props() });
 
         const checkConflicts = screen.getByRole('button', { name: 'Check conflicts' });
@@ -289,10 +394,8 @@ describe('PackageBatchImportDialog', () => {
             Array.from(footer?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
         ).toEqual(['Check conflicts', 'Cancel', 'Import 2 packages']);
         expect(footer?.querySelector('.batch-package-footer-actions')).toBeTruthy();
-        expect(screen.getByText('21').tagName).toBe('SPAN');
-        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*align-items:\s*start;/s);
-        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*padding-block:\s*6px;/s);
-        expect(dialogSource).toMatch(/\.batch-package-footer\s*\{[^}]*flex-wrap:\s*wrap;/s);
+        expect(footer?.querySelector('[role="status"]')?.textContent).toContain('Ready to import');
+        expect(screen.queryByText('Ready to import', { selector: '.batch-package-content *' })).toBeNull();
     });
 
     it('disables conflict checking and reports progress while planning', () => {
@@ -300,12 +403,12 @@ describe('PackageBatchImportDialog', () => {
             props: { ...props(), status: 'planning' },
         });
 
-        const checking = screen.getByRole('button', { name: 'Checking conflicts…' });
+        const checking = screen.getByRole('button', { name: 'Check conflicts' });
         expect(checking.hasAttribute('disabled')).toBe(true);
         expect(screen.getByRole('status').textContent).toContain('Planning batch import…');
     });
 
-    it('scrolls to the capacity summary after a successful conflict check', async () => {
+    it('resets the package and result scrollers after a successful conflict check', async () => {
         let completeCheck: (() => void) | undefined;
         callbacks.onreplan.mockReturnValueOnce(
             new Promise<void>((resolveCheck) => {
@@ -315,15 +418,15 @@ describe('PackageBatchImportDialog', () => {
         render(PackageBatchImportDialog, {
             props: { ...props(), hasUnvalidatedChanges: true },
         });
-        const content = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-package-content');
-        expect(content).toBeTruthy();
-        content!.scrollTop = 480;
+        const rows = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-table-rows');
+        expect(rows).toBeTruthy();
+        rows!.scrollTop = 480;
 
         await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
-        expect(content!.scrollTop).toBe(480);
+        expect(rows!.scrollTop).toBe(480);
         completeCheck?.();
 
-        await waitFor(() => expect(content!.scrollTop).toBe(0));
+        await waitFor(() => expect(rows!.scrollTop).toBe(0));
     });
 
     it('keeps the current scroll position when conflict checking reports an error', async () => {
@@ -332,14 +435,55 @@ describe('PackageBatchImportDialog', () => {
         callbacks.onreplan.mockImplementationOnce(async () => {
             await rendered.rerender({ ...initialProps, error: 'Conflict planning failed' });
         });
-        const content = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-package-content');
-        expect(content).toBeTruthy();
-        content!.scrollTop = 480;
+        const rows = screen.getByRole('dialog').querySelector<HTMLElement>('.batch-table-rows');
+        expect(rows).toBeTruthy();
+        rows!.scrollTop = 480;
 
         await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
 
         await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Conflict planning failed'));
-        expect(content!.scrollTop).toBe(480);
+        expect(rows!.scrollTop).toBe(480);
+    });
+
+    it('uses compact shared dialog controls and a fixed-header scrolling package table', () => {
+        render(PackageBatchImportDialog, { props: props() });
+
+        const selectAll = screen.getByRole('checkbox', { name: 'Select all packages' });
+        const packageCheckbox = screen.getByRole('checkbox', { name: 'Include one.axkvol' });
+        expect(selectAll.classList).toContain('dialog-checkbox');
+        expect(packageCheckbox.classList).toContain('dialog-checkbox');
+        expect(screen.getByRole('group', { name: 'Package placement' }).classList).toContain(
+            'dialog-segmented-control',
+        );
+        expect(screen.getByRole('rowgroup')).toBeTruthy();
+        expect(screen.getByRole('columnheader', { name: 'Package' }).closest('.batch-table-header')).toBeTruthy();
+
+        expect(appStyles).toContain('--dialog-body-font-size: 11px');
+        expect(appStyles).toContain('--dialog-table-header-font-size: 10px');
+        expect(appStyles).toMatch(/\.dialog-shell\s*\{[^}]*font-size:\s*var\(--dialog-body-font-size\)/s);
+        expect(appStyles).toMatch(/\.dialog-checkbox\s*\{[^}]*appearance:\s*none/s);
+        expect(appStyles).toMatch(/\.dialog-checkbox:indeterminate::before\s*\{/);
+        expect(destinationSource).toContain('dialog-segmented-control');
+        expect(styleRule(tableSource, '.batch-table-rows')).toContain('overflow-y: auto');
+        expect(tableSource).toMatch(
+            /\.batch-table-header\s*\{[^}]*font-size:\s*var\(--dialog-table-header-font-size\)/s,
+        );
+        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*align-items:\s*start/s);
+        expect(tableSource).toMatch(/\.batch-table-row\s*\{[^}]*padding-block:\s*5px/s);
+        expect(dialogSource).toMatch(/\.batch-package-content\s*\{[^}]*overflow:\s*hidden/s);
+    });
+
+    it('keeps detailed planning errors in a separately scrolling results panel', () => {
+        render(PackageBatchImportDialog, {
+            props: { ...props(), error: 'Alteration journal storage is full' },
+        });
+
+        const alert = screen.getByRole('alert');
+        const results = alert.closest('.batch-results');
+        expect(results).toBeTruthy();
+        expect(results?.getAttribute('aria-label')).toBe('Import results');
+        expect(screen.getByRole('status').textContent).toContain('Import failed');
+        expect(styleRule(dialogSource, '.batch-results')).toContain('overflow-y: auto');
     });
 
     it('does not report readiness while an apply error is visible', () => {

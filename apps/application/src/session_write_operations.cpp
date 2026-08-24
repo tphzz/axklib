@@ -215,15 +215,16 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     const auto image_id = input.at("imageId").get<std::string>();
                     const auto revision = input.at("expectedRevision").get<std::uint64_t>();
                     const auto targets = input.at("targetObjectIds").get<std::vector<std::string>>();
+                    const auto referrers = input.at("referrerObjectIds").get<std::vector<std::string>>();
                     const auto cleanup = input.at("cleanupObjectIds").get<std::vector<std::string>>();
-                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, cleanup);
+                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, referrers, cleanup);
                     if (!plan)
                         return std::unexpected(plan.error());
                     return deletion_inspection_json(plan->inspection);
                 } catch (const Json::exception &) {
-                    return std::unexpected(operation_error(
-                        "invalid_request",
-                        "imageId, expectedRevision, targetObjectIds, and cleanupObjectIds are required"));
+                    return std::unexpected(operation_error("invalid_request",
+                                                           "imageId, expectedRevision, targetObjectIds, "
+                                                           "referrerObjectIds, and cleanupObjectIds are required"));
                 }
             });
         if (!bound)
@@ -331,18 +332,20 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                 std::string image_id;
                 std::uint64_t revision{};
                 std::vector<std::string> targets;
+                std::vector<std::string> referrers;
                 std::vector<std::string> cleanup;
                 try {
                     image_id = input.at("imageId").get<std::string>();
                     revision = input.at("expectedRevision").get<std::uint64_t>();
                     targets = input.at("targetObjectIds").get<std::vector<std::string>>();
+                    referrers = input.at("referrerObjectIds").get<std::vector<std::string>>();
                     cleanup = input.at("cleanupObjectIds").get<std::vector<std::string>>();
                 } catch (const Json::exception &) {
-                    return std::unexpected(operation_error(
-                        "invalid_request",
-                        "imageId, expectedRevision, targetObjectIds, and cleanupObjectIds are required"));
+                    return std::unexpected(operation_error("invalid_request",
+                                                           "imageId, expectedRevision, targetObjectIds, "
+                                                           "referrerObjectIds, and cleanupObjectIds are required"));
                 }
-                auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, cleanup);
+                auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, referrers, cleanup);
                 if (!plan)
                     return std::unexpected(plan.error());
                 if (!plan->inspection.can_apply) {

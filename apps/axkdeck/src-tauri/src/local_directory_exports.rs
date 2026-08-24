@@ -78,7 +78,7 @@ pub(crate) async fn select_local_directory_export_destination(
     let starting_directory = match preferences.lock() {
         Ok(preferences) => preferences.directory_export_directory(),
         Err(_) => {
-            log::warn!("desktop preference state is unavailable; using the platform save location");
+            log::warn!("axkdeck settings state is unavailable; using the platform save location");
             None
         }
     };
@@ -118,7 +118,7 @@ pub(crate) async fn select_local_directory_export_destination(
             }
             Err(_) => {
                 log::warn!(
-                    "desktop preference state is unavailable; the directory export location was not retained"
+                    "axkdeck settings state is unavailable; the directory export location was not retained"
                 );
             }
         }

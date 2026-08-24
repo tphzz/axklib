@@ -3,7 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { mount, unmount } from 'svelte';
 import StartupShell from './StartupShell.svelte';
 import { installDiagnostics, reportDiagnostic, reportError, reportInfo } from './lib/diagnostics';
-import { createInterfaceScaleController, type InterfaceScaleController } from './lib/interfaceScale';
+import {
+    createInterfaceScaleController,
+    type InterfaceScaleController,
+    type InterfaceScaleMode,
+} from './lib/interfaceScale';
 import { prepareServerConnection, prepareStartup } from './lib/startupCoordinator';
 import { frontendStartup, type StartupView } from './lib/startupDiagnostics';
 import { revealAfterInterfaceScale } from './lib/startupVisibility';
@@ -68,10 +72,17 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const diagnosticsReady = installDiagnostics().finally(() => frontendStartup.markDiagnosticsInstalled());
     const interfaceScalingReady = (async () => {
         if (!isDesktop) return;
+        let initialMode: InterfaceScaleMode = 'auto';
+        try {
+            initialMode = await invoke<InterfaceScaleMode>('desktop_interface_scale_mode');
+        } catch (error) {
+            reportDiagnostic('interface_scale_preference_load_failed', { message: String(error) }, 'warn');
+        }
         try {
             interfaceScaling = await createInterfaceScaleController(
                 createTauriInterfaceScaleAdapter(),
-                window.localStorage,
+                initialMode,
+                (mode) => invoke('set_desktop_interface_scale_mode', { mode }),
                 reportDiagnostic,
             );
         } catch (error) {
@@ -85,6 +96,7 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const view: StartupView =
         new URLSearchParams(window.location.search).get('view') === 'allocation' ? 'allocation' : 'workspace';
     if (view === 'allocation') {
+        const connectionReady = isDesktop ? connectServer(false) : Promise.resolve(null);
         try {
             const moduleReady = shellFirstFrame.then(() =>
                 import('./AllocationInspector.svelte').then((module) => {
@@ -92,7 +104,18 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
                     return module;
                 }),
             );
-            const [module] = await Promise.all([moduleReady, diagnosticsReady, interfaceScalingReady]);
+            const [module, connection] = await Promise.all([
+                moduleReady,
+                connectionReady,
+                diagnosticsReady,
+                interfaceScalingReady,
+            ]);
+            if (isDesktop && !connection) {
+                shellStatus = 'unavailable';
+                shellMessage = 'Check the local service or configure a remote axklib-server connection.';
+                await replaceShell();
+                return;
+            }
             if (shell) await unmount(shell);
             mount(module.default, { target: mountTarget });
             frontendStartup.markAppMounted();

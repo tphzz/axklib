@@ -64,15 +64,13 @@ export function normalizedBatchDestination(
             volume.volumeName === request.destinationVolumeName,
     );
     const mode = selectedVolume ? 'existing' : request.item?.kind === 'partition' ? 'create' : 'existing';
-    const firstVolume = selectedVolume ?? destinations.volumes[0];
+    const partitionIndex = request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null;
     return {
         destinationStrategy: 'shared',
         destinationMode: mode,
-        destinationPartitionIndex:
-            mode === 'existing'
-                ? (firstVolume?.partitionIndex ?? null)
-                : (request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null),
-        destinationVolumeName: mode === 'existing' ? (firstVolume?.volumeName ?? '') : suggestedSharedVolumeName(items),
+        destinationPartitionIndex: selectedVolume?.partitionIndex ?? partitionIndex,
+        destinationVolumeName:
+            mode === 'existing' ? (selectedVolume?.volumeName ?? '') : suggestedSharedVolumeName(items),
     };
 }
 

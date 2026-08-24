@@ -1,4 +1,5 @@
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/AxkVersionRef.cmake")
 
 function(axk_sanitize_git_ref input output_variable)
   string(REGEX REPLACE "[^A-Za-z0-9._-]+" "-" sanitized "${input}")
@@ -18,6 +19,14 @@ function(axk_derive_git_build_info source_directory product_name)
   set(is_dirty OFF)
   set(ref_name "local")
   set(git_executable "")
+  set(github_ref_type "")
+  set(github_ref_name "")
+  if(DEFINED ENV{GITHUB_REF_TYPE})
+    set(github_ref_type "$ENV{GITHUB_REF_TYPE}")
+  endif()
+  if(DEFINED ENV{GITHUB_REF_NAME})
+    set(github_ref_name "$ENV{GITHUB_REF_NAME}")
+  endif()
 
   if(DEFINED AXK_GIT_EXECUTABLE)
     set(git_executable "${AXK_GIT_EXECUTABLE}")
@@ -49,27 +58,22 @@ function(axk_derive_git_build_info source_directory product_name)
       ERROR_QUIET
       OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    if(git_branch_result EQUAL 0 AND NOT git_branch_output STREQUAL "" AND
+    if(github_ref_type STREQUAL "tag" AND NOT github_ref_name STREQUAL "")
+      set(ref_name "${github_ref_name}")
+      set(git_tag "${github_ref_name}")
+      set(is_tagged_release ON)
+    elseif(github_ref_type STREQUAL "branch" AND NOT github_ref_name STREQUAL "")
+      set(ref_name "${github_ref_name}")
+      set(git_branch "${github_ref_name}")
+    elseif(git_branch_result EQUAL 0 AND NOT git_branch_output STREQUAL "" AND
        NOT git_branch_output STREQUAL "HEAD")
       set(ref_name "${git_branch_output}")
       set(git_branch "${git_branch_output}")
-    elseif(DEFINED ENV{GITHUB_REF_TYPE} AND "$ENV{GITHUB_REF_TYPE}" STREQUAL "tag" AND
-           DEFINED ENV{GITHUB_REF_NAME} AND NOT "$ENV{GITHUB_REF_NAME}" STREQUAL "")
-      set(ref_name "$ENV{GITHUB_REF_NAME}")
-      set(git_tag "$ENV{GITHUB_REF_NAME}")
-      set(is_tagged_release ON)
     else()
-      execute_process(
-        COMMAND "${git_executable}" describe --tags --exact-match HEAD
-        WORKING_DIRECTORY "${source_directory}"
-        RESULT_VARIABLE git_tag_result
-        OUTPUT_VARIABLE git_tag_output
-        ERROR_QUIET
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-      )
-      if(git_tag_result EQUAL 0 AND NOT git_tag_output STREQUAL "")
-        set(ref_name "${git_tag_output}")
-        set(git_tag "${git_tag_output}")
+      axk_find_exact_semver_tag("${git_executable}" "${source_directory}")
+      if(NOT AXK_EXACT_SEMVER_TAG STREQUAL "")
+        set(ref_name "${AXK_EXACT_SEMVER_TAG}")
+        set(git_tag "${AXK_EXACT_SEMVER_TAG}")
         set(is_tagged_release ON)
       else()
         set(ref_name "detached")
@@ -91,7 +95,17 @@ function(axk_derive_git_build_info source_directory product_name)
   endif()
 
   axk_sanitize_git_ref("${ref_name}" sanitized_ref)
-  set(source_identity "${sanitized_ref}-${git_sha_short}")
+  axk_parse_version_branch("${ref_name}")
+  if(NOT is_tagged_release AND AXK_VERSION_BRANCH_VALID)
+    set(identity_ref "${AXK_VERSION_BRANCH_CORE}-pre")
+  else()
+    set(identity_ref "${sanitized_ref}")
+  endif()
+  if(is_dirty)
+    set(source_identity "${identity_ref}-dirty-${git_sha_short}")
+  else()
+    set(source_identity "${identity_ref}-${git_sha_short}")
+  endif()
   set(package_basename "${product_name}-${source_identity}")
 
   if(git_branch STREQUAL "")
@@ -104,11 +118,6 @@ function(axk_derive_git_build_info source_directory product_name)
   elseif(NOT git_tag STREQUAL "")
     axk_sanitize_git_ref("${git_tag}" git_tag)
   endif()
-  if(is_dirty)
-    string(APPEND source_identity "-mod")
-    string(APPEND package_basename "-mod")
-  endif()
-
   set(AXK_GIT_TAG "${git_tag}" PARENT_SCOPE)
   set(AXK_GIT_BRANCH "${git_branch}" PARENT_SCOPE)
   set(AXK_GIT_SHA_SHORT "${git_sha_short}" PARENT_SCOPE)

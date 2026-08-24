@@ -207,7 +207,7 @@ class UnavailableTransport implements ImageTransport {
     closeImage(): Promise<void> {
         return Promise.resolve();
     }
-    startVolumeMutation(): Promise<JobState> {
+    startVolumeMutations(): Promise<JobState> {
         return this.unavailable();
     }
     startPartitionMutation(): Promise<JobState> {

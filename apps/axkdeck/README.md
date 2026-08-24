@@ -55,6 +55,10 @@ build directory.
 The same Git tag versions axklib and axkdeck. `desktop:dev` and
 `desktop:build` read `version_metadata.json` and `package_basename.txt` from the
 native build, inject that identity into Tauri, and embed it in the Rust binary.
+Recognized bare, `release/`, `feature/`, `features/`, `bugfix/`, and `bugfixes/`
+version branches accept `0.3.6` or `v0.3.6`, use semantic version `0.3.6-pre`,
+and use source identity `0.3.6-pre-<short-sha>` or
+`0.3.6-pre-dirty-<short-sha>`.
 The tracked npm and Cargo versions are `0.0.0` placeholders and are not release
 version sources. A locally launched desktop refuses a bundled sidecar whose
 semantic version or source identity differs, so rebuild the native server after
@@ -340,6 +344,45 @@ The dialog reports recoverable bytes and clusters and uses an explicit
 and the normal deletion inspection immediately before starting the job; a
 changed or newly referenced candidate returns to review instead of being
 deleted. Discovery is capped at 1,024 candidates per pass.
+
+### Settings
+
+Axkdeck stores its per-user settings under one vendor-scoped configuration
+directory:
+
+- `%APPDATA%\tphzz\axkdeck` on Windows;
+- `$XDG_CONFIG_HOME/tphzz/axkdeck` on Linux, or
+  `~/.config/tphzz/axkdeck` when `XDG_CONFIG_HOME` is unset; and
+- `~/Library/Application Support/tphzz/axkdeck` on macOS.
+
+`settings.json` is the single versioned axkdeck settings document. It groups UI
+appearance settings, including interface scale, separately from last-used
+directories so future settings remain organized. The local sidecar's configured
+storage roots remain operational server data and are stored separately at
+`axklib-server/workspaces.json` below the same axkdeck directory. Axkdeck passes
+that path explicitly when it starts the sidecar.
+
+```json
+{
+  "schemaVersion": 1,
+  "appearance": {
+    "interfaceScaleMode": "auto"
+  },
+  "lastUsedDirectories": {
+    "packageExport": null,
+    "directoryExport": null,
+    "mediaExport": null,
+    "allocationExport": null
+  }
+}
+```
+
+An independently launched `axklib-server` does not share the sidecar registry.
+It uses its own `tphzz/axklib-server/workspaces.json` configuration path unless
+`--workspace-store` or `workspaceStore` explicitly selects another file. The
+earlier unreleased filenames and locations are not read or migrated. Logs,
+WebView profile/cache data, protected credentials, and sidecar operational
+state remain in their platform-specific application locations.
 
 ### Diagnostics
 

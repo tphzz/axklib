@@ -2198,6 +2198,7 @@ export interface components {
             objectId: string | null;
             objectType: string | null;
             parentId: string | null;
+            partitionCapacity: components['schemas']['ImagePartitionCapacity'] | null;
             partitionIndex: number | null;
             quality: string;
             /**
@@ -2205,6 +2206,8 @@ export interface components {
              * @enum {string}
              */
             scopeRole: 'CONTAINED' | 'REFERENCE';
+            /** @description Deduplicated stored size of objects contained by a volume; null for other content nodes or when unavailable. */
+            sizeBytes: number | null;
             volumeDirectoryId: number | null;
         };
         ImageContentPage: {
@@ -2247,8 +2250,9 @@ export interface components {
             partitionName: string;
             prerequisiteObjectIds: string[];
             reason: string;
+            requested: boolean;
             /** @enum {unknown} */
-            role: 'TARGET' | 'DEPENDENCY';
+            role: 'TARGET' | 'REFERRER' | 'DEPENDENCY';
             selected: boolean;
             /** @enum {unknown} */
             status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
@@ -2259,6 +2263,7 @@ export interface components {
             blockers: components['schemas']['ImageObjectDeletionNotice'][];
             /** @description True when at least one requested object can be deleted safely */
             canApply: boolean;
+            cleanupObjectIds: string[];
             /** @description Allocated storage bytes expected to become free for the selected deletion closure */
             estimatedFreedBytes: number;
             /** @description Allocated storage clusters expected to become free for the selected deletion closure */
@@ -2266,6 +2271,7 @@ export interface components {
             imageId: string;
             impacts: components['schemas']['ImageObjectDeletionImpact'][];
             references: components['schemas']['ImageObjectDeletionReference'][];
+            referrerObjectIds: string[];
             revision: number;
             selectedObjectIds: string[];
             targetObjectIds: string[];
@@ -2293,6 +2299,7 @@ export interface components {
             cleanupObjectIds: string[];
             expectedRevision: number;
             imageId: string;
+            referrerObjectIds: string[];
             targetObjectIds: string[];
         };
         ImageObjectDeletionResult: {
@@ -2324,6 +2331,8 @@ export interface components {
             sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
             sizeBytes: number;
+            /** @description Deduplicated stored size of this Program, Sample Bank, or Sample and its exact forward dependency closure; null when the closure is unavailable. */
+            sizeWithDependenciesBytes: number | null;
             type: string;
             volumeName: string;
             waveform: components['schemas']['WaveDataMetadata'] | null;
@@ -2339,6 +2348,11 @@ export interface components {
         };
         ImageOpenRequest: {
             source: components['schemas']['ImageSourceRef'];
+        };
+        ImagePartitionCapacity: {
+            allocatedClusters: number;
+            clusterSizeBytes: number;
+            freeClusters: number;
         };
         ImagePlacementDestination: {
             createsVolume: boolean;
@@ -3128,13 +3142,15 @@ export interface components {
             canDelete: boolean;
             crossingRelationshipCount: number;
             imageId: string;
-            partitionIndex: number;
             revision: number;
-            volumeName: string;
+            targets: components['schemas']['ImageVolumeDeletionTarget'][];
         };
         ImageVolumeDeletionInspectionRequest: {
             expectedRevision: number;
             imageId: string;
+            targets: components['schemas']['ImageVolumeDeletionTarget'][];
+        };
+        ImageVolumeDeletionTarget: {
             partitionIndex: number;
             volumeName: string;
         };

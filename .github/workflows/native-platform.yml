@@ -519,6 +519,34 @@ jobs:
           rpm=$(find "$bundle/rpm" -type f -name '*.rpm' -print -quit)
           test -n "$deb"
           test -n "$rpm"
+          deb_dependencies=$(dpkg-deb -f "$deb" Depends)
+          rpm_dependencies=$(rpm -qp --requires "$rpm")
+          printf 'DEB dependencies: %s\n' "$deb_dependencies"
+          printf 'RPM dependencies:\n%s\n' "$rpm_dependencies"
+          for dependency in \
+            libwebkit2gtk-4.1-0 libgtk-3-0 libc++1-18 libc++abi1-18 libunwind-18; do
+            case "$deb_dependencies" in
+              *"$dependency"*) ;;
+              *)
+                echo "DEB package is missing dependency: $dependency" >&2
+                exit 1
+                ;;
+            esac
+          done
+          for dependency in libcxx llvm-libunwind; do
+            if ! grep -Fx "$dependency" <<< "$rpm_dependencies"; then
+              echo "RPM package is missing dependency: $dependency" >&2
+              exit 1
+            fi
+          done
+          # rpmbuild derives shared-library requirements from ELF metadata.
+          # DNF resolves these SONAME capabilities to the Fedora provider packages.
+          for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do
+            if ! grep -F "${capability}()" <<< "$rpm_dependencies"; then
+              echo "RPM package is missing runtime capability: ${capability}()" >&2
+              exit 1
+            fi
+          done
           dpkg-deb -x "$deb" "$scan/deb"
           rpm -Kv "$rpm"
           bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"

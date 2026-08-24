@@ -115,21 +115,29 @@ impl ServerSidecar {
     pub fn launch_if_available(
         log_directory: &Path,
         state_directory: &Path,
+        workspace_store: &Path,
     ) -> Result<Option<Self>, String> {
-        Self::launch_if_available_inner(log_directory, state_directory, None)
+        Self::launch_if_available_inner(log_directory, state_directory, workspace_store, None)
     }
 
     pub fn launch_at_startup(
         log_directory: &Path,
         state_directory: &Path,
+        workspace_store: &Path,
         startup: &StartupDiagnostics,
     ) -> Result<Option<Self>, String> {
-        Self::launch_if_available_inner(log_directory, state_directory, Some(startup))
+        Self::launch_if_available_inner(
+            log_directory,
+            state_directory,
+            workspace_store,
+            Some(startup),
+        )
     }
 
     fn launch_if_available_inner(
         log_directory: &Path,
         state_directory: &Path,
+        workspace_store: &Path,
         startup: Option<&StartupDiagnostics>,
     ) -> Result<Option<Self>, String> {
         if let Some(startup) = startup {
@@ -148,7 +156,13 @@ impl ServerSidecar {
             complete_sidecar_startup(startup, ServerOutcome::BinaryUnavailable);
             return Ok(None);
         };
-        match Self::launch(&binary, log_directory, state_directory, startup) {
+        match Self::launch(
+            &binary,
+            log_directory,
+            state_directory,
+            workspace_store,
+            startup,
+        ) {
             Ok(sidecar) => {
                 complete_sidecar_startup(startup, ServerOutcome::LocalReady);
                 Ok(Some(sidecar))
@@ -164,13 +178,14 @@ impl ServerSidecar {
         binary: &Path,
         log_directory: &Path,
         state_directory: &Path,
+        workspace_store: &Path,
         startup: Option<&StartupDiagnostics>,
     ) -> Result<Self, String> {
         prepare_persistent_state_directory(state_directory)?;
         let runtime_directory = PrivateRuntimeDirectory::create(&std::env::temp_dir())?;
         record_startup(startup, StartupMilestone::SidecarStatePrepared);
         let connection_path = runtime_directory.connection_path();
-        let arguments = sidecar_arguments(state_directory, &connection_path);
+        let arguments = sidecar_arguments(state_directory, workspace_store, &connection_path);
         let mut command = Command::new(binary);
         command
             .args(arguments)
@@ -521,12 +536,18 @@ fn request_shutdown(connection: &FrontendConnection) -> Result<(), String> {
     Ok(())
 }
 
-fn sidecar_arguments(state_directory: &Path, connection_path: &Path) -> Vec<OsString> {
+fn sidecar_arguments(
+    state_directory: &Path,
+    workspace_store: &Path,
+    connection_path: &Path,
+) -> Vec<OsString> {
     let mut arguments = vec![
         "--port".into(),
         "0".into(),
         "--state-directory".into(),
         state_directory.as_os_str().into(),
+        "--workspace-store".into(),
+        workspace_store.as_os_str().into(),
         "--connection-file".into(),
         connection_path.as_os_str().into(),
         "--parent-pid".into(),

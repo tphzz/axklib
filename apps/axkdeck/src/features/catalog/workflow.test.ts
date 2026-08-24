@@ -44,6 +44,7 @@ function programObject(key: string, name: string): SamplerObject {
         categoryName: '',
         sfsId: 1,
         storedSizeBytes: 1,
+        sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,

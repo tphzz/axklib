@@ -128,8 +128,9 @@ export interface ObjectDeletionImpact {
     partitionIndex: number | null;
     partitionName: string;
     volumeName: string;
-    role: 'TARGET' | 'DEPENDENCY';
+    role: 'TARGET' | 'REFERRER' | 'DEPENDENCY';
     status: 'REQUIRED' | 'OPTIONAL' | 'PRESERVED' | 'BLOCKED';
+    requested: boolean;
     selected: boolean;
     storedSizeBytes: number;
     freedClusters: number;
@@ -154,6 +155,8 @@ export interface ObjectDeletionInspection {
     imageId: string;
     revision: number;
     targetObjectIds: string[];
+    referrerObjectIds: string[];
+    cleanupObjectIds: string[];
     selectedObjectIds: string[];
     impacts: ObjectDeletionImpact[];
     references: ObjectDeletionReference[];
@@ -164,6 +167,7 @@ export interface ObjectDeletionInspection {
 }
 
 export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
+export type VolumeDeletionTarget = components['schemas']['ImageVolumeDeletionTarget'];
 export type ProgramGenerationCandidate = components['schemas']['ImageProgramGenerationCandidate'];
 export type ProgramGenerationInspection = components['schemas']['ImageProgramGenerationInspection'];
 export type ProgramGenerationSelection = components['schemas']['ImageProgramGenerationSelection'];
@@ -238,6 +242,7 @@ export interface SamplerObject {
     categoryName: string;
     sfsId: number;
     storedSizeBytes: number;
+    sizeWithDependenciesBytes: number | null;
     sampleRate: number;
     rootKey: number;
     frameCount: number;
@@ -490,14 +495,10 @@ export interface ImageTransport {
     systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts>;
     allocationMapReference(sessionId: number): Promise<AllocationMapReference>;
     closeImage(sessionId: number): Promise<void>;
-    startVolumeMutation(sessionId: number, mutation: VolumeMutation): Promise<JobState>;
+    startVolumeMutations(sessionId: number, mutations: VolumeMutation[]): Promise<JobState>;
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
-    inspectVolumeDeletion(
-        sessionId: number,
-        partitionIndex: number,
-        volumeName: string,
-    ): Promise<VolumeDeletionInspection>;
+    inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection>;
     inspectPlacement(
         sessionId: number,
         scope: PlacementRepairScope,
@@ -511,10 +512,16 @@ export interface ImageTransport {
     inspectObjectDeletion(
         sessionId: number,
         targetObjectIds: string[],
+        referrerObjectIds: string[],
         cleanupObjectIds: string[],
     ): Promise<ObjectDeletionInspection>;
     inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection>;
-    startObjectDeletion(sessionId: number, targetObjectIds: string[], cleanupObjectIds: string[]): Promise<JobState>;
+    startObjectDeletion(
+        sessionId: number,
+        targetObjectIds: string[],
+        referrerObjectIds: string[],
+        cleanupObjectIds: string[],
+    ): Promise<JobState>;
     inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection>;
     startProgramGeneration(
         sessionId: number,

@@ -79,39 +79,45 @@
             <header class="card-header">
                 <div class="audio-import-file">
                     <div class="audio-import-file-heading">
-                        <strong title={row.fileName}>{row.fileName}</strong>
-                        {#if row.status === 'ready' && row.inspection?.valid}
-                            <button
-                                class="icon-button audition-button"
-                                type="button"
-                                aria-label={`${auditionActive ? 'Stop' : 'Play'} ${row.fileName}`}
-                                aria-pressed={auditionActive}
-                                title={auditionActive ? 'Stop preview' : 'Play preview'}
-                                disabled={busy}
-                                onclick={() => onaudition(row)}
-                            >
-                                <Icon name={auditionActive ? 'stop' : 'play'} size={14} />
-                            </button>
+                        <div class="audio-import-file-name">
+                            <strong title={row.fileName}>{row.fileName}</strong>
+                            {#if row.status === 'ready' && row.inspection?.valid}
+                                <button
+                                    class="icon-button audition-button"
+                                    type="button"
+                                    aria-label={`${auditionActive ? 'Stop' : 'Play'} ${row.fileName}`}
+                                    aria-pressed={auditionActive}
+                                    title={auditionActive ? 'Stop preview' : 'Play preview'}
+                                    disabled={busy}
+                                    onclick={() => onaudition(row)}
+                                >
+                                    <Icon name={auditionActive ? 'stop' : 'play'} size={14} />
+                                </button>
+                            {/if}
+                        </div>
+                        {#if row.status === 'uploading'}
+                            <small class="audio-import-file-metadata">
+                                Uploading {Math.round(row.progress * 100)}%
+                            </small>
+                        {:else if row.status === 'failed'}
+                            <small class="audio-import-file-metadata error-text">Upload or inspection failed</small>
+                        {:else if row.inspection}
+                            <small class="audio-import-file-metadata">
+                                {row.inspection.sourceFormat}
+                                {row.inspection.sourceSubtype} ·
+                                {row.inspection.channels === 2 ? 'Stereo' : 'Mono'} ·
+                                {row.inspection.sourceSampleRate.toLocaleString()} Hz ·
+                                {conversionDescription(row.inspection)}
+                                · {row.inspection.durationSeconds.toFixed(2)} s
+                            </small>
+                        {:else}
+                            <small class="audio-import-file-metadata">Waiting</small>
                         {/if}
                     </div>
-                    {#if row.status === 'uploading'}
-                        <small>Uploading {Math.round(row.progress * 100)}%</small>
-                    {:else if row.status === 'failed'}
-                        <small class="error-text">Upload or inspection failed</small>
-                    {:else if row.inspection}
-                        <small>
-                            {row.inspection.sourceFormat}
-                            {row.inspection.sourceSubtype} ·
-                            {row.inspection.channels === 2 ? 'Stereo' : 'Mono'} ·
-                            {row.inspection.sourceSampleRate.toLocaleString()} Hz ·
-                            {conversionDescription(row.inspection)}
-                            · {row.inspection.durationSeconds.toFixed(2)} s
-                        </small>
-                    {:else}
-                        <small>Waiting</small>
-                    {/if}
                     {#if !committing && audition.rowId === row.id && audition.status === 'failed'}
-                        <small class="error-text">Preview unavailable: {audition.error}</small>
+                        <small class="audio-import-file-note error-text">
+                            Preview unavailable: {audition.error}
+                        </small>
                     {/if}
                 </div>
                 <div class="card-header-actions">
@@ -238,26 +244,26 @@
     .audio-import-summary {
         margin: 0;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
     .audio-import-rows {
         display: grid;
         min-height: 0;
-        gap: 8px;
+        gap: 6px;
         overflow-y: auto;
         padding-right: 12px;
         scrollbar-gutter: stable;
     }
     .audio-import-card {
         display: grid;
-        gap: 10px;
+        gap: 6px;
         min-width: 0;
-        padding: 11px 12px;
+        padding: 8px 10px;
         border: 1px solid var(--color-border);
         border-radius: 6px;
         background: rgb(255 255 255 / 1.5%);
         color: var(--color-text);
-        font-size: 12px;
+        font-size: var(--dialog-body-font-size);
     }
     .card-header {
         display: grid;
@@ -271,15 +277,24 @@
     .audio-import-file-heading {
         display: flex;
         align-items: center;
-        gap: 5px;
+        flex-wrap: wrap;
+        gap: 2px 8px;
         min-width: 0;
+    }
+    .audio-import-file-name {
+        display: flex;
+        align-items: center;
+        flex: 0 1 auto;
+        gap: 4px;
+        min-width: 0;
+        max-width: 100%;
     }
     .audio-import-file strong {
         display: block;
         min-width: 0;
         overflow: hidden;
         color: var(--color-text-strong);
-        font-size: 12px;
+        font-size: var(--dialog-section-font-size);
         font-weight: 600;
         line-height: 1.35;
         text-overflow: ellipsis;
@@ -295,14 +310,18 @@
     .audition-button[aria-pressed='true'] {
         color: var(--color-text-strong);
     }
-    .audio-import-file small {
-        display: block;
-        overflow: hidden;
-        margin-top: 3px;
+    .audio-import-file-metadata {
+        min-width: 0;
+        flex: 1 1 340px;
         color: var(--color-text-muted);
-        font-size: 11px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-size: var(--dialog-metadata-font-size);
+        line-height: 1.35;
+    }
+    .audio-import-file-note {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--dialog-metadata-font-size);
+        line-height: 1.35;
     }
     .card-header-actions {
         display: flex;
@@ -314,7 +333,7 @@
     .identity-fields {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 9px 12px;
+        gap: 6px 10px;
     }
     label {
         display: grid;
@@ -336,7 +355,7 @@
         align-items: flex-start;
         gap: 6px;
         max-width: 420px;
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
         line-height: 1.35;
         overflow-wrap: anywhere;
     }
@@ -353,7 +372,7 @@
     }
     .status-neutral {
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
     }
     .details-button {
         position: relative;

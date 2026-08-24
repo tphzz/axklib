@@ -119,7 +119,7 @@ describe('ProgramGenerationDialog', () => {
             /\.program-generation-content\s*\{[^}]*grid-auto-rows:\s*max-content;[^}]*overflow:\s*auto;/s,
         );
         expect(dialogSource).toMatch(/\.program-generation-row\s*\{[^}]*align-items:\s*start;/s);
-        expect(dialogSource).toMatch(/\.program-generation-row\s*\{[^}]*padding-block:\s*6px;/s);
+        expect(dialogSource).toMatch(/\.program-generation-row\s*\{[^}]*padding-block:\s*5px;/s);
         expect(dialogSource).toMatch(/\.excluded\s*>\s*:not\(\.selection-cell\)\s*\{[^}]*opacity:\s*0\.55;/s);
         expect(dialogSource).not.toMatch(/\.program-generation-rows\s*\{[^}]*(?:max-height|overflow-y):/s);
         expect(dialogSource).toMatch(/@media \(max-width:\s*760px\)/);

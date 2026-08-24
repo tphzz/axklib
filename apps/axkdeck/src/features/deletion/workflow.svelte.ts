@@ -6,6 +6,7 @@ import type { JobController } from '../jobs/actions';
 
 export interface ObjectDeletionRequest {
     targets: PackageExportObject[];
+    referrerObjectIds: string[];
     cleanupObjectIds: string[];
     inspection: ObjectDeletionInspection | null;
     loading: boolean;
@@ -58,6 +59,7 @@ export class DeletionWorkflow {
         const generation = ++this.objectGeneration;
         this.objectRequest = {
             targets,
+            referrerObjectIds: [],
             cleanupObjectIds: [],
             inspection: null,
             loading: true,
@@ -74,19 +76,17 @@ export class DeletionWorkflow {
         this.objectRequest = null;
     }
 
-    updateObjectSelection(objectId: string, selected: boolean): void {
+    updateObjectSelection(role: 'REFERRER' | 'DEPENDENCY', objectId: string, selected: boolean): void {
         const request = this.objectRequest;
         const inspection = request?.inspection;
         if (!request || !inspection || request.busy) return;
-        const included = new Set(
-            inspection.impacts
-                .filter((impact) => impact.role === 'DEPENDENCY' && impact.selected)
-                .map((impact) => impact.objectId),
-        );
+        const referrers = new Set(request.referrerObjectIds);
+        const cleanup = new Set(request.cleanupObjectIds);
+        const included = role === 'REFERRER' ? referrers : cleanup;
         if (selected) {
-            if (request.targets.length + included.size >= maximumPackageExportRoots) {
+            if (request.targets.length + referrers.size + cleanup.size >= maximumPackageExportRoots) {
                 this.dependencies.setStatus(
-                    `Deletion is limited to ${maximumPackageExportRoots} targets and cleanup objects`,
+                    `Deletion is limited to ${maximumPackageExportRoots} targets and related objects`,
                 );
                 return;
             }
@@ -97,45 +97,55 @@ export class DeletionWorkflow {
             while (changed) {
                 changed = false;
                 for (const impact of inspection.impacts) {
+                    const requested =
+                        (impact.role === 'REFERRER' && referrers.has(impact.objectId)) ||
+                        (impact.role === 'DEPENDENCY' && cleanup.has(impact.objectId));
                     if (
-                        included.has(impact.objectId) &&
+                        requested &&
                         impact.prerequisiteObjectIds.some((prerequisite) =>
                             inspection.impacts.some(
                                 (candidate) =>
                                     candidate.objectId === prerequisite &&
-                                    candidate.role === 'DEPENDENCY' &&
-                                    !included.has(prerequisite),
+                                    ((candidate.role === 'REFERRER' && !referrers.has(prerequisite)) ||
+                                        (candidate.role === 'DEPENDENCY' && !cleanup.has(prerequisite))),
                             ),
                         )
                     ) {
-                        included.delete(impact.objectId);
+                        if (impact.role === 'REFERRER') referrers.delete(impact.objectId);
+                        if (impact.role === 'DEPENDENCY') cleanup.delete(impact.objectId);
                         changed = true;
                     }
                 }
             }
         }
         const generation = ++this.objectGeneration;
-        this.objectRequest = { ...request, cleanupObjectIds: [...included], loading: true, error: '' };
+        this.objectRequest = {
+            ...request,
+            referrerObjectIds: [...referrers],
+            cleanupObjectIds: [...cleanup],
+            loading: true,
+            error: '',
+        };
         void this.inspectObjects(generation);
     }
 
-    updateAllObjectDependencies(selected: boolean): void {
+    updateAllObjectSelections(role: 'REFERRER' | 'DEPENDENCY', selected: boolean): void {
         const request = this.objectRequest;
         const inspection = request?.inspection;
         if (!request || !inspection || request.busy) return;
-        const cleanupCapacity = Math.max(0, maximumPackageExportRoots - request.targets.length);
-        const optional = inspection.impacts.filter(
-            (impact) => impact.role === 'DEPENDENCY' && impact.status === 'OPTIONAL',
-        );
-        if (selected && optional.length > cleanupCapacity) {
+        const otherCount = role === 'REFERRER' ? request.cleanupObjectIds.length : request.referrerObjectIds.length;
+        const capacity = Math.max(0, maximumPackageExportRoots - request.targets.length - otherCount);
+        const optional = inspection.impacts.filter((impact) => impact.role === role && impact.status === 'OPTIONAL');
+        if (selected && optional.length > capacity) {
             this.dependencies.setStatus(
-                `Deletion is limited to ${maximumPackageExportRoots} targets and cleanup objects`,
+                `Deletion is limited to ${maximumPackageExportRoots} targets and related objects`,
             );
         }
         const generation = ++this.objectGeneration;
+        const objectIds = selected ? optional.map((impact) => impact.objectId).slice(0, capacity) : [];
         this.objectRequest = {
             ...request,
-            cleanupObjectIds: selected ? optional.map((impact) => impact.objectId).slice(0, cleanupCapacity) : [],
+            ...(role === 'REFERRER' ? { referrerObjectIds: objectIds } : { cleanupObjectIds: objectIds }),
             loading: true,
             error: '',
         };
@@ -160,6 +170,7 @@ export class DeletionWorkflow {
             const finalInspection = await this.dependencies.transport.inspectObjectDeletion(
                 sessionId,
                 request.targets.map((target) => target.objectId),
+                request.referrerObjectIds,
                 request.cleanupObjectIds,
             );
             if (!finalInspection.canApply) {
@@ -171,9 +182,8 @@ export class DeletionWorkflow {
                 this.objectRequest = {
                     ...request,
                     inspection: finalInspection,
-                    cleanupObjectIds: finalInspection.impacts
-                        .filter((impact) => impact.role === 'DEPENDENCY' && impact.selected)
-                        .map((impact) => impact.objectId),
+                    referrerObjectIds: requestedImpactIds(finalInspection, 'REFERRER'),
+                    cleanupObjectIds: requestedImpactIds(finalInspection, 'DEPENDENCY'),
                     busy: false,
                     error: 'The deletion impact changed. Review the affected objects before confirming again.',
                 };
@@ -185,6 +195,7 @@ export class DeletionWorkflow {
                     this.dependencies.transport.startObjectDeletion(
                         sessionId,
                         request.targets.map((target) => target.objectId),
+                        request.referrerObjectIds,
                         request.cleanupObjectIds,
                     ),
                 (update) => {
@@ -282,7 +293,7 @@ export class DeletionWorkflow {
                 this.dependencies.setStatus('Cleanup candidates changed; review before confirming again');
                 return;
             }
-            const deletion = await this.dependencies.transport.inspectObjectDeletion(sessionId, selectedIds, []);
+            const deletion = await this.dependencies.transport.inspectObjectDeletion(sessionId, selectedIds, [], []);
             const targetImpacts = deletion.impacts.filter((impact) => impact.role === 'TARGET');
             const eligibleIds = deletion.selectedObjectIds.toSorted();
             if (
@@ -303,7 +314,7 @@ export class DeletionWorkflow {
                 return;
             }
             const completed = await this.dependencies.jobs.run(
-                () => this.dependencies.transport.startObjectDeletion(sessionId, selectedIds, []),
+                () => this.dependencies.transport.startObjectDeletion(sessionId, selectedIds, [], []),
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
@@ -335,6 +346,7 @@ export class DeletionWorkflow {
             const inspection = await this.dependencies.transport.inspectObjectDeletion(
                 sessionId,
                 request.targets.map((target) => target.objectId),
+                request.referrerObjectIds,
                 request.cleanupObjectIds,
             );
             if (
@@ -343,7 +355,14 @@ export class DeletionWorkflow {
                 this.dependencies.sessionId() !== sessionId
             )
                 return;
-            this.objectRequest = { ...request, inspection, loading: false, error: '' };
+            this.objectRequest = {
+                ...request,
+                referrerObjectIds: requestedImpactIds(inspection, 'REFERRER'),
+                cleanupObjectIds: requestedImpactIds(inspection, 'DEPENDENCY'),
+                inspection,
+                loading: false,
+                error: '',
+            };
         } catch (error) {
             if (
                 generation !== this.objectGeneration ||
@@ -426,10 +445,12 @@ export class DeletionWorkflow {
             nextGeneration === this.objectGeneration &&
             deletionRequestKey(this.objectRequest?.targets ?? []) === deletionRequestKey(request.targets)
         ) {
-            this.objectRequest = {
-                ...request,
-                error: `${message} The image has been refreshed; review the deletion again.`,
-            };
+            const current = this.objectRequest;
+            if (current)
+                this.objectRequest = {
+                    ...current,
+                    error: `${message} The image has been refreshed; review the deletion again.`,
+                };
         }
     }
 
@@ -460,11 +481,36 @@ function deletionRequestKey(targets: PackageExportObject[]): string {
 function deletionInspectionFingerprint(inspection: ObjectDeletionInspection): string {
     return JSON.stringify({
         selected: inspection.selectedObjectIds.toSorted(),
-        targets: inspection.impacts
-            .filter((impact) => impact.role === 'TARGET')
-            .map((impact) => [impact.objectId, impact.status, impact.reason])
-            .toSorted(([left], [right]) => left.localeCompare(right)),
+        impacts: inspection.impacts
+            .map((impact) => [
+                impact.objectId,
+                impact.role,
+                impact.status,
+                impact.requested,
+                impact.selected,
+                impact.prerequisiteObjectIds.toSorted(),
+                impact.reason,
+            ])
+            .toSorted(([left], [right]) => String(left).localeCompare(String(right))),
+        references: inspection.references
+            .map((reference) => [
+                reference.sourceObjectId,
+                reference.targetObjectId,
+                reference.type,
+                reference.quality,
+                reference.effect,
+            ])
+            .toSorted(([left], [right]) => String(left).localeCompare(String(right))),
+        blockers: inspection.blockers
+            .map((blocker) => [blocker.code, blocker.objectIds.toSorted(), blocker.message])
+            .toSorted(([left], [right]) => String(left).localeCompare(String(right))),
     });
+}
+
+function requestedImpactIds(inspection: ObjectDeletionInspection, role: 'REFERRER' | 'DEPENDENCY'): string[] {
+    return inspection.impacts
+        .filter((impact) => impact.role === role && impact.requested)
+        .map((impact) => impact.objectId);
 }
 
 function waveDataCleanupFingerprint(inspection: WaveDataOrphanInspection): string {

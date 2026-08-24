@@ -46,12 +46,15 @@ struct MutablePartition {
     std::map<SfsId, InsertedRecord> changed;
 };
 
+using PartitionObjectSet = std::set<std::pair<PartitionIndex, SfsId>>;
+
 struct TransactionState {
     std::shared_ptr<const RandomAccessReader> source;
     Container container;
     ObjectCatalog catalog;
     RelationshipGraph graph;
     std::vector<std::tuple<PartitionIndex, SfsId, SfsId>> known_edges;
+    std::optional<PartitionObjectSet> approved_volume_deletion_batch;
     std::map<std::uint8_t, MutablePartition> partitions;
     std::vector<OperationReport> reports;
 };
@@ -127,6 +130,9 @@ Result<void> remove_directory_entry(TransactionState &state, MutablePartition &p
                                     std::string_view name, const CancellationToken &cancellation);
 Result<PartitionIndex> resolve_partition(const TransactionState &state, const PartitionSelector &selector);
 Result<std::set<SfsId>> volume_closure(const Partition &partition, const DirectoryEntry &volume);
+Result<std::optional<PartitionObjectSet>> plan_volume_deletion_batch(const TransactionState &state,
+                                                                     const AlterationManifest &manifest,
+                                                                     const CancellationToken &cancellation);
 
 std::vector<SfsId> free_ids(const MutablePartition &partition, std::size_t count);
 Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::uint32_t count);

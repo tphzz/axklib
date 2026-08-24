@@ -37,10 +37,15 @@
     let listOpen = $state(false);
     let filtering = $state(false);
     let synchronizedSelection = $state('');
+    let synchronizedPartition = $state<number | null>(null);
+    let synchronizedMode = $state<ImportDestinationMode>('existing');
     let volumeInput = $state<HTMLInputElement>();
     const normalizedQuery = $derived(query.trim().toLocaleLowerCase());
+    const partitionVolumes = $derived(volumes.filter((option) => option.partitionIndex === partitionIndex));
     const filteredVolumes = $derived(
-        filtering ? volumes.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery)) : volumes,
+        filtering
+            ? partitionVolumes.filter((option) => option.volumeName.toLocaleLowerCase().includes(normalizedQuery))
+            : partitionVolumes,
     );
     const selectedVolume = $derived(
         volumes.find((option) => option.partitionIndex === partitionIndex && option.volumeName === volumeName),
@@ -48,12 +53,21 @@
 
     $effect(() => {
         const nextSelection = selectedVolume ? volumeKey(selectedVolume) : '';
-        if (nextSelection && nextSelection !== synchronizedSelection && selectedVolume) {
-            query = selectedVolume.label;
+        const partitionChanged = partitionIndex !== synchronizedPartition;
+        const modeChanged = mode !== synchronizedMode;
+        if (selectedVolume && (nextSelection !== synchronizedSelection || partitionChanged || modeChanged)) {
+            query = selectedVolume.volumeName;
             filtering = false;
-            activeIndex = Math.max(0, volumes.indexOf(selectedVolume));
+            activeIndex = Math.max(0, partitionVolumes.indexOf(selectedVolume));
+        } else if (partitionChanged || modeChanged) {
+            query = '';
+            filtering = false;
+            activeIndex = -1;
+            listOpen = false;
         }
         synchronizedSelection = nextSelection;
+        synchronizedPartition = partitionIndex;
+        synchronizedMode = mode;
     });
 
     function volumeKey(option: ImportVolumeOption): string {
@@ -66,7 +80,7 @@
 
     function selectVolume(option: ImportVolumeOption): void {
         if (disabled) return;
-        query = option.label;
+        query = option.volumeName;
         filtering = false;
         synchronizedSelection = volumeKey(option);
         listOpen = false;
@@ -78,11 +92,11 @@
         filtering = true;
         activeIndex = -1;
         listOpen = true;
-        onvolume(null, '');
+        onvolume(partitionIndex, '');
     }
 
     function openList(): void {
-        if (disabled || volumes.length === 0) return;
+        if (disabled || partitionVolumes.length === 0) return;
         if (selectedVolume) filtering = false;
         listOpen = true;
         activeIndex = selectedVolume ? filteredVolumes.indexOf(selectedVolume) : -1;
@@ -93,10 +107,19 @@
         query = '';
         filtering = false;
         activeIndex = -1;
-        listOpen = volumes.length > 0;
+        listOpen = partitionVolumes.length > 0;
         synchronizedSelection = selectedVolume ? volumeKey(selectedVolume) : '';
-        onvolume(null, '');
+        onvolume(partitionIndex, '');
         queueMicrotask(() => volumeInput?.focus());
+    }
+
+    function changePartition(value: string): void {
+        if (disabled || value === '') return;
+        query = '';
+        filtering = false;
+        activeIndex = -1;
+        listOpen = false;
+        onpartition(Number(value));
     }
 
     function handleKey(event: KeyboardEvent): void {
@@ -122,28 +145,33 @@
 </script>
 
 <section class="import-destination" aria-label="Import destination">
-    <div class="destination-heading">
-        <strong>Destination</strong>
-        <div class="destination-mode" role="group" aria-label="Destination type">
-            <button
-                type="button"
-                class:active={mode === 'existing'}
-                aria-pressed={mode === 'existing'}
-                disabled={disabled || volumes.length === 0}
-                onclick={() => onmode('existing')}>Existing volume</button
-            >
-            <button
-                type="button"
-                class:active={mode === 'create'}
-                aria-pressed={mode === 'create'}
-                {disabled}
-                onclick={() => onmode('create')}>New volume</button
-            >
-        </div>
+    <strong class="destination-label">Destination volume</strong>
+    <div class="destination-mode dialog-segmented-control" role="group" aria-label="Destination volume type">
+        <button
+            type="button"
+            aria-pressed={mode === 'existing'}
+            disabled={disabled || volumes.length === 0}
+            onclick={() => onmode('existing')}>Existing</button
+        >
+        <button type="button" aria-pressed={mode === 'create'} {disabled} onclick={() => onmode('create')}>New</button>
     </div>
 
+    <select
+        class="destination-partition dialog-field-control"
+        aria-label="Destination partition"
+        value={partitionIndex ?? ''}
+        disabled={disabled || partitions.length === 0}
+        onchange={(event) => changePartition(event.currentTarget.value)}
+    >
+        {#if partitionIndex === null}
+            <option value="" disabled>Select partition</option>
+        {/if}
+        {#each partitions as option (option.partitionIndex)}
+            <option value={option.partitionIndex}>{option.name}</option>
+        {/each}
+    </select>
+
     {#if mode === 'existing'}
-        <label class="target-field" for="import-volume-search">Volume</label>
         <div class="volume-combobox">
             <input
                 bind:this={volumeInput}
@@ -151,15 +179,16 @@
                 class="dialog-field-control"
                 type="text"
                 role="combobox"
+                aria-label="Destination volume"
                 aria-autocomplete="list"
                 aria-expanded={listOpen}
                 aria-controls="import-volume-options"
                 aria-activedescendant={listOpen && filteredVolumes[activeIndex]
                     ? optionId(filteredVolumes[activeIndex])
                     : undefined}
-                placeholder="Select a volume"
+                placeholder={partitionVolumes.length === 0 ? 'No volumes in this partition' : 'Select a volume'}
                 value={query}
-                disabled={disabled || volumes.length === 0}
+                disabled={disabled || partitionIndex === null || partitionVolumes.length === 0}
                 autocomplete="off"
                 oninput={(event) => updateQuery(event.currentTarget.value)}
                 onfocus={openList}
@@ -194,7 +223,7 @@
                             onpointermove={() => (activeIndex = index)}
                             onclick={() => selectVolume(option)}
                         >
-                            {option.label}
+                            {option.volumeName}
                         </button>
                     {:else}
                         <p class="dialog-autocomplete-empty">No matching volumes</p>
@@ -203,97 +232,52 @@
             {/if}
         </div>
     {:else}
-        <div class="new-volume-fields">
-            <label class="target-field">
-                <span>Partition</span>
-                <select
-                    class="dialog-field-control"
-                    value={partitionIndex ?? ''}
-                    disabled={disabled || partitions.length === 0}
-                    onchange={(event) => onpartition(Number(event.currentTarget.value))}
-                >
-                    {#each partitions as option (option.partitionIndex)}
-                        <option value={option.partitionIndex}>{option.name}</option>
-                    {/each}
-                </select>
-            </label>
-            <label class="target-field">
-                <span>Volume name</span>
-                <input
-                    class="dialog-field-control"
-                    type="text"
-                    minlength="1"
-                    maxlength="16"
-                    value={volumeName}
-                    placeholder="Enter a volume name"
-                    {disabled}
-                    autocomplete="off"
-                    oninput={(event) => onname(event.currentTarget.value)}
-                />
-            </label>
-        </div>
+        <input
+            class="new-volume-name dialog-field-control"
+            type="text"
+            aria-label="New volume name"
+            minlength="1"
+            maxlength="16"
+            value={volumeName}
+            placeholder="Enter a volume name"
+            {disabled}
+            autocomplete="off"
+            oninput={(event) => onname(event.currentTarget.value)}
+        />
     {/if}
 </section>
 
 <style>
     .import-destination {
         display: grid;
-        gap: 9px;
-        margin-bottom: 12px;
+        grid-template-columns: max-content max-content minmax(140px, 0.35fr) minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
         padding: 10px;
         border: 1px solid var(--color-border);
         border-radius: 5px;
         background: rgb(255 255 255 / 2%);
     }
 
-    .destination-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-    }
-
-    .destination-heading > strong {
+    .destination-label {
         color: var(--color-text-strong);
-        font-size: 11px;
+        font-size: var(--dialog-section-font-size);
+        white-space: nowrap;
     }
 
     .destination-mode {
-        display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 4px;
-        background: var(--color-bg-deep);
     }
 
-    .destination-mode button {
-        min-height: 27px;
-        padding: 0 10px;
-        color: var(--color-text-muted);
-        border: 0;
-        border-right: 1px solid var(--color-border);
-        background: transparent;
-        cursor: pointer;
-        font-size: 10px;
-    }
-
-    .destination-mode button:last-child {
-        border-right: 0;
-    }
-
-    .destination-mode button.active {
-        color: #fff;
-        background: var(--color-accent-strong);
-    }
-
-    .destination-mode button:disabled {
-        cursor: default;
-        opacity: 0.45;
+    .destination-partition,
+    .new-volume-name {
+        min-width: 0;
+        width: 100%;
     }
 
     .volume-combobox {
         position: relative;
+        min-width: 0;
     }
 
     .volume-combobox > input {
@@ -335,33 +319,15 @@
         padding: 9px;
     }
 
-    .new-volume-fields {
-        display: grid;
-        grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1fr);
-        gap: 10px;
-    }
-
-    .target-field {
-        display: grid;
-        min-width: 0;
-        gap: 4px;
-        color: var(--color-text-muted);
-        font-size: var(--dialog-label-font-size);
-    }
-
-    .new-volume-fields :global(.dialog-field-control) {
-        min-width: 0;
-        width: 100%;
-    }
-
-    @media (max-width: 640px) {
-        .destination-heading,
-        .new-volume-fields {
-            grid-template-columns: 1fr;
+    @media (max-width: 760px) {
+        .import-destination {
+            grid-template-columns: minmax(0, 1fr) max-content;
         }
 
-        .destination-heading {
-            display: grid;
+        .destination-partition,
+        .volume-combobox,
+        .new-volume-name {
+            grid-column: 1 / -1;
         }
     }
 </style>

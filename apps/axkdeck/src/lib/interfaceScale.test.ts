@@ -72,25 +72,6 @@ function adapterFor(initialMonitor: InterfaceScaleMonitor | null = monitor(1920,
     };
 }
 
-function storageWith(value?: string): Storage {
-    const values = new Map<string, string>();
-    if (value !== undefined) values.set('axkdeck.interface-scale.v1', value);
-    return {
-        get length() {
-            return values.size;
-        },
-        clear: () => values.clear(),
-        getItem: (key) => values.get(key) ?? null,
-        key: (index) => [...values.keys()][index] ?? null,
-        removeItem: (key) => {
-            values.delete(key);
-        },
-        setItem: (key, next) => {
-            values.set(key, next);
-        },
-    };
-}
-
 describe('automaticInterfaceZoom', () => {
     it.each([
         [monitor(1920, 1080), 1],
@@ -124,7 +105,7 @@ describe('InterfaceScaleController', () => {
     it('applies automatic scaling and scaled minimum window constraints before returning', async () => {
         const { adapter } = adapterFor(monitor(3840, 2160));
 
-        const controller = await createInterfaceScaleController(adapter, storageWith());
+        const controller = await createInterfaceScaleController(adapter, 'auto');
 
         expect(controller.state()).toEqual({ mode: 'auto', appliedZoom: 1.5 });
         expect(adapter.setMinSize).toHaveBeenCalledWith(1200, 900);
@@ -136,7 +117,7 @@ describe('InterfaceScaleController', () => {
     it('applies native window constraints on startup at neutral zoom', async () => {
         const { adapter } = adapterFor(monitor(1920, 1080));
 
-        const controller = await createInterfaceScaleController(adapter, storageWith());
+        const controller = await createInterfaceScaleController(adapter, 'auto');
 
         expect(adapter.setMinSize).toHaveBeenCalledWith(800, 600);
         expect(adapter.setSize).not.toHaveBeenCalled();
@@ -148,7 +129,7 @@ describe('InterfaceScaleController', () => {
         const { adapter } = adapterFor(monitor(3840, 2160));
         vi.mocked(adapter.innerSize).mockResolvedValue({ width: 1000, height: 700 });
 
-        const controller = await createInterfaceScaleController(adapter, storageWith());
+        const controller = await createInterfaceScaleController(adapter, 'auto');
 
         expect(adapter.setSize).toHaveBeenCalledWith(1200, 900);
         expect(vi.mocked(adapter.setSize).mock.invocationCallOrder[0]).toBeLessThan(
@@ -159,8 +140,8 @@ describe('InterfaceScaleController', () => {
 
     it('loads fixed persisted modes and ignores monitor changes until Auto is selected', async () => {
         const { adapter, emitScaleChanged, setMonitor } = adapterFor(monitor(1920, 1080));
-        const storage = storageWith('1.25');
-        const controller = await createInterfaceScaleController(adapter, storage);
+        const persistMode = vi.fn(async () => undefined);
+        const controller = await createInterfaceScaleController(adapter, '1.25', persistMode);
 
         expect(controller.state()).toEqual({ mode: '1.25', appliedZoom: 1.25 });
         setMonitor(monitor(3840, 2160));
@@ -169,56 +150,33 @@ describe('InterfaceScaleController', () => {
         expect(controller.state()).toEqual({ mode: '1.25', appliedZoom: 1.25 });
 
         await controller.setMode('auto');
-        expect(storage.getItem('axkdeck.interface-scale.v1')).toBe('auto');
+        expect(persistMode).toHaveBeenCalledWith('auto');
         expect(controller.state()).toEqual({ mode: 'auto', appliedZoom: 1.5 });
         await controller.dispose();
     });
 
     it('restores and applies the fixed 115% mode', async () => {
         const { adapter } = adapterFor(monitor(1920, 1080));
-        const controller = await createInterfaceScaleController(adapter, storageWith('1.15'));
+        const controller = await createInterfaceScaleController(adapter, '1.15');
 
         expect(controller.state()).toEqual({ mode: '1.15', appliedZoom: 1.15 });
         expect(adapter.setZoom).toHaveBeenCalledWith(1.15);
         await controller.dispose();
     });
 
-    it.each(['', '125%', '2', 'invalid'])('falls back to Auto for an invalid stored mode %j', async (stored) => {
-        const { adapter } = adapterFor(monitor(2560, 1440));
-
-        const controller = await createInterfaceScaleController(adapter, storageWith(stored));
-
-        expect(controller.state()).toEqual({ mode: 'auto', appliedZoom: 1.25 });
-        await controller.dispose();
-    });
-
-    it('continues when scale preferences cannot be read or written', async () => {
+    it('continues when a scale preference cannot be persisted', async () => {
         const { adapter } = adapterFor(monitor(3840, 2160));
         const report = vi.fn();
-        const storage = {
-            getItem: vi.fn(() => {
-                throw new Error('read failed');
-            }),
-            setItem: vi.fn(() => {
-                throw new Error('write failed');
-            }),
-            removeItem: vi.fn(),
-            clear: vi.fn(),
-            key: vi.fn(),
-            length: 0,
-        } satisfies Storage;
+        const persistMode = vi.fn(async () => {
+            throw new Error('write failed');
+        });
 
-        const controller = await createInterfaceScaleController(adapter, storage, report);
+        const controller = await createInterfaceScaleController(adapter, 'auto', persistMode, report);
         await controller.setMode('1.25');
 
         expect(controller.state()).toEqual({ mode: '1.25', appliedZoom: 1.25 });
         expect(report).toHaveBeenCalledWith(
-            'interface_scale_storage_failed',
-            expect.objectContaining({ message: 'read failed' }),
-            'warn',
-        );
-        expect(report).toHaveBeenCalledWith(
-            'interface_scale_storage_failed',
+            'interface_scale_persistence_failed',
             expect.objectContaining({ message: 'write failed' }),
             'warn',
         );
@@ -227,7 +185,7 @@ describe('InterfaceScaleController', () => {
 
     it('debounces window movement, reacts immediately to scale changes, and suppresses duplicate mutations', async () => {
         const { adapter, emitMoved, emitScaleChanged, setMonitor } = adapterFor(monitor(1920, 1080));
-        const controller = await createInterfaceScaleController(adapter, storageWith());
+        const controller = await createInterfaceScaleController(adapter, 'auto');
         vi.mocked(adapter.setMinSize).mockClear();
         vi.mocked(adapter.setSize).mockClear();
         vi.mocked(adapter.setZoom).mockClear();
@@ -254,10 +212,7 @@ describe('InterfaceScaleController', () => {
         'does not mutate the native window when maximizing in %s mode',
         async (mode) => {
             const { adapter, emitMoved, emitResized, setMaximized } = adapterFor(monitor(1920, 1080));
-            const controller = await createInterfaceScaleController(
-                adapter,
-                storageWith(mode === 'auto' ? undefined : mode),
-            );
+            const controller = await createInterfaceScaleController(adapter, mode);
             vi.mocked(adapter.setMinSize).mockClear();
             vi.mocked(adapter.setSize).mockClear();
             vi.mocked(adapter.setZoom).mockClear();
@@ -278,7 +233,7 @@ describe('InterfaceScaleController', () => {
         'defers changed native constraints while %s and reconciles them once after restore',
         async (windowState) => {
             const { adapter, emitResized, setFullscreen, setMaximized } = adapterFor(monitor(1920, 1080));
-            const controller = await createInterfaceScaleController(adapter, storageWith());
+            const controller = await createInterfaceScaleController(adapter, 'auto');
             vi.mocked(adapter.setMinSize).mockClear();
             vi.mocked(adapter.setSize).mockClear();
             vi.mocked(adapter.setZoom).mockClear();
@@ -313,14 +268,14 @@ describe('InterfaceScaleController', () => {
 
     it('notifies subscribers, persists valid modes, and removes listeners on disposal', async () => {
         const { adapter, emitMoved, emitResized, emitScaleChanged } = adapterFor(monitor(1920, 1080));
-        const storage = storageWith();
-        const controller = await createInterfaceScaleController(adapter, storage);
+        const persistMode = vi.fn(async () => undefined);
+        const controller = await createInterfaceScaleController(adapter, 'auto', persistMode);
         const listener = vi.fn();
         const unsubscribe = controller.subscribe(listener);
 
         await controller.setMode('1.5');
 
-        expect(storage.getItem('axkdeck.interface-scale.v1')).toBe('1.5');
+        expect(persistMode).toHaveBeenCalledWith('1.5');
         expect(listener).toHaveBeenLastCalledWith({ mode: '1.5', appliedZoom: 1.5 });
         unsubscribe();
         await controller.dispose();
@@ -336,7 +291,7 @@ describe('InterfaceScaleController', () => {
         vi.mocked(adapter.setZoom).mockRejectedValue(new Error('zoom unavailable'));
         const report = vi.fn();
 
-        const controller = await createInterfaceScaleController(adapter, storageWith(), report);
+        const controller = await createInterfaceScaleController(adapter, 'auto', undefined, report);
 
         expect(controller.state()).toEqual({ mode: 'auto', appliedZoom: 1 });
         expect(report).toHaveBeenCalledWith(
@@ -349,7 +304,7 @@ describe('InterfaceScaleController', () => {
 
     it('accepts every declared fixed mode', async () => {
         const { adapter } = adapterFor();
-        const controller = await createInterfaceScaleController(adapter, storageWith());
+        const controller = await createInterfaceScaleController(adapter, 'auto');
         const modes: InterfaceScaleMode[] = ['1', '1.15', '1.25', '1.5', 'auto'];
 
         for (const mode of modes) await controller.setMode(mode);

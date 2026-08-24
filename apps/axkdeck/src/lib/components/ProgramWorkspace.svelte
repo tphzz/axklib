@@ -12,6 +12,7 @@
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
+    import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SystemProgramContexts, SystemProgramPart } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -375,12 +376,14 @@
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
                     data-navigation-index={index}
+                    title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => selectProgram(event, program)}
                     oncontextmenu={(event) => openMenu(event, program)}
                     onkeydown={(event) => navigatePrograms(event, index)}
                 >
                     <span class="object-slot">{program.slot}</span><strong>{program.name}</strong>
+                    <small class="object-size-summary">{objectSizeSummary(program.object)}</small>
                 </button>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

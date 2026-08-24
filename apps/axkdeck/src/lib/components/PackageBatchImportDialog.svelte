@@ -110,54 +110,87 @@
         onconfirm,
     }: Props = $props();
     let batchPackageContent = $state<HTMLDivElement>();
+    let batchResults = $state<HTMLElement>();
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
     const locked = $derived(status === 'applying');
     const changeSources = $derived(items.some((item) => item.localPath !== null) ? onchooselocal : onchooseworkspace);
     const selectedItems = $derived(items.filter((item) => item.selected));
     const selectedCount = $derived(selectedItems.length);
+    const displayPlan = $derived.by(() => {
+        if (!plan || plan.packages.length !== selectedItems.length) return null;
+        return plan.packages.every(
+            (summary, packageIndex) =>
+                summary.packageIndex === packageIndex &&
+                summary.packageId === selectedItems[packageIndex]?.inspection.packageId,
+        )
+            ? plan
+            : null;
+    });
     const canImport = $derived(
         status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges && selectedCount > 0 && !error,
     );
-    const summaries = $derived(hasUnvalidatedChanges ? [] : (plan?.packages ?? []));
+    const summaries = $derived(displayPlan?.packages ?? []);
     const totalObjects = $derived(
-        hasUnvalidatedChanges
-            ? selectedItems.reduce((total, item) => total + item.inspection.objects.length, 0)
-            : summaries.reduce((total, item) => total + item.objectCount, 0),
+        displayPlan
+            ? summaries.reduce((total, item) => total + item.objectCount, 0)
+            : selectedItems.reduce((total, item) => total + item.inspection.objects.length, 0),
     );
     const totalPayload = $derived(
-        hasUnvalidatedChanges
-            ? selectedItems.reduce((total, item) => total + item.inspection.totalPayloadBytes, 0)
-            : summaries.reduce((total, item) => total + item.payloadBytes, 0),
+        displayPlan
+            ? summaries.reduce((total, item) => total + item.payloadBytes, 0)
+            : selectedItems.reduce((total, item) => total + item.inspection.totalPayloadBytes, 0),
     );
     const placementNodes = $derived(
         new Set(
-            plan?.programSlotPlacements.flatMap((placement) =>
+            displayPlan?.programSlotPlacements.flatMap((placement) =>
                 placement.mappings.map((mapping) => `${mapping.packageIndex}:${mapping.nodeId}`),
             ) ?? [],
         ),
     );
     const actionableRenameNodes = $derived(
         new Set(
-            plan?.actions
+            displayPlan?.actions
                 .filter((action) => action.actions.includes('CONFLICT'))
                 .map((action) => `${action.packageIndex}:${action.nodeId}`) ?? [],
         ),
     );
     const visibleConflicts = $derived(
-        hasUnvalidatedChanges
-            ? []
-            : (plan?.conflicts.filter(
-                  (conflict) =>
-                      conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
-                      conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
-                      !(
-                          renameConflictCodes.has(conflict.code) &&
-                          (placementNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`) ||
-                              actionableRenameNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`))
-                      ),
-              ) ?? []),
+        displayPlan?.conflicts.filter(
+            (conflict) =>
+                conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
+                conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
+                !(
+                    renameConflictCodes.has(conflict.code) &&
+                    (placementNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`) ||
+                        actionableRenameNodes.has(`${conflict.packageIndex}:${conflict.nodeId}`))
+                ),
+        ) ?? [],
     );
+    const showResults = $derived(
+        Boolean(error) ||
+            (Boolean(displayPlan) &&
+                (visibleConflicts.length > 0 ||
+                    actionableRenameNodes.size > 0 ||
+                    (displayPlan?.opaqueSequences.length ?? 0) > 0 ||
+                    (displayPlan?.programSlotPlacements.length ?? 0) > 0)),
+    );
+    const footerStatus = $derived.by(() => {
+        if (status === 'loading') return 'Preparing packages…';
+        if (status === 'planning') return 'Planning batch import…';
+        if (status === 'applying') return 'Importing packages…';
+        if (error) return 'Import failed';
+        if (hasUnvalidatedChanges) {
+            if (selectedCount === 0) return 'Select at least one package';
+            return displayPlan ? 'Review import issues' : 'Check import conflicts';
+        }
+        if (visibleConflicts.length > 0) {
+            return `${visibleConflicts.length} issue${visibleConflicts.length === 1 ? '' : 's'} prevent import`;
+        }
+        if (plan && !plan.valid) return 'Review import issues';
+        if (plan?.valid) return 'Ready to import';
+        return 'Choose packages to import';
+    });
 
     function opaqueKey(itemId: string, nodeId: string): string {
         return `${itemId}:${nodeId}`;
@@ -170,7 +203,10 @@
             return;
         }
         await tick();
-        if (!error && batchPackageContent) batchPackageContent.scrollTop = 0;
+        if (error) return;
+        const tableRows = batchPackageContent?.querySelector<HTMLElement>('.batch-table-rows');
+        if (tableRows) tableRows.scrollTop = 0;
+        if (batchResults) batchResults.scrollTop = 0;
     }
 </script>
 
@@ -245,92 +281,100 @@
                     onname={ondestinationname}
                 />
 
-                {#if hasUnvalidatedChanges}
-                    <p class="batch-plan-stale" role="status">
-                        {selectedCount === 0
-                            ? 'Select at least one package.'
-                            : 'Selection or volume names changed. Check conflicts to recalculate.'}
-                    </p>
-                {/if}
+                <div class="batch-workspace">
+                    <div class="batch-table-region">
+                        <PackageBatchItemsTable
+                            {items}
+                            plan={displayPlan}
+                            {destinationStrategy}
+                            {destinationVolumeName}
+                            {volumeNames}
+                            {hasUnvalidatedChanges}
+                            {busy}
+                            {onrenamevolume}
+                            {ontoggleselected}
+                            {ontoggleall}
+                        />
+                    </div>
 
-                <PackageBatchItemsTable
-                    {items}
-                    {plan}
-                    {destinationStrategy}
-                    {destinationVolumeName}
-                    {volumeNames}
-                    {hasUnvalidatedChanges}
-                    {busy}
-                    {onrenamevolume}
-                    {ontoggleselected}
-                    {ontoggleall}
-                />
+                    {#if showResults}
+                        <section class="batch-results" aria-label="Import results" bind:this={batchResults}>
+                            {#if displayPlan?.opaqueSequences.length}
+                                <section class="batch-sequence-decisions" aria-label="Sequence decisions">
+                                    {#each displayPlan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
+                                        {@const packageIndex = sequence.packageIndex ?? 0}
+                                        {@const item = selectedItems[packageIndex]}
+                                        {@const selected = item
+                                            ? (opaqueSequenceActions[opaqueKey(item.id, sequence.nodeId)] ??
+                                              sequence.action)
+                                            : sequence.action}
+                                        {#if item}<fieldset>
+                                                <legend
+                                                    >Sequence “{sequence.name || 'Unnamed'}” could not be decoded</legend
+                                                >
+                                                <small
+                                                    >Choose whether to preserve its original bytes or leave it out.</small
+                                                >
+                                                <label>
+                                                    <input
+                                                        type="radio"
+                                                        name={`batch-sequence-${packageIndex}-${sequence.nodeId}`}
+                                                        checked={selected === 'PRESERVE_UNCHANGED'}
+                                                        disabled={busy}
+                                                        onchange={() =>
+                                                            onopaquesequenceaction(
+                                                                item.id,
+                                                                sequence.nodeId,
+                                                                'PRESERVE_UNCHANGED',
+                                                            )}
+                                                    />
+                                                    Preserve unchanged
+                                                </label>
+                                                <label>
+                                                    <input
+                                                        type="radio"
+                                                        name={`batch-sequence-${packageIndex}-${sequence.nodeId}`}
+                                                        checked={selected === 'SKIP'}
+                                                        disabled={busy}
+                                                        onchange={() =>
+                                                            onopaquesequenceaction(item.id, sequence.nodeId, 'SKIP')}
+                                                    />
+                                                    Skip Sequence
+                                                </label>
+                                            </fieldset>{/if}
+                                    {/each}
+                                </section>
+                            {/if}
 
-                {#if !hasUnvalidatedChanges && plan?.opaqueSequences.length}
-                    <section class="batch-sequence-decisions" aria-label="Sequence decisions">
-                        {#each plan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
-                            {@const packageIndex = sequence.packageIndex ?? 0}
-                            {@const item = selectedItems[packageIndex]}
-                            {@const selected = item
-                                ? (opaqueSequenceActions[opaqueKey(item.id, sequence.nodeId)] ?? sequence.action)
-                                : sequence.action}
-                            {#if item}<fieldset>
-                                    <legend>Sequence “{sequence.name || 'Unnamed'}” could not be decoded</legend>
-                                    <small>Choose whether to preserve its original bytes or leave it out.</small>
-                                    <label>
-                                        <input
-                                            type="radio"
-                                            name={`batch-sequence-${packageIndex}-${sequence.nodeId}`}
-                                            checked={selected === 'PRESERVE_UNCHANGED'}
-                                            disabled={busy}
-                                            onchange={() =>
-                                                onopaquesequenceaction(item.id, sequence.nodeId, 'PRESERVE_UNCHANGED')}
-                                        />
-                                        Preserve unchanged
-                                    </label>
-                                    <label>
-                                        <input
-                                            type="radio"
-                                            name={`batch-sequence-${packageIndex}-${sequence.nodeId}`}
-                                            checked={selected === 'SKIP'}
-                                            disabled={busy}
-                                            onchange={() => onopaquesequenceaction(item.id, sequence.nodeId, 'SKIP')}
-                                        />
-                                        Skip Sequence
-                                    </label>
-                                </fieldset>{/if}
-                        {/each}
-                    </section>
-                {/if}
+                            {#if displayPlan}
+                                <PackageBatchConflictControls
+                                    items={selectedItems}
+                                    plan={displayPlan}
+                                    {renames}
+                                    {programSlots}
+                                    disabled={busy}
+                                    {onrename}
+                                    {onprogramslot}
+                                    {onprogramstart}
+                                />
+                            {/if}
 
-                {#if !hasUnvalidatedChanges && plan}
-                    <PackageBatchConflictControls
-                        items={selectedItems}
-                        {plan}
-                        {renames}
-                        {programSlots}
-                        disabled={busy}
-                        {onrename}
-                        {onprogramslot}
-                        {onprogramstart}
-                    />
-                {/if}
-
-                {#if visibleConflicts.length > 0}
-                    <section class="batch-conflicts" role="alert">
-                        <strong
-                            >{visibleConflicts.length} issue{visibleConflicts.length === 1 ? '' : 's'} prevent import</strong
-                        >
-                        {#each visibleConflicts as conflict (`${conflict.packageIndex}:${conflict.code}:${conflict.nodeId}`)}
-                            <p>{conflict.message}</p>
-                        {/each}
-                    </section>
-                {:else if plan?.valid && !hasUnvalidatedChanges && !error}
-                    <p class="batch-ready"><Icon name="check" size={14} /> Ready to import</p>
-                {/if}
+                            {#if visibleConflicts.length > 0}
+                                <section class="batch-conflicts" role="alert">
+                                    <strong
+                                        >{visibleConflicts.length} issue{visibleConflicts.length === 1 ? '' : 's'} prevent
+                                        import</strong
+                                    >
+                                    {#each visibleConflicts as conflict (`${conflict.packageIndex}:${conflict.code}:${conflict.nodeId}`)}
+                                        <p>{conflict.message}</p>
+                                    {/each}
+                                </section>
+                            {/if}
+                            {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
+                        </section>
+                    {/if}
+                </div>
             {/if}
-            {#if status === 'planning'}<p class="dialog-progress" role="status">Planning batch import…</p>{/if}
-            {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
         </div>
 
         <footer class="dialog-footer batch-package-footer">
@@ -341,9 +385,12 @@
                     disabled={busy || selectedCount === 0}
                     onclick={() => void replanAndRevealSummary()}
                 >
-                    {status === 'planning' ? 'Checking conflicts…' : 'Check conflicts'}
+                    Check conflicts
                 </button>
             {/if}
+            <p class:error-status={Boolean(error)} class="batch-footer-status" role="status" aria-live="polite">
+                {footerStatus}
+            </p>
             <div class="batch-package-footer-actions">
                 <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
                 {#if items.length > 0}
@@ -365,9 +412,13 @@
     }
 
     .batch-package-content {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
         min-height: 0;
-        overflow: auto;
-        padding: 12px 14px;
+        gap: 8px;
+        overflow: hidden;
+        padding: 10px 12px;
     }
 
     .batch-progress,
@@ -389,7 +440,6 @@
 
     .batch-summary {
         justify-content: space-between;
-        margin-bottom: 10px;
     }
 
     .batch-summary div {
@@ -399,19 +449,37 @@
 
     .batch-summary small,
     .batch-sequence-decisions small {
-        color: var(--text-muted);
+        color: var(--color-text-muted);
+        font-size: var(--dialog-metadata-font-size);
     }
 
-    .batch-plan-stale {
-        margin: 0 0 10px;
-        color: var(--text-muted);
+    .batch-workspace,
+    .batch-table-region {
+        display: grid;
+        min-height: 0;
+    }
+
+    .batch-workspace {
+        flex: 1;
+        grid-template-rows: minmax(140px, 1fr) auto;
+        gap: 8px;
+    }
+
+    .batch-table-region {
+        overflow: hidden;
+    }
+
+    .batch-results {
+        max-height: min(220px, 30vh);
+        overflow-y: auto;
+        border-top: 1px solid var(--color-border);
+        padding-top: 8px;
     }
 
     .batch-sequence-decisions,
     .batch-conflicts {
         display: grid;
         gap: 10px;
-        margin-top: 10px;
         padding: 10px;
         border: 1px solid #765d2d;
         border-radius: 6px;
@@ -435,16 +503,19 @@
         margin: 0;
     }
 
-    .batch-ready {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin: 10px 0 0;
-        color: #85d8ad;
-    }
-
     .batch-package-footer {
         flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    .batch-footer-status {
+        margin: 0;
+        color: var(--color-text-muted);
+        font-size: var(--dialog-metadata-font-size);
+    }
+
+    .batch-footer-status.error-status {
+        color: var(--color-danger);
     }
 
     .batch-package-footer-actions {

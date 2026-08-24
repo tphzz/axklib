@@ -22,6 +22,7 @@ function program(programNumber: number, name: string): Program {
         categoryName: 'PROG',
         sfsId: programNumber,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,

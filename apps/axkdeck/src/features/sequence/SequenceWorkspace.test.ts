@@ -16,6 +16,7 @@ function sequence(name: string, eventCount: number): SequenceItem {
         categoryName: 'SEQU',
         sfsId: 1,
         storedSizeBytes: 512,
+        sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
         frameCount: 0,

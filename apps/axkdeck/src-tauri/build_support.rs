@@ -73,14 +73,22 @@ pub fn read_build_identity(
         return Err("native project version does not match its numeric components".to_owned());
     }
     if metadata.is_release {
-        if metadata.release_tag != format!("v{}", metadata.semantic_version) {
+        if metadata
+            .release_tag
+            .strip_prefix('v')
+            .unwrap_or(&metadata.release_tag)
+            != metadata.semantic_version
+        {
             return Err("native release tag does not match its semantic version".to_owned());
         }
-    } else if metadata.semantic_version != "0.0.0"
-        || !metadata.release_tag.is_empty()
-        || metadata.is_prerelease
-    {
-        return Err("native development version metadata is inconsistent".to_owned());
+    } else {
+        let fallback_development = metadata.semantic_version == "0.0.0" && !metadata.is_prerelease;
+        let version_branch = metadata.semantic_version
+            == format!("{}-pre", metadata.project_version)
+            && metadata.is_prerelease;
+        if !metadata.release_tag.is_empty() || (!fallback_development && !version_branch) {
+            return Err("native development version metadata is inconsistent".to_owned());
+        }
     }
 
     let package_text = std::fs::read_to_string(package_basename_path).map_err(|error| {

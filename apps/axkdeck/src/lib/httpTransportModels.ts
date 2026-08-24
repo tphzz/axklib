@@ -81,6 +81,8 @@ export function mapContentItem(item: ApiContentItem, parent?: DiskTreeItem): Dis
         volumeDirectoryId: item.volumeDirectoryId ?? undefined,
         volumeName,
         partitionIndex,
+        partitionCapacity: item.partitionCapacity ?? undefined,
+        sizeBytes: item.sizeBytes ?? undefined,
     };
 }
 
@@ -95,6 +97,7 @@ export function mapObject(item: ApiObjectItem): SamplerObject {
         categoryName: item.categoryName,
         sfsId: 0,
         storedSizeBytes: item.sizeBytes,
+        sizeWithDependenciesBytes: item.sizeWithDependenciesBytes,
         sampleRate: item.waveform?.sampleRate ?? 0,
         rootKey: item.waveform?.rootKey ?? 0,
         frameCount: item.waveform?.frameCount ?? 0,

@@ -7,6 +7,7 @@ mod local_workspaces;
 mod remote_settings;
 mod retained_download;
 mod server_sidecar;
+mod settings_paths;
 mod startup_diagnostics;
 mod webview_runtime;
 
@@ -18,7 +19,7 @@ use tauri::{Manager, State, WebviewWindow};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use allocation_inspector::{open_allocation_inspector, save_allocation_map_json};
-use desktop_preferences::DesktopPreferencesStore;
+use desktop_preferences::{DesktopPreferencesStore, InterfaceScaleMode};
 use local_directory_exports::{
     DirectorySaveCandidateStore, save_retained_directory_export,
     select_local_directory_export_destination,
@@ -29,6 +30,7 @@ use local_packages::{
     select_local_packages,
 };
 use local_workspaces::{WorkspaceCandidateStore, commit_local_workspace, select_local_workspace};
+use settings_paths::SettingsPaths;
 use startup_diagnostics::{StartupDiagnostics, StartupMilestone, complete_startup};
 
 const LOG_FILE_SIZE: u128 = 5 * 1024 * 1024;
@@ -58,6 +60,27 @@ fn current_build_info() -> DesktopBuildInfo {
         webview_engine: webview_runtime::ENGINE,
         webview_version: None,
     }
+}
+
+#[tauri::command]
+fn desktop_interface_scale_mode(
+    preferences: State<'_, Mutex<DesktopPreferencesStore>>,
+) -> InterfaceScaleMode {
+    preferences
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .interface_scale_mode()
+}
+
+#[tauri::command]
+fn set_desktop_interface_scale_mode(
+    mode: InterfaceScaleMode,
+    preferences: State<'_, Mutex<DesktopPreferencesStore>>,
+) -> Result<(), String> {
+    preferences
+        .lock()
+        .map_err(|_| "axkdeck settings state is unavailable".to_owned())?
+        .set_interface_scale_mode(mode)
 }
 
 fn parse_log_level(value: Option<&str>) -> log::LevelFilter {
@@ -441,12 +464,17 @@ pub fn run() {
                 .path()
                 .app_local_data_dir()
                 .map_err(|error| format!("resolve application state directory: {error}"))?;
+            let config_directory = app
+                .path()
+                .config_dir()
+                .map_err(|error| format!("resolve application config directory: {error}"))?;
+            let settings_paths = SettingsPaths::from_config_directory(&config_directory);
             setup_startup.record(StartupMilestone::PathsResolved);
-            let preferences_path = application_data_directory.join("desktop-preferences.json");
+            let settings_path = settings_paths.axkdeck_settings;
             setup_startup.record(StartupMilestone::PreferencesLoadStarted);
-            let preferences = DesktopPreferencesStore::load(preferences_path.clone()).unwrap_or_else(|error| {
-                log::warn!("desktop preferences are unavailable and will be reset on the next update: {error}");
-                DesktopPreferencesStore::empty(preferences_path)
+            let preferences = DesktopPreferencesStore::load(settings_path.clone()).unwrap_or_else(|error| {
+                log::warn!("axkdeck settings are unavailable and will be reset on the next update: {error}");
+                DesktopPreferencesStore::empty(settings_path)
             });
             setup_startup.record(StartupMilestone::PreferencesLoadCompleted);
             app.manage(Mutex::new(preferences));
@@ -455,6 +483,7 @@ pub fn run() {
             connections.initialize_in_background(
                 log_directory,
                 state_directory,
+                settings_paths.sidecar_workspace_store,
                 setup_startup.clone(),
             );
             app.manage(connections);
@@ -500,6 +529,8 @@ pub fn run() {
             open_developer_tools,
             diagnostic_log_level,
             desktop_build_info,
+            desktop_interface_scale_mode,
+            set_desktop_interface_scale_mode,
             open_allocation_inspector,
             save_allocation_map_json
         ]);

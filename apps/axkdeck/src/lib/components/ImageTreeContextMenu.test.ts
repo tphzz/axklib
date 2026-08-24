@@ -10,6 +10,13 @@ const partition = {
     name: 'Partition 1',
 } as DiskTreeItem;
 
+const volume = {
+    id: 'volume-1',
+    kind: 'volume',
+    name: 'Strings',
+    partitionIndex: 0,
+} as DiskTreeItem;
+
 const common = {
     item: partition,
     left: 240,
@@ -55,5 +62,17 @@ describe('ImageTreeContextMenu', () => {
         await waitFor(() => expect(submenu.style.visibility).toBe('visible'));
         expect(submenu.style.pointerEvents).toBe('auto');
         expect(submenu.style.left).not.toBe('0px');
+    });
+
+    it('offers only one plural delete command for a volume multi-selection', async () => {
+        const onaction = vi.fn();
+        render(ImageTreeContextMenu, {
+            props: { ...common, item: volume, selectionCount: 3, onaction },
+        });
+
+        const action = screen.getByRole('menuitem', { name: 'Delete 3 volumes…' });
+        expect(screen.getAllByRole('menuitem')).toEqual([action]);
+        await fireEvent.click(action);
+        expect(onaction).toHaveBeenCalledWith('delete-volume');
     });
 });

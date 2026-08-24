@@ -148,7 +148,7 @@ pub(crate) async fn save_allocation_map_json(
     let starting_directory = match preferences.lock() {
         Ok(preferences) => preferences.allocation_export_directory(),
         Err(_) => {
-            log::warn!("desktop preference state is unavailable; using the platform save location");
+            log::warn!("axkdeck settings state is unavailable; using the platform save location");
             None
         }
     };
@@ -186,7 +186,7 @@ pub(crate) async fn save_allocation_map_json(
         }
         Err(_) => {
             log::warn!(
-                "desktop preference state is unavailable; the allocation export directory was not retained"
+                "axkdeck settings state is unavailable; the allocation export directory was not retained"
             );
         }
     }

@@ -17,6 +17,57 @@
 
 namespace axk::alteration_internal {
 
+Result<std::optional<PartitionObjectSet>> plan_volume_deletion_batch(const TransactionState &state,
+                                                                     const AlterationManifest &manifest,
+                                                                     const CancellationToken &cancellation) {
+    const auto direct_deletions = std::ranges::all_of(manifest.operations, [](const AlterationOperation &operation) {
+        const auto *deletion = std::get_if<DeleteVolumeOperation>(&operation.data);
+        return deletion != nullptr && std::holds_alternative<PartitionIndex>(deletion->partition);
+    });
+    if (!direct_deletions)
+        return std::optional<PartitionObjectSet>{};
+
+    std::set<std::pair<std::uint8_t, std::string>> targets;
+    PartitionObjectSet closure_union;
+    for (const auto &typed_operation : manifest.operations) {
+        if (const auto checked = cancellation.check(); !checked)
+            return std::unexpected{checked.error()};
+        const auto &operation = std::get<DeleteVolumeOperation>(typed_operation.data);
+        const auto partition_index = std::get<PartitionIndex>(operation.partition);
+        if (!targets.emplace(partition_index.value, operation.volume_name).second) {
+            return std::unexpected{transaction_error("volume deletion targets must be unique")};
+        }
+        const auto partition_state = state.partitions.find(partition_index.value);
+        if (partition_state == state.partitions.end()) {
+            return std::unexpected{transaction_error("partition index does not exist")};
+        }
+        const auto &partition = *partition_state->second.source;
+        const auto *root = record(partition, SfsId{1U});
+        if (root == nullptr || root->payload_kind != PayloadKind::directory) {
+            return std::unexpected{transaction_error("partition root directory is unavailable")};
+        }
+        std::vector<const DirectoryEntry *> matches;
+        for (const auto &entry : root->directory_entries) {
+            if (entry.state == DirectoryEntryState::live && entry.name == operation.volume_name)
+                matches.push_back(&entry);
+        }
+        if (matches.size() != 1U) {
+            return std::unexpected{transaction_error("volume name is not unique in the selected partition")};
+        }
+        auto closure = volume_closure(partition, *matches.front());
+        if (!closure)
+            return std::unexpected{closure.error()};
+        for (const auto id : *closure)
+            closure_union.emplace(partition_index, id);
+    }
+    for (const auto &[partition, source, target] : state.known_edges) {
+        if (closure_union.contains({partition, source}) != closure_union.contains({partition, target})) {
+            return std::unexpected{transaction_error("a known object relationship crosses the volume deletion batch")};
+        }
+    }
+    return std::optional<PartitionObjectSet>{std::move(closure_union)};
+}
+
 Result<OperationReport> delete_volume(TransactionState &state, OperationContext context,
                                       const DeleteVolumeOperation &operation, const CancellationToken &cancellation) {
     if (const auto check = cancellation.check(); !check)
@@ -47,31 +98,35 @@ Result<OperationReport> delete_volume(TransactionState &state, OperationContext 
     if (!closure)
         return std::unexpected{closure.error()};
 
-    std::map<std::string, SfsId> ids;
-    for (const auto &object : state.catalog.objects) {
-        if (object.partition.value == partition.index.value)
-            ids.emplace(object.key, object.sfs_id);
-    }
-    for (const auto &relation : state.graph.relationships) {
-        if (relation.quality != RelationshipQuality::known || !relation.target_key)
-            continue;
-        const auto source = ids.find(relation.source_key);
-        const auto target = ids.find(*relation.target_key);
-        if (source == ids.end() || target == ids.end())
-            continue;
-        if (closure->contains(source->second) != closure->contains(target->second)) {
-            return std::unexpected{transaction_error("a known object relationship crosses the volume closure")};
+    if (state.approved_volume_deletion_batch) {
+        const auto outside_batch = std::ranges::any_of(*closure, [&](const SfsId id) {
+            return !state.approved_volume_deletion_batch->contains({partition.index, id});
+        });
+        if (outside_batch) {
+            return std::unexpected{transaction_error("volume deletion is outside the approved batch")};
+        }
+    } else {
+        for (const auto &[edge_partition, source, target] : state.known_edges) {
+            if (edge_partition == partition.index && closure->contains(source) != closure->contains(target)) {
+                return std::unexpected{transaction_error("a known object relationship crosses the volume closure")};
+            }
         }
     }
     auto payload = current_root_payload(state, mutable_partition, cancellation);
     if (!payload)
         return std::unexpected{payload.error()};
-    const auto offset = matches.front()->payload_relative_offset;
-    if (offset > payload->size() || payload->size() - offset < 32U) {
-        return std::unexpected{transaction_error("volume directory entry lies outside the root payload")};
+    auto current_entries = parse_directory(*payload, SfsId{1});
+    if (!current_entries)
+        return std::unexpected{current_entries.error()};
+    const auto current = std::ranges::find_if(*current_entries, [&](const ParsedDirectoryEntry &entry) {
+        return entry.state == DirectoryEntryState::live && entry.name == operation.volume_name &&
+               entry.target_sfs_id == SfsId{matches.front()->target_link_id->value};
+    });
+    if (current == current_entries->end()) {
+        return std::unexpected{transaction_error("volume directory entry is absent from transaction state")};
     }
-    payload->erase(payload->begin() + static_cast<std::ptrdiff_t>(offset),
-                   payload->begin() + static_cast<std::ptrdiff_t>(offset + 32U));
+    payload->erase(payload->begin() + static_cast<std::ptrdiff_t>(current->offset),
+                   payload->begin() + static_cast<std::ptrdiff_t>(current->offset + 32U));
     if (auto replaced = set_root_payload(state, mutable_partition, std::move(*payload), cancellation); !replaced)
         return std::unexpected{replaced.error()};
     std::uint64_t freed{};

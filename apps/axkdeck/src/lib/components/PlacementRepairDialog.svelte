@@ -187,7 +187,7 @@
 
     .placement-repair-content p {
         margin-top: 4px;
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
 
     .placement-destinations,
@@ -198,7 +198,7 @@
 
     .placement-destinations h3,
     .placement-blockers h3 {
-        font-size: 11px;
+        font-size: var(--dialog-section-font-size);
     }
 
     .placement-destination {
@@ -211,7 +211,7 @@
         border: 1px solid var(--color-border);
         border-radius: 5px;
         background: rgb(255 255 255 / 2%);
-        font-size: 10px;
+        font-size: var(--dialog-body-font-size);
     }
 
     .placement-destination > span:first-child {
@@ -233,7 +233,7 @@
         display: grid;
         gap: 5px;
         color: var(--color-text-muted);
-        font-size: 10px;
+        font-size: var(--dialog-label-font-size);
     }
 
     .recovery-volume-field input {

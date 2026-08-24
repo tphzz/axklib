@@ -299,6 +299,7 @@
                 <section class="system-exclusive-options" aria-label="System Exclusive import">
                     <label>
                         <input
+                            class="dialog-checkbox"
                             type="checkbox"
                             aria-label="Include SysEx events"
                             checked={includeSystemExclusive}
@@ -349,7 +350,7 @@
     .dialog-header p {
         margin: 2px 0 0;
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
     }
     .midi-import-body {
         min-height: 0;
@@ -377,11 +378,11 @@
     .midi-import-head {
         color: var(--color-text-muted);
         border-bottom: 1px solid var(--color-border);
-        font-size: 9px;
+        font-size: var(--dialog-table-header-font-size);
     }
     .midi-import-row {
         border-bottom: 1px solid var(--color-border-subtle);
-        font-size: 10px;
+        font-size: var(--dialog-body-font-size);
     }
     .midi-import-row:last-of-type {
         border-bottom: 0;
@@ -400,7 +401,7 @@
         border-radius: 4px;
         background: var(--color-bg-deep);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--dialog-control-font-size);
     }
     .midi-import-row span {
         color: var(--color-success);
@@ -413,7 +414,7 @@
     .midi-row-error {
         margin: 0;
         padding: 0 8px 6px;
-        font-size: 9px;
+        font-size: var(--dialog-metadata-font-size);
     }
     .system-exclusive-options {
         display: grid;
@@ -426,7 +427,7 @@
         display: flex;
         align-items: center;
         gap: 7px;
-        font-size: 10px;
+        font-size: var(--dialog-body-font-size);
     }
     .system-exclusive-options input {
         width: 14px;
@@ -436,6 +437,6 @@
     .system-exclusive-options p {
         margin: 0 0 0 21px;
         color: var(--color-text-muted);
-        font-size: 9px;
+        font-size: var(--dialog-metadata-font-size);
     }
 </style>

@@ -22,6 +22,7 @@
     import { SequenceImportWorkflow } from './features/import/sequenceWorkflow.svelte';
     import { Tx16wImportWorkflow } from './features/import/tx16wWorkflow.svelte';
     import { ImageSessionWorkflow } from './features/image-session/workflow.svelte';
+    import { createImageTreeActionHandler } from './features/image-session/treeActions';
     import { ExtentLayoutRepairWorkflow } from './features/image-session/extentLayoutRepairWorkflow.svelte';
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
@@ -30,8 +31,8 @@
     import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
+    import WorkspaceGuard from './lib/components/WorkspaceGuard.svelte';
     import { createTransport } from './lib/createTransport';
-    import { openAllocationInspector } from './lib/allocationInspector';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
     import { reportMutationTiming } from './lib/diagnostics';
     import {
@@ -40,14 +41,7 @@
         type PackageExportSelectionState,
     } from './lib/objectSelection';
     import { userFacingMessage } from './lib/userFacingMessage';
-    import type {
-        DiskTreeItem,
-        InspectorSelection,
-        PackageExportObject,
-        PackageExportSelection,
-        ImageTreeAction,
-        WorkspaceView,
-    } from './lib/types';
+    import type { InspectorSelection, PackageExportObject, PackageExportSelection, WorkspaceView } from './lib/types';
 
     let {
         interfaceScaling = null,
@@ -163,7 +157,7 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         pickerHistory: packagePickerHistory,
         mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
-        selectedSource: () => imageSessionWorkflow.selectedSource,
+        selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         sourceItems: () => imageSessionWorkflow.sourceItems,
     });
     const packageBatchImportWorkflow = new PackageBatchImportWorkflow({
@@ -219,7 +213,7 @@
         imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
-        setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
+        setSelectedSource: (item) => imageSessionWorkflow.selectSource(item),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         activeVolumeId: () => catalog.activeVolumeId,
         sampleBanks: () => catalog.sampleBanks,
@@ -241,7 +235,7 @@
         imageLocation: () => imageSessionWorkflow.location,
         mutationsAvailable: () => mutationWorkflow.objectRenameAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
-        setSelectedSource: (item) => (imageSessionWorkflow.selectedSource = item),
+        setSelectedSource: (item) => imageSessionWorkflow.selectSource(item),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         activeVolumeId: () => catalog.activeVolumeId,
         sequences: () => catalog.sequences,
@@ -284,8 +278,21 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
-        selectedSource: () => imageSessionWorkflow.selectedSource,
+        selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
+    });
+    const requestImageAction = createImageTreeActionHandler({
+        transport,
+        imageSession: imageSessionWorkflow,
+        mutation: mutationWorkflow,
+        directComputer: directComputerWorkflow,
+        packageBatchImport: packageBatchImportWorkflow,
+        exports: exportWorkflow,
+        volumePackages: volumePackageExportWorkflow,
+        volumeFloppies: volumeFloppyExportWorkflow,
+        mediaExports: mediaExportWorkflow,
+        isDesktop,
+        exportAudio: requestAudioExport,
     });
     imageSessionWorkflow.connect({
         catalog,
@@ -333,6 +340,7 @@
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
+    const activeWorkspaceId = $derived(imageSessionWorkflow.location?.reference.rootId ?? null);
     const selectedBank = $derived(sampleBanks.find((item) => item.objectId === catalog.selectedBankId));
     const selectedSample = $derived(samples.find((item) => item.objectId === catalog.selectedSampleId));
     const auditionableSampleObjectIds = $derived(auditionWorkflow.auditionableSampleObjectIds);
@@ -341,7 +349,6 @@
         hasOpenAppDialog({
             pickerRequest,
             imageSession: imageSessionWorkflow,
-            workspaceManagerOpen,
             connectionSettings,
             mutation: mutationWorkflow,
             packageImport: packageImportWorkflow,
@@ -408,92 +415,6 @@
         }
     });
 
-    function requestImageAction(item: DiskTreeItem, action: ImageTreeAction): void {
-        if (item.partitionIndex === undefined) return;
-        if (action === 'inspect-allocation') {
-            const sessionId = imageSessionWorkflow.sessionId;
-            if (
-                !isDesktop ||
-                sessionId === null ||
-                !imageSessionWorkflow.allocationInspectionAvailable ||
-                item.kind !== 'partition'
-            )
-                return;
-            imageSessionWorkflow.selectedSource = item;
-            void transport
-                .allocationMapReference(sessionId)
-                .then((reference) =>
-                    openAllocationInspector({
-                        ...reference,
-                        partitionIndex: item.partitionIndex!,
-                        partitionName: item.name,
-                    }),
-                )
-                .catch((error) => imageSessionWorkflow.setStatus(userFacingMessage(error)));
-            return;
-        }
-        if (action === 'import-package') {
-            if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'volume') return;
-            imageSessionWorkflow.selectedSource = item;
-            directComputerWorkflow.importPackage(packageImportWorkflow, item);
-            return;
-        }
-        if (action === 'import-packages') {
-            if (!imageSessionWorkflow.packageImportAvailable || item.kind !== 'partition') return;
-            imageSessionWorkflow.selectedSource = item;
-            directComputerWorkflow.importVolumePackages(packageBatchImportWorkflow, item);
-            return;
-        }
-        if (action === 'export-package') {
-            if (!imageSessionWorkflow.packageExportAvailable || item.kind !== 'volume') return;
-            imageSessionWorkflow.selectedSource = item;
-            directComputerWorkflow.exportPackage(exportWorkflow, [
-                {
-                    kind: 'VOLUME',
-                    contentId: item.id,
-                    partitionIndex: item.partitionIndex!,
-                    volumeName: item.name,
-                    name: item.name,
-                    typeLabel: 'Volume',
-                },
-            ]);
-            return;
-        }
-        if (action === 'export-volume-packages') {
-            if (!imageSessionWorkflow.volumePackageExportAvailable || item.kind !== 'partition') return;
-            imageSessionWorkflow.selectedSource = item;
-            void directComputerWorkflow.exportVolumePackages(volumePackageExportWorkflow, item);
-            return;
-        }
-        if (action === 'export-volume-floppies') {
-            if (!imageSessionWorkflow.volumeFloppyExportAvailable || item.kind !== 'partition') return;
-            imageSessionWorkflow.selectedSource = item;
-            void directComputerWorkflow.exportVolumeFloppies(volumeFloppyExportWorkflow, item);
-            return;
-        }
-        if (action === 'export-sfz') {
-            if (!imageSessionWorkflow.audioExportAvailable || item.kind !== 'volume') return;
-            imageSessionWorkflow.selectedSource = item;
-            void requestAudioExport([
-                {
-                    kind: 'VOLUME',
-                    contentId: item.id,
-                    partitionIndex: item.partitionIndex,
-                    volumeName: item.name,
-                    name: item.name,
-                    typeLabel: 'Volume',
-                },
-            ]);
-            return;
-        }
-        if (action === 'export-cdrom' || action === 'export-floppy') {
-            if (!imageSessionWorkflow.mediaConversionAvailable) return;
-            imageSessionWorkflow.selectedSource = item;
-            void directComputerWorkflow.exportMedia(mediaExportWorkflow, item);
-            return;
-        }
-        if (mutationWorkflow.requestVolumeAction(item, action)) imageSessionWorkflow.selectedSource = item;
-    }
     function requestObjectPackageExport(items: PackageExportObject[]): void {
         if (
             !imageSessionWorkflow.packageExportAvailable ||
@@ -546,7 +467,6 @@
     async function saveRemoteConnection(input: RemoteServerSettingsInput): Promise<void> {
         await connectionActions.saveRemote(input);
     }
-
     async function switchToLocalConnection(): Promise<void> {
         await connectionActions.useLocal();
     }
@@ -580,6 +500,7 @@
     imageLocation={imageSessionWorkflow.location}
     sourceItems={imageSessionWorkflow.sourceItems}
     selectedSource={imageSessionWorkflow.selectedSource}
+    selectedVolumeIds={imageSessionWorkflow.volumeSelection.items.map((item) => item.id)}
     imageOpening={imageSessionWorkflow.opening}
     sessionId={imageSessionWorkflow.sessionId}
     {catalog}
@@ -613,13 +534,15 @@
     sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
     mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
     allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
+    samplerOrderingEnabled={imageSessionWorkflow.imageFormat === 'sfs'}
     openConnectionSettings={() => void openConnectionSettings()}
     openImage={() => void imageSessionWorkflow.chooseAndOpen()}
     createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
     closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
     showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
     manageLocations={() => (workspaceManagerOpen = true)}
-    selectSource={(item) => imageSessionWorkflow.selectSource(item)}
+    selectSource={(item, mode, visibleVolumes) => imageSessionWorkflow.selectTreeSource(item, mode, visibleVolumes)}
+    selectSourceForContext={(item, visibleVolumes) => imageSessionWorkflow.selectSourceForContext(item, visibleVolumes)}
     imageAction={requestImageAction}
     selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
     exportPackage={requestObjectPackageExport}
@@ -637,7 +560,7 @@
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
 {/if}
 
-{#if imageSessionWorkflow.integrityDialogOpen}
+{#if !experimentalWarningOpen && imageSessionWorkflow.integrityDialogOpen}
     <ImageIntegrityDialog
         issues={imageSessionWorkflow.integrityIssues}
         loading={imageSessionWorkflow.integrityLoading}
@@ -651,7 +574,9 @@
     />
 {/if}
 
-{#if appDialogsOpen}
+<WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
+
+{#if !experimentalWarningOpen && appDialogsOpen}
     {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
         {@const AppDialogs = dialogs.default}
         <AppDialogs
@@ -669,9 +594,6 @@
             hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
             finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
             cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
-            {workspaceManagerOpen}
-            activeWorkspaceId={imageSessionWorkflow.location?.reference.rootId ?? null}
-            closeWorkspaceManager={() => (workspaceManagerOpen = false)}
             {connectionSettings}
             {saveRemoteConnection}
             {switchToLocalConnection}

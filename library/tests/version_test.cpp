@@ -18,7 +18,7 @@ TEST(Version, KeepsSemanticVersionSeparateFromSourceIdentity) {
     EXPECT_FALSE(source_identity.empty());
     EXPECT_EQ(package_basename, "axklib-" + std::string{source_identity});
     EXPECT_FALSE(std::string_view{build.git_sha_short}.empty());
-    EXPECT_EQ(source_identity.ends_with("-mod"), build.is_dirty);
+    EXPECT_EQ(source_identity.find("-dirty-") != std::string_view::npos, build.is_dirty);
     EXPECT_FALSE(std::string_view{build.is_tagged_release ? build.git_tag : build.git_branch}.empty());
     EXPECT_EQ(std::string_view{build.git_tag}.empty(), !build.is_tagged_release);
 }

@@ -5,7 +5,7 @@
 
     interface Props {
         action: ImageTreeAction;
-        item: DiskTreeItem;
+        items: DiskTreeItem[];
         busy: boolean;
         phase: 'idle' | 'checking' | 'submitting';
         error: string;
@@ -14,9 +14,21 @@
         onsubmit: (name: string) => void;
     }
 
-    let { action, item, busy, phase, error, deletionInspection, oncancel, onsubmit }: Props = $props();
+    let { action, items, busy, phase, error, deletionInspection, oncancel, onsubmit }: Props = $props();
     let value = $state('');
     let initialized = false;
+    const item = $derived(items[0]!);
+    const deletingMultiple = $derived(action === 'delete-volume' && items.length > 1);
+    const deletionTargetGroups = $derived.by(() => {
+        const groups = new Map<number, DiskTreeItem[]>();
+        for (const target of items) {
+            const partitionIndex = target.partitionIndex ?? 0;
+            const targets = groups.get(partitionIndex) ?? [];
+            targets.push(target);
+            groups.set(partitionIndex, targets);
+        }
+        return [...groups].map(([partitionIndex, targets]) => ({ partitionIndex, targets }));
+    });
 
     $effect(() => {
         if (initialized) return;
@@ -31,7 +43,9 @@
               ? 'Rename volume'
               : action === 'rename-partition'
                 ? 'Rename partition'
-                : 'Delete volume',
+                : deletingMultiple
+                  ? `Delete ${items.length} volumes`
+                  : 'Delete volume',
     );
     const subject = $derived(action === 'rename-partition' ? 'Partition' : 'Volume');
     const submitLabel = $derived(
@@ -40,7 +54,9 @@
                 ? 'Adding'
                 : action === 'rename-volume' || action === 'rename-partition'
                   ? 'Renaming'
-                  : 'Deleting'
+                  : deletingMultiple
+                    ? `Deleting ${items.length} volumes`
+                    : 'Deleting'
             : action === 'add-volume'
               ? 'Add'
               : action === 'rename-volume' || action === 'rename-partition'
@@ -81,8 +97,26 @@
             </header>
             <div class="volume-action-content">
                 {#if action === 'delete-volume'}
-                    <strong>Permanently delete “{item.name}”?</strong>
-                    <p>The volume and all objects it contains will be destroyed. This action cannot be undone.</p>
+                    {#if deletingMultiple}
+                        <strong>Permanently delete {items.length} volumes?</strong>
+                        <p>The selected volumes and all objects they contain will be destroyed.</p>
+                        <div class="volume-deletion-targets">
+                            {#each deletionTargetGroups as group (group.partitionIndex)}
+                                <section>
+                                    <h3>Partition {group.partitionIndex + 1}</h3>
+                                    <ul>
+                                        {#each group.targets as target (target.id)}
+                                            <li>{target.name}</li>
+                                        {/each}
+                                    </ul>
+                                </section>
+                            {/each}
+                        </div>
+                    {:else}
+                        <strong>Permanently delete “{item.name}”?</strong>
+                        <p>The volume and all objects it contains will be destroyed.</p>
+                    {/if}
+                    <p>This action cannot be undone.</p>
                     {#if phase === 'checking' && !deletionInspection}
                         <p role="status">Checking object relationships…</p>
                     {:else if deletionInspection && !deletionInspection.canDelete}
@@ -123,3 +157,24 @@
         </form>
     </div>
 </div>
+
+<style>
+    .volume-deletion-targets {
+        max-height: 12rem;
+        overflow: auto;
+    }
+
+    .volume-deletion-targets section + section {
+        margin-top: 0.75rem;
+    }
+
+    .volume-deletion-targets h3 {
+        margin: 0;
+        font-size: var(--font-size-value);
+    }
+
+    .volume-deletion-targets ul {
+        margin: 0.25rem 0 0;
+        padding-left: 1.25rem;
+    }
+</style>

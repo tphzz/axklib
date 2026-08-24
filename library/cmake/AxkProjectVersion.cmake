@@ -1,45 +1,5 @@
 include_guard(GLOBAL)
-
-function(axk_parse_semver_tag tag)
-  set(valid OFF)
-  set(major "")
-  set(minor "")
-  set(patch "")
-  set(prerelease "")
-  set(build_metadata "")
-
-  if("${tag}" MATCHES
-     "^v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-([0-9A-Za-z.-]+))?([+]([0-9A-Za-z.-]+))?$")
-    set(valid ON)
-    set(major "${CMAKE_MATCH_1}")
-    set(minor "${CMAKE_MATCH_2}")
-    set(patch "${CMAKE_MATCH_3}")
-    set(prerelease "${CMAKE_MATCH_5}")
-    set(build_metadata "${CMAKE_MATCH_7}")
-
-    foreach(identifier_group IN ITEMS prerelease build_metadata)
-      if(NOT "${${identifier_group}}" STREQUAL "")
-        string(REPLACE "." ";" identifiers "${${identifier_group}}")
-        foreach(identifier IN LISTS identifiers)
-          if(identifier STREQUAL "" OR NOT identifier MATCHES "^[0-9A-Za-z-]+$")
-            set(valid OFF)
-          endif()
-          if(identifier_group STREQUAL "prerelease" AND
-             identifier MATCHES "^[0-9]+$" AND identifier MATCHES "^0[0-9]+$")
-            set(valid OFF)
-          endif()
-        endforeach()
-      endif()
-    endforeach()
-  endif()
-
-  set(AXK_SEMVER_TAG_VALID "${valid}" PARENT_SCOPE)
-  set(AXK_SEMVER_MAJOR "${major}" PARENT_SCOPE)
-  set(AXK_SEMVER_MINOR "${minor}" PARENT_SCOPE)
-  set(AXK_SEMVER_PATCH "${patch}" PARENT_SCOPE)
-  set(AXK_SEMVER_PRERELEASE "${prerelease}" PARENT_SCOPE)
-  set(AXK_SEMVER_BUILD_METADATA "${build_metadata}" PARENT_SCOPE)
-endfunction()
+include("${CMAKE_CURRENT_LIST_DIR}/AxkVersionRef.cmake")
 
 function(axk_derive_project_version source_directory)
   set(semantic_version "0.0.0")
@@ -66,7 +26,11 @@ function(axk_derive_project_version source_directory)
     endif()
   endif()
 
-  set(named_branch OFF)
+  set(branch_name "")
+  if(github_ref_type STREQUAL "branch" AND DEFINED ENV{GITHUB_REF_NAME} AND
+     NOT "$ENV{GITHUB_REF_NAME}" STREQUAL "")
+    set(branch_name "$ENV{GITHUB_REF_NAME}")
+  endif()
   if(NOT git_executable STREQUAL "")
     execute_process(
       COMMAND "${git_executable}" rev-parse --abbrev-ref HEAD
@@ -76,9 +40,9 @@ function(axk_derive_project_version source_directory)
       ERROR_QUIET
       OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    if(branch_result EQUAL 0 AND NOT branch_output STREQUAL "" AND
-       NOT branch_output STREQUAL "HEAD")
-      set(named_branch ON)
+    if(branch_name STREQUAL "" AND branch_result EQUAL 0 AND
+       NOT branch_output STREQUAL "" AND NOT branch_output STREQUAL "HEAD")
+      set(branch_name "${branch_output}")
     endif()
   endif()
 
@@ -91,12 +55,12 @@ function(axk_derive_project_version source_directory)
       message(FATAL_ERROR "GitHub tag builds require GITHUB_REF_NAME")
     endif()
     set(candidate_tag "$ENV{GITHUB_REF_NAME}")
-    axk_parse_semver_tag("${candidate_tag}")
-    if(NOT AXK_SEMVER_TAG_VALID)
+    axk_parse_semver_ref("${candidate_tag}")
+    if(NOT AXK_SEMVER_REF_VALID)
       message(FATAL_ERROR "GitHub ref '${candidate_tag}' is not a valid semantic version tag")
     endif()
     execute_process(
-      COMMAND "${git_executable}" rev-parse --verify "${candidate_tag}^{commit}"
+      COMMAND "${git_executable}" rev-parse --verify "refs/tags/${candidate_tag}^{commit}"
       WORKING_DIRECTORY "${source_directory}"
       RESULT_VARIABLE tag_commit_result
       OUTPUT_VARIABLE tag_commit
@@ -115,39 +79,20 @@ function(axk_derive_project_version source_directory)
        NOT tag_commit STREQUAL head_commit)
       message(FATAL_ERROR "GitHub release tag '${candidate_tag}' does not identify HEAD")
     endif()
+    axk_find_exact_semver_tag("${git_executable}" "${source_directory}")
+    if(NOT AXK_EXACT_SEMVER_TAG STREQUAL "${candidate_tag}")
+      message(FATAL_ERROR
+        "GitHub release tag '${candidate_tag}' is not the exact semantic version tag at HEAD")
+    endif()
     set(selected_tag "${candidate_tag}")
-  elseif(NOT github_ref_type STREQUAL "branch" AND NOT named_branch AND
-         NOT git_executable STREQUAL "")
-    execute_process(
-      COMMAND "${git_executable}" tag --points-at HEAD
-      WORKING_DIRECTORY "${source_directory}"
-      RESULT_VARIABLE tags_result
-      OUTPUT_VARIABLE tags_output
-      ERROR_QUIET
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    set(version_tags)
-    if(tags_result EQUAL 0 AND NOT tags_output STREQUAL "")
-      string(REPLACE "\n" ";" exact_tags "${tags_output}")
-      foreach(candidate_tag IN LISTS exact_tags)
-        axk_parse_semver_tag("${candidate_tag}")
-        if(AXK_SEMVER_TAG_VALID)
-          list(APPEND version_tags "${candidate_tag}")
-        endif()
-      endforeach()
-    endif()
-    list(LENGTH version_tags version_tag_count)
-    if(version_tag_count GREATER 1)
-      list(JOIN version_tags ", " version_tag_list)
-      message(FATAL_ERROR "HEAD has multiple semantic version tags: ${version_tag_list}")
-    elseif(version_tag_count EQUAL 1)
-      list(GET version_tags 0 selected_tag)
-    endif()
+  elseif(branch_name STREQUAL "" AND NOT git_executable STREQUAL "")
+    axk_find_exact_semver_tag("${git_executable}" "${source_directory}")
+    set(selected_tag "${AXK_EXACT_SEMVER_TAG}")
   endif()
 
   if(NOT selected_tag STREQUAL "")
-    axk_parse_semver_tag("${selected_tag}")
-    string(SUBSTRING "${selected_tag}" 1 -1 semantic_version)
+    axk_parse_semver_ref("${selected_tag}")
+    set(semantic_version "${AXK_SEMVER_NORMALIZED}")
     set(version_major "${AXK_SEMVER_MAJOR}")
     set(version_minor "${AXK_SEMVER_MINOR}")
     set(version_patch "${AXK_SEMVER_PATCH}")
@@ -156,6 +101,17 @@ function(axk_derive_project_version source_directory)
     set(project_version "${version_major}.${version_minor}.${version_patch}")
     set(release_tag "${selected_tag}")
     if(NOT version_prerelease STREQUAL "")
+      set(is_prerelease ON)
+    endif()
+  elseif(NOT branch_name STREQUAL "")
+    axk_parse_version_branch("${branch_name}")
+    if(AXK_VERSION_BRANCH_VALID)
+      set(semantic_version "${AXK_VERSION_BRANCH_CORE}-pre")
+      set(project_version "${AXK_VERSION_BRANCH_CORE}")
+      set(version_major "${AXK_VERSION_BRANCH_MAJOR}")
+      set(version_minor "${AXK_VERSION_BRANCH_MINOR}")
+      set(version_patch "${AXK_VERSION_BRANCH_PATCH}")
+      set(version_prerelease pre)
       set(is_prerelease ON)
     endif()
   endif()

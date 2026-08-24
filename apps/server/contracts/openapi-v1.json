@@ -2844,6 +2844,16 @@
               "null"
             ]
           },
+          "partitionCapacity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImagePartitionCapacity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "partitionIndex": {
             "maximum": 255,
             "minimum": 0,
@@ -2863,6 +2873,14 @@
             ],
             "type": "string"
           },
+          "sizeBytes": {
+            "description": "Deduplicated stored size of objects contained by a volume; null for other content nodes or when unavailable.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "volumeDirectoryId": {
             "maximum": 4294967295,
             "minimum": 0,
@@ -2878,6 +2896,8 @@
           "depth",
           "partitionIndex",
           "volumeDirectoryId",
+          "partitionCapacity",
+          "sizeBytes",
           "kind",
           "displayName",
           "childCount",
@@ -3083,9 +3103,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "requested": {
+            "type": "boolean"
+          },
           "role": {
             "enum": [
               "TARGET",
+              "REFERRER",
               "DEPENDENCY"
             ]
           },
@@ -3117,6 +3141,7 @@
           "volumeName",
           "role",
           "status",
+          "requested",
           "selected",
           "storedSizeBytes",
           "freedClusters",
@@ -3137,6 +3162,15 @@
           "canApply": {
             "description": "True when at least one requested object can be deleted safely",
             "type": "boolean"
+          },
+          "cleanupObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
           },
           "estimatedFreedBytes": {
             "description": "Allocated storage bytes expected to become free for the selected deletion closure",
@@ -3164,6 +3198,15 @@
               "$ref": "#/components/schemas/ImageObjectDeletionReference"
             },
             "type": "array"
+          },
+          "referrerObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
           },
           "revision": {
             "minimum": 1,
@@ -3198,6 +3241,8 @@
           "imageId",
           "revision",
           "targetObjectIds",
+          "referrerObjectIds",
+          "cleanupObjectIds",
           "selectedObjectIds",
           "impacts",
           "references",
@@ -3334,6 +3379,15 @@
             "minLength": 1,
             "type": "string"
           },
+          "referrerObjectIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 1024,
+            "type": "array",
+            "uniqueItems": true
+          },
           "targetObjectIds": {
             "items": {
               "minLength": 1,
@@ -3349,6 +3403,7 @@
           "imageId",
           "expectedRevision",
           "targetObjectIds",
+          "referrerObjectIds",
           "cleanupObjectIds"
         ],
         "type": "object"
@@ -3479,6 +3534,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "sizeWithDependenciesBytes": {
+            "description": "Deduplicated stored size of this Program, Sample Bank, or Sample and its exact forward dependency closure; null when the closure is unavailable.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "type": {
             "maxLength": 16,
             "minLength": 1,
@@ -3509,6 +3572,7 @@
           "categoryName",
           "entryName",
           "sizeBytes",
+          "sizeWithDependenciesBytes",
           "waveform",
           "sequence"
         ],
@@ -3566,6 +3630,29 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "ImagePartitionCapacity": {
+        "additionalProperties": false,
+        "properties": {
+          "allocatedClusters": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "clusterSizeBytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "freeClusters": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "allocatedClusters",
+          "freeClusters",
+          "clusterSizeBytes"
         ],
         "type": "object"
       },
@@ -7319,25 +7406,24 @@
             "minLength": 1,
             "type": "string"
           },
-          "partitionIndex": {
-            "maximum": 7,
-            "minimum": 0,
-            "type": "integer"
-          },
           "revision": {
             "minimum": 1,
             "type": "integer"
           },
-          "volumeName": {
-            "minLength": 1,
-            "type": "string"
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ImageVolumeDeletionTarget"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
           "imageId",
           "revision",
-          "partitionIndex",
-          "volumeName",
+          "targets",
           "canDelete",
           "crossingRelationshipCount",
           "blockers"
@@ -7355,19 +7441,38 @@
             "minLength": 1,
             "type": "string"
           },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ImageVolumeDeletionTarget"
+            },
+            "maxItems": 1024,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "targets"
+        ],
+        "type": "object"
+      },
+      "ImageVolumeDeletionTarget": {
+        "additionalProperties": false,
+        "properties": {
           "partitionIndex": {
             "maximum": 7,
             "minimum": 0,
             "type": "integer"
           },
           "volumeName": {
+            "maxLength": 16,
             "minLength": 1,
             "type": "string"
           }
         },
         "required": [
-          "imageId",
-          "expectedRevision",
           "partitionIndex",
           "volumeName"
         ],
@@ -17807,6 +17912,7 @@
                     "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
+                    "referrerObjectIds": [],
                     "targetObjectIds": [
                       "x"
                     ]
@@ -17830,6 +17936,7 @@
                       "data": {
                         "blockers": [],
                         "canApply": false,
+                        "cleanupObjectIds": [],
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -17843,6 +17950,7 @@
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
                             "reason": "x",
+                            "requested": false,
                             "role": "TARGET",
                             "selected": false,
                             "status": "REQUIRED",
@@ -17851,6 +17959,7 @@
                           }
                         ],
                         "references": [],
+                        "referrerObjectIds": [],
                         "revision": 1,
                         "selectedObjectIds": [],
                         "targetObjectIds": [
@@ -17868,6 +17977,7 @@
                       "data": {
                         "blockers": [],
                         "canApply": false,
+                        "cleanupObjectIds": [],
                         "estimatedFreedBytes": 0,
                         "estimatedFreedClusters": 0,
                         "imageId": "x",
@@ -17881,6 +17991,7 @@
                             "partitionName": "x",
                             "prerequisiteObjectIds": [],
                             "reason": "x",
+                            "requested": false,
                             "role": "TARGET",
                             "selected": false,
                             "status": "REQUIRED",
@@ -17889,6 +18000,7 @@
                           }
                         ],
                         "references": [],
+                        "referrerObjectIds": [],
                         "revision": 1,
                         "selectedObjectIds": [],
                         "targetObjectIds": [
@@ -18217,6 +18329,7 @@
                     "cleanupObjectIds": [],
                     "expectedRevision": 1,
                     "imageId": "x",
+                    "referrerObjectIds": [],
                     "targetObjectIds": [
                       "x"
                     ]
@@ -26059,8 +26172,12 @@
                   "value": {
                     "expectedRevision": 1,
                     "imageId": "x",
-                    "partitionIndex": 0,
-                    "volumeName": "x"
+                    "targets": [
+                      {
+                        "partitionIndex": 0,
+                        "volumeName": "x"
+                      }
+                    ]
                   }
                 }
               },
@@ -26083,9 +26200,13 @@
                         "canDelete": false,
                         "crossingRelationshipCount": 0,
                         "imageId": "x",
-                        "partitionIndex": 0,
                         "revision": 1,
-                        "volumeName": "x"
+                        "targets": [
+                          {
+                            "partitionIndex": 0,
+                            "volumeName": "x"
+                          }
+                        ]
                       },
                       "meta": {
                         "requestId": "request-1"
@@ -26099,9 +26220,13 @@
                         "canDelete": false,
                         "crossingRelationshipCount": 0,
                         "imageId": "x",
-                        "partitionIndex": 0,
                         "revision": 1,
-                        "volumeName": "x"
+                        "targets": [
+                          {
+                            "partitionIndex": 0,
+                            "volumeName": "x"
+                          }
+                        ]
                       },
                       "meta": {
                         "requestId": "request-1",

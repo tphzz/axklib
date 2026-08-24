@@ -23,6 +23,12 @@ function(run_git repository)
 endfunction()
 
 function(generate repository output_cpp output_package output_metadata)
+  set(expected_semantic 0.0.0)
+  set(expected_project 0.0.0)
+  if(ARGC EQUAL 6)
+    set(expected_semantic "${ARGV4}")
+    set(expected_project "${ARGV5}")
+  endif()
   execute_process(
     COMMAND
       "${CMAKE_COMMAND}" -E env --unset=GITHUB_REF_TYPE --unset=GITHUB_REF_NAME
@@ -35,8 +41,8 @@ function(generate repository output_cpp output_package output_metadata)
       "-DAXK_VERSION_OUTPUT_CPP=${output_cpp}"
       "-DAXK_VERSION_OUTPUT_PACKAGE=${output_package}"
       "-DAXK_VERSION_OUTPUT_METADATA=${output_metadata}"
-      -DAXK_VERSION_EXPECTED_SEMANTIC=0.0.0
-      -DAXK_VERSION_EXPECTED_PROJECT=0.0.0
+      "-DAXK_VERSION_EXPECTED_SEMANTIC=${expected_semantic}"
+      "-DAXK_VERSION_EXPECTED_PROJECT=${expected_project}"
       "-DAXK_VERSION_GIT_EXECUTABLE=${GIT_EXECUTABLE}"
       -P "${AXK_BUILD_INFO_GENERATOR}"
     RESULT_VARIABLE result
@@ -116,12 +122,12 @@ execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
 generate("${repository}" "${output_cpp}" "${output_package}" "${output_metadata}")
 file(READ "${output_cpp}" dirty_cpp)
 file(READ "${output_package}" dirty_package)
-if(initial_cpp STREQUAL dirty_cpp OR NOT dirty_cpp MATCHES "-mod")
+if(initial_cpp STREQUAL dirty_cpp OR NOT dirty_cpp MATCHES "-dirty-[0-9a-f]+")
   message(FATAL_ERROR "dirty source did not refresh generated C++ metadata")
 endif()
 string(STRIP "${dirty_package}" dirty_package_basename)
 if(NOT dirty_package STREQUAL "${dirty_package_basename}\n" OR
-   NOT dirty_package_basename MATCHES "-mod$")
+   NOT dirty_package_basename MATCHES "-dirty-[0-9a-f]+$")
   message(FATAL_ERROR "dirty source did not refresh package basename")
 endif()
 
@@ -136,6 +142,30 @@ file(READ "${output_metadata}" restored_metadata)
 if(NOT restored_metadata STREQUAL initial_metadata)
   message(FATAL_ERROR "clean source changed version metadata")
 endif()
+
+run_git("${repository}" checkout -b release/v2.3.4)
+generate(
+  "${repository}"
+  "${output_cpp}"
+  "${output_package}"
+  "${output_metadata}"
+  2.3.4-pre
+  2.3.4
+)
+file(READ "${output_package}" version_branch_package)
+string(STRIP "${version_branch_package}" version_branch_package_basename)
+if(NOT version_branch_package STREQUAL "${version_branch_package_basename}\n" OR
+   NOT version_branch_package_basename MATCHES "^axklib-2[.]3[.]4-pre-[0-9a-f]+$")
+  message(FATAL_ERROR "unexpected version-branch package basename: ${version_branch_package}")
+endif()
+file(READ "${output_metadata}" version_branch_metadata)
+string(JSON version_branch_semantic GET "${version_branch_metadata}" semantic_version)
+string(JSON version_branch_release GET "${version_branch_metadata}" is_release)
+if(NOT version_branch_semantic STREQUAL "2.3.4-pre" OR version_branch_release)
+  message(FATAL_ERROR "unexpected version-branch metadata: ${version_branch_metadata}")
+endif()
+run_git("${repository}" checkout main)
+generate("${repository}" "${output_cpp}" "${output_package}" "${output_metadata}")
 
 run_git("${repository}" checkout --detach)
 run_git("${repository}" tag v1.2.3)

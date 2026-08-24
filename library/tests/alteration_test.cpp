@@ -858,6 +858,110 @@ TEST(Alteration, DeleteVolumeDryRunMatchesApplyAndPreservesSource) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, DeletesMultipleVolumesFromCurrentRootDirectoryState) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-delete-volumes";
+    const auto source = root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    auto build = source_manifest();
+    axk::VolumeSpec survivor;
+    survivor.name = "Survivor";
+    build.partitions[0].volumes.push_back(std::move(survivor));
+    ASSERT_TRUE(axk::write_hds_image(build, source));
+    const auto source_before = bytes(source);
+
+    for (const auto &[first, second] : std::array{std::pair{"Retained", "Removed"}, std::pair{"Removed", "Retained"}}) {
+        const auto output = root / std::format("{}-then-{}.hds", first, second);
+        const axk::AlterationManifest manifest{
+            "1.0",
+            {
+                {"first", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, first}},
+                {"second", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, second}},
+            },
+        };
+
+        const auto altered = axk::alter_hds(source, manifest, output);
+        ASSERT_TRUE(altered) << altered.error().message;
+        ASSERT_EQ(altered->operations.size(), 2U);
+        const auto reopened = axk::open_image(output);
+        ASSERT_TRUE(reopened) << reopened.error().message;
+        const auto &root_record =
+            *std::ranges::find(reopened->partitions()[0].records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+        EXPECT_TRUE(std::ranges::contains(root_record.directory_entries, "Survivor", &axk::DirectoryEntry::name));
+        EXPECT_FALSE(std::ranges::contains(root_record.directory_entries, "Retained", &axk::DirectoryEntry::name));
+        EXPECT_FALSE(std::ranges::contains(root_record.directory_entries, "Removed", &axk::DirectoryEntry::name));
+        EXPECT_EQ(bytes(source), source_before);
+    }
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, PlansVolumeDeletionRelationshipsAcrossTheSelectedBatch) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-delete-volume-plan";
+    const auto source = root / "source.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_hds_image(source_manifest(), source));
+    auto state = axk::alteration_internal::open_transaction_state(source, {}, nullptr, true);
+    ASSERT_TRUE(state) << state.error().message;
+    const auto &root_record =
+        *std::ranges::find(state->container.partitions()[0].records, axk::SfsId{1}, &axk::IndexRecord::sfs_id);
+    const auto volume_id = [&](std::string_view name) {
+        const auto found = std::ranges::find(root_record.directory_entries, name, &axk::DirectoryEntry::name);
+        EXPECT_NE(found, root_record.directory_entries.end());
+        return axk::SfsId{found->target_link_id->value};
+    };
+    const auto retained = volume_id("Retained");
+    const auto removed = volume_id("Removed");
+    state->known_edges = {{axk::PartitionIndex{0U}, retained, removed}};
+    const axk::AlterationManifest batch{
+        "1.0",
+        {
+            {"first", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Retained"}},
+            {"second", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Removed"}},
+        },
+    };
+
+    const auto planned = axk::alteration_internal::plan_volume_deletion_batch(*state, batch, {});
+    ASSERT_TRUE(planned) << planned.error().message;
+    ASSERT_TRUE(*planned);
+    EXPECT_TRUE((*planned)->contains({axk::PartitionIndex{0U}, retained}));
+    EXPECT_TRUE((*planned)->contains({axk::PartitionIndex{0U}, removed}));
+
+    const axk::AlterationManifest partial{"1.0",
+                                          {{"only", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Retained"}}}};
+    const auto rejected = axk::alteration_internal::plan_volume_deletion_batch(*state, partial, {});
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("relationship crosses"), std::string::npos);
+
+    const axk::AlterationManifest duplicate{
+        "1.0",
+        {
+            {"first", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Retained"}},
+            {"second", axk::DeleteVolumeOperation{axk::PartitionIndex{0U}, "Retained"}},
+        },
+    };
+    const auto duplicate_plan = axk::alteration_internal::plan_volume_deletion_batch(*state, duplicate, {});
+    ASSERT_FALSE(duplicate_plan);
+    EXPECT_NE(duplicate_plan.error().message.find("unique"), std::string::npos);
+
+    state->approved_volume_deletion_batch = **planned;
+    const auto first = axk::alteration_internal::delete_volume(
+        *state, {"first", "delete_volume"}, std::get<axk::DeleteVolumeOperation>(batch.operations[0].data), {});
+    ASSERT_TRUE(first) << first.error().message;
+    const auto second = axk::alteration_internal::delete_volume(
+        *state, {"second", "delete_volume"}, std::get<axk::DeleteVolumeOperation>(batch.operations[1].data), {});
+    ASSERT_TRUE(second) << second.error().message;
+    auto root_payload = axk::alteration_internal::current_root_payload(*state, state->partitions.at(0U), {});
+    ASSERT_TRUE(root_payload) << root_payload.error().message;
+    const auto entries = axk::alteration_internal::parse_directory(*root_payload, axk::SfsId{1U});
+    ASSERT_TRUE(entries) << entries.error().message;
+    EXPECT_FALSE(std::ranges::contains(*entries, "Retained", &axk::alteration_internal::ParsedDirectoryEntry::name));
+    EXPECT_FALSE(std::ranges::contains(*entries, "Removed", &axk::alteration_internal::ParsedDirectoryEntry::name));
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, RejectsPartitionSupportDirectoryAsAVolumeTarget) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-reserved-prf3";
     const auto source = root / "source.hds";

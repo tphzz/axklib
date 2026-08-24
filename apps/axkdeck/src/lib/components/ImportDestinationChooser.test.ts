@@ -3,12 +3,16 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import ImportDestinationChooser from './ImportDestinationChooser.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+const destinationSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/ImportDestinationChooser.svelte'),
+    'utf8',
+);
 
 const partitions = [
     { partitionIndex: 0, name: 'SOUNDS 01' },
@@ -38,30 +42,47 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ImportDestinationChooser', () => {
-    it('preselects the exact volume and exposes every partition volume through an autocomplete', async () => {
+    it('uses one compact destination-volume row with concise mode labels', () => {
         render(ImportDestinationChooser, { props: props() });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
-        expect(combobox.value).toBe('SOUNDS 01 / Strings');
+        expect(screen.getByText('Destination volume')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Existing' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'New' })).toBeTruthy();
+        expect(screen.getByRole('combobox', { name: 'Destination partition' })).toBeTruthy();
+        expect(screen.getByRole('combobox', { name: 'Destination volume' })).toBeTruthy();
+        expect(destinationSource).toMatch(
+            /\.import-destination\s*\{[^}]*grid-template-columns:\s*max-content max-content minmax\([^;]+\) minmax\(0, 1fr\)/s,
+        );
+        const destinationRule = destinationSource.match(/\.import-destination\s*\{[^}]*\}/s)?.[0];
+        expect(destinationRule).not.toContain('margin-bottom');
+    });
+
+    it('preselects the exact volume and exposes only volumes from the selected partition', async () => {
+        render(ImportDestinationChooser, { props: props() });
+
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
+        expect(combobox.value).toBe('Strings');
         await fireEvent.focus(combobox);
 
         expect(screen.getByRole('listbox', { name: 'Volumes' })).toBeTruthy();
-        expect(screen.getAllByRole('option')).toHaveLength(3);
-        expect(screen.getByRole('option', { name: /SOUNDS 02.*Pianos/ })).toBeTruthy();
+        const options = within(screen.getByRole('listbox', { name: 'Volumes' }));
+        expect(options.getAllByRole('option')).toHaveLength(2);
+        expect(options.getByRole('option', { name: 'Pianos' })).toBeTruthy();
+        expect(options.queryByRole('option', { name: /SOUNDS 02/ })).toBeNull();
     });
 
     it('filters volumes and selects an exact destination with the keyboard', async () => {
         const onvolume = vi.fn();
-        render(ImportDestinationChooser, { props: props({ partitionIndex: null, volumeName: '', onvolume }) });
+        render(ImportDestinationChooser, { props: props({ volumeName: '', onvolume }) });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' });
-        await fireEvent.input(combobox, { target: { value: 'sounds 02' } });
-        expect(onvolume).toHaveBeenLastCalledWith(null, '');
-        expect(screen.getAllByRole('option')).toHaveLength(1);
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
+        await fireEvent.input(combobox, { target: { value: 'piano' } });
+        expect(onvolume).toHaveBeenLastCalledWith(0, '');
+        expect(within(screen.getByRole('listbox', { name: 'Volumes' })).getAllByRole('option')).toHaveLength(1);
         await fireEvent.keyDown(combobox, { key: 'ArrowDown' });
         await fireEvent.keyDown(combobox, { key: 'Enter' });
 
-        expect(onvolume).toHaveBeenLastCalledWith(1, 'Pianos');
+        expect(onvolume).toHaveBeenLastCalledWith(0, 'Pianos');
     });
 
     it('clears the selected volume, reopens all options, and retains keyboard focus', async () => {
@@ -70,11 +91,26 @@ describe('ImportDestinationChooser', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Clear volume' }));
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' }) as HTMLInputElement;
-        expect(onvolume).toHaveBeenLastCalledWith(null, '');
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
+        expect(onvolume).toHaveBeenLastCalledWith(0, '');
         expect(combobox.value).toBe('');
         expect(document.activeElement).toBe(combobox);
-        expect(screen.getAllByRole('option')).toHaveLength(3);
+        expect(within(screen.getByRole('listbox', { name: 'Volumes' })).getAllByRole('option')).toHaveLength(2);
+    });
+
+    it('reports partition changes separately and disables volume selection for an empty partition', async () => {
+        const onpartition = vi.fn();
+        render(ImportDestinationChooser, {
+            props: props({ partitionIndex: 1, volumeName: '', volumes: volumes.slice(0, 2), onpartition }),
+        });
+
+        const partition = screen.getByRole('combobox', { name: 'Destination partition' });
+        await fireEvent.change(partition, { target: { value: '0' } });
+        expect(onpartition).toHaveBeenCalledWith(0);
+
+        const volume = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
+        expect(volume.disabled).toBe(true);
+        expect(volume.placeholder).toBe('No volumes in this partition');
     });
 
     it('uses the same dark dialog control treatment for a new volume name', async () => {
@@ -82,17 +118,19 @@ describe('ImportDestinationChooser', () => {
             props: props({ mode: 'create', partitionIndex: 0, volumeName: '' }),
         });
 
-        expect(screen.getByRole('textbox', { name: 'Volume name' }).classList).toContain('dialog-field-control');
-        expect(screen.getByRole('combobox', { name: 'Partition' }).classList).toContain('dialog-field-control');
+        expect(screen.getByRole('textbox', { name: 'New volume name' }).classList).toContain('dialog-field-control');
+        expect(screen.getByRole('combobox', { name: 'Destination partition' }).classList).toContain(
+            'dialog-field-control',
+        );
     });
 
     it('uses the shared compact dialog typography and dark autocomplete palette', async () => {
         render(ImportDestinationChooser, { props: props() });
 
-        const combobox = screen.getByRole('combobox', { name: 'Volume' });
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
         await fireEvent.focus(combobox);
         const listbox = screen.getByRole('listbox', { name: 'Volumes' });
-        const option = screen.getAllByRole('option')[0];
+        const option = within(listbox).getAllByRole('option')[0];
 
         expect(combobox.classList).toContain('dialog-field-control');
         expect(listbox.classList).toContain('dialog-autocomplete-list');

@@ -187,7 +187,7 @@
     .issue-severity,
     .issue-row small {
         color: var(--color-text-muted);
-        font-size: 10px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .issue-row small {

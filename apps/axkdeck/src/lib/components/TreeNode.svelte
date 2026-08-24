@@ -1,6 +1,10 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import { formatAllocationBytes } from '../allocationInspector';
     import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
+    import { formatStoredSize } from '../formatBytes';
+    import { selectionMode, type ObjectSelectionMode } from '../objectSelection';
+    import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem } from '../types';
     import Icon from './Icon.svelte';
     import TreeNode from './TreeNode.svelte';
@@ -8,9 +12,11 @@
     interface Props {
         item: DiskTreeItem;
         selectedId: string;
+        selectedVolumeIds?: readonly string[];
         depth?: number;
         parentId?: string;
-        onselect: (item: DiskTreeItem) => void;
+        onselect: (item: DiskTreeItem, mode: ObjectSelectionMode) => void;
+        onregister?: (item: DiskTreeItem, present: boolean) => void;
         onloadchildren: (
             parentId: string,
             offset: number,
@@ -25,15 +31,18 @@
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
         allocationInspectionEnabled?: boolean;
+        samplerOrderingEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
     }
 
     let {
         item,
         selectedId,
+        selectedVolumeIds = [],
         depth = 0,
         parentId = '',
         onselect,
+        onregister = () => undefined,
         onloadchildren,
         volumeActionsEnabled = false,
         partitionActionsEnabled = false,
@@ -44,6 +53,7 @@
         audioExportEnabled = false,
         mediaConversionEnabled = false,
         allocationInspectionEnabled = false,
+        samplerOrderingEnabled = false,
         onrequestmenu = () => undefined,
     }: Props = $props();
     let expanded = $state(false);
@@ -52,7 +62,10 @@
     let loading = $state(false);
     let loadError = $state('');
     let initialized = false;
+    const selected = $derived(item.kind === 'volume' ? selectedVolumeIds.includes(item.id) : selectedId === item.id);
     const hasChildren = $derived(item.kind !== 'volume' && totalCount > 0);
+    const loadCompletePartition = $derived(samplerOrderingEnabled && item.kind === 'partition');
+    const orderedChildren = $derived(loadCompletePartition ? orderSamplerTreeItems(children, 'volume') : children);
     const metadata = $derived(
         item.kind === 'partition' && item.partitionIndex !== undefined
             ? `[Partition ${item.partitionIndex}]`
@@ -60,18 +73,59 @@
               ? '[Volume]'
               : '',
     );
+    const partitionCapacity = $derived(item.kind === 'partition' ? item.partitionCapacity : undefined);
+    const usableClusters = $derived(
+        partitionCapacity ? partitionCapacity.allocatedClusters + partitionCapacity.freeClusters : 0,
+    );
+    const usedPercent = $derived(
+        partitionCapacity && usableClusters > 0
+            ? Math.min(100, Math.round((partitionCapacity.allocatedClusters / usableClusters) * 100))
+            : 0,
+    );
+    const capacityLevel = $derived(usedPercent >= 90 ? 'critical' : usedPercent >= 80 ? 'warning' : 'normal');
+    const partitionTooltipId = $derived(`partition-capacity-${item.id}`);
+    const volumeTooltipId = $derived(`volume-size-${item.id}`);
+    const tooltipId = $derived(
+        loadCompletePartition
+            ? partitionTooltipId
+            : item.kind === 'volume' && item.sizeBytes !== undefined
+              ? volumeTooltipId
+              : undefined,
+    );
+    const partitionVolumeText = $derived(`${item.childCount} ${item.childCount === 1 ? 'volume' : 'volumes'}`);
+    const partitionCapacityText = $derived(
+        partitionCapacity
+            ? `${partitionCapacity.allocatedClusters.toLocaleString()} of ${usableClusters.toLocaleString()} clusters used`
+            : 'Capacity unavailable',
+    );
+    const partitionSpaceText = $derived(
+        partitionCapacity
+            ? `${formatAllocationBytes(partitionCapacity.allocatedClusters * partitionCapacity.clusterSizeBytes)} of ${formatAllocationBytes(usableClusters * partitionCapacity.clusterSizeBytes)} used`
+            : '',
+    );
 
     function containsSelected(nodes: DiskTreeItem[]): boolean {
         return nodes.some((node) => node.id === selectedId || containsSelected(node.children ?? []));
     }
 
     $effect(() => {
+        onregister(item, true);
+        return () => onregister(item, false);
+    });
+
+    $effect(() => {
         if (initialized) return;
-        expanded = item.kind === 'disk' || item.id === selectedId || containsSelected(item.children ?? []);
+        expanded =
+            item.kind === 'disk' ||
+            loadCompletePartition ||
+            item.id === selectedId ||
+            containsSelected(item.children ?? []);
         children = item.children ?? [];
         totalCount = item.childCount;
         initialized = true;
-        if (expanded && children.length === 0 && hasChildren) void loadMore();
+        if (expanded && children.length < totalCount && (children.length === 0 || loadCompletePartition)) {
+            void loadMore();
+        }
     });
 
     async function loadMore(): Promise<void> {
@@ -79,15 +133,21 @@
         loading = true;
         loadError = '';
         try {
-            const page = await onloadchildren(item.id, children.length, 64);
-            if (!Number.isSafeInteger(page.totalCount) || page.totalCount < children.length + page.items.length) {
-                throw new Error('The server returned an invalid tree page');
-            }
-            if (page.items.length === 0 && children.length < page.totalCount) {
-                throw new Error('The server returned an incomplete tree page');
-            }
-            children = [...children, ...page.items];
-            totalCount = page.totalCount;
+            const loaded = [...children];
+            let loadedTotalCount = totalCount;
+            do {
+                const page = await onloadchildren(item.id, loaded.length, 64);
+                if (!Number.isSafeInteger(page.totalCount) || page.totalCount < loaded.length + page.items.length) {
+                    throw new Error('The server returned an invalid tree page');
+                }
+                if (page.items.length === 0 && loaded.length < page.totalCount) {
+                    throw new Error('The server returned an incomplete tree page');
+                }
+                loaded.push(...page.items);
+                loadedTotalCount = page.totalCount;
+            } while (loadCompletePartition && loaded.length < loadedTotalCount);
+            children = loaded;
+            totalCount = loadedTotalCount;
         } catch (reason) {
             loadError = reason instanceof Error ? reason.message : String(reason);
         } finally {
@@ -98,7 +158,9 @@
     async function toggle(): Promise<void> {
         if (!hasChildren) return;
         expanded = !expanded;
-        if (expanded && children.length === 0) await loadMore();
+        if (expanded && children.length < totalCount && (children.length === 0 || loadCompletePartition)) {
+            await loadMore();
+        }
     }
 
     function canOpenMenu(): boolean {
@@ -191,7 +253,8 @@
 
 <div>
     <div
-        class:selected={selectedId === item.id}
+        class:selected
+        class:partition-summary-row={loadCompletePartition}
         class="tree-row group"
         style:--tree-depth={depth}
         data-import-drop-volume={item.kind === 'volume' ? item.name : undefined}
@@ -216,27 +279,62 @@
         {:else}
             <span class="tree-chevron" aria-hidden="true"></span>
         {/if}
-        <button
-            class="tree-item-select"
-            type="button"
-            aria-current={selectedId === item.id ? 'true' : undefined}
-            data-tree-id={item.id}
-            data-tree-parent-id={parentId}
-            onclick={() => onselect(item)}
-            onkeydown={(event) => void handleTreeKeyboard(event)}
-            oncontextmenu={openContextMenu}
-        >
-            <span class:volume={item.kind === 'volume'} class="tree-icon"
-                ><Icon
-                    name={item.kind === 'disk' ? 'disc' : item.kind === 'object' ? 'waveform' : 'folder'}
-                    size={14}
-                /></span
+        <div class="tree-item-stack">
+            <button
+                class="tree-item-select"
+                type="button"
+                aria-current={selectedId === item.id ? 'true' : undefined}
+                aria-pressed={item.kind === 'volume' ? selected : undefined}
+                aria-describedby={tooltipId}
+                data-tree-id={item.id}
+                data-tree-kind={item.kind}
+                data-tree-parent-id={parentId}
+                onclick={(event) => onselect(item, selectionMode(event))}
+                ondblclick={() => {
+                    if (item.kind === 'partition') void toggle();
+                }}
+                onkeydown={(event) => void handleTreeKeyboard(event)}
+                oncontextmenu={openContextMenu}
             >
-            <span class="tree-item-name" style:white-space="pre">{item.name}</span>
-            {#if metadata}<span class="tree-item-metadata">{metadata}</span>{/if}
-            {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
-                ></span>{/if}
-        </button>
+                <span class:volume={item.kind === 'volume'} class="tree-icon"
+                    ><Icon
+                        name={item.kind === 'disk' ? 'disc' : item.kind === 'object' ? 'waveform' : 'folder'}
+                        size={14}
+                    /></span
+                >
+                <span class="tree-item-name" style:white-space="pre">{item.name}</span>
+                {#if metadata}<span class="tree-item-metadata">{metadata}</span>{/if}
+                {#if item.kind === 'disk'}<span class="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"
+                    ></span>{/if}
+            </button>
+            {#if loadCompletePartition}
+                {#if partitionCapacity}
+                    <span
+                        class:warning={capacityLevel === 'warning'}
+                        class:critical={capacityLevel === 'critical'}
+                        class="partition-capacity"
+                        role="progressbar"
+                        aria-label={`${usedPercent}% used`}
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow={usedPercent}
+                    >
+                        <span class="partition-capacity-fill" style:width={`${usedPercent}%`}></span>
+                    </span>
+                {:else}
+                    <span class="partition-capacity unavailable" aria-hidden="true"></span>
+                {/if}
+                <span id={partitionTooltipId} class="tree-item-tooltip" role="tooltip">
+                    <span>{partitionVolumeText}</span>
+                    <span>{partitionCapacityText}</span>
+                    {#if partitionSpaceText}<span>{partitionSpaceText}</span>{/if}
+                </span>
+            {:else if item.kind === 'volume' && item.sizeBytes !== undefined}
+                <span id={volumeTooltipId} class="tree-item-tooltip" role="tooltip">
+                    <span>Size: {formatStoredSize(item.sizeBytes)}</span>
+                </span>
+            {/if}
+        </div>
     </div>
 
     {#if expanded && hasChildren}
@@ -247,13 +345,15 @@
                     <button type="button" onclick={() => void loadMore()}>Retry</button>
                 </div>
             {/if}
-            {#each children as child (child.id)}
+            {#each orderedChildren as child (child.id)}
                 <TreeNode
                     item={child}
                     {selectedId}
+                    {selectedVolumeIds}
                     depth={depth + 1}
                     parentId={item.id}
                     {onselect}
+                    {onregister}
                     {onloadchildren}
                     {volumeActionsEnabled}
                     {partitionActionsEnabled}
@@ -264,6 +364,7 @@
                     {audioExportEnabled}
                     {mediaConversionEnabled}
                     {allocationInspectionEnabled}
+                    {samplerOrderingEnabled}
                     {onrequestmenu}
                 />
             {/each}
@@ -282,3 +383,96 @@
         </div>
     {/if}
 </div>
+
+<style>
+    .tree-row {
+        position: relative;
+    }
+
+    .partition-summary-row {
+        height: 27px;
+    }
+
+    .partition-summary-row > .tree-chevron {
+        align-self: flex-start;
+        margin-top: 4px;
+    }
+
+    .tree-item-stack {
+        position: relative;
+        min-width: 0;
+        height: 100%;
+        flex: 1;
+    }
+
+    .tree-item-stack > .tree-item-select {
+        width: 100%;
+        height: 100%;
+    }
+
+    .partition-summary-row .tree-item-select {
+        box-sizing: border-box;
+        padding-bottom: 6px;
+    }
+
+    .partition-capacity {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 1px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 1px;
+        background: var(--color-border);
+        pointer-events: none;
+    }
+
+    .partition-capacity.unavailable {
+        border-bottom: 1px dashed var(--color-border);
+        background: transparent;
+        opacity: 0.55;
+    }
+
+    .partition-capacity-fill {
+        display: block;
+        height: 100%;
+        background: var(--color-accent);
+    }
+
+    .partition-capacity.warning .partition-capacity-fill {
+        background: var(--color-brand);
+    }
+
+    .partition-capacity.critical .partition-capacity-fill {
+        background: var(--color-danger);
+    }
+
+    .tree-item-tooltip {
+        position: absolute;
+        z-index: 70;
+        top: calc(100% + 3px);
+        right: 4px;
+        display: grid;
+        width: max-content;
+        max-width: 230px;
+        gap: 2px;
+        padding: 6px 8px;
+        color: var(--color-text);
+        border: 1px solid var(--color-border);
+        border-radius: 5px;
+        background: var(--color-panel-raised);
+        box-shadow: 0 8px 20px rgb(0 0 0 / 35%);
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-2px);
+        transition:
+            opacity 100ms ease,
+            transform 100ms ease;
+    }
+
+    .tree-row:hover > .tree-item-stack > .tree-item-tooltip,
+    .tree-item-select:focus-visible ~ .tree-item-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+    }
+</style>

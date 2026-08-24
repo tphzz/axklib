@@ -1881,6 +1881,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "imageId": image_id,
                 "expectedRevision": 2,
                 "targetObjectIds": [sample["id"]],
+                "referrerObjectIds": [],
                 "cleanupObjectIds": [],
             }
             status, deletion_inspection = http_request(

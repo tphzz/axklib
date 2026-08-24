@@ -34,7 +34,6 @@ interface ExportDialogState {
 interface AppDialogState {
     pickerRequest: unknown;
     imageSession: ImageSessionDialogState;
-    workspaceManagerOpen: boolean;
     connectionSettings: unknown;
     mutation: MutationDialogState;
     packageImport: RequestDialogState;
@@ -56,7 +55,6 @@ export function hasOpenAppDialog(state: AppDialogState): boolean {
         state.pickerRequest,
         state.imageSession.companionRequest,
         state.imageSession.hardDiskDirectory,
-        state.workspaceManagerOpen,
         state.connectionSettings,
         state.mutation.volumeAction,
         state.mutation.placementRepairRequest,

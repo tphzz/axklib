@@ -103,12 +103,20 @@ struct ImageSessionRead {
     std::shared_ptr<void> lease;
 };
 
+struct ImagePartitionCapacity {
+    std::uint32_t allocated_clusters{};
+    std::uint32_t free_clusters{};
+    std::uint32_t cluster_size_bytes{};
+};
+
 struct ImageContentItem {
     std::string id;
     std::optional<std::string> parent_id;
     std::size_t depth{};
     std::optional<std::uint8_t> partition_index;
     std::optional<std::uint32_t> volume_directory_id;
+    std::optional<ImagePartitionCapacity> partition_capacity;
+    std::optional<std::uint64_t> size_bytes;
     std::string kind;
     std::string name;
     std::string display_name;
@@ -166,6 +174,7 @@ struct ImageObjectItem {
     std::string category_name;
     std::string entry_name;
     std::uint64_t stored_size_bytes{};
+    std::optional<std::uint64_t> size_with_dependencies_bytes;
     std::optional<WaveformMetadata> waveform;
     std::optional<SequenceMetadata> sequence;
 };
@@ -243,6 +252,7 @@ struct ImageObjectDeletionImpact {
     std::string volume_name;
     std::string role;
     std::string status;
+    bool requested{};
     bool selected{};
     std::uint64_t stored_size_bytes{};
     std::uint64_t freed_clusters{};
@@ -267,6 +277,8 @@ struct ImageObjectDeletionInspection {
     std::string image_id;
     std::uint64_t revision{};
     std::vector<std::string> target_object_ids;
+    std::vector<std::string> referrer_object_ids;
+    std::vector<std::string> cleanup_object_ids;
     std::vector<std::string> selected_object_ids;
     std::vector<ImageObjectDeletionImpact> impacts;
     std::vector<ImageObjectDeletionReference> references;
@@ -427,6 +439,7 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const std::vector<std::string> &target_object_ids,
+                                                                const std::vector<std::string> &referrer_object_ids,
                                                                 const std::vector<std::string> &cleanup_object_ids);
     [[nodiscard]] Result<ImageWaveDataOrphanInspection>
     inspect_wave_data_orphans(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,

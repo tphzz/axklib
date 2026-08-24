@@ -21,6 +21,7 @@ function object(objectType: string, name: string): SamplerObject {
         categoryName: objectType,
         sfsId: 0,
         storedSizeBytes: 128,
+        sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
         frameCount: 44_100,
@@ -118,6 +119,7 @@ describe('ContainedObjectWorkspace', () => {
 
     it('does not apply the standalone filter to Sample Bank members', () => {
         const bank = structure('SBAC', 'Brass');
+        bank.object.sizeWithDependenciesBytes = 2048;
         const member = structure('SBNK', 'Banked Brass');
         member.sampleBankObjectIds = [bank.objectId];
         member.membershipLabel = 'Sample Bank: Brass';
@@ -139,6 +141,8 @@ describe('ContainedObjectWorkspace', () => {
 
         expect(screen.queryByRole('checkbox', { name: 'Show only standalone' })).toBeNull();
         expect(screen.getByRole('button', { name: 'Inspect Banked Brass' })).toBeTruthy();
+        expect(screen.getByText('1 Sample · 128 B · 2 KiB incl. deps.')).toBeTruthy();
+        expect(document.querySelectorAll('[title*="Object size with deps.: 2 KiB"]')).toHaveLength(2);
     });
 
     it('navigates vertically within a lane and horizontally through the hierarchy', async () => {

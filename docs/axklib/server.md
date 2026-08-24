@@ -34,12 +34,22 @@ but never files, while choosing a workspace. This temporary broad view uses the
 server process's operating-system permissions. Once a directory is committed,
 all normal reads and writes return to the relative-path sandbox above.
 
-Workspace configuration is stored per user at:
+An independently launched server stores workspace configuration per user at:
 
-- `$XDG_CONFIG_HOME/axkdeck/workspaces.json`, or
-  `~/.config/axkdeck/workspaces.json`, on Linux;
-- `%APPDATA%\axkdeck\workspaces.json` on Windows; and
-- `~/Library/Application Support/axkdeck/workspaces.json` on macOS.
+- `$XDG_CONFIG_HOME/tphzz/axklib-server/workspaces.json`, or
+  `~/.config/tphzz/axklib-server/workspaces.json`, on Linux;
+- `%APPDATA%\tphzz\axklib-server\workspaces.json` on Windows; and
+- `~/Library/Application Support/tphzz/axklib-server/workspaces.json` on macOS.
+
+Axkdeck owns the local server process it launches and passes a distinct sidecar
+registry explicitly. That registry is
+`tphzz/axkdeck/axklib-server/workspaces.json` below the platform configuration
+root. Consequently, a standalone local server can run with its own workspace
+configuration without modifying axkdeck's sidecar configuration. A remote
+server likewise keeps its registry on the remote host; axkdeck does not copy or
+reinterpret it.
+
+The earlier unreleased filenames and locations are not read or migrated.
 
 Use `--workspace-store PATH` or the JSON `workspaceStore` setting for a
 deliberate override. Missing directories remain in the registry with an
@@ -243,6 +253,25 @@ response reports `mediaSourceKind: "AXK_OBJECT_DIRECTORY"` when bounded
 file-prefix inspection recognizes Yamaha object data, otherwise `null`.
 Inspection does not decode complete payloads or recurse beyond one related
 disk-folder level.
+
+### Image browsing size accounting
+
+Image object responses expose `sizeBytes` as the complete logical stored size
+of that object file or SFS record, including its object metadata and stored
+payload. Programs, Sample Banks, and Samples also expose
+`sizeWithDependenciesBytes`. This is an exact, deduplicated forward-closure
+total using the same known relationship requirements as portable-package
+export: a Program includes its assigned Sample Banks and Samples, a Sample Bank
+includes its member Samples, and a Sample includes its left and right Wave
+Data. The value is `null` when any required relationship is missing,
+ambiguous, cyclic, or otherwise unavailable; clients must not present an
+incomplete lower bound as an exact total.
+
+Volume content nodes expose nullable `sizeBytes` as the deduplicated sum of all
+contained object sizes. These values describe logical stored bytes and apply to
+all readable media. They do not include SFS cluster rounding, allocation slack,
+or filesystem support structures and therefore must not be used as physical
+free-space or import-capacity figures.
 
 ### Image integrity and mutation admission
 

@@ -21,6 +21,7 @@ const object: SamplerObject = {
     categoryName: 'PROG',
     sfsId: 8,
     storedSizeBytes: 912,
+    sizeWithDependenciesBytes: null,
     sampleRate: 0,
     rootKey: 0,
     frameCount: 0,

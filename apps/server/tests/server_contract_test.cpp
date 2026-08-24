@@ -167,8 +167,18 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
 
     const auto &content_item = document.at("components").at("schemas").at("ImageContentItem");
     EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "scopeRole"));
+    EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "partitionCapacity"));
+    EXPECT_TRUE(std::ranges::contains(content_item.at("required"), "sizeBytes"));
+    EXPECT_EQ(content_item.at("properties").at("sizeBytes").at("type"), nlohmann::json::array({"integer", "null"}));
+    const auto &partition_capacity = document.at("components").at("schemas").at("ImagePartitionCapacity");
+    EXPECT_EQ(partition_capacity.at("required"),
+              nlohmann::json::array({"allocatedClusters", "freeClusters", "clusterSizeBytes"}));
     EXPECT_EQ(content_item.at("properties").at("scopeRole").at("enum"),
               nlohmann::json::array({"CONTAINED", "REFERENCE"}));
+    const auto &object_item = document.at("components").at("schemas").at("ImageObjectItem");
+    EXPECT_TRUE(std::ranges::contains(object_item.at("required"), "sizeWithDependenciesBytes"));
+    EXPECT_EQ(object_item.at("properties").at("sizeWithDependenciesBytes").at("type"),
+              nlohmann::json::array({"integer", "null"}));
 }
 
 TEST(ServerContract, SequenceMetadataSeparatesHeaderAndTimelineTempo) {
@@ -696,6 +706,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
     const auto request = nlohmann::json{{"imageId", "image-1"},
                                         {"expectedRevision", 4U},
                                         {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                                        {"referrerObjectIds", nlohmann::json::array()},
                                         {"cleanupObjectIds", nlohmann::json::array({"wave-1"})}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageObjectDeletionRequest", request));
 
@@ -712,6 +723,8 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                        {"imageId", "image-1"},
                        {"revision", 4U},
                        {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
+                       {"referrerObjectIds", nlohmann::json::array()},
+                       {"cleanupObjectIds", nlohmann::json::array({"wave-1"})},
                        {"selectedObjectIds", nlohmann::json::array({"program-1"})},
                        {"impacts", nlohmann::json::array({{{"objectId", "program-1"},
                                                            {"objectType", "PROG"},
@@ -721,6 +734,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                                                            {"volumeName", "Piano"},
                                                            {"role", "TARGET"},
                                                            {"status", "REQUIRED"},
+                                                           {"requested", true},
                                                            {"selected", true},
                                                            {"storedSizeBytes", 512U},
                                                            {"freedClusters", 1U},
@@ -734,6 +748,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
                                                            {"volumeName", "Piano"},
                                                            {"role", "TARGET"},
                                                            {"status", "BLOCKED"},
+                                                           {"requested", true},
                                                            {"selected", false},
                                                            {"storedSizeBytes", 512U},
                                                            {"freedClusters", 1U},
@@ -752,20 +767,25 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
 TEST(ServerContract, VolumeDeletionAndScopedPlacementRepairUseSeparateRevisionBoundedContracts) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto deletion_request = nlohmann::json{
-        {"imageId", "image-1"}, {"expectedRevision", 4U}, {"partitionIndex", 0U}, {"volumeName", "Samples"}};
+    const auto targets = nlohmann::json::array(
+        {{{"partitionIndex", 0U}, {"volumeName", "Samples"}}, {{"partitionIndex", 2U}, {"volumeName", "Programs"}}});
+    const auto deletion_request =
+        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"targets", targets}};
     EXPECT_TRUE(
         axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", deletion_request));
     auto invalid_partition = deletion_request;
-    invalid_partition["partitionIndex"] = 8U;
+    invalid_partition["targets"][0]["partitionIndex"] = 8U;
     EXPECT_FALSE(
         axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", invalid_partition));
+    auto duplicate_targets = deletion_request;
+    duplicate_targets["targets"].push_back(duplicate_targets["targets"].front());
+    EXPECT_FALSE(
+        axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", duplicate_targets));
 
     const auto deletion_inspection = nlohmann::json{
         {"imageId", "image-1"},
         {"revision", 4U},
-        {"partitionIndex", 0U},
-        {"volumeName", "Samples"},
+        {"targets", targets},
         {"canDelete", false},
         {"crossingRelationshipCount", 1U},
         {"blockers", nlohmann::json::array({{{"code", "KNOWN_RELATIONSHIP_CROSSES_VOLUME"},

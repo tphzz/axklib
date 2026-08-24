@@ -8,7 +8,6 @@ import { reportError } from '../../lib/diagnostics';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import {
     collectImportDestinations,
-    importDestination,
     initialImportDestination,
     type ImportDestinationMode,
     type ImportPartitionOption,
@@ -64,7 +63,7 @@ export class PackageBatchImportWorkflow {
         this.plannedItemIds = [];
         const destination = initialImportDestination(item) ?? {
             mode: 'existing' as const,
-            partitionIndex: null,
+            partitionIndex: this.destinations().partitions[0]?.partitionIndex ?? null,
             volumeName: '',
         };
         this.request = {
@@ -93,58 +92,48 @@ export class PackageBatchImportWorkflow {
         const request = this.request;
         if (!request || request.status === 'applying' || request.destinationStrategy === strategy) return;
         if (strategy === 'separate' && !separateVolumesAvailable(request.items.filter((item) => item.selected))) return;
-        this.updateDestination({ destinationStrategy: strategy }, true);
+        this.updateDestination({ destinationStrategy: strategy });
     }
 
     setDestinationMode(mode: ImportDestinationMode): void {
         const request = this.request;
         if (!request || request.status === 'applying' || request.destinationMode === mode) return;
         const destinations = this.destinations();
-        const currentVolume = destinations.volumes.find(
-            (option) =>
-                option.partitionIndex === request.destinationPartitionIndex &&
-                option.volumeName === request.destinationVolumeName,
-        );
-        const existingVolume = currentVolume ?? destinations.volumes[0];
-        this.updateDestination(
-            {
-                destinationStrategy: 'shared',
-                destinationMode: mode,
-                destinationPartitionIndex:
-                    mode === 'existing'
-                        ? (existingVolume?.partitionIndex ?? null)
-                        : (request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null),
-                destinationVolumeName:
-                    mode === 'existing' ? (existingVolume?.volumeName ?? '') : suggestedSharedVolumeName(request.items),
-            },
-            true,
-        );
+        this.updateDestination({
+            destinationStrategy: 'shared',
+            destinationMode: mode,
+            destinationPartitionIndex:
+                request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null,
+            destinationVolumeName: mode === 'existing' ? '' : suggestedSharedVolumeName(request.items),
+        });
     }
 
     setExistingVolume(partitionIndex: number | null, volumeName: string): void {
         const request = this.request;
         if (!request || request.status === 'applying') return;
-        this.updateDestination(
-            {
-                destinationStrategy: 'shared',
-                destinationMode: 'existing',
-                destinationPartitionIndex: partitionIndex,
-                destinationVolumeName: volumeName,
-            },
-            partitionIndex !== null,
-        );
+        this.updateDestination({
+            destinationStrategy: 'shared',
+            destinationMode: 'existing',
+            destinationPartitionIndex: partitionIndex,
+            destinationVolumeName: volumeName,
+        });
     }
 
     setDestinationPartition(partitionIndex: number): void {
         const request = this.request;
         if (!request || request.status === 'applying') return;
-        this.updateDestination({ destinationPartitionIndex: partitionIndex }, true);
+        this.updateDestination({
+            destinationPartitionIndex: partitionIndex,
+            ...(request.destinationStrategy === 'shared' && request.destinationMode === 'existing'
+                ? { destinationVolumeName: '' }
+                : {}),
+        });
     }
 
     setDestinationVolumeName(volumeName: string): void {
         const request = this.request;
         if (!request || request.status === 'applying') return;
-        this.updateDestination({ destinationVolumeName: volumeName.slice(0, 16) }, false);
+        this.updateDestination({ destinationVolumeName: volumeName.slice(0, 16) });
     }
 
     renameVolume(itemId: string, name: string): void {
@@ -251,7 +240,6 @@ export class PackageBatchImportWorkflow {
             opaqueSequenceActions: { ...this.request.opaqueSequenceActions, [key]: action },
             hasUnvalidatedChanges: true,
         };
-        void this.replan();
     }
 
     destinationName(itemId: string): string {
@@ -475,10 +463,8 @@ export class PackageBatchImportWorkflow {
         try {
             await this.dependencies.refreshSession({ partitionIndex: request.destinationPartitionIndex! });
             if (generation !== this.generation || !this.request) return;
-            await this.plan(generation);
-            if (generation === this.generation && this.request?.status === 'ready' && this.request.plan) {
-                this.dependencies.setStatus('Image changed; import conflicts checked again');
-            }
+            this.request = { ...this.request, status: 'ready' };
+            this.dependencies.setStatus('Image changed; check import conflicts again');
         } catch (error) {
             if (generation !== this.generation || !this.request) return;
             const message = userFacingMessage(error);
@@ -555,20 +541,24 @@ export class PackageBatchImportWorkflow {
                 this.request = { ...this.request, items: [...items], completedFiles: index + 1 };
             }
             const destination = normalizedBatchDestination(this.request, items, this.destinations());
-            this.request = { ...this.request, ...destination, status: 'planning' };
-            await this.plan(generation);
+            this.request = {
+                ...this.request,
+                ...destination,
+                status: 'ready',
+                hasUnvalidatedChanges: true,
+            };
         } catch (error) {
             await Promise.all(sources.map((item) => this.releaseUpload(item.upload)));
             if (generation !== this.generation || !this.request) return;
+            reportError('Inspect package batch failed', error);
             this.request = { ...this.request, items: [], status: 'choosing', error: userFacingMessage(error) };
         }
     }
 
     private async plan(generation: number, replacePlanToken?: string): Promise<void> {
-        const automaticPlanToken = await this.planOnce(generation, replacePlanToken, true);
-        if (!automaticPlanToken) return;
         try {
-            await this.planOnce(generation, automaticPlanToken, false);
+            const automaticPlanToken = await this.planOnce(generation, replacePlanToken, true);
+            if (automaticPlanToken) await this.planOnce(generation, automaticPlanToken, false);
         } catch (error) {
             if (generation === this.generation && this.request) {
                 this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
@@ -591,47 +581,40 @@ export class PackageBatchImportWorkflow {
             }
             return null;
         }
+        if (generation !== this.generation) return null;
         this.request = { ...request, status: 'planning', error: '' };
-        try {
-            const plan = await this.dependencies.transport.planImagePackageImport(
-                sessionId,
-                selectedItems.map((item) => item.source),
-                arguments_.destination,
-                arguments_.renames,
-                arguments_.programSlotAssignments,
-                replacePlanToken,
-                arguments_.opaqueSequenceDecisions,
-            );
-            if (generation !== this.generation || !this.request) {
-                await this.releasePlan(plan);
-                return null;
-            }
-            const merged = mergeBatchPlanSuggestions(request, selectedItems, plan);
-            const checkSuggestedProgramSlots =
-                allowAutomaticProgramSlotCheck &&
-                merged.suggestedSlotsAdded &&
-                plan.programSlotPlacements.some(
-                    (placement) =>
-                        !placement.applied && placement.mode !== 'UNAVAILABLE' && placement.mappings.length > 0,
-                );
-            this.request = {
-                ...this.request,
-                plan,
-                volumeNames: merged.volumeNames,
-                renames: merged.renames,
-                programSlots: merged.programSlots,
-                hasUnvalidatedChanges: merged.suggestedSlotsAdded,
-                status: checkSuggestedProgramSlots ? 'planning' : 'ready',
-                error: '',
-            };
-            this.plannedItemIds = selectedItems.map((item) => item.id);
-            return checkSuggestedProgramSlots ? plan.planToken : null;
-        } catch (error) {
-            if (generation === this.generation && this.request) {
-                this.request = { ...this.request, status: 'ready', error: userFacingMessage(error) };
-            }
+        const plan = await this.dependencies.transport.planImagePackageImport(
+            sessionId,
+            selectedItems.map((item) => item.source),
+            arguments_.destination,
+            arguments_.renames,
+            arguments_.programSlotAssignments,
+            replacePlanToken,
+            arguments_.opaqueSequenceDecisions,
+        );
+        if (generation !== this.generation || !this.request) {
+            await this.releasePlan(plan);
             return null;
         }
+        const merged = mergeBatchPlanSuggestions(request, selectedItems, plan);
+        const checkSuggestedProgramSlots =
+            allowAutomaticProgramSlotCheck &&
+            merged.suggestedSlotsAdded &&
+            plan.programSlotPlacements.some(
+                (placement) => !placement.applied && placement.mode !== 'UNAVAILABLE' && placement.mappings.length > 0,
+            );
+        this.request = {
+            ...this.request,
+            plan,
+            volumeNames: merged.volumeNames,
+            renames: merged.renames,
+            programSlots: merged.programSlots,
+            hasUnvalidatedChanges: merged.suggestedSlotsAdded,
+            status: checkSuggestedProgramSlots ? 'planning' : 'ready',
+            error: '',
+        };
+        this.plannedItemIds = selectedItems.map((item) => item.id);
+        return checkSuggestedProgramSlots ? plan.planToken : null;
     }
 
     private updateDestination(
@@ -641,7 +624,6 @@ export class PackageBatchImportWorkflow {
                 'destinationStrategy' | 'destinationMode' | 'destinationPartitionIndex' | 'destinationVolumeName'
             >
         >,
-        automaticallyPlan: boolean,
     ): void {
         const request = this.request;
         if (!request || request.status === 'applying') return;
@@ -656,23 +638,10 @@ export class PackageBatchImportWorkflow {
             status: request.items.length > 0 ? ('ready' as const) : request.status,
             error: '',
         };
-        const destinationReady =
-            next.destinationStrategy === 'separate'
-                ? next.destinationPartitionIndex !== null &&
-                  separateVolumesAvailable(next.items.filter((item) => item.selected))
-                : importDestination(
-                      next.destinationMode,
-                      next.destinationPartitionIndex,
-                      next.destinationVolumeName,
-                  ) !== null;
-        const shouldPlan = automaticallyPlan && next.items.some((item) => item.selected) && destinationReady;
-        const generation = ++this.generation;
-        this.request = { ...next, status: shouldPlan ? 'planning' : next.status };
-        void (async () => {
-            await this.releasePlan(previousPlan);
-            if (!shouldPlan || generation !== this.generation || !this.request) return;
-            await this.plan(generation);
-        })();
+        ++this.generation;
+        this.plannedItemIds = [];
+        this.request = next;
+        void this.releasePlan(previousPlan);
     }
 
     private destinations() {

@@ -203,7 +203,7 @@
             {#if imageType === 'HD'}
                 <fieldset disabled={busy || loading}>
                     <legend>Capacity</legend>
-                    <div class="create-hds-segments capacity-segments">
+                    <div class="create-hds-segments capacity-segments dialog-segmented-control">
                         {#each profiles as profile (profile.profileId)}
                             <button
                                 type="button"
@@ -217,7 +217,7 @@
 
                 <fieldset disabled={busy || loading}>
                     <legend>Partitions</legend>
-                    <div class="create-hds-segments partition-segments">
+                    <div class="create-hds-segments partition-segments dialog-segmented-control">
                         {#each partitionCounts as count (count)}
                             {@const option = selectedProfile?.partitionOptions.find(
                                 (candidate) => candidate.partitionCount === count,
@@ -282,7 +282,7 @@
         display: grid;
         gap: 4px;
         color: var(--color-text-muted);
-        font-size: 9px;
+        font-size: var(--dialog-label-font-size);
     }
 
     .create-hds-field output,
@@ -298,7 +298,7 @@
         border-radius: 6px;
         background: var(--color-bg-deep);
         font-family: var(--font-mono);
-        font-size: 10px;
+        font-size: var(--dialog-control-font-size);
         text-overflow: ellipsis;
         white-space: nowrap;
     }
@@ -339,16 +339,11 @@
     legend {
         margin-bottom: 4px;
         color: var(--color-text-muted);
-        font-size: 9px;
+        font-size: var(--dialog-label-font-size);
     }
 
     .create-hds-segments {
-        display: grid;
-        gap: 1px;
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 6px;
-        background: var(--color-border);
+        grid-auto-flow: row;
     }
 
     .capacity-segments {
@@ -359,36 +354,10 @@
         grid-template-columns: repeat(8, minmax(0, 1fr));
     }
 
-    .create-hds-segments button {
-        min-width: 0;
-        height: 30px;
-        padding: 0 5px;
-        overflow: hidden;
-        color: var(--color-text);
-        border: 0;
-        background: var(--color-panel);
-        cursor: pointer;
-        font-size: 10px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .create-hds-segments button[aria-pressed='true'] {
-        color: var(--color-text-strong);
-        background: var(--color-accent-strong);
-    }
-
-    .create-hds-segments button:disabled {
-        color: var(--color-text-dim);
-        background: var(--color-bg-deep);
-        cursor: default;
-        opacity: 0.55;
-    }
-
     .create-hds-summary {
         margin: 0;
         color: var(--color-text-muted);
-        font-size: 9px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .create-hds-error {
@@ -398,7 +367,7 @@
         border: 1px solid rgb(190 80 80 / 35%);
         border-radius: 5px;
         background: rgb(120 35 35 / 20%);
-        font-size: 9px;
+        font-size: var(--dialog-body-font-size);
     }
 
     footer {

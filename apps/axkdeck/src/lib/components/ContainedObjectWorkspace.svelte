@@ -22,17 +22,15 @@
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
-
+    import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
     type ContainedView = 'sample-banks' | 'samples';
     type LaneId = 'primary' | 'secondary' | 'tertiary';
     const containedRowExtent = 26;
-
     interface LaneQueries {
         primary: string;
         secondary: string;
         tertiary: string;
     }
-
     interface Props {
         view: ContainedView;
         sampleBanks: SampleStructureItem[];
@@ -74,7 +72,6 @@
         onselectionchange?: (selection: PackageExportSelectionState) => void;
         onselectionlimit?: () => void;
     }
-
     let {
         view,
         sampleBanks,
@@ -129,7 +126,6 @@
     } | null>(null);
     let sampleViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
     let waveDataViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
-
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
     const orderedBanks = $derived(sampleBanks.toSorted(compareNamedItems));
@@ -145,7 +141,6 @@
     const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, containedRowExtent));
     const visibleSamples = $derived(filteredSamples.slice(sampleWindow.startIndex, sampleWindow.endIndex));
     const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
-
     function updateSampleViewport(viewport: VirtualViewportState): void {
         sampleViewport = viewport;
     }
@@ -458,9 +453,11 @@
                             oncontextmenu={(event) => openObjectMenu(event, 'sample-banks', orderedBanks, item)}
                             onkeydown={(event) => handleContainedKeyboard(event, 'sample-banks', index, item)}
                         >
-                            <strong>{item.name}</strong>
-                            <small>{item.memberCount ?? 0} {(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}</small
-                            >
+                            <ObjectSizeIdentity
+                                name={item.name}
+                                object={item.object}
+                                metadata={`${item.memberCount ?? 0} ${(item.memberCount ?? 0) === 1 ? 'Sample' : 'Samples'}`}
+                            />
                         </button>
                         <button
                             class="contained-playback icon-button"
@@ -544,8 +541,11 @@
                                     oncontextmenu={(event) => openObjectMenu(event, 'samples', availableSamples, item)}
                                     onkeydown={(event) => handleContainedKeyboard(event, 'samples', index, item)}
                                 >
-                                    <strong>{item.name}</strong>
-                                    {#if view === 'samples'}<small>{item.membershipLabel ?? 'Standalone'}</small>{/if}
+                                    <ObjectSizeIdentity
+                                        name={item.name}
+                                        object={item.object}
+                                        metadata={view === 'samples' ? (item.membershipLabel ?? 'Standalone') : ''}
+                                    />
                                 </button>
                                 <button
                                     class="contained-playback icon-button"

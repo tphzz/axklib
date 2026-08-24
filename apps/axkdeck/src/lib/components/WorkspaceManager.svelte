@@ -333,7 +333,8 @@
                         /></label
                     >
                     <label class="workspace-toggle"
-                        ><input type="checkbox" bind:checked={writable} /> Allow image creation and changes</label
+                        ><input class="dialog-checkbox" type="checkbox" bind:checked={writable} /> Allow image creation and
+                        changes</label
                     >
                     {#if error}<p class="workspace-error" role="alert">{error}</p>{/if}
                 </div>
@@ -405,15 +406,15 @@
         gap: 0;
     }
     .workspace-row strong {
-        font-size: 10px;
+        font-size: var(--dialog-body-font-size);
         line-height: 11px;
     }
     .workspace-row small {
         display: block;
         margin: 0;
         color: var(--color-text-muted);
-        font-size: 8px;
-        line-height: 9px;
+        font-size: var(--dialog-metadata-font-size);
+        line-height: 1.2;
     }
     .host-row {
         min-height: 36px;
@@ -457,7 +458,7 @@
         display: grid;
         gap: 4px;
         color: var(--color-text-muted);
-        font-size: 10px;
+        font-size: var(--dialog-label-font-size);
     }
     .workspace-form input[type='text'] {
         width: 100%;

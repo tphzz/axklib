@@ -83,7 +83,7 @@ export class PackageImportWorkflow {
         this.abortController = null;
         const destination = initialImportDestination(item) ?? {
             mode: 'existing' as const,
-            partitionIndex: null,
+            partitionIndex: this.destinations().partitions[0]?.partitionIndex ?? null,
             volumeName: '',
         };
         this.request = {
@@ -132,19 +132,9 @@ export class PackageImportWorkflow {
         const request = this.request;
         if (!request || request.status === 'applying' || request.destinationMode === mode) return;
         const destinations = this.destinations();
-        const currentVolume = destinations.volumes.find(
-            (option) =>
-                option.partitionIndex === request.destinationPartitionIndex &&
-                option.volumeName === request.destinationVolumeName,
-        );
-        const partitionIndex =
-            mode === 'existing'
-                ? (currentVolume?.partitionIndex ?? null)
-                : (request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null);
+        const partitionIndex = request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null;
         const volumeName =
-            mode === 'existing'
-                ? (currentVolume?.volumeName ?? '')
-                : suggestedPackageVolumeName(request.sourceName, request.inspection);
+            mode === 'existing' ? '' : suggestedPackageVolumeName(request.sourceName, request.inspection);
         this.updateDestination(
             {
                 destinationMode: mode,
@@ -179,7 +169,13 @@ export class PackageImportWorkflow {
     setDestinationPartition(partitionIndex: number): void {
         const request = this.request;
         if (!request || request.status === 'applying' || request.destinationPartitionIndex === partitionIndex) return;
-        this.updateDestination({ destinationPartitionIndex: partitionIndex }, true);
+        this.updateDestination(
+            {
+                destinationPartitionIndex: partitionIndex,
+                ...(request.destinationMode === 'existing' ? { destinationVolumeName: '' } : {}),
+            },
+            true,
+        );
     }
 
     setDestinationVolumeName(volumeName: string): void {

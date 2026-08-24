@@ -891,6 +891,64 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
     EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
+TEST_F(WriteOperationsTest, SessionVolumeDeletionInspectionAcceptsMultipleVolumeTargets) {
+    write_tone(root_ / "batch-delete.wav");
+    ASSERT_TRUE(
+        axk::write_hds_image(all_action_source_manifest(root_ / "batch-delete.wav"), root_ / "batch-delete.hds"));
+    const auto opened = images_->open({"workspace", "batch-delete.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const nlohmann::json request = {
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"targets", nlohmann::json::array({{{"partitionIndex", 0U}, {"volumeName", "Volume"}},
+                                           {{"partitionIndex", 0U}, {"volumeName", "Delete Volume"}}})}};
+
+    const auto inspected = registry_.invoke("images.volume_deletion.inspect", request, context());
+
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("targets"), request.at("targets"));
+    EXPECT_TRUE(inspected->at("canDelete").get<bool>());
+    EXPECT_EQ(inspected->at("crossingRelationshipCount"), 0U);
+    EXPECT_TRUE(inspected->at("blockers").empty());
+}
+
+TEST_F(WriteOperationsTest, SessionAlterationDeletesMultipleVolumesAtomically) {
+    axk::VolumeSpec first;
+    first.name = "First";
+    axk::VolumeSpec second;
+    second.name = "Second";
+    axk::VolumeSpec survivor;
+    survivor.name = "Survivor";
+    const axk::HdsBuildManifest build{
+        "1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(first), std::move(second), std::move(survivor)}}}};
+    ASSERT_TRUE(axk::write_hds_image(build, root_ / "batch-delete-session.hds"));
+    const auto opened = images_->open({"workspace", "batch-delete-session.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const nlohmann::json manifest = {
+        {"schema_version", "1.0"},
+        {"operations",
+         nlohmann::json::array(
+             {{{"id", "first"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "First"}},
+              {{"id", "second"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "Second"}}})},
+    };
+
+    const auto altered = registry_.invoke(
+        "images.alter",
+        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"manifest", {{"inline", manifest}}}},
+        context());
+
+    ASSERT_TRUE(altered) << altered.error().message;
+    EXPECT_EQ(altered->at("revision"), 2U);
+    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(roots) << roots.error().message;
+    ASSERT_EQ(roots->items.size(), 1U);
+    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes) << volumes.error().message;
+    EXPECT_TRUE(std::ranges::contains(volumes->items, "Survivor", &axk::app::ImageContentItem::name));
+    EXPECT_FALSE(std::ranges::contains(volumes->items, "First", &axk::app::ImageContentItem::name));
+    EXPECT_FALSE(std::ranges::contains(volumes->items, "Second", &axk::app::ImageContentItem::name));
+}
+
 TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     write_tone(root_ / "repair.wav");
     const auto source = root_ / "placement-repair.hds";
@@ -923,10 +981,10 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
 
     const auto opened = images_->open({"workspace", "placement-repair.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const nlohmann::json request = {{"imageId", opened->image_id},
-                                    {"expectedRevision", opened->revision},
-                                    {"partitionIndex", 0U},
-                                    {"volumeName", "Samples"}};
+    const nlohmann::json request = {
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"targets", nlohmann::json::array({{{"partitionIndex", 0U}, {"volumeName", "Samples"}}})}};
     const auto inspected = registry_.invoke("images.volume_deletion.inspect", request, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_FALSE(inspected->at("canDelete").get<bool>());
@@ -934,10 +992,17 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     ASSERT_EQ(inspected->at("blockers").size(), 1U);
 
     auto absent_volume_request = request;
-    absent_volume_request["volumeName"] = "Absent";
+    absent_volume_request["targets"][0]["volumeName"] = "Absent";
     const auto absent_volume = registry_.invoke("images.volume_deletion.inspect", absent_volume_request, context());
     ASSERT_FALSE(absent_volume);
     EXPECT_EQ(absent_volume.error().code, "volume_scope_invalid");
+
+    auto duplicate_targets_request = request;
+    duplicate_targets_request["targets"].push_back(duplicate_targets_request["targets"].front());
+    const auto duplicate_targets =
+        registry_.invoke("images.volume_deletion.inspect", duplicate_targets_request, context());
+    ASSERT_FALSE(duplicate_targets);
+    EXPECT_EQ(duplicate_targets.error().code, "invalid_request");
 
     const nlohmann::json placement_request = {
         {"imageId", opened->image_id},
@@ -1070,6 +1135,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
                                              {{"imageId", opened->image_id},
                                               {"expectedRevision", opened->revision},
                                               {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                              {"referrerObjectIds", nlohmann::json::array()},
                                               {"cleanupObjectIds", nlohmann::json::array()}},
                                              context());
     ASSERT_TRUE(inspection) << inspection.error().message;
@@ -1091,6 +1157,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
                                                {{"imageId", opened->image_id},
                                                 {"expectedRevision", opened->revision},
                                                 {"targetObjectIds", nlohmann::json::array({sample->id})},
+                                                {"referrerObjectIds", nlohmann::json::array()},
                                                 {"cleanupObjectIds", included}},
                                                context());
     ASSERT_TRUE(deleted) << deleted.error().message;

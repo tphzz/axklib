@@ -101,7 +101,7 @@
                 />
             </span>
         </label>
-        <label>
+        <label class="playback-setting">
             <span>Playback</span>
             <select
                 class="dialog-field-control"
@@ -121,7 +121,7 @@
             </select>
         </label>
         {#if row.loopMode === 1}
-            <label>
+            <label class="frame-setting">
                 <span>Loop start</span>
                 <input
                     class="dialog-field-control"
@@ -134,7 +134,7 @@
                     oninput={(event) => onupdate(row.id, { loopStartFrame: numberValue(event) })}
                 />
             </label>
-            <label>
+            <label class="frame-setting">
                 <span>Loop length</span>
                 <input
                     class="dialog-field-control"
@@ -153,13 +153,17 @@
 <style>
     .sampler-settings {
         display: grid;
-        gap: 9px;
-        padding: 2px 0;
+        gap: 6px;
     }
     .settings-fields {
-        display: grid;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
-        gap: 9px 12px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        align-items: flex-end;
+        gap: 6px 10px;
+    }
+    .settings-fields > label {
+        flex: 0 0 auto;
     }
     label {
         display: grid;
@@ -189,22 +193,15 @@
     .unit-input small,
     .range-inputs span {
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
         white-space: nowrap;
     }
-    @media (max-width: 1120px) {
-        .settings-fields {
-            grid-template-columns: repeat(4, minmax(130px, 1fr));
-        }
+    .playback-setting {
+        width: 180px;
+        max-width: 100%;
     }
-    @media (max-width: 740px) {
-        .settings-fields {
-            grid-template-columns: repeat(2, minmax(130px, 1fr));
-        }
-    }
-    @media (max-width: 460px) {
-        .settings-fields {
-            grid-template-columns: minmax(0, 1fr);
-        }
+    .frame-setting {
+        width: 140px;
+        max-width: 100%;
     }
 </style>

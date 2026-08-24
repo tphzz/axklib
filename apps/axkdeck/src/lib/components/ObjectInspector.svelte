@@ -12,6 +12,9 @@
     }
 
     let { selection, playingObjectId = null, playheadFrame = 0 }: Props = $props();
+    function formatDependencySize(size: number | null): string {
+        return size === null ? 'Unavailable' : formatStoredSize(size);
+    }
     const heading = $derived(
         selection?.kind === 'program'
             ? 'Program details'
@@ -55,8 +58,12 @@
                     <dd>{selection.program.object.volumeName || 'Unknown'}</dd>
                 </div>
                 <div>
-                    <dt>Stored size</dt>
+                    <dt>Object size</dt>
                     <dd>{formatStoredSize(selection.program.object.storedSizeBytes)}</dd>
+                </div>
+                <div>
+                    <dt>Object size with deps.</dt>
+                    <dd>{formatDependencySize(selection.program.object.sizeWithDependenciesBytes)}</dd>
                 </div>
             </dl>
         </div>
@@ -163,8 +170,12 @@
                     <dd>{selection.item.object.volumeName || 'Unknown'}</dd>
                 </div>
                 <div>
-                    <dt>Stored size</dt>
+                    <dt>Object size</dt>
                     <dd>{formatStoredSize(selection.item.object.storedSizeBytes)}</dd>
+                </div>
+                <div>
+                    <dt>Object size with deps.</dt>
+                    <dd>{formatDependencySize(selection.item.object.sizeWithDependenciesBytes)}</dd>
                 </div>
             </dl>
         </div>
@@ -194,8 +205,12 @@
                     <dd>{selection.item.object.partitionName || 'Unknown'}</dd>
                 </div>
                 <div>
-                    <dt>Stored size</dt>
+                    <dt>Object size</dt>
                     <dd>{formatStoredSize(selection.item.object.storedSizeBytes)}</dd>
+                </div>
+                <div>
+                    <dt>Object size with deps.</dt>
+                    <dd>{formatDependencySize(selection.item.object.sizeWithDependenciesBytes)}</dd>
                 </div>
             </dl>
         </div>

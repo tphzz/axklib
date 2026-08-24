@@ -16,6 +16,7 @@
         type PackageExportSelectionState,
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
+    import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
@@ -384,6 +385,7 @@
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
                     data-navigation-index={index}
+                    title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => {
                         if (updateSelection(selectionMode(event), program.objectId) === 'replace')
@@ -395,6 +397,7 @@
                 >
                     <span class="object-slot">{program.slot}</span>
                     <strong>{program.name}</strong>
+                    <small class="object-size-summary">{objectSizeSummary(program.object)}</small>
                 </button>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

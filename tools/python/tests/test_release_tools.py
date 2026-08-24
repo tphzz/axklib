@@ -352,6 +352,23 @@ def test_version_metadata_rejects_inconsistent_values(tmp_path: Path) -> None:
         version_metadata.read(path)
 
 
+def test_version_metadata_accepts_version_branch_prerelease(tmp_path: Path) -> None:
+    path = tmp_path / "version.json"
+    write_metadata(path, metadata("1.2.3-pre", "1.2.3", is_prerelease=True))
+
+    assert version_metadata.read(path).semantic_version == "1.2.3-pre"
+
+
+@pytest.mark.parametrize("release_tag", ["1.2.3", "v1.2.3"])
+def test_version_metadata_accepts_optional_v_release_tag(
+    tmp_path: Path, release_tag: str
+) -> None:
+    path = tmp_path / "version.json"
+    write_metadata(path, metadata("1.2.3", "1.2.3", release_tag))
+
+    assert version_metadata.read(path).release_tag == release_tag
+
+
 def test_sbom_timestamp_and_namespace_are_reproducible(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -426,18 +443,19 @@ def test_release_metadata_uses_source_identity_and_debug_suffix(tmp_path: Path) 
     assert debug.cli_artifact_stem.endswith("-windows-arm64-debug")
 
 
-def test_release_metadata_shortens_only_exact_project_tag() -> None:
-    version = metadata("1.2.3-rc.1+build.4", "1.2.3", "v1.2.3-rc.1+build.4", is_prerelease=True)
+@pytest.mark.parametrize("tag", ["1.2.3-rc.1+build.4", "v1.2.3-rc.1+build.4"])
+def test_release_metadata_shortens_only_exact_project_tag(tag: str) -> None:
+    version = metadata("1.2.3-rc.1+build.4", "1.2.3", tag, is_prerelease=True)
     artifact = release_metadata.artifact_metadata(
         "axklib-v1.2.3-rc.1-build.4-a1b2c3d",
         version,
         "tag",
-        "v1.2.3-rc.1+build.4",
+        tag,
         "macos-universal",
         "Release",
     )
     assert artifact.artifact_stem == "axklib-1.2.3-rc.1+build.4-macos-universal"
-    with pytest.raises(ValueError, match="release tag must be v1.2.3-rc.1[+]build.4"):
+    with pytest.raises(ValueError, match=rf"release tag must be {re.escape(tag)}"):
         release_metadata.artifact_metadata(
             "axklib-nightly-a1b2c3d",
             version,
@@ -448,7 +466,8 @@ def test_release_metadata_shortens_only_exact_project_tag() -> None:
         )
 
 
-def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
+@pytest.mark.parametrize("tag_name", ["2.0.0", "v2.0.0"])
+def test_release_target_uses_preview_for_branches_and_preserves_tags(tag_name: str) -> None:
     branch = release_metadata.draft_release_target("branch", "features/packages", metadata())
     assert branch == release_metadata.DraftReleaseTarget(
         tag_name="features/packages-preview",
@@ -457,11 +476,11 @@ def test_release_target_uses_preview_for_branches_and_preserves_tags() -> None:
         verify_tag=False,
         prerelease=True,
     )
-    stable = metadata("2.0.0", "2.0.0", "v2.0.0")
-    tag = release_metadata.draft_release_target("tag", "v2.0.0", stable)
+    stable = metadata("2.0.0", "2.0.0", tag_name)
+    tag = release_metadata.draft_release_target("tag", tag_name, stable)
     assert tag == release_metadata.DraftReleaseTarget(
-        tag_name="v2.0.0",
-        title="v2.0.0",
+        tag_name=tag_name,
+        title=tag_name,
         cleanup_tag=False,
         verify_tag=True,
         prerelease=False,
@@ -842,6 +861,11 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     root = Path(__file__).resolve().parents[3]
     attributes = (root / ".gitattributes").read_text(encoding="utf-8")
     prettier = json.loads((root / "apps/axkdeck/.prettierrc.json").read_text(encoding="utf-8"))
+    linux_bundle = json.loads(
+        (root / "apps/axkdeck/src-tauri/tauri.linux.conf.json").read_text(
+            encoding="utf-8"
+        )
+    )
     workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
@@ -850,7 +874,22 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
 
     assert "/apps/axkdeck/src/lib/generated/axklibApiV1.ts text eol=lf" in attributes
     assert prettier["endOfLine"] == "lf"
+    assert linux_bundle["bundle"]["linux"]["deb"]["depends"] == [
+        "libc++1-18",
+        "libc++abi1-18",
+        "libunwind-18",
+    ]
+    assert linux_bundle["bundle"]["linux"]["rpm"]["depends"] == [
+        "libcxx",
+        "llvm-libunwind",
+    ]
     assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow_with_platform
+    assert 'dpkg-deb -f "$deb" Depends' in workflow_with_platform
+    assert 'rpm -qp --requires "$rpm"' in workflow_with_platform
+    assert "for dependency in libcxx llvm-libunwind; do" in workflow_with_platform
+    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do" in workflow_with_platform
+    assert 'grep -F "${capability}()"' in workflow_with_platform
+    assert "webkit2gtk4.1 gtk3 libcxx llvm-libunwind" not in workflow_with_platform
     assert 'rpm -Kv "$rpm"' in workflow_with_platform
     assert 'bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"' in workflow_with_platform
     assert "rpm2cpio" not in workflow_with_platform

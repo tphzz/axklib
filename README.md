@@ -85,6 +85,14 @@ an insufficient runtime from Microsoft; silent `/S` installations perform that
 prerequisite step without a prompt. The installer does not bundle a fixed
 WebView2 runtime and does not replace a newer installed version.
 
+Linux packages use the system WebKitGTK runtime and LLVM 18 C++ runtime. The
+RPM declares `webkit2gtk4.1`, `gtk3`, `libcxx`, and `llvm-libunwind`. The DEB
+declares `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libc++1-18`, `libc++abi1-18`,
+and `libunwind-18`. Debian or Ubuntu releases that do not provide the LLVM 18
+runtime packages in their standard repositories require an appropriate LLVM
+package source before the DEB can be installed. An older generic `libc++1`
+package is not a compatible substitute.
+
 ## Command Line
 
 The CLI exposes the same image and object operations for scripts and batch

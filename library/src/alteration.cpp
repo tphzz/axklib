@@ -42,6 +42,10 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
     if (!opened)
         return std::unexpected{opened.error()};
     auto state = std::move(*opened);
+    auto deletion_batch = plan_volume_deletion_batch(state, manifest, cancellation);
+    if (!deletion_batch)
+        return std::unexpected{deletion_batch.error()};
+    state.approved_volume_deletion_batch = std::move(*deletion_batch);
     if (progress) {
         progress->report(
             {ProgressPhase::allocating, 0U, manifest.operations.size(), std::string{initial_message}, progress_path});

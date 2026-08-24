@@ -91,6 +91,6 @@
     .volume-blocker {
         margin: -5px 6px 3px;
         color: var(--color-danger-text);
-        font-size: 11px;
+        font-size: var(--dialog-body-font-size);
     }
 </style>

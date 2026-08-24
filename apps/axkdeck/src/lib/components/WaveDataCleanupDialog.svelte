@@ -94,7 +94,7 @@
                 <label class="wave-data-cleanup-select-all">
                     <input
                         bind:this={selectAllCheckbox}
-                        class="deletion-checkbox"
+                        class="dialog-checkbox"
                         type="checkbox"
                         checked={allSelected}
                         disabled={loading || busy}
@@ -112,7 +112,7 @@
                     {#each candidates as candidate (candidate.objectId)}
                         <label class="wave-data-cleanup-row">
                             <input
-                                class="deletion-checkbox"
+                                class="dialog-checkbox"
                                 type="checkbox"
                                 checked={selectedIds.has(candidate.objectId)}
                                 disabled={loading || busy}
@@ -238,7 +238,7 @@
 
     .wave-data-cleanup-copy small,
     .wave-data-cleanup-limit {
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .wave-data-cleanup-empty {
@@ -267,7 +267,7 @@
 
     .wave-data-cleanup-footer-summary span {
         color: var(--color-text-muted);
-        font-size: 11px;
+        font-size: var(--dialog-metadata-font-size);
     }
 
     .wave-data-cleanup-actions {

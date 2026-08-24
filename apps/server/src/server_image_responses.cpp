@@ -238,22 +238,29 @@ crow::response ServerApplication::image_content_response(const crow::request &re
             return images_.content(id, owner, limit, cursor, parent_id);
         },
         [](const axk::app::ImageContentItem &item) {
-            return Json{{"id", item.id},
-                        {"parentId", item.parent_id ? Json(*item.parent_id) : Json{}},
-                        {"depth", item.depth},
-                        {"partitionIndex", item.partition_index ? Json(*item.partition_index) : Json{}},
-                        {"volumeDirectoryId", item.volume_directory_id ? Json(*item.volume_directory_id) : Json{}},
-                        {"kind", item.kind},
-                        {"name", item.name},
-                        {"displayName", item.display_name},
-                        {"childCount", item.child_count},
-                        {"objectId", item.object_id ? Json(*item.object_id) : Json{}},
-                        {"objectType", item.object_type ? Json(*item.object_type) : Json{}},
-                        {"scopeRole", item.scope_role},
-                        {"quality", item.quality},
-                        {"basis", item.basis},
-                        {"notes", item.notes},
-                        {"details", item.details}};
+            return Json{
+                {"id", item.id},
+                {"parentId", item.parent_id ? Json(*item.parent_id) : Json{}},
+                {"depth", item.depth},
+                {"partitionIndex", item.partition_index ? Json(*item.partition_index) : Json{}},
+                {"volumeDirectoryId", item.volume_directory_id ? Json(*item.volume_directory_id) : Json{}},
+                {"partitionCapacity", item.partition_capacity
+                                          ? Json{{"allocatedClusters", item.partition_capacity->allocated_clusters},
+                                                 {"freeClusters", item.partition_capacity->free_clusters},
+                                                 {"clusterSizeBytes", item.partition_capacity->cluster_size_bytes}}
+                                          : Json{}},
+                {"sizeBytes", item.size_bytes ? Json(*item.size_bytes) : Json{}},
+                {"kind", item.kind},
+                {"name", item.name},
+                {"displayName", item.display_name},
+                {"childCount", item.child_count},
+                {"objectId", item.object_id ? Json(*item.object_id) : Json{}},
+                {"objectType", item.object_type ? Json(*item.object_type) : Json{}},
+                {"scopeRole", item.scope_role},
+                {"quality", item.quality},
+                {"basis", item.basis},
+                {"notes", item.notes},
+                {"details", item.details}};
         });
 }
 
@@ -310,6 +317,8 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                         {"categoryName", item.category_name},
                         {"entryName", item.entry_name},
                         {"sizeBytes", item.stored_size_bytes},
+                        {"sizeWithDependenciesBytes",
+                         item.size_with_dependencies_bytes ? Json(*item.size_with_dependencies_bytes) : Json{}},
                         {"waveform", std::move(waveform)},
                         {"sequence", std::move(sequence)}};
         });

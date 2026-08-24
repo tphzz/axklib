@@ -8,6 +8,7 @@
         allocationExportFilename,
         allocationSpaceStatistic,
         formatAllocationBytes,
+        resolveAllocationServerConnection,
         saveAllocationMap,
     } from './lib/allocationInspector';
 
@@ -72,12 +73,12 @@
             error = 'This allocation inspector link is incomplete.';
             return;
         }
-        const connection = window.__AXKLIB_SERVER__;
-        if (!connection) {
-            error = 'No axklib-server connection is available.';
-            return;
-        }
         try {
+            const connection = await resolveAllocationServerConnection();
+            if (!connection) {
+                error = 'No axklib-server connection is available.';
+                return;
+            }
             const client = new AxklibHttpApiClient(connection);
             const parameters = new URLSearchParams({
                 partitionIndex: String(partitionIndex),

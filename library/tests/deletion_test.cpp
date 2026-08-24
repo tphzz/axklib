@@ -154,13 +154,14 @@ TEST(ObjectDeletion, PlansStandaloneSequenceDeletion) {
                                             [](const auto &object) { return object.object.header.type; });
     ASSERT_NE(sequence, catalog->objects.end());
 
-    const auto inspected =
-        axk::inspect_object_deletion(*container, *catalog, graph, {.target_keys = {sequence->key}, .cleanup_keys = {}});
+    const auto inspected = axk::inspect_object_deletion(
+        *container, *catalog, graph, {.target_keys = {sequence->key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
     ASSERT_EQ(inspected->impacts.size(), 1U);
     EXPECT_EQ(inspected->impacts.front().object_type, axk::ObjectType::sequ);
+    EXPECT_TRUE(inspected->impacts.front().requested);
     ASSERT_EQ(inspected->manifest.operations.size(), 1U);
     EXPECT_TRUE(std::holds_alternative<axk::DeleteSequenceOperation>(inspected->manifest.operations.front().data));
     std::filesystem::remove_all(root, error);
@@ -172,8 +173,9 @@ TEST(ObjectDeletion, KeepsDependenciesExplicitAndUncheckedByDefault) {
     const auto &sample = object(fixture, axk::ObjectType::sbnk);
     const auto &wave = object(fixture, axk::ObjectType::smpl);
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {bank.key}, .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {bank.key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
@@ -222,8 +224,9 @@ TEST(ObjectDeletion, IgnoresStoredProgramRowsWithoutAnEffectiveTarget) {
         .receive_channel_display = "=Smp",
     });
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {program->key}, .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {program->key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
@@ -240,9 +243,9 @@ TEST(ObjectDeletion, OrdersSelectedDependencyClosureFromParentsToLeaves) {
     const auto &sample = object(fixture, axk::ObjectType::sbnk);
     const auto &wave = object(fixture, axk::ObjectType::smpl);
 
-    const auto inspected =
-        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                     {.target_keys = {bank.key}, .cleanup_keys = {wave.key, sample.key}});
+    const auto inspected = axk::inspect_object_deletion(
+        fixture.container, fixture.catalog, fixture.graph,
+        {.target_keys = {bank.key}, .referrer_keys = {}, .cleanup_keys = {wave.key, sample.key}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
@@ -278,29 +281,110 @@ TEST(ObjectDeletion, BlocksTargetWithIncomingProgramReference) {
     const auto fixture = make_fixture(true);
     const auto &bank = object(fixture, axk::ObjectType::sbac);
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {bank.key}, .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {bank.key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_FALSE(inspected->can_apply);
     EXPECT_FALSE(inspected->blockers.empty());
     EXPECT_TRUE(inspected->manifest.operations.empty());
+
+    const auto program = object(fixture, axk::ObjectType::prog);
+    const auto referrer = std::ranges::find(inspected->impacts, program.key, &axk::ObjectDeletionImpact::object_key);
+    ASSERT_NE(referrer, inspected->impacts.end());
+    EXPECT_EQ(referrer->role, axk::ObjectDeletionRole::referrer);
+    EXPECT_EQ(referrer->status, axk::ObjectDeletionStatus::optional);
+    EXPECT_FALSE(referrer->requested);
+    EXPECT_FALSE(referrer->selected);
 }
 
-TEST(ObjectDeletion, ResolvesReferencesAcrossAProgramAndSampleBankBatch) {
+TEST(ObjectDeletion, ResolvesAReferencedSampleBankThroughAnExplicitProgramReferrer) {
     const auto fixture = make_fixture(true);
     const auto &program = object(fixture, axk::ObjectType::prog);
     const auto &bank = object(fixture, axk::ObjectType::sbac);
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {bank.key, program.key}, .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {bank.key}, .referrer_keys = {program.key}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
     EXPECT_TRUE(inspected->blockers.empty());
+    EXPECT_EQ(inspected->target_keys, std::vector<std::string>{bank.key});
     ASSERT_EQ(inspected->manifest.operations.size(), 2U);
     EXPECT_TRUE(std::holds_alternative<axk::DeleteProgramOperation>(inspected->manifest.operations[0].data));
     EXPECT_TRUE(std::holds_alternative<axk::DeleteSampleBankOperation>(inspected->manifest.operations[1].data));
+
+    const auto referrer = std::ranges::find(inspected->impacts, program.key, &axk::ObjectDeletionImpact::object_key);
+    ASSERT_NE(referrer, inspected->impacts.end());
+    EXPECT_TRUE(referrer->requested);
+    EXPECT_TRUE(referrer->selected);
+
+    const auto direct_sample = std::ranges::find(inspected->impacts, "Direct", &axk::ObjectDeletionImpact::object_name);
+    ASSERT_NE(direct_sample, inspected->impacts.end());
+    EXPECT_EQ(direct_sample->role, axk::ObjectDeletionRole::dependency);
+    EXPECT_EQ(direct_sample->status, axk::ObjectDeletionStatus::optional);
+    EXPECT_FALSE(direct_sample->requested);
+    EXPECT_FALSE(direct_sample->selected);
+    EXPECT_EQ(direct_sample->prerequisite_keys, std::vector<std::string>{program.key});
+
+    const auto output = fixture.root / "referrer-deleted.hds";
+    const auto altered = axk::alter_hds(fixture.root / "source.hds", inspected->manifest, output);
+    ASSERT_TRUE(altered) << altered.error().message;
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto remaining = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(remaining) << remaining.error().message;
+    EXPECT_EQ(std::ranges::count(remaining->objects, axk::ObjectType::prog,
+                                 [](const auto &item) { return item.object.header.type; }),
+              0U);
+    EXPECT_EQ(std::ranges::count(remaining->objects, axk::ObjectType::sbac,
+                                 [](const auto &item) { return item.object.header.type; }),
+              0U);
+    EXPECT_EQ(std::ranges::count(remaining->objects, axk::ObjectType::sbnk,
+                                 [](const auto &item) { return item.object.header.type; }),
+              2U);
+    EXPECT_EQ(std::ranges::count(remaining->objects, axk::ObjectType::smpl,
+                                 [](const auto &item) { return item.object.header.type; }),
+              1U);
+}
+
+TEST(ObjectDeletion, RequiresTheCompleteRecursiveReferrerChainForASample) {
+    const auto fixture = make_fixture(true);
+    const auto &program = object(fixture, axk::ObjectType::prog);
+    const auto &bank = object(fixture, axk::ObjectType::sbac);
+    const auto &sample =
+        *std::ranges::find(fixture.catalog.objects, "Sample", [](const auto &item) { return item.object.header.name; });
+
+    const auto partial =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {sample.key}, .referrer_keys = {program.key}, .cleanup_keys = {}});
+
+    ASSERT_TRUE(partial) << partial.error().message;
+    EXPECT_FALSE(partial->can_apply);
+    EXPECT_TRUE(partial->manifest.operations.empty());
+    const auto program_impact =
+        std::ranges::find(partial->impacts, program.key, &axk::ObjectDeletionImpact::object_key);
+    ASSERT_NE(program_impact, partial->impacts.end());
+    EXPECT_TRUE(program_impact->requested);
+    EXPECT_FALSE(program_impact->selected);
+    const auto bank_impact = std::ranges::find(partial->impacts, bank.key, &axk::ObjectDeletionImpact::object_key);
+    ASSERT_NE(bank_impact, partial->impacts.end());
+    EXPECT_EQ(bank_impact->prerequisite_keys, std::vector<std::string>{program.key});
+    EXPECT_EQ(std::ranges::find(partial->impacts, "Direct", &axk::ObjectDeletionImpact::object_name),
+              partial->impacts.end());
+
+    const auto complete = axk::inspect_object_deletion(
+        fixture.container, fixture.catalog, fixture.graph,
+        {.target_keys = {sample.key}, .referrer_keys = {program.key, bank.key}, .cleanup_keys = {}});
+
+    ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_TRUE(complete->can_apply);
+    ASSERT_EQ(complete->manifest.operations.size(), 3U);
+    EXPECT_TRUE(std::holds_alternative<axk::DeleteProgramOperation>(complete->manifest.operations[0].data));
+    EXPECT_TRUE(std::holds_alternative<axk::DeleteSampleBankOperation>(complete->manifest.operations[1].data));
+    EXPECT_TRUE(std::holds_alternative<axk::DeleteSampleOperation>(complete->manifest.operations[2].data));
 }
 
 TEST(ObjectDeletion, KeepsBlockedRootsOutOfAnOtherwiseApplicableBatch) {
@@ -309,8 +393,9 @@ TEST(ObjectDeletion, KeepsBlockedRootsOutOfAnOtherwiseApplicableBatch) {
     const auto &sample =
         *std::ranges::find(fixture.catalog.objects, "Sample", [](const auto &item) { return item.object.header.name; });
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {program.key, sample.key}, .cleanup_keys = {}});
+    const auto inspected = axk::inspect_object_deletion(
+        fixture.container, fixture.catalog, fixture.graph,
+        {.target_keys = {program.key, sample.key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
@@ -334,8 +419,9 @@ TEST(ObjectDeletion, AppliesAHeterogeneousBatchFromParentsToWaveData) {
             targets.push_back(item.key);
     }
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = std::move(targets), .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = std::move(targets), .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);
@@ -365,8 +451,9 @@ TEST(ObjectDeletion, RejectsDependenciesThatAreNotInTheTargetClosure) {
     const auto &sample = object(fixture, axk::ObjectType::sbnk);
     const auto &bank = object(fixture, axk::ObjectType::sbac);
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {sample.key}, .cleanup_keys = {bank.key}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {sample.key}, .referrer_keys = {}, .cleanup_keys = {bank.key}});
 
     ASSERT_FALSE(inspected);
     EXPECT_EQ(inspected.error().code, axk::ErrorCode::transaction_rejected);
@@ -377,10 +464,12 @@ TEST(ObjectDeletion, BlocksDirectDeletionOfReferencedSamplesAndWaveData) {
     const auto &sample = object(fixture, axk::ObjectType::sbnk);
     const auto &wave = object(fixture, axk::ObjectType::smpl);
 
-    const auto sample_inspection = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                                {.target_keys = {sample.key}, .cleanup_keys = {}});
-    const auto wave_inspection = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                              {.target_keys = {wave.key}, .cleanup_keys = {}});
+    const auto sample_inspection =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {sample.key}, .referrer_keys = {}, .cleanup_keys = {}});
+    const auto wave_inspection =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {wave.key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(sample_inspection) << sample_inspection.error().message;
     EXPECT_FALSE(sample_inspection->can_apply);
@@ -392,8 +481,9 @@ TEST(ObjectDeletion, AllowsConfirmedUnreferencedWaveData) {
     const auto fixture = make_fixture(false, true);
     const auto &wave = object(fixture, axk::ObjectType::smpl);
 
-    const auto inspected = axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
-                                                        {.target_keys = {wave.key}, .cleanup_keys = {}});
+    const auto inspected =
+        axk::inspect_object_deletion(fixture.container, fixture.catalog, fixture.graph,
+                                     {.target_keys = {wave.key}, .referrer_keys = {}, .cleanup_keys = {}});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->can_apply);

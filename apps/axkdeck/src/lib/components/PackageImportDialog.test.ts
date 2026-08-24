@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
 import PackageImportDialog from './PackageImportDialog.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 const inspection: PackageInspection = {
     schemaVersion: '1.0',
@@ -223,6 +228,12 @@ const callbacks = {
 };
 
 describe('PackageImportDialog', () => {
+    it('owns consistent spacing around the reusable destination chooser', () => {
+        expect(appStyles).toMatch(/\.package-dialog-content\s*\{[^}]*display:\s*grid;[^}]*gap:\s*12px;/s);
+        const sourceSummaryRule = appStyles.match(/\.package-source-summary\s*\{[^}]*\}/s)?.[0];
+        expect(sourceSummaryRule).not.toContain('margin-bottom');
+    });
+
     it('does not offer to replace a package that was explicitly dropped', () => {
         render(PackageImportDialog, {
             props: {

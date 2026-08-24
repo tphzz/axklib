@@ -46,11 +46,15 @@ export function readBuildIdentity(versionMetadataPath, packageBasenamePath) {
         throw new Error('is_prerelease does not match semantic_version');
     }
     if (metadata.is_release) {
-        if (releaseTag !== `v${semanticVersion}`) {
+        if (releaseTag.replace(/^v/, '') !== semanticVersion) {
             throw new Error('release_tag does not match semantic_version');
         }
-    } else if (semanticVersion !== '0.0.0' || releaseTag !== '') {
-        throw new Error('development builds must use semantic version 0.0.0 without a release tag');
+    } else {
+        const isFallbackDevelopment = semanticVersion === '0.0.0' && !metadata.is_prerelease;
+        const isVersionBranch = semanticVersion === `${projectVersion}-pre` && metadata.is_prerelease;
+        if (releaseTag !== '' || (!isFallbackDevelopment && !isVersionBranch)) {
+            throw new Error('development build version metadata is inconsistent');
+        }
     }
 
     const packageText = readFileSync(packageBasenamePath, 'utf8');

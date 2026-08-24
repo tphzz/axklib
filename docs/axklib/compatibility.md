@@ -9,15 +9,18 @@ axklib versions four public surfaces independently:
 
 Installed PIMPL classes constrain public object layout, but pre-1.0 releases may
 still change source or binary compatibility. Release builds derive their version
-from a semantic-version Git tag; development builds use product version `0.0.0`.
+from an optionally `v`-prefixed semantic-version Git tag. Recognized version
+branches use the corresponding `MAJOR.MINOR.PATCH-pre` prerelease version; other
+development builds use product version `0.0.0`.
 Supported consumers use C++17 and a documented compiler/runtime combination.
-Source identities such as `main-a1b2c3d` do not change the API compatibility
-version. See [Versioning And Build Identity](versioning.md).
+Source identities such as `main-a1b2c3d` and `0.3.6-pre-a1b2c3d` identify exact
+builds independently of the API compatibility version. See
+[Versioning And Build Identity](versioning.md).
 
 | Reference build | Build toolchain | Architectures |
 | --- | --- | --- |
 | Windows library and CLI | Visual Studio 18 MSVC, dynamic CRT | x64, ARM64 |
-| Linux library and CLI | GCC 14, distribution libstdc++/glibc | x64, ARM64 |
+| Linux library and CLI | Clang 18, LLVM libc++ 18, distribution glibc | x64, ARM64 |
 | macOS library and CLI | Apple Clang from Xcode 16.4 | universal x64 + ARM64 |
 
 A shared library built from source is compatible only with the matching

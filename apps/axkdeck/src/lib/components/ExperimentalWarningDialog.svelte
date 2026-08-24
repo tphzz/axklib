@@ -71,6 +71,6 @@
 
     .experimental-warning-disclaimer {
         color: var(--color-text-muted);
-        font-size: 10px;
+        font-size: var(--dialog-metadata-font-size);
     }
 </style>

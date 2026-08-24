@@ -59,9 +59,9 @@ export function createPlanKey(
     ]);
 }
 
-export function volumeMutationOperation(mutation: VolumeMutation): Record<string, unknown> {
+export function volumeMutationOperation(mutation: VolumeMutation, operationNumber?: number): Record<string, unknown> {
     const common = {
-        id: `volume-${mutation.kind}`,
+        id: `volume-${mutation.kind}${operationNumber === undefined ? '' : `-${operationNumber}`}`,
         partition_index: mutation.partitionIndex,
     };
     if (mutation.kind === 'add') {

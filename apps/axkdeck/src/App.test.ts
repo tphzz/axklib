@@ -230,6 +230,68 @@ describe('App panel layout', () => {
         expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
     });
 
+    it('opens storage setup when the local sidecar has no configured workspace', async () => {
+        window.__AXKLIB_SERVER__ = {
+            baseUrl: 'http://127.0.0.1:7331/api/v1',
+            bearerToken: 'test-token',
+            mode: 'local',
+        };
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    data: {
+                        state: 'NO_AVAILABLE_WORKSPACE',
+                        revision: 0,
+                        workspaces: [],
+                        configurationIssue: null,
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const rendered = render(App, { props: { initialExperimentalWarningOpen: false } });
+
+        expect(await screen.findByRole('dialog', { name: 'Storage locations' })).toBeTruthy();
+        expect(screen.getByText('Choose a directory before opening or creating sampler images.')).toBeTruthy();
+
+        rendered.unmount();
+        fetchSpy.mockRestore();
+    });
+
+    it('defers storage setup until the experimental warning is acknowledged', async () => {
+        window.__AXKLIB_SERVER__ = {
+            baseUrl: 'http://127.0.0.1:7331/api/v1',
+            bearerToken: 'test-token',
+            mode: 'local',
+        };
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    data: {
+                        state: 'NO_AVAILABLE_WORKSPACE',
+                        revision: 0,
+                        workspaces: [],
+                        configurationIssue: null,
+                    },
+                }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const rendered = render(App);
+
+        await vi.dynamicImportSettled();
+        expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
+        expect(screen.queryByRole('dialog', { name: 'Storage locations' })).toBeNull();
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        await fireEvent.click(screen.getByRole('button', { name: 'I understand' }));
+        expect(await screen.findByRole('dialog', { name: 'Storage locations' })).toBeTruthy();
+        expect(fetchSpy).toHaveBeenCalledOnce();
+
+        rendered.unmount();
+        fetchSpy.mockRestore();
+    });
+
     it('opens About from the brand and reuses the authoritative build information', async () => {
         renderAcknowledgedApp();
         const brand = screen.getByRole('button', { name: 'About axkdeck' });
@@ -239,7 +301,8 @@ describe('App panel layout', () => {
         await fireEvent.click(brand);
         const firstDialog = await screen.findByRole('dialog', { name: 'About axkdeck' });
         expect(within(firstDialog).getByText('0.4.0')).toBeTruthy();
-        expect(within(firstDialog).getByText('v0.4.0-1234567')).toBeTruthy();
+        expect(within(firstDialog).queryByText('v0.4.0-1234567')).toBeNull();
+        expect(within(firstDialog).queryByText('Build')).toBeNull();
         expect(mocks.desktopBuildInfo).toHaveBeenCalledOnce();
 
         await fireEvent.click(within(firstDialog).getByRole('button', { name: 'Close' }));
@@ -861,6 +924,8 @@ describe('App panel layout', () => {
             imageId: 'image-1',
             revision: 1,
             targetObjectIds: [sample.key],
+            referrerObjectIds: [],
+            cleanupObjectIds: [],
             selectedObjectIds: [sample.key],
             impacts: [
                 {
@@ -872,6 +937,7 @@ describe('App panel layout', () => {
                     volumeName: 'Piano',
                     role: 'TARGET',
                     status: 'REQUIRED',
+                    requested: true,
                     selected: true,
                     storedSizeBytes: 512,
                     freedClusters: 1,
@@ -887,6 +953,7 @@ describe('App panel layout', () => {
                     volumeName: 'Piano',
                     role: 'DEPENDENCY',
                     status: 'OPTIONAL',
+                    requested: false,
                     selected: false,
                     storedSizeBytes: 4096,
                     freedClusters: 4,
@@ -902,9 +969,10 @@ describe('App panel layout', () => {
         };
         const selectedInspection = {
             ...inspection,
+            cleanupObjectIds: ['wave-1'],
             selectedObjectIds: [sample.key, 'wave-1'],
             impacts: inspection.impacts.map((impact) =>
-                impact.objectId === 'wave-1' ? { ...impact, selected: true } : impact,
+                impact.objectId === 'wave-1' ? { ...impact, requested: true, selected: true } : impact,
             ),
             estimatedFreedBytes: 5120,
             estimatedFreedClusters: 5,
@@ -938,12 +1006,14 @@ describe('App panel layout', () => {
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
-        await vi.waitFor(() => expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']));
+        await vi.waitFor(() =>
+            expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, [sample.key], [], ['wave-1']),
+        );
         await fireEvent.click(screen.getByRole('button', { name: 'Delete 2 objects' }));
 
         await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
         expect(mocks.inspectObjectDeletion).toHaveBeenCalledTimes(3);
-        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, [sample.key], ['wave-1']);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, [sample.key], [], ['wave-1']);
         await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();
@@ -1020,6 +1090,8 @@ describe('App panel layout', () => {
             imageId: 'image-1',
             revision: 1,
             targetObjectIds: ['wave-unused-a'],
+            referrerObjectIds: [],
+            cleanupObjectIds: [],
             selectedObjectIds: ['wave-unused-a'],
             impacts: [
                 {
@@ -1031,6 +1103,7 @@ describe('App panel layout', () => {
                     volumeName: volume.name,
                     role: 'TARGET',
                     status: 'REQUIRED',
+                    requested: true,
                     selected: true,
                     storedSizeBytes: 4096,
                     freedClusters: 4,
@@ -1071,9 +1144,9 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.inspectWaveDataOrphans).toHaveBeenCalledTimes(2));
         expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(1, 17, volume.id);
         expect(mocks.inspectWaveDataOrphans).toHaveBeenNthCalledWith(2, 17, volume.id);
-        expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        expect(mocks.inspectObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], [], []);
         await vi.waitFor(() => expect(mocks.startObjectDeletion).toHaveBeenCalledOnce());
-        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], []);
+        expect(mocks.startObjectDeletion).toHaveBeenCalledWith(17, ['wave-unused-a'], [], []);
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Clean up Wave Data' })).toBeNull());
     });
@@ -1212,7 +1285,7 @@ describe('App panel layout', () => {
         expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
     });
 
-    it('continues from package verification into import planning without proxy identity checks', async () => {
+    it('opens batch package import on a volume with that existing volume selected', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1248,6 +1321,7 @@ describe('App panel layout', () => {
             sourceMediaKind: 'SFS',
             valid: true,
             payloadsVerified: true,
+            totalPayloadBytes: 0,
             roots: [{ kind: 'VOLUME', displayName: 'Grand Piano', nodeIds: [] }],
             objects: [],
             relationships: [],
@@ -1282,6 +1356,7 @@ describe('App panel layout', () => {
             programAssignmentAdjustments: [],
             programSlotPlacements: [],
             allocation: [],
+            sfsIndexCapacity: [],
         });
         renderAcknowledgedApp();
 
@@ -1301,14 +1376,34 @@ describe('App panel layout', () => {
             nextCursor: null,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /My Volume/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import package…' }));
-        const importDialog = await screen.findByRole('dialog', { name: 'Import axklib package' });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Import packages…' }));
+        const importDialog = await screen.findByRole('dialog', { name: 'Import packages' });
         await fireEvent.click(within(importDialog).getByRole('button', { name: /Storage location/ }));
-        const picker = await screen.findByRole('dialog', { name: 'Choose axklib package' });
-        expect(screen.queryByRole('dialog', { name: 'Import axklib package' })).toBeNull();
+        const picker = await screen.findByRole('dialog', { name: 'Choose axklib packages' });
+        expect(screen.queryByRole('dialog', { name: 'Import packages' })).toBeNull();
         expect(screen.getAllByRole('dialog')).toHaveLength(1);
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('GrPiano Fazioli.axkvol'));
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Select 1 file' }));
+
+        const plannedDialog = await screen.findByRole('dialog', { name: 'Import packages' });
+        expect(
+            (await within(plannedDialog).findByRole('button', { name: 'One volume' })).getAttribute('aria-pressed'),
+        ).toBe('true');
+        expect(
+            (await within(plannedDialog).findByRole('button', { name: 'Existing' })).getAttribute('aria-pressed'),
+        ).toBe('true');
+        expect(
+            (
+                (await within(plannedDialog).findByRole('combobox', {
+                    name: 'Destination volume',
+                })) as HTMLInputElement
+            ).value,
+        ).toBe('My Volume');
+        expect(mocks.planImagePackageImport).not.toHaveBeenCalled();
+
+        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Check conflicts' }));
 
         await vi.waitFor(() =>
             expect(mocks.planImagePackageImport).toHaveBeenCalledWith(
@@ -1588,8 +1683,9 @@ describe('App panel layout', () => {
 
         await chooseNestedImage();
         await fireEvent.contextMenu(await screen.findByRole('button', { name: /Object directory/ }));
-        expect(screen.queryByRole('menuitem', { name: 'Import package…' })).toBeNull();
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
+        expect(screen.queryByRole('menuitem', { name: 'Import' })).toBeNull();
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export volume package…' }));
 
         const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
         expect(within(dialog).getByText('Export “Object directory”')).toBeTruthy();

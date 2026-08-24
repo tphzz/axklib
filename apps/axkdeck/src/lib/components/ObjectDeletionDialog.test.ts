@@ -15,6 +15,8 @@ const inspection: ObjectDeletionInspection = {
     imageId: 'image-1',
     revision: 2,
     targetObjectIds: ['sample-1'],
+    referrerObjectIds: [],
+    cleanupObjectIds: [],
     selectedObjectIds: ['sample-1'],
     impacts: [
         {
@@ -26,6 +28,7 @@ const inspection: ObjectDeletionInspection = {
             volumeName: 'Piano',
             role: 'TARGET',
             status: 'REQUIRED',
+            requested: true,
             selected: true,
             storedSizeBytes: 512,
             freedClusters: 2,
@@ -41,6 +44,7 @@ const inspection: ObjectDeletionInspection = {
             volumeName: 'Piano',
             role: 'DEPENDENCY',
             status: 'OPTIONAL',
+            requested: false,
             selected: false,
             storedSizeBytes: 4096,
             freedClusters: 4,
@@ -105,9 +109,9 @@ describe('ObjectDeletionDialog', () => {
         expect(screen.getByText(/2 KiB freed/)).toBeTruthy();
 
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
-        expect(onselectall).toHaveBeenCalledWith(true);
+        expect(onselectall).toHaveBeenCalledWith('DEPENDENCY', true);
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Delete Wave Data Piano C3 L' }));
-        expect(onselectionchange).toHaveBeenCalledWith('wave-1', true);
+        expect(onselectionchange).toHaveBeenCalledWith('DEPENDENCY', 'wave-1', true);
         await fireEvent.click(screen.getByRole('button', { name: 'Delete 1 object' }));
         expect(onconfirm).toHaveBeenCalledOnce();
     });
@@ -151,14 +155,85 @@ describe('ObjectDeletionDialog', () => {
             },
         });
 
-        expect(screen.getByRole('region', { name: 'Cannot be deleted' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Cannot be deleted' })).toBeTruthy();
+        expect(screen.getByRole('region', { name: 'Cannot be deleted safely' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Cannot be deleted safely' })).toBeTruthy();
         expect(screen.getByText('Program 001 still refers to this Sample.')).toBeTruthy();
         expect(screen.getByText('Referenced by Program 001: Piano')).toBeTruthy();
         expect(screen.queryByRole('heading', { name: 'References' })).toBeNull();
         expect(screen.queryByText(/Known/)).toBeNull();
         expect(screen.queryByText(/PROG_ASSIGNMENT_TO_SBNK/)).toBeNull();
         expect(screen.getByRole('button', { name: 'Delete 0 eligible objects' }).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('offers explicit upward referrer deletion before conservative descendant cleanup', async () => {
+        const onselectionchange = vi.fn();
+        const onselectall = vi.fn();
+        render(ObjectDeletionDialog, {
+            props: {
+                inspection: {
+                    ...inspection,
+                    canApply: false,
+                    selectedObjectIds: [],
+                    impacts: [
+                        {
+                            ...inspection.impacts[0]!,
+                            status: 'BLOCKED',
+                            selected: false,
+                            reason: 'References must be resolved',
+                        },
+                        {
+                            ...inspection.impacts[0]!,
+                            objectId: 'program-1',
+                            objectType: 'PROG',
+                            objectName: '001: Piano',
+                            role: 'REFERRER',
+                            status: 'OPTIONAL',
+                            requested: false,
+                            selected: false,
+                            prerequisiteObjectIds: [],
+                            reason: 'Delete this Program to resolve its Sample assignment',
+                        },
+                        inspection.impacts[1]!,
+                    ],
+                    blockers: [
+                        {
+                            code: 'incoming_reference',
+                            message: 'Program 001 still refers to this Sample.',
+                            objectIds: ['program-1', 'sample-1'],
+                        },
+                    ],
+                    references: [
+                        {
+                            sourceObjectId: 'program-1',
+                            sourceObjectType: 'PROG',
+                            sourceObjectName: '001: Piano',
+                            targetObjectId: 'sample-1',
+                            targetObjectType: 'SBNK',
+                            targetObjectName: 'Piano C3',
+                            type: 'PROG_ASSIGNMENT_TO_SBNK',
+                            quality: 'CONFIRMED',
+                            effect: 'BLOCKING',
+                        },
+                    ],
+                },
+                loading: false,
+                busy: false,
+                error: '',
+                onselectionchange,
+                onselectall,
+                oncancel: vi.fn(),
+                onconfirm: vi.fn(),
+            },
+        });
+
+        expect(screen.getByRole('heading', { name: 'References must be resolved' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Referencing objects' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Optional cleanup' })).toBeTruthy();
+
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Delete all referencing objects (1)' }));
+        expect(onselectall).toHaveBeenCalledWith('REFERRER', true);
+        await fireEvent.click(screen.getByRole('checkbox', { name: 'Delete referencing Program 001: Piano' }));
+        expect(onselectionchange).toHaveBeenCalledWith('REFERRER', 'program-1', true);
     });
 
     it('allows the eligible subset of a partially blocked batch to proceed', () => {
@@ -199,7 +274,7 @@ describe('ObjectDeletionDialog', () => {
 
         expect(screen.getByRole('dialog', { name: 'Delete 2 objects' })).toBeTruthy();
         expect(screen.getByRole('heading', { name: 'Will be deleted' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Cannot be deleted' })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Cannot be deleted safely' })).toBeTruthy();
         expect(screen.getByText('Program 001 still refers to this Sample Bank.')).toBeTruthy();
         expect(screen.getByText(/1 selected object remains/)).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Delete 1 eligible object' }).hasAttribute('disabled')).toBe(false);
@@ -305,9 +380,10 @@ describe('ObjectDeletionDialog', () => {
             props: {
                 inspection: {
                     ...inspection,
+                    cleanupObjectIds: ['wave-1'],
                     selectedObjectIds: ['sample-1', 'wave-1'],
                     impacts: inspection.impacts.map((impact) =>
-                        impact.objectId === 'wave-1' ? { ...impact, selected: true } : impact,
+                        impact.objectId === 'wave-1' ? { ...impact, requested: true, selected: true } : impact,
                     ),
                     warnings: [],
                     estimatedFreedBytes: 496 * 1024,
@@ -335,10 +411,11 @@ describe('ObjectDeletionDialog', () => {
             props: {
                 inspection: {
                     ...inspection,
+                    cleanupObjectIds: ['wave-1'],
                     selectedObjectIds: ['sample-1', 'wave-1'],
                     impacts: [
                         inspection.impacts[0]!,
-                        { ...inspection.impacts[1]!, selected: true },
+                        { ...inspection.impacts[1]!, requested: true, selected: true },
                         {
                             ...inspection.impacts[1]!,
                             objectId: 'wave-2',
