@@ -9,7 +9,7 @@ import type {
     AudioImportGrouping,
     AudioImportItem,
     AudioImportCapabilities,
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
@@ -53,7 +53,6 @@ import type {
     PlacementRepairScope,
     PreviewEnvelope,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
     Tx16wImportInspection,
@@ -175,7 +174,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -190,7 +189,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {

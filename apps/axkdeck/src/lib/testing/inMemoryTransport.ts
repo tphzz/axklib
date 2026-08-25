@@ -2,7 +2,7 @@ import type {
     AudioImportGrouping,
     AllocationMapReference,
     AudioImportItem,
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportTarget,
     AudioSourceInfo,
     AudioImportCapabilities,
@@ -55,7 +55,6 @@ import type {
     SampleBankAssignment,
     SampleBankCreation,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
     Tx16wImportInspection,
@@ -393,7 +392,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -410,7 +409,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {

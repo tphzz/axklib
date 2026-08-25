@@ -2076,7 +2076,7 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(serverFile('images/base.hds'));
         await transport.startSequenceImport(
             opened.sessionId,
-            { partitionIndex: 2, volumeName: 'Songs' },
+            { kind: 'EXISTING_VOLUME', partitionIndex: 2, volumeName: 'Songs' },
             [
                 { source: uploaded, sequenceName: 'Intro' },
                 { source: workspace, sequenceName: 'Ending' },

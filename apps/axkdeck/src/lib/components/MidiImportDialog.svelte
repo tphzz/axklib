@@ -6,22 +6,38 @@
     import { modal } from '../modal';
     import type { ClientUploadLocation, FileLocation, InputFileLocation } from '../storageLocations';
     import type {
+        ImportDestinationMode,
+        ImportPartitionOption,
+        ImportVolumeOption,
+    } from '../../features/import/packageDestinations';
+    import type {
         ImageTransport,
         MidiInspection,
         SequenceImportItem,
-        SequenceImportTarget,
         SequenceSystemExclusivePolicy,
+        VolumeImportDestination,
     } from '../transport';
     import Icon from './Icon.svelte';
+    import ImportDestinationChooser from './ImportDestinationChooser.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
         transport: ImageTransport;
         files: (File | ClientUploadSource | FileLocation)[];
-        target: SequenceImportTarget;
+        target: VolumeImportDestination | null;
+        destinationMode: ImportDestinationMode;
+        destinationPartitionIndex: number | null;
+        destinationVolumeName: string;
+        partitionOptions: ImportPartitionOption[];
+        volumeOptions: ImportVolumeOption[];
+        destinationBusy: boolean;
         existingSequenceNames: string[];
         onchooseworkspace?: () => void;
         onchooselocal?: () => void;
+        ondestinationmode: (mode: ImportDestinationMode) => void;
+        ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
+        ondestinationpartition: (partitionIndex: number) => void;
+        ondestinationname: (volumeName: string) => void;
         oncommit: (items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy) => Promise<void>;
         oncancel: () => void;
     }
@@ -43,9 +59,19 @@
         transport,
         files,
         target,
+        destinationMode,
+        destinationPartitionIndex,
+        destinationVolumeName,
+        partitionOptions,
+        volumeOptions,
+        destinationBusy,
         existingSequenceNames,
         onchooseworkspace,
         onchooselocal,
+        ondestinationmode,
+        ondestinationvolume,
+        ondestinationpartition,
+        ondestinationname,
         oncommit,
         oncancel,
     }: Props = $props();
@@ -60,6 +86,8 @@
     const validationErrors = $derived(validateRows(rows, existingSequenceNames));
     const ready = $derived(
         rows.length > 0 &&
+            target !== null &&
+            !destinationBusy &&
             rows.every((row) => row.status === 'ready' && row.source !== undefined && row.inspection !== undefined) &&
             validationErrors.every((error) => error === ''),
     );
@@ -88,7 +116,8 @@
     }
 
     $effect(() => {
-        const usedNames = new Set(existingSequenceNames.map((name) => name.toLocaleLowerCase()));
+        const initialExistingNames = untrack(() => existingSequenceNames);
+        const usedNames = new Set(initialExistingNames.map((name) => name.toLocaleLowerCase()));
         rows = files.map((input) => {
             const candidate = 'kind' in input ? input : 'readChunk' in input ? input : browserUploadSource(input);
             const fileName = sourceName(candidate);
@@ -222,27 +251,38 @@
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
     <div
-        class="dialog-shell dialog-shell-wide midi-import-dialog"
+        class="dialog-shell dialog-shell-wide dialog-popovers-visible midi-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Import MIDI"
         use:modal={{ onescape: () => void cancel() }}
     >
         <header class="dialog-header">
-            <div>
-                <h2>Import MIDI</h2>
-                <p>Volume {target.volumeName}</p>
-            </div>
+            <h2>Import MIDI</h2>
             <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={() => void cancel()}>
                 <Icon name="close" size={15} />
             </button>
         </header>
+        <div class="midi-import-destination">
+            <ImportDestinationChooser
+                mode={destinationMode}
+                partitionIndex={destinationPartitionIndex}
+                volumeName={destinationVolumeName}
+                partitions={partitionOptions}
+                volumes={volumeOptions}
+                disabled={busy || destinationBusy}
+                onmode={ondestinationmode}
+                onvolume={ondestinationvolume}
+                onpartition={ondestinationpartition}
+                onname={ondestinationname}
+            />
+        </div>
         <div class="midi-import-body">
             {#if files.length === 0}
                 <ImportSourceChoice
                     label="MIDI source"
                     heading="Choose MIDI files"
-                    description={`Import Sequences into ${target.volumeName} from a configured storage location or this computer.`}
+                    description="Import Sequences into the selected destination from a configured storage location or this computer."
                     workspaceDetail="Choose one or more MIDI files from a configured workspace"
                     computerDetail="Choose local MIDI files and upload them"
                     computerAvailable={onchooselocal !== undefined}
@@ -347,17 +387,19 @@
         max-width: none;
         max-height: min(720px, calc(100vh - 48px));
     }
-    .dialog-header p {
-        margin: 2px 0 0;
-        color: var(--color-text-muted);
-        font-size: var(--dialog-metadata-font-size);
+    .midi-import-destination {
+        position: relative;
+        z-index: 2;
+        flex: none;
+        padding: 12px 12px 0;
     }
     .midi-import-body {
+        flex: 1 1 auto;
         min-height: 0;
         overflow: auto;
         display: flex;
         flex-direction: column;
-        padding: 12px;
+        padding: 10px 12px 12px;
         gap: 10px;
     }
     .midi-import-list {

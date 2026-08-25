@@ -233,8 +233,9 @@
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
-        mutationsAvailable: () => mutationWorkflow.objectRenameAvailable,
-        selectedSource: () => imageSessionWorkflow.selectedSource,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
+        mutationsAvailable: () => mutationWorkflow.volumeAvailable,
+        selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         setSelectedSource: (item) => imageSessionWorkflow.selectSource(item),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         activeVolumeId: () => catalog.activeVolumeId,
@@ -616,7 +617,6 @@
             sampleNames={samples.map((item) => item.name)}
             sampleBankNames={sampleBanks.map((item) => item.name)}
             waveDataNames={waveData.map((item) => item.name)}
-            sequenceNames={sequences.map((item) => item.name)}
         />
     {/await}
 {/if}

@@ -12,7 +12,7 @@
     import type { FileLocation, InputFileLocation } from '../storageLocations';
     import type {
         AudioImportCapabilities,
-        AudioImportDestination,
+        VolumeImportDestination,
         AudioImportGrouping,
         AudioImportItem,
         AudioSourceInfo,
@@ -27,7 +27,7 @@
     interface Props {
         transport: ImageTransport;
         files: (File | ClientUploadSource | FileLocation)[];
-        target: AudioImportDestination | null;
+        target: VolumeImportDestination | null;
         destinationMode: ImportDestinationMode;
         destinationPartitionIndex: number | null;
         destinationVolumeName: string;

@@ -95,7 +95,6 @@
         sampleNames: string[];
         sampleBankNames: string[];
         waveDataNames: string[];
-        sequenceNames: string[];
     }
 
     let {
@@ -135,7 +134,6 @@
         sampleNames,
         sampleBankNames,
         waveDataNames,
-        sequenceNames,
     }: Props = $props();
 
     function directChoiceVisible(operation: DirectComputerOperation, contentAvailable: boolean): boolean {
@@ -535,12 +533,23 @@
     <MidiImportDialog
         {transport}
         files={sequenceImport.request.files}
-        target={sequenceImport.request.target}
-        existingSequenceNames={sequenceNames}
+        target={sequenceImport.destination()}
+        destinationMode={sequenceImport.request.destinationMode}
+        destinationPartitionIndex={sequenceImport.request.destinationPartitionIndex}
+        destinationVolumeName={sequenceImport.request.destinationVolumeName}
+        partitionOptions={sequenceImport.partitionOptions()}
+        volumeOptions={sequenceImport.volumeOptions()}
+        destinationBusy={sequenceImport.destinationBusy}
+        existingSequenceNames={sequenceImport.existingSequenceNames()}
         onchooseworkspace={() => void sequenceImport.chooseWorkspace()}
         onchooselocal={transport.supportsClientUploads && sequenceFileInput
             ? () => sequenceImport.chooseLocal(sequenceFileInput)
             : undefined}
+        ondestinationmode={(mode) => sequenceImport.setDestinationMode(mode)}
+        ondestinationvolume={(partitionIndex, volumeName) =>
+            void sequenceImport.setExistingVolume(partitionIndex, volumeName)}
+        ondestinationpartition={(partitionIndex) => sequenceImport.setDestinationPartition(partitionIndex)}
+        ondestinationname={(volumeName) => sequenceImport.setDestinationVolumeName(volumeName)}
         oncommit={(items, systemExclusivePolicy) => sequenceImport.commit(items, systemExclusivePolicy)}
         oncancel={() => (sequenceImport.request = null)}
     />

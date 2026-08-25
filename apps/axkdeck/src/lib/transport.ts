@@ -51,7 +51,7 @@ export interface OpenedImage {
     format?: string;
 }
 
-export type AudioImportDestination =
+export type VolumeImportDestination =
     | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
     | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
@@ -462,11 +462,6 @@ export type Tx16wImportInspection = components['schemas']['ImageSessionTx16wImpo
 export type Tx16wImportMode = Tx16wImportInspection['importMode'];
 export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
-export interface SequenceImportTarget {
-    partitionIndex: number;
-    volumeName: string;
-}
-
 export type ConnectionMode = 'local' | 'remote' | 'unavailable';
 
 export interface ImageTransport {
@@ -554,7 +549,7 @@ export interface ImageTransport {
     ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState>;
@@ -562,7 +557,7 @@ export interface ImageTransport {
     startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState>;
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState>;

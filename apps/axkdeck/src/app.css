@@ -1332,6 +1332,10 @@ input:focus-visible {
   width: min(680px, calc(100vw - 40px));
 }
 
+.dialog-popovers-visible {
+  overflow: visible;
+}
+
 .dialog-header,
 .dialog-footer {
   display: flex;

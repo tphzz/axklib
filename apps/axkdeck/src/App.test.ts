@@ -1748,7 +1748,7 @@ describe('App panel layout', () => {
         delete runtime.__TAURI_INTERNALS__;
     });
 
-    it('routes browser MIDI drops through the Sequence import review on the Sequences tab', async () => {
+    it('routes browser MIDI drops through the Sequence import review with the selected volume as a hint', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1765,8 +1765,7 @@ describe('App panel layout', () => {
         });
         renderAcknowledgedApp();
         await chooseNestedImage();
-        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
-
+        await screen.findByText('My Volume');
         const dataTransfer = {
             types: ['Files'],
             files: [new File(['midi'], 'intro.MID', { type: 'audio/midi' })],
@@ -1777,7 +1776,9 @@ describe('App panel layout', () => {
         window.dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume My Volume')).toBeTruthy();
+        expect((within(dialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
+            'My Volume',
+        );
         expect(within(dialog).getByDisplayValue('intro')).toBeTruthy();
         await vi.waitFor(() =>
             expect(mocks.uploadClientFile).toHaveBeenCalledWith(
@@ -1830,7 +1831,7 @@ describe('App panel layout', () => {
         delete runtime.__TAURI_INTERNALS__;
     });
 
-    it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
+    it('accepts MIDI drops from any workspace tab and still rejects mixed media drops', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1851,16 +1852,13 @@ describe('App panel layout', () => {
         const midiDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(midiDrop, 'dataTransfer', { value: midiTransfer });
         window.dispatchEvent(midiDrop);
-        let unavailable = await screen.findByRole('dialog', { name: 'MIDI import unavailable' });
+        const midiDialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
         expect(
-            within(unavailable).getByText(
-                'Open the Sequences tab, select a writable volume, then drop the MIDI files again.',
-            ),
-        ).toBeTruthy();
-        expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
-        await fireEvent.click(within(unavailable).getByRole('button', { name: 'OK' }));
+            (within(midiDialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value,
+        ).toBe('My Volume');
+        await fireEvent.click(within(midiDialog).getByRole('button', { name: 'Cancel' }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull());
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
         const mixedTransfer = {
             types: ['Files'],
             files: [
@@ -1872,7 +1870,7 @@ describe('App panel layout', () => {
         const mixedDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
-        unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
+        const unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
         expect(
             within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
         ).toBeTruthy();
@@ -1916,7 +1914,9 @@ describe('App panel layout', () => {
         screen.getByText('Second Volume').dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume First Volume')).toBeTruthy();
+        expect((within(dialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
+            'First Volume',
+        );
         expect(mocks.objectPage).not.toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
     });
 

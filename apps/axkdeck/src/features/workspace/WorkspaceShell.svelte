@@ -394,7 +394,7 @@
         class:has-audition-bar={auditionAvailable}
         class="main-stage"
         style:--split-position={`${splitRatio * 100}%`}
-        data-import-drop-main={audioImport.activeTarget() || sequenceImport.activeTarget() ? 'true' : undefined}
+        data-import-drop-main={audioImport.dropAvailable() || sequenceImport.dropAvailable() ? 'true' : undefined}
     >
         {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
             <ContainedObjectWorkspace
@@ -463,7 +463,7 @@
                 onexportobjects={exportPackage}
                 {sequenceExportAvailable}
                 onexportmidi={exportMidi}
-                sequenceImportAvailable={mutation.objectRenameAvailable && sequenceImport.activeTarget() !== null}
+                sequenceImportAvailable={sequenceImport.dropAvailable()}
                 onimportmidi={importMidi}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
