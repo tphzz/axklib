@@ -468,11 +468,18 @@
         transition:
             opacity 100ms ease,
             transform 100ms ease;
+        transition-delay: 0ms;
     }
 
-    .tree-row:hover > .tree-item-stack > .tree-item-tooltip,
+    .tree-row:hover > .tree-item-stack > .tree-item-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+        transition-delay: 500ms;
+    }
+
     .tree-item-select:focus-visible ~ .tree-item-tooltip {
         opacity: 1;
         transform: translateY(0);
+        transition-delay: 0ms;
     }
 </style>
