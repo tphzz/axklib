@@ -1,6 +1,7 @@
 #include "axklib/audio_export.hpp"
 
 #include "audio_export_support.hpp"
+#include "axklib/audio_export_wav_source.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -498,7 +499,7 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
             const std::array parts{volume.relative_root, *sample.rendered_wav_path};
             const auto path = *audio_internal::resolve_export_destination(output_directory, parts);
             if (auto registered =
-                    register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
+                    register_target(path, audio_export_detail::stereo_sample_wav_source(sample, *left, *right));
                 !registered)
                 return std::unexpected{registered.error()};
         }
@@ -604,7 +605,8 @@ Result<ExportResult> write_selected_wav_audio(const ExportPlan &plan, const Sele
                     return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
                                                       "selected Sample Wave Data is unavailable")};
                 }
-                source = audio_internal::WavSource::from_physical(waveform->second->waveform);
+                source = audio_export_detail::sample_wav_source(*found->second.front(), *waveform->second,
+                                                                members.begin()->first);
             } else if (members.size() == 2U && members.contains("left") && members.contains("right") &&
                        members.at("left") != members.at("right")) {
                 const auto left = waveforms.find(members.at("left"));
@@ -613,7 +615,8 @@ Result<ExportResult> write_selected_wav_audio(const ExportPlan &plan, const Sele
                     return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
                                                       "selected Sample Wave Data is unavailable")};
                 }
-                source = audio_internal::WavSource::from_stereo(left->second->waveform, right->second->waveform);
+                source = audio_export_detail::stereo_sample_wav_source(*found->second.front(), *left->second,
+                                                                       *right->second);
             } else {
                 return std::unexpected{
                     make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,

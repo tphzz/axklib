@@ -4,7 +4,6 @@
 #include <array>
 #include <limits>
 
-#include "axklib/bytes.hpp"
 #include "axklib/media.hpp"
 #include "axklib/wav_stream.hpp"
 
@@ -27,17 +26,6 @@ Result<void> validate_waveform(const Waveform &waveform) {
                                           "waveform frame count and PCM byte length are inconsistent")};
     }
     return {};
-}
-
-void le16(std::vector<std::byte> &bytes, std::size_t offset, std::uint16_t value) {
-    bytes[offset] = static_cast<std::byte>(value & 0xffU);
-    bytes[offset + 1U] = static_cast<std::byte>(value >> 8U);
-}
-
-void le32(std::vector<std::byte> &bytes, std::size_t offset, std::uint32_t value) {
-    for (std::size_t index = 0; index < 4; ++index) {
-        bytes[offset + index] = static_cast<std::byte>((value >> (index * 8U)) & 0xffU);
-    }
 }
 
 std::int32_t sample_value(const Waveform &waveform, std::uint64_t frame, std::uint16_t channel) {
@@ -159,38 +147,14 @@ Result<Waveform> decode_waveform(const MediaObject &object) {
 }
 
 Result<std::vector<std::byte>> wav_bytes(const Waveform &waveform) {
-    if (const auto valid = validate_waveform(waveform); !valid) {
-        return std::unexpected{valid.error()};
-    }
-    const auto data_size = waveform.pcm.size();
-    if (data_size > std::numeric_limits<std::uint32_t>::max() - 36U) {
-        return std::unexpected{
-            make_error(ErrorCode::io_unsupported_size, ErrorCategory::audio, "PCM is too large for RIFF/WAVE")};
-    }
-    std::vector<std::byte> result(44U + data_size);
-    const auto write_tag = [&](std::size_t offset, std::string_view tag) {
-        std::ranges::transform(tag, result.begin() + static_cast<std::ptrdiff_t>(offset),
-                               [](char value) { return static_cast<std::byte>(value); });
-    };
-    write_tag(0, "RIFF");
-    le32(result, 4, static_cast<std::uint32_t>(36U + data_size));
-    write_tag(8, "WAVEfmt ");
-    le32(result, 16, 16);
-    le16(result, 20, 1);
-    le16(result, 22, waveform.format.channels);
-    le32(result, 24, waveform.format.sample_rate);
-    const auto block = static_cast<std::uint16_t>(waveform.format.channels * waveform.format.sample_width_bytes);
-    const auto byte_rate = static_cast<std::uint64_t>(waveform.format.sample_rate) * block;
-    if (byte_rate > std::numeric_limits<std::uint32_t>::max()) {
-        return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
-                                          "waveform byte rate exceeds the WAVE header limit")};
-    }
-    le32(result, 28, static_cast<std::uint32_t>(byte_rate));
-    le16(result, 32, block);
-    le16(result, 34, static_cast<std::uint16_t>(waveform.format.sample_width_bytes * 8U));
-    write_tag(36, "data");
-    le32(result, 40, static_cast<std::uint32_t>(data_size));
-    std::ranges::copy(waveform.pcm, result.begin() + 44);
+    std::vector<std::byte> result;
+    const auto streamed = audio_internal::stream_wav(audio_internal::WavSource::from_physical(waveform),
+                                                     [&](std::span<const std::byte> bytes) -> Result<void> {
+                                                         result.insert(result.end(), bytes.begin(), bytes.end());
+                                                         return {};
+                                                     });
+    if (!streamed)
+        return std::unexpected{streamed.error()};
     return result;
 }
 

@@ -153,7 +153,7 @@ Result<std::optional<InstMetadata>> parse_inst(const RandomAccessReader &reader,
         std::to_integer<std::uint8_t>(bytes[5]),
         std::to_integer<std::uint8_t>(bytes[6]),
     };
-    if (result.root_key > 127U || result.fine_tune_cents < -63 || result.fine_tune_cents > 63) {
+    if (result.root_key > 127U || result.fine_tune_cents < -50 || result.fine_tune_cents > 50) {
         warning(metadata, "wav_inst_pitch_invalid", "WAV inst pitch is outside A-series limits and was ignored");
         result.root_key = 255U;
     }
@@ -183,23 +183,50 @@ Result<std::optional<SmplPitch>> parse_smpl(const RandomAccessReader &reader, co
         warning(metadata, "wav_smpl_pitch_invalid", "WAV smpl pitch is outside A-series limits and was ignored");
 
     const auto loop_count = u32(std::span{header}.subspan<28U, 4U>(), order);
-    if (loop_count == 0U)
-        return pitch;
-    if (loop_count != 1U || chunk.payload_size < 60U) {
-        warning(metadata, "wav_sampler_loop_unsupported",
-                "WAV contains multiple or malformed sampler loops; imported Sample will use one-shot playback");
+    const auto sampler_data_size = u32(std::span{header}.subspan<32U, 4U>(), order);
+    const auto loops_size = static_cast<std::uint64_t>(loop_count) * 24U;
+    if (loops_size > chunk.payload_size - 36U || sampler_data_size > chunk.payload_size - 36U - loops_size) {
+        warning(metadata, "wav_smpl_malformed", "WAV smpl loop or sampler-specific data is truncated and was ignored");
         return pitch;
     }
-    std::array<std::byte, 24> loop{};
-    if (auto read = reader.read_exact_at(chunk.payload_offset + 36U, loop); !read)
+    if (sampler_data_size != 0U) {
+        warning(metadata, "wav_sampler_specific_data_ignored",
+                "WAV smpl contains sampler-specific data that is not mapped to an A-series Sample");
+    }
+    if (loop_count == 0U)
+        return pitch;
+    if (loop_count != 1U) {
+        warning(metadata, "wav_sampler_multiple_loops_unsupported",
+                "WAV contains multiple sampler loops; imported Sample will use one-shot playback");
+        return pitch;
+    }
+    std::array<std::byte, 24> loop_bytes{};
+    if (auto read = reader.read_exact_at(chunk.payload_offset + 36U, loop_bytes); !read)
         return std::unexpected{read.error()};
-    const auto type = u32(std::span{loop}.subspan<4U, 4U>(), order);
-    const auto start = u32(std::span{loop}.subspan<8U, 4U>(), order);
-    const auto inclusive_end = u32(std::span{loop}.subspan<12U, 4U>(), order);
-    const auto play_count = u32(std::span{loop}.subspan<20U, 4U>(), order);
-    if (type != 0U || start > inclusive_end || inclusive_end >= source_frames) {
-        warning(metadata, "wav_sampler_loop_unsupported",
-                "WAV sampler loop is directional or out of range; imported Sample will use one-shot playback");
+    const auto loop = std::span{loop_bytes};
+    const auto type = u32(loop.subspan<4U, 4U>(), order);
+    const auto start = u32(loop.subspan<8U, 4U>(), order);
+    const auto inclusive_end = u32(loop.subspan<12U, 4U>(), order);
+    const auto fraction = u32(loop.subspan<16U, 4U>(), order);
+    const auto play_count = u32(loop.subspan<20U, 4U>(), order);
+    if (type != 0U) {
+        const auto [code, description] = type == 1U
+                                             ? std::pair{"wav_sampler_alternating_loop_unsupported", "alternating"}
+                                         : type == 2U ? std::pair{"wav_sampler_backward_loop_unsupported", "backward"}
+                                                      : std::pair{"wav_sampler_loop_type_unsupported", "nonstandard"};
+        warning(metadata, code,
+                std::string{"WAV contains a "} + description +
+                    " sampler loop; imported Sample will use one-shot playback");
+        return pitch;
+    }
+    if (fraction != 0U) {
+        warning(metadata, "wav_sampler_loop_fraction_unsupported",
+                "WAV sampler loop uses a fractional boundary; imported Sample will use one-shot playback");
+        return pitch;
+    }
+    if (start > inclusive_end || inclusive_end >= source_frames) {
+        warning(metadata, "wav_sampler_loop_range_invalid",
+                "WAV sampler loop is out of range; imported Sample will use one-shot playback");
         return pitch;
     }
     if (play_count != 0U) {

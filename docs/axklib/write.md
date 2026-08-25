@@ -217,9 +217,9 @@ produce a much smaller Yamaha Wave Data object.
 ### WAV Sampler Metadata
 
 Audio inspection reports `samplerDefaults` in addition to storage projections.
-For WAV input, axklib maps a usable `smpl` unity note, pitch fraction, and
-single forward loop to the A-series root key, fine tune, and forward-loop
-window. Loop endpoints in `smpl` are inclusive; axklib converts them to the
+For WAV input, axklib maps a usable `smpl` unity note, pitch fraction, and one
+normal forward loop (type `0`) to the A-series root key, fine tune, and
+forward-loop window. Loop endpoints in `smpl` are inclusive; axklib converts them to the
 A-series start/length representation and rescales the boundaries when the
 audio is resampled. A nonzero `smpl` repeat count is normalized to the A-series
 indefinite forward-loop mode and reported as the non-fatal
@@ -229,14 +229,48 @@ represent the forward loop itself.
 
 A WAV `inst` chunk supplies root key and fine tune only when `smpl` does not,
 and supplies the Sample key and velocity ranges. `smpl` wins a pitch conflict.
-Multiple, backward, alternating, malformed, out-of-range, or resampling-empty
-loops are not approximated: inspection reports a non-fatal issue and defaults
-to the hardware-proven forward one-shot mode.
+The parser validates every declared loop record and the sampler-specific-data
+length before using the chunk. Multiple loops, alternating loops (type `1`),
+backward loops (type `2`), manufacturer-specific loop types, fractional loop
+boundaries, malformed or out-of-range loops, and loops that become empty after
+resampling are not approximated: inspection reports a specific non-fatal issue
+and defaults to the hardware-proven forward one-shot mode. Sampler-specific
+data is retained structurally for validation but is not mapped to an A-series
+field.
 
 Files without usable sampler metadata also default to forward one-shot. The
 inspection result records `pitchSource`, `rangeSource`, and `loopSource`, so a
 client can distinguish WAV-authored values from A-series defaults before
 writing. Explicit manifest values remain authoritative after inspection.
+
+WAV output writes PCM plus RIFF `smpl` and `inst` chunks when the decoded
+metadata can be represented without inventing semantics. The RIFF serializer
+supports the complete standard `smpl` header, sampler-specific data, and loop
+records of normal (type `0`), alternating (type `1`), and backward (type `2`)
+form, as well as every standard `inst` field. Current A-series export maps
+pitch, key range, velocity range, loop bounds, and playback mode as follows:
+
+| A-series mode | WAV output |
+| --- | --- |
+| `-->` (`0`) | No `smpl` loop; PCM remains in its stored forward order. |
+| `->0` (`1`) | One type-`0` forward loop with inclusive end and infinite repeat count. |
+| `->0->` (`2`) | Same exact type-`0` bounds, with a warning that WAV cannot preserve the A-series release-tail behavior. |
+| `<--` (`3`) | No loop and a warning; the PCM is not reversed and type `2` would incorrectly imply looping. |
+| `One->` (`4`) | No `smpl` loop. |
+| `One<-` (`5`) | No loop and a warning; the PCM is not reversed. |
+
+Direct Sample WAV export uses the Sample member's root key and fine tune, the
+Sample key and velocity ranges, and the Sample loop window. The full physical
+Wave Data PCM is retained; a Sample's narrower playback window and coarse tune
+are not representable by `smpl` or `inst`. SFZ `offset`, `end`, and `transpose`
+remain authoritative for those values. A rendered stereo Sample receives
+sampler chunks only when both logical members agree on pitch, playback window,
+and loop metadata; otherwise the chunks are omitted with a warning.
+
+Whole-volume and SFZ exports pool physical Wave Data WAVs because the same Wave
+Data can be shared by Samples with different playback parameters. Such a shared
+WAV therefore carries only its Wave Data-level pitch and loop metadata. The SFZ
+regions carry each Sample's root, range, window, tune, and loop semantics.
 
 ## Create A Hand-Authored CD-ROM ISO
 

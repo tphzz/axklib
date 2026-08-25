@@ -1,11 +1,42 @@
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <ranges>
+#include <span>
+#include <string_view>
 
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
 #include "axklib/wav_stream.hpp"
+
+namespace {
+
+std::uint32_t wav_le32(std::span<const std::byte> bytes, std::size_t offset) {
+    std::uint32_t result{};
+    for (std::size_t index = 0U; index < 4U; ++index)
+        result |= std::to_integer<std::uint32_t>(bytes[offset + index]) << (index * 8U);
+    return result;
+}
+
+std::size_t wav_chunk_offset(std::span<const std::byte> bytes, std::string_view id) {
+    for (std::size_t offset = 12U; offset + 8U <= bytes.size();) {
+        if (id.size() == 4U &&
+            std::equal(id.begin(), id.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                       [](char left, std::byte right) { return static_cast<std::byte>(left) == right; })) {
+            return offset;
+        }
+        const auto payload_size = static_cast<std::size_t>(wav_le32(bytes, offset + 4U));
+        const auto padded_size = payload_size + payload_size % 2U;
+        if (padded_size > bytes.size() - offset - 8U)
+            break;
+        offset += 8U + padded_size;
+    }
+    return bytes.size();
+}
+
+} // namespace
 
 TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
@@ -24,9 +55,11 @@ TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     EXPECT_EQ(waveform->stored_payload_transform, "byteswap16");
     const auto wav = axk::wav_bytes(*waveform);
     ASSERT_TRUE(wav);
-    EXPECT_EQ(wav->size(), 44U + waveform->pcm.size());
     EXPECT_EQ((*wav)[0], std::byte{'R'});
-    EXPECT_TRUE(std::ranges::equal(std::span{*wav}.subspan(44), std::span<const std::byte>{waveform->pcm}));
+    const auto data = wav_chunk_offset(*wav, "data");
+    ASSERT_LT(data, wav->size());
+    EXPECT_EQ(wav_le32(*wav, data + 4U), static_cast<std::uint32_t>(waveform->pcm.size()));
+    EXPECT_TRUE(std::ranges::equal(std::span{*wav}.subspan(data + 8U, waveform->pcm.size()), std::span{waveform->pcm}));
     const auto preview = axk::build_preview_envelope(*waveform, 16);
     ASSERT_TRUE(preview);
     EXPECT_EQ(preview->bins.size(), 16U);

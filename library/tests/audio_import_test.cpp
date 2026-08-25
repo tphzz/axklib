@@ -154,10 +154,11 @@ void append_chunk(std::vector<std::byte> &bytes, std::string_view id, std::span<
 
 std::vector<std::byte> sampler_wav(std::uint32_t unity_note, std::uint32_t pitch_fraction,
                                    std::span<const std::array<std::uint32_t, 4>> loops,
-                                   std::optional<std::array<std::int8_t, 7>> instrument = {}, bool big_endian = false) {
+                                   std::optional<std::array<std::int8_t, 7>> instrument = {}, bool big_endian = false,
+                                   std::span<const std::byte> sampler_data = {}) {
     std::vector<std::byte> smpl(28U);
     append_u32(smpl, static_cast<std::uint32_t>(loops.size()), big_endian);
-    append_u32(smpl, 0U, big_endian);
+    append_u32(smpl, static_cast<std::uint32_t>(sampler_data.size()), big_endian);
     const auto overwrite = [&](std::size_t offset, std::uint32_t value) {
         for (std::size_t index = 0; index < 4U; ++index) {
             const auto shift = big_endian ? (3U - index) * 8U : index * 8U;
@@ -174,6 +175,7 @@ std::vector<std::byte> sampler_wav(std::uint32_t unity_note, std::uint32_t pitch
         append_u32(smpl, 0U, big_endian);
         append_u32(smpl, loops[index][3], big_endian);
     }
+    smpl.insert(smpl.end(), sampler_data.begin(), sampler_data.end());
 
     std::vector<std::byte> bytes;
     append_fourcc(bytes, big_endian ? "RIFX" : "RIFF");
@@ -272,8 +274,34 @@ TEST(WavSamplerMetadata, RejectsUnsupportedLoopSemanticsWithoutApproximatingThem
     EXPECT_EQ(metadata->settings.loop_length_frames, 0U);
     EXPECT_EQ(metadata->settings.loop_source, "DEFAULT");
     ASSERT_EQ(metadata->issues.size(), 1U);
-    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_loop_unsupported");
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_multiple_loops_unsupported");
     EXPECT_FALSE(metadata->issues.front().fatal);
+}
+
+TEST(WavSamplerMetadata, DistinguishesUnsupportedStandardAndNonstandardLoopTypes) {
+    constexpr std::array cases{std::pair{1U, std::string_view{"wav_sampler_alternating_loop_unsupported"}},
+                               std::pair{2U, std::string_view{"wav_sampler_backward_loop_unsupported"}},
+                               std::pair{32U, std::string_view{"wav_sampler_loop_type_unsupported"}}};
+    for (const auto &[type, code] : cases) {
+        const std::array<std::array<std::uint32_t, 4>, 1> loops{{{type, 4U, 83U, 0U}}};
+        axk::MemoryReader reader{sampler_wav(60U, 0U, loops)};
+        const auto metadata = detail::inspect_wav_sampler_metadata(reader, 92U, 10'512U, 44'100U);
+        ASSERT_TRUE(metadata) << metadata.error().message;
+        EXPECT_EQ(metadata->settings.loop_mode, axk::AudioSamplerLoopMode::forward_one_shot);
+        ASSERT_EQ(metadata->issues.size(), 1U);
+        EXPECT_EQ(metadata->issues.front().code, code);
+    }
+}
+
+TEST(WavSamplerMetadata, ReportsSamplerSpecificDataWithoutDiscardingUsableMetadata) {
+    constexpr std::array<std::array<std::uint32_t, 4>, 0> loops{};
+    constexpr std::array sampler_data{std::byte{0xaaU}, std::byte{0xbbU}};
+    axk::MemoryReader reader{sampler_wav(60U, 0U, loops, {}, false, sampler_data)};
+    const auto metadata = detail::inspect_wav_sampler_metadata(reader, 92U, 44'100U, 44'100U);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    EXPECT_EQ(metadata->settings.root_key, 60U);
+    ASSERT_EQ(metadata->issues.size(), 1U);
+    EXPECT_EQ(metadata->issues.front().code, "wav_sampler_specific_data_ignored");
 }
 
 TEST(Pcm16Quantizer, UsesStableAxkTpdfPcg32V1Sequence) {
