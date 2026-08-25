@@ -38,6 +38,41 @@ export function auditionableSampleIds(
     );
 }
 
+export function stereoSampleIds(
+    relationships: readonly SamplerRelationship[],
+    waveData: readonly WaveDataItem[],
+): Set<string> {
+    const waveDataIds = new Set(waveData.map((item) => item.objectKey));
+    const membersBySample = new Map<string, { left: Set<string>; right: Set<string> }>();
+    for (const relationship of relationships) {
+        const member = memberRelationships.find(
+            (candidate) => candidate.relationshipType === relationship.relationshipType,
+        );
+        if (
+            !member ||
+            !isConfirmedRelationship(relationship) ||
+            !relationship.targetObjectId ||
+            !waveDataIds.has(relationship.targetObjectId)
+        ) {
+            continue;
+        }
+        const members = membersBySample.get(relationship.sourceObjectId) ?? {
+            left: new Set<string>(),
+            right: new Set<string>(),
+        };
+        members[member.role].add(relationship.targetObjectId);
+        membersBySample.set(relationship.sourceObjectId, members);
+    }
+    return new Set(
+        [...membersBySample]
+            .filter(([, members]) => {
+                if (members.left.size !== 1 || members.right.size !== 1) return false;
+                return new Set([...members.left, ...members.right]).size === 2;
+            })
+            .map(([sampleId]) => sampleId),
+    );
+}
+
 export function auditionableSampleBankIds(
     relationships: readonly SamplerRelationship[],
     sampleBanks: readonly SampleStructureItem[],

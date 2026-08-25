@@ -60,6 +60,7 @@
         preparingObjectId?: string | null;
         auditionableSampleIds: ReadonlySet<string>;
         auditionableSampleBankIds: ReadonlySet<string>;
+        stereoSampleIds?: ReadonlySet<string>;
         objectRenameAvailable?: boolean;
         onrenameobject?: (target: ObjectRenameTarget) => void;
         sampleBankCreationAvailable?: boolean;
@@ -102,6 +103,7 @@
         preparingObjectId = null,
         auditionableSampleIds,
         auditionableSampleBankIds,
+        stereoSampleIds = new Set<string>(),
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
         sampleBankCreationAvailable = false,
@@ -541,6 +543,7 @@
                                         name={item.name}
                                         object={item.object}
                                         metadata={view === 'samples' ? (item.membershipLabel ?? 'Standalone') : ''}
+                                        indicator={stereoSampleIds.has(item.objectId) ? 'stereo' : undefined}
                                     />
                                 </button>
                                 <button

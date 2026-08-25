@@ -7,6 +7,7 @@ import {
     distinctWaveDataForSample,
     linkedWaveDataForSample,
     orderedSamplesForBank,
+    stereoSampleIds,
 } from './sampleRelationships';
 
 function relationship(id: string, type: string, targetObjectId?: string): SamplerRelationship {
@@ -179,6 +180,77 @@ describe('auditionableSampleIds', () => {
     it('ignores Known targets that are absent from the loaded Wave Data collection', () => {
         expect(
             auditionableSampleIds([relationship('missing', 'SBNK_LEFT_MEMBER_TO_SMPL', 'SMPL-MISSING')], []),
+        ).toEqual(new Set());
+    });
+});
+
+describe('stereoSampleIds', () => {
+    it('requires confirmed left and right members that resolve to distinct Wave Data objects', () => {
+        const left = waveData('SMPL-L');
+        const right = waveData('SMPL-R');
+        const missing = {
+            ...relationship('missing-right', 'SBNK_RIGHT_MEMBER_TO_SMPL', 'SMPL-MISSING'),
+            sourceObjectId: 'SBNK-MISSING',
+        };
+        const likely = {
+            ...relationship('likely-right', 'SBNK_RIGHT_MEMBER_TO_SMPL', right.objectKey),
+            sourceObjectId: 'SBNK-LIKELY',
+            quality: 'LIKELY' as const,
+        };
+
+        expect(
+            stereoSampleIds(
+                [
+                    {
+                        ...relationship('stereo-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-STEREO',
+                    },
+                    {
+                        ...relationship('stereo-right', 'SBNK_RIGHT_MEMBER_TO_SMPL', right.objectKey),
+                        sourceObjectId: 'SBNK-STEREO',
+                    },
+                    {
+                        ...relationship('shared-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-SHARED',
+                    },
+                    {
+                        ...relationship('shared-right', 'SBNK_RIGHT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-SHARED',
+                    },
+                    {
+                        ...relationship('mono-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-MONO',
+                    },
+                    {
+                        ...relationship('missing-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-MISSING',
+                    },
+                    {
+                        ...relationship('likely-left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                        sourceObjectId: 'SBNK-LIKELY',
+                    },
+                    missing,
+                    likely,
+                ],
+                [left, right],
+            ),
+        ).toEqual(new Set(['SBNK-STEREO']));
+    });
+
+    it('does not classify malformed Samples with more than two resolved members as stereo', () => {
+        const left = waveData('SMPL-L');
+        const right = waveData('SMPL-R');
+        const extra = waveData('SMPL-EXTRA');
+
+        expect(
+            stereoSampleIds(
+                [
+                    relationship('left', 'SBNK_LEFT_MEMBER_TO_SMPL', left.objectKey),
+                    relationship('right', 'SBNK_RIGHT_MEMBER_TO_SMPL', right.objectKey),
+                    relationship('extra', 'SBNK_RIGHT_MEMBER_TO_SMPL', extra.objectKey),
+                ],
+                [left, right, extra],
+            ),
         ).toEqual(new Set());
     });
 });

@@ -430,6 +430,7 @@
                 preparingObjectId={audition.state.status === 'preparing' ? audition.state.objectId : null}
                 auditionableSampleIds={audition.auditionableSampleObjectIds}
                 auditionableSampleBankIds={audition.auditionableSampleBankObjectIds}
+                stereoSampleIds={audition.stereoSampleObjectIds}
                 objectRenameAvailable={mutation.objectRenameAvailable}
                 onrenameobject={(target) => mutation.requestObjectRename(target)}
                 sampleBankCreationAvailable={mutation.objectRenameAvailable}

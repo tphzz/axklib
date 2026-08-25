@@ -1,7 +1,12 @@
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
-import { auditionableSampleBankIds, auditionableSampleIds, isStandaloneSample } from '../../lib/sampleRelationships';
+import {
+    auditionableSampleBankIds,
+    auditionableSampleIds,
+    isStandaloneSample,
+    stereoSampleIds,
+} from '../../lib/sampleRelationships';
 import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
 import type {
     Program,
@@ -42,6 +47,7 @@ interface AuditionabilityIndex {
     objectIds: Set<string>;
     sampleIds: Set<string>;
     sampleBankIds: Set<string>;
+    stereoIds: Set<string>;
 }
 
 export class AuditionWorkflow {
@@ -109,6 +115,10 @@ export class AuditionWorkflow {
         return this.auditionabilityIndex().sampleBankIds;
     }
 
+    get stereoSampleObjectIds(): Set<string> {
+        return this.auditionabilityIndex().stereoIds;
+    }
+
     private auditionabilityIndex(): AuditionabilityIndex {
         const catalog = this.dependencies.catalog;
         const cached = this.auditionabilityCache;
@@ -133,6 +143,7 @@ export class AuditionWorkflow {
                 catalog.samples,
                 sampleIds,
             ),
+            stereoIds: stereoSampleIds(catalog.relationships, catalog.waveData),
             objectIds: new Set([...sampleIds, ...catalog.waveData.map((item) => item.objectKey)]),
         };
         this.auditionabilityCache = result;

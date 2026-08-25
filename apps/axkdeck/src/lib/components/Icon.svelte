@@ -35,6 +35,7 @@
         | 'server'
         | 'sparkles'
         | 'stop'
+        | 'stereo'
         | 'trash'
         | 'triangle-alert'
         | 'upload'
@@ -133,6 +134,8 @@
         />
     {:else if name === 'waveform'}
         <path d="M3 12h2l2-7 3 14 3-11 2 8 2-4h4" />
+    {:else if name === 'stereo'}
+        <circle cx="8.5" cy="12" r="6.5" /><circle cx="15.5" cy="12" r="6.5" />
     {:else if name === 'sliders'}
         <path d="M4 6h6M14 6h6M4 12h2M10 12h10M4 18h9M17 18h3" /><circle cx="12" cy="6" r="2" /><circle
             cx="8"

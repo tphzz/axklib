@@ -70,9 +70,47 @@ const callbacks = {
 const noAuditionableSamples = {
     auditionableSampleIds: new Set<string>(),
     auditionableSampleBankIds: new Set<string>(),
+    stereoSampleIds: new Set<string>(),
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('marks stereo Samples in both Sample collection contexts', () => {
+        const bank = structure('SBAC', 'Pads');
+        const stereo = structure('SBNK', 'Stereo Pad');
+        const mono = structure('SBNK', 'Mono Pad');
+        const commonProps = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            sampleBanks: [bank],
+            samples: [stereo, mono],
+            waveData: [],
+            activeSampleBankId: bank.objectId,
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            showOnlyStandaloneSamples: false,
+            stereoSampleIds: new Set([stereo.objectId]),
+        };
+        const rendered = render(ContainedObjectWorkspace, {
+            props: { ...commonProps, view: 'samples' },
+        });
+
+        const stereoRow = screen.getByRole('button', { name: 'Inspect Stereo Pad' });
+        const monoRow = screen.getByRole('button', { name: 'Inspect Mono Pad' });
+        expect(stereoRow.querySelector('[data-icon="stereo"]')).toBeTruthy();
+        expect(stereoRow.querySelector('[title="Stereo Sample"]')).toBeTruthy();
+        expect(monoRow.querySelector('[data-icon="stereo"]')).toBeNull();
+
+        rendered.unmount();
+        render(ContainedObjectWorkspace, {
+            props: { ...commonProps, view: 'sample-banks' },
+        });
+
+        expect(
+            screen.getByRole('button', { name: 'Inspect Stereo Pad' }).querySelector('[data-icon="stereo"]'),
+        ).toBeTruthy();
+    });
+
     it('shows only standalone Samples by default and composes the filter with search', async () => {
         const standalone = structure('SBNK', 'Standalone Piano');
         const assigned = structure('SBNK', 'Banked Brass');
