@@ -98,6 +98,7 @@
         selectWorkspace: (view: WorkspaceView) => void;
         exportPackage: (items: PackageExportObject[]) => void;
         exportAudio: (items: PackageExportSelection[]) => void;
+        exportWav: (items: PackageExportSelection[]) => void;
         exportMidi: (items: PackageExportObject[]) => void;
         deleteObjects: (items: PackageExportObject[]) => void;
         cleanupWaveData: () => void;
@@ -164,6 +165,7 @@
         selectWorkspace,
         exportPackage,
         exportAudio,
+        exportWav,
         exportMidi,
         deleteObjects,
         cleanupWaveData,
@@ -440,6 +442,7 @@
                 onexportobjects={exportPackage}
                 {audioExportAvailable}
                 onexportaudio={exportAudio}
+                onexportwav={exportWav}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}
@@ -525,6 +528,7 @@
                 onexportobjects={exportPackage}
                 {audioExportAvailable}
                 onexportaudio={exportAudio}
+                onexportwav={exportWav}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}

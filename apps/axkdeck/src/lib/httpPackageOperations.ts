@@ -7,6 +7,7 @@ import type { FileLocation, InputFileLocation } from './storageLocations';
 import type {
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionExportRoot,
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
@@ -195,12 +196,14 @@ export class HttpPackageOperations {
     async inspectAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionAudioExportInspection>('images.audio_export.inspect', {
             imageId: session.remoteId,
             expectedRevision: session.revision,
             roots,
+            selectionMode,
         });
         if (this.jobs.isJob(result)) throw new Error('images.audio_export.inspect unexpectedly returned a job');
         return result;
@@ -209,6 +212,7 @@ export class HttpPackageOperations {
     async startAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
@@ -219,6 +223,7 @@ export class HttpPackageOperations {
                 imageId: session.remoteId,
                 expectedRevision: session.revision,
                 roots,
+                selectionMode,
                 format,
                 destination,
             },

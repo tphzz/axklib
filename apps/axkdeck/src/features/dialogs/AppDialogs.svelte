@@ -2,7 +2,7 @@
     import { onDestroy } from 'svelte';
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
     import type { PickerRequest, PickerSelection } from './picker';
-    import type { ExportWorkflow } from '../export/workflow.svelte';
+    import { audioInspectionHasFatalIssues, type ExportWorkflow } from '../export/workflow.svelte';
     import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
     import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
     import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
@@ -138,6 +138,16 @@
 
     function directChoiceVisible(operation: DirectComputerOperation, contentAvailable: boolean): boolean {
         return directComputerDialogVisible(directComputerOperation, operation, contentAvailable);
+    }
+
+    function audioExportDialogVisible(): boolean {
+        const request = exports.audioRequest;
+        if (!request || request.busy || pickerRequest?.parentDialog === 'audio-export' || companionRequest)
+            return false;
+        if (request.destinationFlow === 'DIRECT_COMPUTER') {
+            return !request.loading && (Boolean(request.error) || audioInspectionHasFatalIssues(request.inspection));
+        }
+        return directChoiceVisible('audio-export', Boolean(request.error));
     }
 
     const exportProgressVisibility = new DelayedExportProgressVisibility();
@@ -386,7 +396,7 @@
         oncancel={() => volumeFloppies.cancel()}
     />
 {/if}
-{#if exports.audioRequest && !exports.audioRequest.busy && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest && directChoiceVisible('audio-export', Boolean(exports.audioRequest.error))}
+{#if exports.audioRequest && audioExportDialogVisible()}
     <SfzExportDialog
         items={exports.audioRequest.items}
         inspection={exports.audioRequest.inspection}
@@ -394,6 +404,8 @@
         loading={exports.audioRequest.loading}
         error={exports.audioRequest.error}
         format={exports.audioRequest.format}
+        selectionMode={exports.audioRequest.selectionMode}
+        destinationFlow={exports.audioRequest.destinationFlow}
         onformatchange={(format) => exports.setAudioFormat(format)}
         onworkspace={() => void exports.audioToWorkspace()}
         onlocal={() => void exports.audioToComputer()}
@@ -442,7 +454,7 @@
     />
 {:else if exportProgressVisibility.operation === 'audio-export' && exports.audioRequest?.busy}
     <ExportProgressDialog
-        title="Export audio"
+        title={exports.audioRequest.selectionMode === 'SELECTED_AUDIO_OBJECTS' ? 'Export WAV' : 'Export audio'}
         progressLabel={exports.audioRequest.progressLabel || 'Exporting audio…'}
         cancellable={true}
         oncancel={() => exports.cancelAudio()}

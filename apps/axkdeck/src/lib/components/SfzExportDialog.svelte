@@ -1,6 +1,7 @@
 <script lang="ts">
     import { modal } from '../modal';
-    import type { ImageSessionAudioExportInspection } from '../transport';
+    import type { AudioExportDestinationFlow } from '../../features/export/workflow.svelte';
+    import type { ImageSessionAudioExportInspection, ImageSessionAudioExportSelectionMode } from '../transport';
     import type { PackageExportSelection } from '../types';
     import ExportDestinationChooser from './ExportDestinationChooser.svelte';
     import Icon from './Icon.svelte';
@@ -12,6 +13,8 @@
         loading: boolean;
         error: string;
         format: 'SFZ' | 'WAV';
+        selectionMode: ImageSessionAudioExportSelectionMode;
+        destinationFlow?: AudioExportDestinationFlow;
         onformatchange: (format: 'SFZ' | 'WAV') => void;
         onworkspace: () => void;
         onlocal: () => void;
@@ -24,10 +27,25 @@
         fatal: boolean;
     }
 
-    let { items, inspection, desktop, loading, error, format, onformatchange, onworkspace, onlocal, oncancel }: Props =
-        $props();
+    let {
+        items,
+        inspection,
+        desktop,
+        loading,
+        error,
+        format,
+        selectionMode,
+        destinationFlow = 'CHOOSER',
+        onformatchange,
+        onworkspace,
+        onlocal,
+        oncancel,
+    }: Props = $props();
 
     const singleItem = $derived(items.length === 1 ? items[0] : undefined);
+    const directWav = $derived(selectionMode === 'SELECTED_AUDIO_OBJECTS');
+    const directComputer = $derived(destinationFlow === 'DIRECT_COMPUTER');
+    const dialogTitle = $derived(directWav ? 'Export WAV' : 'Export SFZ');
     const counts = $derived.by(() => {
         if (!inspection) return '';
         const values = [
@@ -78,14 +96,14 @@
         class="dialog-shell package-export-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Export SFZ"
+        aria-label={dialogTitle}
         aria-busy={loading}
         use:modal={{ onescape: oncancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="music" size={16} />
-                <h2>Export SFZ</h2>
+                <h2>{dialogTitle}</h2>
             </div>
             <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
         </header>
@@ -93,46 +111,69 @@
         <div class="package-dialog-content">
             <section class="package-source-choice" aria-label="Audio export destination">
                 <h3>{singleItem ? `Export “${singleItem.name}”` : `Export ${items.length} objects`}</h3>
-                <p>Export the selected objects and their playable audio dependencies.</p>
+                {#if directWav}
+                    <p>
+                        {items[0]?.kind === 'SBNK'
+                            ? 'Export each selected Sample as one mono or interleaved stereo WAV file.'
+                            : 'Export each selected Wave Data object as one mono WAV file.'}
+                    </p>
+                {:else}
+                    <p>Export the selected objects and their playable audio dependencies.</p>
+                {/if}
 
                 {#if loading}
                     <p class="dialog-progress" role="status">Inspecting audio export…</p>
                 {:else if inspection}
                     <p class="package-export-type-summary">{counts}</p>
-                    <div class="audio-export-format dialog-segmented-control" role="group" aria-label="Export format">
-                        <button
-                            type="button"
-                            disabled={!inspection.sfzEligible}
-                            aria-pressed={format === 'SFZ'}
-                            onclick={() => onformatchange('SFZ')}>SFZ + WAV</button
-                        >
-                        <button type="button" aria-pressed={format === 'WAV'} onclick={() => onformatchange('WAV')}
-                            >WAV files</button
-                        >
-                    </div>
-                    {#if inspection.sfzEligible}
+                    {#if directWav}
                         <p>
-                            {format === 'SFZ'
-                                ? `${inspection.sfzFileCount} SFZ ${inspection.sfzFileCount === 1 ? 'file' : 'files'} and referenced WAV files will be created.`
-                                : 'All resolved Wave Data will be exported as WAV files without SFZ mappings.'}
+                            {inspection.wavFileCount} WAV {inspection.wavFileCount === 1 ? 'file' : 'files'} will be created
+                            directly in the selected folder.
                         </p>
                     {:else}
-                        <p class="audio-export-guidance">
-                            SFZ mappings are unavailable for this selection. Export the resolved audio as WAV files
-                            instead.
-                        </p>
+                        <div
+                            class="audio-export-format dialog-segmented-control"
+                            role="group"
+                            aria-label="Export format"
+                        >
+                            <button
+                                type="button"
+                                disabled={!inspection.sfzEligible}
+                                aria-pressed={format === 'SFZ'}
+                                onclick={() => onformatchange('SFZ')}>SFZ + WAV</button
+                            >
+                            <button type="button" aria-pressed={format === 'WAV'} onclick={() => onformatchange('WAV')}
+                                >WAV files</button
+                            >
+                        </div>
+                        {#if inspection.sfzEligible}
+                            <p>
+                                {format === 'SFZ'
+                                    ? `${inspection.sfzFileCount} SFZ ${inspection.sfzFileCount === 1 ? 'file' : 'files'} and referenced WAV files will be created.`
+                                    : 'All resolved Wave Data will be exported as WAV files without SFZ mappings.'}
+                            </p>
+                        {:else}
+                            <p class="audio-export-guidance">
+                                SFZ mappings are unavailable for this selection. Export the resolved audio as WAV files
+                                instead.
+                            </p>
+                        {/if}
                     {/if}
                     {#each displayIssues as issue (issue.key)}
                         <p class:dialog-error={issue.fatal} class="audio-export-issue">{issue.message}</p>
                     {/each}
-                    <ExportDestinationChooser {desktop} {onworkspace} {onlocal} />
+                    {#if !directComputer}
+                        <ExportDestinationChooser {desktop} {onworkspace} {onlocal} />
+                    {/if}
                 {/if}
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </section>
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
+            <button class="secondary-button" type="button" onclick={oncancel}
+                >{directComputer ? 'Close' : 'Cancel'}</button
+            >
         </footer>
     </div>
 </div>

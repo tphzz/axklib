@@ -10,6 +10,7 @@
         oncreatesamplebank?: () => void;
         onassignsamplebank?: () => void;
         onexportpackage?: () => void;
+        onexportwav?: () => void;
         onexportsfz?: () => void;
         onexportmidi?: () => void;
         ondelete?: () => void;
@@ -25,6 +26,7 @@
         oncreatesamplebank,
         onassignsamplebank,
         onexportpackage,
+        onexportwav,
         onexportsfz,
         onexportmidi,
         ondelete,
@@ -138,6 +140,16 @@
             }}>Export package…</button
         >
     {/if}
+    {#if onexportwav}
+        <button
+            type="button"
+            role="menuitem"
+            onclick={() => {
+                onexportwav?.();
+                onclose();
+            }}>Export WAV…</button
+        >
+    {/if}
     {#if onexportsfz}
         <button
             type="button"
@@ -158,7 +170,7 @@
             }}>Export MIDI…</button
         >
     {/if}
-    {#if (onrename || oncreatesamplebank || onassignsamplebank || onexportpackage || onexportsfz || onexportmidi) && ondelete}
+    {#if (onrename || oncreatesamplebank || onassignsamplebank || onexportpackage || onexportwav || onexportsfz || onexportmidi) && ondelete}
         <div class="context-menu-separator" role="separator"></div>
     {/if}
     {#if ondelete}

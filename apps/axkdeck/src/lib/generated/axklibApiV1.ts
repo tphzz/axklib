@@ -2561,11 +2561,13 @@ export interface components {
             sfzEligible: boolean;
             sfzFileCount: number;
             waveDataCount: number;
+            wavFileCount: number;
         };
         ImageSessionAudioExportInspectionRequest: {
             expectedRevision: number;
             imageId: string;
             roots: components['schemas']['ImageSessionExportRoot'][];
+            selectionMode: components['schemas']['ImageSessionAudioExportSelectionMode'];
         };
         ImageSessionAudioExportRequest: {
             destination: components['schemas']['ImageSessionAudioExportDestination'];
@@ -2574,6 +2576,7 @@ export interface components {
             format: 'SFZ' | 'WAV';
             imageId: string;
             roots: components['schemas']['ImageSessionExportRoot'][];
+            selectionMode: components['schemas']['ImageSessionAudioExportSelectionMode'];
         };
         ImageSessionAudioExportResult: {
             /** @enum {unknown} */
@@ -2586,6 +2589,8 @@ export interface components {
             output: components['schemas']['DirectoryRef'] | null;
             revision: number;
         };
+        /** @enum {string} */
+        ImageSessionAudioExportSelectionMode: 'DEPENDENCY_CLOSURE' | 'SELECTED_AUDIO_OBJECTS';
         ImageSessionExportRoot:
             | {
                   contentId: string;

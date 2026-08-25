@@ -27,6 +27,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
     ImageSessionMediaConversionInspection,
@@ -310,16 +311,18 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection> {
-        return this.packages.inspectAudioExport(sessionId, roots);
+        return this.packages.inspectAudioExport(sessionId, roots, selectionMode);
     }
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
-        return this.packages.startAudioExport(sessionId, roots, format, destination);
+        return this.packages.startAudioExport(sessionId, roots, selectionMode, format, destination);
     }
     startImageSequenceExport(
         sessionId: number,

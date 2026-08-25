@@ -56,6 +56,7 @@
         onexportobjects?: (objects: PackageExportObject[]) => void;
         audioExportAvailable?: boolean;
         onexportaudio?: (objects: PackageExportObject[]) => void;
+        onexportwav?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
         onselectionchange?: (selection: PackageExportSelectionState) => void;
         onselectionlimit?: () => void;
@@ -90,6 +91,7 @@
         onexportobjects = () => undefined,
         audioExportAvailable = false,
         onexportaudio = () => undefined,
+        onexportwav = () => undefined,
         selection = emptyPackageExportSelection(),
         onselectionchange = () => undefined,
         onselectionlimit = () => undefined,
@@ -502,6 +504,7 @@
             ? () => onrenameobject(objectMenu!.renameTarget!)
             : undefined}
         onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportwav={audioExportAvailable && view === 'wave-data' ? () => onexportwav(objectMenu!.objects) : undefined}
         onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}
         ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />

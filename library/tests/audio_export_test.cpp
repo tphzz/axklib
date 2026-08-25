@@ -279,6 +279,100 @@ TEST(AudioExport, PreflightsExistingTargetsBeforeWritingAnyAudio) {
     std::filesystem::remove_all(output, error);
 }
 
+TEST(AudioExport, WritesSelectedSampleAsOneFlatInterleavedStereoWav) {
+    axk::Waveform left;
+    left.format = {1, 2, 44'100};
+    left.frame_count = 2;
+    left.pcm = {std::byte{1}, std::byte{0}, std::byte{2}, std::byte{0}};
+    auto right = left;
+    right.pcm = {std::byte{3}, std::byte{0}, std::byte{4}, std::byte{0}};
+
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Stereo Sample";
+    sample.members = {
+        {"left", "left", "SMPL/Left.wav", axk::RelationshipQuality::known},
+        {"right", "right", "SMPL/Right.wav", axk::RelationshipQuality::known},
+    };
+    axk::VolumeExport volume;
+    volume.waveforms = {
+        {"left", "Left", "SMPL/Left.wav", left},
+        {"right", "Right", "SMPL/Right.wav", right},
+    };
+    volume.samples = {sample};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-stereo-wav-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::sample, {"sample"}}, output);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->written_files.size(), 1U);
+    EXPECT_EQ(result->written_files.front().filename(), "Stereo Sample.wav");
+
+    std::ifstream input{result->written_files.front(), std::ios::binary};
+    const std::vector<char> bytes{std::istreambuf_iterator<char>{input}, {}};
+    ASSERT_GE(bytes.size(), 52U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[22]), 2U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[44]), 1U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[46]), 3U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[48]), 2U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[50]), 4U);
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, WritesOnlyTheSelectedWaveDataAndUsesDeterministicNameSuffixes) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::VolumeExport volume;
+    volume.waveforms = {
+        {"first", "Same", "SMPL/First.wav", waveform},
+        {"second", "Same", "SMPL/Second.wav", waveform},
+        {"excluded", "Excluded", "SMPL/Excluded.wav", waveform},
+    };
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-wave-data-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result =
+        axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::wave_data, {"first", "second"}}, output);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->written_files.size(), 2U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / "Same.wav"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / "Same (2).wav"));
+    EXPECT_FALSE(std::filesystem::exists(output / "Excluded.wav"));
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, RejectsSelectedSampleWithoutExactWaveDataMembersBeforeWriting) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Tentative Sample";
+    sample.members = {{"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::likely}};
+    axk::VolumeExport volume;
+    volume.waveforms = {{"wave", "Wave", "SMPL/Wave.wav", waveform}};
+    volume.samples = {sample};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-invalid-sample-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::sample, {"sample"}}, output);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::relationship_unresolved);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
 TEST(AudioExport, WritesSharedIdenticalTargetOnceAndRejectsDistinctCollisionBeforeOutput) {
     axk::Waveform waveform;
     waveform.format = {1, 2, 44100};

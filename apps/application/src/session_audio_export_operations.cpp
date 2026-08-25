@@ -38,12 +38,16 @@ struct AudioExportRoot {
     std::string object_key;
 };
 
+enum class AudioExportSelectionMode : std::uint8_t { dependency_closure, selected_audio_objects };
+
 struct AudioExportSelection {
     std::set<std::pair<std::uint8_t, std::uint32_t>> volumes;
     axk::app::ExactExportClosure closure;
     std::vector<Json> issues;
     std::string default_directory_name;
     std::size_t sfz_file_count{};
+    std::size_t wav_file_count{};
+    std::optional<axk::SelectedWavExportSelection> selected_wav;
 
     [[nodiscard]] bool sfz_eligible() const noexcept {
         return sfz_file_count != 0U &&
@@ -114,6 +118,16 @@ axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(c
     } catch (const Json::exception &) {
         return std::unexpected(operation_error("invalid_request", "imageId and expectedRevision are required"));
     }
+}
+
+axk::app::Result<AudioExportSelectionMode> parse_selection_mode(const Json &input) {
+    const auto value = input.value("selectionMode", std::string{});
+    if (value == "DEPENDENCY_CLOSURE")
+        return AudioExportSelectionMode::dependency_closure;
+    if (value == "SELECTED_AUDIO_OBJECTS")
+        return AudioExportSelectionMode::selected_audio_objects;
+    return std::unexpected(
+        operation_error("invalid_request", "selectionMode must be DEPENDENCY_CLOSURE or SELECTED_AUDIO_OBJECTS"));
 }
 
 axk::app::Result<std::vector<AudioExportRoot>>
@@ -190,9 +204,40 @@ void insert_object(AudioExportSelection &selection, const axk::ObjectSnapshot &o
         selection.closure.wave_data.insert(object.key);
 }
 
+enum class SelectedSampleMembershipStatus : std::uint8_t { missing, exact, invalid };
+
+SelectedSampleMembershipStatus selected_sample_membership_status(const axk::RelationshipGraph &graph,
+                                                                 std::string_view sample_key) {
+    std::map<std::string, std::string, std::less<>> members;
+    bool conflicting_role{};
+    for (const auto &relationship : graph.relationships) {
+        if (relationship.source_key != sample_key || !relationship.target_key ||
+            relationship.quality != axk::RelationshipQuality::known ||
+            (relationship.type != "SBNK_LEFT_MEMBER_TO_SMPL" && relationship.type != "SBNK_RIGHT_MEMBER_TO_SMPL")) {
+            continue;
+        }
+        const auto role = relationship.type == "SBNK_LEFT_MEMBER_TO_SMPL" ? "left" : "right";
+        const auto [found, inserted] = members.emplace(role, *relationship.target_key);
+        if (!inserted && found->second != *relationship.target_key)
+            conflicting_role = true;
+    }
+    if (members.empty())
+        return SelectedSampleMembershipStatus::missing;
+    if (conflicting_role)
+        return SelectedSampleMembershipStatus::invalid;
+    if (members.size() == 1U)
+        return SelectedSampleMembershipStatus::exact;
+    if (members.size() == 2U && members.contains("left") && members.contains("right") &&
+        members.at("left") != members.at("right")) {
+        return SelectedSampleMembershipStatus::exact;
+    }
+    return SelectedSampleMembershipStatus::invalid;
+}
+
 axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<AudioExportRoot> &roots,
                                                          const axk::ObjectCatalog &catalog,
-                                                         const axk::RelationshipGraph &graph) {
+                                                         const axk::RelationshipGraph &graph,
+                                                         AudioExportSelectionMode mode) {
     std::unordered_map<std::string, const axk::ObjectSnapshot *> by_key;
     by_key.reserve(catalog.objects.size());
     for (const auto &object : catalog.objects)
@@ -200,7 +245,9 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
 
     AudioExportSelection selection;
     std::vector<std::string> root_names;
+    std::vector<std::string> selected_object_keys;
     root_names.reserve(roots.size());
+    selected_object_keys.reserve(roots.size());
     for (const auto &root : roots) {
         if (root.kind == "VOLUME") {
             const auto volume = std::pair{*root.partition_index, *root.volume_directory_id};
@@ -227,6 +274,46 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
             return std::unexpected(operation_error("invalid_request", "audio export root kind does not match object"));
         insert_object(selection, *object->second);
         root_names.push_back(object->second->object.header.name);
+        selected_object_keys.push_back(object->second->key);
+    }
+
+    if (mode == AudioExportSelectionMode::selected_audio_objects) {
+        const auto kind = roots.front().kind;
+        if ((kind != "SBNK" && kind != "SMPL") ||
+            std::ranges::any_of(roots, [&](const auto &root) { return root.kind != kind; })) {
+            return std::unexpected(
+                operation_error("invalid_request", "selected audio export requires only Samples or only Wave Data"));
+        }
+        if (kind == "SBNK") {
+            selection.closure =
+                axk::app::build_exact_export_closure(graph, {}, {}, std::move(selection.closure.samples), {});
+            for (const auto &relationship : selection.closure.excluded) {
+                auto issue = axk::app::relationship_diagnostic(relationship,
+                                                               "Selected Sample has unconfirmed Wave Data membership");
+                issue["fatal"] = true;
+                selection.issues.push_back(std::move(issue));
+            }
+            for (const auto &key : selected_object_keys) {
+                const auto status = selected_sample_membership_status(graph, key);
+                if (status == SelectedSampleMembershipStatus::missing) {
+                    selection.issues.push_back({{"code", "sample_has_no_confirmed_wave_data"},
+                                                {"message", "Selected Sample has no confirmed Wave Data membership."},
+                                                {"fatal", true}});
+                } else if (status == SelectedSampleMembershipStatus::invalid) {
+                    selection.issues.push_back(
+                        {{"code", "sample_has_invalid_wave_data_membership"},
+                         {"message", "Selected Sample does not have one mono member or an exact stereo pair."},
+                         {"fatal", true}});
+                }
+            }
+        }
+        selection.selected_wav = axk::SelectedWavExportSelection{kind == "SBNK" ? axk::SelectedWavExportKind::sample
+                                                                                : axk::SelectedWavExportKind::wave_data,
+                                                                 std::move(selected_object_keys)};
+        selection.wav_file_count = selection.selected_wav->object_keys.size();
+        selection.default_directory_name =
+            safe_directory_name(roots.size() == 1U ? root_names.front() : root_names.front() + " and others");
+        return selection;
     }
 
     selection.closure = axk::app::build_exact_export_closure(
@@ -276,6 +363,7 @@ axk::app::Result<AudioExportSelection> resolve_selection(const std::vector<Audio
                  {"fatal", true}});
         }
     }
+    selection.wav_file_count = selection.closure.wave_data.size();
     selection.default_directory_name =
         safe_directory_name(roots.size() == 1U ? root_names.front() : root_names.front() + " and others");
     return selection;
@@ -290,6 +378,7 @@ Json inspection_json(std::string_view image_id, std::uint64_t revision, std::siz
             {"sampleBankCount", selection.closure.sample_banks.size()},
             {"sampleCount", selection.closure.samples.size()},
             {"waveDataCount", selection.closure.wave_data.size()},
+            {"wavFileCount", selection.wav_file_count},
             {"sfzFileCount", selection.sfz_file_count},
             {"sfzEligible", selection.sfz_eligible()},
             {"defaultDirectoryName", selection.default_directory_name},
@@ -331,9 +420,12 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                                   parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
                               if (!roots)
                                   return std::unexpected(roots.error());
+                              const auto mode = parse_selection_mode(input);
+                              if (!mode)
+                                  return std::unexpected(mode.error());
                               const auto catalog = catalog_from_session(*session);
                               const auto graph = axk::build_relationship_graph(catalog);
-                              const auto selection = resolve_selection(*roots, catalog, graph);
+                              const auto selection = resolve_selection(*roots, catalog, graph, *mode);
                               if (!selection)
                                   return std::unexpected(selection.error());
                               return inspection_json(identity->first, identity->second, roots->size(), *selection);
@@ -355,19 +447,32 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 const auto roots = parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
                 if (!roots)
                     return std::unexpected(roots.error());
+                const auto mode = parse_selection_mode(input);
+                if (!mode)
+                    return std::unexpected(mode.error());
                 const auto catalog = catalog_from_session(*session);
                 const auto graph = axk::build_relationship_graph(catalog);
-                const auto selection = resolve_selection(*roots, catalog, graph);
+                const auto selection = resolve_selection(*roots, catalog, graph, *mode);
                 if (!selection)
                     return std::unexpected(selection.error());
 
                 const auto format = input.value("format", std::string{});
                 if (format != "SFZ" && format != "WAV")
                     return std::unexpected(operation_error("invalid_request", "format must be SFZ or WAV"));
+                if (*mode == AudioExportSelectionMode::selected_audio_objects && format != "WAV") {
+                    return std::unexpected(
+                        operation_error("invalid_request", "selected audio objects can only be exported as WAV"));
+                }
                 if (format == "SFZ" && !selection->sfz_eligible()) {
                     return std::unexpected(operation_error(
                         "sfz_semantics_unavailable",
                         "The selection cannot produce reliable SFZ instruments; export it as WAV instead."));
+                }
+                if (*mode == AudioExportSelectionMode::selected_audio_objects &&
+                    std::ranges::any_of(selection->issues,
+                                        [](const Json &issue) { return issue.value("fatal", false); })) {
+                    return std::unexpected(operation_error(
+                        "wav_semantics_unavailable", "The selected Samples do not have exact Wave Data membership."));
                 }
                 if (selection->closure.wave_data.empty())
                     return std::unexpected(
@@ -385,17 +490,19 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 if (!plan)
                     return std::unexpected(core_error(plan.error(), session->source.relative_path));
                 axk::app::filter_export_plan(*plan, selection->closure, selection->volumes);
-                const auto flat_media = session->media->kind() == axk::MediaKind::fat12_floppy ||
-                                        session->media->kind() == axk::MediaKind::standalone_object ||
-                                        session->media->kind() == axk::MediaKind::axk_object_directory ||
-                                        session->media->kind() == axk::MediaKind::a3k_archive;
-                const auto flatten_selected_volume =
-                    flat_media && roots->size() == 1U && roots->front().kind == "VOLUME";
-                axk::app::PooledPathAllocator pooled_paths;
-                if (auto laid_out =
-                        axk::app::apply_audio_export_layout(*plan, {{}, !flatten_selected_volume, true}, pooled_paths);
-                    !laid_out) {
-                    return std::unexpected(core_error(laid_out.error(), session->source.relative_path));
+                if (*mode == AudioExportSelectionMode::dependency_closure) {
+                    const auto flat_media = session->media->kind() == axk::MediaKind::fat12_floppy ||
+                                            session->media->kind() == axk::MediaKind::standalone_object ||
+                                            session->media->kind() == axk::MediaKind::axk_object_directory ||
+                                            session->media->kind() == axk::MediaKind::a3k_archive;
+                    const auto flatten_selected_volume =
+                        flat_media && roots->size() == 1U && roots->front().kind == "VOLUME";
+                    axk::app::PooledPathAllocator pooled_paths;
+                    if (auto laid_out = axk::app::apply_audio_export_layout(*plan, {{}, !flatten_selected_volume, true},
+                                                                            pooled_paths);
+                        !laid_out) {
+                        return std::unexpected(core_error(laid_out.error(), session->source.relative_path));
+                    }
                 }
                 session->lease.reset();
 
@@ -403,8 +510,12 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 if (!staging)
                     return std::unexpected(staging.error());
                 TemporaryDirectoryCleanup cleanup{*staging};
-                report_progress(context, axk::ProgressPhase::writing, 1U, 4U, "Writing Wave Data");
-                auto audio = axk::write_export_audio(*plan, *staging, false, context.cancellation);
+                report_progress(context, axk::ProgressPhase::writing, 1U, 4U,
+                                selection->selected_wav ? "Writing selected WAV files" : "Writing Wave Data");
+                auto audio = selection->selected_wav
+                                 ? axk::write_selected_wav_audio(*plan, *selection->selected_wav, *staging, false,
+                                                                 context.cancellation)
+                                 : axk::write_export_audio(*plan, *staging, false, context.cancellation);
                 if (!audio)
                     return std::unexpected(core_error(audio.error()));
                 std::size_t file_count = audio->written_files.size();

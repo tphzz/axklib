@@ -4624,6 +4624,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "wavFileCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "waveDataCount": {
             "minimum": 0,
             "type": "integer"
@@ -4637,6 +4641,7 @@
           "sampleBankCount",
           "sampleCount",
           "waveDataCount",
+          "wavFileCount",
           "sfzFileCount",
           "sfzEligible",
           "defaultDirectoryName",
@@ -4663,11 +4668,15 @@
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
+          },
+          "selectionMode": {
+            "$ref": "#/components/schemas/ImageSessionAudioExportSelectionMode"
           }
         },
         "required": [
           "imageId",
           "expectedRevision",
+          "selectionMode",
           "roots"
         ],
         "type": "object"
@@ -4700,11 +4709,15 @@
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
+          },
+          "selectionMode": {
+            "$ref": "#/components/schemas/ImageSessionAudioExportSelectionMode"
           }
         },
         "required": [
           "imageId",
           "expectedRevision",
+          "selectionMode",
           "roots",
           "format",
           "destination"
@@ -4769,6 +4782,13 @@
           "download"
         ],
         "type": "object"
+      },
+      "ImageSessionAudioExportSelectionMode": {
+        "enum": [
+          "DEPENDENCY_CLOSURE",
+          "SELECTED_AUDIO_OBJECTS"
+        ],
+        "type": "string"
       },
       "ImageSessionExportRoot": {
         "oneOf": [
@@ -20524,7 +20544,8 @@
                         "contentId": "x",
                         "kind": "VOLUME"
                       }
-                    ]
+                    ],
+                    "selectionMode": "DEPENDENCY_CLOSURE"
                   }
                 }
               },
@@ -20553,6 +20574,7 @@
                         "sampleCount": 0,
                         "sfzEligible": false,
                         "sfzFileCount": 0,
+                        "wavFileCount": 0,
                         "waveDataCount": 0
                       },
                       "meta": {
@@ -20573,6 +20595,7 @@
                         "sampleCount": 0,
                         "sfzEligible": false,
                         "sfzFileCount": 0,
+                        "wavFileCount": 0,
                         "waveDataCount": 0
                       },
                       "meta": {
@@ -20908,7 +20931,8 @@
                         "contentId": "x",
                         "kind": "VOLUME"
                       }
-                    ]
+                    ],
+                    "selectionMode": "DEPENDENCY_CLOSURE"
                   }
                 }
               },

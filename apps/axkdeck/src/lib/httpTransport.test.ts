@@ -2650,6 +2650,7 @@ describe('HttpImageTransport', () => {
                         sampleCount: 2,
                         waveDataCount: 2,
                         sfzFileCount: 1,
+                        wavFileCount: 2,
                         sfzEligible: true,
                         defaultDirectoryName: 'DRUMS',
                         issues: [],
@@ -2806,13 +2807,23 @@ describe('HttpImageTransport', () => {
             }),
         ).resolves.toMatchObject({ kind: 'images.volume_floppy_export', status: 'queued' });
         await expect(
-            transport.inspectImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }]),
+            transport.inspectImageAudioExport(
+                opened.sessionId,
+                [{ kind: 'SBAC', objectId: 'object-bank' }],
+                'DEPENDENCY_CLOSURE',
+            ),
         ).resolves.toMatchObject({ sfzEligible: true, defaultDirectoryName: 'DRUMS' });
         await expect(
-            transport.startImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }], 'SFZ', {
-                kind: 'DOWNLOAD',
-                directoryName: 'DRUMS',
-            }),
+            transport.startImageAudioExport(
+                opened.sessionId,
+                [{ kind: 'SBAC', objectId: 'object-bank' }],
+                'DEPENDENCY_CLOSURE',
+                'SFZ',
+                {
+                    kind: 'DOWNLOAD',
+                    directoryName: 'DRUMS',
+                },
+            ),
         ).resolves.toMatchObject({ kind: 'images.audio_export', status: 'queued' });
         const retained = {
             archiveId: 'archive-package',
@@ -2868,11 +2879,13 @@ describe('HttpImageTransport', () => {
         ).toEqual({
             imageId: 'image-package',
             expectedRevision: 7,
+            selectionMode: 'DEPENDENCY_CLOSURE',
             roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-audio-exports'))?.body).toEqual({
             imageId: 'image-package',
             expectedRevision: 7,
+            selectionMode: 'DEPENDENCY_CLOSURE',
             roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
             format: 'SFZ',
             destination: { kind: 'DOWNLOAD', directoryName: 'DRUMS' },

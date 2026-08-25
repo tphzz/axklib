@@ -38,6 +38,26 @@ describe('ObjectContextMenu', () => {
         expect(onassignsamplebank).toHaveBeenCalledOnce();
     });
 
+    it('offers direct WAV export immediately before SFZ export', async () => {
+        const onexportwav = vi.fn();
+        render(ObjectContextMenu, {
+            props: {
+                objectName: 'Sample',
+                left: 20,
+                top: 30,
+                onexportwav,
+                onexportsfz: vi.fn(),
+                onclose: vi.fn(),
+            },
+        });
+
+        const wav = screen.getByRole('menuitem', { name: 'Export WAV…' });
+        const sfz = screen.getByRole('menuitem', { name: 'Export SFZ…' });
+        expect(wav.compareDocumentPosition(sfz) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        await fireEvent.click(wav);
+        expect(onexportwav).toHaveBeenCalledOnce();
+    });
+
     it('uses roving keyboard focus and restores the invoking control', async () => {
         const invoker = document.createElement('button');
         document.body.append(invoker);

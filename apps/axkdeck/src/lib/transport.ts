@@ -363,6 +363,7 @@ export type ImageSessionVolumePackageExportResult = components['schemas']['Image
 export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
+export type ImageSessionAudioExportSelectionMode = components['schemas']['ImageSessionAudioExportSelectionMode'];
 export type ImageSessionSequenceExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionSequenceExportResult = components['schemas']['ImageSessionSequenceExportResult'];
 export type ImageSessionMediaConversionInspection = components['schemas']['ImageSessionMediaConversionInspection'];
@@ -615,10 +616,12 @@ export interface ImageTransport {
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection>;
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState>;

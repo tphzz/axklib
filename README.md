@@ -51,7 +51,8 @@ CD-ROMs.
 
 ### Export And Author Media
 
-- Export exact audio, rendered SFZ instruments (needs more work), individual 
+- Export selected Samples as mono or interleaved stereo WAV files, selected Wave
+  Data as mono WAV files, rendered SFZ instruments (needs more work), individual
   object packages, and dependency-complete volume packages.
 - Batch-export every volume in a partition as packages or as per-volume floppy
   sets.

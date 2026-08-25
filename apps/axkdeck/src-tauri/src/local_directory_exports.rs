@@ -71,7 +71,7 @@ pub(crate) async fn select_local_directory_export_destination(
     }
     if !matches!(
         export_label.as_str(),
-        "SFZ" | "MIDI" | "Packages" | "Floppies"
+        "SFZ" | "WAV" | "MIDI" | "Packages" | "Floppies"
     ) {
         return Err("the directory export kind is unsupported".to_owned());
     }

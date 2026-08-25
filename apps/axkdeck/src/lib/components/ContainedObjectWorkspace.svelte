@@ -16,10 +16,14 @@
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
     import { isStandaloneSample } from '../sampleRelationships';
-    import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
+    import type {
+        ContainedObjectMenuState,
+        ContainedSelectableItem as SelectableItem,
+        ContainedSelectionScope as SelectionScope,
+    } from './containedObjectMenu';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
@@ -68,6 +72,7 @@
         onexportobjects?: (objects: PackageExportObject[]) => void;
         audioExportAvailable?: boolean;
         onexportaudio?: (objects: PackageExportObject[]) => void;
+        onexportwav?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
         onselectionchange?: (selection: PackageExportSelectionState) => void;
         onselectionlimit?: () => void;
@@ -109,21 +114,12 @@
         onexportobjects = () => undefined,
         audioExportAvailable = false,
         onexportaudio = () => undefined,
+        onexportwav = () => undefined,
         selection = emptyPackageExportSelection(),
         onselectionchange = () => undefined,
         onselectionlimit = () => undefined,
     }: Props = $props();
-    type SelectionScope = 'sample-banks' | 'samples' | 'wave-data';
-    type SelectableItem = SampleStructureItem | WaveDataItem;
-    let objectMenu = $state<{
-        target: SamplerObject;
-        renameTarget: ObjectRenameTarget;
-        objects: PackageExportObject[];
-        sampleBankMembers: SampleStructureItem[] | null;
-        sampleBankAssignmentMembers: SampleStructureItem[] | null;
-        left: number;
-        top: number;
-    } | null>(null);
+    let objectMenu = $state<ContainedObjectMenuState | null>(null);
     let sampleViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
     let waveDataViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
@@ -283,7 +279,7 @@
                 ? selectedSamples
                 : null;
         objectMenu = {
-            target: target.object,
+            directWav: scope !== 'sample-banks',
             renameTarget: renameTarget(target),
             objects: menuSelection.items,
             sampleBankMembers,
@@ -694,6 +690,7 @@
             ? () => onassignsamplebank(objectMenu!.sampleBankAssignmentMembers!)
             : undefined}
         onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        onexportwav={audioExportAvailable && objectMenu.directWav ? () => onexportwav(objectMenu!.objects) : undefined}
         onexportsfz={audioExportAvailable ? () => onexportaudio(objectMenu!.objects) : undefined}
         ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />

@@ -800,6 +800,54 @@ describe('ObjectWorkspace', () => {
         expect(screen.queryByRole('menu')).toBeNull();
     });
 
+    it('offers direct WAV export for Wave Data', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '0.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
+            waveform: [],
+            previewState: 'idle' as const,
+            object: waveObject,
+        };
+        const onexportwav = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData],
+                view: 'wave-data',
+                audioExportAvailable: true,
+                onexportwav,
+            },
+        });
+
+        await fireEvent.contextMenu(document.querySelector('.wave-data-row')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export WAV…' }));
+        expect(onexportwav).toHaveBeenCalledWith([
+            {
+                kind: 'SMPL',
+                objectId: waveObject.key,
+                name: waveObject.name,
+                typeLabel: 'Wave Data',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
+        ]);
+    });
+
     it('delegates play and selection as one coordinated action', async () => {
         const waveObject = {
             ...object('SMPL', 'SMP 001'),

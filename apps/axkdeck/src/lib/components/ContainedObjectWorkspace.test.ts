@@ -573,6 +573,51 @@ describe('ContainedObjectWorkspace', () => {
         expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
     });
 
+    it('offers direct WAV export for Samples but not Sample Banks', async () => {
+        const sample = structure('SBNK', 'Standalone Piano');
+        const onexportwav = vi.fn();
+        const props = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples' as const,
+            sampleBanks: [],
+            samples: [sample],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            audioExportAvailable: true,
+            onexportwav,
+        };
+        const rendered = render(ContainedObjectWorkspace, { props });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Standalone Piano' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export WAV…' }));
+        expect(onexportwav).toHaveBeenCalledWith([
+            {
+                kind: 'SBNK',
+                objectId: sample.object.key,
+                name: sample.name,
+                typeLabel: 'Sample',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
+        ]);
+
+        const bank = structure('SBAC', 'Strings');
+        await rendered.rerender({
+            ...props,
+            view: 'sample-banks',
+            sampleBanks: [bank],
+            samples: [],
+        });
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
+        expect(screen.queryByRole('menuitem', { name: 'Export WAV…' })).toBeNull();
+        expect(screen.getByRole('menuitem', { name: 'Export SFZ…' })).toBeTruthy();
+    });
+
     it('offers type-safe rename targets for contained objects', async () => {
         const bank = structure('SBAC', 'Strings');
         const onrenameobject = vi.fn();

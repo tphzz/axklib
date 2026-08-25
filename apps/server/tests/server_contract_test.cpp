@@ -507,6 +507,7 @@ TEST(ServerContract, RelationshipDiagnosticsValidateForInspectionAndTerminalExtr
         {"sampleBankCount", 0U},
         {"sampleCount", 1U},
         {"waveDataCount", 0U},
+        {"wavFileCount", 1U},
         {"sfzFileCount", 0U},
         {"sfzEligible", false},
         {"defaultDirectoryName", "Sample"},

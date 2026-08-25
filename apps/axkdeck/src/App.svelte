@@ -440,6 +440,10 @@
         if (!imageSessionWorkflow.audioExportAvailable) return;
         await directComputerWorkflow.exportAudio(exportWorkflow, items);
     }
+    async function requestWavExport(items: PackageExportSelection[]): Promise<void> {
+        if (!imageSessionWorkflow.audioExportAvailable) return;
+        await directComputerWorkflow.exportWav(exportWorkflow, items);
+    }
     function requestSequenceExport(items: PackageExportObject[]): void {
         if (!imageSessionWorkflow.sequenceExportAvailable) return;
         directComputerWorkflow.exportMidi(exportWorkflow, items);
@@ -548,6 +552,7 @@
     selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
     exportPackage={requestObjectPackageExport}
     exportAudio={(items) => void requestAudioExport(items)}
+    exportWav={(items) => void requestWavExport(items)}
     exportMidi={requestSequenceExport}
     deleteObjects={requestObjectDeletion}
     cleanupWaveData={requestWaveDataCleanup}

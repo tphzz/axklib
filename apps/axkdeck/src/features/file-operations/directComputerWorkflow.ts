@@ -1,7 +1,7 @@
 import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
-import type { ExportWorkflow } from '../export/workflow.svelte';
+import { audioInspectionHasFatalIssues, type ExportWorkflow } from '../export/workflow.svelte';
 import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
 import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
 import type { SequenceImportWorkflow } from '../import/sequenceWorkflow.svelte';
@@ -87,8 +87,21 @@ export class DirectComputerWorkflow {
             return;
         }
         await this.run('audio-export', async () => {
-            await workflow.requestAudio(items);
-            if (workflow.audioRequest?.inspection) await workflow.audioToComputer(true);
+            await workflow.requestAudioToComputer(items);
+            if (workflow.audioRequest?.inspection && !audioInspectionHasFatalIssues(workflow.audioRequest.inspection))
+                await workflow.audioToComputer(true);
+        });
+    }
+
+    async exportWav(workflow: ExportWorkflow, items: PackageExportSelection[]): Promise<void> {
+        if (!this.enabled) {
+            await workflow.requestWav(items);
+            return;
+        }
+        await this.run('audio-export', async () => {
+            await workflow.requestWavToComputer(items);
+            if (workflow.audioRequest?.inspection && !audioInspectionHasFatalIssues(workflow.audioRequest.inspection))
+                await workflow.audioToComputer(true);
         });
     }
 

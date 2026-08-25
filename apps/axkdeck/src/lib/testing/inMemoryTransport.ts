@@ -21,6 +21,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
     ImageSessionExtentLayoutRepairDestination,
@@ -550,17 +551,19 @@ export class InMemoryImageTransport implements ImageTransport {
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection> {
-        return this.invoke('inspectImageAudioExport', [sessionId, roots]);
+        return this.invoke('inspectImageAudioExport', [sessionId, roots, selectionMode]);
     }
 
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
-        return this.invoke('startImageAudioExport', [sessionId, roots, format, destination]);
+        return this.invoke('startImageAudioExport', [sessionId, roots, selectionMode, format, destination]);
     }
 
     deleteRetainedPackage(download: RetainedDownload): Promise<void> {
