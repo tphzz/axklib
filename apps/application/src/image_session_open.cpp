@@ -13,6 +13,23 @@
 
 namespace {
 
+constexpr std::uint64_t image_open_progress_total = 5U;
+
+axk::app::Result<void> report_image_open_progress(axk::ProgressSink *progress,
+                                                  const axk::CancellationToken &cancellation, axk::ProgressPhase phase,
+                                                  std::uint64_t completed, std::string label) {
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(axk::app::Error{"operation_cancelled", active.error().message});
+    if (progress != nullptr) {
+        progress->report({.phase = phase,
+                          .completed = completed,
+                          .total = image_open_progress_total,
+                          .label = std::move(label),
+                          .output_path = std::nullopt});
+    }
+    return {};
+}
+
 std::optional<std::uint64_t>
 exact_dependency_size(const axk::ObjectSnapshot &root, const axk::RelationshipGraph &graph,
                       const std::map<std::string, const axk::ObjectSnapshot *, std::less<>> &objects,
@@ -66,16 +83,20 @@ exact_dependency_size(const axk::ObjectSnapshot &root, const axk::RelationshipGr
 
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
-                                    const CancellationToken &cancellation) {
-    return open_with_companion_sources(source, std::move(owner_id), {}, cancellation);
+                                    const CancellationToken &cancellation, ProgressSink *progress) {
+    return open_with_companion_sources(source, std::move(owner_id), {}, cancellation, progress);
 }
 
-axk::app::Result<axk::app::ImageSessionSummary>
-axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
-                                                           const std::vector<ImageSourceRef> &companion_sources,
-                                                           const CancellationToken &cancellation) {
+axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::open_with_companion_sources(
+    const ImageSourceRef &source, std::string owner_id, const std::vector<ImageSourceRef> &companion_sources,
+    const CancellationToken &cancellation, ProgressSink *progress) {
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
+    if (auto reported =
+            report_image_open_progress(progress, cancellation, ProgressPhase::opening, 0U, "Opening image source");
+        !reported) {
+        return std::unexpected(reported.error());
+    }
     auto admission = implementation_->reserve_session();
     if (!admission)
         return std::unexpected(admission.error());
@@ -212,12 +233,22 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
                                            .marker = "NONE"});
         }
     }
+    if (auto reported =
+            report_image_open_progress(progress, cancellation, ProgressPhase::reading, 1U, "Reading image metadata");
+        !reported) {
+        return std::unexpected(reported.error());
+    }
     const auto inventory_mode = media->kind() == axk::MediaKind::fat12_floppy_set
                                     ? axk::MediaObjectReadMode::complete
                                     : axk::MediaObjectReadMode::decoded_metadata;
     auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation);
     if (!inventory)
         return std::unexpected(core_error(inventory.error(), source));
+    if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::resolving, 2U,
+                                                   "Resolving sampler objects");
+        !reported) {
+        return std::unexpected(reported.error());
+    }
     auto graph = axk::build_relationship_graph(inventory->catalog);
     auto tree = axk::build_content_tree(*media, inventory->catalog, graph);
     std::unordered_map<std::uint8_t, std::string> partition_names;
@@ -472,6 +503,12 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
             return std::unexpected(appended.error());
     }
 
+    if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::validating, 3U,
+                                                   "Validating image contents");
+        !reported) {
+        return std::unexpected(reported.error());
+    }
+
     const auto append_validation = [&](std::string code, std::string severity, std::string message,
                                        std::string sampler_path, std::optional<std::string> object_id) {
         session->validation.push_back(
@@ -512,6 +549,12 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
             session_error("image_source_changed", "image source changed while the session was opened", true));
     }
 
+    if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::publishing, 4U,
+                                                   "Publishing image session");
+        !reported) {
+        return std::unexpected(reported.error());
+    }
+
     do {
         auto image_id = random_identifier("image-");
         if (!image_id)
@@ -520,7 +563,17 @@ axk::app::ImageSessionManager::open_with_companion_sources(const ImageSourceRef 
         if ((*admission)->promote(session))
             break;
     } while (true);
-    return inspect(session->image_id, session->owner_id);
+    auto summary = inspect(session->image_id, session->owner_id);
+    if (!summary)
+        return std::unexpected(summary.error());
+    if (progress != nullptr) {
+        progress->report({.phase = ProgressPhase::publishing,
+                          .completed = image_open_progress_total,
+                          .total = image_open_progress_total,
+                          .label = "Image session ready",
+                          .output_path = std::nullopt});
+    }
+    return summary;
 }
 
 axk::app::Result<axk::app::ImageSessionSummary>
@@ -606,7 +659,8 @@ axk::app::ImageSessionManager::attach_companions(std::string_view image_id, std:
                                   implementation_->idle_retention,
                                   implementation_->clock,
                                   implementation_->path_reservations};
-    auto opened = refreshed.open_with_companion_sources(source, std::string{owner_id}, unique_candidates, cancellation);
+    auto opened =
+        refreshed.open_with_companion_sources(source, std::string{owner_id}, unique_candidates, cancellation, nullptr);
     if (!opened)
         return std::unexpected(opened.error());
     if (opened->companion_sources.empty()) {

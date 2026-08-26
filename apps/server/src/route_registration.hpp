@@ -43,7 +43,6 @@ struct FileRoutes {
     RequestRoute mutate_entry;
     ResponseRoute file_content;
     ItemResponseRoute download_archive_content;
-    RequestRoute create_image;
     ItemRoute image;
     ItemRoute attach_companions;
     ItemRoute image_content;

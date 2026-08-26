@@ -17,7 +17,6 @@ void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
         .methods(crow::HTTPMethod::GET, crow::HTTPMethod::HEAD)(std::move(routes.file_content));
     app.route_dynamic("/api/v1/download-archives/<string>/content")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.download_archive_content));
-    app.route_dynamic("/api/v1/images").methods(crow::HTTPMethod::Post)(std::move(routes.create_image));
     app.route_dynamic("/api/v1/images/<string>")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.image));
     app.route_dynamic("/api/v1/images/<string>/companions")

@@ -95,7 +95,6 @@ class ServerApplication {
     crow::response delete_entry_response(const crow::request &request);
 
     Json image_summary_json(const app::ImageSessionSummary &summary) const;
-    crow::response create_image_response(const crow::request &request);
     crow::response attach_companions_response(const crow::request &request, const std::string &image_id);
     crow::response image_response(const crow::request &request, const std::string &image_id);
     template <typename Item, typename Loader, typename Serializer>

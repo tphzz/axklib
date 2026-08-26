@@ -1,5 +1,6 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
 import {
     type ApiContentItem,
@@ -28,6 +29,7 @@ import type {
     RelationshipPageFilter,
     SystemProgramContexts,
     ImageValidationIssue,
+    ImageOpenOptions,
     ImageSessionExtentLayoutRepairDestination,
     JobState,
     ObjectDeletionInspection,
@@ -52,14 +54,34 @@ export class HttpImageSessions {
         private readonly jobs: HttpJobController,
     ) {}
 
-    async open(location: ImageLocation): Promise<OpenedImage> {
+    async open(location: ImageLocation, options: ImageOpenOptions = {}): Promise<OpenedImage> {
         if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
             throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
         }
         const wireSource = imageSourceReference(location);
-        const summary = await this.client.request<ApiImageSummary>('POST', '/images', {
+        const submitted = await this.client.request<components['schemas']['Job']>('POST', '/images', {
             source: wireSource,
         });
+        if (!this.jobs.isJob(submitted)) throw new Error('images.open did not return a job');
+        const localJob = this.jobs.map(submitted);
+        options.onUpdate?.(localJob);
+        const completed =
+            localJob.status === 'completed' || localJob.status === 'failed' || localJob.status === 'cancelled'
+                ? localJob
+                : await this.jobs.wait(localJob.jobId, (job) => options.onUpdate?.(job), options.signal);
+        if (completed.status === 'cancelled') {
+            throw new DOMException('Image opening was cancelled', 'AbortError');
+        }
+        if (completed.status !== 'completed' || !completed.result) {
+            throw new AxklibApiError(
+                completed.errorCode ?? 'image_open_failed',
+                completed.error ?? 'Image opening did not complete',
+                422,
+                undefined,
+                completed.errorContext,
+            );
+        }
+        const summary = completed.result as ApiImageSummary;
         const sessionId = this.nextSessionId++;
         this.sessions.set(sessionId, {
             remoteId: summary.imageId,

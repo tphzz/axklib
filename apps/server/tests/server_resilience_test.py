@@ -301,8 +301,15 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
                 }
             },
         )
-        assert opened.status == 201, opened.content
-        image_id = str(opened.json()["data"]["imageId"])
+        assert opened.status == 202, opened.content
+        opened_job = wait_for_job(
+            port,
+            TOKEN_A,
+            str(opened.json()["data"]["jobId"]),
+            running.process,
+        )
+        assert opened_job["state"] == "COMPLETED", opened_job
+        image_id = str(opened_job["result"]["imageId"])
         assert_hidden_reference(port, f"/api/v1/images/{image_id}")
         full_sessions = request(
             port,
@@ -316,8 +323,15 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
                 }
             },
         )
-        assert full_sessions.status == 429, full_sessions.content
-        assert full_sessions.headers["retry-after"] == "1"
+        assert full_sessions.status == 202, full_sessions.content
+        rejected_job = wait_for_job(
+            port,
+            TOKEN_B,
+            str(full_sessions.json()["data"]["jobId"]),
+            running.process,
+        )
+        assert rejected_job["state"] == "FAILED", rejected_job
+        assert rejected_job["error"]["code"] == "image_capacity_exhausted"
         assert (
             request(port, TOKEN_A, "DELETE", f"/api/v1/images/{image_id}").status == 200
         )
@@ -371,6 +385,10 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             statuses = list(executor.map(read_version, range(64)))
         assert statuses == [200] * 64
 
+        metrics_before_load = request(port, TOKEN_A, "GET", "/api/v1/system/metrics")
+        assert metrics_before_load.status == 200, metrics_before_load.content
+        submitted_before_load = metrics_before_load.json()["data"]["submittedJobs"]
+
         def submit_job(_: int) -> tuple[int, object, dict[str, str]]:
             response = request(
                 port,
@@ -415,7 +433,7 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         assert metrics.status == 200, metrics.content
         counters = metrics.json()["data"]
         assert counters["responses4xx"] >= len(malformed_cases)
-        assert counters["submittedJobs"] == len(accepted)
+        assert counters["submittedJobs"] == submitted_before_load + len(accepted)
         assert counters["activeRequests"] >= 1
 
         assert (

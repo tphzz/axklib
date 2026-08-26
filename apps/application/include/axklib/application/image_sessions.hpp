@@ -430,7 +430,8 @@ class ImageSessionManager {
     ImageSessionManager &operator=(const ImageSessionManager &) = delete;
 
     [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
-                                                   const CancellationToken &cancellation = {});
+                                                   const CancellationToken &cancellation = {},
+                                                   ProgressSink *progress = nullptr);
     [[nodiscard]] Result<ImageSessionSummary> attach_companions(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const CompanionSelection &selection,
@@ -502,7 +503,7 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary>
     open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
                                 const std::vector<ImageSourceRef> &companion_sources,
-                                const CancellationToken &cancellation);
+                                const CancellationToken &cancellation, ProgressSink *progress);
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

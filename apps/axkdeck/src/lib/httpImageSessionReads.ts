@@ -7,6 +7,7 @@ import type {
     ObjectPageFilter,
     OpenedImage,
     ImageValidationIssue,
+    ImageOpenOptions,
     RelationshipPage,
     RelationshipPageFilter,
     SystemProgramContexts,
@@ -16,8 +17,8 @@ import type { ImageLocation } from './storageLocations';
 export class HttpImageSessionReads {
     protected constructor(protected readonly imageSessions: HttpImageSessions) {}
 
-    openImage(location: ImageLocation): Promise<OpenedImage> {
-        return this.imageSessions.open(location);
+    openImage(location: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage> {
+        return this.imageSessions.open(location, options);
     }
 
     keepImageAlive(sessionId: number): Promise<void> {

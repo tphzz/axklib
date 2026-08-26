@@ -63,6 +63,112 @@ function opened(sessionId: number): OpenedImage {
     };
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((complete) => {
+        resolve = complete;
+    });
+    return { promise, resolve };
+}
+
+function connectWorkflow(workflow: ImageSessionWorkflow, loadVolume = vi.fn(async () => undefined)): void {
+    workflow.connect({
+        catalog: { activeVolumeId: '', loadVolume, clear: vi.fn() },
+        audition: { invalidateSession: vi.fn(async () => undefined) },
+        mutation: { setCapabilities: vi.fn() },
+        clearExportSelection: vi.fn(),
+    } as never);
+}
+
+describe('ImageSessionWorkflow open progress', () => {
+    it('shows delayed progress and cancels an active server job', async () => {
+        vi.useFakeTimers();
+        try {
+            const openImage = vi.fn(
+                (_location: ImageLocation, options?: Parameters<ImageTransport['openImage']>[1]) =>
+                    new Promise<OpenedImage>((_resolve, reject) => {
+                        options?.onUpdate?.({
+                            jobId: 1,
+                            kind: 'images.open',
+                            status: 'running',
+                            progress: { phase: 0, completed: 2, total: 5, label: 'Resolving sampler objects' },
+                        });
+                        options?.signal?.addEventListener(
+                            'abort',
+                            () => reject(new DOMException('Image opening was cancelled', 'AbortError')),
+                            { once: true },
+                        );
+                    }),
+            );
+            const workflow = new ImageSessionWorkflow(
+                {
+                    openImage,
+                    closeImage: vi.fn(async () => undefined),
+                } as unknown as ImageTransport,
+                {} as PickerController,
+            );
+            connectWorkflow(workflow);
+
+            const opening = workflow.open(location);
+            await vi.advanceTimersByTimeAsync(749);
+            expect(workflow.openProgressVisible).toBe(false);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(workflow.openProgressVisible).toBe(true);
+            expect(workflow.openProgressLabel).toBe('Resolving sampler objects');
+            expect(workflow.openProgressCancellable).toBe(true);
+
+            workflow.cancelOpen();
+            await opening;
+
+            expect(workflow.status).toBe('Image opening cancelled');
+            expect(workflow.openProgressVisible).toBe(false);
+            await workflow.dispose();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('shows non-cancellable workspace preparation after the server job completes', async () => {
+        vi.useFakeTimers();
+        try {
+            const result = deferred<OpenedImage>();
+            const openImage = vi.fn(
+                (_location: ImageLocation, options?: Parameters<ImageTransport['openImage']>[1]) => {
+                    options?.onUpdate?.({
+                        jobId: 1,
+                        kind: 'images.open',
+                        status: 'completed',
+                        progress: { phase: 0, completed: 5, total: 5, label: 'Image session ready' },
+                    });
+                    return result.promise;
+                },
+            );
+            const workflow = new ImageSessionWorkflow(
+                {
+                    openImage,
+                    closeImage: vi.fn(async () => undefined),
+                } as unknown as ImageTransport,
+                {} as PickerController,
+            );
+            connectWorkflow(workflow);
+
+            const opening = workflow.open(location);
+            await vi.advanceTimersByTimeAsync(750);
+
+            expect(workflow.openProgressVisible).toBe(true);
+            expect(workflow.openProgressLabel).toBe('Preparing workspace');
+            expect(workflow.openProgressCancellable).toBe(false);
+
+            result.resolve(opened(1));
+            await opening;
+            expect(workflow.openProgressVisible).toBe(false);
+            await workflow.dispose();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
 describe('ImageSessionWorkflow lease maintenance', () => {
     it('reopens an expired image session at the selected volume', async () => {
         const openImage = vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValueOnce(opened(2));

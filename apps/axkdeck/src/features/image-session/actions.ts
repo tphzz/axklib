@@ -1,5 +1,5 @@
 import type { ImageLocation } from '../../lib/storageLocations';
-import type { ImageTransport, OpenedImage } from '../../lib/transport';
+import type { ImageTransport, JobState, OpenedImage } from '../../lib/transport';
 
 type SessionTransport = Pick<ImageTransport, 'openImage' | 'keepImageAlive' | 'refreshImage' | 'closeImage'>;
 
@@ -13,6 +13,7 @@ export class ImageSessionController {
     private generation = 0;
     private snapshotValue: ImageSessionSnapshot = { sessionId: null, location: null, opening: false };
     private disposed = false;
+    private activeOpen: AbortController | null = null;
 
     constructor(
         private readonly transport: SessionTransport,
@@ -24,14 +25,20 @@ export class ImageSessionController {
         return this.snapshotValue;
     }
 
-    async open(location: ImageLocation): Promise<OpenedImage | null> {
+    async open(location: ImageLocation, onUpdate?: (job: JobState) => void): Promise<OpenedImage | null> {
         if (this.disposed) throw new Error('Image session controller is disposed');
+        this.activeOpen?.abort();
+        const abortController = new AbortController();
+        this.activeOpen = abortController;
         const generation = ++this.generation;
         const previousSessionId = this.snapshotValue.sessionId;
         this.update({ ...this.snapshotValue, opening: true });
         let candidateSessionId: number | null = null;
         try {
-            const opened = await this.transport.openImage(location);
+            const opened = await this.transport.openImage(location, {
+                signal: abortController.signal,
+                onUpdate,
+            });
             candidateSessionId = opened.sessionId;
             if (!this.isCurrent(generation)) {
                 await this.transport.closeImage(opened.sessionId);
@@ -54,7 +61,13 @@ export class ImageSessionController {
             }
             if (this.isCurrent(generation)) this.update({ ...this.snapshotValue, opening: false });
             throw error;
+        } finally {
+            if (this.activeOpen === abortController) this.activeOpen = null;
         }
+    }
+
+    cancelOpen(): void {
+        this.activeOpen?.abort();
     }
 
     async refresh(): Promise<OpenedImage | null> {
@@ -72,6 +85,7 @@ export class ImageSessionController {
     }
 
     async close(): Promise<void> {
+        this.activeOpen?.abort();
         ++this.generation;
         const sessionId = this.snapshotValue.sessionId;
         this.update({ ...this.snapshotValue, opening: false });

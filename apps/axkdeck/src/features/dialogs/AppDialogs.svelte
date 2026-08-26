@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
-    import type { PickerRequest, PickerSelection } from './picker';
+    import type { PickerRequest } from './picker';
     import { audioInspectionHasFatalIssues, type ExportWorkflow } from '../export/workflow.svelte';
     import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
     import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
@@ -34,7 +34,6 @@
     import Tx16wImportDialog from '../../lib/components/Tx16wImportDialog.svelte';
     import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
     import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
-    import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
     import VolumeActionDialog from '../../lib/components/VolumeActionDialog.svelte';
     import VolumePackageExportDialog from '../../lib/components/VolumePackageExportDialog.svelte';
@@ -63,8 +62,6 @@
         isDesktop: boolean;
         directComputerOperation: DirectComputerOperation | null;
         pickerRequest: PickerRequest | null;
-        finishPicker: (selection: PickerSelection | null) => void;
-        manageLocations: () => void;
         companionRequest: CompanionDialogState | null;
         addCompanion: () => void;
         removeCompanion: (source: ImageLocation) => void;
@@ -102,8 +99,6 @@
         isDesktop,
         directComputerOperation,
         pickerRequest,
-        finishPicker,
-        manageLocations,
         companionRequest,
         addCompanion,
         removeCompanion,
@@ -166,27 +161,6 @@
     onDestroy(() => exportProgressVisibility.dispose());
 </script>
 
-{#if pickerRequest}
-    <ServerStoragePicker
-        {transport}
-        mode={pickerRequest.mode}
-        title={pickerRequest.title}
-        extensions={pickerRequest.extensions}
-        suggestedName={pickerRequest.suggestedName}
-        multiple={pickerRequest.multiple}
-        initialDirectory={pickerRequest.initialDirectory}
-        initialFile={pickerRequest.initialFile}
-        requireWritableDirectory={pickerRequest.requireWritableDirectory}
-        ondirectorychange={pickerRequest.ondirectorychange}
-        onmanagelocations={() => {
-            finishPicker(null);
-            manageLocations();
-        }}
-        onselect={(selection) => finishPicker(selection)}
-        onselectmany={(selections) => finishPicker(selections)}
-        oncancel={() => finishPicker(null)}
-    />
-{/if}
 {#if companionRequest && pickerRequest?.parentDialog !== 'companion-disks'}
     <CompanionDiskDialog
         sources={companionRequest.sources}

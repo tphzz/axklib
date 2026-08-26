@@ -52,7 +52,6 @@ interface AppDialogState {
 
 export function hasOpenAppDialog(state: AppDialogState): boolean {
     return [
-        state.pickerRequest,
         state.imageSession.companionRequest,
         state.imageSession.hardDiskDirectory,
         state.connectionSettings,

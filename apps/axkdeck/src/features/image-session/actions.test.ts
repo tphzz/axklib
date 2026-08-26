@@ -117,4 +117,37 @@ describe('ImageSessionController', () => {
         expect(closeImage).toHaveBeenCalledWith(9);
         expect(controller.snapshot().sessionId).toBeNull();
     });
+
+    it('cancels an active open without discarding the existing session', async () => {
+        const openImage = vi
+            .fn()
+            .mockResolvedValueOnce(opened(3))
+            .mockImplementationOnce(
+                async (_location: ImageLocation, options?: { signal?: AbortSignal }) =>
+                    await new Promise<OpenedImage>((_resolve, reject) => {
+                        options?.signal?.addEventListener(
+                            'abort',
+                            () => reject(new DOMException('cancelled', 'AbortError')),
+                            { once: true },
+                        );
+                    }),
+            );
+        const controller = new ImageSessionController(
+            {
+                openImage,
+                keepImageAlive: vi.fn(),
+                refreshImage: vi.fn(),
+                closeImage: vi.fn(),
+            },
+            async () => undefined,
+            () => undefined,
+        );
+        await controller.open(firstLocation);
+
+        const replacement = controller.open(secondLocation);
+        controller.cancelOpen();
+
+        await expect(replacement).rejects.toMatchObject({ name: 'AbortError' });
+        expect(controller.snapshot()).toMatchObject({ sessionId: 3, location: firstLocation, opening: false });
+    });
 });

@@ -59,7 +59,6 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/files/media-source/inspect"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/directories"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/entries"));
-    EXPECT_TRUE(document.at("paths").contains("/images"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companions"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
@@ -282,7 +281,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 56U);
+    EXPECT_EQ(entries.size(), 57U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -359,7 +358,6 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/files/metadata", "post", "EntryRef", "200", "EntryMetadataResponse"},
         Expectation{"/filesystem/directories", "post", "CreateDirectoryRequest", "201", "EntryMetadataResponse"},
         Expectation{"/filesystem/entries", "patch", "RenameEntryRequest", "200", "EntryMetadataResponse"},
-        Expectation{"/images", "post", "ImageOpenRequest", "201", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "get", "", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "delete", "", "200", "ImageCloseResponse"},
         Expectation{"/images/{imageId}/companions", "post", "ImageCompanionsRequest", "200", "ImageSessionResponse"},

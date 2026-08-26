@@ -5,6 +5,7 @@
 #include "axklib/application/directory_archive_operations.hpp"
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
+#include "axklib/application/image_session_operations.hpp"
 #include "axklib/application/midi_operations.hpp"
 #include "axklib/application/package_operations.hpp"
 #include "axklib/application/session_audio_export_operations.hpp"
@@ -218,6 +219,8 @@ axk::app::make_application_registry(const Sandbox &sandbox, UploadStore &uploads
 axk::app::Result<void> axk::app::bind_session_application_operations(
     OperationRegistry &registry, const Sandbox &sandbox, UploadStore &uploads, ImageSessionManager &images,
     AlterationJournalStore &journals, DownloadArchiveStore &downloads, const axk::MediaBuildLimits &media_limits) {
+    if (auto bound = bind_image_session_operations(registry, images); !bound)
+        return bound;
     if (auto bound = bind_directory_archive_operations(registry, sandbox, downloads); !bound)
         return bound;
     if (auto bound = bind_audition_operations(registry, images); !bound)

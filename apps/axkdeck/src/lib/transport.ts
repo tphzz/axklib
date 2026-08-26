@@ -465,6 +465,11 @@ export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
 export type ConnectionMode = 'local' | 'remote' | 'unavailable';
 
+export interface ImageOpenOptions {
+    signal?: AbortSignal;
+    onUpdate?: (job: JobState) => void;
+}
+
 export interface ImageTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
@@ -475,7 +480,7 @@ export interface ImageTransport {
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void>;
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
-    openImage(source: ImageLocation): Promise<OpenedImage>;
+    openImage(source: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage>;
     keepImageAlive(sessionId: number): Promise<void>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
@@ -685,6 +690,6 @@ export interface ImageTransport {
         includeSfz: boolean,
     ): Promise<JobState>;
     jobStatus(jobId: number): Promise<JobState>;
-    waitForJob(jobId: number, onUpdate: (job: JobState) => void): Promise<JobState>;
+    waitForJob(jobId: number, onUpdate: (job: JobState) => void, signal?: AbortSignal): Promise<JobState>;
     cancelJob(jobId?: number): Promise<void>;
 }

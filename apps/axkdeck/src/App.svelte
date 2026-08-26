@@ -7,6 +7,7 @@
     import { createConnectionActions } from './features/connection/actions';
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
+    import PickerDialogHost from './features/dialogs/PickerDialogHost.svelte';
     import { hasOpenAppDialog } from './features/dialogs/visibility';
     import ClientFileInputs from './features/file-operations/ClientFileInputs.svelte';
     import { DirectComputerWorkflow } from './features/file-operations/directComputerWorkflow';
@@ -31,6 +32,7 @@
     import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
+    import ImageOpenProgressDialog from './lib/components/ImageOpenProgressDialog.svelte';
     import WorkspaceGuard from './lib/components/WorkspaceGuard.svelte';
     import { createTransport } from './lib/createTransport';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
@@ -582,6 +584,26 @@
 
 <WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
 
+{#if !experimentalWarningOpen}
+    <PickerDialogHost
+        {transport}
+        request={pickerRequest}
+        finish={(selection) => pickerController.finish(selection)}
+        manageLocations={() => (workspaceManagerOpen = true)}
+    />
+{/if}
+
+{#if !experimentalWarningOpen && imageSessionWorkflow.openProgressVisible}
+    <ImageOpenProgressDialog
+        label={imageSessionWorkflow.openProgressLabel}
+        completed={imageSessionWorkflow.openProgressCompleted}
+        total={imageSessionWorkflow.openProgressTotal}
+        cancellable={imageSessionWorkflow.openProgressCancellable}
+        cancelling={imageSessionWorkflow.openProgressCancelling}
+        oncancel={() => imageSessionWorkflow.cancelOpen()}
+    />
+{/if}
+
 {#if !experimentalWarningOpen && appDialogsOpen}
     {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
         {@const AppDialogs = dialogs.default}
@@ -590,8 +612,6 @@
             {isDesktop}
             directComputerOperation={$pendingDirectComputerOperation}
             {pickerRequest}
-            finishPicker={(selection) => pickerController.finish(selection)}
-            manageLocations={() => (workspaceManagerOpen = true)}
             companionRequest={imageSessionWorkflow.companionRequest}
             addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
             removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}

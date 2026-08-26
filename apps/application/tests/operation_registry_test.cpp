@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <set>
 #include <string>
 
@@ -10,7 +11,7 @@ namespace {
 TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 56U);
+    EXPECT_EQ(entries.size(), 57U);
 
     std::set<std::string> ids;
     std::set<std::string> cli_commands;
@@ -29,6 +30,19 @@ TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
         EXPECT_FALSE(entry.descriptor.result_schema.empty());
     }
     EXPECT_EQ(parity_count, 22U);
+}
+
+TEST(OperationRegistry, DeclaresImageOpeningAsAReadJob) {
+    const auto registry = axk::app::make_operation_registry();
+    const auto entries = registry.entries();
+    const auto opened =
+        std::ranges::find_if(entries, [](const auto &entry) { return entry.descriptor.id == "images.open"; });
+    ASSERT_NE(opened, entries.end());
+    EXPECT_EQ(opened->descriptor.route, "/api/v1/images");
+    EXPECT_EQ(opened->descriptor.method, axk::app::HttpMethod::post);
+    EXPECT_EQ(opened->descriptor.mode, axk::app::ExecutionMode::job);
+    EXPECT_EQ(opened->descriptor.request_schema, "ImageOpenRequest");
+    EXPECT_EQ(opened->descriptor.result_schema, "ImageSession");
 }
 
 TEST(OperationRegistry, InvokesTypedSystemVersionWithoutTransportTypes) {

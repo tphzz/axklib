@@ -630,7 +630,7 @@ describe('App panel layout', () => {
                 failedObjectId: sample.key,
             });
 
-            const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+            const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' }, { timeout: 5_000 });
             await fireEvent.click(within(dialog).getByRole('button', { name: 'Search nearby folders and retry' }));
             await vi.waitFor(() =>
                 expect(mocks.attachCompanions).toHaveBeenCalledWith(17, {
@@ -684,7 +684,7 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
 
-        const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+        const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' }, { timeout: 5_000 });
         expect(
             within(dialog).getByText(
                 (_, element) =>

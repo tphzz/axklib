@@ -256,16 +256,6 @@
         "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}, "409": {"description": "Archive transfer is still active"}}
       }
     },
-    "/images": {
-      "post": {
-        "operationId": "images.open",
-        "requestBody": {
-          "required": true,
-          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageOpenRequest"}}}
-        },
-        "responses": {"201": {"description": "Immutable metadata-only image session opened", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageSessionResponse"}}}}}
-      }
-    },
     "/images/{imageId}": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}}
