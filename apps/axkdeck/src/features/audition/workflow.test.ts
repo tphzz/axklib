@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
-import type { SampleStructureItem, WaveDataItem } from '../../lib/types';
+import type { SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
 import { AuditionWorkflow } from './workflow.svelte';
 
 function relationship(
@@ -91,6 +91,81 @@ describe('AuditionWorkflow auditionability indexes', () => {
 
         expect(workflow.showOnlyStandaloneSamples).toBe(true);
         expect(clearSampleSelection).toHaveBeenCalledOnce();
+    });
+
+    it('stops playback and exposes an assigned Sample before relationship navigation', async () => {
+        const sample = {
+            objectId: 'sample-1',
+            sampleBankObjectIds: ['bank-1'],
+        } as SampleStructureItem;
+        const catalog = {
+            relationships: [],
+            programs: [],
+            sequences: [],
+            sampleBanks: [],
+            samples: [sample],
+            waveData: [],
+            selectedSampleId: '',
+            selectedSampleWaveDataId: '',
+            editorObjectIds: { programs: '', sequences: '', 'sample-banks': '', samples: '', 'wave-data': '' },
+            inspectorObjectId: '',
+            samplePreviewStates: {},
+        } as unknown as CatalogWorkflow;
+        let workspaceView: 'programs' | 'samples' = 'programs';
+        const setWorkspaceView = vi.fn((view: WorkspaceView) => {
+            if (view === 'programs' || view === 'samples') workspaceView = view;
+        });
+        const setInspectorOpen = vi.fn();
+        const workflow = new AuditionWorkflow({
+            transport: {} as ImageTransport,
+            catalog,
+            sessionId: () => null,
+            workspaceView: () => workspaceView,
+            setWorkspaceView,
+            setInspectorOpen,
+            setStatus: () => undefined,
+            requestCompanionDisks: () => undefined,
+        });
+        const stop = vi.spyOn(workflow, 'stop').mockResolvedValue();
+        workflow.showOnlyStandaloneSamples = true;
+        workflow.laneQueries.samples.primary = 'hidden';
+
+        const view = await workflow.navigateToObject(sample.objectId);
+
+        expect(view).toBe('samples');
+        expect(stop).toHaveBeenCalledOnce();
+        expect(setWorkspaceView).toHaveBeenCalledWith('samples');
+        expect(workflow.showOnlyStandaloneSamples).toBe(false);
+        expect(workflow.laneQueries.samples.primary).toBe('');
+        expect(catalog.selectedSampleId).toBe(sample.objectId);
+        expect(catalog.editorObjectIds.samples).toBe(sample.objectId);
+        expect(catalog.inspectorObjectId).toBe(sample.objectId);
+        expect(setInspectorOpen).toHaveBeenCalledWith(true);
+    });
+
+    it('does not navigate an object outside the active volume graph', async () => {
+        const catalog = {
+            relationships: [],
+            programs: [],
+            sequences: [],
+            sampleBanks: [],
+            samples: [],
+            waveData: [],
+        } as unknown as CatalogWorkflow;
+        const workflow = new AuditionWorkflow({
+            transport: {} as ImageTransport,
+            catalog,
+            sessionId: () => null,
+            workspaceView: () => 'programs',
+            setWorkspaceView: () => undefined,
+            setInspectorOpen: () => undefined,
+            setStatus: () => undefined,
+            requestCompanionDisks: () => undefined,
+        });
+        const stop = vi.spyOn(workflow, 'stop').mockResolvedValue();
+
+        expect(await workflow.navigateToObject('missing')).toBeNull();
+        expect(stop).not.toHaveBeenCalled();
     });
 });
 

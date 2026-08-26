@@ -34,3 +34,7 @@ export function createTauriInterfaceScaleAdapter(): InterfaceScaleAdapter {
         onScaleChanged: async (handler) => window.onScaleChanged(handler),
     };
 }
+
+export async function showCurrentTauriWindow(): Promise<void> {
+    await getCurrentWindow().show();
+}

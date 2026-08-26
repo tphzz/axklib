@@ -55,6 +55,7 @@ pub(crate) async fn open_allocation_inspector(
     .title(format!("{} allocation", request.partition_name))
     .inner_size(1280.0, 800.0)
     .min_inner_size(760.0, 520.0)
+    .visible(false)
     .build()
     .map_err(|error| error.to_string())?;
     Ok(())

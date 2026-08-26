@@ -1,6 +1,6 @@
 import type { SamplerRelationship } from './transport';
 import type { LinkedWaveDataItem, SampleStructureItem, WaveDataItem } from './types';
-import { compareNaturalNames } from './naturalSort';
+import { compareNamedItems, compareNaturalNames } from './naturalSort';
 import { isConfirmedRelationship } from './relationshipResolution';
 
 const memberRelationships = [
@@ -10,6 +10,14 @@ const memberRelationships = [
 
 export function isStandaloneSample(sample: SampleStructureItem): boolean {
     return (sample.sampleBankObjectIds?.length ?? 0) === 0;
+}
+
+export function orderedVisibleSamples(
+    samples: readonly SampleStructureItem[],
+    showOnlyStandaloneSamples: boolean,
+): SampleStructureItem[] {
+    const ordered = samples.toSorted(compareNamedItems);
+    return showOnlyStandaloneSamples ? ordered.filter(isStandaloneSample) : ordered;
 }
 
 export function auditionableSampleIds(

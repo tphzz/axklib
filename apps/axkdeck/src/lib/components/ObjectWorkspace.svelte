@@ -6,6 +6,7 @@
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
         linearNavigationIndex,
+        waveDataCollectionRowExtent,
     } from '../collectionNavigation';
     import { formatStoredSize } from '../formatBytes';
     import {
@@ -24,8 +25,6 @@
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import Waveform from './Waveform.svelte';
-
-    const waveDataRowExtent = 42;
 
     interface Props {
         programs: Program[];
@@ -275,7 +274,7 @@
     function navigateObject(event: KeyboardEvent, currentIndex: number): boolean {
         if (hasDisallowedNavigationModifier(event)) return false;
         const items = view === 'programs' ? filteredPrograms : filteredWaveData;
-        const itemExtent = view === 'wave-data' ? waveDataRowExtent : undefined;
+        const itemExtent = view === 'wave-data' ? waveDataCollectionRowExtent : undefined;
         const targetIndex = linearNavigationIndex(
             event.key,
             currentIndex,
@@ -333,7 +332,9 @@
             ? orderedWaveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery))
             : orderedWaveData,
     );
-    const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, waveDataRowExtent));
+    const waveDataWindow = $derived(
+        fixedVirtualWindow(filteredWaveData.length, waveDataViewport, waveDataCollectionRowExtent),
+    );
     const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
@@ -375,6 +376,7 @@
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
+        data-collection-list={view}
         data-navigation-list
         use:virtualViewport={updateWaveDataViewport}
         onclick={clearWaveDataSelection}
@@ -386,6 +388,7 @@
                     class:active={activeObjectId === program.objectId}
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
+                    data-collection-object-id={program.objectId}
                     data-navigation-index={index}
                     title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
@@ -425,6 +428,7 @@
                         >
                             <button
                                 class="wave-data-selection"
+                                data-collection-object-id={item.objectKey}
                                 data-navigation-index={index}
                                 type="button"
                                 aria-label={`Inspect ${item.name}`}

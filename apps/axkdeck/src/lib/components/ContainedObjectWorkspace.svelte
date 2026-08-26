@@ -6,16 +6,16 @@
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
         linearNavigationIndex,
+        denseCollectionRowExtent,
     } from '../collectionNavigation';
     import {
         emptyPackageExportSelection,
         selectionMode,
         type ObjectSelectionMode,
         updatePackageExportSelection,
-        type PackageExportSelectionState,
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
-    import { isStandaloneSample } from '../sampleRelationships';
+    import { orderedVisibleSamples } from '../sampleRelationships';
     import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
@@ -27,57 +27,7 @@
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
-    type ContainedView = 'sample-banks' | 'samples';
-    type LaneId = 'primary' | 'secondary' | 'tertiary';
-    const containedRowExtent = 26;
-    interface LaneQueries {
-        primary: string;
-        secondary: string;
-        tertiary: string;
-    }
-    interface Props {
-        view: ContainedView;
-        sampleBanks: SampleStructureItem[];
-        samples: SampleStructureItem[];
-        waveData: WaveDataItem[];
-        activeSampleBankId: string;
-        activeSampleId: string;
-        activeWaveDataId: string;
-        queries: LaneQueries;
-        showOnlyStandaloneSamples?: boolean;
-        onshowonlystandalonechange?: (checked: boolean) => void;
-        onquerychange: (lane: LaneId, value: string) => void;
-        onsamplebankselect: (item: SampleStructureItem) => void;
-        onsampleselect: (item: SampleStructureItem) => void;
-        onwavedataselect: (item: WaveDataItem) => void;
-        onplaysamplebank?: (item: SampleStructureItem) => void;
-        onplaysample?: (item: SampleStructureItem) => void;
-        onplaywavedata?: (item: WaveDataItem) => void;
-        onstop?: () => void;
-        onimportaudio?: () => void;
-        playingSampleBankId?: string;
-        playingObjectId?: string | null;
-        preparingObjectId?: string | null;
-        auditionableSampleIds: ReadonlySet<string>;
-        auditionableSampleBankIds: ReadonlySet<string>;
-        stereoSampleIds?: ReadonlySet<string>;
-        objectRenameAvailable?: boolean;
-        onrenameobject?: (target: ObjectRenameTarget) => void;
-        sampleBankCreationAvailable?: boolean;
-        oncreatesamplebank?: (samples: SampleStructureItem[]) => void;
-        sampleBankAssignmentAvailable?: boolean;
-        onassignsamplebank?: (samples: SampleStructureItem[]) => void;
-        objectDeletionAvailable?: boolean;
-        ondeleteobjects?: (objects: PackageExportObject[]) => void;
-        packageExportAvailable?: boolean;
-        onexportobjects?: (objects: PackageExportObject[]) => void;
-        audioExportAvailable?: boolean;
-        onexportaudio?: (objects: PackageExportObject[]) => void;
-        onexportwav?: (objects: PackageExportObject[]) => void;
-        selection?: PackageExportSelectionState;
-        onselectionchange?: (selection: PackageExportSelectionState) => void;
-        onselectionlimit?: () => void;
-    }
+    import type { ContainedObjectWorkspaceProps as Props } from './containedObjectWorkspaceProps';
     let {
         view,
         sampleBanks,
@@ -127,16 +77,15 @@
     const sampleQuery = $derived(view === 'sample-banks' ? queries.secondary : queries.primary);
     const waveDataQuery = $derived(view === 'sample-banks' ? queries.tertiary : queries.secondary);
     const orderedBanks = $derived(sampleBanks.toSorted(compareNamedItems));
-    const orderedSamples = $derived(samples.toSorted(compareNamedItems));
     const orderedWaveData = $derived(waveData.toSorted(compareNamedItems));
     const filteredBanks = $derived(orderedBanks.filter((item) => matchesSearch(item.name, queries.primary)));
-    const availableSamples = $derived(
-        view === 'samples' && showOnlyStandaloneSamples ? orderedSamples.filter(isStandaloneSample) : orderedSamples,
-    );
+    const availableSamples = $derived(orderedVisibleSamples(samples, view === 'samples' && showOnlyStandaloneSamples));
     const filteredSamples = $derived(availableSamples.filter((item) => matchesSearch(item.name, sampleQuery)));
     const filteredWaveData = $derived(orderedWaveData.filter((item) => matchesSearch(item.name, waveDataQuery)));
-    const sampleWindow = $derived(fixedVirtualWindow(filteredSamples.length, sampleViewport, containedRowExtent));
-    const waveDataWindow = $derived(fixedVirtualWindow(filteredWaveData.length, waveDataViewport, containedRowExtent));
+    const sampleWindow = $derived(fixedVirtualWindow(filteredSamples.length, sampleViewport, denseCollectionRowExtent));
+    const waveDataWindow = $derived(
+        fixedVirtualWindow(filteredWaveData.length, waveDataViewport, denseCollectionRowExtent),
+    );
     const visibleSamples = $derived(filteredSamples.slice(sampleWindow.startIndex, sampleWindow.endIndex));
     const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
     function updateSampleViewport(viewport: VirtualViewportState): void {
@@ -370,7 +319,7 @@
                 void focusCollectionIndex(
                     event.currentTarget,
                     targetIndex,
-                    targetScope === 'sample-banks' ? undefined : containedRowExtent,
+                    targetScope === 'sample-banks' ? undefined : denseCollectionRowExtent,
                     direction,
                 );
                 return;
@@ -378,7 +327,7 @@
         }
         if (!hasDisallowedNavigationModifier(event)) {
             const items = visibleItems(scope);
-            const itemExtent = scope === 'sample-banks' ? undefined : containedRowExtent;
+            const itemExtent = scope === 'sample-banks' ? undefined : denseCollectionRowExtent;
             const targetIndex = linearNavigationIndex(
                 event.key,
                 currentIndex,
@@ -420,7 +369,7 @@
                 query={queries.primary}
                 onquerychange={(value) => onquerychange('primary', value)}
             />
-            <div class="contained-list" data-navigation-list>
+            <div class="contained-list" data-collection-list="sample-banks" data-navigation-list>
                 {#each filteredBanks as item, index (item.id)}
                     {@const playbackActive = playingSampleBankId === item.objectId}
                     {@const auditionable = auditionableSampleBankIds.has(item.objectId)}
@@ -431,6 +380,7 @@
                     >
                         <button
                             class="contained-identity"
+                            data-collection-object-id={item.objectId}
                             data-navigation-index={index}
                             type="button"
                             aria-label={`Inspect ${item.name}`}
@@ -498,7 +448,12 @@
             filterChecked={showOnlyStandaloneSamples}
             onfilterchange={onshowonlystandalonechange}
         />
-        <div class="contained-list" data-navigation-list use:virtualViewport={updateSampleViewport}>
+        <div
+            class="contained-list"
+            data-collection-list="samples"
+            data-navigation-list
+            use:virtualViewport={updateSampleViewport}
+        >
             {#if filteredSamples.length > 0}
                 <div class="virtual-list-space" style={`height: ${sampleWindow.totalHeight}px`}>
                     <div
@@ -517,6 +472,7 @@
                             >
                                 <button
                                     class="contained-identity"
+                                    data-collection-object-id={item.objectId}
                                     data-navigation-index={index}
                                     type="button"
                                     aria-label={`Inspect ${item.name}`}

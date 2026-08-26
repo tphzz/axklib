@@ -367,6 +367,7 @@
         <div
             class:empty-collection={filteredPrograms.length === 0}
             class="collection-body program-list"
+            data-collection-list="programs"
             data-navigation-list
         >
             {#each filteredPrograms as program, index (program.id)}
@@ -375,6 +376,7 @@
                     class:active={activeObjectId === program.objectId}
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
+                    data-collection-object-id={program.objectId}
                     data-navigation-index={index}
                     title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}

@@ -6,6 +6,7 @@ import {
     auditionableSampleIds,
     distinctWaveDataForSample,
     linkedWaveDataForSample,
+    orderedVisibleSamples,
     orderedSamplesForBank,
     stereoSampleIds,
 } from './sampleRelationships';
@@ -25,6 +26,21 @@ function relationship(id: string, type: string, targetObjectId?: string): Sample
         receiveChannelDisplay: '',
     };
 }
+
+describe('orderedVisibleSamples', () => {
+    it('calculates standalone navigation indices from the same filtered natural order as the Samples view', () => {
+        const bankMember = { ...sample('Sample 2'), sampleBankObjectIds: ['Bank'] };
+        const standalone10 = sample('Sample 10');
+        const standalone3 = sample('Sample 3');
+
+        expect(
+            orderedVisibleSamples([standalone10, bankMember, standalone3], true).map((item) => item.objectId),
+        ).toEqual(['Sample 3', 'Sample 10']);
+        expect(
+            orderedVisibleSamples([standalone10, bankMember, standalone3], false).map((item) => item.objectId),
+        ).toEqual(['Sample 2', 'Sample 3', 'Sample 10']);
+    });
+});
 
 function waveData(id: string): WaveDataItem {
     const object: SamplerObject = {

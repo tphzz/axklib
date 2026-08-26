@@ -413,6 +413,45 @@ export class AuditionWorkflow {
         this.dependencies.setWorkspaceView(view);
     }
 
+    async navigateToObject(objectId: string): Promise<WorkspaceView | null> {
+        const catalog = this.dependencies.catalog;
+        const program = catalog.programs.find((item) => item.objectId === objectId);
+        const sequence = catalog.sequences.find((item) => item.objectId === objectId);
+        const bank = catalog.sampleBanks.find((item) => item.objectId === objectId);
+        const sample = catalog.samples.find((item) => item.objectId === objectId);
+        const waveData = catalog.waveData.find((item) => item.objectKey === objectId);
+        const view: WorkspaceView | null = program
+            ? 'programs'
+            : sequence
+              ? 'sequences'
+              : bank
+                ? 'sample-banks'
+                : sample
+                  ? 'samples'
+                  : waveData
+                    ? 'wave-data'
+                    : null;
+        if (!view) return null;
+
+        await this.stop();
+        this.laneQueries[view].primary = '';
+        if (sample && !isStandaloneSample(sample)) this.showOnlyStandaloneSamples = false;
+        this.dependencies.setWorkspaceView(view);
+
+        if (program) this.selectProgram(program);
+        else if (sequence) {
+            catalog.selectedSequenceId = sequence.objectId;
+            catalog.editorObjectIds.sequences = sequence.objectId;
+            catalog.inspectorObjectId = sequence.objectId;
+            this.dependencies.setInspectorOpen(true);
+        } else if (bank) await this.selectBank(bank, false);
+        else if (sample) {
+            await this.selectSample(sample, false);
+            this.requestSampleWaveformPreview(sample);
+        } else if (waveData) await this.selectWaveData(waveData, false);
+        return view;
+    }
+
     resetSampleBankPreview(bankId = this.dependencies.catalog.selectedBankId): void {
         this.sampleBankPreviewMemberId = bankId
             ? (this.dependencies.catalog.membersForBank(bankId)[0]?.objectId ?? '')

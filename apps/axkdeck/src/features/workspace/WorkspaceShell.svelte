@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy, onMount } from 'svelte';
+    import { onDestroy, onMount, tick } from 'svelte';
     import type { AuditionWorkflow, LaneQueries } from '../audition/workflow.svelte';
     import type { CatalogWorkflow } from '../catalog/workflow.svelte';
     import type { AudioImportWorkflow } from '../import/audioWorkflow.svelte';
@@ -33,6 +33,13 @@
         WorkspaceView,
     } from '../../lib/types';
     import type { ObjectSelectionMode, PackageExportSelectionState } from '../../lib/objectSelection';
+    import {
+        denseCollectionRowExtent,
+        revealCollectionObject,
+        waveDataCollectionRowExtent,
+    } from '../../lib/collectionNavigation';
+    import { compareNamedItems } from '../../lib/naturalSort';
+    import { orderedVisibleSamples } from '../../lib/sampleRelationships';
     import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../lib/desktopBuildInfo';
 
     interface WorkspaceTab {
@@ -288,6 +295,47 @@
         catalog.selectedProgramId = '';
         catalog.inspectorObjectId = '';
         catalog.editorObjectIds.programs = '';
+    }
+
+    function relationshipObjectIndex(view: WorkspaceView, objectId: string): number {
+        if (view === 'programs') return programs.findIndex((item) => item.objectId === objectId);
+        if (view === 'sequences') {
+            return sequences.toSorted(compareNamedItems).findIndex((item) => item.objectId === objectId);
+        }
+        if (view === 'sample-banks') {
+            return sampleBanks.toSorted(compareNamedItems).findIndex((item) => item.objectId === objectId);
+        }
+        if (view === 'samples') {
+            return orderedVisibleSamples(samples, audition.showOnlyStandaloneSamples).findIndex(
+                (item) => item.objectId === objectId,
+            );
+        }
+        return waveData.toSorted(compareNamedItems).findIndex((item) => item.objectKey === objectId);
+    }
+
+    async function navigateInspectorRelationship(objectId: string): Promise<void> {
+        clearSelection();
+        const view = await audition.navigateToObject(objectId);
+        if (!view) return;
+        if (view === 'programs') {
+            programPresentation = 'single';
+            selectedMultiPart = null;
+        }
+        await tick();
+        const itemExtent =
+            view === 'samples'
+                ? denseCollectionRowExtent
+                : view === 'wave-data'
+                  ? waveDataCollectionRowExtent
+                  : undefined;
+        await revealCollectionObject(
+            mainStage,
+            view,
+            objectId,
+            relationshipObjectIndex(view, objectId),
+            itemExtent,
+            'center',
+        );
     }
 
     async function openAbout(): Promise<void> {
@@ -576,6 +624,7 @@
             selection={inspectorSelection}
             playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
             playheadFrame={audition.state.playheadFrame}
+            onrelationshipnavigate={(objectId) => void navigateInspectorRelationship(objectId)}
         />
     {/if}
     <footer class="status-bar">

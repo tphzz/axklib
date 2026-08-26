@@ -231,6 +231,7 @@
     <div
         class:empty-collection={filteredSequences.length === 0}
         class="collection-body sequence-list"
+        data-collection-list="sequences"
         data-navigation-list
         onclick={clearSelection}
     >
@@ -240,6 +241,7 @@
                 class:active={activeObjectId === item.objectId}
                 class:selected={selection.items.some((selected) => selected.objectId === item.objectId)}
                 class="sequence-row"
+                data-collection-object-id={item.objectId}
                 data-navigation-index={index}
                 aria-pressed={selection.items.some((selected) => selected.objectId === item.objectId)}
                 onclick={(event) => {
