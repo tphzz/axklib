@@ -1,9 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageExportSelectionState } from '../objectSelection';
 import type { SamplerObject } from '../transport';
 import type { PackageExportObject } from '../types';
 import ObjectWorkspace from './ObjectWorkspace.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+const objectSizeIdentitySource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/ObjectSizeIdentity.svelte'),
+    'utf8',
+);
 
 function object(objectType: string, name: string): SamplerObject {
     return {
@@ -346,11 +355,42 @@ describe('ObjectWorkspace', () => {
         expect(document.querySelector('.object-code')).toBeNull();
         expect(document.querySelector('.program-keyboard')).toBeNull();
         expect(document.querySelector('.program-list')).toBeTruthy();
-        expect(document.querySelector('.program-row')).toBeTruthy();
+        const row = document.querySelector('.program-row');
+        expect(row).toBeTruthy();
+        expect(row?.querySelector('.object-slot')?.textContent).toBe('001');
+        expect(row?.querySelector('.program-identity .object-size-primary')?.textContent).toContain('Grand Piano');
+        expect(row?.querySelector('.program-identity .object-size-secondary')?.textContent).toBe(
+            '128 B · 4 KiB incl. deps.',
+        );
+        expect(row?.querySelector('.object-size-summary')).toBeNull();
         expect(screen.getByText('128 B · 4 KiB incl. deps.')).toBeTruthy();
         expect(document.querySelector('[title*="Object size with deps.: 4 KiB"]')).toBeTruthy();
         expect(document.querySelector('.object-card')).toBeNull();
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
+
+        const listRule = appStyles.match(/\.program-list\s*\{[^}]+\}/)?.[0];
+        const rowRule = appStyles.match(/\.program-row\s*\{[^}]+\}/)?.[0];
+        const slotRule = appStyles.match(/\.program-row \.object-slot\s*\{[^}]+\}/)?.[0];
+        expect(listRule).toContain('gap: 0');
+        expect(listRule).toContain('padding: 2px 6px 5px');
+        expect(rowRule).toContain('height: var(--density-row)');
+        expect(rowRule).toContain('grid-template-columns: 30px minmax(0, 1fr)');
+        expect(rowRule).toContain('gap: 4px');
+        expect(rowRule).toContain('align-items: center');
+        expect(rowRule).toContain('padding: 0');
+        expect(rowRule).toContain('font: inherit');
+        expect(slotRule).toContain('padding: 3px 6px 1px');
+
+        const identityRule = appStyles.match(/\.program-identity\s*\{[^}]+\}/)?.[0];
+        const primaryRule = objectSizeIdentitySource.match(/\.object-size-primary strong\s*\{[^}]+\}/)?.[0];
+        const secondaryRule = objectSizeIdentitySource.match(/\.object-size-secondary\s*\{[^}]+\}/)?.[0];
+        expect(identityRule).toContain('font-size: 10px');
+        expect(identityRule).toContain('line-height: 10px');
+        expect(identityRule).toContain('padding: 2px 6px 2px 0');
+        expect(primaryRule).toContain('font-size: 10px');
+        expect(primaryRule).toContain('line-height: 10px');
+        expect(secondaryRule).toContain('font-size: 8.5px');
+        expect(secondaryRule).toContain('line-height: 9px');
     });
 
     it('keeps Program inspection fixed while modifier gestures update the exact selection', async () => {

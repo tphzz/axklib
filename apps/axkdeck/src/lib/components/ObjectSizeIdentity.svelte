@@ -22,4 +22,44 @@
         </span>
     {/if}
 </span>
-<small title={tooltip}>{metadata ? `${metadata} · ` : ''}{objectSizeSummary(object)}</small>
+<small class="object-size-secondary" title={tooltip}>
+    {metadata ? `${metadata} · ` : ''}{objectSizeSummary(object)}
+</small>
+
+<style>
+    .object-size-primary {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 3px;
+    }
+
+    .object-size-primary strong {
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--color-text-strong);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .object-size-secondary {
+        display: block;
+        margin-top: 0;
+        overflow: hidden;
+        color: var(--color-text-muted);
+        font-size: 8.5px;
+        line-height: 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .object-size-indicator {
+        display: inline-flex;
+        flex: 0 0 auto;
+        color: var(--color-accent);
+    }
+</style>

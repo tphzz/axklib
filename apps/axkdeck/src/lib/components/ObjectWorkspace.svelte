@@ -17,13 +17,13 @@
         type PackageExportSelectionState,
     } from '../objectSelection';
     import { compareNamedItems } from '../naturalSort';
-    import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
     import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
+    import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
     import Waveform from './Waveform.svelte';
 
     interface Props {
@@ -390,7 +390,6 @@
                     class="program-row"
                     data-collection-object-id={program.objectId}
                     data-navigation-index={index}
-                    title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => {
                         if (updateSelection(selectionMode(event), program.objectId) === 'replace')
@@ -401,8 +400,9 @@
                         handleObjectKeyboard(event, index, program.object, programRenameTarget(program))}
                 >
                     <span class="object-slot">{program.slot}</span>
-                    <strong>{program.name}</strong>
-                    <small class="object-size-summary">{objectSizeSummary(program.object)}</small>
+                    <span class="program-identity">
+                        <ObjectSizeIdentity name={program.name} object={program.object} />
+                    </span>
                 </button>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

@@ -730,18 +730,20 @@ input:focus-visible {
 .program-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+  padding: 2px 6px 5px;
 }
 
 .program-row {
   display: grid;
   width: 100%;
+  height: var(--density-row);
   min-width: 0;
   min-height: var(--density-row);
-  grid-template-columns: 46px minmax(0, 1fr) minmax(110px, 180px);
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 2px 7px;
+  gap: 4px;
+  padding: 0;
   overflow: hidden;
   color: var(--color-text);
   border: 1px solid transparent;
@@ -750,6 +752,13 @@ input:focus-visible {
   cursor: pointer;
   text-align: left;
   transition: 130ms ease;
+  font: inherit;
+}
+
+.program-row .object-slot {
+  align-self: stretch;
+  padding: 3px 6px 1px;
+  line-height: 10px;
 }
 
 .program-row:hover {
@@ -773,25 +782,16 @@ input:focus-visible {
   background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
 }
 
-.program-row strong {
-  display: block;
+.program-identity {
+  display: flex;
   min-width: 0;
+  min-height: calc(var(--density-row) - 2px);
+  flex-direction: column;
+  justify-content: center;
+  padding: 2px 6px 2px 0;
   overflow: hidden;
-  color: var(--color-text-strong);
   font-size: 10px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.object-size-summary {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: 9px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 10px;
 }
 
 .program-system-info {
