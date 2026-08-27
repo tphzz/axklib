@@ -52,14 +52,6 @@
   scrollbar-color: #55585a transparent;
 }
 
-:is([inert], [inert] *) {
-  scrollbar-width: none;
-}
-
-:is([inert], [inert] *)::-webkit-scrollbar {
-  display: none;
-}
-
 html,
 body,
 #app {
