@@ -28,6 +28,10 @@ const dialogComponents = readdirSync(componentDirectory)
     .filter((name) => name.endsWith('.svelte'))
     .map((name) => `src/lib/components/${name}`)
     .filter((path) => source(path).includes('role="dialog"'));
+const autocompleteComponents = readdirSync(componentDirectory)
+    .filter((name) => name.endsWith('.svelte'))
+    .map((name) => `src/lib/components/${name}`)
+    .filter((path) => source(path).includes('dialog-autocomplete-list'));
 
 describe('dialog visual contract', () => {
     it('defines one compact typography scale for dialog content', () => {
@@ -68,6 +72,24 @@ describe('dialog visual contract', () => {
         );
         for (const path of segmentedControls) {
             expect(source(path), path).toContain('dialog-segmented-control');
+        }
+    });
+
+    it('uses one shared trailing clear control in every custom autocomplete', () => {
+        expect(autocompleteComponents.length).toBeGreaterThan(0);
+        expect(appStyles).toMatch(/\.dialog-autocomplete-control\s*\{[^}]*position:\s*relative[^}]*min-width:\s*0/s);
+        expect(appStyles).toMatch(
+            /\.dialog-autocomplete-control\s*>\s*\.dialog-field-control\s*\{[^}]*width:\s*100%[^}]*padding-right:\s*30px/s,
+        );
+        expect(appStyles).toMatch(
+            /\.dialog-autocomplete-clear\s*\{[^}]*position:\s*absolute[^}]*width:\s*25px[^}]*height:\s*24px/s,
+        );
+        expect(appStyles).toMatch(/\.dialog-autocomplete-clear:focus-visible\s*\{[^}]*outline:/s);
+
+        for (const path of autocompleteComponents) {
+            const component = source(path);
+            expect(component, path).toContain('dialog-autocomplete-control');
+            expect(component, path).toContain('dialog-autocomplete-clear');
         }
     });
 

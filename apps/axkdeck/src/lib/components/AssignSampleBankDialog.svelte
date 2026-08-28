@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { dismissAutocompleteFromOutsidePointer } from '../autocomplete';
     import { modal } from '../modal';
     import type { SampleBankAssignmentBlocker, SampleBankAssignmentOption } from '../types';
     import Icon from './Icon.svelte';
@@ -14,43 +15,102 @@
         onsubmit: (bankObjectId: string) => void;
     }
 
+    interface AssignmentStatusSegment {
+        text: string;
+        warning: boolean;
+    }
+
     let { volumeName, sampleCount, options, blockers, busy, error, oncancel, onsubmit }: Props = $props();
     let query = $state('');
     let selectedObjectId = $state('');
-    let activeIndex = $state(0);
-    let listOpen = $state(true);
+    let activeIndex = $state(-1);
+    let listOpen = $state(false);
+    let sampleBankInput = $state<HTMLInputElement>();
     const filteredOptions = $derived(
         options.filter((option) => option.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())),
     );
     const selected = $derived(options.find((option) => option.objectId === selectedObjectId));
+    const assignmentBlocked = $derived(blockers.length > 0);
+    const selectionDisabled = $derived(busy || assignmentBlocked);
+    const assignmentStatusSegments = $derived.by((): AssignmentStatusSegment[] => {
+        if (assignmentBlocked) return [{ text: 'Sample Bank selection unavailable', warning: false }];
+        if (!selected) return [{ text: 'No Sample Bank selected', warning: false }];
+
+        const segments: AssignmentStatusSegment[] = [];
+        if (selected.movedSampleCount === 0) {
+            segments.push({ text: 'No changes', warning: false });
+        } else {
+            if (selected.selectedMemberCount > 0) {
+                segments.push({ text: `${selected.selectedMemberCount} already here`, warning: false });
+            }
+            if (selected.reassignedSampleCount > 0) {
+                segments.push({
+                    text:
+                        selected.reassignedSampleCount === 1
+                            ? '1 moved from another bank'
+                            : `${selected.reassignedSampleCount} moved from other banks`,
+                    warning: true,
+                });
+            }
+            const linkedSampleCount = selected.movedSampleCount - selected.reassignedSampleCount;
+            if (linkedSampleCount > 0) segments.push({ text: `${linkedSampleCount} linked`, warning: false });
+        }
+        segments.push({ text: `${selected.finalMemberCount} of 127 members`, warning: false });
+        return segments;
+    });
+    const assignmentStatusText = $derived(assignmentStatusSegments.map((segment) => segment.text).join(' · '));
     const canSubmit = $derived(
         !busy &&
-            blockers.length === 0 &&
+            !assignmentBlocked &&
             selected !== undefined &&
             selected.movedSampleCount > 0 &&
             selected.finalMemberCount <= 127,
     );
 
     function select(option: SampleBankAssignmentOption): void {
-        if (option.finalMemberCount > 127 || busy) return;
+        if (option.finalMemberCount > 127 || selectionDisabled) return;
         selectedObjectId = option.objectId;
         query = option.name;
-        listOpen = false;
+        closeList();
     }
 
     function updateQuery(value: string): void {
+        if (selectionDisabled) return;
         query = value;
         selectedObjectId = '';
         activeIndex = 0;
         listOpen = true;
     }
 
+    function openList(): void {
+        if (selectionDisabled) return;
+        listOpen = true;
+        activeIndex =
+            filteredOptions.length === 0 ? -1 : Math.max(0, Math.min(filteredOptions.length - 1, activeIndex));
+    }
+
+    function clearSelection(): void {
+        if (selectionDisabled) return;
+        query = '';
+        selectedObjectId = '';
+        activeIndex = -1;
+        listOpen = options.length > 0;
+        queueMicrotask(() => sampleBankInput?.focus());
+    }
+
+    function closeList(): void {
+        listOpen = false;
+        activeIndex = -1;
+    }
+
     function handleKey(event: KeyboardEvent): void {
+        if (selectionDisabled) return;
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
             event.preventDefault();
             listOpen = true;
             const direction = event.key === 'ArrowDown' ? 1 : -1;
-            activeIndex = Math.max(0, Math.min(filteredOptions.length - 1, activeIndex + direction));
+            const startingIndex = activeIndex < 0 ? (direction > 0 ? -1 : filteredOptions.length) : activeIndex;
+            activeIndex = Math.max(0, Math.min(filteredOptions.length - 1, startingIndex + direction));
         } else if (event.key === 'Home' || event.key === 'End') {
             event.preventDefault();
             listOpen = true;
@@ -61,7 +121,7 @@
         } else if (event.key === 'Escape' && listOpen) {
             event.preventDefault();
             event.stopPropagation();
-            listOpen = false;
+            closeList();
         }
     }
 
@@ -77,7 +137,7 @@
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
     <div
-        class="dialog-shell assign-sample-bank-dialog"
+        class="dialog-shell dialog-popovers-visible assign-sample-bank-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Assign to Sample Bank"
@@ -104,8 +164,12 @@
                     </div>
                 {/if}
                 <label for="sample-bank-search">Sample Bank</label>
-                <div class="sample-bank-combobox">
+                <div
+                    class="sample-bank-combobox dialog-autocomplete-control"
+                    use:dismissAutocompleteFromOutsidePointer={{ expanded: listOpen, ondismiss: closeList }}
+                >
                     <input
+                        bind:this={sampleBankInput}
                         id="sample-bank-search"
                         class="dialog-field-control"
                         value={query}
@@ -117,12 +181,22 @@
                             ? `sample-bank-option-${filteredOptions[activeIndex].objectId}`
                             : undefined}
                         autocomplete="off"
-                        disabled={busy}
-                        data-dialog-initial-focus="select"
+                        disabled={selectionDisabled}
+                        data-dialog-initial-focus={selectionDisabled ? undefined : 'select'}
                         oninput={(event) => updateQuery(event.currentTarget.value)}
-                        onfocus={() => (listOpen = true)}
+                        onclick={openList}
                         onkeydown={handleKey}
                     />
+                    {#if query.length > 0 || selected}
+                        <button
+                            class="dialog-autocomplete-clear"
+                            type="button"
+                            aria-label="Clear Sample Bank"
+                            title="Clear Sample Bank"
+                            disabled={selectionDisabled}
+                            onclick={clearSelection}><Icon name="close" size={14} /></button
+                        >
+                    {/if}
                     {#if listOpen}
                         <div
                             id="sample-bank-options"
@@ -139,7 +213,7 @@
                                     aria-selected={selectedObjectId === option.objectId}
                                     aria-disabled={option.finalMemberCount > 127}
                                     class:active={index === activeIndex}
-                                    disabled={busy || option.finalMemberCount > 127}
+                                    disabled={selectionDisabled || option.finalMemberCount > 127}
                                     onpointermove={() => (activeIndex = index)}
                                     onclick={() => select(option)}
                                 >
@@ -158,39 +232,17 @@
                         </div>
                     {/if}
                 </div>
-                {#if selected}
-                    <div class="assignment-summary" aria-live="polite">
-                        {#if selected.selectedMemberCount > 0}
-                            <p>
-                                {selected.selectedMemberCount} selected
-                                {selected.selectedMemberCount === 1 ? 'Sample is' : 'Samples are'} already in this Sample
-                                Bank and will remain in place.
-                            </p>
-                        {/if}
-                        {#if selected.movedSampleCount > 0}
-                            {#if selected.reassignedSampleCount > 0}
-                                <p class="dialog-warning">
-                                    {selected.reassignedSampleCount} selected
-                                    {selected.reassignedSampleCount === 1 ? 'Sample will' : 'Samples will'} be detached from
-                                    {selected.reassignedSampleCount === 1
-                                        ? 'its current Sample Bank'
-                                        : 'their current Sample Banks'} and appended.
-                                </p>
-                            {/if}
-                            {#if selected.movedSampleCount > selected.reassignedSampleCount}
-                                <p>
-                                    {selected.movedSampleCount - selected.reassignedSampleCount} unassigned selected
-                                    {selected.movedSampleCount - selected.reassignedSampleCount === 1
-                                        ? 'Sample will be'
-                                        : 'Samples will be'} linked and appended.
-                                </p>
-                            {/if}
-                        {:else}
-                            <p>All selected Samples are already in this Sample Bank. No changes are needed.</p>
-                        {/if}
-                        <p>{selected.finalMemberCount} of 127 members after assignment</p>
-                    </div>
-                {/if}
+                <div
+                    class="assignment-status"
+                    class:assignment-status-muted={!selected || assignmentBlocked}
+                    role="status"
+                    aria-live="polite"
+                    title={assignmentStatusText}
+                >
+                    {#each assignmentStatusSegments as segment, index}
+                        <span class:dialog-warning={segment.warning}>{index > 0 ? ' · ' : ''}{segment.text}</span>
+                    {/each}
+                </div>
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
             <footer class="dialog-footer">
@@ -220,8 +272,7 @@
     }
 
     .assign-sample-bank-content > p,
-    .assignment-blockers p,
-    .assignment-summary p {
+    .assignment-blockers p {
         margin: 0;
     }
 
@@ -230,16 +281,12 @@
         font-size: var(--dialog-label-font-size);
     }
 
-    .sample-bank-combobox {
-        position: relative;
-    }
-
-    .sample-bank-combobox > input {
-        width: 100%;
-    }
-
     .sample-bank-options {
-        margin-top: 4px;
+        position: absolute;
+        z-index: 4;
+        top: calc(100% + 4px);
+        right: 0;
+        left: 0;
     }
 
     .sample-bank-options :global(.dialog-autocomplete-option) {
@@ -247,18 +294,26 @@
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
         align-items: center;
-        min-height: 38px;
-        padding-top: 4px;
-        padding-bottom: 4px;
-    }
-
-    .assignment-blockers,
-    .assignment-summary {
-        display: grid;
-        gap: 6px;
     }
 
     .assignment-blockers {
+        display: grid;
+        gap: 6px;
         color: var(--color-danger);
+    }
+
+    .assignment-status {
+        min-width: 0;
+        height: 16px;
+        overflow: hidden;
+        color: var(--color-text);
+        font-size: var(--dialog-body-font-size);
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .assignment-status-muted {
+        color: var(--color-text-muted);
     }
 </style>

@@ -253,7 +253,10 @@ describe('MidiImportDialog', () => {
         expect(scrollingContent?.contains(destination)).toBe(false);
         expect(dialog?.classList.contains('dialog-popovers-visible')).toBe(true);
 
-        await fireEvent.focus(screen.getByRole('combobox', { name: 'Destination volume' }));
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
+        await fireEvent.focus(combobox);
+        expect(screen.queryByRole('listbox', { name: 'Volumes' })).toBeNull();
+        await fireEvent.click(combobox);
         expect(screen.getByRole('listbox', { name: 'Volumes' })).toBeTruthy();
     });
 });

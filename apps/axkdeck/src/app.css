@@ -2192,6 +2192,47 @@ input:focus-visible {
   border-color: var(--color-accent);
 }
 
+.dialog-autocomplete-control {
+  position: relative;
+  min-width: 0;
+}
+
+.dialog-autocomplete-control > .dialog-field-control {
+  width: 100%;
+  padding-right: 30px;
+}
+
+.dialog-autocomplete-clear {
+  position: absolute;
+  z-index: 5;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  width: 25px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  color: var(--color-text-muted);
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-bg-deep);
+  cursor: pointer;
+}
+
+.dialog-autocomplete-clear:hover:not(:disabled) {
+  color: var(--color-text-strong);
+}
+
+.dialog-autocomplete-clear:focus-visible {
+  color: var(--color-text-strong);
+  outline: 1px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.dialog-autocomplete-clear:disabled {
+  cursor: not-allowed;
+}
+
 .dialog-autocomplete-list {
   display: grid;
   max-height: 220px;

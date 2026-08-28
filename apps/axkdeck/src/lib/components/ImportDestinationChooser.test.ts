@@ -58,17 +58,25 @@ describe('ImportDestinationChooser', () => {
     });
 
     it('preselects the exact volume and exposes only volumes from the selected partition', async () => {
-        render(ImportDestinationChooser, { props: props() });
+        const onvolume = vi.fn();
+        render(ImportDestinationChooser, { props: props({ onvolume }) });
 
         const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
         expect(combobox.value).toBe('Strings');
         await fireEvent.focus(combobox);
+        expect(screen.queryByRole('listbox', { name: 'Volumes' })).toBeNull();
+        await fireEvent.click(combobox);
 
         expect(screen.getByRole('listbox', { name: 'Volumes' })).toBeTruthy();
         const options = within(screen.getByRole('listbox', { name: 'Volumes' }));
         expect(options.getAllByRole('option')).toHaveLength(2);
         expect(options.getByRole('option', { name: 'Pianos' })).toBeTruthy();
         expect(options.queryByRole('option', { name: /SOUNDS 02/ })).toBeNull();
+
+        await fireEvent.pointerDown(screen.getByText('Destination volume'));
+        expect(combobox.value).toBe('Strings');
+        expect(combobox.getAttribute('aria-expanded')).toBe('false');
+        expect(onvolume).not.toHaveBeenCalled();
     });
 
     it('filters volumes and selects an exact destination with the keyboard', async () => {
@@ -89,13 +97,25 @@ describe('ImportDestinationChooser', () => {
         const onvolume = vi.fn();
         render(ImportDestinationChooser, { props: props({ onvolume }) });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Clear volume' }));
+        const clear = screen.getByRole('button', { name: 'Clear volume' });
+        expect(clear.classList).toContain('dialog-autocomplete-clear');
+        await fireEvent.click(clear);
 
         const combobox = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
+        expect(combobox.parentElement?.classList).toContain('dialog-autocomplete-control');
         expect(onvolume).toHaveBeenLastCalledWith(0, '');
         expect(combobox.value).toBe('');
         expect(document.activeElement).toBe(combobox);
-        expect(within(screen.getByRole('listbox', { name: 'Volumes' })).getAllByRole('option')).toHaveLength(2);
+        const listbox = screen.getByRole('listbox', { name: 'Volumes' });
+        expect(within(listbox).getAllByRole('option')).toHaveLength(2);
+
+        await fireEvent.pointerDown(within(listbox).getAllByRole('option')[0]);
+        expect(screen.getByRole('listbox', { name: 'Volumes' })).toBeTruthy();
+
+        await fireEvent.pointerDown(screen.getByText('Destination volume'));
+        expect(combobox.value).toBe('');
+        expect(combobox.getAttribute('aria-expanded')).toBe('false');
+        expect(screen.queryByRole('listbox', { name: 'Volumes' })).toBeNull();
     });
 
     it('reports partition changes separately and disables volume selection for an empty partition', async () => {
@@ -129,6 +149,8 @@ describe('ImportDestinationChooser', () => {
 
         const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
         await fireEvent.focus(combobox);
+        expect(screen.queryByRole('listbox', { name: 'Volumes' })).toBeNull();
+        await fireEvent.click(combobox);
         const listbox = screen.getByRole('listbox', { name: 'Volumes' });
         const option = within(listbox).getAllByRole('option')[0];
 
