@@ -72,6 +72,7 @@
                 <label>
                     <span>Sample Bank name</span>
                     <input
+                        class="dialog-field-control"
                         bind:value
                         data-dialog-initial-focus="select"
                         disabled={busy}
