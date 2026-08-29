@@ -35,6 +35,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     objectDeletionAvailable: false,
     waveDataCleanupAvailable: false,
     programGenerationAvailable: false,
+    programAssignmentCleanupAvailable: false,
     packageImportAvailable: false,
     packageExportAvailable: false,
     volumePackageExportAvailable: false,

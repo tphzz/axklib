@@ -19,9 +19,7 @@ describe('CollectionToolbar', () => {
                 count: 1,
                 query: '',
                 onquerychange: vi.fn(),
-                actionLabel: 'Import audio',
-                actionIcon: 'upload',
-                onaction: vi.fn(),
+                actions: [{ label: 'Import audio', icon: 'upload', run: vi.fn() }],
             },
         });
 
@@ -39,9 +37,7 @@ describe('CollectionToolbar', () => {
                 count: 3,
                 query: '',
                 onquerychange: vi.fn(),
-                actionLabel: 'Clean up unreferenced Wave Data',
-                actionIcon: 'broom',
-                onaction,
+                actions: [{ label: 'Clean up unreferenced Wave Data', icon: 'broom', run: onaction }],
             },
         });
 

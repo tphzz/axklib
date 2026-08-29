@@ -339,35 +339,21 @@
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
-    const toolbarActionLabel = $derived(
+    const toolbarActions = $derived(
         view === 'programs' && programGenerationAvailable
-            ? 'Generate Programs'
+            ? [{ label: 'Generate Programs', icon: 'sparkles' as const, run: onprogramgeneration }]
             : view === 'wave-data' && waveDataCleanupAvailable
-              ? 'Clean up unreferenced Wave Data'
-              : undefined,
+              ? [{ label: 'Clean up unreferenced Wave Data', icon: 'broom' as const, run: oncleanupwavedata }]
+              : [],
     );
-    const toolbarActionIcon = $derived(view === 'programs' ? 'sparkles' : 'broom');
 
     function updateWaveDataViewport(viewport: VirtualViewportState): void {
         waveDataViewport = viewport;
     }
-
-    function runToolbarAction(): void {
-        if (view === 'programs') onprogramgeneration();
-        else oncleanupwavedata();
-    }
 </script>
 
 <section class="collection-panel" aria-label={title}>
-    <CollectionToolbar
-        {title}
-        {count}
-        {query}
-        {onquerychange}
-        actionLabel={toolbarActionLabel}
-        actionIcon={toolbarActionIcon}
-        onaction={runToolbarAction}
-    />
+    <CollectionToolbar {title} {count} {query} {onquerychange} actions={toolbarActions} />
     <!-- Blank-space clearing is a pointer shortcut; the selection toolbar exposes the keyboard-accessible command. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->

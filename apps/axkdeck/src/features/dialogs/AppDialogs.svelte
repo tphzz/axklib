@@ -14,6 +14,7 @@
     import type { Tx16wImportWorkflow } from '../import/tx16wWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
+    import type { ProgramAssignmentCleanupWorkflow } from '../program-assignment-cleanup/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
@@ -29,6 +30,7 @@
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
+    import ProgramAssignmentCleanupDialog from '../../lib/components/ProgramAssignmentCleanupDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
     import Tx16wImportDialog from '../../lib/components/Tx16wImportDialog.svelte';
@@ -83,6 +85,7 @@
         mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
         programGeneration: ProgramGenerationWorkflow;
+        programAssignmentCleanup: ProgramAssignmentCleanupWorkflow;
         mediaDrop: MediaDropWorkflow;
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
@@ -120,6 +123,7 @@
         mediaExports,
         deletion,
         programGeneration,
+        programAssignmentCleanup,
         mediaDrop,
         audioImport,
         audioFileInput,
@@ -472,6 +476,23 @@
         onselectall={(selected) => deletion.updateAllCleanup(selected)}
         oncancel={() => deletion.cancelCleanup()}
         onconfirm={() => void deletion.submitCleanup()}
+    />
+{/if}
+{#if programAssignmentCleanup.request}
+    <ProgramAssignmentCleanupDialog
+        volumeName={programAssignmentCleanup.request.volumeName}
+        inspection={programAssignmentCleanup.request.inspection}
+        rows={programAssignmentCleanup.request.rows}
+        loading={programAssignmentCleanup.request.loading}
+        busy={programAssignmentCleanup.request.busy}
+        error={programAssignmentCleanup.request.error}
+        onselectall={(selected) => programAssignmentCleanup.setAllSelected(selected)}
+        onprogramselectionchange={(objectId, selected) =>
+            programAssignmentCleanup.setProgramSelected(objectId, selected)}
+        onselectionchange={(objectId, ordinal, selected) =>
+            programAssignmentCleanup.setAssignmentSelected(objectId, ordinal, selected)}
+        oncancel={() => programAssignmentCleanup.close()}
+        onconfirm={() => void programAssignmentCleanup.submit()}
     />
 {/if}
 {#if programGeneration.request}

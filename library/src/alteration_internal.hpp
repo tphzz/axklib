@@ -200,6 +200,9 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
                                        const InsertProgramOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> rename_program(TransactionState &state, OperationContext context,
                                        const RenameProgramOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> clear_program_assignments(TransactionState &state, OperationContext context,
+                                                  const ClearProgramAssignmentsOperation &operation,
+                                                  const CancellationToken &cancellation);
 Result<OperationReport> delete_sequence(TransactionState &state, OperationContext context,
                                         const DeleteSequenceOperation &operation,
                                         const CancellationToken &cancellation);

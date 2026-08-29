@@ -1879,6 +1879,138 @@ describe('HttpImageTransport', () => {
         });
     });
 
+    it('inspects and starts reviewed unresolved Program assignment cleanup', async () => {
+        const bodies = new Map<string, unknown>();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.program_assignments.cleanup.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-program-assignment-cleanup-inspections',
+                                mode: 'read',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageProgramAssignmentCleanupInspectionRequest',
+                                resultSchema: 'ImageProgramAssignmentCleanupInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.program_assignments.cleanup',
+                                method: 'POST',
+                                route: '/api/v1/image-program-assignment-cleanups',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageProgramAssignmentCleanupRequest',
+                                resultSchema: 'ImageProgramAssignmentCleanupResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return completedImageOpen({
+                        imageId: 'image-cleanup',
+                        revision: 6,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 1,
+                        relationshipCount: 1,
+                        availableOperations: [
+                            'images.program_assignments.cleanup.inspect',
+                            'images.program_assignments.cleanup',
+                        ],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-program-assignment-cleanup-inspections')) {
+                    bodies.set('inspect', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-cleanup',
+                        revision: 6,
+                        contentScopeId: 'volume-1',
+                        totalCandidateCount: 1,
+                        candidates: [
+                            {
+                                programObjectId: 'program-7',
+                                programNumber: 7,
+                                programName: 'Bass',
+                                assignmentOrdinal: 3,
+                                assignmentName: 'Missing Bank',
+                                targetObjectType: 'SBAC',
+                                receiveChannelDisplay: 'Bch',
+                                reason: 'MISSING_TARGET',
+                                candidateTargetCount: 0,
+                                defaultSelected: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/image-program-assignment-cleanups')) {
+                    bodies.set('cleanup', JSON.parse(String(init?.body)));
+                    return json(
+                        {
+                            jobId: 'job-cleanup',
+                            operationId: 'images.program_assignments.cleanup',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened.programAssignmentCleanupAvailable).toBe(true);
+
+        const inspection = await transport.inspectProgramAssignmentCleanup(opened.sessionId, 'volume-1');
+        expect(inspection.candidates).toEqual([
+            expect.objectContaining({ programObjectId: 'program-7', assignmentOrdinal: 3 }),
+        ]);
+        const assignments = [{ programObjectId: 'program-7', assignmentOrdinal: 3 }];
+        const job = await transport.startProgramAssignmentCleanup(opened.sessionId, 'volume-1', assignments);
+        expect(job).toMatchObject({ kind: 'images.program_assignments.cleanup', status: 'queued' });
+        expect(bodies.get('inspect')).toEqual({
+            imageId: 'image-cleanup',
+            expectedRevision: 6,
+            contentScopeId: 'volume-1',
+        });
+        expect(bodies.get('cleanup')).toEqual({
+            imageId: 'image-cleanup',
+            expectedRevision: 6,
+            contentScopeId: 'volume-1',
+            assignments,
+        });
+    });
+
     it('imports uploaded and workspace audio into one Sample Bank through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(

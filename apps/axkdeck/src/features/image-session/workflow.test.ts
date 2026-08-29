@@ -51,6 +51,7 @@ function opened(sessionId: number): OpenedImage {
         objectDeletionAvailable: true,
         waveDataCleanupAvailable: true,
         programGenerationAvailable: true,
+        programAssignmentCleanupAvailable: true,
         packageImportAvailable: true,
         packageExportAvailable: true,
         volumePackageExportAvailable: true,

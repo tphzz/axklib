@@ -93,6 +93,7 @@ export class ImageSessionWorkflow {
     objectDeletionAvailable = $state(false);
     waveDataCleanupAvailable = $state(false);
     programGenerationAvailable = $state(false);
+    programAssignmentCleanupAvailable = $state(false);
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
     volumePackageExportAvailable = $state(false);
@@ -541,6 +542,7 @@ export class ImageSessionWorkflow {
         this.objectDeletionAvailable = opened.objectDeletionAvailable;
         this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
         this.programGenerationAvailable = opened.programGenerationAvailable;
+        this.programAssignmentCleanupAvailable = opened.programAssignmentCleanupAvailable;
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
         this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
@@ -647,6 +649,7 @@ export class ImageSessionWorkflow {
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;
+        this.programAssignmentCleanupAvailable = false;
     }
 }
 

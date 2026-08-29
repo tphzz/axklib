@@ -70,6 +70,31 @@ void patch_index_be32(const std::filesystem::path &path, const axk::IndexRecord 
     ASSERT_TRUE(image);
 }
 
+void patch_program_assignment_name(const std::filesystem::path &path, std::string_view slot, std::size_t ordinal,
+                                   std::string_view name) {
+    const auto image = axk::open_image(path);
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &partition = image->partitions().front();
+    const auto program = std::ranges::find_if(partition.records, [&](const auto &record) {
+        return record.object_type == "PROG" && record.object_name == slot;
+    });
+    ASSERT_NE(program, partition.records.end());
+    ASSERT_EQ(program->extents.size(), 1U);
+    const auto absolute =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(program->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+            512U +
+        0x120U + ordinal * 0x38U;
+    std::array<char, 16U> bytes{};
+    std::ranges::fill(bytes, ' ');
+    std::ranges::copy(name, bytes.begin());
+    std::fstream output{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(output);
+    output.seekp(static_cast<std::streamoff>(absolute));
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(output);
+}
+
 std::vector<std::byte> read_bytes(const std::filesystem::path &path) {
     std::ifstream input{path, std::ios::binary};
     const std::vector<char> bytes{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
@@ -1217,6 +1242,61 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     const auto generated_slot = std::format("{:03}", candidate.at("programNumber").get<unsigned int>());
     EXPECT_NE(std::ranges::find(programs->items, generated_slot, &axk::app::ImageObjectItem::entry_name),
               programs->items.end());
+}
+
+TEST_F(WriteOperationsTest, SessionProgramAssignmentCleanupInspectsAndCommitsReviewedRows) {
+    write_tone(root_ / "program-cleanup.wav");
+    const auto path = root_ / "program-cleanup.hds";
+    const auto written = axk::write_hds_image(all_action_source_manifest(root_ / "program-cleanup.wav"), path);
+    ASSERT_TRUE(written) << written.error().message;
+    patch_program_assignment_name(path, "127", 0U, "Missing Bank");
+
+    const auto opened = images_->open({"workspace", "program-cleanup.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(roots);
+    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes);
+    const auto volume = std::ranges::find(volumes->items, "Volume", &axk::app::ImageContentItem::name);
+    ASSERT_NE(volume, volumes->items.end());
+
+    const auto inspection = registry_.invoke(
+        "images.program_assignments.cleanup.inspect",
+        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
+        context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_EQ(inspection->at("candidates").size(), 1U);
+    const auto &candidate = inspection->at("candidates").front();
+    EXPECT_EQ(candidate.at("programNumber"), 127U);
+    EXPECT_EQ(candidate.at("assignmentOrdinal"), 0U);
+    EXPECT_EQ(candidate.at("reason"), "MISSING_TARGET");
+
+    const auto cleaned = registry_.invoke(
+        "images.program_assignments.cleanup",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"contentScopeId", volume->id},
+         {"assignments", nlohmann::json::array({{{"programObjectId", candidate.at("programObjectId")},
+                                                 {"assignmentOrdinal", candidate.at("assignmentOrdinal")}}})}},
+        context());
+    ASSERT_TRUE(cleaned) << cleaned.error().message;
+    EXPECT_EQ(cleaned->at("kind"), "PROGRAM_ASSIGNMENT_CLEANUP");
+    EXPECT_EQ(cleaned->at("revision"), 2U);
+    ASSERT_EQ(cleaned->at("cleanedAssignments").size(), 1U);
+
+    const auto refreshed_roots = images_->content(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(refreshed_roots);
+    const auto refreshed_volumes =
+        images_->content(opened->image_id, "owner", 100U, std::nullopt, refreshed_roots->items.front().id);
+    ASSERT_TRUE(refreshed_volumes);
+    const auto refreshed_volume =
+        std::ranges::find(refreshed_volumes->items, "Volume", &axk::app::ImageContentItem::name);
+    ASSERT_NE(refreshed_volume, refreshed_volumes->items.end());
+    const auto after = registry_.invoke(
+        "images.program_assignments.cleanup.inspect",
+        {{"imageId", opened->image_id}, {"expectedRevision", 2U}, {"contentScopeId", refreshed_volume->id}}, context());
+    ASSERT_TRUE(after) << after.error().message;
+    EXPECT_TRUE(after->at("candidates").empty());
 }
 
 TEST_F(WriteOperationsTest, AlterationRechecksInputsBeforePublishing) {

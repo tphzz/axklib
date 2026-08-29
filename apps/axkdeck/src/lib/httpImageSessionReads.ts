@@ -11,6 +11,9 @@ import type {
     RelationshipPage,
     RelationshipPageFilter,
     SystemProgramContexts,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
+    JobState,
 } from './transport';
 import type { ImageLocation } from './storageLocations';
 
@@ -60,6 +63,21 @@ export class HttpImageSessionReads {
 
     allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
         return this.imageSessions.allocationMapReference(sessionId);
+    }
+
+    inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        return this.imageSessions.inspectProgramAssignmentCleanup(sessionId, contentScopeId);
+    }
+
+    startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        return this.imageSessions.startProgramAssignmentCleanup(sessionId, contentScopeId, assignments);
     }
 
     closeImage(sessionId: number): Promise<void> {

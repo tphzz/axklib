@@ -40,6 +40,8 @@
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         programGenerationAvailable?: boolean;
         onprogramgeneration?: () => void;
+        programAssignmentCleanupAvailable?: boolean;
+        onprogramassignmentcleanup?: () => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
@@ -66,6 +68,8 @@
         ondeleteobjects = () => undefined,
         programGenerationAvailable = false,
         onprogramgeneration = () => undefined,
+        programAssignmentCleanupAvailable = false,
+        onprogramassignmentcleanup = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         selection = emptyPackageExportSelection(),
@@ -96,6 +100,24 @@
     );
     const visibleSystemContexts = $derived(
         contexts?.files.filter((context) => context.availability !== 'NOT_PRESENT') ?? [],
+    );
+    const toolbarActions = $derived(
+        presentation !== 'single'
+            ? []
+            : [
+                  ...(programAssignmentCleanupAvailable
+                      ? [
+                            {
+                                label: 'Clean unresolved Program assignments',
+                                icon: 'broom' as const,
+                                run: onprogramassignmentcleanup,
+                            },
+                        ]
+                      : []),
+                  ...(programGenerationAvailable
+                      ? [{ label: 'Generate Programs', icon: 'sparkles' as const, run: onprogramgeneration }]
+                      : []),
+              ],
     );
     const filteredParts = $derived(
         availableSystem2
@@ -356,9 +378,7 @@
         {countText}
         {query}
         {onquerychange}
-        actionLabel={presentation === 'single' && programGenerationAvailable ? 'Generate Programs' : undefined}
-        actionIcon="sparkles"
-        onaction={onprogramgeneration}
+        actions={toolbarActions}
         titleControls={systemInfoControls}
         trailingControls={presentationControls}
     />

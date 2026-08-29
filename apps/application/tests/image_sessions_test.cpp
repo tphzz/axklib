@@ -75,6 +75,33 @@ void patch_sample_cached_reference(const std::filesystem::path &path, std::uint3
     ASSERT_TRUE(image);
 }
 
+void patch_program_assignment_name(const std::filesystem::path &path, std::string_view slot, std::size_t ordinal,
+                                   std::string_view name) {
+    const auto media = axk::open_media(path);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *sfs = std::get_if<axk::Container>(&media->storage());
+    ASSERT_NE(sfs, nullptr);
+    const auto &partition = sfs->partitions().front();
+    const auto program = std::ranges::find_if(partition.records, [&](const auto &record) {
+        return record.object_type == "PROG" && record.object_name == slot;
+    });
+    ASSERT_NE(program, partition.records.end());
+    ASSERT_EQ(program->extents.size(), 1U);
+    const auto absolute =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(program->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+            512U +
+        0x120U + ordinal * 0x38U;
+    std::array<char, 16U> bytes{};
+    std::ranges::fill(bytes, ' ');
+    std::ranges::copy(name, bytes.begin());
+    std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(absolute));
+    image.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(image);
+}
+
 void corrupt_fixed_allocation_bitmap_copy(const std::filesystem::path &path) {
     const auto media = axk::open_media(path);
     ASSERT_TRUE(media) << media.error().message;
@@ -203,7 +230,9 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
                                                                       "images.package.import",
                                                                       "images.deletion.orphans.inspect",
                                                                       "images.programs.generate.inspect",
-                                                                      "images.programs.generate"}));
+                                                                      "images.programs.generate",
+                                                                      "images.program_assignments.cleanup.inspect",
+                                                                      "images.program_assignments.cleanup"}));
     EXPECT_GT(opened->object_count, 0U);
 
     const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
@@ -1077,6 +1106,140 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
         sessions.inspect_program_generation(opened->image_id, "owner-a", opened->revision + 1U, volume->id);
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
+}
+
+TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm.assign(8U, std::byte{});
+    const auto audio_path = root_ / "cleanup.wav";
+    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
+
+    axk::VolumeSpec volume;
+    volume.name = "Cleanup";
+    volume.waveforms.push_back({"wave", "Wave", audio_path, 60U, {}});
+    axk::SampleSpec sample;
+    sample.name = "Sample";
+    sample.waveform_id = "wave";
+    sample.root_key = 60U;
+    sample.key_high = 127U;
+    volume.samples.push_back(std::move(sample));
+    axk::SampleSpec direct_sample;
+    direct_sample.name = "Direct";
+    direct_sample.waveform_id = "wave";
+    direct_sample.root_key = 60U;
+    direct_sample.key_high = 127U;
+    volume.samples.push_back(std::move(direct_sample));
+    axk::SampleSpec direct_second;
+    direct_second.name = "Direct Second";
+    direct_second.waveform_id = "wave";
+    direct_second.root_key = 60U;
+    direct_second.key_high = 127U;
+    volume.samples.push_back(std::move(direct_second));
+    axk::SampleSpec direct_control;
+    direct_control.name = "Direct Control";
+    direct_control.waveform_id = "wave";
+    direct_control.root_key = 60U;
+    direct_control.key_high = 127U;
+    volume.samples.push_back(std::move(direct_control));
+    volume.sample_banks.push_back({"Bank", {"Sample"}});
+    volume.sample_banks.push_back({"Second Bank", {"Sample"}});
+    volume.sample_banks.push_back({"Control Bank", {"Sample"}});
+    volume.programs.push_back({4U, "Program", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
+    volume.programs.push_back({5U, "Second", {{"SBAC", "Second Bank", 1U}, {"SBNK", "Direct Second", 2U}}});
+    volume.programs.push_back({6U, "Control", {{"SBAC", "Control Bank", 1U}, {"SBNK", "Direct Control", 2U}}});
+    const auto related_volume = [&](std::string volume_name, std::string bank_name, std::string sample_name,
+                                    std::string prefix) {
+        axk::VolumeSpec related;
+        related.name = std::move(volume_name);
+        const auto waveform_id = prefix + "-wave";
+        related.waveforms.push_back({waveform_id, prefix + " Wave", audio_path, 60U, {}});
+        axk::SampleSpec related_sample;
+        related_sample.name = sample_name;
+        related_sample.waveform_id = waveform_id;
+        related_sample.root_key = 60U;
+        related_sample.key_high = 127U;
+        related.samples.push_back(std::move(related_sample));
+        const auto direct_name = prefix + " Direct";
+        axk::SampleSpec related_direct;
+        related_direct.name = direct_name;
+        related_direct.waveform_id = waveform_id;
+        related_direct.root_key = 60U;
+        related_direct.key_high = 127U;
+        related.samples.push_back(std::move(related_direct));
+        related.sample_banks.push_back({bank_name, {sample_name}});
+        related.programs.push_back({1U, "Related", {{"SBAC", bank_name, 1U}, {"SBNK", direct_name, 2U}}});
+        return related;
+    };
+    auto remote = related_volume("Remote", "Remote Bank", "Remote Sample", "Remote");
+    auto shared_a = related_volume("Shared A", "Shared Bank", "Shared Sample A", "Shared A");
+    auto shared_b = related_volume("Shared B", "Shared Bank", "Shared Sample B", "Shared B");
+    const auto written = axk::write_hds_image(
+        {"1.0",
+         8U * 1024U * 1024U,
+         {{"hd1", {std::move(volume), std::move(remote), std::move(shared_a), std::move(shared_b)}}}},
+        root_ / "cleanup.hds");
+    ASSERT_TRUE(written) << written.error().message;
+    patch_program_assignment_name(root_ / "cleanup.hds", "004", 0U, "Missing Bank");
+    patch_program_assignment_name(root_ / "cleanup.hds", "004", 1U, "Remote Sample");
+    patch_program_assignment_name(root_ / "cleanup.hds", "005", 0U, "Shared Bank");
+    patch_program_assignment_name(root_ / "cleanup.hds", "005", 1U, "Other Missing");
+
+    axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
+    const auto opened = sessions.open({"workspace", "cleanup.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(roots);
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes);
+    const auto volume_item = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
+    ASSERT_NE(volume_item, volumes->items.end());
+
+    const auto inspection =
+        sessions.inspect_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision, volume_item->id);
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_EQ(inspection->candidates.size(), 4U);
+    const auto &missing = inspection->candidates[0];
+    const auto &nonlocal = inspection->candidates[1];
+    const auto &ambiguous = inspection->candidates[2];
+    const auto &second_program = inspection->candidates[3];
+    EXPECT_EQ(missing.program_number, 4U);
+    EXPECT_EQ(missing.program_name, "Program");
+    EXPECT_EQ(missing.assignment_ordinal, 0U);
+    EXPECT_EQ(missing.assignment_name, "Missing Bank");
+    EXPECT_EQ(missing.target_object_type, "SBAC");
+    EXPECT_EQ(missing.reason, "MISSING_TARGET");
+    EXPECT_EQ(missing.candidate_target_count, 0U);
+    EXPECT_EQ(nonlocal.reason, "NONLOCAL_TARGET");
+    EXPECT_EQ(nonlocal.candidate_target_count, 1U);
+    EXPECT_EQ(ambiguous.reason, "AMBIGUOUS_TARGET");
+    EXPECT_EQ(ambiguous.candidate_target_count, 2U);
+    EXPECT_EQ(second_program.program_number, 5U);
+    EXPECT_EQ(second_program.assignment_name, "Other Missing");
+    EXPECT_TRUE(std::ranges::all_of(inspection->candidates,
+                                    &axk::app::ImageProgramAssignmentCleanupCandidate::default_selected));
+
+    std::vector<axk::app::ImageProgramAssignmentCleanupSelection> selections;
+    for (const auto &candidate : inspection->candidates)
+        selections.push_back({candidate.program_object_id, candidate.assignment_ordinal});
+    const auto plan = sessions.plan_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision,
+                                                               volume_item->id, selections);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->manifest.operations.size(), 2U);
+    const auto *first_cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&plan->manifest.operations[0].data);
+    const auto *second_cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&plan->manifest.operations[1].data);
+    ASSERT_NE(first_cleanup, nullptr);
+    ASSERT_NE(second_cleanup, nullptr);
+    EXPECT_EQ(first_cleanup->program_number, 4U);
+    EXPECT_EQ(first_cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 1U}));
+    EXPECT_EQ(second_cleanup->program_number, 5U);
+    EXPECT_EQ(second_cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 1U}));
+
+    const auto rejected = sessions.plan_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision,
+                                                                   volume_item->id, {{missing.program_object_id, 2U}});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "program_assignment_cleanup_stale");
 }
 
 TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursorsToTheFilter) {

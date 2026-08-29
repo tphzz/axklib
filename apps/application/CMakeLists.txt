@@ -22,12 +22,15 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
                                    src/image_session_program_generation.cpp
+                                   src/image_session_program_assignment_cleanup.cpp
                                    src/image_session_system_program_contexts.cpp
                                    src/image_session_object_reader.cpp src/image_session_open.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
                                    src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp
-                                   src/operation_registry.cpp src/package_filename.cpp src/package_operations.cpp
+                                   src/operation_registry.cpp src/operation_registry_names.cpp
+                                   src/operation_registry_program_assignments.cpp
+                                   src/package_filename.cpp src/package_operations.cpp
                                    src/package_operations_support.cpp src/session_package_import_plan.cpp
                                    src/session_package_operations.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp

@@ -246,6 +246,27 @@ Json program_generation_inspection_json(const axk::app::ImageProgramGenerationIn
             {"notices", std::move(notices)}};
 }
 
+Json program_assignment_cleanup_inspection_json(const axk::app::ImageProgramAssignmentCleanupInspection &inspection) {
+    Json candidates = Json::array();
+    for (const auto &candidate : inspection.candidates) {
+        candidates.push_back({{"programObjectId", candidate.program_object_id},
+                              {"programNumber", candidate.program_number},
+                              {"programName", candidate.program_name},
+                              {"assignmentOrdinal", candidate.assignment_ordinal},
+                              {"assignmentName", candidate.assignment_name},
+                              {"targetObjectType", candidate.target_object_type},
+                              {"receiveChannelDisplay", candidate.receive_channel_display},
+                              {"reason", candidate.reason},
+                              {"candidateTargetCount", candidate.candidate_target_count},
+                              {"defaultSelected", candidate.default_selected}});
+    }
+    return {{"imageId", inspection.image_id},
+            {"revision", inspection.revision},
+            {"contentScopeId", inspection.content_scope_id},
+            {"totalCandidateCount", inspection.total_candidate_count},
+            {"candidates", std::move(candidates)}};
+}
+
 Json deletion_manifest_json(const axk::AlterationManifest &manifest) {
     Json operations = Json::array();
     for (const auto &operation : manifest.operations) {
@@ -310,6 +331,25 @@ Json program_generation_manifest_json(const axk::AlterationManifest &manifest) {
                                {{"number", insert->program.number},
                                 {"name", insert->program.name},
                                 {"assignments", std::move(assignments)}}}});
+    }
+    return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
+}
+
+Json program_assignment_cleanup_manifest_json(const axk::AlterationManifest &manifest) {
+    Json operations = Json::array();
+    for (const auto &operation : manifest.operations) {
+        const auto *cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&operation.data);
+        if (cleanup == nullptr)
+            continue;
+        const auto *partition = std::get_if<axk::PartitionIndex>(&cleanup->partition);
+        if (partition == nullptr)
+            continue;
+        operations.push_back({{"id", operation.id},
+                              {"type", "clear_program_assignments"},
+                              {"partition_index", partition->value},
+                              {"volume_name", cleanup->volume_name},
+                              {"program_number", cleanup->program_number},
+                              {"assignment_ordinals", cleanup->assignment_ordinals}});
     }
     return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
 }

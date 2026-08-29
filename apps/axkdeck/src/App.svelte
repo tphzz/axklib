@@ -28,6 +28,7 @@
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
+    import { ProgramAssignmentCleanupWorkflow } from './features/program-assignment-cleanup/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
     import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
@@ -205,6 +206,17 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const programAssignmentCleanupWorkflow = new ProgramAssignmentCleanupWorkflow({
+        transport,
+        jobs: jobController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        activeVolumeId: () => catalog.activeVolumeId,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     catalogHooks.resetCleanup = () => deletionWorkflow.resetCleanup();
     const audioImportWorkflow = new AudioImportWorkflow({
         transport,
@@ -325,6 +337,7 @@
         extentLayoutRepairWorkflow.dispose();
         deletionWorkflow.dispose();
         programGenerationWorkflow.dispose();
+        programAssignmentCleanupWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
@@ -362,6 +375,7 @@
             mediaExports: mediaExportWorkflow,
             deletion: deletionWorkflow,
             programGeneration: programGenerationWorkflow,
+            programAssignmentCleanup: programAssignmentCleanupWorkflow,
             audioImport: audioImportWorkflow,
             sequenceImport: sequenceImportWorkflow,
             tx16wImport: tx16wImportWorkflow,
@@ -533,6 +547,7 @@
     objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
     waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
     programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
+    programAssignmentCleanupAvailable={imageSessionWorkflow.programAssignmentCleanupAvailable}
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
@@ -559,6 +574,7 @@
     deleteObjects={requestObjectDeletion}
     cleanupWaveData={requestWaveDataCleanup}
     generatePrograms={() => void programGenerationWorkflow.open()}
+    cleanupProgramAssignments={() => void programAssignmentCleanupWorkflow.open()}
     clearSelection={clearPackageExportSelection}
     selectionChanged={(selection) => (packageExportSelection = selection)}
     selectionLimit={reportPackageExportSelectionLimit}
@@ -633,6 +649,7 @@
             mediaExports={mediaExportWorkflow}
             deletion={deletionWorkflow}
             programGeneration={programGenerationWorkflow}
+            programAssignmentCleanup={programAssignmentCleanupWorkflow}
             mediaDrop={mediaDropWorkflow}
             tx16wImport={tx16wImportWorkflow}
             audioImport={audioImportWorkflow}

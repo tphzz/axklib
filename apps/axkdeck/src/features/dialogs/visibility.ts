@@ -44,6 +44,7 @@ interface AppDialogState {
     mediaExports: RequestDialogState;
     deletion: DeletionDialogState;
     programGeneration: RequestDialogState;
+    programAssignmentCleanup: RequestDialogState;
     audioImport: RequestDialogState;
     sequenceImport: RequestDialogState;
     tx16wImport: RequestDialogState;
@@ -71,6 +72,7 @@ export function hasOpenAppDialog(state: AppDialogState): boolean {
         state.deletion.objectRequest,
         state.deletion.cleanupRequest,
         state.programGeneration.request,
+        state.programAssignmentCleanup.request,
         state.audioImport.request,
         state.sequenceImport.request,
         state.tx16wImport.request,

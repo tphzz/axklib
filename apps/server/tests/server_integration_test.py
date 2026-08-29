@@ -1651,6 +1651,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.deletion.orphans.inspect",
                 "images.programs.generate.inspect",
                 "images.programs.generate",
+                "images.program_assignments.cleanup.inspect",
+                "images.program_assignments.cleanup",
             ]
             assert opened_image["data"]["objectCount"] > 0
             status, missing_system_partition = http_request(

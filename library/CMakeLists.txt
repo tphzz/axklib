@@ -220,6 +220,7 @@ add_library(
     src/alteration_package_adjustment.cpp
     src/alteration_package_sfs.cpp
   src/alteration_program.cpp
+  src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
   src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp

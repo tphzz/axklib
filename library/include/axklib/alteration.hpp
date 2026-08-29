@@ -128,6 +128,13 @@ struct RenameProgramOperation {
     std::string new_program_name;
 };
 
+struct ClearProgramAssignmentsOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    std::vector<std::uint8_t> assignment_ordinals;
+};
+
 struct SequenceSpec {
     std::string name;
     std::filesystem::path midi_path;
@@ -184,7 +191,8 @@ using AlterationOperationData =
                  DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
                  RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
                  DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
-                 RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation>;
+                 RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
+                 ClearProgramAssignmentsOperation>;
 
 struct AlterationOperation {
     std::string id;

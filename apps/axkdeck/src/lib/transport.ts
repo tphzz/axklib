@@ -13,6 +13,8 @@ import type {
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import type { components } from './generated/axklibApiV1';
+import type { ProgramAssignmentCleanupTransport } from './programAssignmentCleanupTransport';
+export type * from './programAssignmentCleanupTransport';
 
 export interface ValidationSummary {
     valid: boolean;
@@ -39,6 +41,7 @@ export interface OpenedImage {
     objectDeletionAvailable: boolean;
     waveDataCleanupAvailable: boolean;
     programGenerationAvailable: boolean;
+    programAssignmentCleanupAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
     volumePackageExportAvailable: boolean;
@@ -470,7 +473,7 @@ export interface ImageOpenOptions {
     onUpdate?: (job: JobState) => void;
 }
 
-export interface ImageTransport {
+export interface ImageTransport extends ProgramAssignmentCleanupTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;

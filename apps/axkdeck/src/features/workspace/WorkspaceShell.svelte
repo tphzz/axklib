@@ -84,6 +84,7 @@
         objectDeletionAvailable: boolean;
         waveDataCleanupAvailable: boolean;
         programGenerationAvailable: boolean;
+        programAssignmentCleanupAvailable: boolean;
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
         volumePackageExportAvailable: boolean;
@@ -110,6 +111,7 @@
         deleteObjects: (items: PackageExportObject[]) => void;
         cleanupWaveData: () => void;
         generatePrograms: () => void;
+        cleanupProgramAssignments: () => void;
         clearSelection: () => void;
         selectionChanged: (selection: PackageExportSelectionState) => void;
         selectionLimit: () => void;
@@ -151,6 +153,7 @@
         objectDeletionAvailable,
         waveDataCleanupAvailable,
         programGenerationAvailable,
+        programAssignmentCleanupAvailable,
         packageImportAvailable,
         packageExportAvailable,
         volumePackageExportAvailable,
@@ -177,6 +180,7 @@
         deleteObjects,
         cleanupWaveData,
         generatePrograms,
+        cleanupProgramAssignments,
         clearSelection,
         selectionChanged,
         selectionLimit,
@@ -541,6 +545,8 @@
                 ondeleteobjects={deleteObjects}
                 programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
                 onprogramgeneration={generatePrograms}
+                programAssignmentCleanupAvailable={programAssignmentCleanupAvailable && catalog.activeVolumeId !== ''}
+                onprogramassignmentcleanup={cleanupProgramAssignments}
                 {packageExportAvailable}
                 onexportobjects={exportPackage}
                 selection={packageSelection}

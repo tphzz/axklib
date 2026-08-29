@@ -281,7 +281,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 57U);
+    EXPECT_EQ(entries.size(), 59U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -890,6 +890,85 @@ TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
     auto invalid_name = request;
     invalid_name["programs"][0]["programName"] = " TooLong ";
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageProgramGenerationRequest", invalid_name));
+}
+
+TEST(ServerContract, ProgramAssignmentCleanupInspectionAndJobUseReviewedSelections) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    const auto inspection_request =
+        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspectionRequest",
+                                                    inspection_request));
+
+    const auto candidate = nlohmann::json{{"programObjectId", "program-7"},
+                                          {"programNumber", 7U},
+                                          {"programName", "Bass"},
+                                          {"assignmentOrdinal", 3U},
+                                          {"assignmentName", "Missing Bank"},
+                                          {"targetObjectType", "SBAC"},
+                                          {"receiveChannelDisplay", "Bch"},
+                                          {"reason", "MISSING_TARGET"},
+                                          {"candidateTargetCount", 0U},
+                                          {"defaultSelected", true}};
+    const auto inspection = nlohmann::json{{"imageId", "image-1"},
+                                           {"revision", 4U},
+                                           {"contentScopeId", "content-volume-1"},
+                                           {"totalCandidateCount", 1U},
+                                           {"candidates", nlohmann::json::array({candidate})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", inspection));
+    auto invalid_reason = inspection;
+    invalid_reason["candidates"][0]["reason"] = "BROKEN";
+    EXPECT_FALSE(
+        axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_reason));
+    auto invalid_ordinal = inspection;
+    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 16U;
+    EXPECT_FALSE(
+        axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_ordinal));
+
+    const auto selection = nlohmann::json{{"programObjectId", "program-7"}, {"assignmentOrdinal", 3U}};
+    const auto request = nlohmann::json{{"imageId", "image-1"},
+                                        {"expectedRevision", 4U},
+                                        {"contentScopeId", "content-volume-1"},
+                                        {"assignments", nlohmann::json::array({selection})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupRequest", request));
+    auto unknown_field = request;
+    unknown_field["assignments"][0]["programName"] = "Bass";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupRequest", unknown_field));
+
+    const auto operation = nlohmann::json{{"id", "clean-program-007"},
+                                          {"type", "CLEAR_PROGRAM_ASSIGNMENTS"},
+                                          {"partitionIndex", 0U},
+                                          {"volumeName", "Programs"},
+                                          {"objectName", "007"},
+                                          {"removedSfsIds", nlohmann::json::array()},
+                                          {"insertedSfsIds", nlohmann::json::array()},
+                                          {"placedSfsIds", nlohmann::json::array()},
+                                          {"freedClusters", 0U},
+                                          {"allocatedClusters", 0U},
+                                          {"audioImport", nullptr}};
+    const auto result =
+        nlohmann::json{{"schemaVersion", "1.0"},
+                       {"kind", "PROGRAM_ASSIGNMENT_CLEANUP"},
+                       {"imageId", "image-1"},
+                       {"revision", 5U},
+                       {"summary", {{"operationCount", 1U}, {"freedClusters", 0U}, {"allocatedClusters", 0U}}},
+                       {"objectCount", 42U},
+                       {"validation", {{"valid", true}, {"issueCount", 0U}}},
+                       {"warnings", nlohmann::json::array()},
+                       {"applied", true},
+                       {"operations", nlohmann::json::array({operation})},
+                       {"cleanedAssignments", nlohmann::json::array({{{"programObjectId", "program-7"},
+                                                                      {"programNumber", 7U},
+                                                                      {"programName", "Bass"},
+                                                                      {"assignmentOrdinal", 3U},
+                                                                      {"assignmentName", "Missing Bank"}}})}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupResult", result));
+    auto application_result = result;
+    application_result["operations"][0]["type"] = "clear_program_assignments";
+    axk::server::OpenApiValidator validator;
+    const auto wire_result = validator.wire_value("ImageProgramAssignmentCleanupResult", application_result);
+    EXPECT_EQ(wire_result.at("operations").at(0).at("type"), "CLEAR_PROGRAM_ASSIGNMENTS");
+    EXPECT_TRUE(validator.validate("ImageProgramAssignmentCleanupResult", wire_result));
 }
 
 TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {

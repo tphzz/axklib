@@ -387,4 +387,45 @@ describe('ProgramWorkspace', () => {
         });
         expect(screen.getByText(message)).toBeTruthy();
     });
+
+    it('orders cleanup before generation in Single view and hides both in Multi view', async () => {
+        const cleanup = vi.fn();
+        const generate = vi.fn();
+        const rendered = render(ProgramWorkspace, {
+            props: {
+                ...baseProps,
+                presentation: 'single',
+                programAssignmentCleanupAvailable: true,
+                onprogramassignmentcleanup: cleanup,
+                programGenerationAvailable: true,
+                onprogramgeneration: generate,
+            },
+        });
+        const actions = screen
+            .getAllByRole('button')
+            .filter((button) =>
+                ['Clean unresolved Program assignments', 'Generate Programs'].includes(
+                    button.getAttribute('aria-label') ?? '',
+                ),
+            );
+        expect(actions.map((button) => button.getAttribute('aria-label'))).toEqual([
+            'Clean unresolved Program assignments',
+            'Generate Programs',
+        ]);
+        expect(actions[0]?.textContent).not.toContain('Clean unresolved Program assignments');
+        expect(actions[1]?.textContent).not.toContain('Generate Programs');
+        await fireEvent.click(actions[0]!);
+        await fireEvent.click(actions[1]!);
+        expect(cleanup).toHaveBeenCalledOnce();
+        expect(generate).toHaveBeenCalledOnce();
+
+        await rendered.rerender({
+            ...baseProps,
+            presentation: 'multi',
+            programAssignmentCleanupAvailable: true,
+            programGenerationAvailable: true,
+        });
+        expect(screen.queryByRole('button', { name: 'Clean unresolved Program assignments' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Generate Programs' })).toBeNull();
+    });
 });

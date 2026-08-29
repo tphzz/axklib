@@ -2,15 +2,19 @@
     import type { Snippet } from 'svelte';
     import Icon from './Icon.svelte';
 
+    export interface CollectionToolbarAction {
+        label: string;
+        icon: 'upload' | 'broom' | 'sparkles';
+        run: () => void;
+    }
+
     interface Props {
         title: string;
         count: number;
         countText?: string;
         query: string;
         onquerychange: (value: string) => void;
-        actionLabel?: string;
-        actionIcon?: 'upload' | 'broom' | 'sparkles';
-        onaction?: () => void;
+        actions?: CollectionToolbarAction[];
         filterLabel?: string;
         filterChecked?: boolean;
         onfilterchange?: (checked: boolean) => void;
@@ -24,9 +28,7 @@
         countText,
         query,
         onquerychange,
-        actionLabel,
-        actionIcon = 'upload',
-        onaction = () => undefined,
+        actions = [],
         filterLabel,
         filterChecked = false,
         onfilterchange = () => undefined,
@@ -44,11 +46,17 @@
         {/if}
     </div>
     <div class="collection-actions">
-        {#if actionLabel}
-            <button class="icon-button" type="button" aria-label={actionLabel} title={actionLabel} onclick={onaction}>
-                <Icon name={actionIcon} size={14} />
+        {#each actions as action (action.label)}
+            <button
+                class="icon-button"
+                type="button"
+                aria-label={action.label}
+                title={action.label}
+                onclick={action.run}
+            >
+                <Icon name={action.icon} size={14} />
             </button>
-        {/if}
+        {/each}
         {#if filterLabel}
             <label class="collection-filter">
                 <input

@@ -44,6 +44,8 @@ import type {
     PackageRename,
     ProgramGenerationInspection,
     ProgramGenerationSelection,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
     RetainedDownload,
     PartitionMutation,
     PlanSummary,
@@ -95,6 +97,7 @@ export interface InMemoryImageTransportOptions {
         | 'objectDeletionAvailable'
         | 'waveDataCleanupAvailable'
         | 'programGenerationAvailable'
+        | 'programAssignmentCleanupAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
         | 'volumePackageExportAvailable'
@@ -112,6 +115,7 @@ export interface InMemoryImageTransportOptions {
         objectDeletionAvailable?: boolean;
         waveDataCleanupAvailable?: boolean;
         programGenerationAvailable?: boolean;
+        programAssignmentCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
         volumePackageExportAvailable?: boolean;
@@ -182,6 +186,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
+            programAssignmentCleanupAvailable: this.options.opened.programAssignmentCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -210,6 +215,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
+            programAssignmentCleanupAvailable: this.options.opened.programAssignmentCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -331,6 +337,21 @@ export class InMemoryImageTransport implements ImageTransport {
         programs: ProgramGenerationSelection[],
     ): Promise<JobState> {
         return this.invoke('startProgramGeneration', [sessionId, contentScopeId, programs]);
+    }
+
+    inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        return this.invoke('inspectProgramAssignmentCleanup', [sessionId, contentScopeId]);
+    }
+
+    startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        return this.invoke('startProgramAssignmentCleanup', [sessionId, contentScopeId, assignments]);
     }
 
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {

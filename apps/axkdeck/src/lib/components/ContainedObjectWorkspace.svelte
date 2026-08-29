@@ -442,8 +442,7 @@
             count={availableSamples.length}
             query={sampleQuery}
             onquerychange={(value) => onquerychange(view === 'sample-banks' ? 'secondary' : 'primary', value)}
-            actionLabel={view === 'samples' ? 'Import audio' : undefined}
-            onaction={onimportaudio}
+            actions={view === 'samples' ? [{ label: 'Import audio', icon: 'upload', run: onimportaudio }] : []}
             filterLabel={view === 'samples' ? 'Show only standalone' : undefined}
             filterChecked={showOnlyStandaloneSamples}
             onfilterchange={onshowonlystandalonechange}

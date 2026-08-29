@@ -222,8 +222,7 @@
         count={sequences.length}
         {query}
         {onquerychange}
-        actionLabel={sequenceImportAvailable ? 'Import MIDI' : undefined}
-        onaction={onimportmidi}
+        actions={sequenceImportAvailable ? [{ label: 'Import MIDI', icon: 'upload', run: onimportmidi }] : []}
     />
     <!-- Blank-space clearing is a pointer shortcut; the selection toolbar exposes the keyboard-accessible command. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->

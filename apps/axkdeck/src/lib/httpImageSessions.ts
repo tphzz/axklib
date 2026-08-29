@@ -37,6 +37,8 @@ import type {
     PlacementRepairScope,
     ProgramGenerationInspection,
     ProgramGenerationSelection,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
     VolumeDeletionInspection,
     WaveDataOrphanInspection,
 } from './transport';
@@ -394,6 +396,38 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
+    async inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<ProgramAssignmentCleanupInspection>(
+            'images.program_assignments.cleanup.inspect',
+            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId },
+        );
+        if (this.jobs.isJob(result)) {
+            throw new Error('images.program_assignments.cleanup.inspect unexpectedly returned a job');
+        }
+        return result;
+    }
+
+    async startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.program_assignments.cleanup',
+            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId, assignments },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) {
+            throw new Error('images.program_assignments.cleanup did not return a job');
+        }
+        return this.jobs.map(result);
+    }
+
     async startExtentLayoutRepair(
         sessionId: number,
         destination: ImageSessionExtentLayoutRepairDestination,
@@ -468,6 +502,9 @@ export class HttpImageSessions {
             programGenerationAvailable:
                 (summary.availableOperations ?? []).includes('images.programs.generate.inspect') &&
                 (summary.availableOperations ?? []).includes('images.programs.generate'),
+            programAssignmentCleanupAvailable:
+                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup.inspect') &&
+                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             volumePackageExportAvailable: (summary.availableOperations ?? []).includes('images.volume_package_export'),
