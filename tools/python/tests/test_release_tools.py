@@ -845,6 +845,15 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "if-no-files-found: error" in workflow_with_platform
 
 
+def test_desktop_pnpm_project_is_not_shadowed_by_a_repository_workspace() -> None:
+    root = Path(__file__).resolve().parents[3]
+
+    assert (root / "package-lock.json").is_file()
+    assert not (root / "pnpm-workspace.yaml").exists()
+    assert not (root / "pnpm-lock.yaml").exists()
+    assert (root / "apps/axkdeck/pnpm-lock.yaml").is_file()
+
+
 def test_clang_tidy_preset_uses_clang_compile_commands() -> None:
     root = Path(__file__).resolve().parents[3]
     presets = json.loads((root / "CMakePresets.json").read_text(encoding="utf-8"))
