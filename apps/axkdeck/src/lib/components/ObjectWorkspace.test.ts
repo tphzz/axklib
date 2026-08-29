@@ -470,7 +470,7 @@ describe('ObjectWorkspace', () => {
         });
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Grand/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         expect(onrenameobject).toHaveBeenCalledWith({
             kind: 'program',
             object: programObject,
@@ -542,6 +542,7 @@ describe('ObjectWorkspace', () => {
             onselectionchange,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
@@ -558,7 +559,7 @@ describe('ObjectWorkspace', () => {
         ]);
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 objects' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 objects…' }));
         expect(ondeleteobjects).toHaveBeenCalledWith(onexportobjects.mock.calls[0]![0]);
     });
 
@@ -648,7 +649,7 @@ describe('ObjectWorkspace', () => {
         const waveform = document.querySelector('.wave-data-row canvas');
         expect(waveform).toBeTruthy();
         await fireEvent.contextMenu(waveform!);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         expect(ondeleteobject).toHaveBeenCalledWith([
             {
                 kind: 'SMPL',
@@ -874,6 +875,7 @@ describe('ObjectWorkspace', () => {
         });
 
         await fireEvent.contextMenu(document.querySelector('.wave-data-row')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export WAV…' }));
         expect(onexportwav).toHaveBeenCalledWith([
             {

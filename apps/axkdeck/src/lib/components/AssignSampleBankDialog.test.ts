@@ -41,13 +41,18 @@ const options = [
     },
 ];
 
+async function chooseExisting(): Promise<void> {
+    await fireEvent.click(screen.getByRole('button', { name: 'Existing' }));
+}
+
 describe('AssignSampleBankDialog', () => {
-    it('searches existing banks, explains the move, and submits the exact bank', async () => {
+    it('defaults to New, preserves both drafts across mode changes, and submits a tagged target', async () => {
         const onsubmit = vi.fn();
         render(AssignSampleBankDialog, {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 3,
+                assignedSampleCount: 2,
                 options,
                 blockers: [],
                 busy: false,
@@ -57,6 +62,65 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        const mode = screen.getByRole('group', { name: 'Sample Bank target' });
+        expect(mode.classList).toContain('dialog-segmented-control');
+        expect(screen.getByRole('button', { name: 'New' }).getAttribute('aria-pressed')).toBe('true');
+        const name = screen.getByRole('textbox', { name: 'Sample Bank name' }) as HTMLInputElement;
+        await waitFor(() => expect(document.activeElement).toBe(name));
+        expect(screen.getByRole('status').textContent).toContain('2 selected Samples will move');
+
+        await fireEvent.input(name, { target: { value: 'Bank 2' } });
+        expect(screen.getByRole('status').textContent).toBe('Sample Bank already exists: Bank 2');
+        await fireEvent.input(name, { target: { value: 'Layered' } });
+
+        await chooseExisting();
+        const existing = screen.getByRole('combobox', { name: 'Sample Bank' });
+        expect(existing.getAttribute('aria-expanded')).toBe('false');
+        await fireEvent.input(existing, { target: { value: 'Bank 2' } });
+        await fireEvent.click(screen.getByRole('option', { name: /Bank 2.*12 members/ }));
+
+        await fireEvent.click(screen.getByRole('button', { name: 'New' }));
+        expect((screen.getByRole('textbox', { name: 'Sample Bank name' }) as HTMLInputElement).value).toBe('Layered');
+        await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
+        expect(onsubmit).toHaveBeenCalledWith({ mode: 'new', name: 'Layered' });
+    });
+
+    it('disables Existing when the volume has no Sample Banks', () => {
+        render(AssignSampleBankDialog, {
+            props: {
+                volumeName: 'Samples',
+                sampleCount: 1,
+                assignedSampleCount: 0,
+                options: [],
+                blockers: [],
+                busy: false,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+
+        expect((screen.getByRole('button', { name: 'Existing' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByRole('button', { name: 'New' }).getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it('searches existing banks, explains the move, and submits the exact bank', async () => {
+        const onsubmit = vi.fn();
+        render(AssignSampleBankDialog, {
+            props: {
+                volumeName: 'Samples',
+                sampleCount: 3,
+                assignedSampleCount: 0,
+                options,
+                blockers: [],
+                busy: false,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit,
+            },
+        });
+
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' });
         const status = screen.getByRole('status');
         await waitFor(() => expect(document.activeElement).toBe(input));
@@ -124,7 +188,7 @@ describe('AssignSampleBankDialog', () => {
         expect(status.textContent).toContain('14 of 127 members');
 
         await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
-        expect(onsubmit).toHaveBeenCalledWith('bank-2');
+        expect(onsubmit).toHaveBeenCalledWith({ mode: 'existing', bankObjectId: 'bank-2' });
     });
 
     it('does not open on focus and supports explicit keyboard opening and dismissal', async () => {
@@ -132,6 +196,7 @@ describe('AssignSampleBankDialog', () => {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 1,
+                assignedSampleCount: 0,
                 options,
                 blockers: [],
                 busy: false,
@@ -141,6 +206,7 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' });
         await waitFor(() => expect(document.activeElement).toBe(input));
         await fireEvent.blur(input);
@@ -161,6 +227,7 @@ describe('AssignSampleBankDialog', () => {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 3,
+                assignedSampleCount: 0,
                 options,
                 blockers: [],
                 busy: false,
@@ -170,6 +237,7 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' }) as HTMLInputElement;
         const status = screen.getByRole('status');
         expect(screen.queryByRole('button', { name: 'Clear Sample Bank' })).toBeNull();
@@ -212,6 +280,7 @@ describe('AssignSampleBankDialog', () => {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 3,
+                assignedSampleCount: 0,
                 options,
                 blockers: [],
                 busy: false,
@@ -221,6 +290,7 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' });
         const status = screen.getByRole('status');
         await fireEvent.input(input, { target: { value: 'Current Bank' } });
@@ -238,6 +308,7 @@ describe('AssignSampleBankDialog', () => {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 3,
+                assignedSampleCount: 0,
                 options,
                 blockers: [],
                 busy: false,
@@ -247,6 +318,7 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' });
         await fireEvent.input(input, { target: { value: 'Bank 10' } });
         expect(
@@ -260,6 +332,7 @@ describe('AssignSampleBankDialog', () => {
             props: {
                 volumeName: 'Samples',
                 sampleCount: 3,
+                assignedSampleCount: 0,
                 options,
                 blockers: [{ sampleName: 'Direct Sample', programName: '001: Lead' }],
                 busy: false,
@@ -269,6 +342,9 @@ describe('AssignSampleBankDialog', () => {
             },
         });
 
+        expect((screen.getByRole('textbox', { name: 'Sample Bank name' }) as HTMLInputElement).disabled).toBe(true);
+        expect(screen.getByRole('status').textContent).toBe('Sample Bank creation unavailable');
+        await chooseExisting();
         const input = screen.getByRole('combobox', { name: 'Sample Bank' }) as HTMLInputElement;
         expect(input.disabled).toBe(true);
         await fireEvent.click(input);

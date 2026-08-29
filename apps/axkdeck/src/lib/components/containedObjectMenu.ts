@@ -7,7 +7,6 @@ export interface ContainedObjectMenuState {
     directWav: boolean;
     renameTarget: ObjectRenameTarget;
     objects: PackageExportObject[];
-    sampleBankMembers: SampleStructureItem[] | null;
     sampleBankAssignmentMembers: SampleStructureItem[] | null;
     left: number;
     top: number;

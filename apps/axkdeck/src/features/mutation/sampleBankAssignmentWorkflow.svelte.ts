@@ -1,6 +1,7 @@
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { JobController } from '../jobs/actions';
+import { validSamplerName } from '../../lib/audioImport';
 import { compareNamedItems } from '../../lib/naturalSort';
 import { isEffectiveProgramAssignment } from '../../lib/relationshipResolution';
 import type { ImageTransport } from '../../lib/transport';
@@ -26,10 +27,13 @@ interface SampleBankAssignmentDependencies {
     reportTiming: (operation: string, started: number, itemCount: number) => void;
 }
 
+export type SampleBankAssignmentTarget = { mode: 'new'; name: string } | { mode: 'existing'; bankObjectId: string };
+
 export interface SampleBankAssignmentRequest {
     samples: SampleStructureItem[];
     options: SampleBankAssignmentOption[];
     blockers: SampleBankAssignmentBlocker[];
+    assignedSampleCount: number;
     partitionIndex: number;
     volumeName: string;
     busy: boolean;
@@ -59,7 +63,6 @@ export class SampleBankAssignmentWorkflow {
                     bank.object.partitionIndex === first.partitionIndex && bank.object.volumeName === first.volumeName,
             )
             .toSorted(compareNamedItems);
-        if (banks.length === 0) return;
         const selectedIds = new Set(samples.map((sample) => sample.objectId));
         const options = banks.map((bank): SampleBankAssignmentOption => {
             const memberIds = new Set(
@@ -84,6 +87,7 @@ export class SampleBankAssignmentWorkflow {
             samples: [...samples],
             options,
             blockers: this.directProgramBlockers(samples, selectedIds),
+            assignedSampleCount: samples.filter((sample) => (sample.sampleBankObjectIds?.length ?? 0) > 0).length,
             partitionIndex: first.partitionIndex,
             volumeName: first.volumeName,
             busy: false,
@@ -99,47 +103,73 @@ export class SampleBankAssignmentWorkflow {
         this.request = null;
     }
 
-    async submit(bankObjectId: string): Promise<void> {
+    async submit(target: SampleBankAssignmentTarget): Promise<void> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
-        const target = request?.options.find((option) => option.objectId === bankObjectId);
+        if (!request || request.busy || sessionId === null || request.blockers.length > 0) return;
+
+        const existing =
+            target.mode === 'existing'
+                ? request.options.find((option) => option.objectId === target.bankObjectId)
+                : undefined;
+        const name = target.mode === 'new' ? target.name.trim() : existing?.name;
+        const duplicate =
+            target.mode === 'new' &&
+            request.options.some((option) => option.name.toLocaleLowerCase() === name?.toLocaleLowerCase());
         if (
-            !request ||
-            request.busy ||
-            sessionId === null ||
-            request.blockers.length > 0 ||
-            !target ||
-            target.movedSampleCount === 0 ||
-            target.finalMemberCount > 127
+            !name ||
+            (target.mode === 'new' && (!validSamplerName(name) || duplicate)) ||
+            (target.mode === 'existing' &&
+                (!existing || existing.movedSampleCount === 0 || existing.finalMemberCount > 127))
         )
             return;
+
         const preferred = { partitionIndex: request.partitionIndex, volumeName: request.volumeName };
         const started = performance.now();
         request.busy = true;
         request.error = '';
-        this.dependencies.setStatus(`Assigning Samples to ${target.name}`);
+        this.dependencies.setStatus(
+            target.mode === 'new' ? `Creating Sample Bank ${name}` : `Assigning Samples to ${name}`,
+        );
         try {
             await this.dependencies.audition.invalidateSession(sessionId);
             const completed = await this.dependencies.jobs.run(
                 () =>
-                    this.dependencies.transport.startSampleBankAssignment(sessionId, {
-                        ...preferred,
-                        sampleBankName: target.name,
-                        sampleNames: request.samples.map((sample) => sample.name),
-                    }),
+                    target.mode === 'new'
+                        ? this.dependencies.transport.startSampleBankCreation(sessionId, {
+                              ...preferred,
+                              sampleBankName: name,
+                              sampleNames: request.samples.map((sample) => sample.name),
+                          })
+                        : this.dependencies.transport.startSampleBankAssignment(sessionId, {
+                              ...preferred,
+                              sampleBankName: name,
+                              sampleNames: request.samples.map((sample) => sample.name),
+                          }),
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
             );
             if (completed.status !== 'completed') {
-                throw new Error(completed.error ?? 'Sample Bank assignment did not complete');
+                throw new Error(
+                    completed.error ??
+                        (target.mode === 'new'
+                            ? 'Sample Bank creation did not complete'
+                            : 'Sample Bank assignment did not complete'),
+                );
             }
             await this.dependencies.refreshSession(preferred);
-            this.selectTarget(target, request);
+            this.selectTarget(target.mode === 'existing' ? existing?.objectId : undefined, name, request);
             this.dependencies.clearSelection();
             this.request = null;
-            this.dependencies.setStatus(`Assigned Samples to ${target.name}`);
-            this.dependencies.reportTiming('assign-sample-bank', started, request.samples.length);
+            this.dependencies.setStatus(
+                target.mode === 'new' ? `Created Sample Bank ${name}` : `Assigned Samples to ${name}`,
+            );
+            this.dependencies.reportTiming(
+                target.mode === 'new' ? 'create-sample-bank' : 'assign-sample-bank',
+                started,
+                request.samples.length,
+            );
         } catch (error) {
             const message = userFacingMessage(error);
             if (this.dependencies.sessionId() !== null)
@@ -183,15 +213,15 @@ export class SampleBankAssignmentWorkflow {
             );
     }
 
-    private selectTarget(target: SampleBankAssignmentOption, request: SampleBankAssignmentRequest): void {
+    private selectTarget(objectId: string | undefined, name: string, request: SampleBankAssignmentRequest): void {
         this.dependencies.setWorkspaceView('sample-banks');
         const refreshedTarget =
-            this.dependencies.catalog.sampleBanks.find((bank) => bank.objectId === target.objectId) ??
+            this.dependencies.catalog.sampleBanks.find((bank) => bank.objectId === objectId) ??
             this.dependencies.catalog.sampleBanks.find(
                 (bank) =>
                     bank.object.partitionIndex === request.partitionIndex &&
                     bank.object.volumeName === request.volumeName &&
-                    bank.name === target.name,
+                    bank.name === name,
             );
         if (!refreshedTarget) return;
         this.dependencies.catalog.selectedBankId = refreshedTarget.objectId;

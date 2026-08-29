@@ -18,7 +18,11 @@ import type {
     WorkspaceView,
 } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
-import { SampleBankAssignmentWorkflow, type SampleBankAssignmentRequest } from './sampleBankAssignmentWorkflow.svelte';
+import {
+    SampleBankAssignmentWorkflow,
+    type SampleBankAssignmentRequest,
+    type SampleBankAssignmentTarget,
+} from './sampleBankAssignmentWorkflow.svelte';
 
 interface MutationWorkflowDependencies {
     transport: ImageTransport;
@@ -72,15 +76,6 @@ export class MutationWorkflow {
     } | null>(null);
     objectRenameRequest = $state<{
         target: ObjectRenameTarget;
-        busy: boolean;
-        error: string;
-    } | null>(null);
-    sampleBankCreationRequest = $state<{
-        samples: SampleStructureItem[];
-        assignedSampleCount: number;
-        partitionIndex: number;
-        volumeName: string;
-        existingNames: string[];
         busy: boolean;
         error: string;
     } | null>(null);
@@ -143,93 +138,6 @@ export class MutationWorkflow {
         this.objectRenameRequest = { target, busy: false, error: '' };
     }
 
-    requestSampleBankCreation(samples: SampleStructureItem[]): void {
-        if (!this.objectRenameAvailable || this.dependencies.sessionId() === null || samples.length === 0) return;
-        const first = samples[0]!.object;
-        const valid =
-            samples.length <= 127 &&
-            samples.every(
-                (sample) =>
-                    sample.objectType === 'SBNK' &&
-                    sample.object.partitionIndex === first.partitionIndex &&
-                    sample.object.volumeName === first.volumeName,
-            );
-        if (!valid) return;
-        this.sampleBankCreationRequest = {
-            samples: [...samples],
-            assignedSampleCount: samples.filter((sample) => (sample.sampleBankObjectIds?.length ?? 0) > 0).length,
-            partitionIndex: first.partitionIndex,
-            volumeName: first.volumeName,
-            existingNames: this.dependencies.catalog.sampleBanks
-                .filter(
-                    (bank) =>
-                        bank.object.partitionIndex === first.partitionIndex &&
-                        bank.object.volumeName === first.volumeName,
-                )
-                .map((bank) => bank.name),
-            busy: false,
-            error: '',
-        };
-    }
-
-    cancelSampleBankCreation(): void {
-        if (!this.sampleBankCreationRequest?.busy) this.sampleBankCreationRequest = null;
-    }
-
-    async submitSampleBankCreation(name: string): Promise<void> {
-        const request = this.sampleBankCreationRequest;
-        const sessionId = this.dependencies.sessionId();
-        if (!request || request.busy || sessionId === null) return;
-        const preferred = { partitionIndex: request.partitionIndex, volumeName: request.volumeName };
-        const started = performance.now();
-        request.busy = true;
-        request.error = '';
-        this.dependencies.setStatus(`Creating Sample Bank ${name}`);
-        try {
-            await this.dependencies.audition.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
-                () =>
-                    this.dependencies.transport.startSampleBankCreation(sessionId, {
-                        ...preferred,
-                        sampleBankName: name,
-                        sampleNames: request.samples.map((sample) => sample.name),
-                    }),
-                (update) => {
-                    if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
-                },
-            );
-            if (completed.status !== 'completed') {
-                throw new Error(completed.error ?? 'Sample Bank creation did not complete');
-            }
-            await this.dependencies.refreshSession(preferred);
-            this.dependencies.setWorkspaceView('sample-banks');
-            const inserted = this.dependencies.catalog.sampleBanks.find(
-                (bank) =>
-                    bank.object.partitionIndex === request.partitionIndex &&
-                    bank.object.volumeName === request.volumeName &&
-                    bank.name === name,
-            );
-            if (inserted) {
-                this.dependencies.catalog.selectedBankId = inserted.objectId;
-                this.dependencies.catalog.inspectorObjectId = inserted.objectId;
-                this.dependencies.catalog.editorObjectIds['sample-banks'] = inserted.objectId;
-            }
-            this.dependencies.clearSelection();
-            this.sampleBankCreationRequest = null;
-            this.dependencies.setStatus(`Created Sample Bank ${name}`);
-            this.dependencies.reportTiming('create-sample-bank', started, request.samples.length);
-        } catch (error) {
-            const message = userFacingMessage(error);
-            if (this.dependencies.sessionId() !== null)
-                await this.dependencies.refreshSession(preferred).catch(() => undefined);
-            if (this.sampleBankCreationRequest === request) {
-                request.busy = false;
-                request.error = message;
-            }
-            this.dependencies.setStatus(message);
-        }
-    }
-
     requestSampleBankAssignment(samples: SampleStructureItem[]): void {
         this.sampleBankAssignment.open(samples);
     }
@@ -238,8 +146,8 @@ export class MutationWorkflow {
         this.sampleBankAssignment.cancel();
     }
 
-    submitSampleBankAssignment(bankObjectId: string): Promise<void> {
-        return this.sampleBankAssignment.submit(bankObjectId);
+    submitSampleBankAssignment(target: SampleBankAssignmentTarget): Promise<void> {
+        return this.sampleBankAssignment.submit(target);
     }
 
     cancelVolumeAction(): void {
@@ -337,7 +245,6 @@ export class MutationWorkflow {
         ++this.placementRepairGeneration;
         this.placementRepairRequest = null;
         this.objectRenameRequest = null;
-        this.sampleBankCreationRequest = null;
         this.sampleBankAssignment.reset();
     }
 

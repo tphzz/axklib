@@ -1003,7 +1003,7 @@ describe('App panel layout', () => {
         const row = screen.getByRole('button', { name: 'Inspect Piano C3' });
         await fireEvent.contextMenu(row);
         expect(screen.getByRole('button', { name: 'Export 1 selected object' })).toBeTruthy();
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
         await vi.waitFor(() =>
@@ -1212,7 +1212,7 @@ describe('App panel layout', () => {
         const row = await screen.findByRole('button', { name: 'Inspect Old Wave' });
         await fireEvent.click(row);
         await fireEvent.contextMenu(row);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         const dialog = await screen.findByRole('dialog', { name: 'Rename Wave Data' });
         await fireEvent.input(within(dialog).getByLabelText('Wave Data name'), {
             target: { value: 'New Wave' },

@@ -18,7 +18,6 @@
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
-    import CreateSampleBankDialog from '../../lib/components/CreateSampleBankDialog.svelte';
     import AssignSampleBankDialog from '../../lib/components/AssignSampleBankDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
@@ -235,28 +234,17 @@
         />
     {/key}
 {/if}
-{#if mutation.sampleBankCreationRequest}
-    <CreateSampleBankDialog
-        volumeName={mutation.sampleBankCreationRequest.volumeName}
-        sampleCount={mutation.sampleBankCreationRequest.samples.length}
-        assignedSampleCount={mutation.sampleBankCreationRequest.assignedSampleCount}
-        existingNames={mutation.sampleBankCreationRequest.existingNames}
-        busy={mutation.sampleBankCreationRequest.busy}
-        error={mutation.sampleBankCreationRequest.error}
-        oncancel={() => mutation.cancelSampleBankCreation()}
-        onsubmit={(name) => void mutation.submitSampleBankCreation(name)}
-    />
-{/if}
 {#if mutation.sampleBankAssignmentRequest}
     <AssignSampleBankDialog
         volumeName={mutation.sampleBankAssignmentRequest.volumeName}
         sampleCount={mutation.sampleBankAssignmentRequest.samples.length}
+        assignedSampleCount={mutation.sampleBankAssignmentRequest.assignedSampleCount}
         options={mutation.sampleBankAssignmentRequest.options}
         blockers={mutation.sampleBankAssignmentRequest.blockers}
         busy={mutation.sampleBankAssignmentRequest.busy}
         error={mutation.sampleBankAssignmentRequest.error}
         oncancel={() => mutation.cancelSampleBankAssignment()}
-        onsubmit={(bankObjectId) => void mutation.submitSampleBankAssignment(bankObjectId)}
+        onsubmit={(target) => void mutation.submitSampleBankAssignment(target)}
     />
 {/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}

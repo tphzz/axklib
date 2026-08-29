@@ -1,18 +1,22 @@
 <script lang="ts">
+    import { validSamplerName } from '../audioImport';
     import { dismissAutocompleteFromOutsidePointer } from '../autocomplete';
     import { modal } from '../modal';
     import type { SampleBankAssignmentBlocker, SampleBankAssignmentOption } from '../types';
     import Icon from './Icon.svelte';
 
+    type SampleBankAssignmentTarget = { mode: 'new'; name: string } | { mode: 'existing'; bankObjectId: string };
+
     interface Props {
         volumeName: string;
         sampleCount: number;
+        assignedSampleCount: number;
         options: SampleBankAssignmentOption[];
         blockers: SampleBankAssignmentBlocker[];
         busy: boolean;
         error: string;
         oncancel: () => void;
-        onsubmit: (bankObjectId: string) => void;
+        onsubmit: (target: SampleBankAssignmentTarget) => void;
     }
 
     interface AssignmentStatusSegment {
@@ -20,19 +24,36 @@
         warning: boolean;
     }
 
-    let { volumeName, sampleCount, options, blockers, busy, error, oncancel, onsubmit }: Props = $props();
+    let { volumeName, sampleCount, assignedSampleCount, options, blockers, busy, error, oncancel, onsubmit }: Props =
+        $props();
+    let mode = $state<'existing' | 'new'>('new');
+    let newName = $state('');
     let query = $state('');
     let selectedObjectId = $state('');
     let activeIndex = $state(-1);
     let listOpen = $state(false);
     let sampleBankInput = $state<HTMLInputElement>();
+    let newNameInput = $state<HTMLInputElement>();
+    const trimmedNewName = $derived(newName.trim());
+    const duplicateName = $derived(
+        options.some((option) => option.name.toLocaleLowerCase() === trimmedNewName.toLocaleLowerCase()),
+    );
+    const nameError = $derived(
+        trimmedNewName.length === 0
+            ? ''
+            : !validSamplerName(trimmedNewName)
+              ? 'Use 1-16 printable ASCII characters.'
+              : duplicateName
+                ? `Sample Bank already exists: ${trimmedNewName}`
+                : '',
+    );
     const filteredOptions = $derived(
         options.filter((option) => option.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())),
     );
     const selected = $derived(options.find((option) => option.objectId === selectedObjectId));
     const assignmentBlocked = $derived(blockers.length > 0);
     const selectionDisabled = $derived(busy || assignmentBlocked);
-    const assignmentStatusSegments = $derived.by((): AssignmentStatusSegment[] => {
+    const existingStatusSegments = $derived.by((): AssignmentStatusSegment[] => {
         if (assignmentBlocked) return [{ text: 'Sample Bank selection unavailable', warning: false }];
         if (!selected) return [{ text: 'No Sample Bank selected', warning: false }];
 
@@ -58,14 +79,28 @@
         segments.push({ text: `${selected.finalMemberCount} of 127 members`, warning: false });
         return segments;
     });
-    const assignmentStatusText = $derived(assignmentStatusSegments.map((segment) => segment.text).join(' · '));
+    const newStatusText = $derived(
+        assignmentBlocked
+            ? 'Sample Bank creation unavailable'
+            : assignedSampleCount > 0
+              ? `${assignedSampleCount} selected ${assignedSampleCount === 1 ? 'Sample will' : 'Samples will'} move from ${assignedSampleCount === 1 ? 'its current bank' : 'their current banks'}`
+              : `A new Sample Bank will be created in ${volumeName}`,
+    );
+    const existingStatusText = $derived(existingStatusSegments.map((segment) => segment.text).join(' · '));
     const canSubmit = $derived(
         !busy &&
             !assignmentBlocked &&
-            selected !== undefined &&
-            selected.movedSampleCount > 0 &&
-            selected.finalMemberCount <= 127,
+            (mode === 'new'
+                ? validSamplerName(trimmedNewName) && !duplicateName
+                : selected !== undefined && selected.movedSampleCount > 0 && selected.finalMemberCount <= 127),
     );
+
+    function setMode(next: 'existing' | 'new'): void {
+        if (busy || next === mode || (next === 'existing' && options.length === 0)) return;
+        mode = next;
+        closeList();
+        queueMicrotask(() => (next === 'new' ? newNameInput : sampleBankInput)?.focus());
+    }
 
     function select(option: SampleBankAssignmentOption): void {
         if (option.finalMemberCount > 127 || selectionDisabled) return;
@@ -127,7 +162,12 @@
 
     function submit(event: SubmitEvent): void {
         event.preventDefault();
-        if (canSubmit) onsubmit(selectedObjectId);
+        if (!canSubmit) return;
+        onsubmit(
+            mode === 'new'
+                ? { mode: 'new', name: trimmedNewName }
+                : { mode: 'existing', bankObjectId: selectedObjectId },
+        );
     }
 
     function cancel(): void {
@@ -137,7 +177,8 @@
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
     <div
-        class="dialog-shell dialog-popovers-visible assign-sample-bank-dialog"
+        class="dialog-shell assign-sample-bank-dialog"
+        class:dialog-popovers-visible={listOpen}
         role="dialog"
         aria-modal="true"
         aria-label="Assign to Sample Bank"
@@ -152,9 +193,20 @@
             </header>
             <div class="assign-sample-bank-content">
                 <p>
-                    Assign {sampleCount} selected {sampleCount === 1 ? 'Sample' : 'Samples'} from {volumeName} to an existing
-                    Sample Bank.
+                    Assign {sampleCount} selected {sampleCount === 1 ? 'Sample' : 'Samples'} from {volumeName} to a new or
+                    existing Sample Bank.
                 </p>
+                <div class="dialog-segmented-control sample-bank-mode" role="group" aria-label="Sample Bank target">
+                    <button
+                        type="button"
+                        aria-pressed={mode === 'existing'}
+                        disabled={busy || options.length === 0}
+                        onclick={() => setMode('existing')}>Existing</button
+                    >
+                    <button type="button" aria-pressed={mode === 'new'} disabled={busy} onclick={() => setMode('new')}
+                        >New</button
+                    >
+                </div>
                 {#if blockers.length > 0}
                     <div class="assignment-blockers" role="alert">
                         <strong>Assignment is blocked</strong>
@@ -163,85 +215,113 @@
                         {/each}
                     </div>
                 {/if}
-                <label for="sample-bank-search">Sample Bank</label>
-                <div
-                    class="sample-bank-combobox dialog-autocomplete-control"
-                    use:dismissAutocompleteFromOutsidePointer={{ expanded: listOpen, ondismiss: closeList }}
-                >
-                    <input
-                        bind:this={sampleBankInput}
-                        id="sample-bank-search"
-                        class="dialog-field-control"
-                        value={query}
-                        role="combobox"
-                        aria-autocomplete="list"
-                        aria-expanded={listOpen}
-                        aria-controls="sample-bank-options"
-                        aria-activedescendant={listOpen && filteredOptions[activeIndex]
-                            ? `sample-bank-option-${filteredOptions[activeIndex].objectId}`
-                            : undefined}
-                        autocomplete="off"
-                        disabled={selectionDisabled}
-                        data-dialog-initial-focus={selectionDisabled ? undefined : 'select'}
-                        oninput={(event) => updateQuery(event.currentTarget.value)}
-                        onclick={openList}
-                        onkeydown={handleKey}
-                    />
-                    {#if query.length > 0 || selected}
-                        <button
-                            class="dialog-autocomplete-clear"
-                            type="button"
-                            aria-label="Clear Sample Bank"
-                            title="Clear Sample Bank"
+                <div class="sample-bank-target">
+                    {#if mode === 'new'}
+                        <label for="sample-bank-name">Sample Bank name</label>
+                        <input
+                            bind:this={newNameInput}
+                            id="sample-bank-name"
+                            class="dialog-field-control"
+                            bind:value={newName}
                             disabled={selectionDisabled}
-                            onclick={clearSelection}><Icon name="close" size={14} /></button
-                        >
-                    {/if}
-                    {#if listOpen}
+                            maxlength="16"
+                            autocomplete="off"
+                            aria-invalid={nameError !== ''}
+                            data-dialog-initial-focus="select"
+                        />
                         <div
-                            id="sample-bank-options"
-                            class="sample-bank-options dialog-autocomplete-list"
-                            role="listbox"
-                            aria-label="Sample Banks"
+                            class="assignment-status"
+                            class:assignment-status-muted={assignedSampleCount === 0 || assignmentBlocked}
+                            class:dialog-warning={assignedSampleCount > 0 && !assignmentBlocked}
+                            role="status"
+                            aria-live="polite"
+                            title={nameError || newStatusText}
                         >
-                            {#each filteredOptions as option, index (option.objectId)}
+                            {nameError || newStatusText}
+                        </div>
+                    {:else}
+                        <label for="sample-bank-search">Sample Bank</label>
+                        <div
+                            class="sample-bank-combobox dialog-autocomplete-control"
+                            use:dismissAutocompleteFromOutsidePointer={{ expanded: listOpen, ondismiss: closeList }}
+                        >
+                            <input
+                                bind:this={sampleBankInput}
+                                id="sample-bank-search"
+                                class="dialog-field-control"
+                                value={query}
+                                role="combobox"
+                                aria-autocomplete="list"
+                                aria-expanded={listOpen}
+                                aria-controls="sample-bank-options"
+                                aria-activedescendant={listOpen && filteredOptions[activeIndex]
+                                    ? `sample-bank-option-${filteredOptions[activeIndex].objectId}`
+                                    : undefined}
+                                autocomplete="off"
+                                disabled={selectionDisabled}
+                                oninput={(event) => updateQuery(event.currentTarget.value)}
+                                onclick={openList}
+                                onkeydown={handleKey}
+                            />
+                            {#if query.length > 0 || selected}
                                 <button
-                                    id={`sample-bank-option-${option.objectId}`}
+                                    class="dialog-autocomplete-clear"
                                     type="button"
-                                    class="dialog-autocomplete-option"
-                                    role="option"
-                                    aria-selected={selectedObjectId === option.objectId}
-                                    aria-disabled={option.finalMemberCount > 127}
-                                    class:active={index === activeIndex}
-                                    disabled={selectionDisabled || option.finalMemberCount > 127}
-                                    onpointermove={() => (activeIndex = index)}
-                                    onclick={() => select(option)}
+                                    aria-label="Clear Sample Bank"
+                                    title="Clear Sample Bank"
+                                    disabled={selectionDisabled}
+                                    onclick={clearSelection}><Icon name="close" size={14} /></button
                                 >
-                                    <span>{option.name}</span>
-                                    <small>
-                                        {option.memberCount}
-                                        {option.memberCount === 1 ? 'member' : 'members'}
-                                        {option.finalMemberCount > 127
-                                            ? ` · ${option.finalMemberCount} after assignment exceeds 127`
-                                            : ''}
-                                    </small>
-                                </button>
-                            {:else}
-                                <p class="empty-copy dialog-autocomplete-empty">No matching Sample Banks</p>
+                            {/if}
+                            {#if listOpen}
+                                <div
+                                    id="sample-bank-options"
+                                    class="sample-bank-options dialog-autocomplete-list"
+                                    role="listbox"
+                                    aria-label="Sample Banks"
+                                >
+                                    {#each filteredOptions as option, index (option.objectId)}
+                                        <button
+                                            id={`sample-bank-option-${option.objectId}`}
+                                            type="button"
+                                            class="dialog-autocomplete-option"
+                                            role="option"
+                                            aria-selected={selectedObjectId === option.objectId}
+                                            aria-disabled={option.finalMemberCount > 127}
+                                            class:active={index === activeIndex}
+                                            disabled={selectionDisabled || option.finalMemberCount > 127}
+                                            onpointermove={() => (activeIndex = index)}
+                                            onclick={() => select(option)}
+                                        >
+                                            <span>{option.name}</span>
+                                            <small>
+                                                {option.memberCount}
+                                                {option.memberCount === 1 ? 'member' : 'members'}
+                                                {option.finalMemberCount > 127
+                                                    ? ` · ${option.finalMemberCount} after assignment exceeds 127`
+                                                    : ''}
+                                            </small>
+                                        </button>
+                                    {:else}
+                                        <p class="empty-copy dialog-autocomplete-empty">No matching Sample Banks</p>
+                                    {/each}
+                                </div>
+                            {/if}
+                        </div>
+                        <div
+                            class="assignment-status"
+                            class:assignment-status-muted={!selected || assignmentBlocked}
+                            role="status"
+                            aria-live="polite"
+                            title={existingStatusText}
+                        >
+                            {#each existingStatusSegments as segment, index}
+                                <span class:dialog-warning={segment.warning}
+                                    >{index > 0 ? ' · ' : ''}{segment.text}</span
+                                >
                             {/each}
                         </div>
                     {/if}
-                </div>
-                <div
-                    class="assignment-status"
-                    class:assignment-status-muted={!selected || assignmentBlocked}
-                    role="status"
-                    aria-live="polite"
-                    title={assignmentStatusText}
-                >
-                    {#each assignmentStatusSegments as segment, index}
-                        <span class:dialog-warning={segment.warning}>{index > 0 ? ' · ' : ''}{segment.text}</span>
-                    {/each}
                 </div>
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
@@ -276,7 +356,18 @@
         margin: 0;
     }
 
-    .assign-sample-bank-content > label {
+    .sample-bank-mode {
+        width: 180px;
+    }
+
+    .sample-bank-target {
+        display: grid;
+        grid-template-rows: 12px var(--density-control) 16px;
+        gap: 4px;
+        min-height: 62px;
+    }
+
+    .sample-bank-target > label {
         color: var(--color-text-muted);
         font-size: var(--dialog-label-font-size);
     }

@@ -320,7 +320,7 @@ describe('ImageNavigator', () => {
             within(rootMenu)
                 .getAllByRole('menuitem')
                 .map((item) => item.textContent?.trim()),
-        ).toEqual(['Import', 'Export', 'Rename volume…', 'Delete volume', 'Expert']);
+        ).toEqual(['Rename volume…', 'Delete volume…', 'Import', 'Export', 'Expert']);
         expect(rootMenu.querySelectorAll(':scope > [role="separator"]')).toHaveLength(2);
 
         await fireEvent.click(within(rootMenu).getByRole('menuitem', { name: 'Export' }));
@@ -416,7 +416,7 @@ describe('ImageNavigator', () => {
             within(rootMenu)
                 .getAllByRole('menuitem')
                 .map((item) => item.textContent?.trim()),
-        ).toEqual(['Import', 'Export', 'Rename partition…', 'Add volume…', 'Expert']);
+        ).toEqual(['Rename partition…', 'Add volume…', 'Import', 'Export', 'Expert']);
         expect(rootMenu.querySelectorAll(':scope > [role="separator"]')).toHaveLength(2);
         const menuGeometry = appStyles.match(/\.tree-context-menu\s*\{[^}]+\}/)?.[0];
         const menuActionGeometry = appStyles.match(/\.tree-context-menu button\s*\{[^}]+\}/)?.[0];

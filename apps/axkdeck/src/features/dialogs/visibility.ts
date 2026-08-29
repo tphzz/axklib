@@ -7,7 +7,6 @@ interface MutationDialogState {
     volumeAction: unknown;
     placementRepairRequest: unknown;
     objectRenameRequest: unknown;
-    sampleBankCreationRequest: unknown;
     sampleBankAssignmentRequest: unknown;
 }
 
@@ -59,7 +58,6 @@ export function hasOpenAppDialog(state: AppDialogState): boolean {
         state.mutation.volumeAction,
         state.mutation.placementRepairRequest,
         state.mutation.objectRenameRequest,
-        state.mutation.sampleBankCreationRequest,
         state.mutation.sampleBankAssignmentRequest,
         state.packageImport.request,
         state.packageBatchImport.request,

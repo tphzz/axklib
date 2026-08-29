@@ -56,8 +56,6 @@
         stereoSampleIds = new Set<string>(),
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
-        sampleBankCreationAvailable = false,
-        oncreatesamplebank = () => undefined,
         sampleBankAssignmentAvailable = false,
         onassignsamplebank = () => undefined,
         objectDeletionAvailable = false,
@@ -185,7 +183,6 @@
     ): void {
         if (
             !objectRenameAvailable &&
-            !sampleBankCreationAvailable &&
             !sampleBankAssignmentAvailable &&
             !objectDeletionAvailable &&
             !packageExportAvailable &&
@@ -212,17 +209,8 @@
             (item): item is SampleStructureItem =>
                 'objectType' in item && item.objectType === 'SBNK' && selectedIds.has(item.objectId),
         );
-        const sampleBankMembers =
-            sampleBankCreationAvailable &&
-            view === 'samples' &&
-            scope === 'samples' &&
-            selectedSamples.length === menuSelection.items.length &&
-            selectedSamples.length <= 127
-                ? selectedSamples
-                : null;
         const sampleBankAssignmentMembers =
             sampleBankAssignmentAvailable &&
-            sampleBanks.length > 0 &&
             view === 'samples' &&
             scope === 'samples' &&
             selectedSamples.length === menuSelection.items.length &&
@@ -233,7 +221,6 @@
             directWav: scope !== 'sample-banks',
             renameTarget: renameTarget(target),
             objects: menuSelection.items,
-            sampleBankMembers,
             sampleBankAssignmentMembers,
             left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
             top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
@@ -251,7 +238,6 @@
         if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
         if (
             !objectRenameAvailable &&
-            !sampleBankCreationAvailable &&
             !sampleBankAssignmentAvailable &&
             !objectDeletionAvailable &&
             !packageExportAvailable &&
@@ -640,9 +626,6 @@
         onclose={() => (objectMenu = null)}
         onrename={objectRenameAvailable && objectMenu.objects.length === 1
             ? () => onrenameobject(objectMenu!.renameTarget)
-            : undefined}
-        oncreatesamplebank={objectMenu.sampleBankMembers
-            ? () => oncreatesamplebank(objectMenu!.sampleBankMembers!)
             : undefined}
         onassignsamplebank={objectMenu.sampleBankAssignmentMembers
             ? () => onassignsamplebank(objectMenu!.sampleBankAssignmentMembers!)
