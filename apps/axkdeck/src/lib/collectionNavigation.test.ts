@@ -65,6 +65,102 @@ describe('revealCollectionObject', () => {
         expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     });
 
+    it('restores measured centering after focus changes a virtual collection scroll position', async () => {
+        const workspace = document.createElement('main');
+        const list = document.createElement('div');
+        list.dataset.collectionList = 'samples';
+        Object.defineProperties(list, {
+            clientHeight: { value: 100 },
+            scrollHeight: { value: 520 },
+        });
+        list.scrollTop = 0;
+        list.getBoundingClientRect = () => ({
+            x: 0,
+            y: 10,
+            top: 10,
+            right: 200,
+            bottom: 110,
+            left: 0,
+            width: 200,
+            height: 100,
+            toJSON: () => undefined,
+        });
+        const target = document.createElement('button');
+        target.dataset.collectionObjectId = 'sample:[1]';
+        target.getBoundingClientRect = () => ({
+            x: 0,
+            y: 270 - list.scrollTop,
+            top: 270 - list.scrollTop,
+            right: 200,
+            bottom: 296 - list.scrollTop,
+            left: 0,
+            width: 200,
+            height: 26,
+            toJSON: () => undefined,
+        });
+        const focus = vi.spyOn(target, 'focus').mockImplementation(() => {
+            list.scrollTop = 240;
+        });
+        list.addEventListener('scroll', () => list.append(target), { once: true });
+        workspace.append(list);
+
+        expect(await revealCollectionObject(workspace, 'samples', 'sample:[1]', 10, 26, 'center')).toBe(true);
+        expect(list.scrollTop).toBe(223);
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    });
+
+    it('settles measured centering after a deferred browser scroll adjustment', async () => {
+        const workspace = document.createElement('main');
+        const list = document.createElement('div');
+        list.dataset.collectionList = 'samples';
+        Object.defineProperties(list, {
+            clientHeight: { value: 100 },
+            scrollHeight: { value: 520 },
+        });
+        list.scrollTop = 0;
+        list.getBoundingClientRect = () => ({
+            x: 0,
+            y: 10,
+            top: 10,
+            right: 200,
+            bottom: 110,
+            left: 0,
+            width: 200,
+            height: 100,
+            toJSON: () => undefined,
+        });
+        const target = document.createElement('button');
+        target.dataset.collectionObjectId = 'sample:[1]';
+        target.getBoundingClientRect = () => ({
+            x: 0,
+            y: 270 - list.scrollTop,
+            top: 270 - list.scrollTop,
+            right: 200,
+            bottom: 296 - list.scrollTop,
+            left: 0,
+            width: 200,
+            height: 26,
+            toJSON: () => undefined,
+        });
+        const focus = vi.spyOn(target, 'focus');
+        list.addEventListener('scroll', () => list.append(target), { once: true });
+        let frame = 0;
+        const requestAnimationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+            frame += 1;
+            if (frame === 1) list.scrollTop = 240;
+            callback(frame);
+            return frame;
+        });
+        workspace.append(list);
+
+        expect(await revealCollectionObject(workspace, 'samples', 'sample:[1]', 10, 26, 'center')).toBe(true);
+        expect(list.scrollTop).toBe(223);
+        expect(requestAnimationFrame).toHaveBeenCalled();
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+
+        requestAnimationFrame.mockRestore();
+    });
+
     it('reapplies a virtual scroll after the collection receives its browser layout', async () => {
         const workspace = document.createElement('main');
         const list = document.createElement('div');
@@ -87,7 +183,7 @@ describe('revealCollectionObject', () => {
         workspace.append(list);
 
         expect(await revealCollectionObject(workspace, 'wave-data', 'wave:[80]', 79, 42, 'center')).toBe(true);
-        expect(requestAnimationFrame).toHaveBeenCalledOnce();
+        expect(requestAnimationFrame).toHaveBeenCalled();
         expect(list.scrollTop).toBe(3_276);
         expect(focus).toHaveBeenCalledWith({ preventScroll: true });
 

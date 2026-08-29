@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 
+import { diagnosticsEnabled, reportDiagnostic } from './diagnostics';
 import type { ObjectSelectionMode } from './objectSelection';
 
 export const denseCollectionRowExtent = 26;
@@ -7,17 +8,37 @@ export const waveDataCollectionRowExtent = 42;
 
 export type CollectionRevealAlignment = 'nearest' | 'center';
 
+const centeredRevealSettleFrames = 2;
+const centeredRevealTolerance = 1;
+
 function clampScrollTop(container: HTMLElement, scrollTop: number): number {
     const maximum = container.scrollHeight - container.clientHeight;
     return Math.max(0, maximum > 0 ? Math.min(maximum, scrollTop) : scrollTop);
 }
 
-function centerRenderedTarget(container: HTMLElement, target: HTMLElement): void {
+function renderedTargetCenterError(container: HTMLElement, target: HTMLElement): number | null {
     const containerBounds = container.getBoundingClientRect();
     const targetBounds = target.getBoundingClientRect();
-    if (containerBounds.height <= 0 || targetBounds.height <= 0) return;
+    if (containerBounds.height <= 0 || targetBounds.height <= 0) return null;
     const targetCenter = targetBounds.top - containerBounds.top + targetBounds.height / 2;
-    container.scrollTop = clampScrollTop(container, container.scrollTop + targetCenter - container.clientHeight / 2);
+    return targetCenter - container.clientHeight / 2;
+}
+
+function centerRenderedTarget(container: HTMLElement, target: HTMLElement): number | null {
+    const centerError = renderedTargetCenterError(container, target);
+    if (centerError === null) return null;
+    if (Math.abs(centerError) > centeredRevealTolerance) {
+        container.scrollTop = clampScrollTop(container, container.scrollTop + centerError);
+    }
+    return renderedTargetCenterError(container, target);
+}
+
+function centerErrorIsScrollBoundary(container: HTMLElement, centerError: number): boolean {
+    const maximum = Math.max(0, container.scrollHeight - container.clientHeight);
+    return (
+        (centerError < -centeredRevealTolerance && container.scrollTop <= 0) ||
+        (centerError > centeredRevealTolerance && container.scrollTop >= maximum)
+    );
 }
 
 function collectionContainer(workspace: HTMLElement, collection: string): HTMLElement | undefined {
@@ -38,6 +59,39 @@ async function nextRenderFrame(): Promise<void> {
         return;
     }
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+async function settleCenteredTarget(
+    container: HTMLElement,
+    objectId: string,
+    initialTarget: HTMLElement,
+): Promise<boolean> {
+    let target: HTMLElement | undefined = initialTarget;
+    let remainingError = centerRenderedTarget(container, target);
+    for (let frame = 0; frame < centeredRevealSettleFrames; frame += 1) {
+        await nextRenderFrame();
+        await tick();
+        target = collectionTarget(container, objectId);
+        if (!target) return false;
+        remainingError = centerRenderedTarget(container, target);
+    }
+    if (
+        remainingError !== null &&
+        Math.abs(remainingError) > centeredRevealTolerance &&
+        !centerErrorIsScrollBoundary(container, remainingError) &&
+        diagnosticsEnabled()
+    ) {
+        reportDiagnostic('collection_relationship_reveal_unsettled', {
+            collection: container.dataset.collectionList ?? null,
+            objectId,
+            centerError: remainingError,
+            rowHeight: target.getBoundingClientRect().height,
+            viewportHeight: container.clientHeight,
+            scrollTop: container.scrollTop,
+            devicePixelRatio: window.devicePixelRatio || 1,
+        });
+    }
+    return true;
 }
 
 export function linearNavigationIndex(
@@ -143,7 +197,8 @@ export async function revealCollectionObject(
             const target = collectionTarget(container, objectId);
             if (target) {
                 target.focus({ preventScroll: true });
-                if (alignment === 'center' && itemExtent === undefined) {
+                if (alignment === 'center') {
+                    if (itemExtent !== undefined) return settleCenteredTarget(container, objectId, target);
                     centerRenderedTarget(container, target);
                 } else if (itemExtent === undefined) {
                     target.scrollIntoView?.({ block: 'nearest' });
