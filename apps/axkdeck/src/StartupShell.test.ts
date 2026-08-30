@@ -9,6 +9,9 @@ describe('StartupShell', () => {
             props: { onacknowledge: vi.fn(), onretry: vi.fn(), onopensettings: vi.fn() },
         });
         expect(screen.getAllByText('Starting services...')).toHaveLength(2);
+        const inspector = screen.getByRole('complementary', { name: 'Object inspector' });
+        expect(inspector.querySelector('.panel-heading')).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Object details', level: 2 })).toBeTruthy();
         expect(screen.getByRole('dialog', { name: 'Experimental software' })).toBeTruthy();
     });
 

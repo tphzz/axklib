@@ -234,7 +234,6 @@ export interface SamplerRelationship {
     assignmentState: string;
     receiveChannelDisplay: string;
 }
-
 export interface SamplerObject {
     key: string;
     objectType: string;
@@ -243,6 +242,8 @@ export interface SamplerObject {
     partitionName: string;
     volumeName: string;
     categoryName: string;
+    objectEncoding: string;
+    directoryEntryName: string;
     sfsId: number;
     storedSizeBytes: number;
     sizeWithDependenciesBytes: number | null;
@@ -250,7 +251,9 @@ export interface SamplerObject {
     rootKey: number;
     frameCount: number;
     sampleWidthBytes: number;
+    sourceWaveName?: string;
     fineTuneCents?: number;
+    loopMode?: number;
     loopModeLabel?: string;
     loopStartFrame?: number;
     loopLengthFrames?: number;
@@ -268,7 +271,6 @@ export interface SamplerObject {
         }[];
     };
 }
-
 export interface PreviewEnvelope {
     frameCount: number;
     lanes: readonly PreviewLane[];

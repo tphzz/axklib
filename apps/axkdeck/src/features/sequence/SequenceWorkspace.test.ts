@@ -14,6 +14,8 @@ function sequence(name: string, eventCount: number): SequenceItem {
         partitionName: 'Partition 0',
         volumeName: 'Songs',
         categoryName: 'SEQU',
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 1,
         storedSizeBytes: 512,
         sizeWithDependenciesBytes: null,

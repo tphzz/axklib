@@ -14,6 +14,8 @@ const object: SamplerObject = {
     partitionName: 'Partition 0',
     volumeName: 'Volume',
     categoryName: 'SMPL',
+    objectEncoding: 'current',
+    directoryEntryName: 'TONE.001',
     sfsId: 9,
     storedSizeBytes: 128,
     sizeWithDependenciesBytes: null,
@@ -21,6 +23,8 @@ const object: SamplerObject = {
     rootKey: 60,
     frameCount: 4,
     sampleWidthBytes: 2,
+    sourceWaveName: 'Source Tone',
+    loopMode: 2,
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
@@ -74,7 +78,14 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
 
     const objects = await transport.objectPage(image.sessionId, 0, 64);
     expect(objects).toMatchObject({ totalCount: 1 });
-    expect(objects.objects[0]).toMatchObject({ objectType: 'SMPL', name: 'Tone' });
+    expect(objects.objects[0]).toMatchObject({
+        objectType: 'SMPL',
+        name: 'Tone',
+        objectEncoding: 'current',
+        directoryEntryName: 'TONE.001',
+        sourceWaveName: 'Source Tone',
+        loopMode: 2,
+    });
 
     const relationships = await transport.relationshipPage(image.sessionId, 0, 64, { scopeId: 'volume-1' });
     expect(relationships).toMatchObject({ totalCount: 1 });
@@ -245,12 +256,25 @@ describe('ImageTransport shared read contract', () => {
                                 id: 'sample-1',
                                 type: 'SMPL',
                                 name: 'Tone',
+                                format: 'current',
                                 partitionIndex: 0,
                                 partitionName: 'Partition 0',
                                 volumeName: 'Volume',
                                 categoryName: 'SMPL',
+                                entryName: 'TONE.001',
                                 sizeBytes: 128,
-                                waveform: { sampleRate: 44_100, sampleWidthBytes: 2, rootKey: 60, frameCount: 4 },
+                                waveform: {
+                                    sampleRate: 44_100,
+                                    sampleWidthBytes: 2,
+                                    rootKey: 60,
+                                    fineTuneCents: -7,
+                                    loopMode: 2,
+                                    loopModeLabel: '->0->',
+                                    frameCount: 4,
+                                    loopStartFrame: 1,
+                                    loopLengthFrames: 2,
+                                    sourceWaveName: 'Source Tone',
+                                },
                             },
                         ],
                         totalCount: 1,

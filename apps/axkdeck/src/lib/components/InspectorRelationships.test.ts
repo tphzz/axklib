@@ -38,6 +38,8 @@ describe('InspectorRelationships', () => {
 
         expect(onnavigate).toHaveBeenNthCalledWith(1, 'bank-1', false);
         expect(onnavigate).toHaveBeenNthCalledWith(2, 'bank-1', true);
+        expect(screen.getByRole('heading', { name: 'Relationships', level: 4 })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Sample Banks', level: 5 })).toBeTruthy();
         expect(screen.getByTitle('Not resolvable').textContent).toContain('Missing Bank');
         expect(screen.queryByRole('button', { name: /Missing Bank/ })).toBeNull();
     });

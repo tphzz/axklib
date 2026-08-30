@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import type { SamplerObject } from '../transport';
-import type { LinkedWaveDataItem, SampleStructureItem, SampleWaveformPreview, WaveDataItem } from '../types';
+import type {
+    InspectorSelection,
+    LinkedWaveDataItem,
+    SampleStructureItem,
+    SampleWaveformPreview,
+    WaveDataItem,
+} from '../types';
 import ObjectInspector from './ObjectInspector.svelte';
 
 function object(objectType: string, name: string): SamplerObject {
@@ -13,6 +19,8 @@ function object(objectType: string, name: string): SamplerObject {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: objectType,
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 0,
         storedSizeBytes: 128,
         sizeWithDependenciesBytes: 1024,
@@ -77,7 +85,38 @@ function samplePreview(
     };
 }
 
+function headingOutline(container: HTMLElement): string[] {
+    return Array.from(
+        container.querySelectorAll('h2, h3, h4, h5'),
+        (heading) => heading.textContent?.trim().replace(/\s+/g, ' ') ?? '',
+    );
+}
+
+function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
+    const programObject = object('PROG', '001');
+    return {
+        kind: 'program',
+        program: {
+            id: programObject.key,
+            objectId: programObject.key,
+            slot: '001',
+            programNumber: 1,
+            name: 'REZO LD',
+            object: programObject,
+        },
+        assignments: [],
+        sampleSelect: { assigned: [], all: [] },
+    };
+}
+
 describe('ObjectInspector', () => {
+    it('uses the common identity, Properties, and Relationships hierarchy for Programs', () => {
+        const { container } = render(ObjectInspector, { props: { selection: programSelection() } });
+
+        expect(headingOutline(container)).toEqual(['Program details', 'REZO LD', 'Properties', 'Relationships']);
+        expect(screen.queryByRole('heading', { name: 'Preview' })).toBeNull();
+    });
+
     it('shows decoded timing and storage metadata for a selected Sequence', () => {
         const sequenceObject = {
             ...object('SEQU', 'DJ TSUYOSHI DEMO'),
@@ -96,7 +135,7 @@ describe('ObjectInspector', () => {
                 ],
             },
         };
-        render(ObjectInspector, {
+        const { container } = render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sequence',
@@ -118,6 +157,12 @@ describe('ObjectInspector', () => {
         expect(screen.getByText('130 BPM')).toBeTruthy();
         expect(screen.getByText('1 change')).toBeTruthy();
         expect(screen.getByText('40,408')).toBeTruthy();
+        expect(headingOutline(container)).toEqual([
+            'Sequence details',
+            'DJ TSUYOSHI DEMO',
+            'Properties',
+            'Relationships',
+        ]);
     });
 
     it('shows structural metadata for a selected SBAC', () => {
@@ -130,7 +175,7 @@ describe('ObjectInspector', () => {
             objectType: 'SBNK',
             object: sampleObject,
         };
-        render(ObjectInspector, {
+        const { container } = render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample-bank',
@@ -162,6 +207,13 @@ describe('ObjectInspector', () => {
         expect(screen.getByText('1')).toBeTruthy();
         expect(screen.getByText('128 B')).toBeTruthy();
         expect(screen.getByText('1 KiB')).toBeTruthy();
+        expect(headingOutline(container)).toEqual([
+            'Sample Bank details',
+            'STRINGS',
+            'Preview',
+            'Properties',
+            'Relationships',
+        ]);
     });
 
     it('marks an incomplete dependency closure as unavailable', () => {
@@ -337,7 +389,7 @@ describe('ObjectInspector', () => {
             objectType: 'SBNK',
             object: sampleObject,
         };
-        render(ObjectInspector, {
+        const { container } = render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
@@ -350,6 +402,13 @@ describe('ObjectInspector', () => {
 
         expect(screen.queryByRole('button', { name: 'Play Stereo Pad' })).toBeNull();
         expect(screen.getByText('Sample')).toBeTruthy();
+        expect(headingOutline(container)).toEqual([
+            'Sample details',
+            'Stereo Pad',
+            'Preview',
+            'Properties',
+            'Relationships',
+        ]);
     });
 
     it('shows linked stereo Wave Data in separate role-labelled lanes on one timeline', () => {
@@ -466,6 +525,55 @@ describe('ObjectInspector', () => {
 
         expect(screen.getByRole('group', { name: 'Wave Data Known Wave Name' })).toBeTruthy();
         expect(screen.getByText('Waveform unavailable')).toBeTruthy();
+    });
+
+    it('shows decoded Wave Data object and loop metadata', () => {
+        const item = waveData('Displayed Wave', 88_200, 'ready');
+        Object.assign(item.object, {
+            objectEncoding: 'current',
+            directoryEntryName: 'WAVE0001.001',
+            sourceWaveName: 'Sampler Source',
+            rootKey: 60,
+            fineTuneCents: -7,
+            loopMode: 2,
+            loopModeLabel: '->0->',
+            loopStartFrame: 1_234,
+            loopLengthFrames: 400,
+        });
+
+        const { container } = render(ObjectInspector, {
+            props: { selection: { kind: 'wave-data', waveData: item } },
+        });
+
+        expect(screen.getByText('Object encoding')).toBeTruthy();
+        expect(screen.getByText('Current A-series')).toBeTruthy();
+        expect(screen.getByText('Directory entry')).toBeTruthy();
+        expect(screen.getByText('WAVE0001.001')).toBeTruthy();
+        expect(screen.getByText('Source Wave Data name')).toBeTruthy();
+        expect(screen.getByText('Sampler Source')).toBeTruthy();
+        expect(screen.getByText('C3')).toBeTruthy();
+        expect(screen.getByText('-7 cents')).toBeTruthy();
+        expect(screen.getByText('Audio format')).toBeTruthy();
+        expect(screen.getByText('->0->')).toBeTruthy();
+        expect(screen.getByText('1,234 frames')).toBeTruthy();
+        expect(screen.getByText('1,634 frames')).toBeTruthy();
+        expect(screen.getByText('400 frames')).toBeTruthy();
+        expect(headingOutline(container)).toEqual([
+            'Wave Data details',
+            'Displayed Wave',
+            'Preview',
+            'Properties',
+            'Relationships',
+        ]);
+    });
+
+    it('does not repeat the source Wave Data name when it is the displayed name', () => {
+        const item = waveData('Same Wave', 44_100, 'ready');
+        Object.assign(item.object, { sourceWaveName: ' Same Wave ' });
+
+        render(ObjectInspector, { props: { selection: { kind: 'wave-data', waveData: item } } });
+
+        expect(screen.queryByText('Source Wave Data name')).toBeNull();
     });
 
     it('explains when an SBNK has no resolved Wave Data', () => {

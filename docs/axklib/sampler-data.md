@@ -37,8 +37,8 @@ Header fields used by axklib:
 | `0x00` | 12 | ASCII | magic | `FSFSDEV3SPLX`. |
 | `0x0c` | 4 | ASCII | type | Object type tag. |
 | `0x10` | 4 | u32be | header_size | Object header size. For `SMPL` exact export, this is the stored waveform byte start. |
-| `0x14` | 4 | u32be | unknown_0x14 | Preserved diagnostic value. |
-| `0x18` | 4 | u32be | record_size_or_header_used | Object-specific compact-record or header-size value surfaced as a raw field. |
+| `0x14` | 4 | u32be | unknown_0x14 | Preserved raw layout selector. The object loader uses it to choose the object-body length field, but the complete value domain is not yet named. |
+| `0x18` | 4 | u32be | record_size_or_header_used | Object-body read length when `0x14 < 4`; retained as an object-specific raw field. |
 | `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
 | `0x20` | 4 | u32be | payload_bytes_0x20 | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
 | `0x24` | 4 | u32be | payload_offset_0x24 | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
@@ -118,14 +118,14 @@ Current compact metadata fields:
 | --- | ---: | --- | --- |
 | `0x28` | 2 | u16be | sample_rate_guess |
 | `0x2a` | 2 | u16be | bytes_per_sample_guess |
-| `0x30` | variable | bytes | compact record, reported as `current_smpl_compact_record_hex` |
-| `0x54` | 16 | ASCII | source_wave_name_guess |
+| `0x30` | `0x7c` | bytes | compact record, reported as `current_smpl_compact_record_hex` |
+| `0x54` | 16 | ASCII | source_wave_name |
 | `0x6c` | 4 | u32be | smpl_group_id_0x06c |
 | `0x78` | 4 | u32be | wave_data_reference_value |
 | `0x7c` | 2 | u16be | sample_rate_duplicate_0x07c |
-| `0x7e` | 1 | u8 | root_key_midi_note_guess |
-| `0x7f` | 1 | s8 | fine_tune_cents_guess |
-| `0x85` | 1 | u8 | loop_mode_candidate_0x085 |
+| `0x7e` | 1 | u8 | root_key_midi_note |
+| `0x7f` | 1 | s8 | fine_tune_cents |
+| `0x85` | 1 | u8 | loop_mode_0x085 |
 | `0x92` | 4 | u32be | wave_length_frames_0x092 |
 | `0x96` | 4 | u32be | loop_start_frame_0x096 |
 | `0x9a` | 4 | u32be | loop_length_frames_0x09a |
@@ -133,10 +133,40 @@ Current compact metadata fields:
 Derived loop values:
 
 ```text
-loop_end_frame_inclusive_guess = loop_start + loop_length - 1
-loop_end_frame_exclusive_guess = loop_start + loop_length
-loop_end_frame_a4000_ui_guess  = loop_start + loop_length
+loop_end_frame_inclusive = loop_start + loop_length - 1
+loop_end_frame_exclusive = loop_start + loop_length
+loop_end_frame_a4000_ui  = loop_start + loop_length
 ```
+
+### Compact-record handling
+
+The normal Wave Data object loader reads exactly `0x7c` bytes beginning at
+object offset `0x30` and normalizes these selected ranges:
+
+| Object range | Runtime range | Length |
+| --- | --- | ---: |
+| `0x30..0x42` | `+0x00..+0x12` | `0x13` |
+| `0x4a..0x6e` | `+0x1e..+0x42` | `0x25` |
+| `0x74..0x77` | `+0x3c..+0x3f` | `0x04` |
+| `0x78..0x8d` | `+0x40..+0x55` | `0x16` |
+| `0x8e..0xab` | `+0x58..+0x75` | `0x1e` |
+
+The later copies replace overlapping runtime bytes initially populated from
+`0x68..0x6e`. Object ranges `0x43..0x49` and `0x6f..0x73` are not transferred
+by this normalization path. The save path copies the same selected ranges back
+into the compact record and writes the `0x7c`-byte record. Copied bytes without
+a documented field role remain raw and are not used for authoring decisions.
+
+The normalized object values at `0x7c`, `0x7e`, `0x7f`, `0x80`, `0x84`,
+`0x85`, `0x8e`, `0x92`, `0x96`, and `0x9a` supply playback metadata. The
+loader derives the Wave Data end and loop end by adding each start and length
+pair. The source Wave Data text at `0x54` is preserved by both load and save
+normalization and is exposed as a secondary source name.
+
+The shared object loader compares the raw field at `0x14` with `4`: values below
+`4` select the body length at `0x18`, while later layouts select `0x1c`; value
+`1` also invokes a post-load conversion callback. Axklib continues to preserve
+both raw fields because public names for every selector value are not defined.
 
 Loop-mode display values currently surfaced by axklib:
 
@@ -155,7 +185,7 @@ PCM export mapping:
 | ---: | --- | --- |
 | `2` | 16-bit stored samples in big-endian byte order | Byte-swapped to little-endian 16-bit WAV PCM. |
 | `1` | 8-bit PCM | Copied directly to WAV frames. |
-| `2` with alternating-byte compatibility pattern | Alternating filler bytes with useful high-byte lane | Useful lane is converted to unsigned 8-bit WAV frames and remains a read/export compatibility case. |
+| `2` with alternating-byte recovery pattern | Third-party conversion artifact with a useful high-byte lane | Useful lane is converted to unsigned 8-bit WAV frames for recovery only. |
 
 `header_size` is the start offset of waveform bytes inside a `SMPL` file.
 Complete objects use `payload_offset_0x24 == 0` and
@@ -184,13 +214,14 @@ frames. In that case the complete logical byte count includes the tail, while
 `wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
 sample window.
 
-When the alternating-byte compatibility pattern is detected, audio APIs set
+The alternating-byte pattern is a third-party conversion artifact, not a Yamaha
+Wave Data encoding or sampler-authored storage. When it is detected, audio APIs set
 `Waveform.alternating_byte_payload_detected` and sidecars write
 `alternating_byte_payload_detected`. In that case `stored_payload_transform` is
 `alternating-byte-signed-high-byte`, `exactness_status` is
 `alternating-byte-compatibility-export`, and the WAV contains the useful lane as
-8-bit PCM. This is a read/export compatibility path; it is not a normal
-write-support format.
+8-bit PCM. This is a recovery/export path only. It must not be used for write
+support, repair, allocation decisions, or promotion to a normal object format.
 
 ## SBNK: Sample Object
 

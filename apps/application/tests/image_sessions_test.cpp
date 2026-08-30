@@ -691,6 +691,10 @@ TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
         std::ranges::find(objects->items, catalog_object->object.header.name, &axk::app::ImageObjectItem::name);
     ASSERT_NE(object, objects->items.end());
     EXPECT_EQ(object->stored_size_bytes, descriptor->size);
+    ASSERT_TRUE(object->waveform);
+    const auto *decoded_wave_data = std::get_if<axk::CurrentSmpl>(&catalog_object->object.payload);
+    ASSERT_NE(decoded_wave_data, nullptr);
+    EXPECT_EQ(object->waveform->source_wave_name, decoded_wave_data->source_wave_name.value);
 }
 
 TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {

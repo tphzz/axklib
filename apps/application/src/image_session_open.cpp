@@ -335,6 +335,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             item.waveform =
                 WaveformMetadata{.sample_rate = waveform->sample_rate.value,
                                  .sample_width_bytes = waveform->stored_sample_width_bytes.value,
+                                 .source_wave_name = waveform->source_wave_name.value,
                                  .root_key = waveform->root_key.value,
                                  .fine_tune_cents = waveform->fine_tune_cents.value,
                                  .loop_mode = waveform->loop_mode.value,

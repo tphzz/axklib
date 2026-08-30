@@ -490,12 +490,18 @@ input:focus-visible {
   padding: 0 9px;
 }
 
+.panel-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
 .eyebrow {
-  margin: 0 0 1px;
+  margin: 0;
   color: var(--color-text-muted);
   font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  line-height: 9px;
+  letter-spacing: 0;
   text-transform: uppercase;
 }
 
@@ -504,6 +510,7 @@ input:focus-visible {
   color: var(--color-text-strong);
   font-size: 12px;
   font-weight: 650;
+  line-height: 14px;
 }
 
 .icon-button {
@@ -1100,7 +1107,7 @@ input:focus-visible {
 }
 
 .inspector-content {
-  padding: 0 9px 9px;
+  padding: 8px calc(9px + var(--overlay-scrollbar-clearance)) 0 9px;
 }
 
 .inspector-empty {
@@ -1230,16 +1237,6 @@ input:focus-visible {
   background: var(--color-brand);
   cursor: pointer;
   box-shadow: 0 5px 15px rgb(0 0 0 / 30%);
-}
-
-.inspector-content h3 {
-  margin: 0;
-  overflow: hidden;
-  color: var(--color-text-strong);
-  font-size: 14px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .object-id {
@@ -3308,6 +3305,8 @@ input:focus-visible {
 }
 
 .inspector {
+  --inspector-row-divider: rgb(61 68 72 / 55%);
+
   display: flex;
   min-height: 0;
   flex-direction: column;
@@ -3321,7 +3320,9 @@ input:focus-visible {
 }
 
 .inspector-title {
-  margin: 2px 0 4px;
+  display: grid;
+  gap: 2px;
+  margin: 0;
 }
 
 .inspector-title-row {
@@ -3341,18 +3342,37 @@ input:focus-visible {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 8px;
+  line-height: 9px;
 }
 
 .inspector-title h3 {
-  margin: 1px 0 0;
+  margin: 0;
   overflow-wrap: anywhere;
   color: var(--color-text-strong);
   font-size: 13px;
+  line-height: 16px;
+}
+
+.inspector-section {
+  margin-top: 12px;
+}
+
+.inspector-section > h4 {
+  margin: 0 0 5px;
+  color: var(--color-text-strong);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 12px;
+}
+
+.inspector-preview .inspector-wave-stack,
+.inspector-preview > .inspector-wave-missing {
+  margin-bottom: 0;
 }
 
 .metadata-list {
   margin: 0;
-  border-top: 1px solid var(--color-border);
+  border-top: 0;
 }
 
 .metadata-list div {
@@ -3361,7 +3381,10 @@ input:focus-visible {
   grid-template-columns: minmax(80px, 0.8fr) minmax(0, 1.2fr);
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid var(--color-border);
+}
+
+.metadata-list div:not(:last-child) {
+  border-bottom: 1px solid var(--inspector-row-divider);
 }
 
 .metadata-list dt {
@@ -3379,14 +3402,9 @@ input:focus-visible {
 }
 
 .inspector-relationships {
-  margin: 9px;
-  border-top: 1px solid var(--color-border);
-}
-
-.inspector-relationships > h3 {
-  margin: 7px 0 3px;
-  color: var(--color-text-strong);
-  font-size: 10px;
+  margin-right: calc(9px + var(--overlay-scrollbar-clearance));
+  margin-bottom: 9px;
+  margin-left: 9px;
 }
 
 .inspector-relationships-empty {
@@ -3395,12 +3413,17 @@ input:focus-visible {
   font-size: 8.5px;
 }
 
-.inspector-relationship-group h4 {
-  margin: 6px 0 1px;
+.inspector-relationship-group h5 {
+  margin: 0 0 2px;
   color: var(--color-text-muted);
   font-size: 8px;
   font-weight: 500;
+  line-height: 10px;
   text-transform: uppercase;
+}
+
+.inspector-relationship-group + .inspector-relationship-group {
+  margin-top: 8px;
 }
 
 .inspector-relationship-group ul {
@@ -3409,8 +3432,8 @@ input:focus-visible {
   list-style: none;
 }
 
-.inspector-relationship-group li {
-  border-bottom: 1px solid var(--color-border);
+.inspector-relationship-group li:not(:last-child) {
+  border-bottom: 1px solid var(--inspector-row-divider);
 }
 
 .inspector-relationship-group button,
@@ -3418,10 +3441,11 @@ input:focus-visible {
   display: grid;
   width: 100%;
   min-width: 0;
+  min-height: var(--density-metadata-row);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
   gap: 6px;
-  padding: 3px 2px;
+  padding: 2px;
   color: var(--color-text);
   border: 0;
   background: transparent;

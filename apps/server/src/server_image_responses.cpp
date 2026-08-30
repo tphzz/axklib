@@ -185,6 +185,7 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
             if (item.waveform) {
                 waveform = {{"sampleRate", item.waveform->sample_rate},
                             {"sampleWidthBytes", item.waveform->sample_width_bytes},
+                            {"sourceWaveName", item.waveform->source_wave_name},
                             {"rootKey", item.waveform->root_key},
                             {"fineTuneCents", item.waveform->fine_tune_cents},
                             {"loopMode", item.waveform->loop_mode},

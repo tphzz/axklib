@@ -52,9 +52,13 @@
             <p class="startup-empty">Starting services...</p>
         {/if}
     </main>
-    <aside class="startup-inspector">
-        <p>INSPECTOR</p>
-        <strong>Object details</strong>
+    <aside class="startup-inspector" aria-label="Object inspector">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Inspector</p>
+                <h2>Object details</h2>
+            </div>
+        </div>
     </aside>
     <footer>
         <span class:startup-failed={status === 'unavailable'}></span>{status === 'starting'
@@ -112,8 +116,7 @@
         background: transparent;
         color: var(--color-text-muted);
     }
-    .startup-library,
-    .startup-inspector {
+    .startup-library {
         padding: 12px 10px;
         border-right: 1px solid var(--color-border);
     }
@@ -121,8 +124,7 @@
         border-right: 0;
         border-left: 1px solid var(--color-border);
     }
-    .startup-library p,
-    .startup-inspector p {
+    .startup-library p {
         margin: 0 0 5px;
         color: var(--color-text-muted);
         font-size: 9px;

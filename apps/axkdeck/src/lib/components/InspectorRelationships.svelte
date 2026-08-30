@@ -9,14 +9,14 @@
     let { groups, onnavigate }: Props = $props();
 </script>
 
-<section class="inspector-relationships" aria-labelledby="inspector-relationships-heading">
-    <h3 id="inspector-relationships-heading">Relationships</h3>
+<section class="inspector-relationships inspector-section" aria-labelledby="inspector-relationships-heading">
+    <h4 id="inspector-relationships-heading">Relationships</h4>
     {#if groups.length === 0}
         <p class="inspector-relationships-empty">No direct relationships</p>
     {:else}
         {#each groups as group (group.objectType)}
             <div class="inspector-relationship-group">
-                <h4>{group.label}</h4>
+                <h5>{group.label}</h5>
                 <ul>
                     {#each group.items as item (item.id)}
                         <li>

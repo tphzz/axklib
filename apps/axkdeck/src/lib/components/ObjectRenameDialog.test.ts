@@ -19,6 +19,8 @@ const object: SamplerObject = {
     partitionName: 'PARTITION 1',
     volumeName: 'Volume',
     categoryName: 'PROG',
+    objectEncoding: 'current',
+    directoryEntryName: 'PROG.001',
     sfsId: 8,
     storedSizeBytes: 912,
     sizeWithDependenciesBytes: null,

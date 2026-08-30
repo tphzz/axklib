@@ -138,6 +138,7 @@ struct ImageContentScope {
 struct WaveformMetadata {
     std::uint16_t sample_rate{};
     std::uint16_t sample_width_bytes{};
+    std::string source_wave_name;
     std::uint8_t root_key{};
     std::int8_t fine_tune_cents{};
     std::uint8_t loop_mode{};

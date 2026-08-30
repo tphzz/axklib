@@ -1057,10 +1057,11 @@
       "WaveDataMetadata": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sampleRate", "sampleWidthBytes", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "frameCount", "loopStartFrame", "loopLengthFrames"],
+        "required": ["sampleRate", "sampleWidthBytes", "sourceWaveName", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "frameCount", "loopStartFrame", "loopLengthFrames"],
         "properties": {
           "sampleRate": {"type": "integer", "minimum": 0, "maximum": 65535},
           "sampleWidthBytes": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "sourceWaveName": {"type": "string"},
           "rootKey": {"type": "integer", "minimum": 0, "maximum": 255},
           "fineTuneCents": {"type": "integer", "minimum": -128, "maximum": 127},
           "loopMode": {"type": "integer", "minimum": 0, "maximum": 255},

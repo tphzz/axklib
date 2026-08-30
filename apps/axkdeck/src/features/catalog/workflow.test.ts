@@ -42,6 +42,8 @@ function programObject(key: string, name: string): SamplerObject {
         partitionName: 'Partition',
         volumeName: 'Volume',
         categoryName: '',
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 1,
         storedSizeBytes: 1,
         sizeWithDependenciesBytes: null,

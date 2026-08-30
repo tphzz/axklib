@@ -24,6 +24,8 @@ function program(programNumber: number, name: string): Program {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: 'PROG',
+        objectEncoding: 'current',
+        directoryEntryName: `PROG.${slot}`,
         sfsId: programNumber,
         storedSizeBytes: 128,
         sizeWithDependenciesBytes: null,

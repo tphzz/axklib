@@ -4092,6 +4092,7 @@ export interface components {
             rootKey: number;
             sampleRate: number;
             sampleWidthBytes: number;
+            sourceWaveName: string;
         };
         Workspace: {
             displayName: string;

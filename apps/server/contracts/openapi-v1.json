@@ -11650,11 +11650,15 @@
             "maximum": 65535,
             "minimum": 0,
             "type": "integer"
+          },
+          "sourceWaveName": {
+            "type": "string"
           }
         },
         "required": [
           "sampleRate",
           "sampleWidthBytes",
+          "sourceWaveName",
           "rootKey",
           "fineTuneCents",
           "loopMode",

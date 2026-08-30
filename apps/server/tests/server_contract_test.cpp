@@ -85,6 +85,9 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionBundle"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
+    const auto &wave_data_metadata = document.at("components").at("schemas").at("WaveDataMetadata");
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "sourceWaveName"));
+    EXPECT_EQ(wave_data_metadata.at("properties").at("sourceWaveName").at("type"), "string");
     const auto &headers = document.at("components").at("headers");
     EXPECT_TRUE(headers.contains("XRequestId"));
 }

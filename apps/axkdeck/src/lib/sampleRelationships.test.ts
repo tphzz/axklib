@@ -51,6 +51,8 @@ function waveData(id: string): WaveDataItem {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: 'SMPL',
+        objectEncoding: 'current',
+        directoryEntryName: `${id}.001`,
         sfsId: 0,
         storedSizeBytes: 2,
         sizeWithDependenciesBytes: null,

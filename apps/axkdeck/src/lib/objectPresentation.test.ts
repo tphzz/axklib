@@ -11,6 +11,8 @@ function object(objectType: string, name: string): SamplerObject {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: objectType,
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 0,
         storedSizeBytes: 128,
         sizeWithDependenciesBytes: null,
