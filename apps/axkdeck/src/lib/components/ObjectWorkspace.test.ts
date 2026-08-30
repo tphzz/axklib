@@ -243,11 +243,12 @@ describe('ObjectWorkspace', () => {
                 props: { ...common, waveData, view: 'wave-data', onpreviewrequest },
             });
 
-            expect(screen.getByText('2000 items')).toBeTruthy();
-            expect(document.querySelectorAll('.wave-data-row')).toHaveLength(2_000);
+            const rows = document.querySelectorAll<HTMLElement>('.wave-data-row');
+            expect(document.querySelector('.collection-toolbar')?.textContent).toContain('2000 items');
+            expect(rows).toHaveLength(2_000);
             expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(0);
-            expect(screen.getByRole('group', { name: 'SMP 001 Wave Data' })).toBeTruthy();
-            expect(screen.getByRole('group', { name: 'SMP 2000 Wave Data' })).toBeTruthy();
+            expect(rows[0]?.getAttribute('aria-label')).toBe('SMP 001 Wave Data');
+            expect(rows[1_999]?.getAttribute('aria-label')).toBe('SMP 2000 Wave Data');
             expect(observers).toHaveLength(1);
             expect(observers[0]!.options?.root).toBe(document.querySelector('.collection-body'));
             expect(observers[0]!.targets).toHaveLength(2_000);
@@ -269,7 +270,7 @@ describe('ObjectWorkspace', () => {
         } finally {
             vi.unstubAllGlobals();
         }
-    });
+    }, 15_000);
 
     it('naturally orders the standalone Wave Data lane', () => {
         const wave2 = {

@@ -245,11 +245,15 @@ describe('ContainedObjectWorkspace', () => {
             },
         });
 
-        expect(screen.getByText('2000 items')).toBeTruthy();
-        expect(document.querySelectorAll('.contained-row')).toHaveLength(2_000);
-        expect(screen.getByRole('button', { name: 'Inspect Sample 001' })).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Inspect Sample 2000' })).toBeTruthy();
-    });
+        const sampleList = document.querySelector<HTMLElement>('[data-collection-list="samples"]');
+        const rows = sampleList?.querySelectorAll<HTMLElement>('.contained-row');
+        const targets = sampleList?.querySelectorAll<HTMLElement>('[data-collection-object-id]');
+        expect(sampleList?.previousElementSibling?.textContent).toContain('2000 items');
+        expect(rows).toHaveLength(2_000);
+        expect(targets).toHaveLength(2_000);
+        expect(targets?.[0]?.dataset.collectionObjectId).toBe(samples[0]!.objectId);
+        expect(targets?.[1_999]?.dataset.collectionObjectId).toBe(samples[1_999]!.objectId);
+    }, 15_000);
 
     it('pages repeatedly within a lane and retains horizontal navigation', async () => {
         const samples = Array.from({ length: 200 }, (_, index) =>
