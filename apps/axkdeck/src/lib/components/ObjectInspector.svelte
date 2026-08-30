@@ -10,7 +10,7 @@
         selection: InspectorSelection;
         playingObjectId?: string | null;
         playheadFrame?: number;
-        onrelationshipnavigate?: (objectId: string) => void;
+        onrelationshipnavigate?: (objectId: string, focusTarget: boolean) => void;
     }
 
     let { selection, playingObjectId = null, playheadFrame = 0, onrelationshipnavigate }: Props = $props();

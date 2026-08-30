@@ -1,6 +1,5 @@
 import { tick } from 'svelte';
 
-import { diagnosticsEnabled, reportDiagnostic } from './diagnostics';
 import type { ObjectSelectionMode } from './objectSelection';
 
 export const denseCollectionRowExtent = 26;
@@ -8,37 +7,9 @@ export const waveDataCollectionRowExtent = 42;
 
 export type CollectionRevealAlignment = 'nearest' | 'center';
 
-const centeredRevealSettleFrames = 2;
-const centeredRevealTolerance = 1;
-
 function clampScrollTop(container: HTMLElement, scrollTop: number): number {
     const maximum = container.scrollHeight - container.clientHeight;
     return Math.max(0, maximum > 0 ? Math.min(maximum, scrollTop) : scrollTop);
-}
-
-function renderedTargetCenterError(container: HTMLElement, target: HTMLElement): number | null {
-    const containerBounds = container.getBoundingClientRect();
-    const targetBounds = target.getBoundingClientRect();
-    if (containerBounds.height <= 0 || targetBounds.height <= 0) return null;
-    const targetCenter = targetBounds.top - containerBounds.top + targetBounds.height / 2;
-    return targetCenter - container.clientHeight / 2;
-}
-
-function centerRenderedTarget(container: HTMLElement, target: HTMLElement): number | null {
-    const centerError = renderedTargetCenterError(container, target);
-    if (centerError === null) return null;
-    if (Math.abs(centerError) > centeredRevealTolerance) {
-        container.scrollTop = clampScrollTop(container, container.scrollTop + centerError);
-    }
-    return renderedTargetCenterError(container, target);
-}
-
-function centerErrorIsScrollBoundary(container: HTMLElement, centerError: number): boolean {
-    const maximum = Math.max(0, container.scrollHeight - container.clientHeight);
-    return (
-        (centerError < -centeredRevealTolerance && container.scrollTop <= 0) ||
-        (centerError > centeredRevealTolerance && container.scrollTop >= maximum)
-    );
 }
 
 function collectionContainer(workspace: HTMLElement, collection: string): HTMLElement | undefined {
@@ -51,47 +22,6 @@ function collectionTarget(container: HTMLElement, objectId: string): HTMLElement
     return [...container.querySelectorAll<HTMLElement>('[data-collection-object-id]')].find(
         (candidate) => candidate.dataset.collectionObjectId === objectId,
     );
-}
-
-async function nextRenderFrame(): Promise<void> {
-    if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-        await tick();
-        return;
-    }
-    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-}
-
-async function settleCenteredTarget(
-    container: HTMLElement,
-    objectId: string,
-    initialTarget: HTMLElement,
-): Promise<boolean> {
-    let target: HTMLElement | undefined = initialTarget;
-    let remainingError = centerRenderedTarget(container, target);
-    for (let frame = 0; frame < centeredRevealSettleFrames; frame += 1) {
-        await nextRenderFrame();
-        await tick();
-        target = collectionTarget(container, objectId);
-        if (!target) return false;
-        remainingError = centerRenderedTarget(container, target);
-    }
-    if (
-        remainingError !== null &&
-        Math.abs(remainingError) > centeredRevealTolerance &&
-        !centerErrorIsScrollBoundary(container, remainingError) &&
-        diagnosticsEnabled()
-    ) {
-        reportDiagnostic('collection_relationship_reveal_unsettled', {
-            collection: container.dataset.collectionList ?? null,
-            objectId,
-            centerError: remainingError,
-            rowHeight: target.getBoundingClientRect().height,
-            viewportHeight: container.clientHeight,
-            scrollTop: container.scrollTop,
-            devicePixelRatio: window.devicePixelRatio || 1,
-        });
-    }
-    return true;
 }
 
 export function linearNavigationIndex(
@@ -168,48 +98,32 @@ export async function revealCollectionObject(
     targetIndex: number,
     itemExtent?: number,
     alignment: CollectionRevealAlignment = 'nearest',
+    focusTarget = false,
 ): Promise<boolean> {
     if (targetIndex < 0) return false;
     await tick();
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-        const container = collectionContainer(workspace, collection);
-        if (container) {
-            if (itemExtent !== undefined) {
-                const itemTop = targetIndex * itemExtent;
-                const itemBottom = itemTop + itemExtent;
-                if (alignment === 'center') {
-                    container.scrollTop = clampScrollTop(
-                        container,
-                        itemTop - (container.clientHeight - itemExtent) / 2,
-                    );
-                } else {
-                    const viewportBottom = container.scrollTop + container.clientHeight;
-                    if (itemTop < container.scrollTop) container.scrollTop = itemTop;
-                    else if (itemBottom > viewportBottom) {
-                        container.scrollTop = Math.max(0, itemBottom - Math.max(container.clientHeight, itemExtent));
-                    }
-                }
-                container.dispatchEvent(new Event('scroll'));
-            }
-
-            await tick();
-            const target = collectionTarget(container, objectId);
-            if (target) {
-                target.focus({ preventScroll: true });
-                if (alignment === 'center') {
-                    if (itemExtent !== undefined) return settleCenteredTarget(container, objectId, target);
-                    centerRenderedTarget(container, target);
-                } else if (itemExtent === undefined) {
-                    target.scrollIntoView?.({ block: 'nearest' });
-                }
-                return true;
+    const container = collectionContainer(workspace, collection);
+    if (!container) return false;
+    if (itemExtent !== undefined) {
+        const itemTop = targetIndex * itemExtent;
+        const itemBottom = itemTop + itemExtent;
+        if (alignment === 'center') {
+            container.scrollTop = clampScrollTop(container, itemTop - (container.clientHeight - itemExtent) / 2);
+        } else {
+            const viewportBottom = container.scrollTop + container.clientHeight;
+            if (itemTop < container.scrollTop) container.scrollTop = itemTop;
+            else if (itemBottom > viewportBottom) {
+                container.scrollTop = Math.max(0, itemBottom - Math.max(container.clientHeight, itemExtent));
             }
         }
-
-        if (attempt === 2) break;
-        await nextRenderFrame();
-        await tick();
+        container.dispatchEvent(new Event('scroll'));
     }
-    return false;
+
+    await tick();
+    const target = collectionTarget(container, objectId);
+    if (!target) return false;
+    if (focusTarget) target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: alignment, inline: 'nearest' });
+    return true;
 }

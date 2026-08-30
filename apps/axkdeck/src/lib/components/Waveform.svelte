@@ -1,13 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
-    import {
-        canvasPixelSize,
-        observeDevicePixelRatio,
-        resizeObserverDevicePixelSize,
-        waveformPixelColumns,
-        type CanvasPixelSize,
-    } from '../waveformCanvas';
+    import { canvasPixelSize, waveformPixelColumns } from '../waveformCanvas';
     import { waveformContentRatio } from '../waveformTimeline';
 
     interface Props {
@@ -20,19 +14,13 @@
 
     let { values, large = false, playheadRatio = 0, sourceFrameCount = 0, timelineFrameCount = 0 }: Props = $props();
     let canvas: HTMLCanvasElement;
-    let observedDeviceSize: CanvasPixelSize | null = null;
     const contentRatio = $derived(waveformContentRatio(sourceFrameCount, timelineFrameCount));
     const normalizedPlayheadRatio = $derived(Math.max(0, Math.min(1, playheadRatio)));
 
     function draw(): void {
         if (!canvas || typeof CanvasRenderingContext2D === 'undefined') return;
         const bounds = canvas.getBoundingClientRect();
-        const { width, height } = canvasPixelSize(
-            bounds.width,
-            bounds.height,
-            window.devicePixelRatio || 1,
-            observedDeviceSize,
-        );
+        const { width, height } = canvasPixelSize(bounds.width, bounds.height, window.devicePixelRatio || 1);
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
             canvas.height = height;
@@ -56,29 +44,10 @@
     });
 
     onMount(() => {
-        const observer =
-            typeof ResizeObserver === 'undefined'
-                ? null
-                : new ResizeObserver((entries) => {
-                      observedDeviceSize = entries[0] ? resizeObserverDevicePixelSize(entries[0]) : null;
-                      draw();
-                  });
-        if (observer) {
-            try {
-                observer.observe(canvas, { box: 'device-pixel-content-box' });
-            } catch {
-                observer.observe(canvas);
-            }
-        }
-        const stopObservingDevicePixelRatio = observeDevicePixelRatio(() => {
-            observedDeviceSize = null;
-            draw();
-        });
+        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(draw);
+        observer?.observe(canvas);
         draw();
-        return () => {
-            observer?.disconnect();
-            stopObservingDevicePixelRatio();
-        };
+        return () => observer?.disconnect();
     });
 </script>
 

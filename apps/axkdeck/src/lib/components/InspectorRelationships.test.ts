@@ -32,9 +32,12 @@ describe('InspectorRelationships', () => {
             },
         });
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Piano Bank Assignment · =Smp' }));
+        const relationship = screen.getByRole('button', { name: 'Piano Bank Assignment · =Smp' });
+        await fireEvent.click(relationship, { detail: 1 });
+        await fireEvent.click(relationship, { detail: 0 });
 
-        expect(onnavigate).toHaveBeenCalledWith('bank-1');
+        expect(onnavigate).toHaveBeenNthCalledWith(1, 'bank-1', false);
+        expect(onnavigate).toHaveBeenNthCalledWith(2, 'bank-1', true);
         expect(screen.getByTitle('Not resolvable').textContent).toContain('Missing Bank');
         expect(screen.queryByRole('button', { name: /Missing Bank/ })).toBeNull();
     });

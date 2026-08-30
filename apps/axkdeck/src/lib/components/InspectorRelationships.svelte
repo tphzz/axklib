@@ -3,7 +3,7 @@
 
     interface Props {
         groups: readonly InspectorRelationshipGroup[];
-        onnavigate?: (objectId: string) => void;
+        onnavigate?: (objectId: string, focusTarget: boolean) => void;
     }
 
     let { groups, onnavigate }: Props = $props();
@@ -21,7 +21,10 @@
                     {#each group.items as item (item.id)}
                         <li>
                             {#if item.navigable && item.objectId}
-                                <button type="button" onclick={() => onnavigate?.(item.objectId!)}>
+                                <button
+                                    type="button"
+                                    onclick={(event) => onnavigate?.(item.objectId!, event.detail === 0)}
+                                >
                                     <strong>{item.name}</strong>
                                     <span>{item.detail}</span>
                                 </button>

@@ -317,7 +317,7 @@
         return waveData.toSorted(compareNamedItems).findIndex((item) => item.objectKey === objectId);
     }
 
-    async function navigateInspectorRelationship(objectId: string): Promise<void> {
+    async function navigateInspectorRelationship(objectId: string, focusTarget: boolean): Promise<void> {
         clearSelection();
         const view = await audition.navigateToObject(objectId);
         if (!view) return;
@@ -339,6 +339,7 @@
             relationshipObjectIndex(view, objectId),
             itemExtent,
             'center',
+            focusTarget,
         );
     }
 
@@ -628,7 +629,8 @@
             selection={inspectorSelection}
             playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
             playheadFrame={audition.state.playheadFrame}
-            onrelationshipnavigate={(objectId) => void navigateInspectorRelationship(objectId)}
+            onrelationshipnavigate={(objectId, focusTarget) =>
+                void navigateInspectorRelationship(objectId, focusTarget)}
         />
     {/if}
     <footer class="status-bar">

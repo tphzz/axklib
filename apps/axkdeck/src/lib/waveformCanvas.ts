@@ -12,41 +12,15 @@ export interface WaveformPixelColumn {
     height: number;
 }
 
-interface DevicePixelRatioSource {
-    devicePixelRatio: number;
-    matchMedia?(query: string): MediaQueryList;
-}
-
 function positiveInteger(value: number): number {
     return Math.max(1, Math.round(Number.isFinite(value) ? value : 1));
 }
 
-export function canvasPixelSize(
-    cssWidth: number,
-    cssHeight: number,
-    devicePixelRatio: number,
-    observedDeviceSize?: CanvasPixelSize | null,
-): CanvasPixelSize {
-    if (observedDeviceSize) {
-        return {
-            width: positiveInteger(observedDeviceSize.width),
-            height: positiveInteger(observedDeviceSize.height),
-        };
-    }
+export function canvasPixelSize(cssWidth: number, cssHeight: number, devicePixelRatio: number): CanvasPixelSize {
     const scale = Math.max(1, Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1);
     return {
         width: positiveInteger(cssWidth * scale),
         height: positiveInteger(cssHeight * scale),
-    };
-}
-
-export function resizeObserverDevicePixelSize(entry: ResizeObserverEntry): CanvasPixelSize | null {
-    const rawSize = entry.devicePixelContentBoxSize as ResizeObserverSize | readonly ResizeObserverSize[] | undefined;
-    const size = Array.isArray(rawSize) ? rawSize[0] : rawSize;
-    if (!size || !Number.isFinite(size.inlineSize) || !Number.isFinite(size.blockSize)) return null;
-    return {
-        width: positiveInteger(size.inlineSize),
-        height: positiveInteger(size.blockSize),
     };
 }
 
@@ -81,22 +55,4 @@ export function waveformPixelColumns(
         columns.push({ x, y, width: Math.max(1, right - x), height: bottom - y });
     }
     return columns;
-}
-
-export function observeDevicePixelRatio(onChange: () => void, source: DevicePixelRatioSource = window): () => void {
-    if (typeof source.matchMedia !== 'function') return () => undefined;
-    let media: MediaQueryList | null = null;
-    const handleChange = (): void => {
-        subscribe();
-        onChange();
-    };
-    const subscribe = (): void => {
-        media?.removeEventListener('change', handleChange);
-        const ratio =
-            Number.isFinite(source.devicePixelRatio) && source.devicePixelRatio > 0 ? source.devicePixelRatio : 1;
-        media = source.matchMedia!(`(resolution: ${ratio}dppx)`);
-        media.addEventListener('change', handleChange);
-    };
-    subscribe();
-    return () => media?.removeEventListener('change', handleChange);
 }

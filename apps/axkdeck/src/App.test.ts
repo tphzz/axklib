@@ -388,6 +388,93 @@ describe('App panel layout', () => {
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');
     });
 
+    it('reveals a Sample selected from a Sample Bank inspector relationship', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Navigation',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const samplerObject = (key: string, objectType: string, name: string, sfsId: number) => ({
+            key,
+            objectType,
+            name,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: objectType,
+            sfsId,
+            storedSizeBytes: 2,
+            sampleRate: 0,
+            rootKey: 60,
+            frameCount: 0,
+            sampleWidthBytes: 0,
+        });
+        const bank = samplerObject('SBAC-1', 'SBAC', 'Navigation Bank', 1);
+        const samples = Array.from({ length: 80 }, (_, index) =>
+            samplerObject(
+                `SBNK-${index + 1}`,
+                'SBNK',
+                index === 74 ? 'Target Sample' : `Sample ${String(index + 1).padStart(3, '0')}`,
+                index + 2,
+            ),
+        );
+        const target = samples[74]!;
+        const relationship = {
+            id: 'bank-target',
+            sourceObjectId: bank.key,
+            targetObjectId: target.key,
+            candidateObjectIds: [],
+            relationshipType: 'SBAC_SLOT_TO_SBNK',
+            quality: 'KNOWN',
+            basis: 'test',
+            notes: [],
+            assignmentIndex: 1,
+            assignmentName: '',
+            assignmentState: '',
+            receiveChannelDisplay: '',
+        };
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: samples.length + 1,
+                relationshipCount: 1,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+        });
+        mocks.objectPage.mockResolvedValue({ objects: [bank, ...samples], totalCount: samples.length + 1 });
+        mocks.relationshipPage.mockResolvedValue({ relationships: [relationship], totalCount: 1 });
+
+        renderAcknowledgedApp();
+        await chooseNestedImage();
+        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
+
+        await waitFor(() => {
+            expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
+            expect(
+                screen
+                    .getByRole('button', { name: 'Inspect Target Sample' })
+                    .closest('.contained-row')
+                    ?.classList.contains('active'),
+            ).toBe(true);
+        });
+        const sampleList = document.querySelector<HTMLElement>('[data-collection-list="samples"]');
+        expect(sampleList?.scrollTop).toBeGreaterThan(0);
+    });
+
     it('schedules gapless Sample Bank playback in the natural order displayed in the Samples lane', async () => {
         const volume = {
             id: 'volume-1',
