@@ -5,6 +5,7 @@ import type {
     FloppySetSummary,
     ImageTransport,
     ImageValidationIssue,
+    JobState,
     OpenedImage,
 } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
@@ -12,6 +13,7 @@ import type { ObjectSelectionMode } from '../../lib/objectSelection';
 import { emptyVolumeSelection, updateVolumeSelection, type VolumeSelectionState } from '../../lib/volumeSelection';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { reportDiagnostic } from '../../lib/diagnostics';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { DeletionWorkflow } from '../deletion/workflow.svelte';
@@ -39,6 +41,7 @@ const allocationBlockerCodes = new Set([
     'SFS_EXTENT_BYTE_TOTAL_MISMATCH',
 ]);
 const imageSessionKeepAliveIntervalMs = 5 * 60 * 1000;
+const imageOpenProgressDelayMs = 750;
 
 interface SessionCollaborators {
     catalog: CatalogWorkflow;
@@ -69,6 +72,12 @@ export class ImageSessionWorkflow {
     companionSources = $state<ImageLocation[]>([]);
     floppySet = $state<FloppySetSummary | null>(null);
     opening = $state(false);
+    openProgressVisible = $state(false);
+    openProgressLabel = $state('Opening image source');
+    openProgressCompleted = $state(0);
+    openProgressTotal = $state<number | undefined>(undefined);
+    openProgressCancellable = $state(false);
+    openProgressCancelling = $state(false);
     status = $state('Ready');
     hardDiskDirectory = $state<DirectoryLocation | null>(null);
     companionRequest = $state<{
@@ -84,6 +93,7 @@ export class ImageSessionWorkflow {
     objectDeletionAvailable = $state(false);
     waveDataCleanupAvailable = $state(false);
     programGenerationAvailable = $state(false);
+    programAssignmentCleanupAvailable = $state(false);
     packageImportAvailable = $state(false);
     packageExportAvailable = $state(false);
     volumePackageExportAvailable = $state(false);
@@ -106,6 +116,10 @@ export class ImageSessionWorkflow {
     private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
     private lastAutomaticIntegrityKey = '';
+    private nextOpenRequestId = 1;
+    private openProgressTimer: ReturnType<typeof setTimeout> | null = null;
+    private openProgressActive = false;
+    private openStartedAt = 0;
     private leaseMaintenanceActive = false;
     private leaseTimer: number | null = null;
     private readonly renewVisibleLease = (): void => {
@@ -206,16 +220,51 @@ export class ImageSessionWorkflow {
     }
 
     async open(location: ImageLocation, preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+        const requestId = this.nextOpenRequestId++;
+        this.beginOpenProgress(requestId, location);
         this.status = 'Opening image';
         try {
-            const opened = await this.controller.open(location);
-            if (opened) {
-                this.lastOpenedImageFile = location.kind === 'server-file' ? location.reference : null;
-                await this.applyOpenedImage(opened, preferred);
-            }
+            const opened = await this.controller.open(location, (job) => this.updateOpenProgress(requestId, job));
+            if (!opened || requestId !== this.nextOpenRequestId - 1) return;
+            this.openProgressCancellable = false;
+            this.openProgressCancelling = false;
+            this.openProgressLabel = 'Preparing workspace';
+            reportDiagnostic('image_open_server_completed', {
+                requestId,
+                sessionId: opened.sessionId,
+                elapsedMs: this.openElapsedMs(),
+            });
+            this.lastOpenedImageFile = location.kind === 'server-file' ? location.reference : null;
+            await this.applyOpenedImage(opened, preferred);
+            reportDiagnostic('image_open_workspace_ready', {
+                requestId,
+                sessionId: opened.sessionId,
+                elapsedMs: this.openElapsedMs(),
+            });
         } catch (error) {
-            this.status = userFacingMessage(error);
+            if (requestId !== this.nextOpenRequestId - 1) return;
+            if (error instanceof DOMException && error.name === 'AbortError') {
+                this.status = 'Image opening cancelled';
+                reportDiagnostic('image_open_cancelled', { requestId, elapsedMs: this.openElapsedMs() });
+            } else {
+                this.status = userFacingMessage(error);
+                reportDiagnostic(
+                    'image_open_failed',
+                    { requestId, elapsedMs: this.openElapsedMs(), message: userFacingMessage(error) },
+                    'error',
+                );
+            }
+        } finally {
+            if (requestId === this.nextOpenRequestId - 1) this.finishOpenProgress();
         }
+    }
+
+    cancelOpen(): void {
+        if (!this.openProgressCancellable || this.openProgressCancelling) return;
+        this.openProgressCancelling = true;
+        this.openProgressLabel = 'Cancelling image open';
+        reportDiagnostic('image_open_cancel_requested', { elapsedMs: this.openElapsedMs() });
+        this.controller.cancelOpen();
     }
 
     async reopen(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
@@ -361,7 +410,71 @@ export class ImageSessionWorkflow {
 
     async dispose(): Promise<void> {
         this.stopLeaseMaintenance();
+        this.clearOpenProgressTimer();
+        this.controller.cancelOpen();
         await this.controller.dispose();
+    }
+
+    private beginOpenProgress(requestId: number, location: ImageLocation): void {
+        this.clearOpenProgressTimer();
+        this.openStartedAt = performance.now();
+        this.openProgressVisible = false;
+        this.openProgressActive = true;
+        this.openProgressLabel = 'Opening image source';
+        this.openProgressCompleted = 0;
+        this.openProgressTotal = undefined;
+        this.openProgressCancellable = true;
+        this.openProgressCancelling = false;
+        this.openProgressTimer = setTimeout(() => {
+            if (requestId === this.nextOpenRequestId - 1 && this.openProgressActive) this.openProgressVisible = true;
+        }, imageOpenProgressDelayMs);
+        reportDiagnostic('image_open_requested', {
+            requestId,
+            sourceKind: location.kind,
+            displayName: location.displayName,
+        });
+    }
+
+    private updateOpenProgress(requestId: number, job: JobState): void {
+        if (requestId !== this.nextOpenRequestId - 1) return;
+        if (job.status === 'completed') {
+            this.openProgressLabel = 'Preparing workspace';
+            this.openProgressCancellable = false;
+            this.openProgressCancelling = false;
+        } else if (job.progress) {
+            this.openProgressLabel = job.progress.label;
+            this.openProgressCompleted = job.progress.completed;
+            this.openProgressTotal = job.progress.total;
+        }
+        this.openProgressCancelling = job.status === 'cancelling';
+        reportDiagnostic('image_open_progress', {
+            requestId,
+            jobId: job.jobId,
+            status: job.status,
+            phase: job.progress?.phase,
+            completed: job.progress?.completed,
+            total: job.progress?.total,
+            label: job.progress?.label,
+            elapsedMs: this.openElapsedMs(),
+        });
+    }
+
+    private finishOpenProgress(): void {
+        this.clearOpenProgressTimer();
+        this.openProgressActive = false;
+        this.openProgressVisible = false;
+        this.openProgressCancellable = false;
+        this.openProgressCancelling = false;
+    }
+
+    private clearOpenProgressTimer(): void {
+        if (this.openProgressTimer === null) return;
+        clearTimeout(this.openProgressTimer);
+        this.openProgressTimer = null;
+    }
+
+    private openElapsedMs(): number {
+        return Math.round(performance.now() - this.openStartedAt);
     }
 
     private startLeaseMaintenance(): void {
@@ -429,6 +542,7 @@ export class ImageSessionWorkflow {
         this.objectDeletionAvailable = opened.objectDeletionAvailable;
         this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
         this.programGenerationAvailable = opened.programGenerationAvailable;
+        this.programAssignmentCleanupAvailable = opened.programAssignmentCleanupAvailable;
         this.packageImportAvailable = opened.packageImportAvailable;
         this.packageExportAvailable = opened.packageExportAvailable;
         this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
@@ -535,6 +649,7 @@ export class ImageSessionWorkflow {
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;
+        this.programAssignmentCleanupAvailable = false;
     }
 }
 

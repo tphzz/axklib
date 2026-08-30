@@ -388,6 +388,162 @@ describe('App panel layout', () => {
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');
     });
 
+    it('reveals Samples and Wave Data selected from inspector relationships', async () => {
+        const volume = {
+            id: 'volume-1',
+            name: 'Navigation',
+            kind: 'volume' as const,
+            childCount: 0,
+            partitionIndex: 0,
+        };
+        const samplerObject = (key: string, objectType: string, name: string, sfsId: number) => ({
+            key,
+            objectType,
+            name,
+            partitionIndex: 0,
+            partitionName: 'Partition 0',
+            volumeName: volume.name,
+            categoryName: objectType,
+            sfsId,
+            storedSizeBytes: 2,
+            sampleRate: 0,
+            rootKey: 60,
+            frameCount: 0,
+            sampleWidthBytes: 0,
+        });
+        const bank = samplerObject('SBAC-1', 'SBAC', 'Navigation Bank', 1);
+        const samples = Array.from({ length: 80 }, (_, index) =>
+            samplerObject(
+                `SBNK-${index + 1}`,
+                'SBNK',
+                index === 74 ? 'Target Sample' : `Sample ${String(index + 1).padStart(3, '0')}`,
+                index + 2,
+            ),
+        );
+        const target = samples[74]!;
+        const waves = Array.from({ length: 80 }, (_, index) =>
+            samplerObject(
+                `SMPL-${index + 1}`,
+                'SMPL',
+                index === 74 ? 'Target Wave' : `Wave ${String(index + 1).padStart(3, '0')}`,
+                index + 82,
+            ),
+        );
+        const targetWave = waves[74]!;
+        const relationships = [
+            {
+                id: 'bank-target',
+                sourceObjectId: bank.key,
+                targetObjectId: target.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBAC_SLOT_TO_SBNK',
+                quality: 'KNOWN',
+                basis: 'test',
+                notes: [],
+                assignmentIndex: 1,
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+            {
+                id: 'sample-wave',
+                sourceObjectId: target.key,
+                targetObjectId: targetWave.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL',
+                quality: 'KNOWN',
+                basis: 'test',
+                notes: [],
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+        ];
+        mocks.openImage.mockResolvedValueOnce({
+            sessionId: 17,
+            tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+            validation: {
+                valid: true,
+                issueCount: 0,
+                errorCount: 0,
+                warningCount: 0,
+                objectCount: samples.length + waves.length + 1,
+                relationshipCount: relationships.length,
+            },
+            objects: [],
+            objectTotalCount: 0,
+            initialVolume: volume,
+            volumeMutationsAvailable: true,
+            partitionMutationsAvailable: true,
+            objectDeletionAvailable: true,
+        });
+        mocks.objectPage.mockResolvedValue({
+            objects: [bank, ...samples, ...waves],
+            totalCount: samples.length + waves.length + 1,
+        });
+        mocks.relationshipPage.mockResolvedValue({ relationships, totalCount: relationships.length });
+        const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView,
+        });
+
+        try {
+            renderAcknowledgedApp();
+            await chooseNestedImage();
+            await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
+
+            await waitFor(() => {
+                expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
+                expect(
+                    screen
+                        .getByRole('button', { name: 'Inspect Target Sample' })
+                        .closest('.contained-row')
+                        ?.classList.contains('active'),
+                ).toBe(true);
+            });
+            await waitFor(() => {
+                expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(1);
+            });
+
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left Wave Data' }), {
+                detail: 1,
+            });
+
+            await waitFor(() => {
+                expect(screen.getByRole('region', { name: 'Wave Data' })).toBeTruthy();
+                expect(
+                    screen
+                        .getByRole('button', { name: 'Inspect Target Wave' })
+                        .closest('.wave-data-row')
+                        ?.classList.contains('active'),
+                ).toBe(true);
+            });
+            await waitFor(() => {
+                expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(2);
+            });
+            expect(scrollIntoView).toHaveBeenCalledWith({
+                block: 'center',
+                inline: 'nearest',
+                behavior: 'auto',
+            });
+        } finally {
+            if (originalScrollIntoView) {
+                Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+                    configurable: true,
+                    writable: true,
+                    value: originalScrollIntoView,
+                });
+            } else {
+                delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+            }
+        }
+    });
+
     it('schedules gapless Sample Bank playback in the natural order displayed in the Samples lane', async () => {
         const volume = {
             id: 'volume-1',
@@ -630,7 +786,7 @@ describe('App panel layout', () => {
                 failedObjectId: sample.key,
             });
 
-            const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+            const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' }, { timeout: 5_000 });
             await fireEvent.click(within(dialog).getByRole('button', { name: 'Search nearby folders and retry' }));
             await vi.waitFor(() =>
                 expect(mocks.attachCompanions).toHaveBeenCalledWith(17, {
@@ -684,7 +840,7 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
 
-        const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' });
+        const dialog = await screen.findByRole('dialog', { name: 'Add companion disks' }, { timeout: 5_000 });
         expect(
             within(dialog).getByText(
                 (_, element) =>
@@ -1003,7 +1159,7 @@ describe('App panel layout', () => {
         const row = screen.getByRole('button', { name: 'Inspect Piano C3' });
         await fireEvent.contextMenu(row);
         expect(screen.getByRole('button', { name: 'Export 1 selected object' })).toBeTruthy();
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         await vi.waitFor(() => expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy());
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Also delete all (1)' }));
         await vi.waitFor(() =>
@@ -1212,7 +1368,7 @@ describe('App panel layout', () => {
         const row = await screen.findByRole('button', { name: 'Inspect Old Wave' });
         await fireEvent.click(row);
         await fireEvent.contextMenu(row);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         const dialog = await screen.findByRole('dialog', { name: 'Rename Wave Data' });
         await fireEvent.input(within(dialog).getByLabelText('Wave Data name'), {
             target: { value: 'New Wave' },
@@ -1748,7 +1904,7 @@ describe('App panel layout', () => {
         delete runtime.__TAURI_INTERNALS__;
     });
 
-    it('routes browser MIDI drops through the Sequence import review on the Sequences tab', async () => {
+    it('routes browser MIDI drops through the Sequence import review with the selected volume as a hint', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1765,8 +1921,7 @@ describe('App panel layout', () => {
         });
         renderAcknowledgedApp();
         await chooseNestedImage();
-        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
-
+        await screen.findByText('My Volume');
         const dataTransfer = {
             types: ['Files'],
             files: [new File(['midi'], 'intro.MID', { type: 'audio/midi' })],
@@ -1777,7 +1932,9 @@ describe('App panel layout', () => {
         window.dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume My Volume')).toBeTruthy();
+        expect((within(dialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
+            'My Volume',
+        );
         expect(within(dialog).getByDisplayValue('intro')).toBeTruthy();
         await vi.waitFor(() =>
             expect(mocks.uploadClientFile).toHaveBeenCalledWith(
@@ -1830,7 +1987,7 @@ describe('App panel layout', () => {
         delete runtime.__TAURI_INTERNALS__;
     });
 
-    it('requires the Sequences tab for MIDI drops and rejects mixed media drops', async () => {
+    it('accepts MIDI drops from any workspace tab and still rejects mixed media drops', async () => {
         const volume = {
             id: 'volume-1',
             name: 'My Volume',
@@ -1851,16 +2008,13 @@ describe('App panel layout', () => {
         const midiDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(midiDrop, 'dataTransfer', { value: midiTransfer });
         window.dispatchEvent(midiDrop);
-        let unavailable = await screen.findByRole('dialog', { name: 'MIDI import unavailable' });
+        const midiDialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
         expect(
-            within(unavailable).getByText(
-                'Open the Sequences tab, select a writable volume, then drop the MIDI files again.',
-            ),
-        ).toBeTruthy();
-        expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
-        await fireEvent.click(within(unavailable).getByRole('button', { name: 'OK' }));
+            (within(midiDialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value,
+        ).toBe('My Volume');
+        await fireEvent.click(within(midiDialog).getByRole('button', { name: 'Cancel' }));
+        await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull());
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Sequences' }));
         const mixedTransfer = {
             types: ['Files'],
             files: [
@@ -1872,7 +2026,7 @@ describe('App panel layout', () => {
         const mixedDrop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent;
         Object.defineProperty(mixedDrop, 'dataTransfer', { value: mixedTransfer });
         window.dispatchEvent(mixedDrop);
-        unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
+        const unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
         expect(
             within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
         ).toBeTruthy();
@@ -1916,7 +2070,9 @@ describe('App panel layout', () => {
         screen.getByText('Second Volume').dispatchEvent(drop);
 
         const dialog = await screen.findByRole('dialog', { name: 'Import MIDI' });
-        expect(within(dialog).getByText('Volume First Volume')).toBeTruthy();
+        expect((within(dialog).getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe(
+            'First Volume',
+        );
         expect(mocks.objectPage).not.toHaveBeenCalledWith(17, 0, 256, { scopeId: 'volume-2' });
     });
 

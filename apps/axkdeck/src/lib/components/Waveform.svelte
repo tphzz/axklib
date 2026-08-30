@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
+    import { canvasPixelSize, waveformPixelColumns } from '../waveformCanvas';
     import { waveformContentRatio } from '../waveformTimeline';
 
     interface Props {
@@ -19,9 +20,7 @@
     function draw(): void {
         if (!canvas || typeof CanvasRenderingContext2D === 'undefined') return;
         const bounds = canvas.getBoundingClientRect();
-        const scale = Math.max(1, window.devicePixelRatio || 1);
-        const width = Math.max(1, Math.round(bounds.width * scale));
-        const height = Math.max(1, Math.round(bounds.height * scale));
+        const { width, height } = canvasPixelSize(bounds.width, bounds.height, window.devicePixelRatio || 1);
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
             canvas.height = height;
@@ -29,32 +28,12 @@
         const context = canvas.getContext('2d');
         if (!context) return;
         context.clearRect(0, 0, width, height);
-        context.strokeStyle = getComputedStyle(canvas).color;
-        context.lineWidth = Math.max(1, scale);
-        const center = height / 2;
+        context.fillStyle = getComputedStyle(canvas).color;
         context.globalAlpha = 0.75;
-        context.beginPath();
-        context.moveTo(0, center);
-        context.lineTo(width, center);
-        context.stroke();
-        if (values.length > 0 && contentRatio > 0) {
-            const contentWidth = Math.max(1, Math.round(width * contentRatio));
-            const peak = Math.max(1, ...values.flatMap((value) => [Math.abs(value.minimum), Math.abs(value.maximum)]));
-            context.globalAlpha = 1;
-            context.beginPath();
-            for (let pixel = 0; pixel < contentWidth; pixel += Math.max(1, Math.round(scale))) {
-                const first = Math.floor((pixel / contentWidth) * values.length);
-                const last = Math.max(first + 1, Math.ceil(((pixel + scale) / contentWidth) * values.length));
-                let minimum = 0;
-                let maximum = 0;
-                for (let index = first; index < Math.min(last, values.length); index += 1) {
-                    minimum = Math.min(minimum, values[index]?.minimum ?? 0);
-                    maximum = Math.max(maximum, values[index]?.maximum ?? 0);
-                }
-                context.moveTo(pixel, center - (maximum / peak) * center);
-                context.lineTo(pixel, center - (minimum / peak) * center);
-            }
-            context.stroke();
+        context.fillRect(0, Math.min(height - 1, Math.floor(height / 2)), width, 1);
+        context.globalAlpha = 1;
+        for (const column of waveformPixelColumns(values, contentRatio, bounds.width, width, height)) {
+            context.fillRect(column.x, column.y, column.width, column.height);
         }
     }
 

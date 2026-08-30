@@ -198,19 +198,21 @@ describe('SequenceWorkspace', () => {
             volumeName: 'Songs',
         };
         await fireEvent.contextMenu(row);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export MIDI…' }));
         expect(onexportmidi).toHaveBeenCalledWith([exported]);
 
         await fireEvent.contextMenu(row);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
         expect(onexportobjects).toHaveBeenCalledWith([exported]);
 
         await fireEvent.contextMenu(row);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         expect(onrenameobject).toHaveBeenCalledWith({ kind: 'sequence', object: item.object, name: item.name });
 
         await fireEvent.contextMenu(row);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         expect(ondeleteobjects).toHaveBeenCalledWith([exported]);
     });
 

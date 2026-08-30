@@ -2,7 +2,7 @@ import { audioExtensions, audioMediaType } from '../../lib/audioImport';
 import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUploadSource';
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
 import type {
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportGrouping,
     AudioImportItem,
     AudioImportTarget,
@@ -174,7 +174,7 @@ export class AudioImportWorkflow {
         if (target?.kind === 'EXISTING_VOLUME') await this.loadExistingVolume(target);
     }
 
-    destination(): AudioImportDestination | null {
+    destination(): VolumeImportDestination | null {
         const request = this.request;
         if (!request) return null;
         return importDestination(

@@ -71,7 +71,7 @@ Result<SamplePlaybackWindow> sample_playback_window(const SampleExport &sample, 
         result.one_shot = true;
         return result;
     }
-    if (sample.decoded.loop_mode != 1U) {
+    if (sample.decoded.loop_mode != 1U && sample.decoded.loop_mode != 2U) {
         return std::unexpected{
             make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                        "SFZ exact export does not support reverse or bidirectional Sample playback modes")};
@@ -204,6 +204,7 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
         }
     }
     auto planned_path = planned_paths.begin();
+    std::set<const SampleExport *> release_tail_warnings;
     for (const auto &volume : plan.volumes) {
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
@@ -218,6 +219,11 @@ Result<SfzExportResult> write_sfz(const ExportPlan &plan, const std::filesystem:
             for (const auto *sample : samples) {
                 if (const auto check = cancellation.check(); !check)
                     return std::unexpected{check.error()};
+                if (sample->decoded.loop_mode == 2U && release_tail_warnings.insert(sample).second) {
+                    result.warnings.push_back("Sample " + display_text(sample->display_name, "sample") +
+                                              " uses release-tail looping; SFZ preserves its loop bounds as "
+                                              "loop_continuous but cannot preserve release-tail behavior");
+                }
                 if (rendered_window_compatible(*sample)) {
                     const auto waveform = std::ranges::find(volume.waveforms, sample->members.front().waveform_key,
                                                             &PhysicalWaveformExport::object_key);

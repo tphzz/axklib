@@ -28,9 +28,17 @@ Each region uses the active Sample (`SBNK`) member playback window. The SFZ
 and loop positions come from the Sample rather than from the underlying Wave
 Data object. A shared Wave Data object can therefore back several Samples with
 different exact windows. Forward one-shot and forward continuous-loop modes
-are supported. Reverse, bidirectional, invalid, or out-of-range Sample windows
+are supported. A-series release-tail looping preserves its exact loop bounds
+as `loop_continuous` and reports that SFZ cannot preserve the release-tail
+transition. Reverse, bidirectional, invalid, or out-of-range Sample windows
 fail the export; they are never approximated with physical Wave Data loop
 metadata.
+
+The physical WAV pool is shared across Samples, so each pooled WAV can contain
+only Wave Data-level `smpl` and `inst` metadata. Per-Sample root, fine tune,
+coarse transpose, key and velocity ranges, playback window, and loop policy
+remain authoritative in the SFZ region. A separately rendered stereo Sample
+receives Sample-level WAV metadata only when both members agree.
 
 Confirmed stereo members use one rendered stereo WAV only when both member
 windows and loop policies match. Otherwise the SFZ keeps the confirmed mono

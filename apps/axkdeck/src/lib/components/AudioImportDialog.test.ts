@@ -107,6 +107,32 @@ describe('AudioImportDialog', () => {
         expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*10px;/s);
     });
 
+    it('keeps the import mode and conditional Sample Bank name in one compact shared-control row', async () => {
+        render(AudioImportDialog, {
+            props: {
+                transport: transport(),
+                files: [new File([new Uint8Array(64)], 'Bass.wav', { type: 'audio/wav' })],
+                ...destinationProps('Sounds'),
+                existingSampleNames: [],
+                existingSampleBankNames: [],
+                existingWaveformNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        const mode = screen.getByRole('combobox', { name: 'Import mode' });
+        expect(mode.classList).toContain('dialog-field-control');
+        await fireEvent.change(mode, { target: { value: 'SAMPLE_BANK' } });
+        expect(screen.getByRole('textbox', { name: 'Sample Bank name' }).classList).toContain('dialog-field-control');
+        expect(audioImportDialogSource).toMatch(
+            /\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(240px, 360px\) max-content minmax\(180px, 1fr\);[^}]*align-items:\s*center;/s,
+        );
+        expect(audioImportDialogSource).toMatch(
+            /@media \(max-width: 760px\)\s*\{[^}]*\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\);/s,
+        );
+    });
+
     it('left-packs sampler fields independently from the identity columns', () => {
         expect(audioSamplerSettingsSource).toMatch(
             /\.settings-fields\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*justify-content:\s*flex-start;/s,

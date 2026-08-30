@@ -52,14 +52,6 @@
   scrollbar-color: #55585a transparent;
 }
 
-:is([inert], [inert] *) {
-  scrollbar-width: none;
-}
-
-:is([inert], [inert] *)::-webkit-scrollbar {
-  display: none;
-}
-
 html,
 body,
 #app {
@@ -738,18 +730,20 @@ input:focus-visible {
 .program-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
+  padding: 2px 6px 5px;
 }
 
 .program-row {
   display: grid;
   width: 100%;
+  height: var(--density-row);
   min-width: 0;
   min-height: var(--density-row);
-  grid-template-columns: 46px minmax(0, 1fr) minmax(110px, 180px);
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 2px 7px;
+  gap: 4px;
+  padding: 0;
   overflow: hidden;
   color: var(--color-text);
   border: 1px solid transparent;
@@ -758,6 +752,13 @@ input:focus-visible {
   cursor: pointer;
   text-align: left;
   transition: 130ms ease;
+  font: inherit;
+}
+
+.program-row .object-slot {
+  align-self: stretch;
+  padding: 3px 6px 1px;
+  line-height: 10px;
 }
 
 .program-row:hover {
@@ -781,25 +782,16 @@ input:focus-visible {
   background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
 }
 
-.program-row strong {
-  display: block;
+.program-identity {
+  display: flex;
   min-width: 0;
+  min-height: calc(var(--density-row) - 2px);
+  flex-direction: column;
+  justify-content: center;
+  padding: 2px 6px 2px 0;
   overflow: hidden;
-  color: var(--color-text-strong);
   font-size: 10px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.object-size-summary {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: 9px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 10px;
 }
 
 .program-system-info {
@@ -1330,6 +1322,10 @@ input:focus-visible {
 
 .dialog-shell-wide {
   width: min(680px, calc(100vw - 40px));
+}
+
+.dialog-popovers-visible {
+  overflow: visible;
 }
 
 .dialog-header,
@@ -2196,6 +2192,47 @@ input:focus-visible {
   border-color: var(--color-accent);
 }
 
+.dialog-autocomplete-control {
+  position: relative;
+  min-width: 0;
+}
+
+.dialog-autocomplete-control > .dialog-field-control {
+  width: 100%;
+  padding-right: 30px;
+}
+
+.dialog-autocomplete-clear {
+  position: absolute;
+  z-index: 5;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  width: 25px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  color: var(--color-text-muted);
+  border: 0;
+  border-radius: 4px;
+  background: var(--color-bg-deep);
+  cursor: pointer;
+}
+
+.dialog-autocomplete-clear:hover:not(:disabled) {
+  color: var(--color-text-strong);
+}
+
+.dialog-autocomplete-clear:focus-visible {
+  color: var(--color-text-strong);
+  outline: 1px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.dialog-autocomplete-clear:disabled {
+  cursor: not-allowed;
+}
+
 .dialog-autocomplete-list {
   display: grid;
   max-height: 220px;
@@ -2976,19 +3013,6 @@ input:focus-visible {
   padding: 12px;
 }
 
-.virtual-list-space {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-}
-
-.virtual-list-window {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-}
-
 .horizontal-splitter {
   position: relative;
   z-index: 2;
@@ -3069,10 +3093,6 @@ input:focus-visible {
   background: transparent;
 }
 
-.contained-virtual-window {
-  display: block;
-}
-
 .contained-row:hover,
 .contained-row.active {
   border-color: rgb(104 151 187 / 45%);
@@ -3103,6 +3123,23 @@ input:focus-visible {
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+.object-size-primary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.object-size-primary strong {
+  min-width: 0;
+}
+
+.object-size-indicator {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--color-accent);
 }
 
 .contained-playback {
@@ -3271,7 +3308,15 @@ input:focus-visible {
 }
 
 .inspector {
+  display: flex;
   min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.inspector-body {
+  min-height: 0;
+  flex: 1;
   overflow: auto;
 }
 
@@ -3333,11 +3378,92 @@ input:focus-visible {
   text-align: right;
 }
 
+.inspector-relationships {
+  margin: 9px;
+  border-top: 1px solid var(--color-border);
+}
+
+.inspector-relationships > h3 {
+  margin: 7px 0 3px;
+  color: var(--color-text-strong);
+  font-size: 10px;
+}
+
+.inspector-relationships-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 8.5px;
+}
+
+.inspector-relationship-group h4 {
+  margin: 6px 0 1px;
+  color: var(--color-text-muted);
+  font-size: 8px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.inspector-relationship-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-relationship-group li {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.inspector-relationship-group button,
+.inspector-relationship-unresolved {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 2px;
+  color: var(--color-text);
+  border: 0;
+  background: transparent;
+  font-size: 8.5px;
+  text-align: left;
+}
+
+.inspector-relationship-group button {
+  cursor: pointer;
+}
+
+.inspector-relationship-group button:hover,
+.inspector-relationship-group button:focus-visible {
+  color: var(--color-text-strong);
+  background: rgb(104 151 187 / 10%);
+}
+
+.inspector-relationship-group strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-relationship-group span {
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-relationship-unresolved {
+  opacity: 0.5;
+}
+
 .wave-data-list {
   padding-right: calc(6px + var(--overlay-scrollbar-clearance));
 }
 
-.wave-data-virtual-window {
+.wave-data-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3415,6 +3541,11 @@ input:focus-visible {
   display: block;
   width: 100%;
   height: 28px;
+}
+
+.viewport-waveform {
+  width: 100%;
+  height: 100%;
 }
 
 .wave-data-playback {

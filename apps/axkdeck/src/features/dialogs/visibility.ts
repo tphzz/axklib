@@ -7,7 +7,6 @@ interface MutationDialogState {
     volumeAction: unknown;
     placementRepairRequest: unknown;
     objectRenameRequest: unknown;
-    sampleBankCreationRequest: unknown;
     sampleBankAssignmentRequest: unknown;
 }
 
@@ -44,6 +43,7 @@ interface AppDialogState {
     mediaExports: RequestDialogState;
     deletion: DeletionDialogState;
     programGeneration: RequestDialogState;
+    programAssignmentCleanup: RequestDialogState;
     audioImport: RequestDialogState;
     sequenceImport: RequestDialogState;
     tx16wImport: RequestDialogState;
@@ -52,14 +52,12 @@ interface AppDialogState {
 
 export function hasOpenAppDialog(state: AppDialogState): boolean {
     return [
-        state.pickerRequest,
         state.imageSession.companionRequest,
         state.imageSession.hardDiskDirectory,
         state.connectionSettings,
         state.mutation.volumeAction,
         state.mutation.placementRepairRequest,
         state.mutation.objectRenameRequest,
-        state.mutation.sampleBankCreationRequest,
         state.mutation.sampleBankAssignmentRequest,
         state.packageImport.request,
         state.packageBatchImport.request,
@@ -72,6 +70,7 @@ export function hasOpenAppDialog(state: AppDialogState): boolean {
         state.deletion.objectRequest,
         state.deletion.cleanupRequest,
         state.programGeneration.request,
+        state.programAssignmentCleanup.request,
         state.audioImport.request,
         state.sequenceImport.request,
         state.tx16wImport.request,

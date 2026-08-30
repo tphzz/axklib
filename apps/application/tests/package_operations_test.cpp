@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -104,6 +105,70 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
     const auto written = axk::write_hds_image(manifest, path);
     ASSERT_TRUE(written) << written.error().message;
+}
+
+void write_selected_wav_source(const std::filesystem::path &path) {
+    axk::Waveform waveform;
+    waveform.format = {1U, 2U, 44'100U};
+    waveform.frame_count = 4U;
+    waveform.pcm = {std::byte{0},    std::byte{0},    std::byte{0xe8}, std::byte{3},
+                    std::byte{0x18}, std::byte{0xfc}, std::byte{0},    std::byte{0}};
+    const auto audio_path = path.parent_path() / "selected-wav.wav";
+    const auto written_audio = axk::write_wav_atomic(audio_path, waveform);
+    ASSERT_TRUE(written_audio) << written_audio.error().message;
+
+    axk::VolumeSpec volume;
+    volume.name = "Selected WAV";
+    volume.waveforms.push_back({"mono", "Mono Wave", audio_path, 60U, {}});
+    volume.waveforms.push_back({"left", "Stereo Left", audio_path, 60U, {}});
+    volume.waveforms.push_back({"right", "Stereo Right", audio_path, 60U, {}});
+    axk::SampleSpec mono;
+    mono.name = "Mono Sample";
+    mono.waveform_id = "mono";
+    mono.root_key = 60U;
+    mono.key_high = 127U;
+    volume.samples.push_back(std::move(mono));
+    axk::SampleSpec stereo;
+    stereo.name = "Stereo Sample";
+    stereo.waveform_id = "left";
+    stereo.right_waveform_id = "right";
+    stereo.root_key = 60U;
+    stereo.key_high = 127U;
+    volume.samples.push_back(std::move(stereo));
+
+    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
+    const auto written = axk::write_hds_image(manifest, path);
+    ASSERT_TRUE(written) << written.error().message;
+}
+
+void write_invalid_stereo_object_directory(const std::filesystem::path &source,
+                                           const std::filesystem::path &destination) {
+    const auto media = axk::open_media(source);
+    ASSERT_TRUE(media) << media.error().message;
+    const auto objects = media->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects) << objects.error().message;
+    std::filesystem::create_directories(destination);
+    bool changed{};
+    for (std::size_t index = 0U; index < objects->size(); ++index) {
+        auto payload = (*objects)[index].raw_payload;
+        if ((*objects)[index].decoded.header.raw_type == "SBNK" &&
+            (*objects)[index].decoded.header.name == "Stereo Sample") {
+            ASSERT_GE(payload.size(), 0xa8U);
+            std::ranges::copy_n(payload.begin() + 0x78, 16U, payload.begin() + 0x88);
+            std::ranges::copy_n(payload.begin() + 0xa0, 4U, payload.begin() + 0xa4);
+            const auto decoded = axk::decode_object(payload);
+            ASSERT_TRUE(decoded) << decoded.error().message;
+            const auto *sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
+            ASSERT_NE(sample, nullptr);
+            ASSERT_TRUE(sample->right);
+            changed = true;
+        }
+        std::ofstream output{destination / std::format("object-{:03}.bin", index), std::ios::binary};
+        ASSERT_TRUE(output);
+        output.write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        ASSERT_TRUE(output);
+    }
+    ASSERT_TRUE(changed);
 }
 
 void write_batch_volume_source(const std::filesystem::path &path) {
@@ -266,6 +331,8 @@ class PackageOperationsTest : public testing::Test {
         write_sequence_object(root_ / "sequence.bin", "Sequence");
         write_empty_target(root_ / "target.hds");
         write_mixed_root_source(root_ / "mixed-roots.hds");
+        write_selected_wav_source(root_ / "selected-wav.hds");
+        write_invalid_stereo_object_directory(root_ / "selected-wav.hds", root_ / "invalid-stereo-objects");
         write_batch_volume_source(root_ / "batch-volumes.hds");
         write_object_directory(root_ / "fixture.hds", root_ / "objects");
         write_split_object_directory(root_ / "fixture.hds", root_ / "disk-set");
@@ -893,8 +960,10 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
     const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
     ASSERT_NE(sample, objects->items.end());
     const nlohmann::json roots{{{"kind", "SBNK"}, {"objectId", sample->id}}};
-    const auto base =
-        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+    const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"expectedRevision", opened->revision},
+                                     {"selectionMode", "DEPENDENCY_CLOSURE"},
+                                     {"roots", roots}};
 
     const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
@@ -934,6 +1003,113 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
     EXPECT_GT(content->snapshot.entry_count, 1U);
 }
 
+TEST_F(PackageOperationsTest, SessionExportsOnlySelectedSampleAsOneFlatWav) {
+    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
+    ASSERT_NE(sample, objects->items.end());
+    const nlohmann::json base{{"imageId", opened->image_id},
+                              {"expectedRevision", opened->revision},
+                              {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
+                              {"roots", {{{"kind", "SBNK"}, {"objectId", sample->id}}}}};
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("wavFileCount"), 1U);
+    EXPECT_TRUE(inspected->at("issues").empty());
+
+    auto request = base;
+    request["format"] = "WAV";
+    request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "selected-sample-wav"}}},
+    };
+    const auto exported = registry_.invoke("images.audio_export", request, context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("fileCount"), 1U);
+    const auto output = root_ / "selected-sample-wav";
+    ASSERT_TRUE(std::filesystem::is_directory(output));
+    std::vector<std::filesystem::directory_entry> wav_files;
+    for (const auto &entry : std::filesystem::directory_iterator{output}) {
+        if (entry.is_directory()) {
+            EXPECT_EQ(entry.path().filename(), ".axklib-publication");
+            EXPECT_TRUE(std::filesystem::is_empty(entry.path()));
+            continue;
+        }
+        if (entry.path().extension() == ".wav")
+            wav_files.push_back(entry);
+    }
+    ASSERT_EQ(wav_files.size(), 1U);
+    EXPECT_TRUE(wav_files.front().is_regular_file());
+}
+
+TEST_F(PackageOperationsTest, SessionExportsSelectedMonoAndStereoSamplesAsOneBatch) {
+    const auto opened = images_->open({"workspace", "selected-wav.hds"}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto object_id = [&](std::string_view name) {
+        const auto found = std::ranges::find_if(
+            objects->items, [&](const auto &object) { return object.type == "SBNK" && object.name == name; });
+        EXPECT_NE(found, objects->items.end());
+        return found == objects->items.end() ? std::string{} : found->id;
+    };
+    const nlohmann::json base{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
+        {"roots",
+         {{{"kind", "SBNK"}, {"objectId", object_id("Mono Sample")}},
+          {{"kind", "SBNK"}, {"objectId", object_id("Stereo Sample")}}}},
+    };
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("wavFileCount"), 2U);
+    EXPECT_TRUE(inspected->at("issues").empty());
+
+    auto request = base;
+    request["format"] = "WAV";
+    request["destination"] = {
+        {"kind", "WORKSPACE"},
+        {"output", {{"rootId", "workspace"}, {"relativePath", "selected-wav-batch"}}},
+    };
+    const auto exported = registry_.invoke("images.audio_export", request, context());
+    ASSERT_TRUE(exported) << exported.error().message;
+    EXPECT_EQ(exported->at("fileCount"), 2U);
+    std::size_t wav_file_count{};
+    for (const auto &entry : std::filesystem::directory_iterator{root_ / "selected-wav-batch"}) {
+        if (entry.is_regular_file() && entry.path().extension() == ".wav")
+            ++wav_file_count;
+    }
+    EXPECT_EQ(wav_file_count, 2U);
+}
+
+TEST_F(PackageOperationsTest, SessionRejectsInvalidSelectedStereoSampleDuringInspection) {
+    const auto opened = images_->open(
+        {"workspace", "invalid-stereo-objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(objects) << objects.error().message;
+    const auto sample = std::ranges::find_if(
+        objects->items, [](const auto &object) { return object.type == "SBNK" && object.name == "Stereo Sample"; });
+    ASSERT_NE(sample, objects->items.end());
+    const nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
+        {"roots", {{{"kind", "SBNK"}, {"objectId", sample->id}}}},
+    };
+
+    const auto inspected = registry_.invoke("images.audio_export.inspect", request, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    ASSERT_EQ(inspected->at("issues").size(), 1U);
+    EXPECT_EQ(inspected->at("issues").front().at("code"), "sample_has_invalid_wave_data_membership");
+    EXPECT_TRUE(inspected->at("issues").front().at("fatal").get<bool>());
+}
+
 TEST_F(PackageOperationsTest, SessionIgnoresStoredProgramRowsWithoutAnExactTargetDuringSfzExport) {
     const auto source_path = root_ / "warned-audio.hds";
     std::filesystem::copy_file(root_ / "mixed-roots.hds", source_path);
@@ -941,8 +1117,10 @@ TEST_F(PackageOperationsTest, SessionIgnoresStoredProgramRowsWithoutAnExactTarge
     const auto opened = images_->open({"workspace", "warned-audio.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json roots{{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "Mixed")}}};
-    const auto base =
-        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+    const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"expectedRevision", opened->revision},
+                                     {"selectionMode", "DEPENDENCY_CLOSURE"},
+                                     {"roots", roots}};
 
     const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
@@ -978,8 +1156,10 @@ TEST_F(PackageOperationsTest, SessionRejectsSfzWhenAnySelectionIssueIsFatal) {
         {{"kind", "SBNK"}, {"objectId", object_id("SBNK", "Linked Sample")}},
         {{"kind", "SMPL"}, {"objectId", object_id("SMPL", "Orphan Wave")}},
     };
-    const auto base =
-        nlohmann::json{{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"roots", roots}};
+    const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"expectedRevision", opened->revision},
+                                     {"selectionMode", "DEPENDENCY_CLOSURE"},
+                                     {"roots", roots}};
 
     const auto inspected = registry_.invoke("images.audio_export.inspect", base, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
@@ -1098,6 +1278,7 @@ TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWitho
         "images.audio_export",
         {{"imageId", opened->image_id},
          {"expectedRevision", opened->revision},
+         {"selectionMode", "DEPENDENCY_CLOSURE"},
          {"roots", {{{"kind", "VOLUME"}, {"contentId", volume.id}}}},
          {"format", "WAV"},
          {"destination",

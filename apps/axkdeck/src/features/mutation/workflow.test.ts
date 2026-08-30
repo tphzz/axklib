@@ -99,6 +99,9 @@ describe('MutationWorkflow', () => {
         const samples = [sample('Sample 2'), sample('Sample 10')];
         const catalog = {
             sampleBanks: [],
+            programs: [],
+            relationships: [],
+            membersForBank: () => [],
             selectedBankId: '',
             inspectorObjectId: '',
             editorObjectIds: { 'sample-banks': '' },
@@ -111,9 +114,10 @@ describe('MutationWorkflow', () => {
             objectRenameAvailable: true,
         });
 
-        workflow.requestSampleBankCreation(samples);
-        expect(workflow.sampleBankCreationRequest?.samples).toEqual(samples);
-        await workflow.submitSampleBankCreation('Layered');
+        workflow.requestSampleBankAssignment(samples);
+        expect(workflow.sampleBankAssignmentRequest?.samples).toEqual(samples);
+        expect(workflow.sampleBankAssignmentRequest?.options).toEqual([]);
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'Layered' });
 
         expect(startSampleBankCreation).toHaveBeenCalledWith(7, {
             partitionIndex: 0,
@@ -123,7 +127,7 @@ describe('MutationWorkflow', () => {
         });
         expect(setWorkspaceView).toHaveBeenCalledWith('sample-banks');
         expect(clearSelection).toHaveBeenCalledOnce();
-        expect(workflow.sampleBankCreationRequest).toBeNull();
+        expect(workflow.sampleBankAssignmentRequest).toBeNull();
     });
 
     it('assigns selected Samples to an existing Sample Bank while retaining existing members', async () => {
@@ -193,7 +197,7 @@ describe('MutationWorkflow', () => {
                 }),
             ]),
         );
-        await workflow.submitSampleBankAssignment('bank-layered');
+        await workflow.submitSampleBankAssignment({ mode: 'existing', bankObjectId: 'bank-layered' });
 
         expect(startSampleBankAssignment).toHaveBeenCalledWith(7, {
             partitionIndex: 0,
@@ -207,7 +211,7 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankAssignmentRequest).toBeNull();
     });
 
-    it('blocks Sample Bank assignment when a selected Sample is assigned directly to a Program', () => {
+    it('blocks new and existing Sample Bank targets when a selected Sample is assigned directly to a Program', async () => {
         const selected = {
             id: 'sample-direct',
             objectId: 'sample-direct',
@@ -253,7 +257,9 @@ describe('MutationWorkflow', () => {
             ],
             membersForBank: () => [],
         };
-        const { workflow } = workflowWith({}, catalog);
+        const startSampleBankCreation = vi.fn();
+        const startSampleBankAssignment = vi.fn();
+        const { workflow } = workflowWith({ startSampleBankCreation, startSampleBankAssignment }, catalog);
         workflow.setCapabilities({
             volumeMutationsAvailable: true,
             partitionMutationsAvailable: true,
@@ -265,6 +271,10 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([
             { sampleName: 'Direct Sample', programName: '001: Lead' },
         ]);
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'New Bank' });
+        await workflow.submitSampleBankAssignment({ mode: 'existing', bankObjectId: 'bank-1' });
+        expect(startSampleBankCreation).not.toHaveBeenCalled();
+        expect(startSampleBankAssignment).not.toHaveBeenCalled();
     });
 
     it('does not block Sample Bank assignment for an unresolved Program row', () => {

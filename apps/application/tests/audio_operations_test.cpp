@@ -47,6 +47,7 @@ class AudioOperationsTest : public testing::Test {
         axk::Waveform waveform;
         waveform.format = {1U, 2U, 96'000U};
         waveform.frame_count = 3U;
+        waveform.root_key = 60U;
         waveform.pcm = {std::byte{}, std::byte{}, std::byte{0xe8}, std::byte{0x03}, std::byte{0x18}, std::byte{0xfc}};
         const auto path = root_ / filename;
         EXPECT_TRUE(axk::write_wav_atomic(path, waveform));
@@ -113,8 +114,8 @@ TEST_F(AudioOperationsTest, InspectsOwnedAudioUploadsWithSamplerConversionMetada
     EXPECT_EQ(result->at("samplerDefaults").at("loopMode"), 4U);
     EXPECT_EQ(result->at("samplerDefaults").at("loopStartFrame"), 0U);
     EXPECT_EQ(result->at("samplerDefaults").at("loopLengthFrames"), 0U);
-    EXPECT_EQ(result->at("samplerDefaults").at("pitchSource"), "DEFAULT");
-    EXPECT_EQ(result->at("samplerDefaults").at("rangeSource"), "DEFAULT");
+    EXPECT_EQ(result->at("samplerDefaults").at("pitchSource"), "WAV_SMPL");
+    EXPECT_EQ(result->at("samplerDefaults").at("rangeSource"), "WAV_INST");
     EXPECT_EQ(result->at("samplerDefaults").at("loopSource"), "DEFAULT");
     EXPECT_TRUE(result->at("valid").get<bool>());
     EXPECT_TRUE(result->at("issues").empty());

@@ -35,6 +35,25 @@ function transport(midiInspection = inspection()): ImageTransport {
     } as unknown as ImageTransport;
 }
 
+function destinationProps() {
+    return {
+        target: { kind: 'EXISTING_VOLUME' as const, partitionIndex: 1, volumeName: 'Songs' },
+        destinationMode: 'existing' as const,
+        destinationPartitionIndex: 1,
+        destinationVolumeName: 'Songs',
+        partitionOptions: [
+            { partitionIndex: 0, name: 'PARTITION 1' },
+            { partitionIndex: 1, name: 'PARTITION 2' },
+        ],
+        volumeOptions: [{ partitionIndex: 1, name: 'PARTITION 2', volumeName: 'Songs', label: 'PARTITION 2 / Songs' }],
+        destinationBusy: false,
+        ondestinationmode: vi.fn(),
+        ondestinationvolume: vi.fn(),
+        ondestinationpartition: vi.fn(),
+        ondestinationname: vi.fn(),
+    };
+}
+
 describe('MidiImportDialog', () => {
     it('offers the shared workspace and local source choices before staging files', async () => {
         const onchooseworkspace = vi.fn();
@@ -43,7 +62,7 @@ describe('MidiImportDialog', () => {
             props: {
                 transport: transport(),
                 files: [],
-                target: { partitionIndex: 0, volumeName: 'Songs' },
+                ...destinationProps(),
                 existingSequenceNames: [],
                 onchooseworkspace,
                 onchooselocal,
@@ -70,7 +89,7 @@ describe('MidiImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [workspaceFile],
-                target: { partitionIndex: 1, volumeName: 'Songs' },
+                ...destinationProps(),
                 existingSequenceNames: ['Demo Song'],
                 oncommit,
                 oncancel: vi.fn(),
@@ -96,7 +115,7 @@ describe('MidiImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [file],
-                target: { partitionIndex: 1, volumeName: 'Songs' },
+                ...destinationProps(),
                 existingSequenceNames: [],
                 oncommit,
                 oncancel,
@@ -138,7 +157,7 @@ describe('MidiImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [workspaceFile],
-                target: { partitionIndex: 1, volumeName: 'Songs' },
+                ...destinationProps(),
                 existingSequenceNames: [],
                 oncommit,
                 oncancel: vi.fn(),
@@ -170,7 +189,7 @@ describe('MidiImportDialog', () => {
             props: {
                 transport: imageTransport,
                 files: [workspaceFile],
-                target: { partitionIndex: 1, volumeName: 'Songs' },
+                ...destinationProps(),
                 existingSequenceNames: [],
                 oncommit,
                 oncancel: vi.fn(),
@@ -182,5 +201,62 @@ describe('MidiImportDialog', () => {
         await fireEvent.click(include);
         await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
         await waitFor(() => expect(oncommit).toHaveBeenCalledWith(expect.any(Array), 'preserve'));
+    });
+
+    it('uses the shared destination chooser without resetting edited Sequence names', async () => {
+        const workspaceFile = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'midi/Pattern.mid' },
+            'Yamaha/midi/Pattern.mid',
+        );
+        const props = destinationProps();
+        render(MidiImportDialog, {
+            props: {
+                transport: transport(),
+                files: [workspaceFile],
+                ...props,
+                existingSequenceNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        expect((screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).value).toBe('Songs');
+        const sequenceName = await screen.findByDisplayValue('Pattern');
+        await fireEvent.input(sequenceName, { target: { value: 'Edited' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+        expect(props.ondestinationmode).toHaveBeenCalledWith('create');
+        expect(screen.getByDisplayValue('Edited')).toBeTruthy();
+    });
+
+    it('keeps the destination autocomplete outside the scrolling MIDI content', async () => {
+        const workspaceFile = serverFileLocation(
+            { rootId: 'workspace', relativePath: 'midi/Pattern.mid' },
+            'Yamaha/midi/Pattern.mid',
+        );
+        const { container } = render(MidiImportDialog, {
+            props: {
+                transport: transport(),
+                files: [workspaceFile],
+                ...destinationProps(),
+                existingSequenceNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+
+        const destination = container.querySelector('.import-destination');
+        const scrollingContent = container.querySelector('.midi-import-body');
+        const dialog = container.querySelector('.midi-import-dialog');
+        expect(destination).toBeTruthy();
+        expect(scrollingContent).toBeTruthy();
+        expect(scrollingContent?.contains(destination)).toBe(false);
+        expect(dialog?.classList.contains('dialog-popovers-visible')).toBe(true);
+
+        const combobox = screen.getByRole('combobox', { name: 'Destination volume' });
+        await fireEvent.focus(combobox);
+        expect(screen.queryByRole('listbox', { name: 'Volumes' })).toBeNull();
+        await fireEvent.click(combobox);
+        expect(screen.getByRole('listbox', { name: 'Volumes' })).toBeTruthy();
     });
 });

@@ -6,6 +6,7 @@ import type {
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
     ImageSessionAudioExportResult,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionPackageExportResult,
     ImageSessionSequenceExportDestination,
     ImageSessionSequenceExportResult,
@@ -28,11 +29,19 @@ export interface AudioExportRequest {
     items: PackageExportSelection[];
     inspection: ImageSessionAudioExportInspection | null;
     format: 'SFZ' | 'WAV';
+    selectionMode: ImageSessionAudioExportSelectionMode;
+    destinationFlow: AudioExportDestinationFlow;
     loading: boolean;
     busy: boolean;
     jobId: number | null;
     progressLabel: string;
     error: string;
+}
+
+export type AudioExportDestinationFlow = 'CHOOSER' | 'DIRECT_COMPUTER';
+
+export function audioInspectionHasFatalIssues(inspection: ImageSessionAudioExportInspection | null): boolean {
+    return inspection?.issues.some((issue) => issue.fatal === true) ?? false;
 }
 
 export interface SequenceExportRequest {
@@ -211,14 +220,20 @@ export class ExportWorkflow {
         }
     }
 
-    async requestAudio(items: PackageExportSelection[]): Promise<void> {
+    private async requestAudioSelection(
+        items: PackageExportSelection[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
+        destinationFlow: AudioExportDestinationFlow,
+    ): Promise<void> {
         const sessionId = this.dependencies.sessionId();
         if (sessionId === null || items.length === 0) return;
         const generation = ++this.audioGeneration;
         this.audioRequest = {
             items: [...items],
             inspection: null,
-            format: 'SFZ',
+            format: selectionMode === 'SELECTED_AUDIO_OBJECTS' ? 'WAV' : 'SFZ',
+            selectionMode,
+            destinationFlow,
             loading: true,
             busy: false,
             jobId: null,
@@ -229,6 +244,7 @@ export class ExportWorkflow {
             const inspection = await this.dependencies.transport.inspectImageAudioExport(
                 sessionId,
                 imageSessionExportRoots(items),
+                selectionMode,
             );
             if (
                 generation !== this.audioGeneration ||
@@ -239,7 +255,7 @@ export class ExportWorkflow {
             this.audioRequest = {
                 ...this.audioRequest,
                 inspection,
-                format: inspection.sfzEligible ? 'SFZ' : 'WAV',
+                format: selectionMode === 'SELECTED_AUDIO_OBJECTS' || !inspection.sfzEligible ? 'WAV' : 'SFZ',
                 loading: false,
             };
         } catch (error) {
@@ -248,6 +264,37 @@ export class ExportWorkflow {
             this.audioRequest = { ...this.audioRequest, loading: false, error: message };
             this.dependencies.setStatus(message);
         }
+    }
+
+    async requestAudio(items: PackageExportSelection[]): Promise<void> {
+        await this.requestAudioSelection(items, 'DEPENDENCY_CLOSURE', 'CHOOSER');
+    }
+
+    async requestAudioToComputer(items: PackageExportSelection[]): Promise<void> {
+        await this.requestAudioSelection(items, 'DEPENDENCY_CLOSURE', 'DIRECT_COMPUTER');
+    }
+
+    private async requestWavSelection(
+        items: PackageExportSelection[],
+        destinationFlow: AudioExportDestinationFlow,
+    ): Promise<void> {
+        if (
+            items.length === 0 ||
+            !items.every((item) => item.kind === items[0]!.kind) ||
+            (items[0]!.kind !== 'SBNK' && items[0]!.kind !== 'SMPL')
+        ) {
+            this.dependencies.setStatus('Export WAV requires only Samples or only Wave Data');
+            return;
+        }
+        await this.requestAudioSelection(items, 'SELECTED_AUDIO_OBJECTS', destinationFlow);
+    }
+
+    async requestWav(items: PackageExportSelection[]): Promise<void> {
+        await this.requestWavSelection(items, 'CHOOSER');
+    }
+
+    async requestWavToComputer(items: PackageExportSelection[]): Promise<void> {
+        await this.requestWavSelection(items, 'DIRECT_COMPUTER');
     }
 
     async runAudio(
@@ -276,6 +323,7 @@ export class ExportWorkflow {
                     this.dependencies.transport.startImageAudioExport(
                         sessionId,
                         imageSessionExportRoots(request.items),
+                        request.selectionMode,
                         format,
                         destination,
                     ),
@@ -351,7 +399,7 @@ export class ExportWorkflow {
         const generation = this.audioGeneration;
         const selection = await this.dependencies.picker.chooseLocation(
             'save-directory',
-            'Export SFZ',
+            request.selectionMode === 'SELECTED_AUDIO_OBJECTS' ? 'Export WAV' : 'Export SFZ',
             [],
             request.inspection.defaultDirectoryName,
             {
@@ -372,7 +420,7 @@ export class ExportWorkflow {
         try {
             const destination = await selectLocalDirectoryExportDestination(
                 request.inspection.defaultDirectoryName,
-                'SFZ',
+                request.selectionMode === 'SELECTED_AUDIO_OBJECTS' ? 'WAV' : 'SFZ',
             );
             if (!destination) {
                 if (closeOnCancel) this.cancelAudio();

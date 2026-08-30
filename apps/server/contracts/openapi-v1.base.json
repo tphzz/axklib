@@ -256,16 +256,6 @@
         "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}, "409": {"description": "Archive transfer is still active"}}
       }
     },
-    "/images": {
-      "post": {
-        "operationId": "images.open",
-        "requestBody": {
-          "required": true,
-          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageOpenRequest"}}}
-        },
-        "responses": {"201": {"description": "Immutable metadata-only image session opened", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageSessionResponse"}}}}}
-      }
-    },
     "/images/{imageId}": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}}
@@ -3212,13 +3202,18 @@
           }
         }
       },
+      "ImageSessionAudioExportSelectionMode": {
+        "type": "string",
+        "enum": ["DEPENDENCY_CLOSURE", "SELECTED_AUDIO_OBJECTS"]
+      },
       "ImageSessionAudioExportInspectionRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "expectedRevision", "roots"],
+        "required": ["imageId", "expectedRevision", "selectionMode", "roots"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "expectedRevision": {"type": "integer", "minimum": 1},
+          "selectionMode": {"$ref": "#/components/schemas/ImageSessionAudioExportSelectionMode"},
           "roots": {
             "type": "array",
             "minItems": 1,
@@ -3231,7 +3226,7 @@
       "ImageSessionAudioExportInspection": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "revision", "rootCount", "programCount", "sampleBankCount", "sampleCount", "waveDataCount", "sfzFileCount", "sfzEligible", "defaultDirectoryName", "issues"],
+        "required": ["imageId", "revision", "rootCount", "programCount", "sampleBankCount", "sampleCount", "waveDataCount", "wavFileCount", "sfzFileCount", "sfzEligible", "defaultDirectoryName", "issues"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "revision": {"type": "integer", "minimum": 1},
@@ -3240,6 +3235,7 @@
           "sampleBankCount": {"type": "integer", "minimum": 0},
           "sampleCount": {"type": "integer", "minimum": 0},
           "waveDataCount": {"type": "integer", "minimum": 0},
+          "wavFileCount": {"type": "integer", "minimum": 0},
           "sfzFileCount": {"type": "integer", "minimum": 0},
           "sfzEligible": {"type": "boolean"},
           "defaultDirectoryName": {"type": "string", "minLength": 1},
@@ -3271,10 +3267,11 @@
       "ImageSessionAudioExportRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["imageId", "expectedRevision", "roots", "format", "destination"],
+        "required": ["imageId", "expectedRevision", "selectionMode", "roots", "format", "destination"],
         "properties": {
           "imageId": {"type": "string", "minLength": 1},
           "expectedRevision": {"type": "integer", "minimum": 1},
+          "selectionMode": {"$ref": "#/components/schemas/ImageSessionAudioExportSelectionMode"},
           "roots": {
             "type": "array",
             "minItems": 1,
@@ -3802,7 +3799,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "type": {
-            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "ASSIGN_SBAC_MEMBERS", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS", "IMPORT_TX16W_DISK_SET"],
+            "enum": ["DELETE_VOLUME", "INSERT_VOLUME", "DELETE_SBNK", "INSERT_SBNK", "INSERT_WAVEFORM", "DELETE_WAVEFORM", "RENAME_WAVEFORM", "RENAME_SBNK", "DELETE_SBAC", "INSERT_SBAC", "ASSIGN_SBAC_MEMBERS", "RENAME_SBAC", "DELETE_PROGRAM", "INSERT_PROGRAM", "RENAME_PROGRAM", "DELETE_SEQUENCE", "INSERT_SEQUENCE", "RENAME_SEQUENCE", "RENAME_VOLUME", "RENAME_PARTITION", "REPAIR_OBJECT_PLACEMENTS", "IMPORT_TX16W_DISK_SET", "CLEAR_PROGRAM_ASSIGNMENTS"],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
               "INSERT_VOLUME": "insert_volume",
@@ -3825,7 +3822,8 @@
               "RENAME_VOLUME": "rename_volume",
               "RENAME_PARTITION": "rename_partition",
               "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements",
-              "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set"
+              "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set",
+              "CLEAR_PROGRAM_ASSIGNMENTS": "clear_program_assignments"
             }
           },
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
@@ -4377,6 +4375,114 @@
             "minItems": 1,
             "maxItems": 128,
             "items": {"$ref": "#/components/schemas/ImageGeneratedProgram"}
+          }
+        }
+      },
+      "ImageProgramAssignmentCleanupInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "contentScopeId"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageProgramAssignmentCleanupCandidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["programObjectId", "programNumber", "programName", "assignmentOrdinal", "assignmentName", "targetObjectType", "receiveChannelDisplay", "reason", "candidateTargetCount", "defaultSelected"],
+        "properties": {
+          "programObjectId": {"type": "string", "minLength": 1},
+          "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
+          "programName": {"type": "string"},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentName": {"type": "string", "minLength": 1},
+          "targetObjectType": {"enum": ["SBAC", "SBNK"]},
+          "receiveChannelDisplay": {"type": "string"},
+          "reason": {"enum": ["MISSING_TARGET", "NONLOCAL_TARGET", "AMBIGUOUS_TARGET"]},
+          "candidateTargetCount": {"type": "integer", "minimum": 0},
+          "defaultSelected": {"const": true}
+        }
+      },
+      "ImageProgramAssignmentCleanupInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "revision", "contentScopeId", "totalCandidateCount", "candidates"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1},
+          "totalCandidateCount": {"type": "integer", "minimum": 0, "maximum": 2048},
+          "candidates": {
+            "type": "array",
+            "maxItems": 2048,
+            "items": {"$ref": "#/components/schemas/ImageProgramAssignmentCleanupCandidate"}
+          }
+        }
+      },
+      "ImageProgramAssignmentCleanupSelection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["programObjectId", "assignmentOrdinal"],
+        "properties": {
+          "programObjectId": {"type": "string", "minLength": 1},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15}
+        }
+      },
+      "ImageProgramAssignmentCleanupRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "contentScopeId", "assignments"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "contentScopeId": {"type": "string", "minLength": 1},
+          "assignments": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2048,
+            "items": {"$ref": "#/components/schemas/ImageProgramAssignmentCleanupSelection"}
+          }
+        }
+      },
+      "ImageCleanedProgramAssignment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["programObjectId", "programNumber", "programName", "assignmentOrdinal", "assignmentName"],
+        "properties": {
+          "programObjectId": {"type": "string", "minLength": 1},
+          "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
+          "programName": {"type": "string"},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentName": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageProgramAssignmentCleanupResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "kind", "imageId", "revision", "summary", "objectCount", "validation", "warnings", "applied", "operations", "cleanedAssignments"],
+        "properties": {
+          "schemaVersion": {"const": "1.0"},
+          "kind": {"const": "PROGRAM_ASSIGNMENT_CLEANUP"},
+          "imageId": {"type": "string", "minLength": 1},
+          "revision": {"type": "integer", "minimum": 2},
+          "summary": {"$ref": "#/components/schemas/AlterationSummary"},
+          "objectCount": {"type": "integer", "minimum": 0},
+          "validation": {"$ref": "#/components/schemas/ImageBuildResult/properties/validation"},
+          "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
+          "applied": {"const": true},
+          "operations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 128,
+            "items": {"$ref": "#/components/schemas/AlterationOperationReport"}
+          },
+          "cleanedAssignments": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2048,
+            "items": {"$ref": "#/components/schemas/ImageCleanedProgramAssignment"}
           }
         }
       },

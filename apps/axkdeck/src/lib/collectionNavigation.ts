@@ -2,6 +2,20 @@ import { tick } from 'svelte';
 
 import type { ObjectSelectionMode } from './objectSelection';
 
+export type CollectionRevealAlignment = 'nearest' | 'center';
+
+function collectionContainer(workspace: HTMLElement, collection: string): HTMLElement | undefined {
+    return [...workspace.querySelectorAll<HTMLElement>('[data-collection-list]')].find(
+        (candidate) => candidate.dataset.collectionList === collection,
+    );
+}
+
+function collectionTarget(container: HTMLElement, objectId: string): HTMLElement | undefined {
+    return [...container.querySelectorAll<HTMLElement>('[data-collection-object-id]')].find(
+        (candidate) => candidate.dataset.collectionObjectId === objectId,
+    );
+}
+
 export function linearNavigationIndex(
     key: string,
     currentIndex: number,
@@ -19,10 +33,10 @@ export function linearNavigationIndex(
     return targetIndex;
 }
 
-export function collectionPageStep(currentTarget: EventTarget | null, itemExtent?: number): number {
+export function collectionPageStep(currentTarget: EventTarget | null): number {
     const current = currentTarget instanceof HTMLElement ? currentTarget : null;
     const container = current?.closest<HTMLElement>('[data-navigation-list]');
-    const measuredExtent = itemExtent ?? current?.offsetHeight ?? 0;
+    const measuredExtent = current?.offsetHeight ?? 0;
     if (!container || container.clientHeight <= 0 || measuredExtent <= 0) return 1;
     return Math.max(1, Math.floor(container.clientHeight / measuredExtent) - 1);
 }
@@ -39,7 +53,6 @@ export function hasDisallowedNavigationModifier(event: KeyboardEvent): boolean {
 export async function focusCollectionIndex(
     currentTarget: EventTarget | null,
     targetIndex: number,
-    itemExtent?: number,
     listOffset = 0,
 ): Promise<void> {
     const current = currentTarget instanceof HTMLElement ? currentTarget : null;
@@ -50,21 +63,28 @@ export async function focusCollectionIndex(
     const container = listOffset === 0 ? currentContainer : lists[currentListIndex + listOffset];
     if (!container) return;
 
-    if (itemExtent !== undefined) {
-        const itemTop = targetIndex * itemExtent;
-        const itemBottom = itemTop + itemExtent;
-        const viewportBottom = container.scrollTop + container.clientHeight;
-        if (itemTop < container.scrollTop) container.scrollTop = itemTop;
-        else if (itemBottom > viewportBottom) {
-            container.scrollTop = Math.max(0, itemBottom - Math.max(container.clientHeight, itemExtent));
-        }
-        container.dispatchEvent(new Event('scroll'));
-    }
-
     await tick();
     const target = [...container.querySelectorAll<HTMLElement>('[data-navigation-index]')].find(
         (candidate) => Number(candidate.dataset.navigationIndex) === targetIndex,
     );
     target?.focus({ preventScroll: true });
-    if (itemExtent === undefined) target?.scrollIntoView?.({ block: 'nearest' });
+    target?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+}
+
+export async function revealCollectionObject(
+    workspace: HTMLElement,
+    collection: string,
+    objectId: string,
+    alignment: CollectionRevealAlignment = 'nearest',
+    focusTarget = false,
+): Promise<boolean> {
+    await tick();
+
+    const container = collectionContainer(workspace, collection);
+    if (!container) return false;
+    const target = collectionTarget(container, objectId);
+    if (!target) return false;
+    if (focusTarget) target.focus({ preventScroll: true });
+    target.scrollIntoView?.({ block: alignment, inline: 'nearest', behavior: 'auto' });
+    return true;
 }

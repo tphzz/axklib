@@ -1,9 +1,18 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageExportSelectionState } from '../objectSelection';
 import type { SamplerObject } from '../transport';
 import type { PackageExportObject } from '../types';
 import ObjectWorkspace from './ObjectWorkspace.svelte';
+
+const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+const objectSizeIdentitySource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/ObjectSizeIdentity.svelte'),
+    'utf8',
+);
 
 function object(objectType: string, name: string): SamplerObject {
     return {
@@ -72,7 +81,7 @@ describe('ObjectWorkspace', () => {
         expect(document.activeElement).toBe(rows()[2]);
     });
 
-    it('moves to the end of a virtualized Wave Data list and scrolls it into view', async () => {
+    it('moves to the end of a Wave Data list and reveals the rendered target', async () => {
         const waveData = Array.from({ length: 80 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
@@ -110,17 +119,17 @@ describe('ObjectWorkspace', () => {
         });
 
         const first = screen.getByRole('button', { name: 'Inspect SMP 001' });
-        const list = document.querySelector('.collection-body') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
+        const last = screen.getByRole('button', { name: 'Inspect SMP 080' });
+        last.scrollIntoView = vi.fn();
         first.focus();
         await fireEvent.keyDown(first, { key: 'End' });
 
         expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[79]);
-        expect(screen.getByRole('button', { name: 'Inspect SMP 080' })).toBe(document.activeElement);
-        expect(list.scrollTop).toBeGreaterThan(0);
+        expect(last).toBe(document.activeElement);
+        expect(last.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
     });
 
-    it('retains selection and focus across repeated paging in virtualized Wave Data', async () => {
+    it('retains selection and focus across repeated paging in Wave Data', async () => {
         const waveData = Array.from({ length: 80 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
@@ -158,7 +167,9 @@ describe('ObjectWorkspace', () => {
 
         const list = document.querySelector('.collection-body') as HTMLElement;
         Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
-        screen.getByRole('button', { name: 'Inspect SMP 001' }).focus();
+        const rows = screen.getAllByRole('button', { name: /^Inspect SMP/ });
+        for (const row of rows) Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 42 });
+        rows[0]!.focus();
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
         expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
@@ -177,8 +188,8 @@ describe('ObjectWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 080' }));
     });
 
-    it('mounts and scrolls a bounded window of Wave Data rows and canvases', async () => {
-        const waveData = Array.from({ length: 200 }, (_, index) => {
+    it('renders all Wave Data rows while mounting canvases only near the viewport', async () => {
+        const waveData = Array.from({ length: 2_000 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
                 ...object('SMPL', name),
@@ -203,22 +214,63 @@ describe('ObjectWorkspace', () => {
             };
         });
 
-        render(ObjectWorkspace, { props: { ...common, waveData, view: 'wave-data' } });
+        const observers: Array<{
+            callback: IntersectionObserverCallback;
+            options?: IntersectionObserverInit;
+            targets: Element[];
+        }> = [];
+        class TestIntersectionObserver {
+            private readonly record: (typeof observers)[number];
 
-        expect(screen.getByText('200 items')).toBeTruthy();
-        expect(document.querySelectorAll('.wave-data-row').length).toBeLessThan(60);
-        expect(document.querySelectorAll('.wave-data-row canvas').length).toBeLessThan(60);
-        expect(screen.getByRole('group', { name: 'SMP 001 Wave Data' })).toBeTruthy();
-        expect(screen.queryByRole('group', { name: 'SMP 200 Wave Data' })).toBeNull();
+            constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+                this.record = { callback, options, targets: [] };
+                observers.push(this.record);
+            }
 
-        const list = document.querySelector('.collection-body') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 420 });
-        list.scrollTop = 8_400;
-        await fireEvent.scroll(list);
+            observe(target: Element): void {
+                this.record.targets.push(target);
+            }
 
-        expect(screen.queryByRole('group', { name: 'SMP 001 Wave Data' })).toBeNull();
-        expect(screen.getByRole('group', { name: 'SMP 200 Wave Data' })).toBeTruthy();
-    });
+            unobserve(): void {}
+
+            disconnect(): void {}
+        }
+        vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
+        const onpreviewrequest = vi.fn();
+
+        try {
+            render(ObjectWorkspace, {
+                props: { ...common, waveData, view: 'wave-data', onpreviewrequest },
+            });
+
+            const rows = document.querySelectorAll<HTMLElement>('.wave-data-row');
+            expect(document.querySelector('.collection-toolbar')?.textContent).toContain('2000 items');
+            expect(rows).toHaveLength(2_000);
+            expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(0);
+            expect(rows[0]?.getAttribute('aria-label')).toBe('SMP 001 Wave Data');
+            expect(rows[1_999]?.getAttribute('aria-label')).toBe('SMP 2000 Wave Data');
+            expect(observers).toHaveLength(1);
+            expect(observers[0]!.options?.root).toBe(document.querySelector('.collection-body'));
+            expect(observers[0]!.targets).toHaveLength(2_000);
+
+            const observer = observers[0]!;
+            const lastTarget = observer.targets[1_999]!;
+            observer.callback(
+                [{ isIntersecting: true, target: lastTarget } as IntersectionObserverEntry],
+                observer as unknown as IntersectionObserver,
+            );
+            await waitFor(() => expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(1));
+            expect(onpreviewrequest).toHaveBeenCalledWith(waveData[1_999]);
+
+            observer.callback(
+                [{ isIntersecting: false, target: lastTarget } as IntersectionObserverEntry],
+                observer as unknown as IntersectionObserver,
+            );
+            await waitFor(() => expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(0));
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    }, 15_000);
 
     it('naturally orders the standalone Wave Data lane', () => {
         const wave2 = {
@@ -346,11 +398,42 @@ describe('ObjectWorkspace', () => {
         expect(document.querySelector('.object-code')).toBeNull();
         expect(document.querySelector('.program-keyboard')).toBeNull();
         expect(document.querySelector('.program-list')).toBeTruthy();
-        expect(document.querySelector('.program-row')).toBeTruthy();
+        const row = document.querySelector('.program-row');
+        expect(row).toBeTruthy();
+        expect(row?.querySelector('.object-slot')?.textContent).toBe('001');
+        expect(row?.querySelector('.program-identity .object-size-primary')?.textContent).toContain('Grand Piano');
+        expect(row?.querySelector('.program-identity .object-size-secondary')?.textContent).toBe(
+            '128 B · 4 KiB incl. deps.',
+        );
+        expect(row?.querySelector('.object-size-summary')).toBeNull();
         expect(screen.getByText('128 B · 4 KiB incl. deps.')).toBeTruthy();
         expect(document.querySelector('[title*="Object size with deps.: 4 KiB"]')).toBeTruthy();
         expect(document.querySelector('.object-card')).toBeNull();
         expect(screen.getByRole('searchbox', { name: 'Search Programs' })).toBeTruthy();
+
+        const listRule = appStyles.match(/\.program-list\s*\{[^}]+\}/)?.[0];
+        const rowRule = appStyles.match(/\.program-row\s*\{[^}]+\}/)?.[0];
+        const slotRule = appStyles.match(/\.program-row \.object-slot\s*\{[^}]+\}/)?.[0];
+        expect(listRule).toContain('gap: 0');
+        expect(listRule).toContain('padding: 2px 6px 5px');
+        expect(rowRule).toContain('height: var(--density-row)');
+        expect(rowRule).toContain('grid-template-columns: 30px minmax(0, 1fr)');
+        expect(rowRule).toContain('gap: 4px');
+        expect(rowRule).toContain('align-items: center');
+        expect(rowRule).toContain('padding: 0');
+        expect(rowRule).toContain('font: inherit');
+        expect(slotRule).toContain('padding: 3px 6px 1px');
+
+        const identityRule = appStyles.match(/\.program-identity\s*\{[^}]+\}/)?.[0];
+        const primaryRule = objectSizeIdentitySource.match(/\.object-size-primary strong\s*\{[^}]+\}/)?.[0];
+        const secondaryRule = objectSizeIdentitySource.match(/\.object-size-secondary\s*\{[^}]+\}/)?.[0];
+        expect(identityRule).toContain('font-size: 10px');
+        expect(identityRule).toContain('line-height: 10px');
+        expect(identityRule).toContain('padding: 2px 6px 2px 0');
+        expect(primaryRule).toContain('font-size: 10px');
+        expect(primaryRule).toContain('line-height: 10px');
+        expect(secondaryRule).toContain('font-size: 8.5px');
+        expect(secondaryRule).toContain('line-height: 9px');
     });
 
     it('keeps Program inspection fixed while modifier gestures update the exact selection', async () => {
@@ -430,7 +513,7 @@ describe('ObjectWorkspace', () => {
         });
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Grand/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         expect(onrenameobject).toHaveBeenCalledWith({
             kind: 'program',
             object: programObject,
@@ -502,6 +585,7 @@ describe('ObjectWorkspace', () => {
             onselectionchange,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([
@@ -518,7 +602,7 @@ describe('ObjectWorkspace', () => {
         ]);
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: /Piano/ }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 objects' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete 2 objects…' }));
         expect(ondeleteobjects).toHaveBeenCalledWith(onexportobjects.mock.calls[0]![0]);
     });
 
@@ -608,7 +692,7 @@ describe('ObjectWorkspace', () => {
         const waveform = document.querySelector('.wave-data-row canvas');
         expect(waveform).toBeTruthy();
         await fireEvent.contextMenu(waveform!);
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         expect(ondeleteobject).toHaveBeenCalledWith([
             {
                 kind: 'SMPL',
@@ -798,6 +882,55 @@ describe('ObjectWorkspace', () => {
         expect(screen.getByRole('menu')).toBeTruthy();
         await fireEvent.pointerDown(screen.getByRole('button', { name: 'Play SMP 001' }));
         expect(screen.queryByRole('menu')).toBeNull();
+    });
+
+    it('offers direct WAV export for Wave Data', async () => {
+        const waveObject = {
+            ...object('SMPL', 'SMP 001'),
+            sampleRate: 44_100,
+            sampleWidthBytes: 2,
+            frameCount: 1,
+        };
+        const waveData = {
+            id: waveObject.key,
+            objectKey: waveObject.key,
+            name: waveObject.name,
+            note: 'C3',
+            duration: '0.00 s',
+            sampleRate: '44.1 kHz',
+            bitDepth: '16-bit',
+            channels: 'Mono' as const,
+            storedSizeBytes: 2,
+            sizeWithDependenciesBytes: null,
+            waveform: [],
+            previewState: 'idle' as const,
+            object: waveObject,
+        };
+        const onexportwav = vi.fn();
+        render(ObjectWorkspace, {
+            props: {
+                ...common,
+                waveData: [waveData],
+                view: 'wave-data',
+                audioExportAvailable: true,
+                onexportwav,
+            },
+        });
+
+        await fireEvent.contextMenu(document.querySelector('.wave-data-row')!);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export WAV…' }));
+        expect(onexportwav).toHaveBeenCalledWith([
+            {
+                kind: 'SMPL',
+                objectId: waveObject.key,
+                name: waveObject.name,
+                typeLabel: 'Wave Data',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
+        ]);
     });
 
     it('delegates play and selection as one coordinated action', async () => {

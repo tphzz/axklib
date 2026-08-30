@@ -169,8 +169,10 @@ Json alteration_summary(std::span<const axk::OperationReport> operations);
 Json deletion_inspection_json(const ImageObjectDeletionInspection &inspection);
 Json wave_data_orphan_inspection_json(const ImageWaveDataOrphanInspection &inspection);
 Json program_generation_inspection_json(const ImageProgramGenerationInspection &inspection);
+Json program_assignment_cleanup_inspection_json(const ImageProgramAssignmentCleanupInspection &inspection);
 Json deletion_manifest_json(const axk::AlterationManifest &manifest);
 Json program_generation_manifest_json(const axk::AlterationManifest &manifest);
+Json program_assignment_cleanup_manifest_json(const axk::AlterationManifest &manifest);
 axk::Result<PreparedLocalBuildManifest> prepare_local_manifest_document(const std::filesystem::path &manifest_path,
                                                                         std::span<const std::filesystem::path> paths);
 

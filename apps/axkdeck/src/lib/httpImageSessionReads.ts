@@ -7,17 +7,21 @@ import type {
     ObjectPageFilter,
     OpenedImage,
     ImageValidationIssue,
+    ImageOpenOptions,
     RelationshipPage,
     RelationshipPageFilter,
     SystemProgramContexts,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
+    JobState,
 } from './transport';
 import type { ImageLocation } from './storageLocations';
 
 export class HttpImageSessionReads {
     protected constructor(protected readonly imageSessions: HttpImageSessions) {}
 
-    openImage(location: ImageLocation): Promise<OpenedImage> {
-        return this.imageSessions.open(location);
+    openImage(location: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage> {
+        return this.imageSessions.open(location, options);
     }
 
     keepImageAlive(sessionId: number): Promise<void> {
@@ -59,6 +63,21 @@ export class HttpImageSessionReads {
 
     allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
         return this.imageSessions.allocationMapReference(sessionId);
+    }
+
+    inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        return this.imageSessions.inspectProgramAssignmentCleanup(sessionId, contentScopeId);
+    }
+
+    startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        return this.imageSessions.startProgramAssignmentCleanup(sessionId, contentScopeId, assignments);
     }
 
     closeImage(sessionId: number): Promise<void> {

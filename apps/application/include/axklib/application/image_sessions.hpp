@@ -349,6 +349,38 @@ struct ImageProgramGenerationPlan {
     axk::AlterationManifest manifest;
 };
 
+struct ImageProgramAssignmentCleanupCandidate {
+    std::string program_object_id;
+    std::uint8_t program_number{};
+    std::string program_name;
+    std::uint8_t assignment_ordinal{};
+    std::string assignment_name;
+    std::string target_object_type;
+    std::string receive_channel_display;
+    std::string reason;
+    std::size_t candidate_target_count{};
+    bool default_selected{true};
+};
+
+struct ImageProgramAssignmentCleanupInspection {
+    std::string image_id;
+    std::uint64_t revision{};
+    std::string content_scope_id;
+    std::size_t total_candidate_count{};
+    std::vector<ImageProgramAssignmentCleanupCandidate> candidates;
+};
+
+struct ImageProgramAssignmentCleanupSelection {
+    std::string program_object_id;
+    std::uint8_t assignment_ordinal{};
+};
+
+struct ImageProgramAssignmentCleanupPlan {
+    ImageProgramAssignmentCleanupInspection inspection;
+    std::vector<ImageProgramAssignmentCleanupSelection> selections;
+    axk::AlterationManifest manifest;
+};
+
 struct ImageValidationItem {
     std::string code;
     std::string severity;
@@ -430,7 +462,8 @@ class ImageSessionManager {
     ImageSessionManager &operator=(const ImageSessionManager &) = delete;
 
     [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
-                                                   const CancellationToken &cancellation = {});
+                                                   const CancellationToken &cancellation = {},
+                                                   ProgressSink *progress = nullptr);
     [[nodiscard]] Result<ImageSessionSummary> attach_companions(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const CompanionSelection &selection,
@@ -451,6 +484,13 @@ class ImageSessionManager {
     plan_program_generation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                             std::string_view content_scope_id,
                             const std::vector<ImageProgramGenerationSelection> &selections);
+    [[nodiscard]] Result<ImageProgramAssignmentCleanupInspection>
+    inspect_program_assignment_cleanup(std::string_view image_id, std::string_view owner_id,
+                                       std::uint64_t expected_revision, std::string_view content_scope_id);
+    [[nodiscard]] Result<ImageProgramAssignmentCleanupPlan>
+    plan_program_assignment_cleanup(std::string_view image_id, std::string_view owner_id,
+                                    std::uint64_t expected_revision, std::string_view content_scope_id,
+                                    const std::vector<ImageProgramAssignmentCleanupSelection> &selections);
     [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
@@ -502,7 +542,7 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary>
     open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
                                 const std::vector<ImageSourceRef> &companion_sources,
-                                const CancellationToken &cancellation);
+                                const CancellationToken &cancellation, ProgressSink *progress);
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

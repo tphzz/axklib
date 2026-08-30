@@ -1,12 +1,11 @@
 import type {
     AudioImportItem,
     AudioImportGrouping,
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     JobState,
     AudioSourceInfo,
@@ -84,7 +83,7 @@ export class HttpImportOperations {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -104,7 +103,7 @@ export class HttpImportOperations {
 
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
@@ -180,7 +179,7 @@ function request(
 export function audioImportRequest(
     imageId: string,
     expectedRevision: number,
-    target: AudioImportDestination,
+    target: VolumeImportDestination,
     items: AudioImportItem[],
     grouping: AudioImportGrouping,
 ): ImportAlterationRequest {
@@ -299,21 +298,32 @@ export function sampleBankAssignmentRequest(
 export function sequenceImportRequest(
     imageId: string,
     expectedRevision: number,
-    target: SequenceImportTarget,
+    target: VolumeImportDestination,
     items: SequenceImportItem[],
     systemExclusivePolicy: SequenceSystemExclusivePolicy,
 ): ImportAlterationRequest {
-    const operations = items.map((item, index) => ({
-        id: `sequence-${index}`,
-        type: 'insert_sequence',
-        partition_index: target.partitionIndex,
-        volume_name: target.volumeName,
-        sequence: {
-            name: item.sequenceName,
-            midi_path: `sequence/import-${index}.mid`,
-            system_exclusive_policy: systemExclusivePolicy,
-        },
-    }));
+    const operations: Record<string, unknown>[] = [];
+    if (target.kind === 'CREATE_VOLUME') {
+        operations.push({
+            id: 'volume-midi-import',
+            type: 'insert_volume',
+            partition_index: target.partitionIndex,
+            volume: { name: target.volumeName, waveforms: [], samples: [] },
+        });
+    }
+    operations.push(
+        ...items.map((item, index) => ({
+            id: `sequence-${index}`,
+            type: 'insert_sequence',
+            partition_index: target.partitionIndex,
+            volume_name: target.volumeName,
+            sequence: {
+                name: item.sequenceName,
+                midi_path: `sequence/import-${index}.mid`,
+                system_exclusive_policy: systemExclusivePolicy,
+            },
+        })),
+    );
     const inputBindings = items.map((item, index) => ({
         manifestPath: `sequence/import-${index}.mid`,
         input: serverInput(item.source),

@@ -1,5 +1,5 @@
 import type { DiskTreeItem } from '../../lib/types';
-import type { PackageInspection } from '../../lib/transport';
+import type { PackageInspection, VolumeImportDestination } from '../../lib/transport';
 
 export type ImportDestinationMode = 'existing' | 'create';
 
@@ -19,10 +19,6 @@ export interface ImportDestinations {
     partitionItems: DiskTreeItem[];
     volumeItems: DiskTreeItem[];
 }
-
-export type ImportDestination =
-    | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
-    | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
 export function collectImportDestinations(sourceItems: readonly DiskTreeItem[]): ImportDestinations {
     const partitionItems: DiskTreeItem[] = [];
@@ -69,7 +65,7 @@ export function importDestination(
     mode: ImportDestinationMode,
     partitionIndex: number | null,
     rawVolumeName: string,
-): ImportDestination | null {
+): VolumeImportDestination | null {
     if (partitionIndex === null || rawVolumeName.length === 0) return null;
     if (
         mode === 'create' &&

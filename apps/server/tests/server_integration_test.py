@@ -1546,8 +1546,30 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                     }
                 },
             )
-            assert status == 201, opened
-            image_id = str(opened["data"]["imageId"])
+            assert status == 202, opened
+            opened_job_id = str(opened["data"]["jobId"])
+            opened_job = wait_for_job(port, opened_job_id, process)
+            assert opened_job["state"] == "COMPLETED", opened_job
+            retained_after = opened_job["latestSequence"] - 3
+            status, opened_events = http_request(
+                port,
+                "GET",
+                f"/api/v1/jobs/{opened_job_id}/events?afterSequence={retained_after}",
+            )
+            assert status == 200, opened_events
+            opened_progress = [
+                event["progress"]
+                for event in opened_events["data"]["events"]
+                if event["type"] == "progress"
+            ]
+            assert opened_progress, opened_events
+            assert opened_progress[-1]["completed"] == opened_progress[-1]["total"]
+            assert opened_progress[-1]["message"] == "Image session ready"
+            image_id = str(opened_job["result"]["imageId"])
+            status, opened_image = http_request(
+                port, "GET", f"/api/v1/images/{image_id}"
+            )
+            assert status == 200, opened_image
             status, workspace_snapshot = http_request(
                 port, "GET", "/api/v1/workspaces"
             )
@@ -1606,9 +1628,9 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 409, in_use
             assert in_use["error"]["code"] == "entry_in_use"
-            assert opened["data"]["format"] == "sfs"
-            assert opened["data"]["revision"] == 1
-            assert opened["data"]["availableOperations"] == [
+            assert opened_image["data"]["format"] == "sfs"
+            assert opened_image["data"]["revision"] == 1
+            assert opened_image["data"]["availableOperations"] == [
                 "images.content",
                 "images.objects",
                 "images.relationships",
@@ -1629,8 +1651,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.deletion.orphans.inspect",
                 "images.programs.generate.inspect",
                 "images.programs.generate",
+                "images.program_assignments.cleanup.inspect",
+                "images.program_assignments.cleanup",
             ]
-            assert opened["data"]["objectCount"] > 0
+            assert opened_image["data"]["objectCount"] > 0
             status, missing_system_partition = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/system-program-contexts"
             )

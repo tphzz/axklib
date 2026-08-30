@@ -1,8 +1,13 @@
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <ranges>
+#include <span>
+#include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -13,6 +18,27 @@ namespace {
 std::filesystem::path fixture() {
     return std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
                                                     "HD00_512_single_sbnk_authored.hds";
+}
+
+std::uint32_t wav_le32(std::span<const char> bytes, std::size_t offset) {
+    std::uint32_t result{};
+    for (std::size_t index = 0U; index < 4U; ++index) {
+        result |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[offset + index])) << (index * 8U);
+    }
+    return result;
+}
+
+std::size_t wav_chunk_offset(std::span<const char> bytes, std::string_view id) {
+    for (std::size_t offset = 12U; offset + 8U <= bytes.size();) {
+        if (id.size() == 4U && std::equal(id.begin(), id.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset)))
+            return offset;
+        const auto payload_size = static_cast<std::size_t>(wav_le32(bytes, offset + 4U));
+        const auto padded_size = payload_size + payload_size % 2U;
+        if (padded_size > bytes.size() - offset - 8U)
+            break;
+        offset += 8U + padded_size;
+    }
+    return bytes.size();
 }
 
 } // namespace
@@ -279,6 +305,126 @@ TEST(AudioExport, PreflightsExistingTargetsBeforeWritingAnyAudio) {
     std::filesystem::remove_all(output, error);
 }
 
+TEST(AudioExport, WritesSelectedSampleAsOneFlatInterleavedStereoWav) {
+    axk::Waveform left;
+    left.format = {1, 2, 44'100};
+    left.frame_count = 4;
+    left.pcm = {std::byte{1}, std::byte{0}, std::byte{2}, std::byte{0},
+                std::byte{5}, std::byte{0}, std::byte{6}, std::byte{0}};
+    auto right = left;
+    right.pcm = {std::byte{3}, std::byte{0}, std::byte{4}, std::byte{0},
+                 std::byte{7}, std::byte{0}, std::byte{8}, std::byte{0}};
+
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Stereo Sample";
+    sample.key_low = 36U;
+    sample.key_high = 84U;
+    sample.decoded.velocity_range_low = 12U;
+    sample.decoded.velocity_range_high = 110U;
+    sample.decoded.loop_mode = 1U;
+    sample.decoded.left.root_key = 60U;
+    sample.decoded.left.fine_tune_cents = -25;
+    sample.decoded.left.wave_length_frames = 4U;
+    sample.decoded.left.loop_start_frame = 1U;
+    sample.decoded.left.loop_length_frames = 2U;
+    sample.decoded.right = sample.decoded.left;
+    sample.members = {
+        {"left", "left", "SMPL/Left.wav", axk::RelationshipQuality::known},
+        {"right", "right", "SMPL/Right.wav", axk::RelationshipQuality::known},
+    };
+    axk::VolumeExport volume;
+    volume.waveforms = {
+        {"left", "Left", "SMPL/Left.wav", left},
+        {"right", "Right", "SMPL/Right.wav", right},
+    };
+    volume.samples = {sample};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-stereo-wav-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::sample, {"sample"}}, output);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->written_files.size(), 1U);
+    EXPECT_EQ(result->written_files.front().filename(), "Stereo Sample.wav");
+
+    std::ifstream input{result->written_files.front(), std::ios::binary};
+    const std::vector<char> bytes{std::istreambuf_iterator<char>{input}, {}};
+    const auto smpl = wav_chunk_offset(bytes, "smpl");
+    const auto inst = wav_chunk_offset(bytes, "inst");
+    const auto data = wav_chunk_offset(bytes, "data");
+    ASSERT_LT(smpl, bytes.size());
+    ASSERT_LT(inst, bytes.size());
+    ASSERT_LT(data, bytes.size());
+    EXPECT_EQ(static_cast<unsigned char>(bytes[22]), 2U);
+    EXPECT_EQ(wav_le32(bytes, smpl + 16U), 22'675U);
+    EXPECT_EQ(wav_le32(bytes, smpl + 36U), 1U);
+    EXPECT_EQ(wav_le32(bytes, smpl + 52U), 1U);
+    EXPECT_EQ(wav_le32(bytes, smpl + 56U), 2U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[inst + 8U]), 60U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[inst + 11U]), 36U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[inst + 12U]), 84U);
+    EXPECT_EQ(wav_le32(bytes, data + 4U), 16U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[data + 8U]), 1U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[data + 10U]), 3U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[data + 12U]), 2U);
+    EXPECT_EQ(static_cast<unsigned char>(bytes[data + 14U]), 4U);
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, WritesOnlyTheSelectedWaveDataAndUsesDeterministicNameSuffixes) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::VolumeExport volume;
+    volume.waveforms = {
+        {"first", "Same", "SMPL/First.wav", waveform},
+        {"second", "Same", "SMPL/Second.wav", waveform},
+        {"excluded", "Excluded", "SMPL/Excluded.wav", waveform},
+    };
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-wave-data-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result =
+        axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::wave_data, {"first", "second"}}, output);
+    ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->written_files.size(), 2U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / "Same.wav"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(output / "Same (2).wav"));
+    EXPECT_FALSE(std::filesystem::exists(output / "Excluded.wav"));
+    std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, RejectsSelectedSampleWithoutExactWaveDataMembersBeforeWriting) {
+    axk::Waveform waveform;
+    waveform.format = {1, 2, 44'100};
+    waveform.frame_count = 1;
+    waveform.pcm = {std::byte{}, std::byte{}};
+    axk::SampleExport sample;
+    sample.object_key = "sample";
+    sample.display_name = "Tentative Sample";
+    sample.members = {{"left", "wave", "SMPL/Wave.wav", axk::RelationshipQuality::likely}};
+    axk::VolumeExport volume;
+    volume.waveforms = {{"wave", "Wave", "SMPL/Wave.wav", waveform}};
+    volume.samples = {sample};
+    axk::ExportPlan plan;
+    plan.volumes = {volume};
+
+    const auto output = std::filesystem::temp_directory_path() / "axklib-selected-invalid-sample-test";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto result = axk::write_selected_wav_audio(plan, {axk::SelectedWavExportKind::sample, {"sample"}}, output);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::relationship_unresolved);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
 TEST(AudioExport, WritesSharedIdenticalTargetOnceAndRejectsDistinctCollisionBeforeOutput) {
     axk::Waveform waveform;
     waveform.format = {1, 2, 44100};
@@ -369,7 +515,7 @@ TEST(AudioExport, UsesEachSamplesPlaybackWindowAndLoopPolicyForSharedWaveData) {
     second.decoded.left.wave_length_frames = 20;
     second.decoded.left.loop_start_frame = 65;
     second.decoded.left.loop_length_frames = 5;
-    second.decoded.loop_mode = 1;
+    second.decoded.loop_mode = 2;
 
     axk::VolumeExport volume;
     volume.relative_root = "volume";
@@ -383,6 +529,8 @@ TEST(AudioExport, UsesEachSamplesPlaybackWindowAndLoopPolicyForSharedWaveData) {
     std::filesystem::remove_all(output, error);
     const auto result = axk::write_sfz(plan, output);
     ASSERT_TRUE(result) << result.error().message;
+    ASSERT_EQ(result->warnings.size(), 1U);
+    EXPECT_NE(result->warnings.front().find("release-tail looping"), std::string::npos);
     std::ifstream first_input{output / "volume/First.sfz"};
     const std::string first_text{std::istreambuf_iterator<char>{first_input}, {}};
     EXPECT_NE(first_text.find("offset=20 end=59 loop_mode=one_shot"), std::string::npos);

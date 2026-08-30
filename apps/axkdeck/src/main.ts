@@ -10,8 +10,8 @@ import {
 } from './lib/interfaceScale';
 import { prepareServerConnection, prepareStartup } from './lib/startupCoordinator';
 import { frontendStartup, type StartupView } from './lib/startupDiagnostics';
-import { revealAfterInterfaceScale } from './lib/startupVisibility';
-import { createTauriInterfaceScaleAdapter } from './lib/tauriInterfaceScale';
+import { revealAfterInterfaceScale, waitForVisibleScaleCommit } from './lib/startupVisibility';
+import { createTauriInterfaceScaleAdapter, showCurrentTauriWindow } from './lib/tauriInterfaceScale';
 
 type ServerConnection = NonNullable<Window['__AXKLIB_SERVER__']>;
 type AppModule = typeof import('./App.svelte');
@@ -89,8 +89,13 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
             reportDiagnostic('interface_scale_initialization_failed', { message: String(error) }, 'warn');
         }
     })().finally(() => frontendStartup.markInterfaceScaleComplete());
-    const shellFirstFrame = revealAfterInterfaceScale(interfaceScalingReady, () =>
-        frontendStartup.waitForShellFirstFrame(),
+    const shellFirstFrame = revealAfterInterfaceScale(
+        interfaceScalingReady,
+        () => frontendStartup.waitForShellFirstFrame(),
+        {
+            showWindow: isDesktop ? showCurrentTauriWindow : undefined,
+            waitForScaleCommit: isDesktop ? waitForVisibleScaleCommit : undefined,
+        },
     );
 
     const view: StartupView =

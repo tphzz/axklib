@@ -33,6 +33,7 @@
         WorkspaceView,
     } from '../../lib/types';
     import type { ObjectSelectionMode, PackageExportSelectionState } from '../../lib/objectSelection';
+    import { revealCollectionObject } from '../../lib/collectionNavigation';
     import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../lib/desktopBuildInfo';
 
     interface WorkspaceTab {
@@ -77,6 +78,7 @@
         objectDeletionAvailable: boolean;
         waveDataCleanupAvailable: boolean;
         programGenerationAvailable: boolean;
+        programAssignmentCleanupAvailable: boolean;
         packageImportAvailable: boolean;
         packageExportAvailable: boolean;
         volumePackageExportAvailable: boolean;
@@ -98,10 +100,12 @@
         selectWorkspace: (view: WorkspaceView) => void;
         exportPackage: (items: PackageExportObject[]) => void;
         exportAudio: (items: PackageExportSelection[]) => void;
+        exportWav: (items: PackageExportSelection[]) => void;
         exportMidi: (items: PackageExportObject[]) => void;
         deleteObjects: (items: PackageExportObject[]) => void;
         cleanupWaveData: () => void;
         generatePrograms: () => void;
+        cleanupProgramAssignments: () => void;
         clearSelection: () => void;
         selectionChanged: (selection: PackageExportSelectionState) => void;
         selectionLimit: () => void;
@@ -143,6 +147,7 @@
         objectDeletionAvailable,
         waveDataCleanupAvailable,
         programGenerationAvailable,
+        programAssignmentCleanupAvailable,
         packageImportAvailable,
         packageExportAvailable,
         volumePackageExportAvailable,
@@ -164,10 +169,12 @@
         selectWorkspace,
         exportPackage,
         exportAudio,
+        exportWav,
         exportMidi,
         deleteObjects,
         cleanupWaveData,
         generatePrograms,
+        cleanupProgramAssignments,
         clearSelection,
         selectionChanged,
         selectionLimit,
@@ -288,6 +295,17 @@
         catalog.editorObjectIds.programs = '';
     }
 
+    async function navigateInspectorRelationship(objectId: string, focusTarget: boolean): Promise<void> {
+        clearSelection();
+        const view = await audition.navigateToObject(objectId);
+        if (!view) return;
+        if (view === 'programs') {
+            programPresentation = 'single';
+            selectedMultiPart = null;
+        }
+        await revealCollectionObject(mainStage, view, objectId, 'center', focusTarget);
+    }
+
     async function openAbout(): Promise<void> {
         aboutDialogOpen = true;
         if (cachedDesktopBuildInfo) {
@@ -394,7 +412,7 @@
         class:has-audition-bar={auditionAvailable}
         class="main-stage"
         style:--split-position={`${splitRatio * 100}%`}
-        data-import-drop-main={audioImport.activeTarget() || sequenceImport.activeTarget() ? 'true' : undefined}
+        data-import-drop-main={audioImport.dropAvailable() || sequenceImport.dropAvailable() ? 'true' : undefined}
     >
         {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
             <ContainedObjectWorkspace
@@ -428,10 +446,9 @@
                 preparingObjectId={audition.state.status === 'preparing' ? audition.state.objectId : null}
                 auditionableSampleIds={audition.auditionableSampleObjectIds}
                 auditionableSampleBankIds={audition.auditionableSampleBankObjectIds}
+                stereoSampleIds={audition.stereoSampleObjectIds}
                 objectRenameAvailable={mutation.objectRenameAvailable}
                 onrenameobject={(target) => mutation.requestObjectRename(target)}
-                sampleBankCreationAvailable={mutation.objectRenameAvailable}
-                oncreatesamplebank={(selectedSamples) => mutation.requestSampleBankCreation(selectedSamples)}
                 sampleBankAssignmentAvailable={mutation.objectRenameAvailable}
                 onassignsamplebank={(selectedSamples) => mutation.requestSampleBankAssignment(selectedSamples)}
                 {objectDeletionAvailable}
@@ -440,6 +457,7 @@
                 onexportobjects={exportPackage}
                 {audioExportAvailable}
                 onexportaudio={exportAudio}
+                onexportwav={exportWav}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}
@@ -463,7 +481,7 @@
                 onexportobjects={exportPackage}
                 {sequenceExportAvailable}
                 onexportmidi={exportMidi}
-                sequenceImportAvailable={mutation.objectRenameAvailable && sequenceImport.activeTarget() !== null}
+                sequenceImportAvailable={sequenceImport.dropAvailable()}
                 onimportmidi={importMidi}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
@@ -489,6 +507,8 @@
                 ondeleteobjects={deleteObjects}
                 programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
                 onprogramgeneration={generatePrograms}
+                programAssignmentCleanupAvailable={programAssignmentCleanupAvailable && catalog.activeVolumeId !== ''}
+                onprogramassignmentcleanup={cleanupProgramAssignments}
                 {packageExportAvailable}
                 onexportobjects={exportPackage}
                 selection={packageSelection}
@@ -525,6 +545,7 @@
                 onexportobjects={exportPackage}
                 {audioExportAvailable}
                 onexportaudio={exportAudio}
+                onexportwav={exportWav}
                 selection={packageSelection}
                 onselectionchange={selectionChanged}
                 onselectionlimit={selectionLimit}
@@ -571,6 +592,8 @@
             selection={inspectorSelection}
             playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
             playheadFrame={audition.state.playheadFrame}
+            onrelationshipnavigate={(objectId, focusTarget) =>
+                void navigateInspectorRelationship(objectId, focusTarget)}
         />
     {/if}
     <footer class="status-bar">

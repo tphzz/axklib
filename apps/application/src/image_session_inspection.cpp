@@ -48,6 +48,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         available_operations.emplace_back("images.deletion.orphans.inspect");
         available_operations.emplace_back("images.programs.generate.inspect");
         available_operations.emplace_back("images.programs.generate");
+        available_operations.emplace_back("images.program_assignments.cleanup.inspect");
+        available_operations.emplace_back("images.program_assignments.cleanup");
     }
     return ImageSessionSummary{.image_id = (*session)->image_id,
                                .revision = (*session)->revision,

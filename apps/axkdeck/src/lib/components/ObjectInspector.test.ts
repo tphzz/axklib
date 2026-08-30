@@ -315,11 +315,17 @@ describe('ObjectInspector', () => {
 
     it('keeps the inspector visible without a selection', () => {
         render(ObjectInspector, { props: { selection: null } });
-        expect(screen.getByRole('complementary', { name: 'Object inspector' })).toBeTruthy();
-        expect(screen.getByRole('heading', { name: 'Object details' })).toBeTruthy();
+        const inspector = screen.getByRole('complementary', { name: 'Object inspector' });
+        const heading = screen.getByRole('heading', { name: 'Object details' });
+        expect(inspector).toBeTruthy();
+        expect(heading).toBeTruthy();
         const emptyState = screen.getByText('No object selected');
         expect(emptyState.classList.contains('empty-copy')).toBe(true);
         expect(emptyState.closest('.inspector-empty')?.querySelector('svg')).toBeNull();
+        const body = inspector.querySelector('.inspector-body');
+        expect(body).toBeTruthy();
+        expect(body?.contains(emptyState)).toBe(true);
+        expect(body?.contains(heading)).toBe(false);
     });
 
     it('keeps playback controls out of the inspector', () => {

@@ -9,7 +9,7 @@ import type {
     AudioImportGrouping,
     AudioImportItem,
     AudioImportCapabilities,
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
@@ -27,6 +27,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
     ImageSessionMediaConversionInspection,
@@ -53,7 +54,6 @@ import type {
     PlacementRepairScope,
     PreviewEnvelope,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
     Tx16wImportInspection,
@@ -175,7 +175,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -190,7 +190,7 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
@@ -311,16 +311,18 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection> {
-        return this.packages.inspectAudioExport(sessionId, roots);
+        return this.packages.inspectAudioExport(sessionId, roots, selectionMode);
     }
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
-        return this.packages.startAudioExport(sessionId, roots, format, destination);
+        return this.packages.startAudioExport(sessionId, roots, selectionMode, format, destination);
     }
     startImageSequenceExport(
         sessionId: number,

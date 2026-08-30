@@ -2,7 +2,7 @@ import type {
     AudioImportGrouping,
     AllocationMapReference,
     AudioImportItem,
-    AudioImportDestination,
+    VolumeImportDestination,
     AudioImportTarget,
     AudioSourceInfo,
     AudioImportCapabilities,
@@ -21,6 +21,7 @@ import type {
     ImageSessionExportRoot,
     ImageSessionAudioExportDestination,
     ImageSessionAudioExportInspection,
+    ImageSessionAudioExportSelectionMode,
     ImageSessionSequenceExportDestination,
     ImageSessionMediaConversionDestination,
     ImageSessionExtentLayoutRepairDestination,
@@ -43,6 +44,8 @@ import type {
     PackageRename,
     ProgramGenerationInspection,
     ProgramGenerationSelection,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
     RetainedDownload,
     PartitionMutation,
     PlanSummary,
@@ -55,7 +58,6 @@ import type {
     SampleBankAssignment,
     SampleBankCreation,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
     MidiInspection,
     Tx16wImportInspection,
@@ -95,6 +97,7 @@ export interface InMemoryImageTransportOptions {
         | 'objectDeletionAvailable'
         | 'waveDataCleanupAvailable'
         | 'programGenerationAvailable'
+        | 'programAssignmentCleanupAvailable'
         | 'packageImportAvailable'
         | 'packageExportAvailable'
         | 'volumePackageExportAvailable'
@@ -112,6 +115,7 @@ export interface InMemoryImageTransportOptions {
         objectDeletionAvailable?: boolean;
         waveDataCleanupAvailable?: boolean;
         programGenerationAvailable?: boolean;
+        programAssignmentCleanupAvailable?: boolean;
         packageImportAvailable?: boolean;
         packageExportAvailable?: boolean;
         volumePackageExportAvailable?: boolean;
@@ -182,6 +186,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
+            programAssignmentCleanupAvailable: this.options.opened.programAssignmentCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -210,6 +215,7 @@ export class InMemoryImageTransport implements ImageTransport {
             objectDeletionAvailable: this.options.opened.objectDeletionAvailable ?? false,
             waveDataCleanupAvailable: this.options.opened.waveDataCleanupAvailable ?? false,
             programGenerationAvailable: this.options.opened.programGenerationAvailable ?? false,
+            programAssignmentCleanupAvailable: this.options.opened.programAssignmentCleanupAvailable ?? false,
             packageImportAvailable: this.options.opened.packageImportAvailable ?? false,
             packageExportAvailable: this.options.opened.packageExportAvailable ?? false,
             volumePackageExportAvailable: this.options.opened.volumePackageExportAvailable ?? false,
@@ -333,6 +339,21 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startProgramGeneration', [sessionId, contentScopeId, programs]);
     }
 
+    inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        return this.invoke('inspectProgramAssignmentCleanup', [sessionId, contentScopeId]);
+    }
+
+    startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        return this.invoke('startProgramAssignmentCleanup', [sessionId, contentScopeId, assignments]);
+    }
+
     async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
         this.calls.push('preview');
         const configured = this.options.operations?.preview;
@@ -393,7 +414,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState> {
@@ -410,7 +431,7 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState> {
@@ -551,17 +572,19 @@ export class InMemoryImageTransport implements ImageTransport {
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection> {
-        return this.invoke('inspectImageAudioExport', [sessionId, roots]);
+        return this.invoke('inspectImageAudioExport', [sessionId, roots, selectionMode]);
     }
 
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState> {
-        return this.invoke('startImageAudioExport', [sessionId, roots, format, destination]);
+        return this.invoke('startImageAudioExport', [sessionId, roots, selectionMode, format, destination]);
     }
 
     deleteRetainedPackage(download: RetainedDownload): Promise<void> {

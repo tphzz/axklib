@@ -327,6 +327,16 @@ describe('TreeNode', () => {
         expect(treeNodeSource).toContain('.tree-item-select:focus-visible ~ .tree-item-tooltip');
     });
 
+    it('delays pointer tooltips without delaying keyboard focus or dismissal', () => {
+        expect(treeNodeSource).toMatch(
+            /\.tree-row:hover\s*>\s*\.tree-item-stack\s*>\s*\.tree-item-tooltip\s*\{[^}]*transition-delay:\s*500ms;/s,
+        );
+        expect(treeNodeSource).toMatch(
+            /\.tree-item-select:focus-visible\s*~\s*\.tree-item-tooltip\s*\{[^}]*transition-delay:\s*0ms;/s,
+        );
+        expect(treeNodeSource).toMatch(/\.tree-item-tooltip\s*\{[^}]*transition-delay:\s*0ms;/s);
+    });
+
     it('opens volume actions from pointer and keyboard context requests', async () => {
         const onrequestmenu = vi.fn();
         render(TreeNode, {

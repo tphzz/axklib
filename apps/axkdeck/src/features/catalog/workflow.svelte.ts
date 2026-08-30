@@ -1,4 +1,5 @@
 import { objectPresentationName } from '../../lib/objectPresentation';
+import { inspectorRelationshipGroups, type InspectorRelationshipObject } from '../../lib/inspectorRelationships';
 import { collectPages } from '../../lib/pagination';
 import { programSampleSelectRows } from '../../lib/programSampleSelect';
 import { isConfirmedRelationship } from '../../lib/relationshipResolution';
@@ -128,6 +129,7 @@ export class CatalogWorkflow {
     }
 
     selectionForObject(objectId: string, displayedBankMemberId = ''): InspectorSelection {
+        const relationships = inspectorRelationshipGroups(objectId, this.relationships, this.relationshipObjects());
         const program = this.programs.find((item) => item.objectId === objectId);
         if (program) {
             const assignments = this.assignmentsForProgram(program.objectId);
@@ -136,6 +138,7 @@ export class CatalogWorkflow {
                 program,
                 assignments,
                 sampleSelect: programSampleSelectRows(assignments, this.sampleBanks, this.samples),
+                relationships,
             };
         }
         const bank = this.sampleBanks.find((item) => item.objectId === objectId);
@@ -150,6 +153,7 @@ export class CatalogWorkflow {
                 members,
                 memberPreviews: members.map((member) => this.sampleWaveformPreview(member)),
                 displayedMemberId,
+                relationships,
             };
         }
         const sample = this.samples.find((item) => item.objectId === objectId);
@@ -159,12 +163,44 @@ export class CatalogWorkflow {
                 item: sample,
                 memberships: this.banksForSample(sample.objectId),
                 preview: this.sampleWaveformPreview(sample),
+                relationships,
             };
         }
         const sequence = this.sequences.find((item) => item.objectId === objectId);
-        if (sequence) return { kind: 'sequence', sequence };
+        if (sequence) return { kind: 'sequence', sequence, relationships };
         const waveform = this.waveData.find((item) => item.objectKey === objectId);
-        return waveform ? { kind: 'wave-data', waveData: waveform } : null;
+        return waveform ? { kind: 'wave-data', waveData: waveform, relationships } : null;
+    }
+
+    private relationshipObjects(): InspectorRelationshipObject[] {
+        return [
+            ...this.programs.map((item) => ({
+                objectId: item.objectId,
+                objectType: 'PROG' as const,
+                name: `${item.slot}: ${item.name}`,
+                sortIndex: item.programNumber,
+            })),
+            ...this.sampleBanks.map((item) => ({
+                objectId: item.objectId,
+                objectType: 'SBAC' as const,
+                name: item.name,
+            })),
+            ...this.samples.map((item) => ({
+                objectId: item.objectId,
+                objectType: 'SBNK' as const,
+                name: item.name,
+            })),
+            ...this.waveData.map((item) => ({
+                objectId: item.objectKey,
+                objectType: 'SMPL' as const,
+                name: item.name,
+            })),
+            ...this.sequences.map((item) => ({
+                objectId: item.objectId,
+                objectType: 'SEQU' as const,
+                name: item.name,
+            })),
+        ];
     }
 
     async loadVolume(volumeId: string, partitionIndex: number | null = this.activePartitionIndex): Promise<void> {

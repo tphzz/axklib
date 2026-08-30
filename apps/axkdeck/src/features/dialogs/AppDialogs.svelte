@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import type { DeletionWorkflow } from '../deletion/workflow.svelte';
-    import type { PickerRequest, PickerSelection } from './picker';
-    import type { ExportWorkflow } from '../export/workflow.svelte';
+    import type { PickerRequest } from './picker';
+    import { audioInspectionHasFatalIssues, type ExportWorkflow } from '../export/workflow.svelte';
     import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
     import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
     import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
@@ -14,10 +14,10 @@
     import type { Tx16wImportWorkflow } from '../import/tx16wWorkflow.svelte';
     import type { MutationWorkflow } from '../mutation/workflow.svelte';
     import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
+    import type { ProgramAssignmentCleanupWorkflow } from '../program-assignment-cleanup/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
     import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
-    import CreateSampleBankDialog from '../../lib/components/CreateSampleBankDialog.svelte';
     import AssignSampleBankDialog from '../../lib/components/AssignSampleBankDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
@@ -29,12 +29,12 @@
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
+    import ProgramAssignmentCleanupDialog from '../../lib/components/ProgramAssignmentCleanupDialog.svelte';
     import MidiExportDialog from '../../lib/components/MidiExportDialog.svelte';
     import MidiImportDialog from '../../lib/components/MidiImportDialog.svelte';
     import Tx16wImportDialog from '../../lib/components/Tx16wImportDialog.svelte';
     import MediaExportDialog from '../../lib/components/MediaExportDialog.svelte';
     import ServerConnectionSettings from '../../lib/components/ServerConnectionSettings.svelte';
-    import ServerStoragePicker from '../../lib/components/ServerStoragePicker.svelte';
     import SfzExportDialog from '../../lib/components/SfzExportDialog.svelte';
     import VolumeActionDialog from '../../lib/components/VolumeActionDialog.svelte';
     import VolumePackageExportDialog from '../../lib/components/VolumePackageExportDialog.svelte';
@@ -63,8 +63,6 @@
         isDesktop: boolean;
         directComputerOperation: DirectComputerOperation | null;
         pickerRequest: PickerRequest | null;
-        finishPicker: (selection: PickerSelection | null) => void;
-        manageLocations: () => void;
         companionRequest: CompanionDialogState | null;
         addCompanion: () => void;
         removeCompanion: (source: ImageLocation) => void;
@@ -86,6 +84,7 @@
         mediaExports: MediaExportWorkflow;
         deletion: DeletionWorkflow;
         programGeneration: ProgramGenerationWorkflow;
+        programAssignmentCleanup: ProgramAssignmentCleanupWorkflow;
         mediaDrop: MediaDropWorkflow;
         audioImport: AudioImportWorkflow;
         audioFileInput?: HTMLInputElement;
@@ -95,7 +94,6 @@
         sampleNames: string[];
         sampleBankNames: string[];
         waveDataNames: string[];
-        sequenceNames: string[];
     }
 
     let {
@@ -103,8 +101,6 @@
         isDesktop,
         directComputerOperation,
         pickerRequest,
-        finishPicker,
-        manageLocations,
         companionRequest,
         addCompanion,
         removeCompanion,
@@ -126,6 +122,7 @@
         mediaExports,
         deletion,
         programGeneration,
+        programAssignmentCleanup,
         mediaDrop,
         audioImport,
         audioFileInput,
@@ -135,11 +132,20 @@
         sampleNames,
         sampleBankNames,
         waveDataNames,
-        sequenceNames,
     }: Props = $props();
 
     function directChoiceVisible(operation: DirectComputerOperation, contentAvailable: boolean): boolean {
         return directComputerDialogVisible(directComputerOperation, operation, contentAvailable);
+    }
+
+    function audioExportDialogVisible(): boolean {
+        const request = exports.audioRequest;
+        if (!request || request.busy || pickerRequest?.parentDialog === 'audio-export' || companionRequest)
+            return false;
+        if (request.destinationFlow === 'DIRECT_COMPUTER') {
+            return !request.loading && (Boolean(request.error) || audioInspectionHasFatalIssues(request.inspection));
+        }
+        return directChoiceVisible('audio-export', Boolean(request.error));
     }
 
     const exportProgressVisibility = new DelayedExportProgressVisibility();
@@ -158,27 +164,6 @@
     onDestroy(() => exportProgressVisibility.dispose());
 </script>
 
-{#if pickerRequest}
-    <ServerStoragePicker
-        {transport}
-        mode={pickerRequest.mode}
-        title={pickerRequest.title}
-        extensions={pickerRequest.extensions}
-        suggestedName={pickerRequest.suggestedName}
-        multiple={pickerRequest.multiple}
-        initialDirectory={pickerRequest.initialDirectory}
-        initialFile={pickerRequest.initialFile}
-        requireWritableDirectory={pickerRequest.requireWritableDirectory}
-        ondirectorychange={pickerRequest.ondirectorychange}
-        onmanagelocations={() => {
-            finishPicker(null);
-            manageLocations();
-        }}
-        onselect={(selection) => finishPicker(selection)}
-        onselectmany={(selections) => finishPicker(selections)}
-        oncancel={() => finishPicker(null)}
-    />
-{/if}
 {#if companionRequest && pickerRequest?.parentDialog !== 'companion-disks'}
     <CompanionDiskDialog
         sources={companionRequest.sources}
@@ -249,28 +234,17 @@
         />
     {/key}
 {/if}
-{#if mutation.sampleBankCreationRequest}
-    <CreateSampleBankDialog
-        volumeName={mutation.sampleBankCreationRequest.volumeName}
-        sampleCount={mutation.sampleBankCreationRequest.samples.length}
-        assignedSampleCount={mutation.sampleBankCreationRequest.assignedSampleCount}
-        existingNames={mutation.sampleBankCreationRequest.existingNames}
-        busy={mutation.sampleBankCreationRequest.busy}
-        error={mutation.sampleBankCreationRequest.error}
-        oncancel={() => mutation.cancelSampleBankCreation()}
-        onsubmit={(name) => void mutation.submitSampleBankCreation(name)}
-    />
-{/if}
 {#if mutation.sampleBankAssignmentRequest}
     <AssignSampleBankDialog
         volumeName={mutation.sampleBankAssignmentRequest.volumeName}
         sampleCount={mutation.sampleBankAssignmentRequest.samples.length}
+        assignedSampleCount={mutation.sampleBankAssignmentRequest.assignedSampleCount}
         options={mutation.sampleBankAssignmentRequest.options}
         blockers={mutation.sampleBankAssignmentRequest.blockers}
         busy={mutation.sampleBankAssignmentRequest.busy}
         error={mutation.sampleBankAssignmentRequest.error}
         oncancel={() => mutation.cancelSampleBankAssignment()}
-        onsubmit={(bankObjectId) => void mutation.submitSampleBankAssignment(bankObjectId)}
+        onsubmit={(target) => void mutation.submitSampleBankAssignment(target)}
     />
 {/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}
@@ -388,7 +362,7 @@
         oncancel={() => volumeFloppies.cancel()}
     />
 {/if}
-{#if exports.audioRequest && !exports.audioRequest.busy && pickerRequest?.parentDialog !== 'audio-export' && !companionRequest && directChoiceVisible('audio-export', Boolean(exports.audioRequest.error))}
+{#if exports.audioRequest && audioExportDialogVisible()}
     <SfzExportDialog
         items={exports.audioRequest.items}
         inspection={exports.audioRequest.inspection}
@@ -396,6 +370,8 @@
         loading={exports.audioRequest.loading}
         error={exports.audioRequest.error}
         format={exports.audioRequest.format}
+        selectionMode={exports.audioRequest.selectionMode}
+        destinationFlow={exports.audioRequest.destinationFlow}
         onformatchange={(format) => exports.setAudioFormat(format)}
         onworkspace={() => void exports.audioToWorkspace()}
         onlocal={() => void exports.audioToComputer()}
@@ -444,7 +420,7 @@
     />
 {:else if exportProgressVisibility.operation === 'audio-export' && exports.audioRequest?.busy}
     <ExportProgressDialog
-        title="Export audio"
+        title={exports.audioRequest.selectionMode === 'SELECTED_AUDIO_OBJECTS' ? 'Export WAV' : 'Export audio'}
         progressLabel={exports.audioRequest.progressLabel || 'Exporting audio…'}
         cancellable={true}
         oncancel={() => exports.cancelAudio()}
@@ -488,6 +464,23 @@
         onselectall={(selected) => deletion.updateAllCleanup(selected)}
         oncancel={() => deletion.cancelCleanup()}
         onconfirm={() => void deletion.submitCleanup()}
+    />
+{/if}
+{#if programAssignmentCleanup.request}
+    <ProgramAssignmentCleanupDialog
+        volumeName={programAssignmentCleanup.request.volumeName}
+        inspection={programAssignmentCleanup.request.inspection}
+        rows={programAssignmentCleanup.request.rows}
+        loading={programAssignmentCleanup.request.loading}
+        busy={programAssignmentCleanup.request.busy}
+        error={programAssignmentCleanup.request.error}
+        onselectall={(selected) => programAssignmentCleanup.setAllSelected(selected)}
+        onprogramselectionchange={(objectId, selected) =>
+            programAssignmentCleanup.setProgramSelected(objectId, selected)}
+        onselectionchange={(objectId, ordinal, selected) =>
+            programAssignmentCleanup.setAssignmentSelected(objectId, ordinal, selected)}
+        oncancel={() => programAssignmentCleanup.close()}
+        onconfirm={() => void programAssignmentCleanup.submit()}
     />
 {/if}
 {#if programGeneration.request}
@@ -535,12 +528,23 @@
     <MidiImportDialog
         {transport}
         files={sequenceImport.request.files}
-        target={sequenceImport.request.target}
-        existingSequenceNames={sequenceNames}
+        target={sequenceImport.destination()}
+        destinationMode={sequenceImport.request.destinationMode}
+        destinationPartitionIndex={sequenceImport.request.destinationPartitionIndex}
+        destinationVolumeName={sequenceImport.request.destinationVolumeName}
+        partitionOptions={sequenceImport.partitionOptions()}
+        volumeOptions={sequenceImport.volumeOptions()}
+        destinationBusy={sequenceImport.destinationBusy}
+        existingSequenceNames={sequenceImport.existingSequenceNames()}
         onchooseworkspace={() => void sequenceImport.chooseWorkspace()}
         onchooselocal={transport.supportsClientUploads && sequenceFileInput
             ? () => sequenceImport.chooseLocal(sequenceFileInput)
             : undefined}
+        ondestinationmode={(mode) => sequenceImport.setDestinationMode(mode)}
+        ondestinationvolume={(partitionIndex, volumeName) =>
+            void sequenceImport.setExistingVolume(partitionIndex, volumeName)}
+        ondestinationpartition={(partitionIndex) => sequenceImport.setDestinationPartition(partitionIndex)}
+        ondestinationname={(volumeName) => sequenceImport.setDestinationVolumeName(volumeName)}
         oncommit={(items, systemExclusivePolicy) => sequenceImport.commit(items, systemExclusivePolicy)}
         oncancel={() => (sequenceImport.request = null)}
     />

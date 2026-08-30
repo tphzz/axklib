@@ -13,6 +13,8 @@ import type {
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import type { components } from './generated/axklibApiV1';
+import type { ProgramAssignmentCleanupTransport } from './programAssignmentCleanupTransport';
+export type * from './programAssignmentCleanupTransport';
 
 export interface ValidationSummary {
     valid: boolean;
@@ -39,6 +41,7 @@ export interface OpenedImage {
     objectDeletionAvailable: boolean;
     waveDataCleanupAvailable: boolean;
     programGenerationAvailable: boolean;
+    programAssignmentCleanupAvailable: boolean;
     packageImportAvailable: boolean;
     packageExportAvailable: boolean;
     volumePackageExportAvailable: boolean;
@@ -51,7 +54,7 @@ export interface OpenedImage {
     format?: string;
 }
 
-export type AudioImportDestination =
+export type VolumeImportDestination =
     | { kind: 'EXISTING_VOLUME'; partitionIndex: number; volumeName: string }
     | { kind: 'CREATE_VOLUME'; partitionIndex: number; volumeName: string };
 
@@ -363,6 +366,7 @@ export type ImageSessionVolumePackageExportResult = components['schemas']['Image
 export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
+export type ImageSessionAudioExportSelectionMode = components['schemas']['ImageSessionAudioExportSelectionMode'];
 export type ImageSessionSequenceExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionSequenceExportResult = components['schemas']['ImageSessionSequenceExportResult'];
 export type ImageSessionMediaConversionInspection = components['schemas']['ImageSessionMediaConversionInspection'];
@@ -462,14 +466,14 @@ export type Tx16wImportInspection = components['schemas']['ImageSessionTx16wImpo
 export type Tx16wImportMode = Tx16wImportInspection['importMode'];
 export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
-export interface SequenceImportTarget {
-    partitionIndex: number;
-    volumeName: string;
-}
-
 export type ConnectionMode = 'local' | 'remote' | 'unavailable';
 
-export interface ImageTransport {
+export interface ImageOpenOptions {
+    signal?: AbortSignal;
+    onUpdate?: (job: JobState) => void;
+}
+
+export interface ImageTransport extends ProgramAssignmentCleanupTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
@@ -479,7 +483,7 @@ export interface ImageTransport {
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void>;
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
-    openImage(source: ImageLocation): Promise<OpenedImage>;
+    openImage(source: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage>;
     keepImageAlive(sessionId: number): Promise<void>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;
@@ -554,7 +558,7 @@ export interface ImageTransport {
     ): Promise<Tx16wImportInspection>;
     startAudioImport(
         sessionId: number,
-        target: AudioImportDestination,
+        target: VolumeImportDestination,
         items: AudioImportItem[],
         grouping: AudioImportGrouping,
     ): Promise<JobState>;
@@ -562,7 +566,7 @@ export interface ImageTransport {
     startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState>;
     startSequenceImport(
         sessionId: number,
-        target: SequenceImportTarget,
+        target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
     ): Promise<JobState>;
@@ -620,10 +624,12 @@ export interface ImageTransport {
     inspectImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
     ): Promise<ImageSessionAudioExportInspection>;
     startImageAudioExport(
         sessionId: number,
         roots: ImageSessionExportRoot[],
+        selectionMode: ImageSessionAudioExportSelectionMode,
         format: 'SFZ' | 'WAV',
         destination: ImageSessionAudioExportDestination,
     ): Promise<JobState>;
@@ -687,6 +693,6 @@ export interface ImageTransport {
         includeSfz: boolean,
     ): Promise<JobState>;
     jobStatus(jobId: number): Promise<JobState>;
-    waitForJob(jobId: number, onUpdate: (job: JobState) => void): Promise<JobState>;
+    waitForJob(jobId: number, onUpdate: (job: JobState) => void, signal?: AbortSignal): Promise<JobState>;
     cancelJob(jobId?: number): Promise<void>;
 }

@@ -1,7 +1,12 @@
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
-import { auditionableSampleBankIds, auditionableSampleIds, isStandaloneSample } from '../../lib/sampleRelationships';
+import {
+    auditionableSampleBankIds,
+    auditionableSampleIds,
+    isStandaloneSample,
+    stereoSampleIds,
+} from '../../lib/sampleRelationships';
 import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
 import type {
     Program,
@@ -42,6 +47,7 @@ interface AuditionabilityIndex {
     objectIds: Set<string>;
     sampleIds: Set<string>;
     sampleBankIds: Set<string>;
+    stereoIds: Set<string>;
 }
 
 export class AuditionWorkflow {
@@ -109,6 +115,10 @@ export class AuditionWorkflow {
         return this.auditionabilityIndex().sampleBankIds;
     }
 
+    get stereoSampleObjectIds(): Set<string> {
+        return this.auditionabilityIndex().stereoIds;
+    }
+
     private auditionabilityIndex(): AuditionabilityIndex {
         const catalog = this.dependencies.catalog;
         const cached = this.auditionabilityCache;
@@ -133,6 +143,7 @@ export class AuditionWorkflow {
                 catalog.samples,
                 sampleIds,
             ),
+            stereoIds: stereoSampleIds(catalog.relationships, catalog.waveData),
             objectIds: new Set([...sampleIds, ...catalog.waveData.map((item) => item.objectKey)]),
         };
         this.auditionabilityCache = result;
@@ -400,6 +411,45 @@ export class AuditionWorkflow {
         if (this.dependencies.workspaceView() === view) return;
         if (this.active) void this.stop();
         this.dependencies.setWorkspaceView(view);
+    }
+
+    async navigateToObject(objectId: string): Promise<WorkspaceView | null> {
+        const catalog = this.dependencies.catalog;
+        const program = catalog.programs.find((item) => item.objectId === objectId);
+        const sequence = catalog.sequences.find((item) => item.objectId === objectId);
+        const bank = catalog.sampleBanks.find((item) => item.objectId === objectId);
+        const sample = catalog.samples.find((item) => item.objectId === objectId);
+        const waveData = catalog.waveData.find((item) => item.objectKey === objectId);
+        const view: WorkspaceView | null = program
+            ? 'programs'
+            : sequence
+              ? 'sequences'
+              : bank
+                ? 'sample-banks'
+                : sample
+                  ? 'samples'
+                  : waveData
+                    ? 'wave-data'
+                    : null;
+        if (!view) return null;
+
+        await this.stop();
+        this.laneQueries[view].primary = '';
+        if (sample && !isStandaloneSample(sample)) this.showOnlyStandaloneSamples = false;
+        this.dependencies.setWorkspaceView(view);
+
+        if (program) this.selectProgram(program);
+        else if (sequence) {
+            catalog.selectedSequenceId = sequence.objectId;
+            catalog.editorObjectIds.sequences = sequence.objectId;
+            catalog.inspectorObjectId = sequence.objectId;
+            this.dependencies.setInspectorOpen(true);
+        } else if (bank) await this.selectBank(bank, false);
+        else if (sample) {
+            await this.selectSample(sample, false);
+            this.requestSampleWaveformPreview(sample);
+        } else if (waveData) await this.selectWaveData(waveData, false);
+        return view;
     }
 
     resetSampleBankPreview(bankId = this.dependencies.catalog.selectedBankId): void {

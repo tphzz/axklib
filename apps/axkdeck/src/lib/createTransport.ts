@@ -25,6 +25,7 @@ import type {
     PlanSummary,
     PlacementRepairInspection,
     ProgramGenerationInspection,
+    ProgramAssignmentCleanupInspection,
     PreviewEnvelope,
     RelationshipPage,
     SystemProgramContexts,
@@ -238,6 +239,12 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startProgramGeneration(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectProgramAssignmentCleanup(): Promise<ProgramAssignmentCleanupInspection> {
+        return this.unavailable();
+    }
+    startProgramAssignmentCleanup(): Promise<JobState> {
         return this.unavailable();
     }
     preview(): Promise<PreviewEnvelope> {

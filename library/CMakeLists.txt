@@ -95,8 +95,10 @@ add_library(
   STATIC
   src/audio.cpp
   src/audio_export.cpp
+  src/audio_export_wav_source.cpp
   src/audio_export_support.cpp
   src/audio_sfz_export.cpp
+  src/wav_sampler_mapping.cpp
   src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
@@ -218,6 +220,7 @@ add_library(
     src/alteration_package_adjustment.cpp
     src/alteration_package_sfs.cpp
   src/alteration_program.cpp
+  src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
   src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp
@@ -508,6 +511,8 @@ if(BUILD_TESTING)
     tests/alteration_test.cpp
     tests/audio_import_test.cpp
     tests/audio_test.cpp
+    tests/wav_stream_test.cpp
+    tests/audio_export_wav_source_test.cpp
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
     tests/deletion_test.cpp

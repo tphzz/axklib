@@ -386,6 +386,21 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (operation.program_number == 0U || operation.program_number > 128U)
                         return std::unexpected{manifest_error("program_number must be between 1 and 128")};
                     return require_program_name(operation.new_program_name, "new_program_name");
+                } else if constexpr (std::same_as<T, ClearProgramAssignmentsOperation>) {
+                    if (operation.program_number == 0U || operation.program_number > 128U)
+                        return std::unexpected{manifest_error("program_number must be between 1 and 128")};
+                    if (operation.assignment_ordinals.empty() ||
+                        operation.assignment_ordinals.size() > maximum_program_assignments) {
+                        return std::unexpected{manifest_error("assignment_ordinals must contain 1..16 ordinals")};
+                    }
+                    std::set<std::uint8_t> ordinals;
+                    for (const auto ordinal : operation.assignment_ordinals) {
+                        if (ordinal >= maximum_program_assignments || !ordinals.insert(ordinal).second) {
+                            return std::unexpected{
+                                manifest_error("assignment_ordinals must contain distinct values between 0 and 15")};
+                        }
+                    }
+                    return {};
                 } else if constexpr (std::same_as<T, DeleteSequenceOperation>) {
                     return require_object_name(operation.sequence_name, "sequence_name");
                 } else if constexpr (std::same_as<T, InsertSequenceOperation>) {

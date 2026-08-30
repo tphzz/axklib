@@ -70,9 +70,47 @@ const callbacks = {
 const noAuditionableSamples = {
     auditionableSampleIds: new Set<string>(),
     auditionableSampleBankIds: new Set<string>(),
+    stereoSampleIds: new Set<string>(),
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('marks stereo Samples in both Sample collection contexts', () => {
+        const bank = structure('SBAC', 'Pads');
+        const stereo = structure('SBNK', 'Stereo Pad');
+        const mono = structure('SBNK', 'Mono Pad');
+        const commonProps = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            sampleBanks: [bank],
+            samples: [stereo, mono],
+            waveData: [],
+            activeSampleBankId: bank.objectId,
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            showOnlyStandaloneSamples: false,
+            stereoSampleIds: new Set([stereo.objectId]),
+        };
+        const rendered = render(ContainedObjectWorkspace, {
+            props: { ...commonProps, view: 'samples' },
+        });
+
+        const stereoRow = screen.getByRole('button', { name: 'Inspect Stereo Pad' });
+        const monoRow = screen.getByRole('button', { name: 'Inspect Mono Pad' });
+        expect(stereoRow.querySelector('[data-icon="stereo"]')).toBeTruthy();
+        expect(stereoRow.querySelector('[title="Stereo Sample"]')).toBeTruthy();
+        expect(monoRow.querySelector('[data-icon="stereo"]')).toBeNull();
+
+        rendered.unmount();
+        render(ContainedObjectWorkspace, {
+            props: { ...commonProps, view: 'sample-banks' },
+        });
+
+        expect(
+            screen.getByRole('button', { name: 'Inspect Stereo Pad' }).querySelector('[data-icon="stereo"]'),
+        ).toBeTruthy();
+    });
+
     it('shows only standalone Samples by default and composes the filter with search', async () => {
         const standalone = structure('SBNK', 'Standalone Piano');
         const assigned = structure('SBNK', 'Banked Brass');
@@ -187,8 +225,8 @@ describe('ContainedObjectWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Cello' }));
     });
 
-    it('mounts and scrolls a bounded window for a large Sample collection', async () => {
-        const samples = Array.from({ length: 200 }, (_, index) =>
+    it('renders every row in a large Sample collection', () => {
+        const samples = Array.from({ length: 2_000 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
         );
 
@@ -207,21 +245,17 @@ describe('ContainedObjectWorkspace', () => {
             },
         });
 
-        expect(screen.getByText('200 items')).toBeTruthy();
-        expect(document.querySelectorAll('.contained-row').length).toBeLessThan(60);
-        expect(screen.getByRole('button', { name: 'Inspect Sample 001' })).toBeTruthy();
-        expect(screen.queryByRole('button', { name: 'Inspect Sample 200' })).toBeNull();
+        const sampleList = document.querySelector<HTMLElement>('[data-collection-list="samples"]');
+        const rows = sampleList?.querySelectorAll<HTMLElement>('.contained-row');
+        const targets = sampleList?.querySelectorAll<HTMLElement>('[data-collection-object-id]');
+        expect(sampleList?.previousElementSibling?.textContent).toContain('2000 items');
+        expect(rows).toHaveLength(2_000);
+        expect(targets).toHaveLength(2_000);
+        expect(targets?.[0]?.dataset.collectionObjectId).toBe(samples[0]!.objectId);
+        expect(targets?.[1_999]?.dataset.collectionObjectId).toBe(samples[1_999]!.objectId);
+    }, 15_000);
 
-        const list = document.querySelector('.contained-list') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 260 });
-        list.scrollTop = 5_200;
-        await fireEvent.scroll(list);
-
-        expect(screen.queryByRole('button', { name: 'Inspect Sample 001' })).toBeNull();
-        expect(screen.getByRole('button', { name: 'Inspect Sample 200' })).toBeTruthy();
-    });
-
-    it('pages repeatedly within a virtualized lane and retains horizontal navigation', async () => {
+    it('pages repeatedly within a lane and retains horizontal navigation', async () => {
         const samples = Array.from({ length: 200 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
         );
@@ -247,7 +281,9 @@ describe('ContainedObjectWorkspace', () => {
 
         const lists = [...document.querySelectorAll<HTMLElement>('.contained-list')];
         Object.defineProperty(lists[0], 'clientHeight', { configurable: true, value: 260 });
-        screen.getByRole('button', { name: 'Inspect Sample 001' }).focus();
+        const rows = screen.getAllByRole('button', { name: /^Inspect Sample/ });
+        for (const row of rows) Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 26 });
+        rows[0]!.focus();
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
         expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);
@@ -266,12 +302,12 @@ describe('ContainedObjectWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Wave 001' }));
     });
 
-    it('creates a Sample Bank from standalone and already-banked Samples in displayed order', async () => {
+    it('assigns Samples to a new or existing Sample Bank even when no Sample Bank exists yet', async () => {
         const sample2 = structure('SBNK', 'Sample 2');
         const sample10 = structure('SBNK', 'Sample 10');
         sample2.sampleBankObjectIds = ['SBAC-Existing'];
         sample2.membershipLabel = 'Sample Bank: Existing';
-        const oncreatesamplebank = vi.fn();
+        const onassignsamplebank = vi.fn();
         const selected = [sample10, sample2].map((sample) => ({
             kind: 'SBNK' as const,
             objectId: sample.objectId,
@@ -294,8 +330,8 @@ describe('ContainedObjectWorkspace', () => {
                 activeWaveDataId: '',
                 queries: { primary: '', secondary: '', tertiary: '' },
                 showOnlyStandaloneSamples: false,
-                sampleBankCreationAvailable: true,
-                oncreatesamplebank,
+                sampleBankAssignmentAvailable: true,
+                onassignsamplebank,
                 selection: { items: selected, anchors: {} },
             },
         });
@@ -304,8 +340,8 @@ describe('ContainedObjectWorkspace', () => {
             clientX: 100,
             clientY: 100,
         });
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Create Sample Bank from selection…' }));
-        expect(oncreatesamplebank).toHaveBeenCalledWith([sample2, sample10]);
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Assign to Sample Bank…' }));
+        expect(onassignsamplebank).toHaveBeenCalledWith([sample2, sample10]);
     });
 
     it('assigns a pure Sample selection when an existing Sample Bank is available', async () => {
@@ -556,7 +592,7 @@ describe('ContainedObjectWorkspace', () => {
 
         const row = screen.getByRole('button', { name: 'Inspect Strings' });
         await fireEvent.contextMenu(row, { clientX: 80, clientY: 120 });
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete…' }));
         expect(ondeleteobject).toHaveBeenCalledWith([
             {
                 kind: 'SBAC',
@@ -570,7 +606,54 @@ describe('ContainedObjectWorkspace', () => {
         ]);
 
         await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
-        expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
+        expect(screen.getByRole('menuitem', { name: 'Delete…' })).toBeTruthy();
+    });
+
+    it('offers direct WAV export for Samples but not Sample Banks', async () => {
+        const sample = structure('SBNK', 'Standalone Piano');
+        const onexportwav = vi.fn();
+        const props = {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples' as const,
+            sampleBanks: [],
+            samples: [sample],
+            waveData: [],
+            activeSampleBankId: '',
+            activeSampleId: '',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+            audioExportAvailable: true,
+            onexportwav,
+        };
+        const rendered = render(ContainedObjectWorkspace, { props });
+
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Standalone Piano' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export WAV…' }));
+        expect(onexportwav).toHaveBeenCalledWith([
+            {
+                kind: 'SBNK',
+                objectId: sample.object.key,
+                name: sample.name,
+                typeLabel: 'Sample',
+                partitionIndex: 0,
+                partitionName: 'Partition 0',
+                volumeName: 'Volume',
+            },
+        ]);
+
+        const bank = structure('SBAC', 'Strings');
+        await rendered.rerender({
+            ...props,
+            view: 'sample-banks',
+            sampleBanks: [bank],
+            samples: [],
+        });
+        await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
+        expect(screen.queryByRole('menuitem', { name: 'Export WAV…' })).toBeNull();
+        expect(screen.getByRole('menuitem', { name: 'Export SFZ…' })).toBeTruthy();
     });
 
     it('offers type-safe rename targets for contained objects', async () => {
@@ -594,7 +677,7 @@ describe('ContainedObjectWorkspace', () => {
         });
 
         await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
         expect(onrenameobject).toHaveBeenCalledWith({
             kind: 'sample-bank',
             object: bank.object,
@@ -659,6 +742,7 @@ describe('ContainedObjectWorkspace', () => {
             onselectionchange,
         });
         await fireEvent.contextMenu(screen.getByRole('button', { name: 'Inspect Strings' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Export' }));
         await fireEvent.click(screen.getByRole('menuitem', { name: 'Export package…' }));
 
         expect(onexportobjects).toHaveBeenCalledWith([

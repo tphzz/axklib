@@ -86,7 +86,6 @@ Result<std::uint8_t> program_value(const Json &row, std::string_view field, std:
     }
     return static_cast<std::uint8_t>(value);
 }
-
 Result<std::string> object_name(const Json &row, std::string_view field, std::string_view context) {
     auto result = required_text(row, field, context);
     if (!result)
@@ -97,7 +96,6 @@ Result<std::string> object_name(const Json &row, std::string_view field, std::st
     }
     return result;
 }
-
 Result<std::string> partition_name(const Json &row, std::string_view field, std::string_view context) {
     auto result = required_text(row, field, context);
     if (!result)
@@ -110,7 +108,6 @@ Result<std::string> partition_name(const Json &row, std::string_view field, std:
     }
     return result;
 }
-
 Result<std::string> program_name(const Json &row, std::string_view field, std::string_view context) {
     auto result = required_text(row, field, context);
     if (!result)
@@ -215,7 +212,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
                 *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
                 *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
-                *type != "import_tx16w_disk_set") {
+                *type != "import_tx16w_disk_set" && *type != "clear_program_assignments") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -568,6 +565,11 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!name)
                     return std::unexpected{name.error()};
                 data = RenameProgramOperation{std::move(selector), std::move(*volume), *number, std::move(*name)};
+            } else if (*type == "clear_program_assignments") {
+                auto cleanup = detail::parse_clear_program_assignments_json(row, std::move(selector), context);
+                if (!cleanup)
+                    return std::unexpected{cleanup.error()};
+                data = std::move(*cleanup);
             } else if (*type == "delete_waveform") {
                 if (auto valid =
                         exact_fields(row, {"id", "type", "partition_index", "volume_name", "waveform_name"}, context);

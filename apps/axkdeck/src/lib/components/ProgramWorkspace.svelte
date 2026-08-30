@@ -12,12 +12,12 @@
         updatePackageExportSelection,
         type PackageExportSelectionState,
     } from '../objectSelection';
-    import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SystemProgramContexts, SystemProgramPart } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
+    import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
 
     export type ProgramPresentation = 'single' | 'multi';
 
@@ -40,6 +40,8 @@
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         programGenerationAvailable?: boolean;
         onprogramgeneration?: () => void;
+        programAssignmentCleanupAvailable?: boolean;
+        onprogramassignmentcleanup?: () => void;
         packageExportAvailable?: boolean;
         onexportobjects?: (objects: PackageExportObject[]) => void;
         selection?: PackageExportSelectionState;
@@ -66,6 +68,8 @@
         ondeleteobjects = () => undefined,
         programGenerationAvailable = false,
         onprogramgeneration = () => undefined,
+        programAssignmentCleanupAvailable = false,
+        onprogramassignmentcleanup = () => undefined,
         packageExportAvailable = false,
         onexportobjects = () => undefined,
         selection = emptyPackageExportSelection(),
@@ -96,6 +100,24 @@
     );
     const visibleSystemContexts = $derived(
         contexts?.files.filter((context) => context.availability !== 'NOT_PRESENT') ?? [],
+    );
+    const toolbarActions = $derived(
+        presentation !== 'single'
+            ? []
+            : [
+                  ...(programAssignmentCleanupAvailable
+                      ? [
+                            {
+                                label: 'Clean unresolved Program assignments',
+                                icon: 'broom' as const,
+                                run: onprogramassignmentcleanup,
+                            },
+                        ]
+                      : []),
+                  ...(programGenerationAvailable
+                      ? [{ label: 'Generate Programs', icon: 'sparkles' as const, run: onprogramgeneration }]
+                      : []),
+              ],
     );
     const filteredParts = $derived(
         availableSystem2
@@ -356,9 +378,7 @@
         {countText}
         {query}
         {onquerychange}
-        actionLabel={presentation === 'single' && programGenerationAvailable ? 'Generate Programs' : undefined}
-        actionIcon="sparkles"
-        onaction={onprogramgeneration}
+        actions={toolbarActions}
         titleControls={systemInfoControls}
         trailingControls={presentationControls}
     />
@@ -367,6 +387,7 @@
         <div
             class:empty-collection={filteredPrograms.length === 0}
             class="collection-body program-list"
+            data-collection-list="programs"
             data-navigation-list
         >
             {#each filteredPrograms as program, index (program.id)}
@@ -375,15 +396,17 @@
                     class:active={activeObjectId === program.objectId}
                     class:selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
+                    data-collection-object-id={program.objectId}
                     data-navigation-index={index}
-                    title={objectSizeTooltip(program.object)}
                     aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => selectProgram(event, program)}
                     oncontextmenu={(event) => openMenu(event, program)}
                     onkeydown={(event) => navigatePrograms(event, index)}
                 >
-                    <span class="object-slot">{program.slot}</span><strong>{program.name}</strong>
-                    <small class="object-size-summary">{objectSizeSummary(program.object)}</small>
+                    <span class="object-slot">{program.slot}</span>
+                    <span class="program-identity">
+                        <ObjectSizeIdentity name={program.name} object={program.object} />
+                    </span>
                 </button>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

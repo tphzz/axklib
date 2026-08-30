@@ -1,6 +1,7 @@
 #include "axklib/audio_export.hpp"
 
 #include "audio_export_support.hpp"
+#include "axklib/audio_export_wav_source.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -498,7 +499,7 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
             const std::array parts{volume.relative_root, *sample.rendered_wav_path};
             const auto path = *audio_internal::resolve_export_destination(output_directory, parts);
             if (auto registered =
-                    register_target(path, audio_internal::WavSource::from_stereo(left->waveform, right->waveform));
+                    register_target(path, audio_export_detail::stereo_sample_wav_source(sample, *left, *right));
                 !registered)
                 return std::unexpected{registered.error()};
         }
@@ -525,6 +526,126 @@ Result<ExportResult> write_export_audio(const ExportPlan &plan, const std::files
         if (const auto check = cancellation.check(); !check)
             return std::unexpected{check.error()};
         const auto written = audio_internal::write_wav_atomic(path, source, overwrite, cancellation);
+        if (!written)
+            return std::unexpected{written.error()};
+        append_publication_warnings(result.warnings, *written);
+        result.written_files.push_back(path);
+    }
+    return result;
+}
+
+Result<ExportResult> write_selected_wav_audio(const ExportPlan &plan, const SelectedWavExportSelection &selection,
+                                              const std::filesystem::path &output_directory, bool overwrite,
+                                              const CancellationToken &cancellation) {
+    if (selection.object_keys.empty()) {
+        return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::audio,
+                                          "selected WAV export requires at least one object")};
+    }
+
+    std::map<std::string, const PhysicalWaveformExport *> waveforms;
+    std::map<std::string, std::vector<const SampleExport *>> samples;
+    for (const auto &volume : plan.volumes) {
+        for (const auto &waveform : volume.waveforms)
+            waveforms.try_emplace(waveform.object_key, &waveform);
+        for (const auto &sample : volume.samples)
+            samples[sample.object_key].push_back(&sample);
+    }
+    for (const auto &scope : plan.unresolved_wave_data) {
+        for (const auto &waveform : scope.waveforms)
+            waveforms.try_emplace(waveform.object_key, &waveform);
+    }
+
+    std::set<std::string> selected_keys;
+    std::set<std::string> used_names;
+    std::map<std::filesystem::path, audio_internal::WavSource> targets;
+    for (const auto &key : selection.object_keys) {
+        if (!selected_keys.insert(key).second) {
+            return std::unexpected{make_error(ErrorCode::invalid_argument, ErrorCategory::audio,
+                                              "selected WAV export contains a duplicate object")};
+        }
+
+        std::string display_name;
+        audio_internal::WavSource source;
+        if (selection.kind == SelectedWavExportKind::wave_data) {
+            const auto found = waveforms.find(key);
+            if (found == waveforms.end()) {
+                return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                                  "selected Wave Data is unavailable for WAV export")};
+            }
+            display_name = found->second->display_name;
+            source = audio_internal::WavSource::from_physical(found->second->waveform);
+        } else {
+            const auto found = samples.find(key);
+            if (found == samples.end()) {
+                return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                                  "selected Sample is unavailable for WAV export")};
+            }
+            std::map<std::string, std::string> members;
+            for (const auto *sample : found->second) {
+                if (display_name.empty())
+                    display_name = sample->display_name;
+                for (const auto &member : sample->members) {
+                    if (member.quality != RelationshipQuality::known ||
+                        (member.role != "left" && member.role != "right")) {
+                        return std::unexpected{make_error(ErrorCode::relationship_unresolved,
+                                                          ErrorCategory::relationship,
+                                                          "selected Sample does not have exact Wave Data membership")};
+                    }
+                    const auto [existing, inserted] = members.emplace(member.role, member.waveform_key);
+                    if (!inserted && existing->second != member.waveform_key) {
+                        return std::unexpected{make_error(ErrorCode::relationship_ambiguous,
+                                                          ErrorCategory::relationship,
+                                                          "selected Sample has conflicting Wave Data membership")};
+                    }
+                }
+            }
+            if (members.size() == 1U) {
+                const auto waveform = waveforms.find(members.begin()->second);
+                if (waveform == waveforms.end()) {
+                    return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                                      "selected Sample Wave Data is unavailable")};
+                }
+                source = audio_export_detail::sample_wav_source(*found->second.front(), *waveform->second,
+                                                                members.begin()->first);
+            } else if (members.size() == 2U && members.contains("left") && members.contains("right") &&
+                       members.at("left") != members.at("right")) {
+                const auto left = waveforms.find(members.at("left"));
+                const auto right = waveforms.find(members.at("right"));
+                if (left == waveforms.end() || right == waveforms.end()) {
+                    return std::unexpected{make_error(ErrorCode::object_missing, ErrorCategory::object,
+                                                      "selected Sample Wave Data is unavailable")};
+                }
+                source = audio_export_detail::stereo_sample_wav_source(*found->second.front(), *left->second,
+                                                                       *right->second);
+            } else {
+                return std::unexpected{
+                    make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
+                               "selected Sample does not have one mono member or an exact stereo pair")};
+            }
+        }
+
+        const std::array parts{std::filesystem::path{unique_wav_name(display_name, used_names)}};
+        auto destination = audio_internal::resolve_export_destination(output_directory, parts);
+        if (!destination)
+            return std::unexpected{destination.error()};
+        targets.emplace(std::move(*destination), source);
+    }
+
+    if (!overwrite) {
+        const auto existing =
+            std::ranges::find_if(targets, [](const auto &entry) { return std::filesystem::exists(entry.first); });
+        if (existing != targets.end()) {
+            return std::unexpected{
+                make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                           "refusing to replace an existing audio export: " + text::path_to_utf8(existing->first))};
+        }
+    }
+
+    ExportResult result;
+    for (const auto &[path, source] : targets) {
+        if (const auto check = cancellation.check(); !check)
+            return std::unexpected{check.error()};
+        auto written = audio_internal::write_wav_atomic(path, source, overwrite, cancellation);
         if (!written)
             return std::unexpected{written.error()};
         append_publication_warnings(result.warnings, *written);

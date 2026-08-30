@@ -58,8 +58,11 @@ describe('modal', () => {
         dialog.remove();
     });
 
-    it('suppresses native and WebKit overlay scrollbars in inert modal backgrounds', () => {
-        expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/);
-        expect(appStyles).toMatch(/:is\(\[inert\], \[inert\] \*\)::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/);
+    it('preserves scrollbar geometry in inert modal backgrounds', () => {
+        expect(appStyles).toMatch(/\*\s*\{[^}]*scrollbar-width:\s*thin;[^}]*\}/);
+        expect(appStyles).not.toMatch(/:is\(\[inert\], \[inert\] \*\)\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/);
+        expect(appStyles).not.toMatch(
+            /:is\(\[inert\], \[inert\] \*\)::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/,
+        );
     });
 });

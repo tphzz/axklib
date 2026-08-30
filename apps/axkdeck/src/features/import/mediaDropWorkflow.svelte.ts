@@ -98,11 +98,6 @@ export class MediaDropWorkflow {
         const names = Array.from(dataTransfer.files).map((file) => file.name);
         const classified = classifyDroppedNames(names);
         const kind = classified === 'none' ? this.defaultKind() : classified;
-        if (kind === 'midi' && this.dependencies.workspaceView() !== 'sequences') {
-            dataTransfer.dropEffect = 'none';
-            this.clearHover();
-            return;
-        }
         this.dragKind = kind;
         this.dragTarget = kind === 'mixed' ? null : this.selectedVolumeTarget();
         this.dragActive = true;
@@ -142,9 +137,8 @@ export class MediaDropWorkflow {
         }
         const selectedKind = kind === 'none' ? this.defaultKind() : kind;
         if (kind === 'none') {
-            const volumeTarget = this.selectedVolumeTarget();
             if (selectedKind === 'midi')
-                await this.dependencies.sequenceImport.requestDroppedFiles(files, volumeTarget);
+                await this.dependencies.sequenceImport.requestDroppedFiles(files, this.dependencies.selectedSource());
             else await this.dependencies.audioImport.requestDroppedFiles(files, this.dependencies.selectedSource());
             return;
         }
@@ -181,23 +175,7 @@ export class MediaDropWorkflow {
             return;
         }
         if (selectedKind === 'midi') {
-            if (this.dependencies.workspaceView() !== 'sequences') {
-                this.dependencies.setStatus('Open the Sequences tab to import MIDI files');
-                this.notice = {
-                    title: 'MIDI import unavailable',
-                    message: 'Open the Sequences tab, select a writable volume, then drop the MIDI files again.',
-                };
-                return;
-            }
-            if (!volumeTarget) {
-                this.dependencies.setStatus('Select a writable volume first');
-                this.notice = {
-                    title: 'MIDI import unavailable',
-                    message: 'Select a writable volume in Contents, then drop the MIDI files again.',
-                };
-                return;
-            }
-            await this.dependencies.sequenceImport.requestDroppedFiles(files, volumeTarget);
+            await this.dependencies.sequenceImport.requestDroppedFiles(files, this.dependencies.selectedSource());
             return;
         }
         await this.dependencies.audioImport.requestDroppedFiles(files, this.dependencies.selectedSource());
@@ -209,7 +187,7 @@ export class MediaDropWorkflow {
             return;
         }
         const kind = classifyDroppedNames(paths);
-        if (kind === 'none' || (kind === 'midi' && this.dependencies.workspaceView() !== 'sequences')) {
+        if (kind === 'none') {
             this.clearHover();
             return;
         }

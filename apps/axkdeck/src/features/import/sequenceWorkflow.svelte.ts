@@ -4,18 +4,26 @@ import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storag
 import type {
     ImageTransport,
     SequenceImportItem,
-    SequenceImportTarget,
     SequenceSystemExclusivePolicy,
+    VolumeImportDestination,
 } from '../../lib/transport';
 import type { DiskTreeItem, SequenceItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
+import {
+    collectImportDestinations,
+    importDestination,
+    initialImportDestination,
+    type ImportDestinationMode,
+} from './packageDestinations';
 import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 
 export interface SequenceImportRequest {
     files: (ClientUploadSource | FileLocation)[];
-    target: SequenceImportTarget;
+    destinationMode: ImportDestinationMode;
+    destinationPartitionIndex: number | null;
+    destinationVolumeName: string;
 }
 
 interface SequenceImportDependencies {
@@ -24,6 +32,7 @@ interface SequenceImportDependencies {
     picker: PickerController;
     sessionId: () => number | null;
     imageLocation: () => ImageLocation | null;
+    imageFormat: () => string | null;
     mutationsAvailable: () => boolean;
     selectedSource: () => DiskTreeItem;
     setSelectedSource: (item: DiskTreeItem) => void;
@@ -41,37 +50,44 @@ interface SequenceImportDependencies {
 
 export class SequenceImportWorkflow {
     request = $state<SequenceImportRequest | null>(null);
+    destinationBusy = $state(false);
     private lastDirectory = $state<DirectoryRef | null>(null);
+    private destinationRevision = 0;
 
     constructor(private readonly dependencies: SequenceImportDependencies) {}
 
     dropAvailable(): boolean {
-        return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
+        return (
+            this.dependencies.mutationsAvailable() &&
+            this.dependencies.imageLocation() !== null &&
+            this.dependencies.imageFormat() === 'sfs'
+        );
     }
 
-    activeTarget(): SequenceImportTarget | null {
+    activeTarget(): VolumeImportDestination | null {
         const selected = this.dependencies.selectedSource();
         return this.dependencies.mutationsAvailable() &&
             selected.kind === 'volume' &&
             selected.partitionIndex !== undefined
-            ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
+            ? { kind: 'EXISTING_VOLUME', partitionIndex: selected.partitionIndex, volumeName: selected.name }
             : null;
     }
 
     chooseFiles(): void {
-        const target = this.activeTarget();
-        if (!target || !this.dependencies.imageLocation()) {
-            this.dependencies.setStatus('Select a writable volume first');
+        if (!this.dropAvailable()) {
+            this.dependencies.setStatus('Open a writable SFS hard-disk image first');
             return;
         }
-        this.request = { files: [], target };
+        this.request = this.newRequest([], this.dependencies.selectedSource());
     }
 
     filesChosen(event: Event): void {
         const input = event.currentTarget as HTMLInputElement;
+        const request = this.request;
         void this.requestDroppedFiles(
             Array.from(input.files ?? []).map(browserUploadSource),
-            this.request?.target ?? this.activeTarget(),
+            null,
+            request ?? undefined,
         );
         input.value = '';
     }
@@ -85,7 +101,7 @@ export class SequenceImportWorkflow {
             ondirectorychange: (directory) => (this.lastDirectory = directory),
         });
         if (!selections || !this.request) return;
-        await this.requestDroppedFiles(selections, request.target);
+        await this.requestDroppedFiles(selections, null, request);
     }
 
     chooseLocal(input: HTMLInputElement): void {
@@ -96,8 +112,11 @@ export class SequenceImportWorkflow {
     async commit(items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy): Promise<void> {
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
-        if (!request || sessionId === null) throw new Error('MIDI import target is no longer available');
-        const target = request.target;
+        if (!request || sessionId === null || this.destinationBusy) {
+            throw new Error('MIDI import target is no longer available');
+        }
+        const target = this.destination();
+        if (!target) throw new Error('Choose a valid MIDI import destination');
         const firstName = items[0]?.sequenceName;
         const started = performance.now();
         this.dependencies.setStatus('Importing MIDI');
@@ -111,7 +130,10 @@ export class SequenceImportWorkflow {
             );
             if (completed.status !== 'completed') throw new Error(completed.error ?? 'MIDI import did not complete');
             this.dependencies.selectWorkspace('sequences');
-            await this.dependencies.refreshSession(target);
+            await this.dependencies.refreshSession({
+                partitionIndex: target.partitionIndex,
+                volumeName: target.volumeName,
+            });
             const inserted = this.dependencies.sequences().find((sequence) => sequence.name === firstName);
             if (inserted) this.dependencies.selectSequence(inserted);
             this.dependencies.reportTiming('midi-import', started, items.length);
@@ -123,7 +145,8 @@ export class SequenceImportWorkflow {
 
     async requestDroppedFiles(
         files: (ClientUploadSource | FileLocation)[],
-        target = this.activeTarget(),
+        selected: DiskTreeItem | null = this.dependencies.selectedSource(),
+        destinationRequest?: SequenceImportRequest,
     ): Promise<void> {
         const admitted = files
             .map((source) => {
@@ -136,24 +159,128 @@ export class SequenceImportWorkflow {
             this.dependencies.setStatus('No Standard MIDI Files were selected');
             return;
         }
-        if (!target || admitted.length === 0 || !this.dependencies.imageLocation()) {
-            this.dependencies.setStatus(target ? 'Choose MIDI files' : 'Select a writable volume first');
+        if (admitted.length === 0 || !this.dropAvailable()) {
+            this.dependencies.setStatus('Drop Standard MIDI Files onto a writable SFS hard-disk image');
             return;
         }
-        if (!sameVolumeTarget(this.activeTarget(), target)) {
-            const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
-            if (!item) {
-                this.dependencies.setStatus('MIDI import target is no longer available');
-                return;
-            }
-            this.dependencies.setSelectedSource(item);
-            await this.dependencies.loadVolume(item.id);
-            if (this.dependencies.activeVolumeId() !== item.id) {
-                this.dependencies.setStatus('MIDI import target is no longer available');
-                return;
-            }
+        this.request = destinationRequest
+            ? { ...destinationRequest, files: admitted }
+            : this.newRequest(admitted, selected);
+        const target = this.destination();
+        if (target?.kind === 'EXISTING_VOLUME') await this.synchronizeExistingVolume(target);
+    }
+
+    destination(): VolumeImportDestination | null {
+        const request = this.request;
+        if (!request) return null;
+        return importDestination(
+            request.destinationMode,
+            request.destinationPartitionIndex,
+            request.destinationVolumeName,
+        );
+    }
+
+    partitionOptions() {
+        return collectImportDestinations(this.dependencies.sourceItems()).partitions;
+    }
+
+    volumeOptions() {
+        return collectImportDestinations(this.dependencies.sourceItems()).volumes;
+    }
+
+    existingSequenceNames(): string[] {
+        if (this.destinationBusy) return [];
+        const target = this.destination();
+        if (target?.kind !== 'EXISTING_VOLUME') return [];
+        const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
+        if (!item || item.id !== this.dependencies.activeVolumeId()) return [];
+        return this.dependencies.sequences().map((sequence) => sequence.name);
+    }
+
+    setDestinationMode(mode: ImportDestinationMode): void {
+        const request = this.request;
+        if (!request) return;
+        this.cancelDestinationSynchronization();
+        const destinations = collectImportDestinations(this.dependencies.sourceItems());
+        request.destinationMode = mode;
+        request.destinationVolumeName = '';
+        request.destinationPartitionIndex =
+            request.destinationPartitionIndex ?? destinations.partitions[0]?.partitionIndex ?? null;
+    }
+
+    async setExistingVolume(partitionIndex: number | null, volumeName: string): Promise<void> {
+        const request = this.request;
+        if (!request) return;
+        request.destinationPartitionIndex = partitionIndex;
+        request.destinationVolumeName = volumeName;
+        if (partitionIndex === null || !volumeName) {
+            this.cancelDestinationSynchronization();
+            return;
         }
-        this.request = { files: admitted, target };
+        await this.synchronizeExistingVolume({
+            kind: 'EXISTING_VOLUME',
+            partitionIndex,
+            volumeName,
+        });
+    }
+
+    setDestinationPartition(partitionIndex: number): void {
+        if (!this.request) return;
+        this.cancelDestinationSynchronization();
+        this.request.destinationPartitionIndex = partitionIndex;
+        if (this.request.destinationMode === 'existing') this.request.destinationVolumeName = '';
+    }
+
+    setDestinationVolumeName(volumeName: string): void {
+        if (this.request) this.request.destinationVolumeName = volumeName.slice(0, 16);
+    }
+
+    private newRequest(
+        files: (ClientUploadSource | FileLocation)[],
+        selected: DiskTreeItem | null,
+    ): SequenceImportRequest {
+        const initial = selected ? initialImportDestination(selected) : null;
+        const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
+        return {
+            files,
+            destinationMode: initial?.mode ?? 'existing',
+            destinationPartitionIndex: initial?.partitionIndex ?? firstPartition?.partitionIndex ?? null,
+            destinationVolumeName: initial?.volumeName ?? '',
+        };
+    }
+
+    private async synchronizeExistingVolume(target: VolumeImportDestination): Promise<void> {
+        if (target.kind !== 'EXISTING_VOLUME') return;
+        const revision = ++this.destinationRevision;
+        this.destinationBusy = true;
+        try {
+            await this.loadExistingVolume(target);
+        } catch (error) {
+            if (revision === this.destinationRevision && this.request) {
+                this.request.destinationVolumeName = '';
+                this.dependencies.setStatus(userFacingMessage(error));
+            }
+        } finally {
+            if (revision === this.destinationRevision) this.destinationBusy = false;
+        }
+    }
+
+    private cancelDestinationSynchronization(): void {
+        this.destinationRevision += 1;
+        this.destinationBusy = false;
+    }
+
+    private async loadExistingVolume(target: VolumeImportDestination): Promise<void> {
+        if (target.kind !== 'EXISTING_VOLUME') return;
+        if (sameVolumeTarget(this.activeTarget(), target)) return;
+        const item = findVolumeSourceItem(this.dependencies.sourceItems(), target);
+        if (!item) throw new Error('MIDI import target is no longer available');
+        if (this.dependencies.activeVolumeId() === item.id) return;
+        this.dependencies.setSelectedSource(item);
+        await this.dependencies.loadVolume(item.id);
+        if (this.dependencies.activeVolumeId() !== item.id) {
+            throw new Error('MIDI import target is no longer available');
+        }
     }
 }
 

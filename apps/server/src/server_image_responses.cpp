@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "authentication.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 #include "axklib/server/job_json.hpp"
 #include "axklib/server/telemetry.hpp"
 #include "axklib/utf8.hpp"
@@ -16,28 +17,6 @@
 
 namespace axk::server::detail {
 namespace {
-
-Json image_source_json(const axk::app::ImageSourceRef &source) {
-    if (source.kind == axk::app::ImageSourceKind::file) {
-        return {{"kind", "FILE"}, {"file", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
-    }
-    return {{"kind", "AXK_OBJECT_DIRECTORY"},
-            {"directory", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
-}
-
-std::string_view floppy_set_status_name(axk::app::ImageFloppySetStatus status) {
-    switch (status) {
-    case axk::app::ImageFloppySetStatus::single:
-        return "SINGLE";
-    case axk::app::ImageFloppySetStatus::incomplete:
-        return "INCOMPLETE";
-    case axk::app::ImageFloppySetStatus::complete:
-        return "COMPLETE";
-    case axk::app::ImageFloppySetStatus::recovery:
-        return "RECOVERY";
-    }
-    return "SINGLE";
-}
 
 std::string_view system_program_context_availability_name(axk::app::SystemProgramContextAvailability availability) {
     switch (availability) {
@@ -56,91 +35,16 @@ std::string_view system_program_context_file_name(axk::app::SystemProgramContext
 }
 
 axk::app::ImageSourceRef parse_image_source(const Json &reference) {
-    const auto kind = reference.at("kind").get<std::string>();
-    if (kind == "FILE") {
-        const auto &file = reference.at("file");
-        return {file.at("rootId").get<std::string>(), file.at("relativePath").get<std::string>(),
-                axk::app::ImageSourceKind::file};
-    }
-    if (kind == "AXK_OBJECT_DIRECTORY") {
-        const auto &directory = reference.at("directory");
-        return {directory.at("rootId").get<std::string>(), directory.at("relativePath").get<std::string>(),
-                axk::app::ImageSourceKind::axk_object_directory};
-    }
-    throw Json::type_error::create(302, "unsupported image source kind", &reference);
+    auto source = axk::app::image_source_ref_from_json(reference);
+    if (!source)
+        throw Json::type_error::create(302, source.error().message, &reference);
+    return std::move(*source);
 }
 
 } // namespace
 
 Json ServerApplication::image_summary_json(const axk::app::ImageSessionSummary &summary) const {
-    Json companion_sources = Json::array();
-    for (const auto &source : summary.companion_sources)
-        companion_sources.push_back(image_source_json(source));
-    Json floppy_set;
-    if (summary.floppy_set) {
-        Json members = Json::array();
-        for (const auto &member : summary.floppy_set->members) {
-            members.push_back({{"index", member.index}, {"label", member.label}, {"marker", member.marker}});
-        }
-        floppy_set = {{"status", floppy_set_status_name(summary.floppy_set->status)},
-                      {"setLabel", summary.floppy_set->set_label},
-                      {"members", std::move(members)},
-                      {"nextRequiredIndex", summary.floppy_set->next_required_index
-                                                ? Json(*summary.floppy_set->next_required_index)
-                                                : Json{}}};
-    }
-    return {{"imageId", summary.image_id},
-            {"revision", summary.revision},
-            {"source", image_source_json(summary.source)},
-            {"companionSources", std::move(companion_sources)},
-            {"floppySet", std::move(floppy_set)},
-            {"format", summary.format},
-            {"availableOperations", summary.available_operations},
-            {"rootCount", summary.root_count},
-            {"objectCount", summary.object_count},
-            {"relationshipCount", summary.relationship_count},
-            {"validation",
-             {{"valid", summary.validation.valid()},
-              {"infoCount", summary.validation.info_count},
-              {"warningCount", summary.validation.warning_count},
-              {"errorCount", summary.validation.error_count}}}};
-}
-
-crow::response ServerApplication::create_image_response(const crow::request &request) {
-    const auto id = request_id(request);
-    if (auto denied = guard(request, id))
-        return std::move(*denied);
-    const auto parsed = parse_validated_json_body(request, "ImageOpenRequest");
-    if (!parsed)
-        return error_response(status_for_error(parsed.error(), 400), parsed.error(), id);
-    const auto &input = *parsed;
-    axk::app::ImageSourceRef source;
-    try {
-        const auto &reference = input.at("source");
-        const auto kind = reference.at("kind").get<std::string>();
-        if (kind == "FILE") {
-            const auto &file = reference.at("file");
-            source.root_id = file.at("rootId").get<std::string>();
-            source.relative_path = file.at("relativePath").get<std::string>();
-            source.kind = axk::app::ImageSourceKind::file;
-        } else if (kind == "AXK_OBJECT_DIRECTORY") {
-            const auto &directory = reference.at("directory");
-            source.root_id = directory.at("rootId").get<std::string>();
-            source.relative_path = directory.at("relativePath").get<std::string>();
-            source.kind = axk::app::ImageSourceKind::axk_object_directory;
-        } else {
-            return error_response(400, {"invalid_request", "image source kind is unsupported"}, id);
-        }
-    } catch (const Json::exception &) {
-        return error_response(400, {"invalid_request", "source must be one FILE or AXK_OBJECT_DIRECTORY reference"},
-                              id);
-    }
-    const auto opened = images_.open(source, request_owner(request));
-    if (!opened)
-        return error_response(status_for_error(opened.error()), opened.error(), id);
-    auto response = json_response(201, {{"data", image_summary_json(*opened)}, {"meta", {{"requestId", id}}}}, id);
-    response.set_header("Location", "/api/v1/images/" + opened->image_id);
-    return response;
+    return axk::app::image_session_summary_json(summary);
 }
 
 crow::response ServerApplication::attach_companions_response(const crow::request &request,

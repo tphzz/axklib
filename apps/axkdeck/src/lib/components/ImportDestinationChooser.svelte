@@ -4,6 +4,7 @@
         ImportPartitionOption,
         ImportVolumeOption,
     } from '../../features/import/packageDestinations';
+    import { dismissAutocompleteFromOutsidePointer } from '../autocomplete';
     import Icon from './Icon.svelte';
 
     interface Props {
@@ -83,7 +84,7 @@
         query = option.volumeName;
         filtering = false;
         synchronizedSelection = volumeKey(option);
-        listOpen = false;
+        closeList();
         onvolume(option.partitionIndex, option.volumeName);
     }
 
@@ -113,6 +114,11 @@
         queueMicrotask(() => volumeInput?.focus());
     }
 
+    function closeList(): void {
+        listOpen = false;
+        activeIndex = -1;
+    }
+
     function changePartition(value: string): void {
         if (disabled || value === '') return;
         query = '';
@@ -139,7 +145,7 @@
         } else if (event.key === 'Escape' && listOpen) {
             event.preventDefault();
             event.stopPropagation();
-            listOpen = false;
+            closeList();
         }
     }
 </script>
@@ -172,7 +178,10 @@
     </select>
 
     {#if mode === 'existing'}
-        <div class="volume-combobox">
+        <div
+            class="volume-combobox dialog-autocomplete-control"
+            use:dismissAutocompleteFromOutsidePointer={{ expanded: listOpen, ondismiss: closeList }}
+        >
             <input
                 bind:this={volumeInput}
                 id="import-volume-search"
@@ -191,13 +200,12 @@
                 disabled={disabled || partitionIndex === null || partitionVolumes.length === 0}
                 autocomplete="off"
                 oninput={(event) => updateQuery(event.currentTarget.value)}
-                onfocus={openList}
                 onclick={openList}
                 onkeydown={handleKey}
             />
             {#if query.length > 0 || selectedVolume}
                 <button
-                    class="volume-clear"
+                    class="dialog-autocomplete-clear"
                     type="button"
                     aria-label="Clear volume"
                     title="Clear volume"
@@ -273,37 +281,6 @@
     .new-volume-name {
         min-width: 0;
         width: 100%;
-    }
-
-    .volume-combobox {
-        position: relative;
-        min-width: 0;
-    }
-
-    .volume-combobox > input {
-        width: 100%;
-        padding-right: 30px;
-    }
-
-    .volume-clear {
-        position: absolute;
-        z-index: 5;
-        top: 1px;
-        right: 1px;
-        display: grid;
-        width: 25px;
-        height: 24px;
-        padding: 0;
-        place-items: center;
-        color: var(--color-text-muted);
-        border: 0;
-        background: var(--color-bg-deep);
-        cursor: pointer;
-        font-size: 15px;
-    }
-
-    .volume-clear:hover:not(:disabled) {
-        color: var(--color-text-strong);
     }
 
     .volume-options {

@@ -243,6 +243,25 @@
             >Delete {selectionCount} volumes…</button
         >
     {:else if item.kind === 'partition'}
+        {#if partitionActionsEnabled}
+            <button
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('rename-partition')}>Rename partition…</button
+            >
+        {/if}
+        {#if volumeActionsEnabled}
+            <button
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('add-volume')}>Add volume…</button
+            >
+        {/if}
+        {#if partitionHasMutation && (partitionHasImport || partitionHasExport)}
+            <div class="context-menu-separator" role="separator"></div>
+        {/if}
         {#if partitionHasImport}
             <button
                 bind:this={importParent}
@@ -273,26 +292,7 @@
                 <span>Export</span><Icon name="chevron" size={13} />
             </button>
         {/if}
-        {#if (partitionHasImport || partitionHasExport) && (partitionHasMutation || partitionHasTools)}
-            <div class="context-menu-separator" role="separator"></div>
-        {/if}
-        {#if partitionActionsEnabled}
-            <button
-                type="button"
-                role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('rename-partition')}>Rename partition…</button
-            >
-        {/if}
-        {#if volumeActionsEnabled}
-            <button
-                type="button"
-                role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('add-volume')}>Add volume…</button
-            >
-        {/if}
-        {#if partitionHasMutation && partitionHasTools}
+        {#if (partitionHasMutation || partitionHasImport || partitionHasExport) && partitionHasTools}
             <div class="context-menu-separator" role="separator"></div>
         {/if}
         {#if partitionHasTools}
@@ -311,6 +311,24 @@
             </button>
         {/if}
     {:else}
+        {#if volumeHasMutation}
+            <button
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('rename-volume')}>Rename volume…</button
+            >
+            <button
+                class="danger-menu-item"
+                type="button"
+                role="menuitem"
+                onmouseenter={() => closeSubmenu(false)}
+                onclick={() => choose('delete-volume')}>Delete volume…</button
+            >
+        {/if}
+        {#if volumeHasMutation && (volumeHasImport || volumeHasExport)}
+            <div class="context-menu-separator" role="separator"></div>
+        {/if}
         {#if volumeHasImport}
             <button
                 bind:this={importParent}
@@ -341,25 +359,7 @@
                 <span>Export</span><Icon name="chevron" size={13} />
             </button>
         {/if}
-        {#if (volumeHasImport || volumeHasExport) && (volumeHasMutation || volumeHasTools)}
-            <div class="context-menu-separator" role="separator"></div>
-        {/if}
-        {#if volumeHasMutation}
-            <button
-                type="button"
-                role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('rename-volume')}>Rename volume…</button
-            >
-            <button
-                class="danger-menu-item"
-                type="button"
-                role="menuitem"
-                onmouseenter={() => closeSubmenu(false)}
-                onclick={() => choose('delete-volume')}>Delete volume</button
-            >
-        {/if}
-        {#if volumeHasMutation && volumeHasTools}
+        {#if (volumeHasMutation || volumeHasImport || volumeHasExport) && volumeHasTools}
             <div class="context-menu-separator" role="separator"></div>
         {/if}
         {#if volumeHasTools}

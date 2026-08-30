@@ -5,6 +5,7 @@ import {
     audioImportRequest,
     sampleBankAssignmentRequest,
     sampleBankCreationRequest,
+    sequenceImportRequest,
     tx16wDiskSetImportRequest,
 } from './httpImportOperations';
 
@@ -51,6 +52,46 @@ describe('audioImportRequest', () => {
             {
                 manifestPath: 'audio/import-0',
                 input: { fileRef: { rootId: 'workspace', relativePath: 'audio/Tone.wav' } },
+            },
+        ]);
+    });
+});
+
+describe('sequenceImportRequest', () => {
+    it('creates a new volume and imports its Sequences in one alteration manifest', () => {
+        const source = serverFileLocation({ rootId: 'workspace', relativePath: 'midi/Pattern.mid' });
+
+        const result = sequenceImportRequest(
+            'image-1',
+            8,
+            { kind: 'CREATE_VOLUME', partitionIndex: 1, volumeName: 'Imported' },
+            [{ source, sequenceName: 'Pattern' }],
+            'exclude',
+        );
+
+        expect(result.manifest.inline.operations).toEqual([
+            {
+                id: 'volume-midi-import',
+                type: 'insert_volume',
+                partition_index: 1,
+                volume: { name: 'Imported', waveforms: [], samples: [] },
+            },
+            {
+                id: 'sequence-0',
+                type: 'insert_sequence',
+                partition_index: 1,
+                volume_name: 'Imported',
+                sequence: {
+                    name: 'Pattern',
+                    midi_path: 'sequence/import-0.mid',
+                    system_exclusive_policy: 'exclude',
+                },
+            },
+        ]);
+        expect(result.inputBindings).toEqual([
+            {
+                manifestPath: 'sequence/import-0.mid',
+                input: { fileRef: { rootId: 'workspace', relativePath: 'midi/Pattern.mid' } },
             },
         ]);
     });

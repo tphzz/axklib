@@ -18,6 +18,21 @@ function json(data: unknown, status = 200): Response {
     });
 }
 
+function completedImageOpen(result: unknown, jobId = 'job-image-open'): Response {
+    return json(
+        {
+            jobId,
+            operationId: 'images.open',
+            state: 'COMPLETED',
+            latestSequence: 5,
+            progress: { phase: 'publishing', completed: 5, total: 5, message: 'Image session ready' },
+            result,
+            error: null,
+        },
+        202,
+    );
+}
+
 class OpeningWebSocket {
     static readonly instances: OpeningWebSocket[] = [];
     readonly url: string;
@@ -144,23 +159,20 @@ describe('HttpImageTransport', () => {
                             file: { rootId: 'workspace', relativePath: 'images/test.hds' },
                         },
                     });
-                    return json(
-                        {
-                            imageId: 'image-remote',
-                            source: {
-                                kind: 'FILE',
-                                file: { rootId: 'workspace', relativePath: 'images/test.hds' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'sfs',
-                            rootCount: 1,
-                            objectCount: 2,
-                            relationshipCount: 1,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    return completedImageOpen({
+                        imageId: 'image-remote',
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
                         },
-                        201,
-                    );
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 1,
+                        objectCount: 2,
+                        relationshipCount: 1,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
                 }
                 if (url.pathname.endsWith('/images/image-remote/content') && !url.searchParams.has('parentId')) {
                     return json({
@@ -311,6 +323,95 @@ describe('HttpImageTransport', () => {
         expect(requests.filter((request) => request.includes('/content'))).toHaveLength(3);
     });
 
+    it('reports replayed server progress while opening an image job', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return json(
+                        {
+                            jobId: 'job-open-progress',
+                            operationId: 'images.open',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                if (url.pathname.endsWith('/jobs/job-open-progress/events')) {
+                    expect(url.searchParams.get('afterSequence')).toBe('0');
+                    return json({
+                        events: [
+                            {
+                                schemaVersion: '1',
+                                eventId: 'event-open-progress',
+                                sequence: 1,
+                                jobId: 'job-open-progress',
+                                operationId: 'images.open',
+                                type: 'progress',
+                                timestampUnixMs: 1,
+                                state: 'RUNNING',
+                                progress: {
+                                    phase: 'resolving',
+                                    completed: 2,
+                                    total: 5,
+                                    message: 'Resolving sampler objects',
+                                },
+                                jobUrl: '/api/v1/jobs/job-open-progress',
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/jobs/job-open-progress')) {
+                    return json({
+                        jobId: 'job-open-progress',
+                        operationId: 'images.open',
+                        state: 'COMPLETED',
+                        latestSequence: 5,
+                        progress: { phase: 'publishing', completed: 5, total: 5, message: 'Image session ready' },
+                        result: {
+                            imageId: 'image-progress',
+                            revision: 1,
+                            source: {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/progress.hds' },
+                            },
+                            companionSources: [],
+                            floppySet: null,
+                            format: 'sfs',
+                            availableOperations: ['images.content'],
+                            rootCount: 0,
+                            objectCount: 0,
+                            relationshipCount: 0,
+                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        },
+                        error: null,
+                    });
+                }
+                if (url.pathname.endsWith('/images/image-progress/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
+        const updates: string[] = [];
+
+        await transport.openImage(serverFile('images/progress.hds'), {
+            onUpdate: (job) => updates.push(`${job.status}:${job.progress?.label ?? ''}`),
+        });
+
+        expect(updates).toEqual(['queued:', 'running:Resolving sampler objects', 'completed:Image session ready']);
+    });
+
     it('opens an AXK object directory through the explicit directory source contract', async () => {
         vi.stubGlobal(
             'fetch',
@@ -323,25 +424,22 @@ describe('HttpImageTransport', () => {
                             directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
                         },
                     });
-                    return json(
-                        {
-                            imageId: 'directory-image',
-                            revision: 1,
-                            source: {
-                                kind: 'AXK_OBJECT_DIRECTORY',
-                                directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'axk-object-directory',
-                            availableOperations: ['images.content', 'images.objects', 'images.package.export'],
-                            rootCount: 0,
-                            objectCount: 0,
-                            relationshipCount: 0,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    return completedImageOpen({
+                        imageId: 'directory-image',
+                        revision: 1,
+                        source: {
+                            kind: 'AXK_OBJECT_DIRECTORY',
+                            directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
                         },
-                        201,
-                    );
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'axk-object-directory',
+                        availableOperations: ['images.content', 'images.objects', 'images.package.export'],
+                        rootCount: 0,
+                        objectCount: 0,
+                        relationshipCount: 0,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
                 }
                 if (url.pathname.endsWith('/images/directory-image/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
@@ -374,25 +472,22 @@ describe('HttpImageTransport', () => {
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = new URL(String(input));
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json(
-                        {
-                            imageId: 'directory-image',
-                            revision: 1,
-                            source: {
-                                kind: 'AXK_OBJECT_DIRECTORY',
-                                directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'axk-object-directory',
-                            availableOperations: ['images.content'],
-                            rootCount: 0,
-                            objectCount: 1,
-                            relationshipCount: 0,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    return completedImageOpen({
+                        imageId: 'directory-image',
+                        revision: 1,
+                        source: {
+                            kind: 'AXK_OBJECT_DIRECTORY',
+                            directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
                         },
-                        201,
-                    );
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'axk-object-directory',
+                        availableOperations: ['images.content'],
+                        rootCount: 0,
+                        objectCount: 1,
+                        relationshipCount: 0,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
                 }
                 if (url.pathname.endsWith('/images/directory-image/companions')) {
                     requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
@@ -946,7 +1041,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-retained',
                         revision: 1,
                         source: {
@@ -1297,7 +1392,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-repair',
                         revision: 4,
                         source: {
@@ -1443,7 +1538,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-delete',
                         revision: 7,
                         source: {
@@ -1591,7 +1686,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-cleanup',
                         revision: 11,
                         source: {
@@ -1697,7 +1792,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-programs',
                         revision: 5,
                         source: {
@@ -1784,6 +1879,138 @@ describe('HttpImageTransport', () => {
         });
     });
 
+    it('inspects and starts reviewed unresolved Program assignment cleanup', async () => {
+        const bodies = new Map<string, unknown>();
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities')) {
+                    return json({
+                        apiVersion: 'v1',
+                        limits: {},
+                        operations: [
+                            {
+                                id: 'images.program_assignments.cleanup.inspect',
+                                method: 'POST',
+                                route: '/api/v1/image-program-assignment-cleanup-inspections',
+                                mode: 'read',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageProgramAssignmentCleanupInspectionRequest',
+                                resultSchema: 'ImageProgramAssignmentCleanupInspection',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.program_assignments.cleanup',
+                                method: 'POST',
+                                route: '/api/v1/image-program-assignment-cleanups',
+                                mode: 'job',
+                                operationClass: 'write',
+                                requiresIdempotency: true,
+                                variant: null,
+                                requestSchema: 'ImageProgramAssignmentCleanupRequest',
+                                resultSchema: 'ImageProgramAssignmentCleanupResult',
+                                implemented: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/images') && init?.method === 'POST') {
+                    return completedImageOpen({
+                        imageId: 'image-cleanup',
+                        revision: 6,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                        },
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 0,
+                        objectCount: 1,
+                        relationshipCount: 1,
+                        availableOperations: [
+                            'images.program_assignments.cleanup.inspect',
+                            'images.program_assignments.cleanup',
+                        ],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
+                }
+                if (url.pathname.endsWith('/content')) {
+                    return json({ items: [], totalCount: 0, nextCursor: null });
+                }
+                if (url.pathname.endsWith('/image-program-assignment-cleanup-inspections')) {
+                    bodies.set('inspect', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-cleanup',
+                        revision: 6,
+                        contentScopeId: 'volume-1',
+                        totalCandidateCount: 1,
+                        candidates: [
+                            {
+                                programObjectId: 'program-7',
+                                programNumber: 7,
+                                programName: 'Bass',
+                                assignmentOrdinal: 3,
+                                assignmentName: 'Missing Bank',
+                                targetObjectType: 'SBAC',
+                                receiveChannelDisplay: 'Bch',
+                                reason: 'MISSING_TARGET',
+                                candidateTargetCount: 0,
+                                defaultSelected: true,
+                            },
+                        ],
+                    });
+                }
+                if (url.pathname.endsWith('/image-program-assignment-cleanups')) {
+                    bodies.set('cleanup', JSON.parse(String(init?.body)));
+                    return json(
+                        {
+                            jobId: 'job-cleanup',
+                            operationId: 'images.program_assignments.cleanup',
+                            state: 'QUEUED',
+                            latestSequence: 0,
+                            progress: null,
+                            result: null,
+                            error: null,
+                        },
+                        202,
+                    );
+                }
+                throw new Error(`unexpected request ${init?.method ?? 'GET'} ${url}`);
+            }),
+        );
+
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
+        const opened = await transport.openImage(serverFile('images/base.hds'));
+        expect(opened.programAssignmentCleanupAvailable).toBe(true);
+
+        const inspection = await transport.inspectProgramAssignmentCleanup(opened.sessionId, 'volume-1');
+        expect(inspection.candidates).toEqual([
+            expect.objectContaining({ programObjectId: 'program-7', assignmentOrdinal: 3 }),
+        ]);
+        const assignments = [{ programObjectId: 'program-7', assignmentOrdinal: 3 }];
+        const job = await transport.startProgramAssignmentCleanup(opened.sessionId, 'volume-1', assignments);
+        expect(job).toMatchObject({ kind: 'images.program_assignments.cleanup', status: 'queued' });
+        expect(bodies.get('inspect')).toEqual({
+            imageId: 'image-cleanup',
+            expectedRevision: 6,
+            contentScopeId: 'volume-1',
+        });
+        expect(bodies.get('cleanup')).toEqual({
+            imageId: 'image-cleanup',
+            expectedRevision: 6,
+            contentScopeId: 'volume-1',
+            assignments,
+        });
+    });
+
     it('imports uploaded and workspace audio into one Sample Bank through one atomic alteration job', async () => {
         let alterationBody: unknown;
         vi.stubGlobal(
@@ -1811,7 +2038,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-audio',
                         revision: 1,
                         source: {
@@ -1896,7 +2123,7 @@ describe('HttpImageTransport', () => {
             { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' },
         );
 
-        expect(job).toMatchObject({ jobId: 1, kind: 'images.alter', status: 'queued' });
+        expect(job).toMatchObject({ jobId: 2, kind: 'images.alter', status: 'queued' });
         expect(alterationBody).toEqual({
             imageId: 'image-audio',
             expectedRevision: 1,
@@ -2027,7 +2254,7 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json({
+                    return completedImageOpen({
                         imageId: 'image-midi',
                         revision: 4,
                         source: {
@@ -2076,7 +2303,7 @@ describe('HttpImageTransport', () => {
         const opened = await transport.openImage(serverFile('images/base.hds'));
         await transport.startSequenceImport(
             opened.sessionId,
-            { partitionIndex: 2, volumeName: 'Songs' },
+            { kind: 'EXISTING_VOLUME', partitionIndex: 2, volumeName: 'Songs' },
             [
                 { source: uploaded, sequenceName: 'Intro' },
                 { source: workspace, sequenceName: 'Ending' },
@@ -2588,31 +2815,28 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json(
-                        {
-                            imageId: 'image-package',
-                            revision: 7,
-                            source: {
-                                kind: 'FILE',
-                                file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'sfs',
-                            rootCount: 1,
-                            objectCount: 2,
-                            relationshipCount: 1,
-                            availableOperations: [
-                                'images.package.import',
-                                'images.package.export',
-                                'images.volume_package_export',
-                                'images.volume_floppy_export',
-                                'images.audio_export',
-                            ],
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    return completedImageOpen({
+                        imageId: 'image-package',
+                        revision: 7,
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
                         },
-                        201,
-                    );
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 1,
+                        objectCount: 2,
+                        relationshipCount: 1,
+                        availableOperations: [
+                            'images.package.import',
+                            'images.package.export',
+                            'images.volume_package_export',
+                            'images.volume_floppy_export',
+                            'images.audio_export',
+                        ],
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
                 }
                 if (url.pathname.endsWith('/images/image-package/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
@@ -2650,6 +2874,7 @@ describe('HttpImageTransport', () => {
                         sampleCount: 2,
                         waveDataCount: 2,
                         sfzFileCount: 1,
+                        wavFileCount: 2,
                         sfzEligible: true,
                         defaultDirectoryName: 'DRUMS',
                         issues: [],
@@ -2806,13 +3031,23 @@ describe('HttpImageTransport', () => {
             }),
         ).resolves.toMatchObject({ kind: 'images.volume_floppy_export', status: 'queued' });
         await expect(
-            transport.inspectImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }]),
+            transport.inspectImageAudioExport(
+                opened.sessionId,
+                [{ kind: 'SBAC', objectId: 'object-bank' }],
+                'DEPENDENCY_CLOSURE',
+            ),
         ).resolves.toMatchObject({ sfzEligible: true, defaultDirectoryName: 'DRUMS' });
         await expect(
-            transport.startImageAudioExport(opened.sessionId, [{ kind: 'SBAC', objectId: 'object-bank' }], 'SFZ', {
-                kind: 'DOWNLOAD',
-                directoryName: 'DRUMS',
-            }),
+            transport.startImageAudioExport(
+                opened.sessionId,
+                [{ kind: 'SBAC', objectId: 'object-bank' }],
+                'DEPENDENCY_CLOSURE',
+                'SFZ',
+                {
+                    kind: 'DOWNLOAD',
+                    directoryName: 'DRUMS',
+                },
+            ),
         ).resolves.toMatchObject({ kind: 'images.audio_export', status: 'queued' });
         const retained = {
             archiveId: 'archive-package',
@@ -2868,11 +3103,13 @@ describe('HttpImageTransport', () => {
         ).toEqual({
             imageId: 'image-package',
             expectedRevision: 7,
+            selectionMode: 'DEPENDENCY_CLOSURE',
             roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-audio-exports'))?.body).toEqual({
             imageId: 'image-package',
             expectedRevision: 7,
+            selectionMode: 'DEPENDENCY_CLOSURE',
             roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
             format: 'SFZ',
             destination: { kind: 'DOWNLOAD', directoryName: 'DRUMS' },
@@ -2889,23 +3126,20 @@ describe('HttpImageTransport', () => {
                 requests.push(`${init?.method ?? 'GET'} ${url.pathname}`);
                 expect(url.protocol).toBe('https:');
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
-                    return json(
-                        {
-                            imageId: 'image-remote',
-                            source: {
-                                kind: 'FILE',
-                                file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'sfs',
-                            rootCount: 1,
-                            objectCount: 1,
-                            relationshipCount: 0,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    return completedImageOpen({
+                        imageId: 'image-remote',
+                        source: {
+                            kind: 'FILE',
+                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
                         },
-                        201,
-                    );
+                        companionSources: [],
+                        floppySet: null,
+                        format: 'sfs',
+                        rootCount: 1,
+                        objectCount: 1,
+                        relationshipCount: 0,
+                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                    });
                 }
                 if (url.pathname.endsWith('/images/image-remote/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });

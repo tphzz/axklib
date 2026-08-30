@@ -165,26 +165,45 @@ export interface ProgramSampleSelectRows {
     all: ProgramSampleSelectRow[];
 }
 
+export type InspectorRelatedObjectType = 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU';
+
+export interface InspectorRelationshipItem {
+    id: string;
+    objectId?: string;
+    name: string;
+    detail: string;
+    navigable: boolean;
+}
+
+export interface InspectorRelationshipGroup {
+    objectType: InspectorRelatedObjectType;
+    label: 'Programs' | 'Sample Banks' | 'Samples' | 'Wave Data' | 'Sequences';
+    items: InspectorRelationshipItem[];
+}
+
 export type InspectorSelection =
     | {
           kind: 'program';
           program: Program;
           assignments: ProgramAssignmentRow[];
           sampleSelect: ProgramSampleSelectRows;
+          relationships?: InspectorRelationshipGroup[];
       }
-    | { kind: 'sequence'; sequence: SequenceItem }
+    | { kind: 'sequence'; sequence: SequenceItem; relationships?: InspectorRelationshipGroup[] }
     | {
           kind: 'sample-bank';
           item: SampleStructureItem;
           members: SampleStructureItem[];
           memberPreviews: SampleWaveformPreview[];
           displayedMemberId: string;
+          relationships?: InspectorRelationshipGroup[];
       }
     | {
           kind: 'sample';
           item: SampleStructureItem;
           memberships: SampleStructureItem[];
           preview: SampleWaveformPreview;
+          relationships?: InspectorRelationshipGroup[];
       }
-    | { kind: 'wave-data'; waveData: WaveDataItem }
+    | { kind: 'wave-data'; waveData: WaveDataItem; relationships?: InspectorRelationshipGroup[] }
     | null;

@@ -35,6 +35,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
     objectDeletionAvailable: false,
     waveDataCleanupAvailable: false,
     programGenerationAvailable: false,
+    programAssignmentCleanupAvailable: false,
     packageImportAvailable: false,
     packageExportAvailable: false,
     volumePackageExportAvailable: false,
@@ -198,20 +199,34 @@ describe('ImageTransport shared read contract', () => {
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     return json(
                         {
-                            imageId: 'image-1',
-                            source: {
-                                kind: 'FILE',
-                                file: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
+                            jobId: 'job-image-open',
+                            operationId: 'images.open',
+                            state: 'COMPLETED',
+                            latestSequence: 5,
+                            progress: {
+                                phase: 'publishing',
+                                completed: 5,
+                                total: 5,
+                                message: 'Image session ready',
                             },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'SFS',
-                            rootCount: 1,
-                            objectCount: 1,
-                            relationshipCount: 1,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                            result: {
+                                imageId: 'image-1',
+                                revision: 1,
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
+                                },
+                                companionSources: [],
+                                floppySet: null,
+                                format: 'SFS',
+                                rootCount: 1,
+                                objectCount: 1,
+                                relationshipCount: 1,
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                            },
+                            error: null,
                         },
-                        201,
+                        202,
                     );
                 }
                 if (url.pathname.endsWith('/content')) {

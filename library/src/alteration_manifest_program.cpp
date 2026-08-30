@@ -106,4 +106,36 @@ Result<InsertProgramOperation> parse_insert_program_json(const Json &row, Partit
     return InsertProgramOperation{std::move(selector), std::move(*volume), std::move(spec)};
 }
 
+Result<ClearProgramAssignmentsOperation>
+parse_clear_program_assignments_json(const Json &row, PartitionSelector selector, std::string_view context) {
+    if (auto valid = exact_fields(
+            row, {"id", "type", "partition_index", "volume_name", "program_number", "assignment_ordinals"}, context);
+        !valid) {
+        return std::unexpected{valid.error()};
+    }
+    auto volume = text(row, "volume_name", 16U, context);
+    if (!volume)
+        return std::unexpected{volume.error()};
+    Json program{{"number", row["program_number"]}};
+    auto number = program_number(program, context);
+    if (!number)
+        return std::unexpected{number.error()};
+    if (!row["assignment_ordinals"].is_array())
+        return std::unexpected{invalid(std::string{context} + ".assignment_ordinals must be an array")};
+    std::vector<std::uint8_t> ordinals;
+    ordinals.reserve(row["assignment_ordinals"].size());
+    for (const auto &value : row["assignment_ordinals"]) {
+        if (!value.is_number_integer()) {
+            return std::unexpected{invalid(std::string{context} + ".assignment_ordinals entries must be integers")};
+        }
+        const auto ordinal = value.get<int>();
+        if (ordinal < 0 || ordinal >= static_cast<int>(maximum_program_assignments)) {
+            return std::unexpected{
+                invalid(std::string{context} + ".assignment_ordinals entries must be between 0 and 15")};
+        }
+        ordinals.push_back(static_cast<std::uint8_t>(ordinal));
+    }
+    return ClearProgramAssignmentsOperation{std::move(selector), std::move(*volume), *number, std::move(ordinals)};
+}
+
 } // namespace axk::detail

@@ -1,5 +1,6 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
 import {
     type ApiContentItem,
@@ -28,6 +29,7 @@ import type {
     RelationshipPageFilter,
     SystemProgramContexts,
     ImageValidationIssue,
+    ImageOpenOptions,
     ImageSessionExtentLayoutRepairDestination,
     JobState,
     ObjectDeletionInspection,
@@ -35,6 +37,8 @@ import type {
     PlacementRepairScope,
     ProgramGenerationInspection,
     ProgramGenerationSelection,
+    ProgramAssignmentCleanupInspection,
+    ProgramAssignmentCleanupSelection,
     VolumeDeletionInspection,
     WaveDataOrphanInspection,
 } from './transport';
@@ -52,14 +56,34 @@ export class HttpImageSessions {
         private readonly jobs: HttpJobController,
     ) {}
 
-    async open(location: ImageLocation): Promise<OpenedImage> {
+    async open(location: ImageLocation, options: ImageOpenOptions = {}): Promise<OpenedImage> {
         if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
             throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
         }
         const wireSource = imageSourceReference(location);
-        const summary = await this.client.request<ApiImageSummary>('POST', '/images', {
+        const submitted = await this.client.request<components['schemas']['Job']>('POST', '/images', {
             source: wireSource,
         });
+        if (!this.jobs.isJob(submitted)) throw new Error('images.open did not return a job');
+        const localJob = this.jobs.map(submitted);
+        options.onUpdate?.(localJob);
+        const completed =
+            localJob.status === 'completed' || localJob.status === 'failed' || localJob.status === 'cancelled'
+                ? localJob
+                : await this.jobs.wait(localJob.jobId, (job) => options.onUpdate?.(job), options.signal);
+        if (completed.status === 'cancelled') {
+            throw new DOMException('Image opening was cancelled', 'AbortError');
+        }
+        if (completed.status !== 'completed' || !completed.result) {
+            throw new AxklibApiError(
+                completed.errorCode ?? 'image_open_failed',
+                completed.error ?? 'Image opening did not complete',
+                422,
+                undefined,
+                completed.errorContext,
+            );
+        }
+        const summary = completed.result as ApiImageSummary;
         const sessionId = this.nextSessionId++;
         this.sessions.set(sessionId, {
             remoteId: summary.imageId,
@@ -372,6 +396,38 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
+    async inspectProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+    ): Promise<ProgramAssignmentCleanupInspection> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<ProgramAssignmentCleanupInspection>(
+            'images.program_assignments.cleanup.inspect',
+            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId },
+        );
+        if (this.jobs.isJob(result)) {
+            throw new Error('images.program_assignments.cleanup.inspect unexpectedly returned a job');
+        }
+        return result;
+    }
+
+    async startProgramAssignmentCleanup(
+        sessionId: number,
+        contentScopeId: string,
+        assignments: ProgramAssignmentCleanupSelection[],
+    ): Promise<JobState> {
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<never>(
+            'images.program_assignments.cleanup',
+            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId, assignments },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(result)) {
+            throw new Error('images.program_assignments.cleanup did not return a job');
+        }
+        return this.jobs.map(result);
+    }
+
     async startExtentLayoutRepair(
         sessionId: number,
         destination: ImageSessionExtentLayoutRepairDestination,
@@ -446,6 +502,9 @@ export class HttpImageSessions {
             programGenerationAvailable:
                 (summary.availableOperations ?? []).includes('images.programs.generate.inspect') &&
                 (summary.availableOperations ?? []).includes('images.programs.generate'),
+            programAssignmentCleanupAvailable:
+                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup.inspect') &&
+                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup'),
             packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
             packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
             volumePackageExportAvailable: (summary.availableOperations ?? []).includes('images.volume_package_export'),

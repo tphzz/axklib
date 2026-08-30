@@ -7,6 +7,7 @@
     import { createConnectionActions } from './features/connection/actions';
     import { DeletionWorkflow } from './features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from './features/dialogs/picker';
+    import PickerDialogHost from './features/dialogs/PickerDialogHost.svelte';
     import { hasOpenAppDialog } from './features/dialogs/visibility';
     import ClientFileInputs from './features/file-operations/ClientFileInputs.svelte';
     import { DirectComputerWorkflow } from './features/file-operations/directComputerWorkflow';
@@ -27,10 +28,12 @@
     import { JobController } from './features/jobs/actions';
     import { MutationWorkflow } from './features/mutation/workflow.svelte';
     import { ProgramGenerationWorkflow } from './features/program-generation/workflow.svelte';
+    import { ProgramAssignmentCleanupWorkflow } from './features/program-assignment-cleanup/workflow.svelte';
     import WorkspaceShell from './features/workspace/WorkspaceShell.svelte';
     import { workspaceTabs } from './features/workspace/tabs';
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from './lib/components/ImageIntegrityDialog.svelte';
+    import ImageOpenProgressDialog from './lib/components/ImageOpenProgressDialog.svelte';
     import WorkspaceGuard from './lib/components/WorkspaceGuard.svelte';
     import { createTransport } from './lib/createTransport';
     import type { RemoteServerSettingsInput, RemoteServerSettingsView } from './lib/serverSettings';
@@ -203,6 +206,17 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
+    const programAssignmentCleanupWorkflow = new ProgramAssignmentCleanupWorkflow({
+        transport,
+        jobs: jobController,
+        sessionId: () => imageSessionWorkflow.sessionId,
+        activeVolumeId: () => catalog.activeVolumeId,
+        selectedSource: () => imageSessionWorkflow.selectedSource,
+        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
+        setStatus: (status) => imageSessionWorkflow.setStatus(status),
+        reportTiming: reportMutationTiming,
+    });
     catalogHooks.resetCleanup = () => deletionWorkflow.resetCleanup();
     const audioImportWorkflow = new AudioImportWorkflow({
         transport,
@@ -233,8 +247,9 @@
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageLocation: () => imageSessionWorkflow.location,
-        mutationsAvailable: () => mutationWorkflow.objectRenameAvailable,
-        selectedSource: () => imageSessionWorkflow.selectedSource,
+        imageFormat: () => imageSessionWorkflow.imageFormat,
+        mutationsAvailable: () => mutationWorkflow.volumeAvailable,
+        selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         setSelectedSource: (item) => imageSessionWorkflow.selectSource(item),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         activeVolumeId: () => catalog.activeVolumeId,
@@ -322,6 +337,7 @@
         extentLayoutRepairWorkflow.dispose();
         deletionWorkflow.dispose();
         programGenerationWorkflow.dispose();
+        programAssignmentCleanupWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
@@ -359,6 +375,7 @@
             mediaExports: mediaExportWorkflow,
             deletion: deletionWorkflow,
             programGeneration: programGenerationWorkflow,
+            programAssignmentCleanup: programAssignmentCleanupWorkflow,
             audioImport: audioImportWorkflow,
             sequenceImport: sequenceImportWorkflow,
             tx16wImport: tx16wImportWorkflow,
@@ -438,6 +455,10 @@
     async function requestAudioExport(items: PackageExportSelection[]): Promise<void> {
         if (!imageSessionWorkflow.audioExportAvailable) return;
         await directComputerWorkflow.exportAudio(exportWorkflow, items);
+    }
+    async function requestWavExport(items: PackageExportSelection[]): Promise<void> {
+        if (!imageSessionWorkflow.audioExportAvailable) return;
+        await directComputerWorkflow.exportWav(exportWorkflow, items);
     }
     function requestSequenceExport(items: PackageExportObject[]): void {
         if (!imageSessionWorkflow.sequenceExportAvailable) return;
@@ -526,6 +547,7 @@
     objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
     waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
     programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
+    programAssignmentCleanupAvailable={imageSessionWorkflow.programAssignmentCleanupAvailable}
     packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
     packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
     volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
@@ -547,10 +569,12 @@
     selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
     exportPackage={requestObjectPackageExport}
     exportAudio={(items) => void requestAudioExport(items)}
+    exportWav={(items) => void requestWavExport(items)}
     exportMidi={requestSequenceExport}
     deleteObjects={requestObjectDeletion}
     cleanupWaveData={requestWaveDataCleanup}
     generatePrograms={() => void programGenerationWorkflow.open()}
+    cleanupProgramAssignments={() => void programAssignmentCleanupWorkflow.open()}
     clearSelection={clearPackageExportSelection}
     selectionChanged={(selection) => (packageExportSelection = selection)}
     selectionLimit={reportPackageExportSelectionLimit}
@@ -576,6 +600,26 @@
 
 <WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
 
+{#if !experimentalWarningOpen}
+    <PickerDialogHost
+        {transport}
+        request={pickerRequest}
+        finish={(selection) => pickerController.finish(selection)}
+        manageLocations={() => (workspaceManagerOpen = true)}
+    />
+{/if}
+
+{#if !experimentalWarningOpen && imageSessionWorkflow.openProgressVisible}
+    <ImageOpenProgressDialog
+        label={imageSessionWorkflow.openProgressLabel}
+        completed={imageSessionWorkflow.openProgressCompleted}
+        total={imageSessionWorkflow.openProgressTotal}
+        cancellable={imageSessionWorkflow.openProgressCancellable}
+        cancelling={imageSessionWorkflow.openProgressCancelling}
+        oncancel={() => imageSessionWorkflow.cancelOpen()}
+    />
+{/if}
+
 {#if !experimentalWarningOpen && appDialogsOpen}
     {#await import('./features/dialogs/AppDialogs.svelte') then dialogs}
         {@const AppDialogs = dialogs.default}
@@ -584,8 +628,6 @@
             {isDesktop}
             directComputerOperation={$pendingDirectComputerOperation}
             {pickerRequest}
-            finishPicker={(selection) => pickerController.finish(selection)}
-            manageLocations={() => (workspaceManagerOpen = true)}
             companionRequest={imageSessionWorkflow.companionRequest}
             addCompanion={() => void imageSessionWorkflow.addCompanionDiskSource()}
             removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
@@ -607,6 +649,7 @@
             mediaExports={mediaExportWorkflow}
             deletion={deletionWorkflow}
             programGeneration={programGenerationWorkflow}
+            programAssignmentCleanup={programAssignmentCleanupWorkflow}
             mediaDrop={mediaDropWorkflow}
             tx16wImport={tx16wImportWorkflow}
             audioImport={audioImportWorkflow}
@@ -616,7 +659,6 @@
             sampleNames={samples.map((item) => item.name)}
             sampleBankNames={sampleBanks.map((item) => item.name)}
             waveDataNames={waveData.map((item) => item.name)}
-            sequenceNames={sequences.map((item) => item.name)}
         />
     {/await}
 {/if}

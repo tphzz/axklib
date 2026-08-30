@@ -678,6 +678,27 @@ TEST(AlterationManifest, ParsesStrictProgramRename) {
     }
 }
 
+TEST(AlterationManifest, ParsesStrictUnresolvedProgramAssignmentCleanup) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"clean","type":"clear_program_assignments","partition_index":0,
+         "volume_name":"Programs","program_number":128,"assignment_ordinals":[0,15]}
+      ]})");
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&parsed->operations.front().data);
+    ASSERT_NE(cleanup, nullptr);
+    EXPECT_EQ(cleanup->program_number, 128U);
+    EXPECT_EQ(cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 15U}));
+
+    for (const auto *ordinals : {"[]", "[0,0]", "[16]"}) {
+        const auto rejected = axk::parse_alteration_manifest(std::format(
+            R"({{"schema_version":"1.0","operations":[{{"id":"clean","type":"clear_program_assignments",)"
+            R"("partition_index":0,"volume_name":"Programs","program_number":1,"assignment_ordinals":{}}}]}})",
+            ordinals));
+        EXPECT_FALSE(rejected) << ordinals;
+    }
+}
+
 TEST(Alteration, InsertsSamplerControlledProgramForDirectSample) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-generate-program";
     const auto audio = root / "tone.wav";
@@ -1272,6 +1293,79 @@ TEST(Alteration, RenameProgramChangesOnlyTheSamplerVisibleDisplayName) {
       ]})");
     ASSERT_TRUE(unchanged);
     EXPECT_FALSE(axk::inspect_hds_alteration(source, *unchanged));
+    std::filesystem::remove_all(root, error);
+}
+
+TEST(Alteration, ClearsOnlySelectedUnresolvedProgramAssignmentRows) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-clear-program-assignments";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(chain_source_manifest(audio), source));
+
+    const auto generated = axk::open_image(source);
+    ASSERT_TRUE(generated) << generated.error().message;
+    const auto &partition = generated->partitions().front();
+    const auto program_record = std::ranges::find_if(partition.records, [](const auto &record) {
+        return record.object_type == "PROG" && record.object_name == "033";
+    });
+    ASSERT_NE(program_record, partition.records.end());
+    patch_record_name(source, partition, *program_record, 0x120U, "Missing Bank");
+
+    const auto before = axk::open_image(source);
+    ASSERT_TRUE(before) << before.error().message;
+    const auto before_catalog = axk::build_object_catalog(*before);
+    ASSERT_TRUE(before_catalog) << before_catalog.error().message;
+    const auto before_program = std::ranges::find_if(before_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(before_program, before_catalog->objects.end());
+    const auto before_payload = before_program->raw_payload;
+    const auto graph = axk::build_relationship_graph(*before_catalog);
+    const auto unresolved = std::ranges::find_if(graph.relationships, [&](const auto &relationship) {
+        return relationship.source_key == before_program->key && relationship.assignment_index == 0U;
+    });
+    ASSERT_NE(unresolved, graph.relationships.end());
+    EXPECT_FALSE(unresolved->target_key);
+    EXPECT_EQ(unresolved->assignment_state, axk::AssignmentState::stored_assignment);
+
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"clean","type":"clear_program_assignments","partition_index":0,
+         "volume_name":"Chain","program_number":33,"assignment_ordinals":[0]}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto applied = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+
+    const auto after = axk::open_image(output);
+    ASSERT_TRUE(after) << after.error().message;
+    const auto after_catalog = axk::build_object_catalog(*after);
+    ASSERT_TRUE(after_catalog) << after_catalog.error().message;
+    const auto after_program = std::ranges::find_if(after_catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::prog && object.object.header.name == "033";
+    });
+    ASSERT_NE(after_program, after_catalog->objects.end());
+    ASSERT_EQ(after_program->raw_payload.size(), before_payload.size());
+    for (std::size_t offset = 0U; offset < before_payload.size(); ++offset) {
+        if (offset >= 0x120U && offset < 0x158U)
+            EXPECT_EQ(after_program->raw_payload[offset], std::byte{}) << "uncleared row byte " << offset;
+        else
+            EXPECT_EQ(after_program->raw_payload[offset], before_payload[offset])
+                << "unexpected Program payload change at offset " << offset;
+    }
+
+    const auto exact = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"clean","type":"clear_program_assignments","partition_index":0,
+         "volume_name":"Chain","program_number":33,"assignment_ordinals":[1]}
+      ]})");
+    ASSERT_TRUE(exact);
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *exact));
     std::filesystem::remove_all(root, error);
 }
 

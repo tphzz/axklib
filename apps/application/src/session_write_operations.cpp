@@ -325,6 +325,81 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         if (!bound)
             return bound;
     }
+    if (!registry.is_implemented("images.program_assignments.cleanup.inspect")) {
+        auto bound =
+            registry.bind("images.program_assignments.cleanup.inspect",
+                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                              try {
+                                  const auto image_id = input.at("imageId").get<std::string>();
+                                  const auto revision = input.at("expectedRevision").get<std::uint64_t>();
+                                  const auto content_scope_id = input.at("contentScopeId").get<std::string>();
+                                  auto inspection = images.inspect_program_assignment_cleanup(
+                                      image_id, context.owner_id, revision, content_scope_id);
+                                  if (!inspection)
+                                      return std::unexpected(inspection.error());
+                                  return program_assignment_cleanup_inspection_json(*inspection);
+                              } catch (const Json::exception &) {
+                                  return std::unexpected(operation_error(
+                                      "invalid_request", "imageId, expectedRevision, and contentScopeId are required"));
+                              }
+                          });
+        if (!bound)
+            return bound;
+    }
+    if (!registry.is_implemented("images.program_assignments.cleanup")) {
+        auto bound = registry.bind(
+            "images.program_assignments.cleanup",
+            [&images, alter_session](const Json &input, const OperationContext &context) -> Result<Json> {
+                std::string image_id;
+                std::uint64_t revision{};
+                std::string content_scope_id;
+                std::vector<ImageProgramAssignmentCleanupSelection> selections;
+                try {
+                    image_id = input.at("imageId").get<std::string>();
+                    revision = input.at("expectedRevision").get<std::uint64_t>();
+                    content_scope_id = input.at("contentScopeId").get<std::string>();
+                    for (const auto &row : input.at("assignments")) {
+                        selections.push_back({row.at("programObjectId").get<std::string>(),
+                                              row.at("assignmentOrdinal").get<std::uint8_t>()});
+                    }
+                } catch (const Json::exception &) {
+                    return std::unexpected(operation_error(
+                        "invalid_request",
+                        "imageId, expectedRevision, contentScopeId, and valid assignment selections are required"));
+                }
+                auto plan = images.plan_program_assignment_cleanup(image_id, context.owner_id, revision,
+                                                                   content_scope_id, selections);
+                if (!plan)
+                    return std::unexpected(plan.error());
+                auto altered =
+                    alter_session({{"imageId", image_id},
+                                   {"expectedRevision", revision},
+                                   {"manifest", {{"inline", program_assignment_cleanup_manifest_json(plan->manifest)}}},
+                                   {"inputBindings", Json::array()}},
+                                  context);
+                if (!altered)
+                    return std::unexpected(altered.error());
+                std::map<std::pair<std::string, std::uint8_t>, const ImageProgramAssignmentCleanupCandidate *>
+                    candidates;
+                for (const auto &candidate : plan->inspection.candidates)
+                    candidates.emplace(std::pair{candidate.program_object_id, candidate.assignment_ordinal},
+                                       &candidate);
+                Json cleaned = Json::array();
+                for (const auto &selection : plan->selections) {
+                    const auto candidate = candidates.at({selection.program_object_id, selection.assignment_ordinal});
+                    cleaned.push_back({{"programObjectId", candidate->program_object_id},
+                                       {"programNumber", candidate->program_number},
+                                       {"programName", candidate->program_name},
+                                       {"assignmentOrdinal", candidate->assignment_ordinal},
+                                       {"assignmentName", candidate->assignment_name}});
+                }
+                (*altered)["kind"] = "PROGRAM_ASSIGNMENT_CLEANUP";
+                (*altered)["cleanedAssignments"] = std::move(cleaned);
+                return altered;
+            });
+        if (!bound)
+            return bound;
+    }
     if (!registry.is_implemented("images.delete")) {
         auto bound = registry.bind(
             "images.delete",

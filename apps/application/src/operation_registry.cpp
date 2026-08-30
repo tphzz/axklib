@@ -6,13 +6,14 @@
 
 #include "axklib/application/system_service.hpp"
 
+#include "operation_registry_program_assignments.hpp"
+
 namespace {
 
 using axk::app::ExecutionMode;
 using axk::app::HttpMethod;
 using axk::app::OperationClass;
 using axk::app::OperationDescriptor;
-
 const std::array descriptors{
     OperationDescriptor{"system.version",
                         "axklib --version",
@@ -22,6 +23,17 @@ const std::array descriptors{
                         {},
                         "EmptyRequest",
                         "VersionResponse"},
+    OperationDescriptor{"images.open",
+                        {},
+                        HttpMethod::post,
+                        "/api/v1/images",
+                        ExecutionMode::job,
+                        {},
+                        "ImageOpenRequest",
+                        "ImageSession",
+                        OperationClass::read,
+                        false,
+                        false},
     OperationDescriptor{"report.info",
                         "axklib info",
                         HttpMethod::post,
@@ -613,7 +625,6 @@ axk::app::OperationRegistry::invoke(std::string_view operation_id, const Json &i
     }
     return operation.handler(input, context);
 }
-
 axk::app::Result<std::vector<axk::app::PathAccess>>
 axk::app::OperationRegistry::path_accesses(std::string_view operation_id, const Json &input,
                                            const OperationContext &context) const {
@@ -625,7 +636,6 @@ axk::app::OperationRegistry::path_accesses(std::string_view operation_id, const 
         return std::vector<PathAccess>{};
     return operation.path_access_resolver(input, context);
 }
-
 std::vector<axk::app::OperationEntry> axk::app::OperationRegistry::entries() const {
     std::vector<OperationEntry> result;
     result.reserve(operations_.size());
@@ -650,37 +660,11 @@ axk::app::OperationRegistry axk::app::make_operation_registry() {
         if (!registry.declare(descriptor))
             std::terminate();
     }
+    for (const auto &descriptor : program_assignment_cleanup_descriptors()) {
+        if (!registry.declare(descriptor))
+            std::terminate();
+    }
     if (!registry.bind_typed<EmptyRequest, VersionResponse>("system.version", system_version))
         std::terminate();
     return registry;
-}
-
-std::string_view axk::app::http_method_name(HttpMethod method) noexcept {
-    switch (method) {
-    case HttpMethod::get:
-        return "GET";
-    case HttpMethod::post:
-        return "POST";
-    }
-    return "POST";
-}
-
-std::string_view axk::app::execution_mode_name(ExecutionMode mode) noexcept {
-    switch (mode) {
-    case ExecutionMode::request:
-        return "request";
-    case ExecutionMode::job:
-        return "job";
-    }
-    return "request";
-}
-
-std::string_view axk::app::operation_class_name(OperationClass operation_class) noexcept {
-    switch (operation_class) {
-    case OperationClass::read:
-        return "read";
-    case OperationClass::write:
-        return "write";
-    }
-    return "read";
 }
