@@ -225,8 +225,8 @@ describe('ContainedObjectWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Cello' }));
     });
 
-    it('mounts and scrolls a bounded window for a large Sample collection', async () => {
-        const samples = Array.from({ length: 200 }, (_, index) =>
+    it('renders every row in a large Sample collection', () => {
+        const samples = Array.from({ length: 2_000 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
         );
 
@@ -245,21 +245,13 @@ describe('ContainedObjectWorkspace', () => {
             },
         });
 
-        expect(screen.getByText('200 items')).toBeTruthy();
-        expect(document.querySelectorAll('.contained-row').length).toBeLessThan(60);
+        expect(screen.getByText('2000 items')).toBeTruthy();
+        expect(document.querySelectorAll('.contained-row')).toHaveLength(2_000);
         expect(screen.getByRole('button', { name: 'Inspect Sample 001' })).toBeTruthy();
-        expect(screen.queryByRole('button', { name: 'Inspect Sample 200' })).toBeNull();
-
-        const list = document.querySelector('.contained-list') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 260 });
-        list.scrollTop = 5_200;
-        await fireEvent.scroll(list);
-
-        expect(screen.queryByRole('button', { name: 'Inspect Sample 001' })).toBeNull();
-        expect(screen.getByRole('button', { name: 'Inspect Sample 200' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Inspect Sample 2000' })).toBeTruthy();
     });
 
-    it('pages repeatedly within a virtualized lane and retains horizontal navigation', async () => {
+    it('pages repeatedly within a lane and retains horizontal navigation', async () => {
         const samples = Array.from({ length: 200 }, (_, index) =>
             structure('SBNK', `Sample ${String(index + 1).padStart(3, '0')}`),
         );
@@ -285,7 +277,9 @@ describe('ContainedObjectWorkspace', () => {
 
         const lists = [...document.querySelectorAll<HTMLElement>('.contained-list')];
         Object.defineProperty(lists[0], 'clientHeight', { configurable: true, value: 260 });
-        screen.getByRole('button', { name: 'Inspect Sample 001' }).focus();
+        const rows = screen.getAllByRole('button', { name: /^Inspect Sample/ });
+        for (const row of rows) Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 26 });
+        rows[0]!.focus();
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
         expect(onsampleselect).toHaveBeenLastCalledWith(samples[9]);

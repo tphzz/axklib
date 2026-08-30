@@ -388,7 +388,7 @@ describe('App panel layout', () => {
         expect(container.querySelector('.object-editor')?.textContent).toContain('No object selected');
     });
 
-    it('reveals a Sample selected from a Sample Bank inspector relationship', async () => {
+    it('reveals Samples and Wave Data selected from inspector relationships', async () => {
         const volume = {
             id: 'volume-1',
             name: 'Navigation',
@@ -421,20 +421,44 @@ describe('App panel layout', () => {
             ),
         );
         const target = samples[74]!;
-        const relationship = {
-            id: 'bank-target',
-            sourceObjectId: bank.key,
-            targetObjectId: target.key,
-            candidateObjectIds: [],
-            relationshipType: 'SBAC_SLOT_TO_SBNK',
-            quality: 'KNOWN',
-            basis: 'test',
-            notes: [],
-            assignmentIndex: 1,
-            assignmentName: '',
-            assignmentState: '',
-            receiveChannelDisplay: '',
-        };
+        const waves = Array.from({ length: 80 }, (_, index) =>
+            samplerObject(
+                `SMPL-${index + 1}`,
+                'SMPL',
+                index === 74 ? 'Target Wave' : `Wave ${String(index + 1).padStart(3, '0')}`,
+                index + 82,
+            ),
+        );
+        const targetWave = waves[74]!;
+        const relationships = [
+            {
+                id: 'bank-target',
+                sourceObjectId: bank.key,
+                targetObjectId: target.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBAC_SLOT_TO_SBNK',
+                quality: 'KNOWN',
+                basis: 'test',
+                notes: [],
+                assignmentIndex: 1,
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+            {
+                id: 'sample-wave',
+                sourceObjectId: target.key,
+                targetObjectId: targetWave.key,
+                candidateObjectIds: [],
+                relationshipType: 'SBNK_LEFT_MEMBER_TO_SMPL',
+                quality: 'KNOWN',
+                basis: 'test',
+                notes: [],
+                assignmentName: '',
+                assignmentState: '',
+                receiveChannelDisplay: '',
+            },
+        ];
         mocks.openImage.mockResolvedValueOnce({
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
@@ -443,8 +467,8 @@ describe('App panel layout', () => {
                 issueCount: 0,
                 errorCount: 0,
                 warningCount: 0,
-                objectCount: samples.length + 1,
-                relationshipCount: 1,
+                objectCount: samples.length + waves.length + 1,
+                relationshipCount: relationships.length,
             },
             objects: [],
             objectTotalCount: 0,
@@ -453,26 +477,71 @@ describe('App panel layout', () => {
             partitionMutationsAvailable: true,
             objectDeletionAvailable: true,
         });
-        mocks.objectPage.mockResolvedValue({ objects: [bank, ...samples], totalCount: samples.length + 1 });
-        mocks.relationshipPage.mockResolvedValue({ relationships: [relationship], totalCount: 1 });
-
-        renderAcknowledgedApp();
-        await chooseNestedImage();
-        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
-        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
-        await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
-
-        await waitFor(() => {
-            expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
-            expect(
-                screen
-                    .getByRole('button', { name: 'Inspect Target Sample' })
-                    .closest('.contained-row')
-                    ?.classList.contains('active'),
-            ).toBe(true);
+        mocks.objectPage.mockResolvedValue({
+            objects: [bank, ...samples, ...waves],
+            totalCount: samples.length + waves.length + 1,
         });
-        const sampleList = document.querySelector<HTMLElement>('[data-collection-list="samples"]');
-        expect(sampleList?.scrollTop).toBeGreaterThan(0);
+        mocks.relationshipPage.mockResolvedValue({ relationships, totalCount: relationships.length });
+        const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+        const scrollIntoView = vi.fn();
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+            configurable: true,
+            writable: true,
+            value: scrollIntoView,
+        });
+
+        try {
+            renderAcknowledgedApp();
+            await chooseNestedImage();
+            await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
+
+            await waitFor(() => {
+                expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
+                expect(
+                    screen
+                        .getByRole('button', { name: 'Inspect Target Sample' })
+                        .closest('.contained-row')
+                        ?.classList.contains('active'),
+                ).toBe(true);
+            });
+            await waitFor(() => {
+                expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(1);
+            });
+
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left Wave Data' }), {
+                detail: 1,
+            });
+
+            await waitFor(() => {
+                expect(screen.getByRole('region', { name: 'Wave Data' })).toBeTruthy();
+                expect(
+                    screen
+                        .getByRole('button', { name: 'Inspect Target Wave' })
+                        .closest('.wave-data-row')
+                        ?.classList.contains('active'),
+                ).toBe(true);
+            });
+            await waitFor(() => {
+                expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(2);
+            });
+            expect(scrollIntoView).toHaveBeenCalledWith({
+                block: 'center',
+                inline: 'nearest',
+                behavior: 'auto',
+            });
+        } finally {
+            if (originalScrollIntoView) {
+                Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+                    configurable: true,
+                    writable: true,
+                    value: originalScrollIntoView,
+                });
+            } else {
+                delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+            }
+        }
     });
 
     it('schedules gapless Sample Bank playback in the natural order displayed in the Samples lane', async () => {

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageExportSelectionState } from '../objectSelection';
 import type { SamplerObject } from '../transport';
@@ -81,7 +81,7 @@ describe('ObjectWorkspace', () => {
         expect(document.activeElement).toBe(rows()[2]);
     });
 
-    it('moves to the end of a virtualized Wave Data list and scrolls it into view', async () => {
+    it('moves to the end of a Wave Data list and reveals the rendered target', async () => {
         const waveData = Array.from({ length: 80 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
@@ -119,17 +119,17 @@ describe('ObjectWorkspace', () => {
         });
 
         const first = screen.getByRole('button', { name: 'Inspect SMP 001' });
-        const list = document.querySelector('.collection-body') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
+        const last = screen.getByRole('button', { name: 'Inspect SMP 080' });
+        last.scrollIntoView = vi.fn();
         first.focus();
         await fireEvent.keyDown(first, { key: 'End' });
 
         expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[79]);
-        expect(screen.getByRole('button', { name: 'Inspect SMP 080' })).toBe(document.activeElement);
-        expect(list.scrollTop).toBeGreaterThan(0);
+        expect(last).toBe(document.activeElement);
+        expect(last.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
     });
 
-    it('retains selection and focus across repeated paging in virtualized Wave Data', async () => {
+    it('retains selection and focus across repeated paging in Wave Data', async () => {
         const waveData = Array.from({ length: 80 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
@@ -167,7 +167,9 @@ describe('ObjectWorkspace', () => {
 
         const list = document.querySelector('.collection-body') as HTMLElement;
         Object.defineProperty(list, 'clientHeight', { configurable: true, value: 210 });
-        screen.getByRole('button', { name: 'Inspect SMP 001' }).focus();
+        const rows = screen.getAllByRole('button', { name: /^Inspect SMP/ });
+        for (const row of rows) Object.defineProperty(row, 'offsetHeight', { configurable: true, value: 42 });
+        rows[0]!.focus();
 
         await fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'PageDown' });
         expect(onwavedataselect).toHaveBeenLastCalledWith(waveData[4]);
@@ -186,8 +188,8 @@ describe('ObjectWorkspace', () => {
         expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect SMP 080' }));
     });
 
-    it('mounts and scrolls a bounded window of Wave Data rows and canvases', async () => {
-        const waveData = Array.from({ length: 200 }, (_, index) => {
+    it('renders all Wave Data rows while mounting canvases only near the viewport', async () => {
+        const waveData = Array.from({ length: 2_000 }, (_, index) => {
             const name = `SMP ${String(index + 1).padStart(3, '0')}`;
             const waveObject = {
                 ...object('SMPL', name),
@@ -212,21 +214,61 @@ describe('ObjectWorkspace', () => {
             };
         });
 
-        render(ObjectWorkspace, { props: { ...common, waveData, view: 'wave-data' } });
+        const observers: Array<{
+            callback: IntersectionObserverCallback;
+            options?: IntersectionObserverInit;
+            targets: Element[];
+        }> = [];
+        class TestIntersectionObserver {
+            private readonly record: (typeof observers)[number];
 
-        expect(screen.getByText('200 items')).toBeTruthy();
-        expect(document.querySelectorAll('.wave-data-row').length).toBeLessThan(60);
-        expect(document.querySelectorAll('.wave-data-row canvas').length).toBeLessThan(60);
-        expect(screen.getByRole('group', { name: 'SMP 001 Wave Data' })).toBeTruthy();
-        expect(screen.queryByRole('group', { name: 'SMP 200 Wave Data' })).toBeNull();
+            constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+                this.record = { callback, options, targets: [] };
+                observers.push(this.record);
+            }
 
-        const list = document.querySelector('.collection-body') as HTMLElement;
-        Object.defineProperty(list, 'clientHeight', { configurable: true, value: 420 });
-        list.scrollTop = 8_400;
-        await fireEvent.scroll(list);
+            observe(target: Element): void {
+                this.record.targets.push(target);
+            }
 
-        expect(screen.queryByRole('group', { name: 'SMP 001 Wave Data' })).toBeNull();
-        expect(screen.getByRole('group', { name: 'SMP 200 Wave Data' })).toBeTruthy();
+            unobserve(): void {}
+
+            disconnect(): void {}
+        }
+        vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
+        const onpreviewrequest = vi.fn();
+
+        try {
+            render(ObjectWorkspace, {
+                props: { ...common, waveData, view: 'wave-data', onpreviewrequest },
+            });
+
+            expect(screen.getByText('2000 items')).toBeTruthy();
+            expect(document.querySelectorAll('.wave-data-row')).toHaveLength(2_000);
+            expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(0);
+            expect(screen.getByRole('group', { name: 'SMP 001 Wave Data' })).toBeTruthy();
+            expect(screen.getByRole('group', { name: 'SMP 2000 Wave Data' })).toBeTruthy();
+            expect(observers).toHaveLength(1);
+            expect(observers[0]!.options?.root).toBe(document.querySelector('.collection-body'));
+            expect(observers[0]!.targets).toHaveLength(2_000);
+
+            const observer = observers[0]!;
+            const lastTarget = observer.targets[1_999]!;
+            observer.callback(
+                [{ isIntersecting: true, target: lastTarget } as IntersectionObserverEntry],
+                observer as unknown as IntersectionObserver,
+            );
+            await waitFor(() => expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(1));
+            expect(onpreviewrequest).toHaveBeenCalledWith(waveData[1_999]);
+
+            observer.callback(
+                [{ isIntersecting: false, target: lastTarget } as IntersectionObserverEntry],
+                observer as unknown as IntersectionObserver,
+            );
+            await waitFor(() => expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(0));
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it('naturally orders the standalone Wave Data lane', () => {

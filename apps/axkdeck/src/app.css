@@ -3013,19 +3013,6 @@ input:focus-visible {
   padding: 12px;
 }
 
-.virtual-list-space {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-}
-
-.virtual-list-window {
-  position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-}
-
 .horizontal-splitter {
   position: relative;
   z-index: 2;
@@ -3104,10 +3091,6 @@ input:focus-visible {
   border: 1px solid transparent;
   border-bottom-color: rgb(61 68 72 / 72%);
   background: transparent;
-}
-
-.contained-virtual-window {
-  display: block;
 }
 
 .contained-row:hover,
@@ -3480,7 +3463,7 @@ input:focus-visible {
   padding-right: calc(6px + var(--overlay-scrollbar-clearance));
 }
 
-.wave-data-virtual-window {
+.wave-data-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3558,6 +3541,11 @@ input:focus-visible {
   display: block;
   width: 100%;
   height: 28px;
+}
+
+.viewport-waveform {
+  width: 100%;
+  height: 100%;
 }
 
 .wave-data-playback {

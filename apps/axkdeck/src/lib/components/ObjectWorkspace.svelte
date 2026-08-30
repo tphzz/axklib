@@ -6,7 +6,6 @@
         hasDisallowedNavigationModifier,
         keyboardSelectionMode,
         linearNavigationIndex,
-        waveDataCollectionRowExtent,
     } from '../collectionNavigation';
     import { formatStoredSize } from '../formatBytes';
     import {
@@ -19,12 +18,11 @@
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
-    import { fixedVirtualWindow, virtualViewport, type VirtualViewportState } from '../virtualList';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
-    import Waveform from './Waveform.svelte';
+    import ViewportWaveform from './ViewportWaveform.svelte';
 
     interface Props {
         programs: Program[];
@@ -103,7 +101,6 @@
         left: number;
         top: number;
     } | null>(null);
-    let waveDataViewport = $state<VirtualViewportState>({ scrollTop: 0, height: 0 });
 
     onDestroy(() => clearPrefetch());
 
@@ -118,21 +115,6 @@
     function clearPrefetch(): void {
         if (prefetchTimer !== undefined) clearTimeout(prefetchTimer);
         prefetchTimer = undefined;
-    }
-
-    function observePreview(node: HTMLElement, item: WaveDataItem): { destroy: () => void } {
-        if (typeof IntersectionObserver === 'undefined') {
-            onpreviewrequest(item);
-            return { destroy: () => undefined };
-        }
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries.some((entry) => entry.isIntersecting)) onpreviewrequest(item);
-            },
-            { root: node.closest('.collection-body'), rootMargin: '80px' },
-        );
-        observer.observe(node);
-        return { destroy: () => observer.disconnect() };
     }
 
     function seek(event: MouseEvent, item: WaveDataItem): void {
@@ -274,12 +256,11 @@
     function navigateObject(event: KeyboardEvent, currentIndex: number): boolean {
         if (hasDisallowedNavigationModifier(event)) return false;
         const items = view === 'programs' ? filteredPrograms : filteredWaveData;
-        const itemExtent = view === 'wave-data' ? waveDataCollectionRowExtent : undefined;
         const targetIndex = linearNavigationIndex(
             event.key,
             currentIndex,
             items.length,
-            collectionPageStep(event.currentTarget, itemExtent),
+            collectionPageStep(event.currentTarget),
         );
         if (targetIndex === null) return false;
         event.preventDefault();
@@ -293,7 +274,7 @@
             if (view === 'programs') onprogramselect(target as Program);
             else onwavedataselect(target as WaveDataItem);
         }
-        void focusCollectionIndex(event.currentTarget, targetIndex, itemExtent);
+        void focusCollectionIndex(event.currentTarget, targetIndex);
         return true;
     }
 
@@ -332,10 +313,6 @@
             ? orderedWaveData.filter((item) => item.name.toLocaleLowerCase().includes(normalizedQuery))
             : orderedWaveData,
     );
-    const waveDataWindow = $derived(
-        fixedVirtualWindow(filteredWaveData.length, waveDataViewport, waveDataCollectionRowExtent),
-    );
-    const visibleWaveData = $derived(filteredWaveData.slice(waveDataWindow.startIndex, waveDataWindow.endIndex));
     const emptyCollection = $derived(
         view === 'programs' ? filteredPrograms.length === 0 : filteredWaveData.length === 0,
     );
@@ -346,10 +323,6 @@
               ? [{ label: 'Clean up unreferenced Wave Data', icon: 'broom' as const, run: oncleanupwavedata }]
               : [],
     );
-
-    function updateWaveDataViewport(viewport: VirtualViewportState): void {
-        waveDataViewport = viewport;
-    }
 </script>
 
 <section class="collection-panel" aria-label={title}>
@@ -364,7 +337,6 @@
         class="collection-body"
         data-collection-list={view}
         data-navigation-list
-        use:virtualViewport={updateWaveDataViewport}
         onclick={clearWaveDataSelection}
     >
         {#if view === 'programs'}
@@ -394,87 +366,78 @@
                 <p class="empty-copy">No matching Programs</p>
             {/each}
         {:else if filteredWaveData.length > 0}
-            <div class="virtual-list-space" style={`height: ${waveDataWindow.totalHeight}px`}>
+            {#each filteredWaveData as item, index (item.id)}
+                <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
+                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div
-                    class="virtual-list-window wave-data-virtual-window"
-                    style={`transform: translateY(${waveDataWindow.offset}px)`}
+                    class:active={activeObjectId === item.objectKey}
+                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                    class="wave-data-row"
+                    role="group"
+                    aria-label={`${item.name} Wave Data`}
+                    oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
                 >
-                    {#each visibleWaveData as item, visibleIndex (item.id)}
-                        {@const index = waveDataWindow.startIndex + visibleIndex}
-                        <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
-                        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                        <div
-                            use:observePreview={item}
-                            class:active={activeObjectId === item.objectKey}
-                            class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                            class="wave-data-row"
-                            role="group"
-                            aria-label={`${item.name} Wave Data`}
-                            oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
-                        >
-                            <button
-                                class="wave-data-selection"
-                                data-collection-object-id={item.objectKey}
-                                data-navigation-index={index}
-                                type="button"
-                                aria-label={`Inspect ${item.name}`}
-                                aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                                onclick={(event) => selectWaveData(event, item)}
-                                onkeydown={(event) =>
-                                    handleObjectKeyboard(event, index, item.object, waveDataRenameTarget(item))}
-                            ></button>
-                            <strong class="wave-data-identity">{item.name}</strong>
-                            <span class="wave-data-meta">{item.note} · {item.duration}</span>
-                            <button
-                                class="waveform-seek"
-                                type="button"
-                                aria-label={`Seek ${item.name}`}
-                                onclick={(event) => selectWaveData(event, item, true)}
-                            >
-                                <Waveform
-                                    values={item.waveform}
-                                    playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
-                                        ? playheadFrame / item.object.frameCount
-                                        : 0}
-                                />
-                            </button>
-                            <span class="wave-data-format"
-                                >{item.sampleRate} · {item.bitDepth} · {formatStoredSize(item.storedSizeBytes)}</span
-                            >
-                            <button
-                                class="wave-data-playback icon-button"
-                                type="button"
-                                aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                                    ? `Stop ${item.name}`
-                                    : `Play ${item.name}`}
-                                title={preparingObjectId === item.objectKey
-                                    ? 'Stop preparing audio'
-                                    : playingObjectId === item.objectKey
-                                      ? 'Stop'
-                                      : 'Play'}
-                                onpointerenter={() => schedulePrefetch(item)}
-                                onpointerleave={clearPrefetch}
-                                onfocus={() => schedulePrefetch(item)}
-                                onblur={clearPrefetch}
-                                onclick={(event) => {
-                                    event.stopPropagation();
-                                    clearPrefetch();
-                                    if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey)
-                                        onstop();
-                                    else onplay(item);
-                                }}
-                            >
-                                <Icon
-                                    name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                                        ? 'stop'
-                                        : 'play'}
-                                    size={13}
-                                />
-                            </button>
-                        </div>
-                    {/each}
+                    <button
+                        class="wave-data-selection"
+                        data-collection-object-id={item.objectKey}
+                        data-navigation-index={index}
+                        type="button"
+                        aria-label={`Inspect ${item.name}`}
+                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                        onclick={(event) => selectWaveData(event, item)}
+                        onkeydown={(event) =>
+                            handleObjectKeyboard(event, index, item.object, waveDataRenameTarget(item))}
+                    ></button>
+                    <strong class="wave-data-identity">{item.name}</strong>
+                    <span class="wave-data-meta">{item.note} · {item.duration}</span>
+                    <button
+                        class="waveform-seek"
+                        type="button"
+                        aria-label={`Seek ${item.name}`}
+                        onclick={(event) => selectWaveData(event, item, true)}
+                    >
+                        <ViewportWaveform
+                            values={item.waveform}
+                            onvisible={() => onpreviewrequest(item)}
+                            playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
+                                ? playheadFrame / item.object.frameCount
+                                : 0}
+                        />
+                    </button>
+                    <span class="wave-data-format"
+                        >{item.sampleRate} · {item.bitDepth} · {formatStoredSize(item.storedSizeBytes)}</span
+                    >
+                    <button
+                        class="wave-data-playback icon-button"
+                        type="button"
+                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                            ? `Stop ${item.name}`
+                            : `Play ${item.name}`}
+                        title={preparingObjectId === item.objectKey
+                            ? 'Stop preparing audio'
+                            : playingObjectId === item.objectKey
+                              ? 'Stop'
+                              : 'Play'}
+                        onpointerenter={() => schedulePrefetch(item)}
+                        onpointerleave={clearPrefetch}
+                        onfocus={() => schedulePrefetch(item)}
+                        onblur={clearPrefetch}
+                        onclick={(event) => {
+                            event.stopPropagation();
+                            clearPrefetch();
+                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
+                            else onplay(item);
+                        }}
+                    >
+                        <Icon
+                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
+                                ? 'stop'
+                                : 'play'}
+                            size={13}
+                        />
+                    </button>
                 </div>
-            </div>
+            {/each}
         {:else}
             <p class="empty-copy">No matching Wave Data</p>
         {/if}
