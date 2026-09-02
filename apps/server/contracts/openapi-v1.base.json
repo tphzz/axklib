@@ -315,6 +315,22 @@
         }
       }
     },
+    "/images/{imageId}/objects/{objectId}": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+        {"name": "objectId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}}
+      ],
+      "get": {
+        "operationId": "images.object",
+        "responses": {
+          "200": {
+            "description": "Complete decoded object metadata and direct relationships without content payload bytes",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageObjectDetailResponse"}}}
+          },
+          "404": {"description": "Image object not found"}
+        }
+      }
+    },
     "/images/{imageId}/relationships": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -1057,18 +1073,21 @@
       "WaveDataMetadata": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sampleRate", "sampleWidthBytes", "sourceWaveName", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "frameCount", "loopStartFrame", "loopLengthFrames"],
+        "required": ["sampleRate", "sampleWidthBytes", "embeddedContainerName", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "storedFrameCount", "waveStartFrame", "waveLengthFrames", "loopStartFrame", "loopLengthFrames", "storageState"],
         "properties": {
           "sampleRate": {"type": "integer", "minimum": 0, "maximum": 65535},
           "sampleWidthBytes": {"type": "integer", "minimum": 0, "maximum": 65535},
-          "sourceWaveName": {"type": "string"},
+          "embeddedContainerName": {"type": "string"},
           "rootKey": {"type": "integer", "minimum": 0, "maximum": 255},
           "fineTuneCents": {"type": "integer", "minimum": -128, "maximum": 127},
           "loopMode": {"type": "integer", "minimum": 0, "maximum": 255},
           "loopModeLabel": {"type": "string"},
-          "frameCount": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storedFrameCount": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "waveStartFrame": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "waveLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295},
           "loopStartFrame": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-          "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+          "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storageState": {"type": "string", "enum": ["COMPLETE", "INCOMPLETE"]}
         }
       },
       "SequenceTempoEvent": {
@@ -1131,6 +1150,152 @@
         "required": ["data", "meta"],
         "properties": {
           "data": {"$ref": "#/components/schemas/ImageObjectPage"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImageObjectDetailPlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "partitionName", "volumeDirectoryId", "volumeName", "categoryName", "entryName", "containerDirectory"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "volumeDirectoryId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "volumeName": {"type": "string"},
+          "categoryName": {"type": "string"},
+          "entryName": {"type": "string"},
+          "containerDirectory": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logicalPath", "scopeKey", "rawGroup", "rawVolume", "groupLabel", "groupLabelStatus", "groupLabelBasis", "volumeLabel", "volumeLabelStatus", "volumeLabelBasis", "dataOffsetBytes"],
+        "properties": {
+          "logicalPath": {"type": "string"},
+          "scopeKey": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "groupLabel": {"type": "string"},
+          "groupLabelStatus": {"type": "string"},
+          "groupLabelBasis": {"type": "string"},
+          "volumeLabel": {"type": "string"},
+          "volumeLabelStatus": {"type": "string"},
+          "volumeLabelBasis": {"type": "string"},
+          "dataOffsetBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageObjectDetailHeader": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rawType", "name", "headerSizeBytes", "layoutSelector0x14", "recordSizeOrHeaderUsed0x18", "payloadBytes0x1c", "payloadBytes0x20", "payloadOffset0x24", "rawPrefixHex"],
+        "properties": {
+          "rawType": {"type": "string"},
+          "name": {"type": "string"},
+          "headerSizeBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "layoutSelector0x14": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "recordSizeOrHeaderUsed0x18": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadBytes0x1c": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadBytes0x20": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadOffset0x24": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "rawPrefixHex": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailOmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "sizeBytes", "reason"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["AUDIO_PCM", "SEQUENCE_PAYLOAD", "OPAQUE_PAYLOAD"]},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageObjectDetailObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "key", "type", "name", "format", "scopeKey", "partitionIndex", "sfsId", "storedSizeBytes", "placementResolution", "placement", "placementCandidates", "descriptor", "header", "decoded", "omissions"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "key": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1, "maxLength": 16},
+          "name": {"type": "string"},
+          "format": {"type": "string"},
+          "scopeKey": {"type": "string"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "sfsId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storedSizeBytes": {"type": "integer", "minimum": 0},
+          "placementResolution": {"type": "string", "enum": ["EXACT", "MISSING", "AMBIGUOUS"]},
+          "placement": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailPlacement"}, {"type": "null"}]},
+          "placementCandidates": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailPlacement"}},
+          "descriptor": {"$ref": "#/components/schemas/ImageObjectDetailDescriptor"},
+          "header": {"$ref": "#/components/schemas/ImageObjectDetailHeader"},
+          "decoded": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {"kind": {"type": "string"}},
+            "additionalProperties": true
+          },
+          "omissions": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailOmission"}}
+        }
+      },
+      "ImageObjectDetailReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "key", "type", "name"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "key": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1, "maxLength": 16},
+          "name": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailRelationship": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "selectedObjectRoles", "sourceObject", "targetObject", "candidateObjects", "type", "quality", "basis", "notes", "assignmentIndex", "assignmentName", "assignmentState", "receiveChannelDisplay"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "selectedObjectRoles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["SOURCE", "TARGET", "CANDIDATE"]}},
+          "sourceObject": {"$ref": "#/components/schemas/ImageObjectDetailReference"},
+          "targetObject": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailReference"}, {"type": "null"}]},
+          "candidateObjects": {"type": "array", "items": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailReference"}, {"type": "null"}]}},
+          "type": {"type": "string", "minLength": 1, "maxLength": 64},
+          "quality": {"type": "string", "enum": ["KNOWN", "LIKELY", "TENTATIVE", "UNKNOWN"]},
+          "basis": {"type": "string"},
+          "notes": {"type": "string"},
+          "assignmentIndex": {"type": ["integer", "null"], "minimum": 0},
+          "assignmentName": {"type": "string"},
+          "assignmentState": {"type": "string"},
+          "receiveChannelDisplay": {"type": "string"}
+        }
+      },
+      "ImageObjectDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "image", "object", "relationships"],
+        "properties": {
+          "schemaVersion": {"type": "integer", "const": 1},
+          "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "revision", "format"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "revision": {"type": "integer", "minimum": 1},
+              "format": {"type": "string", "minLength": 1}
+            }
+          },
+          "object": {"$ref": "#/components/schemas/ImageObjectDetailObject"},
+          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailRelationship"}}
+        }
+      },
+      "ImageObjectDetailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/ImageObjectDetail"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },

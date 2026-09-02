@@ -606,7 +606,7 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                 return std::unexpected{loaded.error()};
             if (std::ranges::equal(*relocated, existing_payload(existing_object)))
                 continue;
-            if (object.object_type != "SBNK" && object.object_type != "PROG") {
+            if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG") {
                 return std::unexpected{planner_error("existing package object relocation fields "
                                                      "do not match the projected target")};
             }

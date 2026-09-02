@@ -58,7 +58,10 @@ function waveData(id: string): WaveDataItem {
         sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
-        frameCount: 1,
+        storedFrameCount: 1,
+        waveStartFrame: 0,
+        waveLengthFrames: 1,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 2,
     };
     return {

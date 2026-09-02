@@ -234,7 +234,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{imported.error()};
             const auto id = next++;
             const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(waveform_index) * 0x100U;
-            auto payload = detail::prepare_smpl_payload(spec, *imported, reference_value);
+            auto payload = detail::prepare_smpl_payload(spec, *imported, reference_value, volume.name);
             if (!payload)
                 return std::unexpected{payload.error()};
             smpl_entries.emplace_back(spec.name, id, 16U);
@@ -287,7 +287,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                   sample.target_sample_rate};
                 const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
-                auto payload = detail::prepare_smpl_payload(spec, audio, reference_value);
+                auto payload = detail::prepare_smpl_payload(spec, audio, reference_value, volume.name);
                 if (!payload)
                     return std::unexpected{payload.error()};
                 const auto id = next++;

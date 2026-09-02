@@ -1719,7 +1719,9 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             waveform = next(
                 item for item in objects["data"]["items"] if item["type"] == "SMPL"
             )
-            assert isinstance(waveform["waveform"]["sourceWaveName"], str), waveform
+            assert isinstance(
+                waveform["waveform"]["embeddedContainerName"], str
+            ), waveform
             preview_query = urlencode({"objectId": waveform["id"], "bins": 16})
             status, preview = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"

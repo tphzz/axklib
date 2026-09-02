@@ -182,8 +182,14 @@
         },
         "role": {
           "enum": [
-            "SMPL_GROUP_ID",
+            "SMPL_SAVE_BUFFER_RESIDUE_0X43",
+            "SMPL_EMBEDDED_CONTAINER_NAME",
+            "SMPL_NAME_HASH_NEXT_HANDLE_ALIAS",
+            "SMPL_REFERENCE_PREFIX",
+            "SMPL_SAVE_BUFFER_RESIDUE_0X6F",
+            "SMPL_NAME_HASH_NEXT_HANDLE",
             "SMPL_REFERENCE_VALUE",
+            "SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER",
             "SBNK_LEFT_MEMBER_CACHED_REFERENCE",
             "SBNK_RIGHT_MEMBER_CACHED_REFERENCE",
             "SBNK_GROUP_MEMBERSHIP",

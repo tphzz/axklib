@@ -66,19 +66,24 @@ struct ObjectHeader {
 struct CurrentSmpl {
     FieldValue<std::uint16_t> sample_rate;
     FieldValue<std::uint16_t> stored_sample_width_bytes;
-    FieldValue<std::string> source_wave_name;
-    FieldValue<std::uint32_t> group_id;
+    FieldValue<std::string> embedded_container_name;
+    FieldValue<std::uint32_t> transient_name_hash_next_handle;
     FieldValue<std::uint32_t> wave_data_reference_value;
     FieldValue<std::uint16_t> duplicate_sample_rate;
     FieldValue<std::uint8_t> root_key;
     FieldValue<std::int8_t> fine_tune_cents;
+    FieldValue<std::uint8_t> pcm_transfer_control;
+    std::uint8_t pcm_transfer_format_selector{};
     FieldValue<std::uint8_t> loop_mode;
     std::string loop_mode_label;
+    FieldValue<std::uint32_t> wave_start_frame;
     FieldValue<std::uint32_t> wave_length_frames;
+    std::optional<std::uint64_t> wave_end_frame_exclusive;
     FieldValue<std::uint32_t> loop_start_frame;
     FieldValue<std::uint32_t> loop_length_frames;
     std::optional<std::uint64_t> loop_end_frame_inclusive;
     std::optional<std::uint64_t> loop_end_frame_exclusive;
+    FieldValue<std::uint16_t> transient_512_byte_block_counter;
     std::uint32_t stored_pcm_offset{};
     std::uint32_t stored_pcm_bytes{};
     std::uint32_t stored_segment_offset{};

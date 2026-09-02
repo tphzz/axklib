@@ -11,7 +11,8 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
         return std::unexpected(session.error());
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
-    auto source = implementation_->prepare_source(**session, object_id, cancellation);
+    auto source = implementation_->prepare_source(**session, object_id,
+                                                  Implementation::DirectWaveDataWindow::stored_pcm, cancellation);
     if (!source)
         return std::unexpected(source.error());
     const auto frame_count =
@@ -92,7 +93,8 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
             attach_object_context(error);
             return error;
         };
-        auto source = implementation_->prepare_source(**session, object_id, cancellation);
+        auto source = implementation_->prepare_source(**session, object_id,
+                                                      Implementation::DirectWaveDataWindow::playback, cancellation);
         if (!source) {
             auto error = std::move(source.error());
             attach_object_context(error);

@@ -5,6 +5,7 @@ import type {
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDetail,
     OpenedImage,
     ImageValidationIssue,
     ImageOpenOptions,
@@ -46,6 +47,10 @@ export class HttpImageSessionReads {
 
     objectPage(sessionId: number, offset: number, limit: number, filter: ObjectPageFilter = {}): Promise<ObjectPage> {
         return this.imageSessions.objectPage(sessionId, offset, limit, filter);
+    }
+
+    objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
+        return this.imageSessions.objectDetail(sessionId, objectId);
     }
 
     relationshipPage(

@@ -19,7 +19,10 @@ function object(objectType: string, name: string): SamplerObject {
         sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
-        frameCount: 44_100,
+        storedFrameCount: 44_100,
+        waveStartFrame: 0,
+        waveLengthFrames: 44_100,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 2,
     };
 }

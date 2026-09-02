@@ -332,7 +332,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             if (!has_action(object, PackageImportObjectAction::insert)) {
                 if (has_action(object, PackageImportObjectAction::reuse) &&
                     has_action(object, PackageImportObjectAction::relocate)) {
-                    if (!object.target_sfs_id || (object.object_type != "SBNK" && object.object_type != "PROG")) {
+                    if (!object.target_sfs_id || (object.object_type != "SMPL" && object.object_type != "SBNK" &&
+                                                  object.object_type != "PROG")) {
                         return std::unexpected{
                             transaction_error("planned reused relocation is not a supported fixed object")};
                     }

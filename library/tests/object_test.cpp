@@ -69,7 +69,10 @@ TEST(CurrentSmpl, MatchesMaintainedSemanticContract) {
     EXPECT_EQ(wave_data.fine_tune_cents.value, -20);
     EXPECT_EQ(wave_data.loop_mode.value, 1U);
     EXPECT_EQ(wave_data.loop_mode_label, "->0");
+    EXPECT_EQ(wave_data.wave_start_frame.value, 0U);
+    EXPECT_EQ(wave_data.wave_start_frame.source.offset, 0x8eU);
     EXPECT_EQ(wave_data.wave_length_frames.value, 128U);
+    EXPECT_EQ(wave_data.wave_end_frame_exclusive, 128U);
     EXPECT_EQ(wave_data.loop_start_frame.value, 0U);
     EXPECT_EQ(wave_data.loop_length_frames.value, 128U);
     EXPECT_EQ(wave_data.loop_end_frame_inclusive, 127U);
@@ -93,8 +96,14 @@ TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEn
     ASSERT_TRUE(writer.write_be32(0x1c, 1));
     ASSERT_TRUE(writer.write_be32(0x20, 1));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "bad", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x54, 16, "Embedded Volume", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(0x74, 0x12345678U));
+    ASSERT_TRUE(writer.write_u8(0x84, 0x30U));
+    ASSERT_TRUE(writer.write_be32(0x8e, std::numeric_limits<std::uint32_t>::max()));
+    ASSERT_TRUE(writer.write_be32(0x92, 2));
     ASSERT_TRUE(writer.write_be32(0x96, std::numeric_limits<std::uint32_t>::max()));
     ASSERT_TRUE(writer.write_be32(0x9a, 2));
+    ASSERT_TRUE(writer.write_be16(0xaa, 3U));
     const auto outside = axk::decode_object(payload);
     ASSERT_TRUE(outside);
     const auto &wave_data = std::get<axk::CurrentSmpl>(outside->payload);
@@ -102,6 +111,16 @@ TEST(CurrentSmpl, RetainsMetadataOutsideDeclaredPcmAndPreservesWideDerivedLoopEn
     EXPECT_EQ(wave_data.stored_pcm_bytes, 1U);
     EXPECT_EQ(wave_data.stored_segment_offset, 0U);
     EXPECT_EQ(wave_data.stored_segment_bytes, 1U);
+    EXPECT_EQ(wave_data.embedded_container_name.value, "Embedded Volume");
+    EXPECT_EQ(wave_data.embedded_container_name.source.offset, 0x54U);
+    EXPECT_EQ(wave_data.embedded_container_name.source.verification, axk::Verification::verified);
+    EXPECT_EQ(wave_data.transient_name_hash_next_handle.value, 0x12345678U);
+    EXPECT_EQ(wave_data.transient_name_hash_next_handle.source.offset, 0x74U);
+    EXPECT_EQ(wave_data.pcm_transfer_control.value, 0x30U);
+    EXPECT_EQ(wave_data.pcm_transfer_format_selector, 0x30U);
+    EXPECT_EQ(wave_data.transient_512_byte_block_counter.value, 3U);
+    EXPECT_EQ(wave_data.transient_512_byte_block_counter.source.offset, 0xaaU);
+    EXPECT_EQ(wave_data.wave_end_frame_exclusive, 4'294'967'297ULL);
     EXPECT_EQ(wave_data.loop_end_frame_inclusive, 4'294'967'296ULL);
     EXPECT_EQ(wave_data.loop_end_frame_exclusive, 4'294'967'297ULL);
 }

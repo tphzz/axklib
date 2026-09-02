@@ -10,6 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "axklib/application/allocation_map.hpp"
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
@@ -138,14 +140,17 @@ struct ImageContentScope {
 struct WaveformMetadata {
     std::uint16_t sample_rate{};
     std::uint16_t sample_width_bytes{};
-    std::string source_wave_name;
+    std::string embedded_container_name;
     std::uint8_t root_key{};
     std::int8_t fine_tune_cents{};
     std::uint8_t loop_mode{};
     std::string loop_mode_label;
-    std::uint32_t frame_count{};
+    std::uint32_t stored_frame_count{};
+    std::uint32_t wave_start_frame{};
+    std::uint32_t wave_length_frames{};
     std::uint32_t loop_start_frame{};
     std::uint32_t loop_length_frames{};
+    std::string storage_state;
 };
 
 struct SequenceMetadata {
@@ -516,6 +521,8 @@ class ImageSessionManager {
             std::optional<std::string_view> cursor = std::nullopt,
             std::optional<std::string_view> object_type = std::nullopt,
             std::optional<std::string_view> content_scope_id = std::nullopt);
+    [[nodiscard]] Result<nlohmann::ordered_json> object_detail(std::string_view image_id, std::string_view owner_id,
+                                                               std::string_view object_id);
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                   std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});

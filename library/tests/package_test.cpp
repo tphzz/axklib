@@ -648,7 +648,7 @@ TEST(PortablePackage, ExportsAndVerifiesTypedSmplFromFat12) {
     ASSERT_EQ(built->package.roots.size(), 1U);
     ASSERT_EQ(built->package.nodes.size(), 1U);
     EXPECT_EQ(built->package.nodes.front().object_type, "SMPL");
-    EXPECT_EQ(built->package.nodes.front().relocations.size(), 2U);
+    EXPECT_EQ(built->package.nodes.front().relocations.size(), 8U);
     ASSERT_TRUE(built->package.nodes.front().semantic_sha256);
     ASSERT_TRUE(built->package.nodes.front().audio_sha256);
     EXPECT_EQ(built->package.nodes.front().semantic_sha256->size(), 64U);
@@ -656,12 +656,12 @@ TEST(PortablePackage, ExportsAndVerifiesTypedSmplFromFat12) {
     EXPECT_NE(built->package.nodes.front().semantic_sha256, built->package.nodes.front().normalized_sha256);
     EXPECT_NE(built->package.nodes.front().audio_sha256, built->package.nodes.front().normalized_sha256);
     EXPECT_EQ(*built->package.nodes.front().semantic_sha256,
-              "f0bc9a18c0c14d35e0cb81c375fd43ef8cd6528bb52eb29aee67ef8bbfe82b82");
+              "e3b47824e8002294724c2bc4a2b0f24bd32743c8776d12f62bb1525e8ffd5f4c");
     EXPECT_EQ(*built->package.nodes.front().audio_sha256,
               "2e0f5102be7b10596b272fd8df2cb288a304bd6f8a1b9c7603d13494cd13a024");
     EXPECT_EQ(built->package.nodes.front().normalized_sha256,
-              "e64305ce4d25f82f73b5512fa6945d74ba554e0cf481e42accb76fd397117d37");
-    EXPECT_EQ(built->package.package_id, "674d364947736a718728ea1af87f7882fb03ff5fc47f433dabf165af2a5c2d6b");
+              "8ae3113ddc0e4a0b2fc7a713343c22a3298ebe7400e29496b357b513fac5345b");
+    EXPECT_EQ(built->package.package_id, "db307f8ba6629f8f305c9c5221d407f5906b1d2f41d63f3e00eb5c021503a87d");
 
     const auto reopened = axk::open_portable_package(built->archive, "TEST.axksmpl");
     ASSERT_TRUE(reopened) << reopened.error().message;
@@ -1849,7 +1849,10 @@ TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) 
     EXPECT_EQ(string_set(definitions.at("relocation").at("properties").at("role").at("enum")),
               (std::set<std::string>{"PROG_ASSIGNMENT_HANDLE", "SBAC_SLOT_HANDLE", "SBNK_GROUP_MEMBERSHIP",
                                      "SBNK_LEFT_MEMBER_CACHED_REFERENCE", "SBNK_PROGRAM_BITMAP",
-                                     "SBNK_RIGHT_MEMBER_CACHED_REFERENCE", "SMPL_GROUP_ID", "SMPL_REFERENCE_VALUE"}));
+                                     "SBNK_RIGHT_MEMBER_CACHED_REFERENCE", "SMPL_EMBEDDED_CONTAINER_NAME",
+                                     "SMPL_NAME_HASH_NEXT_HANDLE", "SMPL_NAME_HASH_NEXT_HANDLE_ALIAS",
+                                     "SMPL_REFERENCE_PREFIX", "SMPL_REFERENCE_VALUE", "SMPL_SAVE_BUFFER_RESIDUE_0X43",
+                                     "SMPL_SAVE_BUFFER_RESIDUE_0X6F", "SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER"}));
     std::filesystem::remove_all(output_root, error);
 }
 
@@ -2256,15 +2259,32 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
         }
 
         if (node.object_type == "SMPL") {
-            ASSERT_EQ(profile->relocations.size(), 2U);
-            EXPECT_EQ(profile->relocations[0].offset, 0x6cU);
-            EXPECT_EQ(profile->relocations[0].width, 4U);
-            EXPECT_EQ(profile->relocations[0].role, "SMPL_GROUP_ID");
-            EXPECT_TRUE(profile->relocations[0].mask_hex.empty());
-            EXPECT_EQ(profile->relocations[1].offset, 0x78U);
-            EXPECT_EQ(profile->relocations[1].width, 4U);
-            EXPECT_EQ(profile->relocations[1].role, "SMPL_REFERENCE_VALUE");
-            EXPECT_TRUE(profile->relocations[1].mask_hex.empty());
+            const std::array expected{
+                std::tuple{0x43U, 7U, std::string_view{"SMPL_SAVE_BUFFER_RESIDUE_0X43"}},
+                std::tuple{0x54U, 16U, std::string_view{"SMPL_EMBEDDED_CONTAINER_NAME"}},
+                std::tuple{0x68U, 4U, std::string_view{"SMPL_NAME_HASH_NEXT_HANDLE_ALIAS"}},
+                std::tuple{0x6cU, 3U, std::string_view{"SMPL_REFERENCE_PREFIX"}},
+                std::tuple{0x6fU, 5U, std::string_view{"SMPL_SAVE_BUFFER_RESIDUE_0X6F"}},
+                std::tuple{0x74U, 4U, std::string_view{"SMPL_NAME_HASH_NEXT_HANDLE"}},
+                std::tuple{0x78U, 4U, std::string_view{"SMPL_REFERENCE_VALUE"}},
+                std::tuple{0xaaU, 2U, std::string_view{"SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER"}},
+            };
+            ASSERT_EQ(profile->relocations.size(), expected.size());
+            for (std::size_t index = 0; index < expected.size(); ++index) {
+                EXPECT_EQ(profile->relocations[index].offset, std::get<0>(expected[index]));
+                EXPECT_EQ(profile->relocations[index].width, std::get<1>(expected[index]));
+                EXPECT_EQ(profile->relocations[index].role, std::get<2>(expected[index]));
+                EXPECT_TRUE(profile->relocations[index].mask_hex.empty());
+            }
+
+            auto unsupported_transfer = node.raw_payload;
+            unsupported_transfer[0x84U] = std::byte{0x20};
+            const auto unsupported_decoded = axk::decode_object(unsupported_transfer);
+            ASSERT_TRUE(unsupported_decoded);
+            const auto unsupported_profile =
+                axk::package_internal::build_relocation_profile(*unsupported_decoded, unsupported_transfer);
+            ASSERT_FALSE(unsupported_profile);
+            EXPECT_EQ(unsupported_profile.error().code, axk::ErrorCode::unsupported_profile);
         } else if (node.object_type == "SBNK") {
             ASSERT_EQ(profile->relocations.size(), 4U);
             EXPECT_EQ(profile->relocations[0].offset, 0xa0U);
@@ -2461,8 +2481,10 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
 
         axk::package_internal::PackageNodeRelocationContext context;
         context.destination_name = destination_name(node);
-        if (node.object_type == "SMPL")
+        if (node.object_type == "SMPL") {
+            context.destination_embedded_container_name = "Target Volume";
             context.wave_data_reference_value = 0x234U;
+        }
         if (node.object_type == "SBNK") {
             context.linked_program_numbers = {2U, 33U, 96U, 128U};
             context.sample_bank_member =
@@ -2502,8 +2524,23 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             EXPECT_TRUE(allowed) << node.object_type << ' ' << node.name << " changed byte " << offset;
         }
         if (node.object_type == "SMPL") {
-            EXPECT_EQ(be32(*relocated, 0x6cU), 0x234U - 0xbaU);
+            const auto relocated_decoded = axk::decode_object(*relocated);
+            ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
+            const auto *wave_data = std::get_if<axk::CurrentSmpl>(&relocated_decoded->payload);
+            ASSERT_NE(wave_data, nullptr);
+            EXPECT_EQ(wave_data->embedded_container_name.value, "Target Volume");
+            for (std::size_t offset = 0x43U; offset <= 0x49U; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
+            for (std::size_t offset = 0x68U; offset <= 0x6bU; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
+            EXPECT_EQ((*relocated)[0x6cU], std::byte{});
+            EXPECT_EQ((*relocated)[0x6dU], std::byte{});
+            EXPECT_EQ((*relocated)[0x6eU], std::byte{0x02});
+            for (std::size_t offset = 0x6fU; offset <= 0x77U; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
             EXPECT_EQ(be32(*relocated, 0x78U), 0x234U);
+            EXPECT_EQ((*relocated)[0xaaU], std::byte{});
+            EXPECT_EQ((*relocated)[0xabU], std::byte{});
         } else if (node.object_type == "SBNK") {
             EXPECT_EQ(be32(*relocated, 0xa0U), 0x234U);
             EXPECT_EQ(be32(*relocated, 0xc0U), 0x00000002U);
@@ -3122,6 +3159,9 @@ TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     EXPECT_EQ(imported.front()->sfs_id.value, *plan->objects.front().target_sfs_id);
     const auto *wave_data = std::get_if<axk::CurrentSmpl>(&imported.front()->object.payload);
     ASSERT_NE(wave_data, nullptr);
+    EXPECT_EQ(wave_data->embedded_container_name.value, "New Volume");
+    EXPECT_EQ(wave_data->transient_name_hash_next_handle.value, 0U);
+    EXPECT_EQ(wave_data->transient_512_byte_block_counter.value, 0U);
     EXPECT_EQ(wave_data->wave_data_reference_value.value, *plan->objects.front().target_wave_data_reference_value);
 
     const auto repeat_plan = axk::plan_package_import(first_output, packages, request);

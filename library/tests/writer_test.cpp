@@ -341,14 +341,14 @@ TEST(AudioImport, SmplSerializationRejectsWaveDataPastTheHardwareAddressLimit) {
     axk::WaveformSpec waveform;
     waveform.name = "Too Large";
 
-    const auto payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    const auto payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U, "Test Volume");
     ASSERT_FALSE(payload);
     EXPECT_EQ(payload.error().code, axk::ErrorCode::audio_wave_data_too_large);
 
     audio.output_frames = 1U;
     audio.pcm_channels = {
         std::vector<std::byte>(static_cast<std::size_t>(axk::maximum_wave_data_pcm16_bytes_per_channel + 2U))};
-    const auto oversized_pcm = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    const auto oversized_pcm = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U, "Test Volume");
     ASSERT_FALSE(oversized_pcm);
     EXPECT_EQ(oversized_pcm.error().code, axk::ErrorCode::audio_wave_data_too_large);
 }
@@ -367,15 +367,38 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
     waveform.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
     waveform.loop_start_frame = 17U;
     waveform.loop_length_frames = 335U;
-    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U, "Mapped Volume");
     ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
+    for (std::size_t offset = 0x43U; offset <= 0x49U; ++offset)
+        EXPECT_EQ((*waveform_payload)[offset], std::byte{}) << offset;
+    EXPECT_EQ((*waveform_payload)[0x68U], (*waveform_payload)[0x74U]);
+    EXPECT_EQ((*waveform_payload)[0x69U], (*waveform_payload)[0x75U]);
+    EXPECT_EQ((*waveform_payload)[0x6aU], (*waveform_payload)[0x76U]);
+    EXPECT_EQ((*waveform_payload)[0x6bU], (*waveform_payload)[0x77U]);
+    for (std::size_t offset = 0x68U; offset <= 0x6bU; ++offset)
+        EXPECT_EQ((*waveform_payload)[offset], std::byte{}) << offset;
+    EXPECT_EQ((*waveform_payload)[0x6cU], (*waveform_payload)[0x78U]);
+    EXPECT_EQ((*waveform_payload)[0x6dU], (*waveform_payload)[0x79U]);
+    EXPECT_EQ((*waveform_payload)[0x6eU], (*waveform_payload)[0x7aU]);
+    for (std::size_t offset = 0x6fU; offset <= 0x73U; ++offset)
+        EXPECT_EQ((*waveform_payload)[offset], std::byte{}) << offset;
+    EXPECT_EQ(std::string(reinterpret_cast<const char *>(waveform_payload->data() + 0x54U), 16U), "Mapped Volume   ");
+    for (std::size_t offset = 0x74U; offset <= 0x77U; ++offset)
+        EXPECT_EQ((*waveform_payload)[offset], std::byte{}) << offset;
+    EXPECT_EQ((*waveform_payload)[0x84U], std::byte{0x30});
+    EXPECT_EQ((*waveform_payload)[0xaaU], std::byte{});
+    EXPECT_EQ((*waveform_payload)[0xabU], std::byte{});
     const auto decoded_waveform = axk::decode_object(*waveform_payload);
     ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
     const auto *smpl = std::get_if<axk::CurrentSmpl>(&decoded_waveform->payload);
     ASSERT_NE(smpl, nullptr);
+    EXPECT_EQ(smpl->embedded_container_name.value, "Mapped Volume");
+    EXPECT_EQ(smpl->pcm_transfer_control.value, 0x30U);
+    EXPECT_EQ(smpl->pcm_transfer_format_selector, 0x30U);
     EXPECT_EQ(smpl->root_key.value, 64U);
     EXPECT_EQ(smpl->fine_tune_cents.value, 25);
     EXPECT_EQ(smpl->loop_mode.value, 1U);
+    EXPECT_EQ(smpl->wave_start_frame.value, 0U);
     EXPECT_EQ(smpl->wave_length_frames.value, 400U);
     EXPECT_EQ(smpl->loop_start_frame.value, 17U);
     EXPECT_EQ(smpl->loop_length_frames.value, 335U);
@@ -411,6 +434,28 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
     EXPECT_EQ(sbnk->left.loop_length_frames, 335U);
 }
 
+TEST(AudioImport, SerializesWaveDataReferenceValuesWithoutAnInventedBase) {
+    axk::ImportedAudio audio;
+    audio.output_sample_rate = 44'100U;
+    audio.output_sample_width_bits = axk::sampler_output_sample_width_bits;
+    audio.output_frames = 1U;
+    audio.pcm_channels = {{std::byte{}, std::byte{}}};
+    axk::WaveformSpec waveform;
+    waveform.name = "Small Reference";
+
+    const auto payload = axk::detail::prepare_smpl_payload(waveform, audio, 1U, "Test Volume");
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_EQ((*payload)[0x6cU], std::byte{});
+    EXPECT_EQ((*payload)[0x6dU], std::byte{});
+    EXPECT_EQ((*payload)[0x6eU], std::byte{});
+    EXPECT_EQ((*payload)[0x6fU], std::byte{});
+    EXPECT_EQ((*payload)[0x78U], std::byte{});
+    EXPECT_EQ((*payload)[0x79U], std::byte{});
+    EXPECT_EQ((*payload)[0x7aU], std::byte{});
+    EXPECT_EQ((*payload)[0x7bU], std::byte{1});
+}
+
 TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
     axk::ImportedAudio audio;
     audio.output_sample_rate = 44'100U;
@@ -420,7 +465,7 @@ TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
 
     axk::WaveformSpec waveform;
     waveform.name = "One Shot Wave";
-    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U);
+    const auto waveform_payload = axk::detail::prepare_smpl_payload(waveform, audio, 0x100U, "Test Volume");
     ASSERT_TRUE(waveform_payload) << waveform_payload.error().message;
     const auto decoded_waveform = axk::decode_object(*waveform_payload);
     ASSERT_TRUE(decoded_waveform) << decoded_waveform.error().message;
@@ -606,11 +651,8 @@ TEST(HdsWriter, PrivateObjectCodecsRejectValuesOutsideTheirEncodedFields) {
     audio.pcm_channels = {{std::byte{}, std::byte{}}};
     axk::WaveformSpec waveform;
     waveform.name = "Wave Data";
-    const auto low_link = axk::detail::prepare_smpl_payload(waveform, audio, 0xb9U);
-    ASSERT_FALSE(low_link);
-    EXPECT_EQ(low_link.error().code, axk::ErrorCode::internal_invariant);
     audio.output_sample_rate = 0U;
-    EXPECT_FALSE(axk::detail::prepare_smpl_payload(waveform, audio, 0x100U));
+    EXPECT_FALSE(axk::detail::prepare_smpl_payload(waveform, audio, 0x100U, "Test Volume"));
     audio.output_sample_rate = 44'100U;
 
     axk::SampleSpec sample;

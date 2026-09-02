@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
     import { canvasPixelSize, waveformPixelColumns } from '../waveformCanvas';
-    import { waveformContentRatio } from '../waveformTimeline';
+    import { waveformContentRatio, waveformFrameWindow } from '../waveformTimeline';
 
     interface Props {
         values: readonly WaveformBin[];
@@ -10,12 +10,28 @@
         playheadRatio?: number;
         sourceFrameCount?: number;
         timelineFrameCount?: number;
+        windowStartFrame?: number;
+        windowLengthFrames?: number;
+        loopStartFrame?: number;
+        loopLengthFrames?: number;
     }
 
-    let { values, large = false, playheadRatio = 0, sourceFrameCount = 0, timelineFrameCount = 0 }: Props = $props();
+    let {
+        values,
+        large = false,
+        playheadRatio = 0,
+        sourceFrameCount = 0,
+        timelineFrameCount = 0,
+        windowStartFrame = 0,
+        windowLengthFrames = 0,
+        loopStartFrame = 0,
+        loopLengthFrames = 0,
+    }: Props = $props();
     let canvas: HTMLCanvasElement;
     const contentRatio = $derived(waveformContentRatio(sourceFrameCount, timelineFrameCount));
     const normalizedPlayheadRatio = $derived(Math.max(0, Math.min(1, playheadRatio)));
+    const waveWindow = $derived(waveformFrameWindow(windowStartFrame, windowLengthFrames, timelineFrameCount));
+    const loopWindow = $derived(waveformFrameWindow(loopStartFrame, loopLengthFrames, timelineFrameCount));
 
     function draw(): void {
         if (!canvas || typeof CanvasRenderingContext2D === 'undefined') return;
@@ -56,8 +72,27 @@
     aria-hidden="true"
     data-content-ratio={contentRatio}
     data-playhead-ratio={normalizedPlayheadRatio}
+    data-window-start-ratio={waveWindow?.startRatio}
+    data-window-end-ratio={waveWindow?.endRatio}
 >
     <canvas bind:this={canvas} class:large class="waveform"></canvas>
+    {#if waveWindow}
+        {#if waveWindow.startRatio > 0}
+            <span class="waveform-outside-window" style:width={`${waveWindow.startRatio * 100}%`}></span>
+        {/if}
+        {#if waveWindow.endRatio < 1}
+            <span
+                class="waveform-outside-window waveform-outside-window-end"
+                style:left={`${waveWindow.endRatio * 100}%`}
+            ></span>
+        {/if}
+        <span class="waveform-window-boundary" style:left={`${waveWindow.startRatio * 100}%`}></span>
+        <span class="waveform-window-boundary" style:left={`${waveWindow.endRatio * 100}%`}></span>
+    {/if}
+    {#if loopWindow}
+        <span class="waveform-loop-boundary" style:left={`${loopWindow.startRatio * 100}%`}></span>
+        <span class="waveform-loop-boundary" style:left={`${loopWindow.endRatio * 100}%`}></span>
+    {/if}
     {#if normalizedPlayheadRatio > 0}
         <span
             class="waveform-playhead"

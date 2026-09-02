@@ -40,6 +40,7 @@ Result<package_internal::PackageNodeRelocationContext>
 relocation_context(const PortablePackage &package, const PackageImportPlan &plan, const PlannedPackageObject &owner) {
     package_internal::PackageNodeRelocationContext context;
     context.destination_name = owner.destination_name;
+    context.destination_embedded_container_name = owner.volume_name;
     context.wave_data_reference_value = owner.target_wave_data_reference_value;
     context.linked_program_numbers = owner.target_program_numbers;
     context.sample_bank_member = owner.target_sample_bank_member;

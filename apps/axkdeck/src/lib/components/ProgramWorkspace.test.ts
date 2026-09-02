@@ -31,7 +31,10 @@ function program(programNumber: number, name: string): Program {
         sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
-        frameCount: 0,
+        storedFrameCount: 0,
+        waveStartFrame: 0,
+        waveLengthFrames: 0,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 0,
     };
     return { id: object.key, objectId: object.key, slot, programNumber, name, object };

@@ -217,6 +217,16 @@ describe('HttpImageTransport', () => {
                         nextCursor: null,
                     });
                 }
+                if (url.pathname.endsWith('/images/image-remote/objects/object-1')) {
+                    return json({
+                        data: {
+                            schemaVersion: 1,
+                            image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
+                            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+                            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
+                        },
+                    });
+                }
                 if (url.pathname.endsWith('/images/image-remote/objects') && !url.searchParams.has('cursor')) {
                     expect(url.searchParams.get('type')).toBe('SMPL');
                     expect(url.searchParams.get('scopeId')).toBe('volume-1');
@@ -236,7 +246,10 @@ describe('HttpImageTransport', () => {
                                     sampleRate: 44100,
                                     sampleWidthBytes: 2,
                                     rootKey: 60,
-                                    frameCount: 100,
+                                    storedFrameCount: 120,
+                                    waveStartFrame: 10,
+                                    waveLengthFrames: 100,
+                                    storageState: 'COMPLETE',
                                 },
                             },
                         ],
@@ -307,11 +320,20 @@ describe('HttpImageTransport', () => {
                     key: 'object-1',
                     sampleRate: 44100,
                     rootKey: 60,
+                    storedFrameCount: 120,
+                    waveStartFrame: 10,
+                    waveLengthFrames: 100,
+                    storageState: 'COMPLETE',
                     storedSizeBytes: 88_064,
                     sizeWithDependenciesBytes: null,
                 },
             ],
             totalCount: 2,
+        });
+        await expect(transport.objectDetail(1, 'object-1')).resolves.toMatchObject({
+            schemaVersion: 1,
+            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
         });
         await expect(transport.contentChildren(1, 'partition-1', 0, 64)).resolves.toMatchObject({
             items: [{ id: 'volume-1', partitionIndex: 0 }],
@@ -319,7 +341,7 @@ describe('HttpImageTransport', () => {
         });
         await transport.keepImageAlive(1);
         await transport.closeImage(1);
-        expect(requests).toHaveLength(7);
+        expect(requests).toHaveLength(8);
         expect(requests.filter((request) => request.includes('/content'))).toHaveLength(3);
     });
 

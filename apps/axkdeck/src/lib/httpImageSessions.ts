@@ -24,6 +24,7 @@ import type {
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDetail,
     OpenedImage,
     RelationshipPage,
     RelationshipPageFilter,
@@ -210,6 +211,15 @@ export class HttpImageSessions {
         );
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { objects: page.items.map(mapObject), totalCount: page.totalCount };
+    }
+
+    async objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
+        const session = this.get(sessionId);
+        const response = await this.client.request<components['schemas']['ImageObjectDetailResponse']>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}/objects/${encodeURIComponent(objectId)}`,
+        );
+        return response.data;
     }
 
     async relationshipPage(

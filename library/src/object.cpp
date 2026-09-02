@@ -50,37 +50,49 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
     const ByteReader reader{payload};
     const auto sample_rate = reader.be16(0x28);
     const auto sample_width = reader.be16(0x2a);
-    const auto source_name = reader.printable_ascii_field(0x54, 16);
-    const auto group_id = reader.be32(0x6c);
+    const auto embedded_container_name = reader.printable_ascii_field(0x54, 16);
+    const auto transient_name_hash_next_handle = reader.be32(0x74);
     const auto reference_value = reader.be32(0x78);
     const auto duplicate_rate = reader.be16(0x7c);
     const auto root_key = reader.u8(0x7e);
     const auto fine_tune = reader.s8(0x7f);
+    const auto pcm_transfer_control = reader.u8(0x84);
     const auto loop_mode = reader.u8(0x85);
+    const auto wave_start = reader.be32(0x8e);
     const auto wave_length = reader.be32(0x92);
     const auto loop_start = reader.be32(0x96);
     const auto loop_length = reader.be32(0x9a);
-    if (!sample_rate || !sample_width || !source_name || !group_id || !reference_value || !duplicate_rate ||
-        !root_key || !fine_tune || !loop_mode || !wave_length || !loop_start || !loop_length) {
+    const auto transient_512_byte_block_counter = reader.be16(0xaa);
+    if (!sample_rate || !sample_width || !embedded_container_name || !transient_name_hash_next_handle ||
+        !reference_value || !duplicate_rate || !root_key || !fine_tune || !pcm_transfer_control || !loop_mode ||
+        !wave_start || !wave_length || !loop_start || !loop_length || !transient_512_byte_block_counter) {
         return std::unexpected{
             make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SMPL metadata is truncated")};
     }
     CurrentSmpl result{
         field(*sample_rate, 0x28, 2, Verification::corroborated, "current SMPL header"),
         field(*sample_width, 0x2a, 2, Verification::corroborated, "current SMPL header"),
-        field(*source_name, 0x54, 16, Verification::corroborated, "compact record text"),
-        field(*group_id, 0x6c, 4, Verification::corroborated, "compact record link field"),
+        field(*embedded_container_name, 0x54, 16, Verification::verified,
+              "A-series path descriptor and controlled SFS Volume rename"),
+        field(*transient_name_hash_next_handle, 0x74, 4, Verification::verified,
+              "A-series runtime name-hash collision chain"),
         field(*reference_value, 0x78, 4, Verification::corroborated, "compact Wave Data reference value"),
         field(*duplicate_rate, 0x7c, 2, Verification::corroborated, "compact rate copy"),
         field(*root_key, 0x7e, 1, Verification::corroborated, "compact pitch field"),
         field(*fine_tune, 0x7f, 1, Verification::corroborated, "compact pitch field"),
+        field(*pcm_transfer_control, 0x84, 1, Verification::verified, "A-series PCM transfer-format selection"),
+        static_cast<std::uint8_t>(*pcm_transfer_control & 0x30U),
         field(*loop_mode, 0x85, 1, Verification::corroborated, "compact loop field"),
         {},
+        field(*wave_start, 0x8e, 4, Verification::verified, "Wave Data playback window"),
         field(*wave_length, 0x92, 4, Verification::corroborated, "compact frame field"),
+        std::nullopt,
         field(*loop_start, 0x96, 4, Verification::corroborated, "compact loop field"),
         field(*loop_length, 0x9a, 4, Verification::corroborated, "compact loop field"),
         std::nullopt,
         std::nullopt,
+        field(*transient_512_byte_block_counter, 0xaa, 2, Verification::verified,
+              "A-series 512-byte transfer counter and controlled hardware validation"),
         header.header_size,
         header.payload_bytes_0x1c,
         header.payload_offset_0x24,
@@ -88,6 +100,10 @@ Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const Object
         {},
     };
     result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
+    const auto wave_end = checked_add(*wave_start, *wave_length);
+    if (!wave_end)
+        return std::unexpected{wave_end.error()};
+    result.wave_end_frame_exclusive = *wave_end;
     if (*loop_length != 0) {
         const auto exclusive = checked_add(*loop_start, *loop_length);
         if (!exclusive)

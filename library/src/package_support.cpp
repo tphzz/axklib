@@ -301,7 +301,6 @@ Result<std::optional<WaveformDigests>> waveform_digests(const DecodedObject &dec
                         {"root_key", smpl->root_key.value},
                         {"sample_rate", smpl->sample_rate.value},
                         {"schema", "axklib-smpl-semantic-v1"},
-                        {"source_wave_name", smpl->source_wave_name.value},
                         {"stored_pcm_bytes", smpl->stored_pcm_bytes},
                         {"stored_pcm_offset", smpl->stored_pcm_offset},
                         {"stored_sample_width_bytes", smpl->stored_sample_width_bytes.value},

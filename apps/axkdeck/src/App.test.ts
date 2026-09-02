@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     validationIssues: vi.fn(),
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
+    objectDetail: vi.fn(),
     relationshipPage: vi.fn(),
     preview: vi.fn(),
     inspectPackage: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock('./lib/createTransport', () => ({
         validationIssues: mocks.validationIssues,
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
+        objectDetail: mocks.objectDetail,
         relationshipPage: mocks.relationshipPage,
         preview: mocks.preview,
         inspectPackage: mocks.inspectPackage,
@@ -146,6 +148,7 @@ describe('App panel layout', () => {
         mocks.validationIssues.mockReset().mockResolvedValue([]);
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
+        mocks.objectDetail.mockReset();
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
         mocks.preview.mockReset().mockResolvedValue({ frameCount: 1, lanes: [] });
         mocks.inspectPackage.mockReset();
@@ -408,7 +411,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: 0,
             rootKey: 60,
-            frameCount: 0,
+            storedFrameCount: 0,
+            waveStartFrame: 0,
+            waveLengthFrames: 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Navigation Bank', 1);
@@ -564,7 +570,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: objectType === 'SMPL' ? 44_100 : 0,
             rootKey: 60,
-            frameCount: objectType === 'SMPL' ? 1 : 0,
+            storedFrameCount: objectType === 'SMPL' ? 1 : 0,
+            waveStartFrame: 0,
+            waveLengthFrames: objectType === 'SMPL' ? 1 : 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
@@ -669,7 +678,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: objectType === 'SMPL' ? 44_100 : 0,
             rootKey: 60,
-            frameCount: objectType === 'SMPL' ? 1 : 0,
+            storedFrameCount: objectType === 'SMPL' ? 1 : 0,
+            waveStartFrame: 0,
+            waveLengthFrames: objectType === 'SMPL' ? 1 : 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
@@ -1046,7 +1058,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 512,
             sampleRate: 0,
             rootKey: 60,
-            frameCount: 0,
+            storedFrameCount: 0,
+            waveStartFrame: 0,
+            waveLengthFrames: 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 0,
         };
         const volume = {
@@ -1327,7 +1342,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 4096,
             sampleRate: 44_100,
             rootKey: 60,
-            frameCount: 44_100,
+            storedFrameCount: 44_100,
+            waveStartFrame: 0,
+            waveLengthFrames: 44_100,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 2,
         };
         const opened = {

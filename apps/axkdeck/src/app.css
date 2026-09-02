@@ -1100,6 +1100,35 @@ input:focus-visible {
   pointer-events: none;
 }
 
+.waveform-outside-window,
+.waveform-window-boundary,
+.waveform-loop-boundary {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.waveform-outside-window {
+  left: 0;
+  background: rgb(4 8 10 / 38%);
+}
+
+.waveform-outside-window-end {
+  right: 0;
+  width: auto;
+}
+
+.waveform-window-boundary {
+  width: 1px;
+  background: rgb(88 169 214 / 78%);
+}
+
+.waveform-loop-boundary {
+  width: 1px;
+  background: #d7ae68;
+}
+
 .inspector {
   grid-row: 2;
   border-right: 0;
@@ -3317,6 +3346,19 @@ input:focus-visible {
   min-height: 0;
   flex: 1;
   overflow: auto;
+}
+
+.inspector-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.inspector-copy-button:disabled {
+  cursor: wait;
 }
 
 .inspector-title {

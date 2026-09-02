@@ -91,7 +91,7 @@ Result<LoopWindow> loop_window(AudioSamplerLoopMode mode, std::uint32_t start, s
 }
 
 Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const ImportedAudio &audio,
-                                              std::uint32_t reference_value) {
+                                              std::uint32_t reference_value, std::string_view embedded_container_name) {
     const auto pcm_bytes = audio.pcm_channels.size() == 1U ? audio.pcm_channels[0].size() : 0U;
     if (audio.output_frames > maximum_wave_data_frames_per_channel ||
         pcm_bytes > maximum_wave_data_pcm16_bytes_per_channel) {
@@ -104,10 +104,6 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
         audio.output_sample_rate > std::numeric_limits<std::uint16_t>::max()) {
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "SMPL writer requires bounded mono 16-bit PCM")};
-    }
-    if (reference_value < 0xbaU) {
-        return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
-                                          "SMPL reference value is below the encoded relocation base")};
     }
     auto loop = loop_window(spec.loop_mode, spec.loop_start_frame, spec.loop_length_frames, audio.output_frames);
     if (!loop)
@@ -139,18 +135,24 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
     if (!name)
         return std::unexpected{name.error()};
     std::ranges::copy(*name, result.begin() + 0x32);
-    constexpr std::array<std::byte, 8> identity{std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0x0a},
-                                                std::byte{0x87}, std::byte{0x7c}, std::byte{0x01}, std::byte{0x54}};
-    std::ranges::copy(identity, result.begin() + 0x42);
-    writer.be32(0x68, 0x01443840);
-    writer.be32(0x6c, reference_value - 0xbaU);
-    writer.be32(0x74, 0x01443840);
+    if (embedded_container_name.empty()) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "SMPL writer requires an embedded container name")};
+    }
+    auto container_name = ascii(embedded_container_name, 16);
+    if (!container_name)
+        return std::unexpected{container_name.error()};
+    std::ranges::copy(*container_name, result.begin() + 0x54);
     writer.be32(0x78, reference_value);
+    result[0x6c] = result[0x78];
+    result[0x6d] = result[0x79];
+    result[0x6e] = result[0x7a];
     writer.be16(0x7c, static_cast<std::uint16_t>(audio.output_sample_rate));
     result[0x7e] = static_cast<std::byte>(spec.root_key);
     result[0x7f] = static_cast<std::byte>(static_cast<std::uint8_t>(spec.fine_tune_cents));
     writer.be16(0x80, pitch_word(spec.root_key, spec.fine_tune_cents, audio.output_sample_rate));
     writer.be32(0x84, 0x30000000U | (static_cast<std::uint32_t>(spec.loop_mode) << 16U));
+    writer.be32(0x8e, 0U);
     writer.be32(0x92, static_cast<std::uint32_t>(audio.output_frames));
     writer.be32(0x96, loop->start);
     writer.be32(0x9a, loop->length);
@@ -462,8 +464,9 @@ Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
 } // namespace
 
 Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                            std::uint32_t reference_value) {
-    return serialize_smpl(spec, audio, reference_value);
+                                                            std::uint32_t reference_value,
+                                                            std::string_view embedded_container_name) {
+    return serialize_smpl(spec, audio, reference_value, embedded_container_name);
 }
 
 Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,

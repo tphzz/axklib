@@ -609,6 +609,23 @@ Result<OperationReport> rename_volume(TransactionState &state, OperationContext 
     const auto source = std::ranges::find_if(*entries, [&](const ParsedDirectoryEntry &entry) {
         return entry.state == DirectoryEntryState::live && entry.name == operation.volume_name;
     });
+    auto wave_data_objects =
+        category_objects(state, partition, operation.volume_name, "SMPL", ObjectType::smpl, cancellation);
+    if (!wave_data_objects)
+        return std::unexpected{wave_data_objects.error()};
+    for (auto &wave_data : *wave_data_objects) {
+        if (wave_data.payload.size() < 0x64U) {
+            return std::unexpected{transaction_error("SMPL payload is too short for its embedded container name")};
+        }
+        ByteWriter writer{wave_data.payload};
+        if (auto written = writer.write_ascii_field(0x54U, 16U, operation.new_volume_name, std::byte{' '}); !written)
+            return std::unexpected{written.error()};
+        if (auto replaced = replace_fixed_object_payload(state, partition, wave_data.id, std::move(wave_data.payload),
+                                                         cancellation);
+            !replaced) {
+            return std::unexpected{replaced.error()};
+        }
+    }
     if (auto renamed = rename_directory_entry(state, partition, SfsId{1}, *source->target_sfs_id, operation.volume_name,
                                               operation.new_volume_name, cancellation);
         !renamed) {

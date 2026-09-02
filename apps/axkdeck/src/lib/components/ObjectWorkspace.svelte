@@ -399,8 +399,8 @@
                         <ViewportWaveform
                             values={item.waveform}
                             onvisible={() => onpreviewrequest(item)}
-                            playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
-                                ? playheadFrame / item.object.frameCount
+                            playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
+                                ? (item.object.waveStartFrame + playheadFrame) / item.object.storedFrameCount
                                 : 0}
                         />
                     </button>

@@ -35,6 +35,8 @@
     import type { ObjectSelectionMode, PackageExportSelectionState } from '../../lib/objectSelection';
     import { revealCollectionObject } from '../../lib/collectionNavigation';
     import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../lib/desktopBuildInfo';
+    import { copyObjectDetailToClipboard } from '../../lib/objectDetailClipboard';
+    import { userFacingMessage } from '../../lib/userFacingMessage';
 
     interface WorkspaceTab {
         id: WorkspaceView;
@@ -109,6 +111,7 @@
         clearSelection: () => void;
         selectionChanged: (selection: PackageExportSelectionState) => void;
         selectionLimit: () => void;
+        setStatus: (status: string) => void;
     }
 
     let {
@@ -178,6 +181,7 @@
         clearSelection,
         selectionChanged,
         selectionLimit,
+        setStatus,
     }: Props = $props();
 
     let sidebarOpen = $state(true);
@@ -304,6 +308,18 @@
             selectedMultiPart = null;
         }
         await revealCollectionObject(mainStage, view, objectId, 'center', focusTarget);
+    }
+
+    async function copyInspectorMetadata(objectId: string): Promise<void> {
+        if (sessionId === null) throw new Error('No image is open');
+        try {
+            const detail = await transport.objectDetail(sessionId, objectId);
+            await copyObjectDetailToClipboard(detail);
+            setStatus('Copied object metadata to the clipboard');
+        } catch (error) {
+            setStatus(userFacingMessage(error));
+            throw error;
+        }
     }
 
     async function openAbout(): Promise<void> {
@@ -594,6 +610,7 @@
             playheadFrame={audition.state.playheadFrame}
             onrelationshipnavigate={(objectId, focusTarget) =>
                 void navigateInspectorRelationship(objectId, focusTarget)}
+            onmetadatacopy={copyInspectorMetadata}
         />
     {/if}
     <footer class="status-bar">

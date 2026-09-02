@@ -33,6 +33,7 @@ import type {
     JobState,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDetail,
     ObjectDeletionInspection,
     ObjectRenameMutation,
     OpenedImage,
@@ -247,6 +248,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage> {
         return this.invoke('objectPage', [sessionId, offset, limit, filter]);
+    }
+
+    objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
+        return this.invoke('objectDetail', [sessionId, objectId]);
     }
 
     relationshipPage(

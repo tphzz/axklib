@@ -62,6 +62,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companions"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects/{objectId}"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/relationships"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/validation/issues"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/preview"));
@@ -81,13 +82,18 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("JobEvent"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentItem"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageObjectDetailResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageCompanionsRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionBundle"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
     const auto &wave_data_metadata = document.at("components").at("schemas").at("WaveDataMetadata");
-    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "sourceWaveName"));
-    EXPECT_EQ(wave_data_metadata.at("properties").at("sourceWaveName").at("type"), "string");
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "embeddedContainerName"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "storedFrameCount"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "waveStartFrame"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "waveLengthFrames"));
+    EXPECT_FALSE(std::ranges::contains(wave_data_metadata.at("required"), "frameCount"));
+    EXPECT_EQ(wave_data_metadata.at("properties").at("embeddedContainerName").at("type"), "string");
     const auto &headers = document.at("components").at("headers");
     EXPECT_TRUE(headers.contains("XRequestId"));
 }
@@ -366,6 +372,7 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/images/{imageId}/companions", "post", "ImageCompanionsRequest", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}/content", "get", "", "200", "ImageContentPageResponse"},
         Expectation{"/images/{imageId}/objects", "get", "", "200", "ImageObjectPageResponse"},
+        Expectation{"/images/{imageId}/objects/{objectId}", "get", "", "200", "ImageObjectDetailResponse"},
         Expectation{"/images/{imageId}/relationships", "get", "", "200", "ImageRelationshipPageResponse"},
         Expectation{"/images/{imageId}/validation/issues", "get", "", "200", "ImageValidationPageResponse"},
         Expectation{"/images/{imageId}/preview", "get", "", "200", "ImagePreviewResponse"},

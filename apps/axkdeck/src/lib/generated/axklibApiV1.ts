@@ -963,6 +963,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/objects/{objectId}': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imageId: string;
+                objectId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.object'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/preview': {
         parameters: {
             query: {
@@ -2359,6 +2378,105 @@ export interface components {
             summary: components['schemas']['AlterationSummary'];
             validation: components['schemas']['ImageBuildResult']['validation'];
             warnings: components['schemas']['Issue'][];
+        };
+        ImageObjectDetail: {
+            image: {
+                format: string;
+                imageId: string;
+                revision: number;
+            };
+            object: components['schemas']['ImageObjectDetailObject'];
+            relationships: components['schemas']['ImageObjectDetailRelationship'][];
+            /** @constant */
+            schemaVersion: 1;
+        };
+        ImageObjectDetailDescriptor: {
+            dataOffsetBytes: number;
+            groupLabel: string;
+            groupLabelBasis: string;
+            groupLabelStatus: string;
+            logicalPath: string;
+            rawGroup: string;
+            rawVolume: string;
+            scopeKey: string;
+            volumeLabel: string;
+            volumeLabelBasis: string;
+            volumeLabelStatus: string;
+        };
+        ImageObjectDetailHeader: {
+            headerSizeBytes: number;
+            layoutSelector0x14: number;
+            name: string;
+            payloadBytes0x1c: number;
+            payloadBytes0x20: number;
+            payloadOffset0x24: number;
+            rawPrefixHex: string;
+            rawType: string;
+            recordSizeOrHeaderUsed0x18: number;
+        };
+        ImageObjectDetailObject: {
+            decoded: {
+                kind: string;
+            } & {
+                [key: string]: unknown;
+            };
+            descriptor: components['schemas']['ImageObjectDetailDescriptor'];
+            format: string;
+            header: components['schemas']['ImageObjectDetailHeader'];
+            id: string;
+            key: string;
+            name: string;
+            omissions: components['schemas']['ImageObjectDetailOmission'][];
+            partitionIndex: number;
+            placement: components['schemas']['ImageObjectDetailPlacement'] | null;
+            placementCandidates: components['schemas']['ImageObjectDetailPlacement'][];
+            /** @enum {string} */
+            placementResolution: 'EXACT' | 'MISSING' | 'AMBIGUOUS';
+            scopeKey: string;
+            sfsId: number;
+            storedSizeBytes: number;
+            type: string;
+        };
+        ImageObjectDetailOmission: {
+            /** @enum {string} */
+            kind: 'AUDIO_PCM' | 'SEQUENCE_PAYLOAD' | 'OPAQUE_PAYLOAD';
+            reason: string;
+            sizeBytes: number;
+        };
+        ImageObjectDetailPlacement: {
+            categoryName: string;
+            containerDirectory: string;
+            entryName: string;
+            partitionIndex: number;
+            partitionName: string;
+            volumeDirectoryId: number;
+            volumeName: string;
+        };
+        ImageObjectDetailReference: {
+            id: string;
+            key: string;
+            name: string;
+            type: string;
+        };
+        ImageObjectDetailRelationship: {
+            assignmentIndex: number | null;
+            assignmentName: string;
+            assignmentState: string;
+            basis: string;
+            candidateObjects: (components['schemas']['ImageObjectDetailReference'] | null)[];
+            id: string;
+            notes: string;
+            /** @enum {string} */
+            quality: 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+            receiveChannelDisplay: string;
+            selectedObjectRoles: ('SOURCE' | 'TARGET' | 'CANDIDATE')[];
+            sourceObject: components['schemas']['ImageObjectDetailReference'];
+            targetObject: components['schemas']['ImageObjectDetailReference'] | null;
+            type: string;
+        };
+        ImageObjectDetailResponse: {
+            data: components['schemas']['ImageObjectDetail'];
+            meta: components['schemas']['ResponseMeta'];
         };
         ImageObjectItem: {
             categoryName: string;
@@ -4083,8 +4201,8 @@ export interface components {
             message: string;
         };
         WaveDataMetadata: {
+            embeddedContainerName: string;
             fineTuneCents: number;
-            frameCount: number;
             loopLengthFrames: number;
             loopMode: number;
             loopModeLabel: string;
@@ -4092,7 +4210,11 @@ export interface components {
             rootKey: number;
             sampleRate: number;
             sampleWidthBytes: number;
-            sourceWaveName: string;
+            /** @enum {string} */
+            storageState: 'COMPLETE' | 'INCOMPLETE';
+            storedFrameCount: number;
+            waveLengthFrames: number;
+            waveStartFrame: number;
         };
         Workspace: {
             displayName: string;
@@ -9726,6 +9848,50 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageObjectPageResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.object': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                imageId: string;
+                objectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Complete decoded object metadata and direct relationships without content payload bytes */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageObjectDetailResponse'];
+                };
+            };
+            /** @description Image object not found */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
                 };
             };
             /** @description Request could not be completed */

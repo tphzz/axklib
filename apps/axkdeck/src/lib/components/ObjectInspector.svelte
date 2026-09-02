@@ -1,7 +1,9 @@
 <script lang="ts">
+    import { onDestroy } from 'svelte';
     import { formatSequenceTempo, laterTempoChangeCount } from '../sequenceTempo';
     import { formatStoredSize } from '../formatBytes';
     import type { InspectorSelection } from '../types';
+    import Icon from './Icon.svelte';
     import InspectorRelationships from './InspectorRelationships.svelte';
     import SampleWaveformStack from './SampleWaveformStack.svelte';
     import Waveform from './Waveform.svelte';
@@ -11,9 +13,19 @@
         playingObjectId?: string | null;
         playheadFrame?: number;
         onrelationshipnavigate?: (objectId: string, focusTarget: boolean) => void;
+        onmetadatacopy?: (objectId: string) => Promise<void>;
     }
 
-    let { selection, playingObjectId = null, playheadFrame = 0, onrelationshipnavigate }: Props = $props();
+    let {
+        selection,
+        playingObjectId = null,
+        playheadFrame = 0,
+        onrelationshipnavigate,
+        onmetadatacopy,
+    }: Props = $props();
+    let copyState = $state<'idle' | 'copying' | 'copied'>('idle');
+    let copyRequest = 0;
+    let copiedTimer: ReturnType<typeof setTimeout> | undefined;
     function formatDependencySize(size: number | null): string {
         return size === null ? 'Unavailable' : formatStoredSize(size);
     }
@@ -29,6 +41,20 @@
     function formatFrames(frames: number | undefined): string {
         return `${(frames ?? 0).toLocaleString()} frames`;
     }
+    function formatStorageState(state: 'COMPLETE' | 'INCOMPLETE'): string {
+        return state === 'COMPLETE' ? 'Complete' : 'Incomplete';
+    }
+    const selectedObjectId = $derived(
+        selection?.kind === 'program'
+            ? selection.program.objectId
+            : selection?.kind === 'sequence'
+              ? selection.sequence.objectId
+              : selection?.kind === 'sample-bank' || selection?.kind === 'sample'
+                ? selection.item.objectId
+                : selection?.kind === 'wave-data'
+                  ? selection.waveData.objectKey
+                  : '',
+    );
     const heading = $derived(
         selection?.kind === 'program'
             ? 'Program details'
@@ -42,6 +68,31 @@
                     ? 'Wave Data details'
                     : 'Object details',
     );
+
+    $effect(() => {
+        selectedObjectId;
+        copyRequest += 1;
+        copyState = 'idle';
+        clearTimeout(copiedTimer);
+    });
+
+    async function copyMetadata(): Promise<void> {
+        if (!selectedObjectId || !onmetadatacopy || copyState === 'copying') return;
+        const request = ++copyRequest;
+        copyState = 'copying';
+        try {
+            await onmetadatacopy(selectedObjectId);
+            if (request !== copyRequest) return;
+            copyState = 'copied';
+            copiedTimer = setTimeout(() => {
+                if (request === copyRequest) copyState = 'idle';
+            }, 1_500);
+        } catch {
+            if (request === copyRequest) copyState = 'idle';
+        }
+    }
+
+    onDestroy(() => clearTimeout(copiedTimer));
 </script>
 
 <aside class="inspector" aria-label="Object inspector">
@@ -50,6 +101,21 @@
             <p class="eyebrow">Inspector</p>
             <h2>{heading}</h2>
         </div>
+        {#if selectedObjectId && onmetadatacopy}
+            <button
+                class="icon-button inspector-copy-button"
+                type="button"
+                aria-label={copyState === 'copied' ? 'Object metadata copied' : 'Copy object metadata'}
+                title={copyState === 'copied' ? 'Object metadata copied' : 'Copy object metadata as JSON'}
+                disabled={copyState === 'copying'}
+                onclick={() => void copyMetadata()}
+            >
+                <Icon name={copyState === 'copied' ? 'check' : 'copy'} size={14} />
+            </button>
+            <span class="inspector-copy-status" aria-live="polite">
+                {copyState === 'copied' ? 'Object metadata copied' : ''}
+            </span>
+        {/if}
     </div>
 
     <div class="inspector-body">
@@ -249,7 +315,8 @@
             </div>
         {:else if selection?.kind === 'wave-data'}
             {@const item = selection.waveData}
-            {@const sourceWaveName = item.object.sourceWaveName?.trim() ?? ''}
+            {@const embeddedContainerName = item.object.embeddedContainerName?.trim() ?? ''}
+            {@const waveEndFrame = item.object.waveStartFrame + item.object.waveLengthFrames}
             {@const loopEndFrame = (item.object.loopStartFrame ?? 0) + (item.object.loopLengthFrames ?? 0)}
             <div class="inspector-content">
                 <div class="inspector-title">
@@ -262,10 +329,14 @@
                         <Waveform
                             values={item.waveform}
                             large
-                            sourceFrameCount={item.object.frameCount}
-                            timelineFrameCount={item.object.frameCount}
-                            playheadRatio={playingObjectId === item.objectKey && item.object.frameCount > 0
-                                ? playheadFrame / item.object.frameCount
+                            sourceFrameCount={item.object.storedFrameCount}
+                            timelineFrameCount={item.object.storedFrameCount}
+                            windowStartFrame={item.object.waveStartFrame}
+                            windowLengthFrames={item.object.waveLengthFrames}
+                            loopStartFrame={item.object.loopStartFrame}
+                            loopLengthFrames={item.object.loopLengthFrames}
+                            playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
+                                ? (item.object.waveStartFrame + playheadFrame) / item.object.storedFrameCount
                                 : 0}
                         />
                     </div>
@@ -281,15 +352,23 @@
                             <dt>Directory entry</dt>
                             <dd>{item.object.directoryEntryName || 'Unknown'}</dd>
                         </div>
-                        {#if sourceWaveName && sourceWaveName !== item.name.trim()}
+                        {#if embeddedContainerName && embeddedContainerName !== item.object.volumeName.trim()}
                             <div>
-                                <dt>Source Wave Data name</dt>
-                                <dd>{sourceWaveName}</dd>
+                                <dt>Embedded container</dt>
+                                <dd>{embeddedContainerName}</dd>
                             </div>
                         {/if}
                         <div>
+                            <dt>Partition</dt>
+                            <dd>{item.object.partitionName || 'Unknown'}</dd>
+                        </div>
+                        <div>
+                            <dt>Volume</dt>
+                            <dd>{item.object.volumeName || 'Unknown'}</dd>
+                        </div>
+                        <div>
                             <dt>Root key</dt>
-                            <dd>{item.note}</dd>
+                            <dd>{item.note} ({item.object.rootKey})</dd>
                         </div>
                         <div>
                             <dt>Fine tune</dt>
@@ -301,7 +380,7 @@
                         </div>
                         <div>
                             <dt>Sample rate</dt>
-                            <dd>{item.sampleRate}</dd>
+                            <dd>{item.object.sampleRate.toLocaleString()} Hz</dd>
                         </div>
                         <div>
                             <dt>Audio format</dt>
@@ -312,11 +391,31 @@
                             <dd>{formatLoopMode(item.object.loopModeLabel, item.object.loopMode)}</dd>
                         </div>
                         <div>
+                            <dt>Storage</dt>
+                            <dd>{formatStorageState(item.object.storageState)}</dd>
+                        </div>
+                        <div>
+                            <dt>Stored frames</dt>
+                            <dd>{formatFrames(item.object.storedFrameCount)}</dd>
+                        </div>
+                        <div>
+                            <dt>Wave start</dt>
+                            <dd>{formatFrames(item.object.waveStartFrame)}</dd>
+                        </div>
+                        <div>
+                            <dt>Wave end (exclusive)</dt>
+                            <dd>{formatFrames(waveEndFrame)}</dd>
+                        </div>
+                        <div>
+                            <dt>Wave length</dt>
+                            <dd>{formatFrames(item.object.waveLengthFrames)}</dd>
+                        </div>
+                        <div>
                             <dt>Loop start</dt>
                             <dd>{formatFrames(item.object.loopStartFrame)}</dd>
                         </div>
                         <div>
-                            <dt>Loop end</dt>
+                            <dt>Loop end (exclusive)</dt>
                             <dd>{formatFrames(loopEndFrame)}</dd>
                         </div>
                         <div>

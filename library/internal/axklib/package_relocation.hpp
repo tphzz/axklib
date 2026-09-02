@@ -18,6 +18,7 @@ struct RelocationProfile {
 
 struct PackageNodeRelocationContext {
     std::string destination_name;
+    std::string destination_embedded_container_name;
     std::optional<std::uint32_t> wave_data_reference_value;
     std::map<std::string, std::string, std::less<>> edge_target_names;
     std::map<std::string, std::uint32_t, std::less<>> edge_target_reference_values;

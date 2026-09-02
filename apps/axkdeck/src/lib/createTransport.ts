@@ -16,6 +16,7 @@ import type {
     HardDiskCreationProfile,
     JobState,
     ObjectPage,
+    ObjectDetail,
     ObjectDeletionInspection,
     OpenedImage,
     ImageValidationIssue,
@@ -194,6 +195,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     objectPage(): Promise<ObjectPage> {
+        return this.unavailable();
+    }
+    objectDetail(): Promise<ObjectDetail> {
         return this.unavailable();
     }
     relationshipPage(): Promise<RelationshipPage> {

@@ -119,16 +119,19 @@ Current compact metadata fields:
 | `0x28` | 2 | u16be | sample_rate_guess |
 | `0x2a` | 2 | u16be | bytes_per_sample_guess |
 | `0x30` | `0x7c` | bytes | compact record, reported as `current_smpl_compact_record_hex` |
-| `0x54` | 16 | ASCII | source_wave_name |
-| `0x6c` | 4 | u32be | smpl_group_id_0x06c |
+| `0x54` | 16 | ASCII | embedded_container_name |
+| `0x74` | 4 | u32be | transient_name_hash_next_handle |
 | `0x78` | 4 | u32be | wave_data_reference_value |
 | `0x7c` | 2 | u16be | sample_rate_duplicate_0x07c |
 | `0x7e` | 1 | u8 | root_key_midi_note |
 | `0x7f` | 1 | s8 | fine_tune_cents |
+| `0x84` | 1 | u8 | pcm_transfer_control |
 | `0x85` | 1 | u8 | loop_mode_0x085 |
+| `0x8e` | 4 | u32be | wave_start_frame_0x08e |
 | `0x92` | 4 | u32be | wave_length_frames_0x092 |
 | `0x96` | 4 | u32be | loop_start_frame_0x096 |
 | `0x9a` | 4 | u32be | loop_length_frames_0x09a |
+| `0xaa` | 2 | u16be | transient_512_byte_block_counter |
 
 Derived loop values:
 
@@ -152,16 +155,36 @@ object offset `0x30` and normalizes these selected ranges:
 | `0x8e..0xab` | `+0x58..+0x75` | `0x1e` |
 
 The later copies replace overlapping runtime bytes initially populated from
-`0x68..0x6e`. Object ranges `0x43..0x49` and `0x6f..0x73` are not transferred
-by this normalization path. The save path copies the same selected ranges back
-into the compact record and writes the `0x7c`-byte record. Copied bytes without
-a documented field role remain raw and are not used for authoring decisions.
+`0x68..0x6e`. This produces two confirmed aliases on disk:
+`0x68..0x6b == 0x74..0x77` and
+`0x6c..0x6e == 0x78..0x7a`. The latter is only a three-byte prefix; byte
+`0x6f` is not part of the reference.
+
+Object ranges `0x43..0x49` and `0x6f..0x73` are not transferred. The A3000,
+A4000, and A5000 save paths write the entire local `0x7c`-byte buffer without
+initializing those gaps, so their contents are confirmed stack residue rather
+than object fields. Canonical writers emit zero there. The false former
+interpretation of `0x6c..0x6f` as a four-byte group ID has been removed.
 
 The normalized object values at `0x7c`, `0x7e`, `0x7f`, `0x80`, `0x84`,
 `0x85`, `0x8e`, `0x92`, `0x96`, and `0x9a` supply playback metadata. The
 loader derives the Wave Data end and loop end by adding each start and length
-pair. The source Wave Data text at `0x54` is preserved by both load and save
-normalization and is exposed as a secondary source name.
+pair. The embedded source/container text at `0x54` is preserved by load and
+save normalization. Current SFS objects store the containing Volume name; it is
+source-dependent outside SFS and is not a second Wave Data identity. Current corpus objects
+store zero at `0x82..0x83`, `0x86..0x8d`, and `0x9e..0xa9`; no current Wave
+Data playback consumer was found for those reserved ranges.
+
+The value at `0x74..0x77` is the transient name-hash collision-chain next
+handle. `0xaa..0xab` is a transient 512-byte transfer counter whose complete
+continuation lifecycle remains unknown. Neither is a user-facing Wave Data
+property. `0x78..0x7b` is a rebuilt runtime storage/cache reference used during
+Sample relationship resolution; it is not a persistent globally unique object
+identifier. Canonical authoring zero-initializes the residue ranges and the
+new-object hash-chain handle and transfer counter instead of reproducing
+captured runtime state. `0x84 & 0x30` selects one of four internal PCM transfer
+codes; canonical authoring emits the corpus-supported value `0x30` and rejects
+other values during portable import.
 
 The shared object loader compares the raw field at `0x14` with `4`: values below
 `4` select the body length at `0x18`, while later layouts select `0x1c`; value
@@ -354,6 +377,10 @@ the same Wave Data. Sample preview and audition therefore:
 4. use the `SBNK` loop mode rather than the physical Wave Data loop selector.
 
 Direct Wave Data preview remains physical and covers the stored PCM extent.
+Direct Wave Data audition uses its own `wave_start_frame` and
+`wave_length_frames` window, with its loop window rebased to that playback
+range. This keeps the preview useful for inspecting storage while playback
+matches the sampler's logical Wave Data window.
 Sample-owned preview returns one lane per active member, including each lane's
 role, source object identifier, and frame count. Invalid member windows are
 rejected instead of being clamped to the physical payload.

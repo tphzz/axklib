@@ -332,17 +332,23 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         }
         if (const auto *waveform = std::get_if<axk::CurrentSmpl>(&object.object.payload)) {
             const auto stored_width = waveform->stored_sample_width_bytes.value;
-            item.waveform =
-                WaveformMetadata{.sample_rate = waveform->sample_rate.value,
-                                 .sample_width_bytes = waveform->stored_sample_width_bytes.value,
-                                 .source_wave_name = waveform->source_wave_name.value,
-                                 .root_key = waveform->root_key.value,
-                                 .fine_tune_cents = waveform->fine_tune_cents.value,
-                                 .loop_mode = waveform->loop_mode.value,
-                                 .loop_mode_label = waveform->loop_mode_label,
-                                 .frame_count = stored_width == 0U ? 0U : waveform->stored_pcm_bytes / stored_width,
-                                 .loop_start_frame = waveform->loop_start_frame.value,
-                                 .loop_length_frames = waveform->loop_length_frames.value};
+            item.waveform = WaveformMetadata{
+                .sample_rate = waveform->sample_rate.value,
+                .sample_width_bytes = waveform->stored_sample_width_bytes.value,
+                .embedded_container_name = waveform->embedded_container_name.value,
+                .root_key = waveform->root_key.value,
+                .fine_tune_cents = waveform->fine_tune_cents.value,
+                .loop_mode = waveform->loop_mode.value,
+                .loop_mode_label = waveform->loop_mode_label,
+                .stored_frame_count = stored_width == 0U ? 0U : waveform->stored_pcm_bytes / stored_width,
+                .wave_start_frame = waveform->wave_start_frame.value,
+                .wave_length_frames = waveform->wave_length_frames.value,
+                .loop_start_frame = waveform->loop_start_frame.value,
+                .loop_length_frames = waveform->loop_length_frames.value,
+                .storage_state = waveform->stored_segment_offset == 0U &&
+                                         waveform->stored_segment_bytes == waveform->stored_pcm_bytes
+                                     ? "COMPLETE"
+                                     : "INCOMPLETE"};
         }
         if (const auto *sequence = std::get_if<axk::CurrentSequence>(&object.object.payload)) {
             std::vector<SequenceMetadata::TempoEvent> tempo_events;

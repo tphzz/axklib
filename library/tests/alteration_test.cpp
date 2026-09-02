@@ -1129,6 +1129,12 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     ASSERT_NE(before_wave, before_catalog->objects.end());
     const auto before_pcm = axk::decode_waveform(*before, *before_wave);
     ASSERT_TRUE(before_pcm) << before_pcm.error().message;
+    const auto *before_wave_data = std::get_if<axk::CurrentSmpl>(&before_wave->object.payload);
+    ASSERT_NE(before_wave_data, nullptr);
+    EXPECT_EQ(before_wave_data->embedded_container_name.value, "Chain");
+    const auto before_payload =
+        before->read_record_data(before_partition.index, before_wave->sfs_id, std::numeric_limits<std::size_t>::max());
+    ASSERT_TRUE(before_payload) << before_payload.error().message;
 
     const auto manifest = axk::parse_alteration_manifest(R"({
       "schema_version":"1.0","operations":[
@@ -1175,6 +1181,18 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     const auto after_pcm = axk::decode_waveform(*after, *after_wave);
     ASSERT_TRUE(after_pcm) << after_pcm.error().message;
     EXPECT_EQ(after_pcm->pcm, before_pcm->pcm);
+    const auto *after_wave_data = std::get_if<axk::CurrentSmpl>(&after_wave->object.payload);
+    ASSERT_NE(after_wave_data, nullptr);
+    EXPECT_EQ(after_wave_data->embedded_container_name.value, "Renamed");
+    const auto after_payload =
+        after->read_record_data(after_partition.index, after_wave->sfs_id, std::numeric_limits<std::size_t>::max());
+    ASSERT_TRUE(after_payload) << after_payload.error().message;
+    ASSERT_EQ(after_payload->size(), before_payload->size());
+    for (std::size_t offset = 0; offset < before_payload->size(); ++offset) {
+        if (offset >= 0x54U && offset < 0x64U)
+            continue;
+        EXPECT_EQ((*after_payload)[offset], (*before_payload)[offset]) << offset;
+    }
 
     const auto duplicate = axk::parse_alteration_manifest(R"({
       "schema_version":"1.0","operations":[

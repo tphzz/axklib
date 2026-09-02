@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/svelte';
+import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject } from '../transport';
 import type {
     InspectorSelection,
@@ -26,7 +26,10 @@ function object(objectType: string, name: string): SamplerObject {
         sizeWithDependenciesBytes: 1024,
         sampleRate: 0,
         rootKey: 0,
-        frameCount: 0,
+        storedFrameCount: 0,
+        waveStartFrame: 0,
+        waveLengthFrames: 0,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 0,
     };
 }
@@ -34,7 +37,9 @@ function object(objectType: string, name: string): SamplerObject {
 function waveData(name: string, frameCount: number, previewState: WaveDataItem['previewState']): WaveDataItem {
     const waveObject = {
         ...object('SMPL', name),
-        frameCount,
+        storedFrameCount: frameCount,
+        waveStartFrame: 0,
+        waveLengthFrames: frameCount,
         sampleRate: 44_100,
         sampleWidthBytes: 2,
         storedSizeBytes: frameCount * 2,
@@ -63,8 +68,8 @@ function samplePreview(
     item: SampleStructureItem,
     waveData: LinkedWaveDataItem[],
     previewState: SampleWaveformPreview['previewState'] = 'ready',
-    frameCount = Math.max(0, ...waveData.map((entry) => entry.waveData.object.frameCount)),
-    laneFrameCounts = waveData.map((entry) => entry.waveData.object.frameCount),
+    frameCount = Math.max(0, ...waveData.map((entry) => entry.waveData.object.waveLengthFrames)),
+    laneFrameCounts = waveData.map((entry) => entry.waveData.object.waveLengthFrames),
 ): SampleWaveformPreview {
     return {
         item,
@@ -110,6 +115,19 @@ function programSelection(): Extract<InspectorSelection, { kind: 'program' }> {
 }
 
 describe('ObjectInspector', () => {
+    it('copies metadata for the selected object through one icon control', async () => {
+        const onmetadatacopy = vi.fn().mockResolvedValue(undefined);
+        render(ObjectInspector, { props: { selection: programSelection(), onmetadatacopy } });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Copy object metadata' }));
+
+        expect(onmetadatacopy).toHaveBeenCalledOnce();
+        expect(onmetadatacopy).toHaveBeenCalledWith('PROG-001');
+        expect(
+            screen.getByRole('button', { name: 'Object metadata copied' }).querySelector('[data-icon="check"]'),
+        ).toBeTruthy();
+    });
+
     it('uses the common identity, Properties, and Relationships hierarchy for Programs', () => {
         const { container } = render(ObjectInspector, { props: { selection: programSelection() } });
 
@@ -532,8 +550,12 @@ describe('ObjectInspector', () => {
         Object.assign(item.object, {
             objectEncoding: 'current',
             directoryEntryName: 'WAVE0001.001',
-            sourceWaveName: 'Sampler Source',
+            embeddedContainerName: 'Sampler Source',
             rootKey: 60,
+            storedFrameCount: 90_000,
+            waveStartFrame: 100,
+            waveLengthFrames: 88_200,
+            storageState: 'INCOMPLETE',
             fineTuneCents: -7,
             loopMode: 2,
             loopModeLabel: '->0->',
@@ -549,15 +571,23 @@ describe('ObjectInspector', () => {
         expect(screen.getByText('Current A-series')).toBeTruthy();
         expect(screen.getByText('Directory entry')).toBeTruthy();
         expect(screen.getByText('WAVE0001.001')).toBeTruthy();
-        expect(screen.getByText('Source Wave Data name')).toBeTruthy();
+        expect(screen.getByText('Embedded container')).toBeTruthy();
         expect(screen.getByText('Sampler Source')).toBeTruthy();
-        expect(screen.getByText('C3')).toBeTruthy();
+        expect(screen.getByText('C3 (60)')).toBeTruthy();
         expect(screen.getByText('-7 cents')).toBeTruthy();
         expect(screen.getByText('Audio format')).toBeTruthy();
         expect(screen.getByText('->0->')).toBeTruthy();
+        expect(screen.getByText('Incomplete')).toBeTruthy();
+        expect(screen.getByText('90,000 frames')).toBeTruthy();
+        expect(screen.getByText('100 frames')).toBeTruthy();
+        expect(screen.getByText('88,300 frames')).toBeTruthy();
+        expect(screen.getByText('88,200 frames')).toBeTruthy();
         expect(screen.getByText('1,234 frames')).toBeTruthy();
         expect(screen.getByText('1,634 frames')).toBeTruthy();
         expect(screen.getByText('400 frames')).toBeTruthy();
+        expect(container.querySelector('.waveform-frame')?.getAttribute('data-window-start-ratio')).toBe(
+            String(100 / 90_000),
+        );
         expect(headingOutline(container)).toEqual([
             'Wave Data details',
             'Displayed Wave',
@@ -567,13 +597,13 @@ describe('ObjectInspector', () => {
         ]);
     });
 
-    it('does not repeat the source Wave Data name when it is the displayed name', () => {
+    it('does not repeat the embedded container when it matches the containing volume', () => {
         const item = waveData('Same Wave', 44_100, 'ready');
-        Object.assign(item.object, { sourceWaveName: ' Same Wave ' });
+        Object.assign(item.object, { embeddedContainerName: ` ${item.object.volumeName} ` });
 
         render(ObjectInspector, { props: { selection: { kind: 'wave-data', waveData: item } } });
 
-        expect(screen.queryByText('Source Wave Data name')).toBeNull();
+        expect(screen.queryByText('Embedded container')).toBeNull();
     });
 
     it('explains when an SBNK has no resolved Wave Data', () => {

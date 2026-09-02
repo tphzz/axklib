@@ -153,7 +153,8 @@ struct PreparedVolumeFloppyExport {
 };
 
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                    std::uint32_t reference_value);
+                                                    std::uint32_t reference_value,
+                                                    std::string_view embedded_container_name);
 Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
                                                     const std::optional<PreparedWaveformMember> &right = {},
                                                     bool sample_bank_member = false,

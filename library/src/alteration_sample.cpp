@@ -241,7 +241,7 @@ Result<OperationReport> insert_waveform_audio(TransactionState &state, Operation
         waveform.loop_mode = spec.loop_mode;
         waveform.loop_start_frame = spec.loop_start_frame;
         waveform.loop_length_frames = spec.loop_length_frames;
-        auto payload = detail::prepare_smpl_payload(waveform, mono, link_id);
+        auto payload = detail::prepare_smpl_payload(waveform, mono, link_id, operation.volume_name);
         if (!payload)
             return std::unexpected{payload.error()};
         auto stored = allocate_record(partition, std::move(*payload), PayloadKind::object);

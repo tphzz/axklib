@@ -578,6 +578,7 @@
     clearSelection={clearPackageExportSelection}
     selectionChanged={(selection) => (packageExportSelection = selection)}
     selectionLimit={reportPackageExportSelectionLimit}
+    setStatus={(status) => imageSessionWorkflow.setStatus(status)}
 />
 
 {#if experimentalWarningOpen}

@@ -102,6 +102,8 @@ class ServerApplication {
                                        Serializer serializer);
     crow::response image_content_response(const crow::request &request, const std::string &image_id);
     crow::response image_objects_response(const crow::request &request, const std::string &image_id);
+    crow::response image_object_response(const crow::request &request, const std::string &image_id,
+                                         const std::string &object_id);
     crow::response image_relationships_response(const crow::request &request, const std::string &image_id);
     crow::response image_system_program_contexts_response(const crow::request &request, const std::string &image_id);
     crow::response image_allocation_map_response(const crow::request &request, const std::string &image_id);

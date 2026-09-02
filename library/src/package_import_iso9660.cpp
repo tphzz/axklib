@@ -531,7 +531,7 @@ Result<PackageImportPlan> plan_iso9660_import(const RandomAccessReader &target_r
             if (found == existing.end())
                 return std::unexpected{planner_error("planned ISO9660 existing object is missing")};
             if (*relocated != found->snapshot->raw_payload) {
-                if (object.object_type != "SBNK" && object.object_type != "PROG") {
+                if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG") {
                     return std::unexpected{planner_error("existing ISO9660 object relocation "
                                                          "fields differ from the target")};
                 }

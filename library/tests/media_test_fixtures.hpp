@@ -54,6 +54,7 @@ inline std::vector<std::byte> smpl_object(std::string_view name = "TEST") {
     be16(bytes, 0x28, 32000);
     be16(bytes, 0x2a, 2);
     ascii(bytes, 0x32, name);
+    bytes[0x84] = std::byte{0x30};
     be16(bytes, 0x8c, 32000);
     be32(bytes, 0x96, 2);
     be32(bytes, 0x9e, 2);
