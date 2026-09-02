@@ -358,14 +358,16 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
             values.push_back({{"minimum", bin.minimum}, {"maximum", bin.maximum}});
         lanes.push_back({{"role", lane.role},
                          {"sourceObjectId", lane.source_object_id},
-                         {"frameCount", lane.frame_count},
+                         {"sampleRate", lane.sample_rate},
+                         {"storedFrameCount", lane.stored_frame_count},
+                         {"playbackStartFrame", lane.playback_start_frame},
+                         {"playbackLengthFrames", lane.playback_length_frames},
+                         {"loopStartFrame", lane.loop_start_frame},
+                         {"loopLengthFrames", lane.loop_length_frames},
                          {"bins", std::move(values)}});
     }
     return json_response(
-        200,
-        {{"data",
-          {{"objectId", preview->object_id}, {"frameCount", preview->frame_count}, {"lanes", std::move(lanes)}}},
-         {"meta", {{"requestId", id}}}},
+        200, {{"data", {{"objectId", preview->object_id}, {"lanes", std::move(lanes)}}}, {"meta", {{"requestId", id}}}},
         id);
 }
 

@@ -2567,14 +2567,18 @@ export interface components {
         };
         ImagePreviewLane: {
             bins: components['schemas']['ImagePreviewBin'][];
-            frameCount: number;
+            loopLengthFrames: number;
+            loopStartFrame: number;
+            playbackLengthFrames: number;
+            playbackStartFrame: number;
             /** @enum {unknown} */
             role: 'MONO' | 'LEFT' | 'RIGHT';
+            sampleRate: number;
             sourceObjectId: string;
+            storedFrameCount: number;
         };
         ImagePreviewResponse: {
             data: {
-                frameCount: number;
                 lanes: components['schemas']['ImagePreviewLane'][];
                 objectId: string;
             };

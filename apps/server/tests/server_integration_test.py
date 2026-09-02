@@ -1726,10 +1726,32 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, preview = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"
             )
-            assert status == 200 and preview["data"]["frameCount"] > 0, preview
+            assert status == 200 and "frameCount" not in preview["data"], preview
             assert len(preview["data"]["lanes"]) == 1, preview
-            assert preview["data"]["lanes"][0]["role"] == "MONO", preview
-            assert len(preview["data"]["lanes"][0]["bins"]) == 16, preview
+            preview_lane = preview["data"]["lanes"][0]
+            assert preview_lane["role"] == "MONO", preview
+            assert preview_lane["sampleRate"] == waveform["waveform"]["sampleRate"], preview
+            assert (
+                preview_lane["storedFrameCount"]
+                == waveform["waveform"]["storedFrameCount"]
+            ), preview
+            assert (
+                preview_lane["playbackStartFrame"]
+                == waveform["waveform"]["waveStartFrame"]
+            ), preview
+            assert (
+                preview_lane["playbackLengthFrames"]
+                == waveform["waveform"]["waveLengthFrames"]
+            ), preview
+            assert (
+                preview_lane["loopStartFrame"]
+                == waveform["waveform"]["loopStartFrame"]
+            ), preview
+            assert (
+                preview_lane["loopLengthFrames"]
+                == waveform["waveform"]["loopLengthFrames"]
+            ), preview
+            assert len(preview_lane["bins"]) == 16, preview
             status, submitted = http_request(
                 port,
                 "POST",

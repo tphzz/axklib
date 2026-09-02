@@ -92,6 +92,11 @@ struct axk::app::ImageSessionManager::Implementation {
         bool alternating_byte{};
         std::uint16_t output_width{};
         std::uint32_t sample_rate{};
+        std::uint64_t stored_frame_count{};
+        std::uint64_t playback_start_frame{};
+        std::uint64_t playback_length_frames{};
+        std::uint64_t source_loop_start{};
+        std::uint64_t source_loop_length{};
         std::uint64_t physical_first_frame{};
         std::uint64_t frame_count{};
         std::uint64_t loop_start{};
@@ -105,7 +110,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<std::string> warnings;
     };
 
-    enum class DirectWaveDataWindow : std::uint8_t { stored_pcm, playback };
+    enum class PcmReadWindow : std::uint8_t { stored_pcm, playback };
 
     struct AuditionEntry {
         ImageAudition descriptor;
@@ -381,7 +386,7 @@ struct axk::app::ImageSessionManager::Implementation {
                                                      const CancellationToken &cancellation) const;
 
     Result<PcmMember> prepare_member(Session &session, std::string object_id, std::string role,
-                                     const CurrentSbnkMember *sample_member, DirectWaveDataWindow direct_window,
+                                     const CurrentSbnkMember *sample_member, PcmReadWindow read_window,
                                      const CancellationToken &cancellation) const {
         const auto snapshot = session.snapshots_by_id.find(object_id);
         if (snapshot == session.snapshots_by_id.end())
@@ -402,23 +407,24 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::unexpected(
                 session_error("invalid_audio_range", "Wave Data PCM size is not aligned to its sample width"));
         const auto physical_frame_count = smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value;
-        const auto direct_playback = sample_member == nullptr && direct_window == DirectWaveDataWindow::playback;
-        const auto used_first_frame = sample_member != nullptr ? sample_member->wave_start_frame
-                                      : direct_playback        ? smpl->wave_start_frame.value
-                                                               : 0U;
-        const auto used_frame_count = sample_member != nullptr ? sample_member->wave_length_frames
-                                      : direct_playback        ? smpl->wave_length_frames.value
-                                                               : physical_frame_count;
+        const auto playback_first_frame =
+            sample_member ? sample_member->wave_start_frame : smpl->wave_start_frame.value;
+        const auto playback_frame_count =
+            sample_member ? sample_member->wave_length_frames : smpl->wave_length_frames.value;
         const auto window_owner = sample_member == nullptr ? "Wave Data" : "Sample";
-        if (used_frame_count == 0U) {
+        if (playback_frame_count == 0U) {
             return std::unexpected(
                 session_error("audition_unsupported", std::format("{} playback window is empty", window_owner)));
         }
-        if (used_first_frame > physical_frame_count || used_frame_count > physical_frame_count - used_first_frame) {
+        if (playback_first_frame > physical_frame_count ||
+            playback_frame_count > physical_frame_count - playback_first_frame) {
             return std::unexpected(
                 session_error("invalid_audio_range",
                               std::format("{} playback window exceeds the stored Wave Data PCM", window_owner)));
         }
+        const auto used_first_frame = read_window == PcmReadWindow::playback ? playback_first_frame : 0U;
+        const auto used_frame_count =
+            read_window == PcmReadWindow::playback ? playback_frame_count : physical_frame_count;
         bool alternating = smpl->stored_sample_width_bytes.value == 2U && smpl->stored_pcm_bytes >= 2U;
         constexpr std::size_t chunk_size = 64U * 1024U;
         for (std::uint64_t offset = 0U; alternating && offset < smpl->stored_pcm_bytes; offset += chunk_size) {
@@ -441,11 +447,14 @@ struct axk::app::ImageSessionManager::Implementation {
                          .role = std::move(role),
                          .alternating_byte = alternating,
                          .output_width = output_width,
+                         .stored_frame_count = physical_frame_count,
+                         .playback_start_frame = playback_first_frame,
+                         .playback_length_frames = playback_frame_count,
                          .physical_first_frame = used_first_frame,
                          .frame_count = used_frame_count};
     }
 
-    Result<PcmSource> prepare_source(Session &session, std::string_view object_id, DirectWaveDataWindow direct_window,
+    Result<PcmSource> prepare_source(Session &session, std::string_view object_id, PcmReadWindow read_window,
                                      const CancellationToken &cancellation) const {
         const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
         if (snapshot == session.snapshots_by_id.end())
@@ -513,7 +522,7 @@ struct axk::app::ImageSessionManager::Implementation {
             sample ? sample->loop_mode_label : std::get<CurrentSmpl>(snapshot->second.object.payload).loop_mode_label;
         for (auto &pending : pending_members) {
             auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role),
-                                         pending.sample_member, direct_window, cancellation);
+                                         pending.sample_member, read_window, cancellation);
             if (!member)
                 return std::unexpected(member.error());
             const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
@@ -523,30 +532,21 @@ struct axk::app::ImageSessionManager::Implementation {
             if (sample_rate == 0U)
                 return std::unexpected(session_error("audition_unsupported", "Sample playback rate is zero"));
             member->sample_rate = sample_rate;
-            if (pending.sample_member) {
-                if (pending.sample_member->loop_start_frame < pending.sample_member->wave_start_frame) {
-                    source.warnings.emplace_back(
-                        "Sample loop starts before its playback window; playback will use one-shot mode");
-                    source.loop_mode = 0U;
-                    source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-                } else {
-                    member->loop_start =
-                        pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame;
-                    member->loop_length = pending.sample_member->loop_length_frames;
-                }
+            member->source_loop_start =
+                pending.sample_member ? pending.sample_member->loop_start_frame : smpl.loop_start_frame.value;
+            member->source_loop_length =
+                pending.sample_member ? pending.sample_member->loop_length_frames : smpl.loop_length_frames.value;
+            if (member->source_loop_start < member->playback_start_frame) {
+                source.warnings.emplace_back(
+                    std::format("{} loop starts before its playback window; playback will use one-shot mode",
+                                pending.sample_member ? "Sample" : "Wave Data"));
+                source.loop_mode = 0U;
+                source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
             } else {
-                if (direct_window == DirectWaveDataWindow::playback &&
-                    smpl.loop_start_frame.value < smpl.wave_start_frame.value) {
-                    source.warnings.emplace_back(
-                        "Wave Data loop starts before its playback window; playback will use one-shot mode");
-                    source.loop_mode = 0U;
-                    source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-                } else {
-                    member->loop_start = direct_window == DirectWaveDataWindow::playback
-                                             ? smpl.loop_start_frame.value - smpl.wave_start_frame.value
-                                             : smpl.loop_start_frame.value;
-                }
-                member->loop_length = smpl.loop_length_frames.value;
+                member->loop_start = read_window == PcmReadWindow::playback
+                                         ? member->source_loop_start - member->playback_start_frame
+                                         : member->source_loop_start;
+                member->loop_length = member->source_loop_length;
             }
             if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
                 (member->loop_length == 0U || member->loop_start >= member->frame_count ||

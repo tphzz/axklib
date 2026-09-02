@@ -1404,7 +1404,8 @@ TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
     EXPECT_EQ(preview->object_id, waveform->id);
     ASSERT_EQ(preview->lanes.size(), 1U);
     EXPECT_EQ(preview->lanes.front().bins.size(), 32U);
-    EXPECT_GT(preview->frame_count, 0U);
+    EXPECT_GT(preview->lanes.front().stored_frame_count, 0U);
+    EXPECT_GT(preview->lanes.front().sample_rate, 0U);
     EXPECT_TRUE(sessions.preview(opened->image_id, "owner-a", waveform->id, 1024U));
     EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", waveform->id, 4097U));
     EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", "object-unknown", 32U));
@@ -1559,7 +1560,12 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
 
     const auto preview = sessions.preview(opened->image_id, "owner-a", samples->items.front().id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
-    EXPECT_EQ(preview->frame_count, 400U);
+    ASSERT_EQ(preview->lanes.size(), 1U);
+    EXPECT_EQ(preview->lanes.front().stored_frame_count, 404U);
+    EXPECT_EQ(preview->lanes.front().playback_start_frame, 0U);
+    EXPECT_EQ(preview->lanes.front().playback_length_frames, 400U);
+    EXPECT_EQ(preview->lanes.front().loop_start_frame, 17U);
+    EXPECT_EQ(preview->lanes.front().loop_length_frames, 335U);
     const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {samples->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -1593,7 +1599,7 @@ TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistry
     EXPECT_FALSE(result->at("clips").front().at("lanes").empty());
 }
 
-TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {
+TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditionsTheWindow) {
     patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U);
     patch_wave_data_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U);
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
@@ -1616,12 +1622,17 @@ TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {
 
     const auto sample_preview = sessions.preview(opened->image_id, "owner-a", sample.id, 32U);
     ASSERT_TRUE(sample_preview) << sample_preview.error().message;
-    EXPECT_EQ(sample_preview->frame_count, 32U);
     ASSERT_EQ(sample_preview->lanes.size(), 1U);
-    EXPECT_EQ(sample_preview->lanes.front().role, "LEFT");
-    EXPECT_EQ(sample_preview->lanes.front().source_object_id, wave->id);
-    EXPECT_EQ(sample_preview->lanes.front().frame_count, 32U);
-    EXPECT_EQ(sample_preview->lanes.front().bins.size(), 32U);
+    const auto &sample_preview_lane = sample_preview->lanes.front();
+    EXPECT_EQ(sample_preview_lane.role, "LEFT");
+    EXPECT_EQ(sample_preview_lane.source_object_id, wave->id);
+    EXPECT_EQ(sample_preview_lane.sample_rate, 48'000U);
+    EXPECT_EQ(sample_preview_lane.stored_frame_count, 132U);
+    EXPECT_EQ(sample_preview_lane.playback_start_frame, 32U);
+    EXPECT_EQ(sample_preview_lane.playback_length_frames, 32U);
+    EXPECT_EQ(sample_preview_lane.loop_start_frame, 40U);
+    EXPECT_EQ(sample_preview_lane.loop_length_frames, 8U);
+    EXPECT_EQ(sample_preview_lane.bins.size(), 32U);
 
     const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id});
     const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave->id});
@@ -1652,10 +1663,14 @@ TEST_F(ImageSessionTest, UsesTheSamplePlaybackWindowForPreviewAndAudition) {
 
     const auto wave_preview = sessions.preview(opened->image_id, "owner-a", wave->id, 32U);
     ASSERT_TRUE(wave_preview) << wave_preview.error().message;
-    EXPECT_EQ(wave_preview->frame_count, 132U);
     ASSERT_EQ(wave_preview->lanes.size(), 1U);
-    EXPECT_EQ(wave_preview->lanes.front().role, "MONO");
-    EXPECT_EQ(wave_preview->lanes.front().frame_count, 132U);
+    const auto &wave_preview_lane = wave_preview->lanes.front();
+    EXPECT_EQ(wave_preview_lane.role, "MONO");
+    EXPECT_EQ(wave_preview_lane.stored_frame_count, 132U);
+    EXPECT_EQ(wave_preview_lane.playback_start_frame, 32U);
+    EXPECT_EQ(wave_preview_lane.playback_length_frames, 32U);
+    EXPECT_EQ(wave_preview_lane.loop_start_frame, 40U);
+    EXPECT_EQ(wave_preview_lane.loop_length_frames, 8U);
 }
 
 TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
@@ -1683,12 +1698,20 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
 
     const auto preview = sessions.preview(opened->image_id, "owner-a", objects->items.front().id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
-    EXPECT_EQ(preview->frame_count, 32U);
     ASSERT_EQ(preview->lanes.size(), 2U);
     EXPECT_EQ(preview->lanes[0].role, "LEFT");
-    EXPECT_EQ(preview->lanes[0].frame_count, 32U);
+    EXPECT_EQ(preview->lanes[0].stored_frame_count, 132U);
+    EXPECT_EQ(preview->lanes[0].playback_start_frame, 32U);
+    EXPECT_EQ(preview->lanes[0].playback_length_frames, 32U);
+    EXPECT_EQ(preview->lanes[0].loop_start_frame, 40U);
+    EXPECT_EQ(preview->lanes[0].loop_length_frames, 8U);
     EXPECT_EQ(preview->lanes[1].role, "RIGHT");
-    EXPECT_EQ(preview->lanes[1].frame_count, 16U);
+    EXPECT_EQ(preview->lanes[1].sample_rate, 48'000U);
+    EXPECT_EQ(preview->lanes[1].stored_frame_count, 132U);
+    EXPECT_EQ(preview->lanes[1].playback_start_frame, 64U);
+    EXPECT_EQ(preview->lanes[1].playback_length_frames, 16U);
+    EXPECT_EQ(preview->lanes[1].loop_start_frame, 72U);
+    EXPECT_EQ(preview->lanes[1].loop_length_frames, 8U);
 
     const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;

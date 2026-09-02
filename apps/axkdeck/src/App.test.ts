@@ -150,7 +150,7 @@ describe('App panel layout', () => {
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
         mocks.objectDetail.mockReset();
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
-        mocks.preview.mockReset().mockResolvedValue({ frameCount: 1, lanes: [] });
+        mocks.preview.mockReset().mockResolvedValue({ objectId: 'wave-1', lanes: [] });
         mocks.inspectPackage.mockReset();
         mocks.planImagePackageImport.mockReset();
         mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);

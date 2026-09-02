@@ -21,6 +21,14 @@ portable packages remain the resolvable outbound closure used for transfer,
 while object detail also preserves incoming links, unresolved candidates, and
 field source details for one loaded object.
 
+Waveform previews return one or two full stored-PCM envelopes. Every lane
+identifies its source Wave Data and carries its sample rate, stored frame count,
+playback window, and loop window. For a Sample, the playback and loop values
+come from that Sample's corresponding left or right member; for direct Wave
+Data they come from the Wave Data object itself. This keeps collection rows and
+all inspector previews on one stored timeline without treating a cropped
+preview as the underlying Wave Data.
+
 Audition preparation accepts an ordered set of Sample or Wave Data identifiers
 and returns one bounded bundle descriptor. Each clip contains one or two
 independent mono-WAV lane ranges with its own source format and loop metadata.

@@ -4413,8 +4413,20 @@
             "minItems": 1,
             "type": "array"
           },
-          "frameCount": {
+          "loopLengthFrames": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "loopStartFrame": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "playbackLengthFrames": {
             "minimum": 1,
+            "type": "integer"
+          },
+          "playbackStartFrame": {
+            "minimum": 0,
             "type": "integer"
           },
           "role": {
@@ -4424,15 +4436,29 @@
               "RIGHT"
             ]
           },
+          "sampleRate": {
+            "maximum": 4294967295,
+            "minimum": 1,
+            "type": "integer"
+          },
           "sourceObjectId": {
             "minLength": 1,
             "type": "string"
+          },
+          "storedFrameCount": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "role",
           "sourceObjectId",
-          "frameCount",
+          "sampleRate",
+          "storedFrameCount",
+          "playbackStartFrame",
+          "playbackLengthFrames",
+          "loopStartFrame",
+          "loopLengthFrames",
           "bins"
         ],
         "type": "object"
@@ -4443,10 +4469,6 @@
           "data": {
             "additionalProperties": false,
             "properties": {
-              "frameCount": {
-                "minimum": 1,
-                "type": "integer"
-              },
               "lanes": {
                 "items": {
                   "$ref": "#/components/schemas/ImagePreviewLane"
@@ -4462,7 +4484,6 @@
             },
             "required": [
               "objectId",
-              "frameCount",
               "lanes"
             ],
             "type": "object"

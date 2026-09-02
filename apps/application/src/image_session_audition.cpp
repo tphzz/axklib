@@ -11,19 +11,24 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
         return std::unexpected(session.error());
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
-    auto source = implementation_->prepare_source(**session, object_id,
-                                                  Implementation::DirectWaveDataWindow::stored_pcm, cancellation);
+    auto source =
+        implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm, cancellation);
     if (!source)
         return std::unexpected(source.error());
-    const auto frame_count =
-        std::ranges::max(source->members | std::views::transform(&Implementation::PcmMember::frame_count));
-    ImageWaveformPreview result{.object_id = std::string{object_id}, .frame_count = frame_count, .lanes = {}};
+    ImageWaveformPreview result{.object_id = std::string{object_id}, .lanes = {}};
     result.lanes.reserve(source->members.size());
     constexpr std::size_t chunk_frames = 16U * 1024U;
     for (const auto &member : source->members) {
         const auto used_bins = static_cast<std::size_t>(std::min<std::uint64_t>(bin_count, member.frame_count));
-        ImageWaveformPreviewLane lane{
-            .role = member.role, .source_object_id = member.object_id, .frame_count = member.frame_count, .bins = {}};
+        ImageWaveformPreviewLane lane{.role = member.role,
+                                      .source_object_id = member.object_id,
+                                      .sample_rate = member.sample_rate,
+                                      .stored_frame_count = member.stored_frame_count,
+                                      .playback_start_frame = member.playback_start_frame,
+                                      .playback_length_frames = member.playback_length_frames,
+                                      .loop_start_frame = member.source_loop_start,
+                                      .loop_length_frames = member.source_loop_length,
+                                      .bins = {}};
         lane.bins.assign(used_bins,
                          {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
         for (std::uint64_t first = 0U; first < member.frame_count; first += chunk_frames) {
@@ -93,8 +98,8 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
             attach_object_context(error);
             return error;
         };
-        auto source = implementation_->prepare_source(**session, object_id,
-                                                      Implementation::DirectWaveDataWindow::playback, cancellation);
+        auto source = implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::playback,
+                                                      cancellation);
         if (!source) {
             auto error = std::move(source.error());
             attach_object_context(error);

@@ -622,7 +622,10 @@ describe('ObjectWorkspace', () => {
             sampleRate: 44_100,
             sampleWidthBytes: 2,
             storedFrameCount: 44_100,
-            waveLengthFrames: 44_100,
+            waveStartFrame: 4_410,
+            waveLengthFrames: 35_280,
+            loopStartFrame: 11_025,
+            loopLengthFrames: 22_050,
         };
         const onwavedataselect = vi.fn();
         render(ObjectWorkspace, {
@@ -656,7 +659,8 @@ describe('ObjectWorkspace', () => {
         expect(document.querySelector('.wave-data-row canvas')).toBeTruthy();
         expect(screen.queryByText('SMPL')).toBeNull();
         expect(document.querySelector('.object-code')).toBeNull();
-        expect(document.querySelector('.waveform span')).toBeNull();
+        expect(document.querySelectorAll('.wave-data-row .waveform-window-boundary')).toHaveLength(2);
+        expect(document.querySelectorAll('.wave-data-row .waveform-loop-boundary')).toHaveLength(2);
 
         const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
         expect(selectionTarget.parentElement?.classList.contains('wave-data-row')).toBe(true);

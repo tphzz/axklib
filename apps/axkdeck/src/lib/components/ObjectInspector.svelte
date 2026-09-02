@@ -3,6 +3,7 @@
     import { formatSequenceTempo, laterTempoChangeCount } from '../sequenceTempo';
     import { formatStoredSize } from '../formatBytes';
     import type { InspectorSelection } from '../types';
+    import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
     import Icon from './Icon.svelte';
     import InspectorRelationships from './InspectorRelationships.svelte';
     import SampleWaveformStack from './SampleWaveformStack.svelte';
@@ -318,6 +319,16 @@
             {@const embeddedContainerName = item.object.embeddedContainerName?.trim() ?? ''}
             {@const waveEndFrame = item.object.waveStartFrame + item.object.waveLengthFrames}
             {@const loopEndFrame = (item.object.loopStartFrame ?? 0) + (item.object.loopLengthFrames ?? 0)}
+            {@const timeline: WaveformTimeline = {
+                sampleRate: item.object.sampleRate,
+                storedFrameCount: item.object.storedFrameCount,
+                playbackStartFrame: item.object.waveStartFrame,
+                playbackLengthFrames: item.object.waveLengthFrames,
+                loopStartFrame: item.object.loopStartFrame ?? 0,
+                loopLengthFrames: item.object.loopLengthFrames ?? 0,
+                displayDurationSeconds:
+                    item.object.sampleRate > 0 ? item.object.storedFrameCount / item.object.sampleRate : 0,
+            }}
             <div class="inspector-content">
                 <div class="inspector-title">
                     <span>Wave Data</span>
@@ -329,14 +340,9 @@
                         <Waveform
                             values={item.waveform}
                             large
-                            sourceFrameCount={item.object.storedFrameCount}
-                            timelineFrameCount={item.object.storedFrameCount}
-                            windowStartFrame={item.object.waveStartFrame}
-                            windowLengthFrames={item.object.waveLengthFrames}
-                            loopStartFrame={item.object.loopStartFrame}
-                            loopLengthFrames={item.object.loopLengthFrames}
+                            {timeline}
                             playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
-                                ? (item.object.waveStartFrame + playheadFrame) / item.object.storedFrameCount
+                                ? waveformPlayheadRatio(timeline, playheadFrame, item.object.sampleRate)
                                 : 0}
                         />
                     </div>

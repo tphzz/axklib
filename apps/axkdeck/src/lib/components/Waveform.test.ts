@@ -38,12 +38,15 @@ describe('Waveform', () => {
         const { container } = render(Waveform, {
             props: {
                 values: [],
-                sourceFrameCount: 1_000,
-                timelineFrameCount: 1_000,
-                windowStartFrame: 100,
-                windowLengthFrames: 800,
-                loopStartFrame: 250,
-                loopLengthFrames: 500,
+                timeline: {
+                    sampleRate: 1_000,
+                    storedFrameCount: 1_000,
+                    playbackStartFrame: 100,
+                    playbackLengthFrames: 800,
+                    loopStartFrame: 250,
+                    loopLengthFrames: 500,
+                    displayDurationSeconds: 1,
+                },
             },
         });
         const frame = container.querySelector('.waveform-frame');

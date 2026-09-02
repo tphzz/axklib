@@ -2,36 +2,25 @@
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
     import { canvasPixelSize, waveformPixelColumns } from '../waveformCanvas';
-    import { waveformContentRatio, waveformFrameWindow } from '../waveformTimeline';
+    import { waveformContentRatio, waveformFrameWindow, type WaveformTimeline } from '../waveformTimeline';
 
     interface Props {
         values: readonly WaveformBin[];
         large?: boolean;
         playheadRatio?: number;
-        sourceFrameCount?: number;
-        timelineFrameCount?: number;
-        windowStartFrame?: number;
-        windowLengthFrames?: number;
-        loopStartFrame?: number;
-        loopLengthFrames?: number;
+        timeline?: WaveformTimeline;
     }
 
-    let {
-        values,
-        large = false,
-        playheadRatio = 0,
-        sourceFrameCount = 0,
-        timelineFrameCount = 0,
-        windowStartFrame = 0,
-        windowLengthFrames = 0,
-        loopStartFrame = 0,
-        loopLengthFrames = 0,
-    }: Props = $props();
+    let { values, large = false, playheadRatio = 0, timeline }: Props = $props();
     let canvas: HTMLCanvasElement;
-    const contentRatio = $derived(waveformContentRatio(sourceFrameCount, timelineFrameCount));
+    const contentRatio = $derived(timeline ? waveformContentRatio(timeline) : 1);
     const normalizedPlayheadRatio = $derived(Math.max(0, Math.min(1, playheadRatio)));
-    const waveWindow = $derived(waveformFrameWindow(windowStartFrame, windowLengthFrames, timelineFrameCount));
-    const loopWindow = $derived(waveformFrameWindow(loopStartFrame, loopLengthFrames, timelineFrameCount));
+    const waveWindow = $derived(
+        timeline ? waveformFrameWindow(timeline, timeline.playbackStartFrame, timeline.playbackLengthFrames) : null,
+    );
+    const loopWindow = $derived(
+        timeline ? waveformFrameWindow(timeline, timeline.loopStartFrame, timeline.loopLengthFrames) : null,
+    );
 
     function draw(): void {
         if (!canvas || typeof CanvasRenderingContext2D === 'undefined') return;

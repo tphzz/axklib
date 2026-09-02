@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { SamplerObject } from '../transport';
+import type { PreviewLane, SamplerObject } from '../transport';
 import type {
     InspectorSelection,
     LinkedWaveDataItem,
@@ -68,8 +68,7 @@ function samplePreview(
     item: SampleStructureItem,
     waveData: LinkedWaveDataItem[],
     previewState: SampleWaveformPreview['previewState'] = 'ready',
-    frameCount = Math.max(0, ...waveData.map((entry) => entry.waveData.object.waveLengthFrames)),
-    laneFrameCounts = waveData.map((entry) => entry.waveData.object.waveLengthFrames),
+    laneTimelines: Partial<PreviewLane>[] = [],
 ): SampleWaveformPreview {
     return {
         item,
@@ -78,12 +77,18 @@ function samplePreview(
         preview:
             previewState === 'ready'
                 ? {
-                      frameCount,
+                      objectId: item.objectId,
                       lanes: waveData.map((entry, index) => ({
                           role: entry.role === 'left' ? 'LEFT' : 'RIGHT',
                           sourceObjectId: entry.waveData.objectKey,
-                          frameCount: laneFrameCounts[index] ?? frameCount,
+                          sampleRate: entry.waveData.object.sampleRate,
+                          storedFrameCount: entry.waveData.object.storedFrameCount,
+                          playbackStartFrame: entry.waveData.object.waveStartFrame,
+                          playbackLengthFrames: entry.waveData.object.waveLengthFrames,
+                          loopStartFrame: entry.waveData.object.loopStartFrame ?? 0,
+                          loopLengthFrames: entry.waveData.object.loopLengthFrames ?? 0,
                           bins: entry.waveData.waveform,
+                          ...laneTimelines[index],
                       })),
                   }
                 : null,
@@ -462,7 +467,7 @@ describe('ObjectInspector', () => {
         expect(document.querySelectorAll('[data-playhead-ratio="0.25"]')).toHaveLength(2);
     });
 
-    it('uses the Sample preview timeline instead of the full physical Wave Data length', () => {
+    it('shows the Sample window and playhead on the full stored Wave Data timeline', () => {
         const sampleObject = object('SBNK', 'Loop Divide 10');
         const item: SampleStructureItem = {
             id: sampleObject.key,
@@ -471,22 +476,31 @@ describe('ObjectInspector', () => {
             objectType: 'SBNK',
             object: sampleObject,
         };
-        const linked = [member('left', waveData('Shared Loop Wave', 81_419, 'ready'))];
+        const linked = [member('left', waveData('Shared Loop Wave', 44_100, 'ready'))];
         render(ObjectInspector, {
             props: {
                 selection: {
                     kind: 'sample',
                     item,
                     memberships: [],
-                    preview: samplePreview(item, linked, 'ready', 20_352, [20_352]),
+                    preview: samplePreview(item, linked, 'ready', [
+                        {
+                            playbackStartFrame: 11_025,
+                            playbackLengthFrames: 22_050,
+                            loopStartFrame: 22_050,
+                            loopLengthFrames: 5_512,
+                        },
+                    ]),
                 },
                 playingObjectId: sampleObject.key,
-                playheadFrame: 10_176,
+                playheadFrame: 11_025,
             },
         });
 
         expect(document.querySelector('[data-playhead-ratio="0.5"]')).toBeTruthy();
         expect(document.querySelector('[data-content-ratio="1"]')).toBeTruthy();
+        expect(document.querySelector('[data-window-start-ratio="0.25"]')).toBeTruthy();
+        expect(document.querySelector('[data-window-end-ratio="0.75"]')).toBeTruthy();
     });
 
     it('uses a neutral lane label for mono SBNK Wave Data', () => {

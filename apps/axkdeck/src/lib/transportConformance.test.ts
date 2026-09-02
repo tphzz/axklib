@@ -118,12 +118,17 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
 
     const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
     expect(preview).toEqual({
-        frameCount: 4,
+        objectId: 'wave-1',
         lanes: [
             {
                 role: 'MONO',
                 sourceObjectId: 'wave-1',
-                frameCount: 4,
+                sampleRate: 44_100,
+                storedFrameCount: 4,
+                playbackStartFrame: 0,
+                playbackLengthFrames: 4,
+                loopStartFrame: 0,
+                loopLengthFrames: 0,
                 bins: [{ minimum: -1, maximum: 1 }],
             },
         ],
@@ -147,12 +152,17 @@ describe('ImageTransport shared read contract', () => {
         const transport = new InMemoryImageTransport({
             opened,
             preview: {
-                frameCount: 4,
+                objectId: 'wave-1',
                 lanes: [
                     {
                         role: 'MONO',
                         sourceObjectId: 'wave-1',
-                        frameCount: 4,
+                        sampleRate: 44_100,
+                        storedFrameCount: 4,
+                        playbackStartFrame: 0,
+                        playbackLengthFrames: 4,
+                        loopStartFrame: 0,
+                        loopLengthFrames: 0,
                         bins: [{ minimum: -1, maximum: 1 }],
                     },
                 ],
@@ -331,12 +341,17 @@ describe('ImageTransport shared read contract', () => {
                 }
                 if (url.pathname.endsWith('/preview')) {
                     return json({
-                        frameCount: 4,
+                        objectId: 'wave-1',
                         lanes: [
                             {
                                 role: 'MONO',
                                 sourceObjectId: 'wave-1',
-                                frameCount: 4,
+                                sampleRate: 44_100,
+                                storedFrameCount: 4,
+                                playbackStartFrame: 0,
+                                playbackLengthFrames: 4,
+                                loopStartFrame: 0,
+                                loopLengthFrames: 0,
                                 bins: [{ minimum: -1, maximum: 1 }],
                             },
                         ],

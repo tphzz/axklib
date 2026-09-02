@@ -403,13 +403,17 @@ struct ImagePreviewBin {
 struct ImageWaveformPreviewLane {
     std::string role;
     std::string source_object_id;
-    std::uint64_t frame_count{};
+    std::uint32_t sample_rate{};
+    std::uint64_t stored_frame_count{};
+    std::uint64_t playback_start_frame{};
+    std::uint64_t playback_length_frames{};
+    std::uint64_t loop_start_frame{};
+    std::uint64_t loop_length_frames{};
     std::vector<ImagePreviewBin> bins;
 };
 
 struct ImageWaveformPreview {
     std::string object_id;
-    std::uint64_t frame_count{};
     std::vector<ImageWaveformPreviewLane> lanes;
 };
 

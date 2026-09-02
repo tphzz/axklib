@@ -18,6 +18,7 @@
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
+    import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
@@ -367,6 +368,16 @@
             {/each}
         {:else if filteredWaveData.length > 0}
             {#each filteredWaveData as item, index (item.id)}
+                {@const timeline: WaveformTimeline = {
+                    sampleRate: item.object.sampleRate,
+                    storedFrameCount: item.object.storedFrameCount,
+                    playbackStartFrame: item.object.waveStartFrame,
+                    playbackLengthFrames: item.object.waveLengthFrames,
+                    loopStartFrame: item.object.loopStartFrame ?? 0,
+                    loopLengthFrames: item.object.loopLengthFrames ?? 0,
+                    displayDurationSeconds:
+                        item.object.sampleRate > 0 ? item.object.storedFrameCount / item.object.sampleRate : 0,
+                }}
                 <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
                 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                 <div
@@ -398,9 +409,10 @@
                     >
                         <ViewportWaveform
                             values={item.waveform}
+                            {timeline}
                             onvisible={() => onpreviewrequest(item)}
                             playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
-                                ? (item.object.waveStartFrame + playheadFrame) / item.object.storedFrameCount
+                                ? waveformPlayheadRatio(timeline, playheadFrame, item.object.sampleRate)
                                 : 0}
                         />
                     </button>

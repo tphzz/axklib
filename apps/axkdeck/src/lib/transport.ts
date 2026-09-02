@@ -272,15 +272,13 @@ export interface SamplerObject {
         }[];
     };
 }
-export interface PreviewEnvelope {
-    frameCount: number;
+type ApiPreviewEnvelope = components['schemas']['ImagePreviewResponse']['data'];
+type ApiPreviewLane = components['schemas']['ImagePreviewLane'];
+export interface PreviewEnvelope extends Omit<ApiPreviewEnvelope, 'lanes'> {
     lanes: readonly PreviewLane[];
 }
-export interface PreviewLane {
-    role: 'MONO' | 'LEFT' | 'RIGHT';
-    sourceObjectId: string;
-    frameCount: number;
-    bins: readonly { minimum: number; maximum: number }[];
+export interface PreviewLane extends Omit<ApiPreviewLane, 'bins'> {
+    bins: readonly components['schemas']['ImagePreviewBin'][];
 }
 export interface AuditionLaneDescriptor {
     role: 'MONO' | 'LEFT' | 'RIGHT';
