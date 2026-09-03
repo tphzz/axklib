@@ -137,6 +137,7 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"linkedProgramNumbers", sample->linked_program_numbers},
                 {"sampleFlags", sample->sample_flags},
                 {"mapoutFlags", sample->mapout_flags},
+                {"monoMode", sample->mono_mode},
                 {"keyRangeHigh", sample->key_range_high},
                 {"keyRangeLow", sample->key_range_low},
                 {"sampleLevel", sample->sample_level},
@@ -145,6 +146,10 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"velocityRangeLow", sample->velocity_range_low},
                 {"loopMode", sample->loop_mode},
                 {"loopModeLabel", sample->loop_mode_label},
+                {"controlRecordStorageOffset", sample->control_record_storage_offset},
+                {"controlRecordTailCopyPresent", sample->control_record_tail_copy_present},
+                {"controlRecordCopiesMatch",
+                 sample->control_record_copies_match ? Json(*sample->control_record_copies_match) : Json(nullptr)},
                 {"controlRecords", std::move(controls)},
                 {"numericFields", std::move(fields)},
                 {"rawParameterWindowHex", hex(sample->raw_parameter_window)}};

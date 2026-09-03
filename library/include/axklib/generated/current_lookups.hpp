@@ -84,8 +84,10 @@ inline constexpr std::array sample_control_type_ui_labels{
 };
 
 inline constexpr std::array sample_control_device_ui_labels{
-    LookupEntry{1, "001/ModWhel"},  LookupEntry{7, "007/Volume"}, LookupEntry{10, "010/Pan"},
-    LookupEntry{64, "064/Sustain"}, LookupEntry{65, "---"},       LookupEntry{66, "066/Sostenuto"},
+    LookupEntry{1, "001/ModWhel"},  LookupEntry{2, "002/BrthCtl"},  LookupEntry{4, "004/FootCtl"},
+    LookupEntry{6, "006/D.Entry"},  LookupEntry{7, "007/Volume"},   LookupEntry{10, "010/Pan"},
+    LookupEntry{11, "011/Express"}, LookupEntry{64, "064/Sustain"}, LookupEntry{65, "---"},
+    LookupEntry{66, "066/Sostent"}, LookupEntry{67, "067/SoftPdl"}, LookupEntry{69, "069/Hold2"},
 };
 
 inline constexpr std::array filter_type_ui_labels{

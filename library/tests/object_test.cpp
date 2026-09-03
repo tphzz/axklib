@@ -43,6 +43,8 @@ TEST(CurrentRecordEnvelope, DecodesTheSharedHeaderWithoutRequiringANamedObject) 
 TEST(CurrentLookups, ExposesCanonicalParameterAndProgramLabels) {
     EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_eq_frequency_ui_labels, 26), "630Hz");
     EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_control_function_ui_labels, 4), "Cutoff Bias");
+    EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_control_device_ui_labels, 2), "002/BrthCtl");
+    EXPECT_EQ(axk::current_label(axk::CurrentLookup::sample_control_device_ui_labels, 67), "067/SoftPdl");
     EXPECT_EQ(axk::current_label(axk::CurrentLookup::prog_slot_kind_target_category, 0x11), "SBAC");
     EXPECT_TRUE(axk::current_label(axk::CurrentLookup::prog_slot_kind_target_category, 0x7f).empty());
 }
@@ -154,6 +156,7 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     EXPECT_EQ(sample.inactive_right.root_key, 66U);
     EXPECT_EQ(sample.inactive_right.pitch_base_word, 5442U);
     EXPECT_EQ(sample.sample_flags, 2U);
+    EXPECT_FALSE(sample.mono_mode);
     EXPECT_EQ(sample.key_range_high, 127U);
     EXPECT_EQ(sample.key_range_low, 0U);
     EXPECT_EQ(sample.sample_level, 100U);
@@ -162,6 +165,11 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     EXPECT_EQ(sample.control_records[0].device, 74U);
     EXPECT_EQ(sample.control_records[0].range, 32);
     EXPECT_EQ(sample.control_records[2].range, -32);
+    EXPECT_EQ(sample.control_record_storage_offset, 0x164U);
+    EXPECT_TRUE(sample.control_record_tail_copy_present);
+    ASSERT_TRUE(sample.control_record_copies_match);
+    EXPECT_TRUE(*sample.control_record_copies_match);
+    EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
     EXPECT_EQ(sample.numeric_fields.size(), 105U);
     ASSERT_NE(sample.find_numeric_field("coarse_tune_0x0d5"), nullptr);
     EXPECT_EQ(sample.find_numeric_field("coarse_tune_0x0d5")->value, 0);
@@ -171,6 +179,62 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     EXPECT_EQ(sample.find_numeric_field("sample_eq_gain_0x123")->value, 64);
     ASSERT_NE(sample.find_numeric_field("sample_portamento_time_0x184"), nullptr);
     EXPECT_EQ(sample.find_numeric_field("sample_portamento_time_0x184")->value, 90);
+}
+
+TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
+    const auto container = axk::open_image(path);
+    ASSERT_TRUE(container);
+    auto payload =
+        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{10}, std::numeric_limits<std::size_t>::max());
+    ASSERT_TRUE(payload);
+    payload->resize(0x188U);
+    axk::ByteWriter writer{*payload};
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0x158U));
+    (*payload)[0x164U] = std::byte{1};
+    (*payload)[0x0d1U] |= std::byte{0x02};
+
+    const auto decoded = axk::decode_object(*payload);
+
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto &sample = std::get<axk::CurrentSbnk>(decoded->payload);
+    EXPECT_EQ(sample.control_record_storage_offset, 0x164U);
+    EXPECT_TRUE(sample.control_record_tail_copy_present);
+    ASSERT_TRUE(sample.control_record_copies_match);
+    EXPECT_FALSE(*sample.control_record_copies_match);
+    ASSERT_EQ(sample.control_records.size(), 6U);
+    EXPECT_EQ(sample.control_records[0].device, 1U);
+    EXPECT_EQ(sample.control_records[0].function, 4U);
+    EXPECT_EQ(sample.control_records[2].range, -32);
+    EXPECT_TRUE(sample.mono_mode);
+    EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
+}
+
+TEST(CurrentSbnk, DecodesCompatibilityControllersWhenTheDeclaredObjectEndsBeforeTheTail) {
+    const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
+                                                               "HD00_512_single_sbnk_authored.hds";
+    const auto container = axk::open_image(path);
+    ASSERT_TRUE(container);
+    auto payload =
+        container->read_record_data(axk::PartitionIndex{0}, axk::SfsId{10}, std::numeric_limits<std::size_t>::max());
+    ASSERT_TRUE(payload);
+    payload->resize(0x164U);
+    axk::ByteWriter writer{*payload};
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0x134U));
+
+    const auto decoded = axk::decode_object(*payload);
+
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto &sample = std::get<axk::CurrentSbnk>(decoded->payload);
+    EXPECT_EQ(sample.control_record_storage_offset, 0x0a8U);
+    EXPECT_FALSE(sample.control_record_tail_copy_present);
+    EXPECT_FALSE(sample.control_record_copies_match);
+    ASSERT_EQ(sample.control_records.size(), 6U);
+    EXPECT_EQ(sample.control_records[0].device, 74U);
+    EXPECT_EQ(sample.control_records[0].function, 4U);
+    EXPECT_EQ(sample.control_records[2].range, -32);
+    EXPECT_EQ(sample.raw_parameter_window.size(), 0xbcU);
 }
 
 TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {

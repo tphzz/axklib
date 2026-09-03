@@ -133,6 +133,7 @@ struct CurrentSbnk {
     std::vector<std::uint8_t> linked_program_numbers;
     std::uint8_t sample_flags{};
     std::uint8_t mapout_flags{};
+    bool mono_mode{};
     std::uint8_t key_range_high{};
     std::uint8_t key_range_low{};
     std::uint8_t sample_level{};
@@ -141,6 +142,9 @@ struct CurrentSbnk {
     std::uint8_t velocity_range_low{};
     std::uint8_t loop_mode{};
     std::string loop_mode_label;
+    std::size_t control_record_storage_offset{};
+    bool control_record_tail_copy_present{};
+    std::optional<bool> control_record_copies_match;
     std::vector<SbnkControlRecord> control_records;
     std::vector<NumericField> numeric_fields;
     std::vector<std::byte> raw_parameter_window;

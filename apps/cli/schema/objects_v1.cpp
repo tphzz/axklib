@@ -73,6 +73,7 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"instrument_name", sample->instrument_name},
                 {"right_slot_present", sample->right_slot_present},
                 {"right_link_role", sample->right_link_role},
+                {"mono_mode", sample->mono_mode},
                 {"loop_mode", sample->loop_mode},
                 {"loop_mode_label", sample->loop_mode_label},
                 {"left", member_json(sample->left)},
@@ -81,6 +82,11 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"linked_program_bitmap_words", sample->linked_program_bitmap_words},
                 {"linked_program_numbers", sample->linked_program_numbers},
                 {"numeric_fields", std::move(fields)},
+                {"control_record_storage_offset", sample->control_record_storage_offset},
+                {"control_record_tail_copy_present", sample->control_record_tail_copy_present},
+                {"control_record_copies_match", sample->control_record_copies_match
+                                                    ? OrderedJson(*sample->control_record_copies_match)
+                                                    : OrderedJson(nullptr)},
                 {"control_records", std::move(controls)},
                 {"raw_parameter_window_hex", hex(sample->raw_parameter_window)}};
     }

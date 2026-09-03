@@ -143,7 +143,7 @@ Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool righ
                              .loop_length_frames = *loop_length};
 }
 
-Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
+Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const ObjectHeader &header) {
     if (payload.size() < 0x108U) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "current SBNK member contract requires at least 264 bytes")};
@@ -203,6 +203,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     }
     result.sample_flags = *sample_flags;
     result.mapout_flags = *mapout_flags;
+    result.mono_mode = (*mapout_flags & 0x02U) != 0U;
     result.key_range_high = *key_high;
     result.key_range_low = *key_low;
     result.sample_level = *level;
@@ -211,11 +212,25 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
     result.velocity_range_low = *velocity_low;
     result.loop_mode = *loop_mode;
     result.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, *loop_mode);
-    constexpr std::size_t control_count = 6;
+    constexpr std::size_t control_count = 6U;
+    constexpr std::size_t control_size = 4U;
+    constexpr std::size_t control_bytes = control_count * control_size;
+    constexpr std::size_t compatibility_control_offset = 0x0a8U;
+    constexpr std::size_t tail_control_offset = 0x164U;
+    constexpr std::size_t object_prefix_size = 0x30U;
+    const auto declared_size = object_prefix_size + static_cast<std::size_t>(header.payload_bytes_0x1c);
+    const auto logical_size =
+        header.payload_bytes_0x1c == 0U ? payload.size() : std::min(payload.size(), declared_size);
+    result.control_record_tail_copy_present = logical_size >= tail_control_offset + control_bytes;
+    result.control_record_storage_offset =
+        result.control_record_tail_copy_present ? tail_control_offset : compatibility_control_offset;
+    if (result.control_record_tail_copy_present) {
+        result.control_record_copies_match =
+            std::ranges::equal(payload.subspan(compatibility_control_offset, control_bytes),
+                               payload.subspan(tail_control_offset, control_bytes));
+    }
     for (std::size_t index = 0; index < control_count; ++index) {
-        const auto offset = 0x164U + index * 4U;
-        if (offset + 4U > payload.size())
-            break;
+        const auto offset = result.control_record_storage_offset + index * control_size;
         const auto device = reader.u8(offset);
         const auto function = reader.u8(offset + 1U);
         const auto type = reader.u8(offset + 2U);
@@ -252,7 +267,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload) {
             {descriptor.offset, descriptor.width, Verification::corroborated, "current SBNK parameter field"},
         });
     }
-    const auto parameter_end = std::min<std::size_t>(payload.size(), 0x185U);
+    const auto parameter_end = std::max<std::size_t>(0x0a8U, std::min<std::size_t>(logical_size, 0x188U));
     result.raw_parameter_window.assign(payload.begin() + 0xa8,
                                        payload.begin() + static_cast<std::ptrdiff_t>(parameter_end));
     return result;
@@ -453,7 +468,7 @@ Result<DecodedObject> decode_object(std::span<const std::byte> payload) {
         return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::sbnk) {
-        const auto decoded = decode_sbnk(payload);
+        const auto decoded = decode_sbnk(payload, *header);
         if (!decoded) {
             return std::unexpected{decoded.error()};
         }

@@ -232,11 +232,12 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     }
     writer.be32(0xa0, left.reference_value);
     writer.be32(0xa4, right == nullptr ? 0U : right->reference_value);
-    constexpr std::array<std::byte, 16> member_defaults{
+    constexpr std::array<std::byte, 24> controls{
         std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20}, std::byte{0x47}, std::byte{0x05},
         std::byte{0x01}, std::byte{0x20}, std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
-        std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
-    std::ranges::copy(member_defaults, result.begin() + 0xa8);
+        std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}, std::byte{0},    std::byte{0},
+        std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0}};
+    std::ranges::copy(controls, result.begin() + 0xa8);
     result[0xd0] = static_cast<std::byte>(sample_bank_member ? 0x03U : 0x02U);
     result[0xd4] = std::byte{2};
     for (const auto number : linked_programs) {
@@ -327,11 +328,6 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
     std::ranges::copy(playback, result.begin() + 0x152);
     std::ranges::copy(tone, result.begin() + 0x158);
-    constexpr std::array<std::byte, 24> controls{
-        std::byte{74}, std::byte{4},  std::byte{1},  std::byte{32},   std::byte{71}, std::byte{5},
-        std::byte{1},  std::byte{32}, std::byte{73}, std::byte{11},   std::byte{1},  std::byte{0xe0},
-        std::byte{72}, std::byte{12}, std::byte{1},  std::byte{0xe0}, std::byte{0},  std::byte{0},
-        std::byte{0},  std::byte{0},  std::byte{0},  std::byte{0},    std::byte{0},  std::byte{0}};
     std::ranges::copy(controls, result.begin() + 0x164);
     result[0x17e] = std::byte{1};
     result[0x17f] = std::byte{127};

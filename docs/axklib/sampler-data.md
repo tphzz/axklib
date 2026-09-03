@@ -297,8 +297,35 @@ for word_index in 0..3:
 
 ### Sample Parameter Window
 
-The sample parameter window starts at `0x0a8`. The table below lists the public
-field names currently exposed by the decoder.
+The extended sample parameter window starts at `0x0a8`, contains 224 bytes, and
+ends at `0x187`. Two current logical object extents occur in real media:
+
+- a `0x164`-byte object ends after parameter offset `0xbb`; and
+- a `0x188`-byte object includes the complete 224-byte parameter window.
+
+For `SBNK`, calculate this extent as `0x30 + payload_bytes_0x1c`.
+Sampler-authored Samples commonly store zero in the generic `header_size` field,
+so `header_size + payload_bytes_0x1c` is not an SBNK size formula.
+
+The first 24 bytes at `0x0a8..0x0bf` contain six four-byte sample-controller
+records. Extended objects repeat the records at `0x164..0x17b`; all 1,537
+extended objects checked in two independent HDA images had identical copies.
+Short objects have no in-extent tail and retain the records at `0x0a8`. The decoder
+therefore uses `0x164` when the logical tail exists and `0x0a8` otherwise, and reports
+the physical source offset plus copy consistency. This precedence is
+hardware-backed: a controlled mismatch changed only the tail records, and the
+A4000 displayed those values rather than the unchanged prefix values. Fresh
+generation and explicit controller edits emit identical copies. Exact
+preservation paths retain and report an untouched mismatch.
+
+Controller records use the confirmed Yamaha bounds: Device `0..126`, Function
+`0..36`, Type `0..3`, and signed Range `-63..+63`. A4000 behavior confirms the
+complete Device formatter, including special values `121..126`, and the raw
+Function order has an independent implementation-level confirmation matching
+the Yamaha Note 11 table. The public writer rejects controller records outside
+these bounds.
+
+The table below lists the public field names currently exposed by the decoder.
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -364,7 +391,11 @@ The member start, length, and loop fields are frame addresses in the linked
 physical Wave Data object. They define the Sample's playable window and can
 select only one segment of a larger shared `SMPL` payload. Loop Divide media is
 a common example: several Samples have different start frames while referencing
-the same Wave Data. Sample preview and audition therefore:
+the same Wave Data. The full left/right wave-start words are decoded for this
+read path but remain read-only write inputs: template-backed serialization
+preserves them, while fresh generation uses the proven zero-start profile and
+named loop-mode policies write only confirmed low-half cache lanes. Sample
+preview and audition therefore:
 
 1. resolve each active member to one confirmed `SMPL`;
 2. read `wave_length_frames` beginning at `wave_start_frame`;
@@ -385,6 +416,21 @@ sample level values in the normal `0..127` range. The writer also carries a
 conservative current-format default set for fields that are not yet surfaced as
 public write inputs, including filter, envelope, LFO, output, portamento, and
 sample-control defaults for this direct single-member scope.
+
+`sample_flags_0x0d0` is read-only topology state. The A4000 reads bit `0`
+separately and handles bits `2..1` as one masked two-bit state. The exact
+bank-member Expand derivation remains unresolved, so writers derive only proven
+fresh-object profiles and graph alterations change only the membership bit
+while preserving the other lanes.
+
+`mapout_flags_0x0d1` is a packed byte, not one wholly semantic field. Bits
+`7..6` are EQ Type, bit `4` is Fixed Pitch, bit `2` is Key Crossfade, and bit
+`1` is Poly/Mono (`0=Poly`, `1=Mono`). All four visible lanes are `Confirmed`
+from sampler behavior or the exact object-load and parameter-update path. Bits `5`, `3`, and `0` remain opaque and
+must be preserved; bit `0` is nonzero in some real objects despite being
+manual-reserved. Device updates to every visible field in this byte mask around
+all three opaque lanes, and template-based serialization has regression
+coverage for retaining nonzero opaque lanes.
 
 The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
 reserved. With the current `0x0a8` Sample Parameter base, those reserved bytes

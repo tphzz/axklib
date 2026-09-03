@@ -114,7 +114,7 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                     const auto &control = context.decoded.control_records[index];
                     controls.push_back({
                         {"index", index + 1U},
-                        {"offset", 0x164U + index * 4U},
+                        {"offset", context.decoded.control_record_storage_offset + index * 4U},
                         {"device_u8", control.device},
                         {"function_u8", control.function},
                         {"type_u8", control.type},
@@ -122,6 +122,12 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                     });
                 }
                 numeric_fields["sample_control_records"] = std::move(controls);
+                numeric_fields["sample_control_record_storage_offset"] = context.decoded.control_record_storage_offset;
+                numeric_fields["sample_control_tail_copy_present"] = context.decoded.control_record_tail_copy_present;
+                numeric_fields["sample_control_copies_match"] =
+                    context.decoded.control_record_copies_match
+                        ? OrderedJson(*context.decoded.control_record_copies_match)
+                        : OrderedJson(nullptr);
                 parameter_contexts.push_back({
                     {"sample_object_key", context.object_key},
                     {"sample_name", context.display_name},

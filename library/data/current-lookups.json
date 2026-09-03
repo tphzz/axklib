@@ -425,12 +425,28 @@
           "label": "001/ModWhel"
         },
         {
+          "key": 2,
+          "label": "002/BrthCtl"
+        },
+        {
+          "key": 4,
+          "label": "004/FootCtl"
+        },
+        {
+          "key": 6,
+          "label": "006/D.Entry"
+        },
+        {
           "key": 7,
           "label": "007/Volume"
         },
         {
           "key": 10,
           "label": "010/Pan"
+        },
+        {
+          "key": 11,
+          "label": "011/Express"
         },
         {
           "key": 64,
@@ -442,7 +458,15 @@
         },
         {
           "key": 66,
-          "label": "066/Sostenuto"
+          "label": "066/Sostent"
+        },
+        {
+          "key": 67,
+          "label": "067/SoftPdl"
+        },
+        {
+          "key": 69,
+          "label": "069/Hold2"
         }
       ]
     },
