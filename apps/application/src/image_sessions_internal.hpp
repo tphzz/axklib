@@ -89,7 +89,6 @@ struct axk::app::ImageSessionManager::Implementation {
     struct PcmMember {
         std::string object_id;
         std::string role;
-        bool alternating_byte{};
         std::uint16_t output_width{};
         std::uint32_t sample_rate{};
         std::uint64_t stored_frame_count{};
@@ -386,8 +385,7 @@ struct axk::app::ImageSessionManager::Implementation {
                                                      const CancellationToken &cancellation) const;
 
     Result<PcmMember> prepare_member(Session &session, std::string object_id, std::string role,
-                                     const CurrentSbnkMember *sample_member, PcmReadWindow read_window,
-                                     const CancellationToken &cancellation) const {
+                                     const CurrentSbnkMember *sample_member, PcmReadWindow read_window) const {
         const auto snapshot = session.snapshots_by_id.find(object_id);
         if (snapshot == session.snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "Wave Data object does not exist"));
@@ -425,28 +423,9 @@ struct axk::app::ImageSessionManager::Implementation {
         const auto used_first_frame = read_window == PcmReadWindow::playback ? playback_first_frame : 0U;
         const auto used_frame_count =
             read_window == PcmReadWindow::playback ? playback_frame_count : physical_frame_count;
-        bool alternating = smpl->stored_sample_width_bytes.value == 2U && smpl->stored_pcm_bytes >= 2U;
-        constexpr std::size_t chunk_size = 64U * 1024U;
-        for (std::uint64_t offset = 0U; alternating && offset < smpl->stored_pcm_bytes; offset += chunk_size) {
-            const auto count =
-                static_cast<std::size_t>(std::min<std::uint64_t>(chunk_size, smpl->stored_pcm_bytes - offset));
-            auto bytes = read_object_range(session, object_id, smpl->stored_pcm_offset + offset, count, cancellation);
-            if (!bytes)
-                return std::unexpected(bytes.error());
-            for (std::size_t index = 1U; index < bytes->size(); index += 2U) {
-                const auto absolute = offset + index;
-                const auto expected = absolute % 4U == 1U ? 0x55U : 0xaaU;
-                if (std::to_integer<std::uint8_t>((*bytes)[index]) != expected) {
-                    alternating = false;
-                    break;
-                }
-            }
-        }
-        const auto output_width = static_cast<std::uint16_t>(alternating ? 1U : smpl->stored_sample_width_bytes.value);
         return PcmMember{.object_id = std::move(object_id),
                          .role = std::move(role),
-                         .alternating_byte = alternating,
-                         .output_width = output_width,
+                         .output_width = smpl->stored_sample_width_bytes.value,
                          .stored_frame_count = physical_frame_count,
                          .playback_start_frame = playback_first_frame,
                          .playback_length_frames = playback_frame_count,
@@ -454,8 +433,7 @@ struct axk::app::ImageSessionManager::Implementation {
                          .frame_count = used_frame_count};
     }
 
-    Result<PcmSource> prepare_source(Session &session, std::string_view object_id, PcmReadWindow read_window,
-                                     const CancellationToken &cancellation) const {
+    Result<PcmSource> prepare_source(Session &session, std::string_view object_id, PcmReadWindow read_window) const {
         const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
         if (snapshot == session.snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "image object does not exist"));
@@ -522,7 +500,7 @@ struct axk::app::ImageSessionManager::Implementation {
             sample ? sample->loop_mode_label : std::get<CurrentSmpl>(snapshot->second.object.payload).loop_mode_label;
         for (auto &pending : pending_members) {
             auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role),
-                                         pending.sample_member, read_window, cancellation);
+                                         pending.sample_member, read_window);
             if (!member)
                 return std::unexpected(member.error());
             const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
@@ -611,15 +589,6 @@ struct axk::app::ImageSessionManager::Implementation {
                               frame_count * stored_width, cancellation);
         if (!stored)
             return std::unexpected(stored.error());
-        if (member.alternating_byte) {
-            std::vector<std::byte> result;
-            result.reserve(frame_count);
-            for (std::size_t offset = 0U; offset < stored->size(); offset += 2U) {
-                result.push_back(
-                    static_cast<std::byte>((std::to_integer<std::uint8_t>((*stored)[offset]) + 128U) & 0xffU));
-            }
-            return result;
-        }
         if (stored_width == 2U) {
             for (std::size_t offset = 0U; offset < stored->size(); offset += 2U)
                 std::swap((*stored)[offset], (*stored)[offset + 1U]);

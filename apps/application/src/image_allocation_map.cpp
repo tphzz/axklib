@@ -33,8 +33,6 @@ std::string payload_kind_name(axk::PayloadKind kind) {
         return "DIRECTORY";
     case axk::PayloadKind::object:
         return "OBJECT";
-    case axk::PayloadKind::alternating_byte_object:
-        return "ALTERNATING_BYTE_OBJECT";
     case axk::PayloadKind::unknown:
         return "UNKNOWN";
     }

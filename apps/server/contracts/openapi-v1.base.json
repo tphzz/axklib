@@ -1451,7 +1451,7 @@
           "claimKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DATA"]},
           "sfsId": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
           "extentIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
-          "recordKind": {"type": "string", "enum": ["METADATA", "DIRECTORY", "SUPPORT", "OBJECT", "ALTERNATING_BYTE_OBJECT", "UNKNOWN"]},
+          "recordKind": {"type": "string", "enum": ["METADATA", "DIRECTORY", "SUPPORT", "OBJECT", "UNKNOWN"]},
           "objectId": {"type": ["string", "null"]},
           "objectType": {"type": "string"},
           "objectName": {"type": "string"},

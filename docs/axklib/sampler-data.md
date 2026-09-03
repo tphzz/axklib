@@ -208,7 +208,6 @@ PCM export mapping:
 | ---: | --- | --- |
 | `2` | 16-bit stored samples in big-endian byte order | Byte-swapped to little-endian 16-bit WAV PCM. |
 | `1` | 8-bit PCM | Copied directly to WAV frames. |
-| `2` with alternating-byte recovery pattern | Third-party conversion artifact with a useful high-byte lane | Useful lane is converted to unsigned 8-bit WAV frames for recovery only. |
 
 `header_size` is the start offset of waveform bytes inside a `SMPL` file.
 Complete objects use `payload_offset_0x24 == 0` and
@@ -237,14 +236,10 @@ frames. In that case the complete logical byte count includes the tail, while
 `wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
 sample window.
 
-The alternating-byte pattern is a third-party conversion artifact, not a Yamaha
-Wave Data encoding or sampler-authored storage. When it is detected, audio APIs set
-`Waveform.alternating_byte_payload_detected` and sidecars write
-`alternating_byte_payload_detected`. In that case `stored_payload_transform` is
-`alternating-byte-signed-high-byte`, `exactness_status` is
-`alternating-byte-compatibility-export`, and the WAV contains the useful lane as
-8-bit PCM. This is a recovery/export path only. It must not be used for write
-support, repair, allocation decisions, or promotion to a normal object format.
+The decoder follows the declared stored width. It does not reinterpret a
+16-bit object as 8-bit audio based on a byte-pattern heuristic. Unrecognized or
+corrupted records remain unsupported rather than acquiring a compatibility
+decode path.
 
 ## SBNK: Sample Object
 

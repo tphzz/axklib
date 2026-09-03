@@ -2068,7 +2068,7 @@ export interface components {
             objectName: string;
             objectType: string;
             /** @enum {string} */
-            recordKind: 'METADATA' | 'DIRECTORY' | 'SUPPORT' | 'OBJECT' | 'ALTERNATING_BYTE_OBJECT' | 'UNKNOWN';
+            recordKind: 'METADATA' | 'DIRECTORY' | 'SUPPORT' | 'OBJECT' | 'UNKNOWN';
             sfsId: number | null;
             volumeName: string;
         };

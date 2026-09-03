@@ -594,15 +594,15 @@ TEST(SfsReader, InventoryReadsOnlyAnObjectPrefixNotWaveformPayload) {
     EXPECT_EQ(payload_read_sizes[0], 512U);
 }
 
-TEST(SfsReader, ClassifiesEstablishedAlternatingByteObjectType) {
+TEST(SfsReader, KeepsThirdPartyAlternatingByteRecordUnknown) {
     auto reader = std::make_shared<axk::MemoryReader>(alternating_object_fixture());
     const auto result = axk::open_image(reader, "alternating-object.hds");
     ASSERT_TRUE(result);
     ASSERT_EQ(result->partitions().size(), 1U);
     ASSERT_EQ(result->partitions()[0].records.size(), 1U);
     const auto &record = result->partitions()[0].records[0];
-    EXPECT_EQ(record.payload_kind, axk::PayloadKind::alternating_byte_object);
-    EXPECT_EQ(record.object_type, "SMPL");
+    EXPECT_EQ(record.payload_kind, axk::PayloadKind::unknown);
+    EXPECT_TRUE(record.object_type.empty());
     EXPECT_TRUE(record.object_name.empty());
 }
 

@@ -3,6 +3,7 @@
 #include "semantic_support.hpp"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <ranges>
 #include <string>
@@ -46,6 +47,62 @@ std::string join(const std::vector<std::string> &values) {
         result += value;
     }
     return result;
+}
+
+bool is_object_category(std::string_view name) {
+    static constexpr std::array categories{"SMPL", "SBNK", "SBAC", "PROG", "SEQU", "PRF3"};
+    return std::ranges::find(categories, name) != categories.end();
+}
+
+void append_unrecognized_category_entry_issues(const Container &container, std::vector<ValidationIssue> &issues) {
+    for (const auto &partition : container.partitions()) {
+        std::unordered_map<std::uint32_t, const IndexRecord *> records;
+        std::unordered_map<std::uint32_t, const IndexRecord *> directories;
+        for (const auto &record : partition.records) {
+            records.emplace(record.sfs_id.value, &record);
+            if (record.directory_id)
+                directories.emplace(record.directory_id->value, &record);
+        }
+        const auto root_id = locate_partition_root_record(partition);
+        if (!root_id)
+            continue;
+        const auto root = records.find(root_id->value);
+        if (root == records.end())
+            continue;
+        for (const auto &volume_entry : root->second->directory_entries) {
+            if (!volume_entry.target_link_id || volume_entry.name == "." || volume_entry.name == ".." ||
+                is_partition_support_root_entry(volume_entry.name)) {
+                continue;
+            }
+            const auto volume = directories.find(volume_entry.target_link_id->value);
+            if (volume == directories.end())
+                continue;
+            std::size_t unrecognized{};
+            for (const auto &category_entry : volume->second->directory_entries) {
+                if (!category_entry.target_link_id || !is_object_category(category_entry.name))
+                    continue;
+                const auto category = directories.find(category_entry.target_link_id->value);
+                if (category == directories.end())
+                    continue;
+                for (const auto &entry : category->second->directory_entries) {
+                    if (!entry.target_link_id || entry.name == "." || entry.name == "..")
+                        continue;
+                    const auto target = records.find(entry.target_link_id->value);
+                    if (target != records.end() && target->second->payload_kind != PayloadKind::object)
+                        ++unrecognized;
+                }
+            }
+            if (unrecognized == 0U)
+                continue;
+            issues.push_back({
+                "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES",
+                ValidationSeverity::error,
+                std::format("volume has {} visible object entries whose payload is unrecognized", unrecognized),
+                std::format("partition {}: {} / {}", partition.index.value, partition.name, volume_entry.name),
+                {},
+            });
+        }
+    }
 }
 
 } // namespace
@@ -194,6 +251,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
             issue.sfs_id ? std::format("p{}:sfs{}", issue.partition.value, issue.sfs_id->value) : "",
         });
     }
+    append_unrecognized_category_entry_issues(container, result.issues);
     for (const auto &relation : graph.relationships) {
         switch (relation.quality) {
         case RelationshipQuality::known:

@@ -32,7 +32,6 @@
     }
     function formatObjectEncoding(encoding: string): string {
         if (encoding === 'current') return 'Current A-series';
-        if (encoding === 'alternating-byte') return 'Recovered conversion artifact';
         return 'Unknown';
     }
     function formatLoopMode(label: string | undefined, raw: number | undefined): string {

@@ -35,7 +35,6 @@ struct Waveform {
     std::uint16_t stored_sample_width_bytes{};
     std::uint32_t stored_payload_size{};
     std::string stored_payload_transform;
-    bool alternating_byte_payload_detected{};
     std::uint8_t root_key{};
     std::int8_t fine_tune_cents{};
     std::uint8_t loop_mode{};

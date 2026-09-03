@@ -77,7 +77,6 @@ enum class PayloadKind : std::uint8_t {
     unknown,
     directory,
     object,
-    alternating_byte_object,
 };
 
 struct IndexRecord {

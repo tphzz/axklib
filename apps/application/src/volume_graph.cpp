@@ -59,8 +59,7 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                   {"stored_payload_size", audio.stored_payload_size},
                   {"decoded_pcm_size", audio.pcm.size()},
                   {"stored_payload_transform", audio.stored_payload_transform},
-                  {"exactness_status", audio.alternating_byte_payload_detected ? "alternating-byte-compatibility-export"
-                                                                               : "exact-current-mono"}}},
+                  {"exactness_status", "exact-current-mono"}}},
                 {"playback",
                  {{"root_key_midi", audio.root_key},
                   {"fine_tune_cents", audio.fine_tune_cents},
@@ -76,12 +75,8 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                  {{"source_container", text::path_to_utf8(source_path)},
                   {"container_kind", container_kind},
                   {"partition_index", audio.partition.value},
-                  {"quality", audio.alternating_byte_payload_detected ? "Likely" : "Known"},
-                  {"basis", audio.alternating_byte_payload_detected
-                                ? "direct object header plus alternating-byte payload "
-                                  "detection"
-                                : "direct object header and stored payload bytes"},
-                  {"alternating_byte_payload_detected", audio.alternating_byte_payload_detected}}},
+                  {"quality", "Known"},
+                  {"basis", "direct object header and stored payload bytes"}}},
             });
         }
         OrderedJson sbnk = OrderedJson::array();
@@ -327,8 +322,7 @@ axk::Result<std::string> serialize_unresolved_wave_data_graph(const UnresolvedWa
                   {"frames", audio.frame_count},
                   {"stored_payload_size", audio.stored_payload_size},
                   {"decoded_pcm_size", audio.pcm.size()},
-                  {"exactness_status", audio.alternating_byte_payload_detected ? "alternating-byte-compatibility-export"
-                                                                               : "exact-current-mono"}}},
+                  {"exactness_status", "exact-current-mono"}}},
             });
         }
         return OrderedJson{

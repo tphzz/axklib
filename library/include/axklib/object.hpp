@@ -25,7 +25,7 @@ enum class ObjectType : std::uint8_t {
     prf3,
 };
 
-enum class ObjectFormat : std::uint8_t { current, alternating_byte, unknown };
+enum class ObjectFormat : std::uint8_t { current, unknown };
 enum class Verification : std::uint8_t { verified, corroborated, tentative, unknown };
 
 inline constexpr std::size_t current_record_envelope_size = 0x30U;

@@ -4,7 +4,6 @@
 #include "axklib/object.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -52,35 +51,6 @@ void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
         if (const auto header = decode_object_header(payload); header)
             record.object_name = header->name;
         return;
-    }
-    if (payload.size() >= 16U) {
-        bool marker_lane = true;
-        for (std::size_t offset = 1; offset < 16U; offset += 2U) {
-            const auto expected = offset % 4U == 1U ? 0x55U : 0xaaU;
-            marker_lane &= std::to_integer<std::uint8_t>(payload[offset]) == expected;
-        }
-        constexpr std::array<std::byte, 6> even_magic{std::byte{'F'}, std::byte{'F'}, std::byte{'D'},
-                                                      std::byte{'V'}, std::byte{'S'}, std::byte{'L'}};
-        for (std::size_t index = 0; index < even_magic.size(); ++index)
-            marker_lane &= payload[index * 2U] == even_magic[index];
-        if (marker_lane) {
-            const std::array type_code{payload[12], payload[14]};
-            constexpr std::array mappings{
-                std::pair{std::array{std::byte{'S'}, std::byte{'P'}}, std::string_view{"SMPL"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'N'}}, std::string_view{"SBNK"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'A'}}, std::string_view{"SBAC"}},
-                std::pair{std::array{std::byte{'P'}, std::byte{'O'}}, std::string_view{"PROG"}},
-                std::pair{std::array{std::byte{'S'}, std::byte{'Q'}}, std::string_view{"SEQU"}},
-                std::pair{std::array{std::byte{'P'}, std::byte{'F'}}, std::string_view{"PRF3"}},
-            };
-            const auto mapping = std::find_if(mappings.begin(), mappings.end(),
-                                              [&](const auto &item) { return item.first == type_code; });
-            if (mapping != mappings.end()) {
-                record.payload_kind = PayloadKind::alternating_byte_object;
-                record.object_type = mapping->second;
-                return;
-            }
-        }
     }
     auto entries = parse_directory_entries(payload);
     if (entries.size() >= 2U && entries[0].name == "." && entries[1].name == ".." && entries[0].target_link_id &&

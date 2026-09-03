@@ -9,7 +9,11 @@
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
+#include "axklib/catalog.hpp"
+#include "axklib/object.hpp"
 #include "axklib/wav_stream.hpp"
+
+#include "media_test_fixtures.hpp"
 
 namespace {
 
@@ -63,6 +67,26 @@ TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     const auto preview = axk::build_preview_envelope(*waveform, 16);
     ASSERT_TRUE(preview);
     EXPECT_EQ(preview->bins.size(), 16U);
+}
+
+TEST(Audio, RespectsDeclaredSixteenBitWidthForMarkerLikePcm) {
+    auto bytes = smpl_object("MARKER LIKE");
+    bytes[0xac] = std::byte{0x00};
+    bytes[0xad] = std::byte{0x55};
+    bytes[0xae] = std::byte{0x80};
+    bytes[0xaf] = std::byte{0xaa};
+    auto object = axk::decode_object(bytes);
+    ASSERT_TRUE(object);
+    const axk::ObjectSnapshot snapshot{"p0:sfs9",          axk::PartitionIndex{0}, axk::SfsId{9},   "fixture",
+                                       std::move(*object), std::nullopt,           std::move(bytes)};
+
+    const auto waveform = axk::decode_waveform(snapshot, "marker-like.obj");
+    ASSERT_TRUE(waveform);
+    EXPECT_EQ(waveform->format.sample_width_bytes, 2U);
+    EXPECT_EQ(waveform->frame_count, 2U);
+    EXPECT_EQ(waveform->stored_payload_transform, "byteswap16");
+    EXPECT_EQ(waveform->pcm,
+              (std::vector<std::byte>{std::byte{0x55}, std::byte{0x00}, std::byte{0xaa}, std::byte{0x80}}));
 }
 
 TEST(Audio, PadsShorterStereoMemberAndRejectsFormatMismatch) {

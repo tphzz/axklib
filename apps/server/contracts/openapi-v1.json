@@ -2115,7 +2115,6 @@
               "DIRECTORY",
               "SUPPORT",
               "OBJECT",
-              "ALTERNATING_BYTE_OBJECT",
               "UNKNOWN"
             ],
             "type": "string"

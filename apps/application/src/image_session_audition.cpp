@@ -11,8 +11,7 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
         return std::unexpected(session.error());
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
-    auto source =
-        implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm, cancellation);
+    auto source = implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm);
     if (!source)
         return std::unexpected(source.error());
     ImageWaveformPreview result{.object_id = std::string{object_id}, .lanes = {}};
@@ -98,8 +97,7 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
             attach_object_context(error);
             return error;
         };
-        auto source = implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::playback,
-                                                      cancellation);
+        auto source = implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::playback);
         if (!source) {
             auto error = std::move(source.error());
             attach_object_context(error);

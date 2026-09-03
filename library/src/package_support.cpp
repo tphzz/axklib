@@ -68,8 +68,6 @@ std::string object_format_name(ObjectFormat format) {
     switch (format) {
     case ObjectFormat::current:
         return "current";
-    case ObjectFormat::alternating_byte:
-        return "alternating-byte";
     case ObjectFormat::unknown:
         return "unknown";
     }

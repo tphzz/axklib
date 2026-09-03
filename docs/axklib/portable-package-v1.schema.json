@@ -244,7 +244,6 @@
         "object_format": {
           "enum": [
             "current",
-            "alternating-byte",
             "unknown"
           ]
         },

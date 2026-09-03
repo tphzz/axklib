@@ -259,8 +259,6 @@ std::string object_format_name(axk::ObjectFormat format) {
     switch (format) {
     case axk::ObjectFormat::current:
         return "current";
-    case axk::ObjectFormat::alternating_byte:
-        return "alternating-byte";
     case axk::ObjectFormat::unknown:
         return "unknown";
     }

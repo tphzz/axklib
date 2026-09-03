@@ -15,8 +15,6 @@ std::string_view payload_kind(axk::PayloadKind kind) {
         return "directory";
     case axk::PayloadKind::object:
         return "object";
-    case axk::PayloadKind::alternating_byte_object:
-        return "alternating-byte-object";
     case axk::PayloadKind::unknown:
         return "unknown";
     }

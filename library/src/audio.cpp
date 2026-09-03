@@ -71,33 +71,16 @@ static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std:
     result.loop_start = decoded.loop_start_frame.value;
     result.loop_length = decoded.loop_length_frames.value;
     if (result.stored_sample_width_bytes == 2U) {
-        bool alternating = stored.size() >= 2U;
-        const auto limit = stored.size() - (stored.size() % 2U);
-        for (std::size_t offset = 1; offset < limit; offset += 2U) {
-            const auto expected = offset % 4U == 1U ? 0x55U : 0xaaU;
-            alternating &= std::to_integer<std::uint8_t>(stored[offset]) == expected;
+        if (stored.size() % 2U != 0U) {
+            return std::unexpected{
+                make_error(ErrorCode::object_malformed, ErrorCategory::audio, "16-bit SMPL PCM has an odd byte count")};
         }
-        if (alternating) {
-            result.format.sample_width_bytes = 1;
-            result.stored_payload_transform = "alternating-byte-signed-high-byte";
-            result.alternating_byte_payload_detected = true;
-            result.pcm.reserve((stored.size() + 1U) / 2U);
-            for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
-                result.pcm.push_back(
-                    static_cast<std::byte>((std::to_integer<std::uint8_t>(stored[offset]) + 128U) & 0xffU));
-            }
-        } else {
-            if (stored.size() % 2U != 0U) {
-                return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::audio,
-                                                  "16-bit SMPL PCM has an odd byte count")};
-            }
-            result.format.sample_width_bytes = 2;
-            result.stored_payload_transform = "byteswap16";
-            result.pcm.resize(stored.size());
-            for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
-                result.pcm[offset] = stored[offset + 1U];
-                result.pcm[offset + 1U] = stored[offset];
-            }
+        result.format.sample_width_bytes = 2;
+        result.stored_payload_transform = "byteswap16";
+        result.pcm.resize(stored.size());
+        for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
+            result.pcm[offset] = stored[offset + 1U];
+            result.pcm[offset + 1U] = stored[offset];
         }
     } else if (result.stored_sample_width_bytes == 1U) {
         result.format.sample_width_bytes = 1;

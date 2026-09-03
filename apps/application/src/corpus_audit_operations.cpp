@@ -100,16 +100,17 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
                 const auto severity = issue.severity == axk::ValidationSeverity::error     ? "error"
                                       : issue.severity == axk::ValidationSeverity::warning ? "warning"
                                                                                            : "info";
-                validation_issues.push_back({{"severity", severity},
-                                             {"code", issue.code},
-                                             {"message", issue.message},
-                                             {"scope", "relationship"},
-                                             {"source_path", display},
-                                             {"sampler_path", issue.sampler_path},
-                                             {"object_key", issue.object_key},
-                                             {"quality", "Known"},
-                                             {"basis", "validation"},
-                                             {"recommended_next_check", ""}});
+                validation_issues.push_back(
+                    {{"severity", severity},
+                     {"code", issue.code},
+                     {"message", issue.message},
+                     {"scope", issue.code == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES" ? "volume" : "relationship"},
+                     {"source_path", display},
+                     {"sampler_path", issue.sampler_path},
+                     {"object_key", issue.object_key},
+                     {"quality", "Known"},
+                     {"basis", "validation"},
+                     {"recommended_next_check", ""}});
             }
         }
         if (!request->skip_wave_smoke) {
