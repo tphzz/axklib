@@ -211,6 +211,7 @@ add_library(
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_manifest_template.cpp
   src/alteration_manifest_program.cpp
   src/alteration_manifest_sample_bank.cpp
   src/alteration_manifest_placement.cpp
@@ -244,9 +245,11 @@ add_library(
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
+  src/sample_bank_parameter_update.cpp
   src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
+  src/writer_manifest_template.cpp
   src/writer_profiles.cpp
 )
 add_library(axklib::audio ALIAS axk_audio)

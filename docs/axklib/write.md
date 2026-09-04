@@ -622,8 +622,8 @@ Waveform fields:
 | `root_key` | Required MIDI note `0..127`. |
 | `target_sample_rate` | Optional requested output rate. Omit to preserve supported native rates or use the default conversion policy. |
 | `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
-| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
-| `loop_start_frame`, `loop_length_frames` | Optional explicit loop window. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero and serializes the full physical Wave Data span. |
+| `loop_mode` | Optional A-series mode `0..5`: `-->`, `->0`, `->0->`, `<--`, `One->`, or `One<-`; default `4` (`One->`). |
+| `loop_start_frame`, `loop_length_frames` | Optional explicit loop window. Repeating modes `1` and `2` require a non-empty contained range. For modes `0`, `3`, `4`, and `5`, zero values select the complete physical Wave Data span; an explicit non-empty contained range is also accepted. |
 
 Direct and stereo Sample fields:
 
@@ -631,12 +631,14 @@ Direct and stereo Sample fields:
 | --- | --- |
 | `name` | Required unique ASCII `SBNK` name, at most 16 bytes. |
 | `root_key` | Required MIDI note `0..127`. |
-| `key_low`, `key_high` | Required MIDI limits `0..127`; high must not precede low. |
+| `key_low`, `key_high` | Required MIDI limits. Concrete limits are `0..127`; `key_low = 255` and `key_high = 128` encode the sampler's `=Orig` setting and resolve to `root_key` for range validation. The effective high limit must not precede the effective low limit. |
 | `level` | Optional `0..127`; default `100`. |
 | `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
 | `velocity_low`, `velocity_high` | Optional MIDI limits `0..127`; defaults `0` and `127`, and high must not precede low. |
-| `loop_mode` | Optional A-series mode: `1` forward loop or `4` forward one-shot; default `4`. |
-| `loop_start_frame`, `loop_length_frames` | Optional Sample loop window within the full linked Wave Data playback span. Forward loop requires a non-empty contained range. One-shot requires both manifest values to remain zero. |
+| `expand_detune` | Optional signed expanded-mono detune `-7..7`; default `0`. Nonzero detune or dephase selects expanded-mono topology and requires a single Wave Data source. |
+| `expand_dephase`, `expand_width` | Optional signed expanded-mono values `-63..63`; defaults `0` and `63`. Nonzero dephase requires a single Wave Data source. |
+| `loop_mode` | Optional A-series mode `0..5`: `-->`, `->0`, `->0->`, `<--`, `One->`, or `One<-`; default `4` (`One->`). |
+| `loop_start_frame`, `loop_length_frames` | Optional Sample loop window within the linked Wave Data span. Repeating modes `1` and `2` require a non-empty contained range. The other modes accept zero values for the complete span or an explicit contained range. Fresh Samples retain the complete linked Wave Data as their playback window. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
@@ -646,6 +648,18 @@ Direct and stereo Sample fields:
 Direct stereo members must have equal sample rate and logical frame count.
 Interleaved input is split into two physical mono objects and inherently meets
 that constraint.
+
+Sample Bank fields:
+
+| Field | Rule |
+| --- | --- |
+| `name` | Required unique ASCII `SBAC` name, at most 16 bytes. |
+| `member_samples` | Required array of 1..127 distinct existing Sample names. A Sample can belong to only one authored Sample Bank. |
+| `parameter_overrides` | Optional non-empty object applied to every member Sample and stored as the Sample Bank's current parameter state. Supported fields are `root_key`, `key_low`, `key_high`, `level`, `fine_tune_cents`, `velocity_low`, `velocity_high`, `expand_detune`, `expand_dephase`, and `expand_width`, with the same ranges and topology rules as Sample fields. |
+
+Fresh Sample Banks use the canonical current parameter defaults. Semantic
+overrides are applied immediately to the member Samples, so the three pending
+propagation bitmaps remain clear. Raw pending-state authoring is not exposed.
 
 The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
 contains 1..127 mono or stereo Samples. Each Program has exactly two ordered
@@ -734,12 +748,17 @@ directory.
 
 An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
 and `key_high`. Optional fields are `right_waveform_name`, `level`,
-`fine_tune_cents`, `velocity_low`, `velocity_high`, `loop_mode`,
-`loop_start_frame`, and `loop_length_frames`. The named Wave Data entries in
+`fine_tune_cents`, `velocity_low`, `velocity_high`, `expand_detune`,
+`expand_dephase`, `expand_width`, `loop_mode`, `loop_start_frame`, and
+`loop_length_frames`. The named Wave Data entries in
 the evolving transaction must already exist at that point.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
-one to 127 distinct existing Sample names. Samples may be mono or stereo. If a
+one to 127 distinct existing Sample names. It may also contain the same
+non-empty semantic `parameter_overrides` object accepted by authored Sample
+Banks. The overrides are applied immediately to every member Sample and stored
+as the bank's current parameter state; raw pending propagation state cannot be
+authored. Samples may be mono, stereo, or single-source expanded mono. If a
 member already belongs to another Sample Bank, the transaction removes that
 membership and moves the Sample into the new bank; the source bank remains with
 its other members and may become empty. A Sample assigned directly to a Program

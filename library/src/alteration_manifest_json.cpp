@@ -12,8 +12,6 @@
 
 #include <nlohmann/json.hpp>
 
-#include "axklib/file_publication.hpp"
-
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_program.hpp"
@@ -22,7 +20,6 @@
 namespace axk {
 namespace {
 using Json = nlohmann::json;
-using OrderedJson = nlohmann::ordered_json;
 Error transaction_error(std::string message) {
     return make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction, std::move(message));
 }
@@ -45,7 +42,7 @@ Result<void> exact_fields(const Json &row, std::initializer_list<std::string_vie
     return {};
 }
 Result<std::uint8_t> midi_value(const Json &row, std::string_view field, std::string_view context,
-                                std::uint8_t default_value, bool required) {
+                                std::uint8_t default_value, bool required, std::uint8_t maximum = 127U) {
     if (!row.contains(field)) {
         if (!required)
             return default_value;
@@ -56,9 +53,9 @@ Result<std::uint8_t> midi_value(const Json &row, std::string_view field, std::st
             transaction_error(std::string{context} + "." + std::string{field} + " must be an integer")};
     }
     const auto value = row[field].get<int>();
-    if (value < 0 || value > 127) {
+    if (value < 0 || value > maximum) {
         return std::unexpected{
-            transaction_error(std::string{context} + "." + std::string{field} + " must be between 0 and 127")};
+            transaction_error(std::string{context} + "." + std::string{field} + " is outside its supported range")};
     }
     return static_cast<std::uint8_t>(value);
 }
@@ -122,60 +119,6 @@ Result<std::string> program_name(const Json &row, std::string_view field, std::s
 }
 
 } // namespace
-
-Result<std::string> serialize_alteration_manifest_template() {
-    try {
-        OrderedJson operation = OrderedJson::object();
-        operation["id"] = "rename-waveform";
-        operation["type"] = "rename_waveform";
-        operation["partition_index"] = 0;
-        operation["volume_name"] = "Volume";
-        operation["waveform_name"] = "Old Wave";
-        operation["new_waveform_name"] = "New Wave";
-
-        OrderedJson manifest = OrderedJson::object();
-        manifest["schema_version"] = alteration_manifest_schema_version;
-        manifest["operations"] = OrderedJson::array({std::move(operation)});
-        return manifest.dump(2) + "\n";
-    } catch (const OrderedJson::exception &error) {
-        return std::unexpected{
-            transaction_error(std::string{"could not serialize alteration manifest template: "} + error.what())};
-    }
-}
-
-Result<PublicationOutcome> write_alteration_manifest_template(const std::filesystem::path &output_path,
-                                                              bool overwrite) {
-    auto serialized = serialize_alteration_manifest_template();
-    if (!serialized)
-        return std::unexpected{serialized.error()};
-
-    std::error_code filesystem_error;
-    if (!overwrite && std::filesystem::exists(output_path, filesystem_error)) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                       "refusing to replace existing alteration manifest: " + text::path_to_utf8(output_path))};
-    }
-    if (filesystem_error) {
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not inspect alteration manifest output path")};
-    }
-    if (!output_path.parent_path().empty())
-        std::filesystem::create_directories(output_path.parent_path(), filesystem_error);
-    if (filesystem_error) {
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not create alteration manifest output directory")};
-    }
-    auto temporary = detail::TemporaryPublication::create(output_path, [&](const detail::TemporaryFileSink &sink) {
-        return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
-    });
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
-    auto published = temporary->publish(mode);
-    if (!published)
-        return std::unexpected{published.error()};
-    return std::move(*published);
-}
 
 Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                                                      const std::filesystem::path &base_directory) {
@@ -350,8 +293,9 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 }
                 const std::set<std::string> required{"name", "waveform_name", "root_key", "key_low", "key_high"};
                 const std::set<std::string> optional{
-                    "right_waveform_name", "level",     "fine_tune_cents",  "velocity_low",
-                    "velocity_high",       "loop_mode", "loop_start_frame", "loop_length_frames"};
+                    "right_waveform_name", "level",          "fine_tune_cents", "velocity_low", "velocity_high",
+                    "expand_detune",       "expand_dephase", "expand_width",    "loop_mode",    "loop_start_frame",
+                    "loop_length_frames"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -367,13 +311,17 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 auto name = object_name(sample, "name", sample_context);
                 auto waveform = object_name(sample, "waveform_name", sample_context);
                 auto root_key = midi_value(sample, "root_key", sample_context, 0U, true);
-                auto key_low = midi_value(sample, "key_low", sample_context, 0U, true);
-                auto key_high = midi_value(sample, "key_high", sample_context, 0U, true);
+                auto key_low = midi_value(sample, "key_low", sample_context, 0U, true, sampler_original_key_low_limit);
+                auto key_high =
+                    midi_value(sample, "key_high", sample_context, 0U, true, sampler_original_key_high_limit);
                 auto level = midi_value(sample, "level", sample_context, 100U, false);
                 auto fine = bounded_integer(sample, "fine_tune_cents", sample_context, -63, 63, 0);
                 auto velocity_low = midi_value(sample, "velocity_low", sample_context, 0U, false);
                 auto velocity_high = midi_value(sample, "velocity_high", sample_context, 127U, false);
-                auto loop_mode = bounded_integer(sample, "loop_mode", sample_context, 1, 4, 4);
+                auto expand_detune = bounded_integer(sample, "expand_detune", sample_context, -7, 7, 0);
+                auto expand_dephase = bounded_integer(sample, "expand_dephase", sample_context, -63, 63, 0);
+                auto expand_width = bounded_integer(sample, "expand_width", sample_context, -63, 63, 63);
+                auto loop_mode = bounded_integer(sample, "loop_mode", sample_context, 0, 5, 4);
                 auto loop_start = bounded_integer(sample, "loop_start_frame", sample_context, 0,
                                                   maximum_wave_data_frames_per_channel, 0);
                 auto loop_length = bounded_integer(sample, "loop_length_frames", sample_context, 0,
@@ -396,13 +344,25 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{velocity_low.error()};
                 if (!velocity_high)
                     return std::unexpected{velocity_high.error()};
+                if (!expand_detune)
+                    return std::unexpected{expand_detune.error()};
+                if (!expand_dephase)
+                    return std::unexpected{expand_dephase.error()};
+                if (!expand_width)
+                    return std::unexpected{expand_width.error()};
                 if (!loop_mode)
                     return std::unexpected{loop_mode.error()};
                 if (!loop_start)
                     return std::unexpected{loop_start.error()};
                 if (!loop_length)
                     return std::unexpected{loop_length.error()};
-                if (*key_high < *key_low) {
+                if (*key_low > 127U && *key_low != sampler_original_key_low_limit) {
+                    return std::unexpected{
+                        transaction_error(sample_context + ".key_low is outside its supported range")};
+                }
+                const auto effective_low = *key_low == sampler_original_key_low_limit ? *root_key : *key_low;
+                const auto effective_high = *key_high == sampler_original_key_high_limit ? *root_key : *key_high;
+                if (effective_high < effective_low) {
                     return std::unexpected{transaction_error(sample_context + ".key_high must not be below key_low")};
                 }
                 SampleSpec spec;
@@ -421,6 +381,9 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 spec.fine_tune_cents = static_cast<std::int8_t>(*fine);
                 spec.velocity_low = *velocity_low;
                 spec.velocity_high = *velocity_high;
+                spec.expand_detune = static_cast<std::int8_t>(*expand_detune);
+                spec.expand_dephase = static_cast<std::int8_t>(*expand_dephase);
+                spec.expand_width = static_cast<std::int8_t>(*expand_width);
                 spec.loop_mode = static_cast<AudioSamplerLoopMode>(*loop_mode);
                 spec.loop_start_frame = static_cast<std::uint32_t>(*loop_start);
                 spec.loop_length_frames = static_cast<std::uint32_t>(*loop_length);
@@ -508,36 +471,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{sample_bank.error()};
                 data = DeleteSampleBankOperation{std::move(selector), std::move(*volume), std::move(*sample_bank)};
             } else if (*type == "insert_sbac") {
-                if (auto valid =
-                        exact_fields(row, {"id", "type", "partition_index", "volume_name", "sample_bank"}, context);
-                    !valid)
-                    return std::unexpected{valid.error()};
-                auto volume = required_text(row, "volume_name", context);
-                if (!volume)
-                    return std::unexpected{volume.error()};
-                const auto &sample_bank = row["sample_bank"];
-                if (auto valid = exact_fields(sample_bank, {"name", "member_samples"}, context + ".sample_bank");
-                    !valid)
-                    return std::unexpected{valid.error()};
-                auto name = object_name(sample_bank, "name", context + ".sample_bank");
-                if (!name)
-                    return std::unexpected{name.error()};
-                if (!sample_bank["member_samples"].is_array() || sample_bank["member_samples"].empty() ||
-                    sample_bank["member_samples"].size() > maximum_sample_bank_members)
-                    return std::unexpected{transaction_error("member_samples must contain 1..127 names")};
-                SampleBankSpec spec;
-                spec.name = *name;
-                for (std::size_t member_index = 0; member_index < sample_bank["member_samples"].size();
-                     ++member_index) {
-                    Json wrapper{{"name", sample_bank["member_samples"][member_index]}};
-                    auto member = object_name(wrapper, "name", context + ".sample_bank.member_samples");
-                    if (!member)
-                        return std::unexpected{member.error()};
-                    if (std::ranges::contains(spec.member_samples, *member))
-                        return std::unexpected{transaction_error("member_samples must be distinct")};
-                    spec.member_samples.push_back(std::move(*member));
-                }
-                data = InsertSampleBankOperation{std::move(selector), std::move(*volume), std::move(spec)};
+                auto parsed = detail::parse_insert_sample_bank_json(row, std::move(selector), context);
+                if (!parsed)
+                    return std::unexpected{parsed.error()};
+                data = std::move(*parsed);
             } else if (*type == "assign_sbac_members") {
                 auto assignment = detail::parse_sample_bank_assignment_json(row, std::move(selector), context);
                 if (!assignment)
@@ -635,7 +572,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 auto path = required_text(audio, "path", context + ".audio");
                 auto root_key = midi_value(audio, "root_key", context + ".audio", 0U, true);
                 auto fine = bounded_integer(audio, "fine_tune_cents", context + ".audio", -63, 63, 0);
-                auto loop_mode = bounded_integer(audio, "loop_mode", context + ".audio", 1, 4, 4);
+                auto loop_mode = bounded_integer(audio, "loop_mode", context + ".audio", 0, 5, 4);
                 auto loop_start = bounded_integer(audio, "loop_start_frame", context + ".audio", 0,
                                                   maximum_wave_data_frames_per_channel, 0);
                 auto loop_length = bounded_integer(audio, "loop_length_frames", context + ".audio", 0,

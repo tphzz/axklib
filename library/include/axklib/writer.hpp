@@ -28,6 +28,8 @@ inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 inline constexpr std::size_t maximum_sample_bank_members = 127U;
 inline constexpr std::size_t maximum_program_assignments = 16U;
+inline constexpr std::uint8_t sampler_original_key_high_limit = 0x80U;
+inline constexpr std::uint8_t sampler_original_key_low_limit = 0xffU;
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
     4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
 inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;
@@ -37,8 +39,12 @@ inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_wid
 inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
 
 enum class AudioSamplerLoopMode : std::uint8_t {
+    forward = 0,
     forward_loop = 1,
+    forward_loop_release = 2,
+    reverse = 3,
     forward_one_shot = 4,
+    reverse_one_shot = 5,
 };
 
 struct WaveformSpec {
@@ -68,14 +74,31 @@ struct SampleSpec {
     std::int8_t fine_tune_cents{};
     std::uint8_t velocity_low{};
     std::uint8_t velocity_high{127};
+    std::int8_t expand_detune{};
+    std::int8_t expand_dephase{};
+    std::int8_t expand_width{63};
     AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
     std::uint32_t loop_start_frame{};
     std::uint32_t loop_length_frames{};
 };
 
+struct SampleBankParameterOverrides {
+    std::optional<std::uint8_t> root_key{};
+    std::optional<std::uint8_t> key_low{};
+    std::optional<std::uint8_t> key_high{};
+    std::optional<std::uint8_t> level{};
+    std::optional<std::int8_t> fine_tune_cents{};
+    std::optional<std::uint8_t> velocity_low{};
+    std::optional<std::uint8_t> velocity_high{};
+    std::optional<std::int8_t> expand_detune{};
+    std::optional<std::int8_t> expand_dephase{};
+    std::optional<std::int8_t> expand_width{};
+};
+
 struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
+    std::optional<SampleBankParameterOverrides> parameter_overrides{};
 };
 
 enum class ProgramReceiveMode : std::uint8_t {

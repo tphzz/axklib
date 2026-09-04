@@ -522,8 +522,9 @@ TEST(AlterationManifest, ParsesStrictSampleOperations) {
        "volume_name":"Samples","sample_name":"Old Sample"},
       {"id":"insert","type":"insert_sbnk","partition_index":{"operation_ref":"delete"},
        "volume_name":"Samples","sample":{"name":"New Sample","waveform_name":"Wave",
-       "root_key":64,"fine_tune_cents":-12,"key_low":10,"key_high":100,
-       "velocity_low":20,"velocity_high":110,"loop_mode":1,"loop_start_frame":17,
+       "root_key":64,"fine_tune_cents":-12,"key_low":255,"key_high":128,
+       "velocity_low":20,"velocity_high":110,"expand_detune":-5,"expand_dephase":27,"expand_width":-41,
+       "loop_mode":5,"loop_start_frame":17,
        "loop_length_frames":335}}
     ]})");
     ASSERT_TRUE(parsed) << parsed.error().message;
@@ -533,7 +534,12 @@ TEST(AlterationManifest, ParsesStrictSampleOperations) {
     EXPECT_EQ(insert->sample.fine_tune_cents, -12);
     EXPECT_EQ(insert->sample.velocity_low, 20U);
     EXPECT_EQ(insert->sample.velocity_high, 110U);
-    EXPECT_EQ(insert->sample.loop_mode, axk::AudioSamplerLoopMode::forward_loop);
+    EXPECT_EQ(insert->sample.key_low, axk::sampler_original_key_low_limit);
+    EXPECT_EQ(insert->sample.key_high, axk::sampler_original_key_high_limit);
+    EXPECT_EQ(insert->sample.expand_detune, -5);
+    EXPECT_EQ(insert->sample.expand_dephase, 27);
+    EXPECT_EQ(insert->sample.expand_width, -41);
+    EXPECT_EQ(insert->sample.loop_mode, axk::AudioSamplerLoopMode::reverse_one_shot);
     EXPECT_EQ(insert->sample.loop_start_frame, 17U);
     EXPECT_EQ(insert->sample.loop_length_frames, 335U);
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
@@ -564,6 +570,32 @@ TEST(AlterationManifest, ParsesStrictSampleBankAssignment) {
        "volume_name":"Samples","sample_bank_name":"Target Bank",
        "sample_names":["Sample 1","Sample 1"]}
     ]})"));
+}
+
+TEST(AlterationManifest, ParsesStrictSampleBankParameterOverrides) {
+    const auto parsed = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Samples",
+         "sample_bank":{"name":"Bank","member_samples":["Sample"],"parameter_overrides":{
+           "root_key":64,"key_low":255,"key_high":128,"level":87,"fine_tune_cents":-12,
+           "velocity_low":20,"velocity_high":110,"expand_detune":-5,"expand_dephase":27,"expand_width":-41}}}
+      ]})");
+
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto *insert = std::get_if<axk::InsertSampleBankOperation>(&parsed->operations.front().data);
+    ASSERT_NE(insert, nullptr);
+    ASSERT_TRUE(insert->sample_bank.parameter_overrides);
+    EXPECT_EQ(insert->sample_bank.parameter_overrides->root_key, 64U);
+    EXPECT_EQ(insert->sample_bank.parameter_overrides->key_low, axk::sampler_original_key_low_limit);
+    EXPECT_EQ(insert->sample_bank.parameter_overrides->key_high, axk::sampler_original_key_high_limit);
+    EXPECT_EQ(insert->sample_bank.parameter_overrides->fine_tune_cents, -12);
+    EXPECT_EQ(insert->sample_bank.parameter_overrides->expand_detune, -5);
+
+    EXPECT_FALSE(axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Samples",
+         "sample_bank":{"name":"Bank","member_samples":["Sample"],"parameter_overrides":{}}}
+      ]})"));
 }
 
 TEST(AlterationManifest, ParsesStrictWaveformSamplerMetadataAndRejectsInvalidLoopWindows) {
@@ -1830,6 +1862,60 @@ TEST(Alteration, MovesSampleBankMemberToNewBankAndRejectsDirectProgramSample) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(Alteration, AppliesSampleBankOverridesToMembersAndClearsPendingState) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-sample-bank-parameters";
+    const auto audio = root / "tone.wav";
+    const auto source = root / "source.hds";
+    const auto output = root / "output.hds";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root);
+    ASSERT_TRUE(axk::write_wav_atomic(audio, test_waveform()));
+    ASSERT_TRUE(axk::write_hds_image(wide_sample_bank_source_manifest(audio), source));
+    const auto manifest = axk::parse_alteration_manifest(R"({
+      "schema_version":"1.0","operations":[
+        {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Wide Bank",
+         "sample_bank":{"name":"Adjusted","member_samples":["Member 4"],"parameter_overrides":{
+           "root_key":64,"key_low":255,"key_high":128,"level":87,"fine_tune_cents":-12,
+           "velocity_low":20,"velocity_high":110,"expand_detune":-5,"expand_dephase":27,"expand_width":-41}}}
+      ]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+
+    const auto applied = axk::alter_hds(source, *manifest, output);
+
+    ASSERT_TRUE(applied) << applied.error().message;
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog) << catalog.error().message;
+    const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "Member 4";
+    });
+    ASSERT_NE(sample, catalog->objects.end());
+    const auto *decoded_sample = std::get_if<axk::CurrentSbnk>(&sample->object.payload);
+    ASSERT_NE(decoded_sample, nullptr);
+    EXPECT_EQ(decoded_sample->left.root_key, 64U);
+    EXPECT_EQ(decoded_sample->left.fine_tune_cents, -12);
+    EXPECT_EQ(decoded_sample->key_range_low, axk::sampler_original_key_low_limit);
+    EXPECT_EQ(decoded_sample->key_range_high, axk::sampler_original_key_high_limit);
+    EXPECT_EQ(decoded_sample->sample_level, 87U);
+    EXPECT_EQ(decoded_sample->velocity_range_low, 20U);
+    EXPECT_EQ(decoded_sample->velocity_range_high, 110U);
+    EXPECT_EQ(decoded_sample->sample_flags & 0x07U, 0x07U);
+    EXPECT_EQ(sample->raw_payload[0x112U], std::byte{0xfb});
+    EXPECT_EQ(sample->raw_payload[0x113U], std::byte{0x1b});
+    EXPECT_EQ(sample->raw_payload[0x114U], std::byte{0xd7});
+    const auto bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Adjusted";
+    });
+    ASSERT_NE(bank, catalog->objects.end());
+    const auto *decoded_bank = std::get_if<axk::CurrentSbac>(&bank->object.payload);
+    ASSERT_NE(decoded_bank, nullptr);
+    EXPECT_TRUE(decoded_bank->pending_parameter_numbers.empty());
+    EXPECT_TRUE(decoded_bank->reserved_pending_parameter_numbers.empty());
+    std::filesystem::remove_all(root, error);
+}
+
 TEST(Alteration, AssignsSamplesToExistingSampleBankWithoutChangingItsIdentityOrOrder) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-assign-existing-sample-bank";
     const auto audio = root / "tone.wav";
@@ -2064,6 +2150,18 @@ TEST(Alteration, InsertsSampleBankContainingStereoSample) {
        "sample_bank":{"name":"Stereo Bank","member_samples":["Stereo Sample"]}}
     ]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
+
+    const auto invalid_expand = axk::parse_alteration_manifest(R"({
+    "schema_version":"1.0","operations":[
+      {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Stereo",
+       "sample_bank":{"name":"Invalid Expand","member_samples":["Stereo Sample"],
+                      "parameter_overrides":{"expand_detune":1}}}
+    ]})");
+    ASSERT_TRUE(invalid_expand) << invalid_expand.error().message;
+    const auto invalid_inspection = axk::inspect_hds_alteration(source, *invalid_expand);
+    ASSERT_FALSE(invalid_inspection);
+    EXPECT_EQ(invalid_inspection.error().message, "Sample Bank parameters are invalid for an existing member Sample");
+
     const auto applied = axk::alter_hds(source, *manifest, output);
     ASSERT_TRUE(applied) << applied.error().message;
 

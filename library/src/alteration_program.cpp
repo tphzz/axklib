@@ -402,6 +402,7 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         return std::unexpected{memberships.error()};
     std::map<std::string, SampleSpec> sample_specs;
     std::map<std::string, SfsId> member_ids;
+    std::map<SfsId, std::vector<std::byte>> updated_member_payloads;
     for (const auto &name : spec.member_samples) {
         auto sample = category_object(state, partition, operation.volume_name, "SBNK", name, "SBNK", cancellation);
         if (!sample)
@@ -424,6 +425,14 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
             return std::unexpected{transaction_error("Sample is shared by multiple Sample Banks")};
         if (banked != (source_count == 1U))
             return std::unexpected{transaction_error("Sample membership flag disagrees with its Sample Bank")};
+        if (spec.parameter_overrides) {
+            if (auto updated = detail::apply_sample_bank_parameter_overrides_to_payload(*sample_payload,
+                                                                                        *spec.parameter_overrides);
+                !updated) {
+                return std::unexpected{updated.error()};
+            }
+            updated_member_payloads.emplace(sample->second, std::move(*sample_payload));
+        }
         SampleSpec placeholder;
         placeholder.name = name;
         sample_specs.emplace(name, std::move(placeholder));
@@ -442,6 +451,14 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         return std::unexpected{allocated.error()};
     for (const auto &[name, id] : member_ids) {
         static_cast<void>(name);
+        const auto updated_payload = updated_member_payloads.find(id);
+        if (updated_payload != updated_member_payloads.end()) {
+            if (auto updated = replace_fixed_object_payload(state, partition, id, std::move(updated_payload->second),
+                                                            cancellation);
+                !updated) {
+                return std::unexpected{updated.error()};
+            }
+        }
         if (auto updated = set_sbnk_sample_bank_flag(state, partition, id, true, cancellation); !updated)
             return std::unexpected{updated.error()};
         state.known_edges.emplace_back(*partition_index, allocated->first, id);

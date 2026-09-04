@@ -395,9 +395,10 @@ uses direction-specific sentinel bytes for the UI value `Orig`: raw `128` in
 `key_range_high_0x0e2` and raw `255` in `key_range_low_0x0e3`. axklib
 preserves those raw values and exposes a `resolved_key_range` projection in
 volume graphs. The projection resolves `Orig` to the member root key so export
-formats with only concrete MIDI limits can emit bounded zones. Generated direct
-single-member `SBNK` objects have been hardware-tested with concrete root key
-and key-range values. For a single-member Sample, an empty right member name means
+formats with only concrete MIDI limits can emit bounded zones. Fresh Sample
+authoring accepts the same direction-specific sentinel values and validates the
+effective range after resolving them to the authored root key. For a
+single-member Sample, an empty right member name means
 there is no active right member; the generated writer treats right-member fields
 as inactive compatibility fields rather than as a second playback region.
 
@@ -435,10 +436,13 @@ select only one segment of a larger shared `SMPL` payload. Loop Divide media is
 a common example: several Samples have different start frames while referencing
 the same Wave Data. The full left/right wave-start words are decoded for this
 read path. Real images use nonzero upper halves, including shared stereo starts,
-so the words must not be reduced to their overlapping low-16 aliases. They
-remain read-only write inputs: template-backed serialization preserves them,
-while fresh generation uses the proven zero-start profile and named loop-mode
-policies write only confirmed low-half cache lanes. Sample
+so the words must not be reduced to their overlapping low-16 aliases.
+Template-backed serialization preserves the full words except for explicit
+supported updates. Fresh Sample authoring supports all loop modes `0..5`,
+keeps the complete linked Wave Data as the playback window, and serializes the
+requested loop window independently. Repeating modes `1` and `2` require a
+non-empty explicit loop window. The other modes accept either the complete
+linked Wave Data span or an explicit non-empty loop window. Sample
 preview and audition therefore:
 
 1. resolve each active member to one confirmed `SMPL`;
@@ -468,13 +472,16 @@ range `0..24`, filter type `0..16`, filter cutoff/Q velocity sensitivity
 generation uses the documented profile defaults; template-backed edits preserve
 fields that were not explicitly changed, including opaque packed lanes.
 
-`sample_flags_0x0d0` is read-only topology state. The A4000 reads bit `0`
-separately and handles bits `2..1` as one masked two-bit state. The exact
-bank-member Expand derivation remains unresolved, so writers derive only proven
-fresh-object profiles: `0x02` for a standalone mono/single-source object and
-`0x00` for a standalone stereo/two-source object. Graph alterations change only
-the membership bit while preserving the other lanes. Expanded profiles remain
-template-preserved and are not synthesized by the fresh writer.
+`sample_flags_0x0d0` is read-only topology state. Bit `0` records Sample Bank
+membership, bit `1` records mono topology, and bit `2` records expanded-mono
+topology. Fresh writers emit `0x02` for ordinary single-source mono and `0x00`
+for two-source stereo, then derive bit `2` for a single-source Sample whose
+Expand Detune or Expand Dephase is nonzero. Expand Detune accepts `-7..7`, and
+Expand Dephase and Width accept `-63..63`; true two-source stereo rejects
+nonzero detune or dephase. Graph alterations preserve topology bits while
+changing membership, except when an explicit semantic Sample Bank override
+updates expanded-mono state. Duplicate-source expanded objects remain
+template-preserved and have no fresh authoring form.
 
 `mapout_flags_0x0d1` is a packed byte, not one wholly semantic field. Bits
 `7..6` are EQ Type, bit `4` is Fixed Pitch, bit `2` is Key Crossfade, and bit
@@ -647,11 +654,19 @@ Structured decoders expose them as `reserved_pending_parameter_numbers`.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
 
+Fresh current Sample Banks use the canonical nonzero Sample Parameter defaults,
+not an all-zero placeholder. The optional semantic parameter override set can
+change root key, key limits, level, fine tune, velocity limits, and expanded
+mono controls. Image creation and `insert_sbac` apply those values immediately
+to every member Sample and store the same current state in the Sample Bank, so
+the pending propagation words remain clear. Raw pending-state authoring is not
+exposed.
+
 SBAC slot row layout, stride `0x14`:
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `+0x00` | 16 | ASCII | Sample (`SBNK`) member name; first byte zero means an inert row. |
+| `+0x00` | 16 | ASCII | Sample (`SBNK`) member name; first byte zero means an inert row. Live names shorter than 16 bytes are ASCII-space padded. |
 | `+0x10` | 4 | u32be | transient resolved-member runtime pointer residue |
 
 The reader uses the stored member count at `0x144` to decide how many rows to

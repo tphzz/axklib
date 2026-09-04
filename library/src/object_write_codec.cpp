@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <format>
 #include <limits>
 #include <map>
@@ -56,18 +55,18 @@ Result<std::vector<std::byte>> ascii(std::string_view value, std::size_t size, s
     return result;
 }
 
-std::uint16_t pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate) {
-    constexpr std::array<std::uint16_t, 12> fractions{0x000, 0x055, 0x0ab, 0x100, 0x155, 0x1ab,
-                                                      0x200, 0x255, 0x2ab, 0x300, 0x355, 0x3ab};
-    const auto root = root_key == 0U ? 0x03ab : ((root_key - 1U) / 12U) * 1024U + fractions[(root_key - 1U) % 12U];
-    const auto rate = static_cast<int>(std::log(static_cast<double>(sample_rate) / 44'100.0) * 1477.3197);
-    return static_cast<std::uint16_t>(static_cast<int>(root) - rate - fine_tune_cents);
-}
-
 struct LoopWindow {
     std::uint32_t start{};
     std::uint32_t length{};
 };
+
+constexpr bool valid_loop_mode(AudioSamplerLoopMode mode) {
+    return static_cast<std::uint8_t>(mode) <= static_cast<std::uint8_t>(AudioSamplerLoopMode::reverse_one_shot);
+}
+
+constexpr bool requires_explicit_loop_window(AudioSamplerLoopMode mode) {
+    return mode == AudioSamplerLoopMode::forward_loop || mode == AudioSamplerLoopMode::forward_loop_release;
+}
 
 Result<LoopWindow> loop_window(AudioSamplerLoopMode mode, std::uint32_t start, std::uint32_t length,
                                std::uint64_t frame_count) {
@@ -75,17 +74,15 @@ Result<LoopWindow> loop_window(AudioSamplerLoopMode mode, std::uint32_t start, s
         return std::unexpected{make_error(ErrorCode::audio_wave_data_too_large, ErrorCategory::audio,
                                           "sampler loop window exceeds the encoded frame range")};
     }
-    if (mode == AudioSamplerLoopMode::forward_one_shot) {
-        if (start != 0U || length != 0U) {
-            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                              "forward one-shot playback cannot specify a loop window")};
-        }
-        return LoopWindow{0U, static_cast<std::uint32_t>(frame_count)};
+    if (!valid_loop_mode(mode)) {
+        return std::unexpected{
+            make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "sampler loop mode is invalid")};
     }
-    if (mode != AudioSamplerLoopMode::forward_loop || length == 0U || start >= frame_count ||
-        length > frame_count - start) {
+    if (start == 0U && length == 0U && !requires_explicit_loop_window(mode))
+        return LoopWindow{0U, static_cast<std::uint32_t>(frame_count)};
+    if (length == 0U || start >= frame_count || length > frame_count - start) {
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                          "forward loop window must be non-empty and remain inside Wave Data")};
+                                          "sampler loop window must be non-empty and remain inside Wave Data")};
     }
     return LoopWindow{start, length};
 }
@@ -150,7 +147,7 @@ Result<std::vector<std::byte>> serialize_smpl(const WaveformSpec &spec, const Im
     writer.be16(0x7c, static_cast<std::uint16_t>(audio.output_sample_rate));
     result[0x7e] = static_cast<std::byte>(spec.root_key);
     result[0x7f] = static_cast<std::byte>(static_cast<std::uint8_t>(spec.fine_tune_cents));
-    writer.be16(0x80, pitch_word(spec.root_key, spec.fine_tune_cents, audio.output_sample_rate));
+    writer.be16(0x80, detail::sample_pitch_word(spec.root_key, spec.fine_tune_cents, audio.output_sample_rate));
     writer.be32(0x84, 0x30000000U | (static_cast<std::uint32_t>(spec.loop_mode) << 16U));
     writer.be32(0x8e, 0U);
     writer.be32(0x92, static_cast<std::uint32_t>(audio.output_frames));
@@ -187,6 +184,12 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         loop_window(sample.loop_mode, sample.loop_start_frame, sample.loop_length_frames, left.audio.output_frames);
     if (!left_loop)
         return std::unexpected{left_loop.error()};
+    if (sample.expand_detune < -7 || sample.expand_detune > 7 || sample.expand_dephase < -63 ||
+        sample.expand_dephase > 63 || sample.expand_width < -63 || sample.expand_width > 63 ||
+        (right != nullptr && (sample.expand_detune != 0 || sample.expand_dephase != 0))) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Sample expand controls are invalid for its playback topology")};
+    }
     std::optional<LoopWindow> right_loop;
     if (right != nullptr) {
         auto checked = loop_window(sample.loop_mode, sample.loop_start_frame, sample.loop_length_frames,
@@ -233,7 +236,9 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}, std::byte{0},    std::byte{0},
         std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0}};
     std::ranges::copy(controls, result.begin() + 0xa8);
-    const auto topology_flags = (sample_bank_member ? 0x01U : 0U) | (right == nullptr ? 0x02U : 0U);
+    const auto expanded = right == nullptr && (sample.expand_detune != 0 || sample.expand_dephase != 0);
+    const auto topology_flags =
+        (sample_bank_member ? 0x01U : 0U) | (right == nullptr ? 0x02U : 0U) | (expanded ? 0x04U : 0U);
     result[0xd0] = static_cast<std::byte>(topology_flags);
     result[0xd4] = std::byte{2};
     for (const auto number : linked_programs) {
@@ -252,12 +257,14 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0xd6] = static_cast<std::byte>(sample.root_key);
     result[0xdc] = static_cast<std::byte>(static_cast<std::uint8_t>(sample.fine_tune_cents));
     writer.be16(0xd8, static_cast<std::uint16_t>(left.audio.output_sample_rate));
-    writer.be16(0xde, pitch_word(sample.root_key, sample.fine_tune_cents, left.audio.output_sample_rate));
+    writer.be16(0xde,
+                detail::sample_pitch_word(sample.root_key, sample.fine_tune_cents, left.audio.output_sample_rate));
     if (right != nullptr) {
         result[0xd7] = static_cast<std::byte>(sample.root_key);
         result[0xdd] = static_cast<std::byte>(static_cast<std::uint8_t>(sample.fine_tune_cents));
         writer.be16(0xda, static_cast<std::uint16_t>(right->audio.output_sample_rate));
-        writer.be16(0xe0, pitch_word(sample.root_key, sample.fine_tune_cents, right->audio.output_sample_rate));
+        writer.be16(
+            0xe0, detail::sample_pitch_word(sample.root_key, sample.fine_tune_cents, right->audio.output_sample_rate));
     }
     result[0xe2] = static_cast<std::byte>(sample.key_high);
     result[0xe3] = static_cast<std::byte>(sample.key_low);
@@ -276,38 +283,39 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         writer.be32(0xfc, right_loop->start);
         writer.be32(0x104, right_loop->length);
     }
-    const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{{{0x109, 0},
-                                                                         {0x10a, 127},
-                                                                         {0x10b, 4},
-                                                                         {0x10c, 0},
-                                                                         {0x10d, 127},
-                                                                         {0x10e, 0},
-                                                                         {0x10f, 0},
-                                                                         {0x110, 0},
-                                                                         {0x111, 0},
-                                                                         {0x112, 0},
-                                                                         {0x113, 0},
-                                                                         {0x114, 63},
-                                                                         {0x115, 0},
-                                                                         {0x116, sample.level},
-                                                                         {0x117, 0},
-                                                                         {0x118, 0},
-                                                                         {0x119, 0},
-                                                                         {0x11a, sample.velocity_high},
-                                                                         {0x11b, sample.velocity_low},
-                                                                         {0x11c, 0},
-                                                                         {0x11d, 127},
-                                                                         {0x11e, 127},
-                                                                         {0x11f, 127},
-                                                                         {0x120, 0},
-                                                                         {0x121, 0},
-                                                                         {0x122, 26},
-                                                                         {0x123, 64},
-                                                                         {0x124, 10},
-                                                                         {0x125, 0},
-                                                                         {0x126, 127},
-                                                                         {0x127, 127},
-                                                                         {0x128, 127}}};
+    const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
+        {{0x109, 0},
+         {0x10a, 127},
+         {0x10b, 4},
+         {0x10c, 0},
+         {0x10d, 127},
+         {0x10e, 0},
+         {0x10f, 0},
+         {0x110, 0},
+         {0x111, 0},
+         {0x112, static_cast<std::uint8_t>(sample.expand_detune)},
+         {0x113, static_cast<std::uint8_t>(sample.expand_dephase)},
+         {0x114, static_cast<std::uint8_t>(sample.expand_width)},
+         {0x115, 0},
+         {0x116, sample.level},
+         {0x117, 0},
+         {0x118, 0},
+         {0x119, 0},
+         {0x11a, sample.velocity_high},
+         {0x11b, sample.velocity_low},
+         {0x11c, 0},
+         {0x11d, 127},
+         {0x11e, 127},
+         {0x11f, 127},
+         {0x120, 0},
+         {0x121, 0},
+         {0x122, 26},
+         {0x123, 64},
+         {0x124, 10},
+         {0x125, 0},
+         {0x126, 127},
+         {0x127, 127},
+         {0x128, 127}}};
     for (const auto &[offset, value] : defaults)
         result[offset] = static_cast<std::byte>(value);
     result[0x131] = std::byte{127};
@@ -335,6 +343,102 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     if (auto written = writer.finish(); !written)
         return std::unexpected{written.error()};
     return result;
+}
+
+std::array<std::byte, 0xe0> default_sbac_sample_parameters() {
+    std::array<std::byte, 0xe0> result{};
+    const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
+        result[offset] = static_cast<std::byte>(value >> 8U);
+        result[offset + 1U] = static_cast<std::byte>(value);
+    };
+    constexpr std::array<std::byte, 16> controls{std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20},
+                                                 std::byte{0x47}, std::byte{0x05}, std::byte{0x01}, std::byte{0x20},
+                                                 std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
+                                                 std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
+    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
+                                                std::byte{0x20}};
+    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
+    std::ranges::copy(controls, result.begin());
+    result[0x2c] = std::byte{2};
+    result[0x2e] = std::byte{60};
+    result[0x2f] = std::byte{60};
+    put_be16(0x30, 44'100U);
+    put_be16(0x32, 44'100U);
+    put_be16(0x36, detail::sample_pitch_word(60U, 0, 44'100U));
+    put_be16(0x38, detail::sample_pitch_word(60U, 0, 44'100U));
+    result[0x3a] = std::byte{127};
+    result[0x3c] = std::byte{0x30};
+    put_be16(0x3e, 9000U);
+    constexpr std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
+        {{0x61, 0}, {0x62, 127}, {0x63, 4},  {0x64, 0},  {0x65, 127}, {0x66, 0},   {0x67, 0},   {0x68, 0},
+         {0x69, 0}, {0x6a, 0},   {0x6b, 0},  {0x6c, 63}, {0x6d, 0},   {0x6e, 100}, {0x6f, 0},   {0x70, 0},
+         {0x71, 0}, {0x72, 127}, {0x73, 0},  {0x74, 0},  {0x75, 127}, {0x76, 127}, {0x77, 127}, {0x78, 0},
+         {0x79, 0}, {0x7a, 26},  {0x7b, 64}, {0x7c, 10}, {0x7d, 0},   {0x7e, 127}, {0x7f, 127}, {0x80, 127}}};
+    for (const auto &[offset, value] : defaults)
+        result[offset] = static_cast<std::byte>(value);
+    result[0x89] = std::byte{127};
+    result[0x8a] = std::byte{127};
+    result[0x8b] = std::byte{127};
+    result[0x93] = std::byte{12};
+    result[0x94] = std::byte{127};
+    result[0x95] = std::byte{127};
+    result[0x96] = std::byte{126};
+    result[0x97] = std::byte{8};
+    result[0x98] = std::byte{127};
+    result[0x99] = std::byte{127};
+    result[0x9e] = std::byte{1};
+    result[0x9f] = std::byte{39};
+    result[0xa1] = std::byte{1};
+    std::ranges::copy(playback, result.begin() + 0xaa);
+    std::ranges::copy(tone, result.begin() + 0xb0);
+    std::ranges::copy(controls, result.begin() + 0xbc);
+    result[0xd6] = std::byte{1};
+    result[0xd7] = std::byte{127};
+    result[0xd9] = std::byte{127};
+    result[0xdb] = std::byte{90};
+    result[0xdc] = std::byte{90};
+    return result;
+}
+
+Result<void> apply_sbac_parameter_overrides(std::array<std::byte, 0xe0> &parameters,
+                                            const SampleBankParameterOverrides &overrides) {
+    const auto root_key = overrides.root_key.value_or(60U);
+    const auto key_low = overrides.key_low.value_or(0U);
+    const auto key_high = overrides.key_high.value_or(127U);
+    const auto fine_tune = overrides.fine_tune_cents.value_or(0);
+    const auto velocity_low = overrides.velocity_low.value_or(0U);
+    const auto velocity_high = overrides.velocity_high.value_or(127U);
+    const auto effective_low = key_low == sampler_original_key_low_limit ? root_key : key_low;
+    const auto effective_high = key_high == sampler_original_key_high_limit ? root_key : key_high;
+    if (root_key > 127U || (key_low > 127U && key_low != sampler_original_key_low_limit) ||
+        key_high > sampler_original_key_high_limit || effective_high < effective_low ||
+        overrides.level.value_or(100U) > 127U || fine_tune < -63 || fine_tune > 63 || velocity_low > 127U ||
+        velocity_high > 127U || velocity_high < velocity_low || overrides.expand_detune.value_or(0) < -7 ||
+        overrides.expand_detune.value_or(0) > 7 || overrides.expand_dephase.value_or(0) < -63 ||
+        overrides.expand_dephase.value_or(0) > 63 || overrides.expand_width.value_or(63) < -63 ||
+        overrides.expand_width.value_or(63) > 63) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Sample Bank parameter overrides are outside their supported ranges")};
+    }
+    const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
+        parameters[offset] = static_cast<std::byte>(value >> 8U);
+        parameters[offset + 1U] = static_cast<std::byte>(value);
+    };
+    parameters[0x2e] = static_cast<std::byte>(root_key);
+    parameters[0x2f] = static_cast<std::byte>(root_key);
+    parameters[0x34] = static_cast<std::byte>(static_cast<std::uint8_t>(fine_tune));
+    parameters[0x35] = static_cast<std::byte>(static_cast<std::uint8_t>(fine_tune));
+    put_be16(0x36, detail::sample_pitch_word(root_key, fine_tune, 44'100U));
+    put_be16(0x38, detail::sample_pitch_word(root_key, fine_tune, 44'100U));
+    parameters[0x3a] = static_cast<std::byte>(key_high);
+    parameters[0x3b] = static_cast<std::byte>(key_low);
+    parameters[0x6a] = static_cast<std::byte>(static_cast<std::uint8_t>(overrides.expand_detune.value_or(0)));
+    parameters[0x6b] = static_cast<std::byte>(static_cast<std::uint8_t>(overrides.expand_dephase.value_or(0)));
+    parameters[0x6c] = static_cast<std::byte>(static_cast<std::uint8_t>(overrides.expand_width.value_or(63)));
+    parameters[0x6e] = static_cast<std::byte>(overrides.level.value_or(100U));
+    parameters[0x72] = static_cast<std::byte>(velocity_high);
+    parameters[0x73] = static_cast<std::byte>(velocity_low);
+    return {};
 }
 
 Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
@@ -366,6 +470,13 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
     if (!name)
         return std::unexpected{name.error()};
     std::ranges::copy(*name, result.begin() + 0x32);
+    auto parameters = default_sbac_sample_parameters();
+    if (sample_bank.parameter_overrides) {
+        if (auto applied = apply_sbac_parameter_overrides(parameters, *sample_bank.parameter_overrides); !applied)
+            return std::unexpected{applied.error()};
+    }
+    std::copy_n(parameters.begin(), 0xbcU, result.begin() + 0x78U);
+    std::copy_n(parameters.begin() + 0xbcU, 0x24U, result.end() - 0x24U);
     result[0x144] = static_cast<std::byte>(sample_bank.member_samples.size());
     for (std::size_t index = 0; index < sample_bank.member_samples.size(); ++index) {
         const auto found = samples.find(sample_bank.member_samples[index]);
@@ -489,6 +600,32 @@ Result<std::vector<std::byte>> detail::prepare_sbnk_payload(const SampleSpec &sp
 Result<std::vector<std::byte>> detail::prepare_sbac_payload(const SampleBankSpec &sample_bank,
                                                             const std::map<std::string, SampleSpec> &samples) {
     return serialize_sbac(sample_bank, samples);
+}
+
+SampleSpec detail::apply_sample_bank_parameter_overrides(const SampleSpec &sample,
+                                                         const SampleBankParameterOverrides &overrides) {
+    auto result = sample;
+    if (overrides.root_key)
+        result.root_key = *overrides.root_key;
+    if (overrides.key_low)
+        result.key_low = *overrides.key_low;
+    if (overrides.key_high)
+        result.key_high = *overrides.key_high;
+    if (overrides.level)
+        result.level = *overrides.level;
+    if (overrides.fine_tune_cents)
+        result.fine_tune_cents = *overrides.fine_tune_cents;
+    if (overrides.velocity_low)
+        result.velocity_low = *overrides.velocity_low;
+    if (overrides.velocity_high)
+        result.velocity_high = *overrides.velocity_high;
+    if (overrides.expand_detune)
+        result.expand_detune = *overrides.expand_detune;
+    if (overrides.expand_dephase)
+        result.expand_dephase = *overrides.expand_dephase;
+    if (overrides.expand_width)
+        result.expand_width = *overrides.expand_width;
+    return result;
 }
 
 Result<std::vector<std::byte>> detail::prepare_prog_payload(const ProgramSpec &program) {

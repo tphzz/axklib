@@ -188,10 +188,14 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                                       "SBAC/PROG writer profile supports mono Samples only")};
                 }
                 if (sample_bank->second->member_samples.size() == 1U) {
-                    const auto *member = sample_specs.at(sample_bank->second->member_samples[0]);
-                    if (member->waveform_id != direct->second->waveform_id ||
-                        member->root_key != direct->second->root_key || member->key_low != direct->second->key_low ||
-                        member->key_high != direct->second->key_high || member->level != direct->second->level) {
+                    auto member = *sample_specs.at(sample_bank->second->member_samples[0]);
+                    if (sample_bank->second->parameter_overrides) {
+                        member = detail::apply_sample_bank_parameter_overrides(
+                            member, *sample_bank->second->parameter_overrides);
+                    }
+                    if (member.waveform_id != direct->second->waveform_id ||
+                        member.root_key != direct->second->root_key || member.key_low != direct->second->key_low ||
+                        member.key_high != direct->second->key_high || member.level != direct->second->level) {
                         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                           "one-member Sample Bank and direct Sample control "
                                                           "parameters must match")};
@@ -242,9 +246,16 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), reference_value});
         }
         std::map<std::string, std::pair<std::string, std::string>> generated_members;
-        std::set<std::string> banked_samples;
+        std::map<std::string, const SampleBankParameterOverrides *> bank_parameter_overrides;
         for (const auto &sample_bank : volume.sample_banks) {
-            banked_samples.insert(sample_bank.member_samples.begin(), sample_bank.member_samples.end());
+            for (const auto &member : sample_bank.member_samples) {
+                if (!bank_parameter_overrides
+                         .emplace(member, sample_bank.parameter_overrides ? &*sample_bank.parameter_overrides : nullptr)
+                         .second) {
+                    return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                                      "Sample cannot belong to multiple Sample Banks")};
+                }
+            }
         }
         std::map<std::string, std::vector<std::uint8_t>> linked_programs;
         for (const auto &program : volume.programs) {
@@ -332,14 +343,19 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                     right->second.spec.name, right->second.reference_value, right->second.audio.output_sample_rate,
                     static_cast<std::uint32_t>(right->second.audio.output_frames)});
             }
-            auto payload = detail::prepare_sbnk_payload(
-                sample, left_member, right_member, banked_samples.contains(sample.name), linked_programs[sample.name]);
+            auto effective_sample = sample;
+            const auto bank = bank_parameter_overrides.find(sample.name);
+            if (bank != bank_parameter_overrides.end() && bank->second != nullptr)
+                effective_sample = detail::apply_sample_bank_parameter_overrides(sample, *bank->second);
+            auto payload =
+                detail::prepare_sbnk_payload(effective_sample, left_member, right_member,
+                                             bank != bank_parameter_overrides.end(), linked_programs[sample.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
             sbnk_entries.emplace_back(sample.name, id, 16U);
             objects.push_back({id, std::move(*payload), RecordKind::object});
-            samples.emplace(sample.name, sample);
+            samples.emplace(sample.name, std::move(effective_sample));
         }
         for (const auto &sample_bank : volume.sample_banks) {
             auto payload = detail::prepare_sbac_payload(sample_bank, samples);
