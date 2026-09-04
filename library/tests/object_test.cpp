@@ -208,7 +208,8 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     axk::ByteWriter writer{*payload};
     ASSERT_TRUE(writer.write_be32(0x1cU, 0x158U));
     (*payload)[0x164U] = std::byte{1};
-    (*payload)[0x0d1U] |= std::byte{0x02};
+    (*payload)[0x0d1U] |= std::byte{0x03};
+    (*payload)[0x182U] = std::byte{1};
 
     const auto decoded = axk::decode_object(*payload);
 
@@ -223,6 +224,7 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     EXPECT_EQ(sample.control_records[0].function, 4U);
     EXPECT_EQ(sample.control_records[2].range, -32);
     EXPECT_TRUE(sample.mono_mode);
+    EXPECT_TRUE(sample.uses_program_portamento);
     EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
 }
 
@@ -274,7 +276,7 @@ TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
     EXPECT_EQ(sample_bank.slots[0].transient_member_pointer, 21249456U);
     EXPECT_EQ(sample_bank.pending_parameter_propagation_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
     EXPECT_TRUE(sample_bank.pending_parameter_numbers.empty());
-    EXPECT_TRUE(sample_bank.pending_numbers_outside_table.empty());
+    EXPECT_TRUE(sample_bank.reserved_pending_parameter_numbers.empty());
     EXPECT_EQ(sample_bank.effective_member_count, 1U);
     EXPECT_TRUE(sample_bank.slots[0].active);
     EXPECT_TRUE(std::ranges::equal(std::span{*payload}.subspan(0x78U, 0xbcU),
@@ -311,7 +313,7 @@ TEST(CurrentSbac, ReconstructsLegacyParameterTailWithoutConsumingMemberRows) {
     EXPECT_EQ(sample_bank.pending_parameter_propagation_words,
               (std::array<std::uint32_t, 3>{0x80000005U, 0x00000003U, 0x03000001U}));
     EXPECT_EQ(sample_bank.pending_parameter_numbers, (std::vector<std::uint8_t>{0U, 2U, 31U, 32U, 33U, 64U, 88U}));
-    EXPECT_EQ(sample_bank.pending_numbers_outside_table, (std::vector<std::uint8_t>{89U}));
+    EXPECT_EQ(sample_bank.reserved_pending_parameter_numbers, (std::vector<std::uint8_t>{89U}));
     EXPECT_EQ(sample_bank.effective_member_count, 2U);
     EXPECT_TRUE(std::ranges::equal(std::span{payload}.subspan(0x78U, 0xbcU),
                                    std::span{sample_bank.raw_sample_parameter_block}.first(0xbcU)));

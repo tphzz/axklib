@@ -254,6 +254,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     }
     result.sample_flags = *sample_flags;
     result.mapout_flags = *mapout_flags;
+    result.uses_program_portamento = (*mapout_flags & 0x01U) != 0U;
     result.mono_mode = (*mapout_flags & 0x02U) != 0U;
     result.key_range_high = *key_high;
     result.key_range_low = *key_low;
@@ -367,7 +368,8 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
                 continue;
             }
             const auto number = static_cast<std::uint8_t>(word_index * 32U + bit);
-            (number <= 88U ? result.pending_parameter_numbers : result.pending_numbers_outside_table).push_back(number);
+            (number <= 88U ? result.pending_parameter_numbers : result.reserved_pending_parameter_numbers)
+                .push_back(number);
         }
     }
     const auto member_count = reader.u8(member_count_offset);

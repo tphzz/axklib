@@ -255,7 +255,7 @@ disk bytes as follows:
 | Offset | Size | Classification |
 | --- | ---: | --- |
 | `0x030` | 1 | object class (`0x10` for SBNK, `0x11` for SBAC) |
-| `0x031` | 1 | opaque-preserved object state |
+| `0x031` | 1 | packed lifecycle/dirty state; preserve the raw byte |
 | `0x032..0x041` | 16 | object name |
 | `0x042` | 1 | opaque-preserved common state transferred by the load/save transforms |
 | `0x043..0x049` | 7 | untransferred saver residue; canonical writers emit zero |
@@ -434,9 +434,11 @@ physical Wave Data object. They define the Sample's playable window and can
 select only one segment of a larger shared `SMPL` payload. Loop Divide media is
 a common example: several Samples have different start frames while referencing
 the same Wave Data. The full left/right wave-start words are decoded for this
-read path but remain read-only write inputs: template-backed serialization
-preserves them, while fresh generation uses the proven zero-start profile and
-named loop-mode policies write only confirmed low-half cache lanes. Sample
+read path. Real images use nonzero upper halves, including shared stereo starts,
+so the words must not be reduced to their overlapping low-16 aliases. They
+remain read-only write inputs: template-backed serialization preserves them,
+while fresh generation uses the proven zero-start profile and named loop-mode
+policies write only confirmed low-half cache lanes. Sample
 preview and audition therefore:
 
 1. resolve each active member to one confirmed `SMPL`;
@@ -474,19 +476,26 @@ while preserving the other lanes.
 
 `mapout_flags_0x0d1` is a packed byte, not one wholly semantic field. Bits
 `7..6` are EQ Type, bit `4` is Fixed Pitch, bit `2` is Key Crossfade, and bit
-`1` is Poly/Mono (`0=Poly`, `1=Mono`). All four visible lanes are `Confirmed`
-from sampler behavior or the exact object-load and parameter-update path. Bits `5`, `3`, and `0` remain opaque and
-must be preserved; bit `0` is nonzero in some real objects despite being
-manual-reserved. Device updates to every visible field in this byte mask around
-all three opaque lanes, and template-based serialization has regression
-coverage for retaining nonzero opaque lanes.
+`1` is Poly/Mono (`0=Poly`, `1=Mono`). Bit `0` is a derived cache: it is set
+exactly when Sample Portamento Type is `Pgm` (raw `1`) and clear for the other
+types. The writer refreshes that bit whenever it writes Portamento Type while
+preserving the other packed lanes. Bit `3` selects values in an internal
+synthesis cache but has no independent user-facing parameter, so it remains
+preserve-only. Bit `5` has no identified active consumer, is clear throughout
+the maintained HDA corpus, and remains reserved/preserve-only. Fresh objects
+write zero for bits `5` and `3`; template-based edits retain them.
 
 The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
 reserved. With the current `0x0a8` Sample Parameter base, those reserved bytes
 map to `SBNK+0x152..0x15b`. Hardware-tested generated direct single-member
 `SBNK` objects require compatible values in this reserved range: `0x152..0x156`
 gates audible playback, and `0x158..0x15b` restores the normal unfiltered tone
-for this writer scope.
+for this writer scope. They have no independent parameter selector; fresh
+writers use the tested compatibility profile and template edits preserve them.
+The other manual-reserved lanes remain raw-preserved. In particular,
+`0x13f..0x140` and `0x142` are transported only inside the four-byte group that
+contains AEG Sustain at `0x141`, and `0x14d..0x150` are copied into an internal
+synthesis cache without becoming user-facing parameters.
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -626,6 +635,10 @@ number, it copies the
 bank's corresponding Sample Parameter value into each resolved member Sample,
 clears the consumed bit, and marks the Sample Bank dirty. These words are
 therefore pending operation state, not durable per-bank value-enable settings.
+Only P2 `0..88` are actionable. The operation stops after `88`, and there are no
+parameter-table entries for `89..95`; those seven positions are reserved bitmap
+capacity and are reported separately when nonzero.
+Structured decoders expose them as `reserved_pending_parameter_numbers`.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
 

@@ -150,6 +150,7 @@ struct CurrentSbnk {
     std::vector<std::uint8_t> linked_program_numbers;
     std::uint8_t sample_flags{};
     std::uint8_t mapout_flags{};
+    bool uses_program_portamento{};
     bool mono_mode{};
     std::uint8_t key_range_high{};
     std::uint8_t key_range_low{};
@@ -188,7 +189,7 @@ struct CurrentSbac {
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};
     std::array<std::uint32_t, 3> pending_parameter_propagation_words{};
     std::vector<std::uint8_t> pending_parameter_numbers;
-    std::vector<std::uint8_t> pending_numbers_outside_table;
+    std::vector<std::uint8_t> reserved_pending_parameter_numbers;
     std::uint8_t stored_member_count{};
     std::size_t effective_member_count{};
     std::size_t maximum_member_count{};
