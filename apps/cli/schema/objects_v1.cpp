@@ -32,6 +32,23 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
             {"loop_length_frames", member.loop_length_frames}};
 }
 
+OrderedJson common_json(const CurrentObjectCommonRecord &common) {
+    return {{"object_class", common.object_class.value},
+            {"state", common.state.value},
+            {"name", common.name.value},
+            {"state_0x42", common.state_0x42.value},
+            {"saver_residue_0x43_0x49_hex", hex(common.saver_residue_0x43_0x49.value)},
+            {"raw_common_state_0x4a_0x53_hex", hex(common.raw_common_state_0x4a_0x53.value)},
+            {"embedded_container_name", common.embedded_container_name.value},
+            {"raw_common_state_0x64_0x67_hex", hex(common.raw_common_state_0x64_0x67.value)},
+            {"transient_name_hash_alias", common.transient_name_hash_alias.value},
+            {"body_prefix_alias_0x6c_0x6e_hex", hex(common.body_prefix_alias.value)},
+            {"saver_residue_0x6f_0x73_hex", hex(common.saver_residue_0x6f_0x73.value)},
+            {"transient_name_hash_next_handle", common.transient_name_hash_next_handle.value},
+            {"transient_name_hash_alias_matches", common.transient_name_hash_alias_matches},
+            {"body_prefix_alias_matches", common.body_prefix_alias_matches}};
+}
+
 OrderedJson decoded_json(const DecodedObject &object) {
     if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.payload)) {
         return {{"kind", "SMPL"},
@@ -70,7 +87,7 @@ OrderedJson decoded_json(const DecodedObject &object) {
             controls.push_back({control.device, control.function, control.type, control.range});
         return {{"kind", "SBNK"},
                 {"sample_name", sample->sample_name},
-                {"instrument_name", sample->instrument_name},
+                {"common", common_json(sample->common)},
                 {"right_slot_present", sample->right_slot_present},
                 {"right_link_role", sample->right_link_role},
                 {"mono_mode", sample->mono_mode},
@@ -93,15 +110,25 @@ OrderedJson decoded_json(const DecodedObject &object) {
     if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.payload)) {
         auto slots = OrderedJson::array();
         for (const auto &slot : sample_bank->slots)
-            slots.push_back({{"name", slot.name}, {"raw_handle", slot.raw_handle}, {"offset", slot.offset}});
+            slots.push_back({{"name", slot.name},
+                             {"active", slot.active},
+                             {"transient_member_pointer", slot.transient_member_pointer},
+                             {"offset", slot.offset}});
         return {{"kind", "SBAC"},
+                {"common", common_json(sample_bank->common)},
+                {"storage_layout", sample_bank->storage_layout == SbacStorageLayout::current_split_parameter_tail
+                                       ? "current-split-parameter-tail"
+                                       : "legacy-without-parameter-tail"},
+                {"parameter_tail_offset", sample_bank->parameter_tail_offset
+                                              ? OrderedJson(*sample_bank->parameter_tail_offset)
+                                              : OrderedJson(nullptr)},
                 {"raw_sample_parameter_block_hex", hex(sample_bank->raw_sample_parameter_block)},
-                {"value_enable_words", sample_bank->value_enable_words},
-                {"enabled_parameter_numbers", sample_bank->enabled_parameter_numbers},
-                {"enabled_numbers_outside_table", sample_bank->enabled_numbers_outside_table},
-                {"bulk_assigned_sample_count", sample_bank->bulk_assigned_sample_count},
-                {"active_slot_count", sample_bank->active_slot_count},
-                {"maximum_slot_count", sample_bank->maximum_slot_count},
+                {"pending_parameter_propagation_words", sample_bank->pending_parameter_propagation_words},
+                {"pending_parameter_numbers", sample_bank->pending_parameter_numbers},
+                {"pending_numbers_outside_table", sample_bank->pending_numbers_outside_table},
+                {"stored_member_count", sample_bank->stored_member_count},
+                {"effective_member_count", sample_bank->effective_member_count},
+                {"maximum_member_count", sample_bank->maximum_member_count},
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<CurrentProg>(&object.payload)) {

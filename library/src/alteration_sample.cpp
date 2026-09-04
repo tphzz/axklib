@@ -519,12 +519,12 @@ Result<OperationReport> rename_sbnk(TransactionState &state, OperationContext co
         auto payload = sample_bank_row.payload;
         bool changed{};
         for (const auto &slot : sample_bank->slots) {
+            if (!slot.active)
+                continue;
             if (slot.name == operation.new_sample_name)
                 return std::unexpected{transaction_error("SBAC already references SBNK rename destination")};
             if (slot.name != operation.sample_name)
                 continue;
-            if (slot.raw_handle != 0U)
-                return std::unexpected{transaction_error("SBAC member has unsupported nonzero handle")};
             put_padded_name(payload, slot.offset, operation.new_sample_name);
             changed = true;
         }

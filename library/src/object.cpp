@@ -42,6 +42,55 @@ FieldValue<T> field(T value, std::uint32_t offset, std::uint32_t size, Verificat
     return {std::move(value), {offset, size, verification, std::move(basis)}};
 }
 
+template <std::size_t Size>
+FieldValue<std::array<std::byte, Size>> byte_field(std::span<const std::byte> payload, std::size_t offset,
+                                                   Verification verification, std::string basis) {
+    std::array<std::byte, Size> value{};
+    std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(offset), Size, value.begin());
+    return field(value, static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(Size), verification,
+                 std::move(basis));
+}
+
+Result<CurrentObjectCommonRecord> decode_current_common_record(std::span<const std::byte> payload) {
+    if (payload.size() < 0x7bU) {
+        return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
+                                          "current object common record requires at least 123 bytes")};
+    }
+    const ByteReader reader{payload};
+    const auto object_class = reader.u8(0x30U);
+    const auto state = reader.u8(0x31U);
+    const auto name = reader.printable_ascii_field(0x32U, 16U);
+    const auto state_0x42 = reader.u8(0x42U);
+    const auto embedded_container_name = reader.printable_ascii_field(0x54U, 16U);
+    const auto transient_name_hash_alias = reader.be32(0x68U);
+    const auto transient_name_hash_next_handle = reader.be32(0x74U);
+    if (!object_class || !state || !name || !state_0x42 || !embedded_container_name || !transient_name_hash_alias ||
+        !transient_name_hash_next_handle) {
+        return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
+                                          "current object common record is truncated")};
+    }
+
+    CurrentObjectCommonRecord result{
+        field(*object_class, 0x30U, 1U, Verification::verified, "verified current-object class dispatch"),
+        field(*state, 0x31U, 1U, Verification::unknown, "opaque-preserved current-object state"),
+        field(*name, 0x32U, 16U, Verification::verified, "verified current-object Common name"),
+        field(*state_0x42, 0x42U, 1U, Verification::unknown,
+              "opaque-preserved state transferred by the Common-record load/save transforms"),
+        byte_field<7>(payload, 0x43U, Verification::verified, "serializer leaves this range unwritten"),
+        byte_field<10>(payload, 0x4aU, Verification::unknown, "opaque-preserved current-object Common state"),
+        field(*embedded_container_name, 0x54U, 16U, Verification::corroborated,
+              "current-object Common reserved text and corpus source/container correlation"),
+        byte_field<4>(payload, 0x64U, Verification::unknown, "opaque-preserved current-object Common state"),
+        field(*transient_name_hash_alias, 0x68U, 4U, Verification::verified, "Common-record serializer alias"),
+        byte_field<3>(payload, 0x6cU, Verification::verified, "body-prefix serializer alias"),
+        byte_field<5>(payload, 0x6fU, Verification::verified, "serializer leaves this range unwritten"),
+        field(*transient_name_hash_next_handle, 0x74U, 4U, Verification::verified, "runtime name-hash collision chain"),
+    };
+    result.transient_name_hash_alias_matches = *transient_name_hash_alias == *transient_name_hash_next_handle;
+    result.body_prefix_alias_matches = std::ranges::equal(result.body_prefix_alias.value, payload.subspan(0x78U, 3U));
+    return result;
+}
+
 Result<CurrentSmpl> decode_smpl(std::span<const std::byte> payload, const ObjectHeader &header) {
     if (payload.size() < 0xacU) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
@@ -149,19 +198,21 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
                                           "current SBNK member contract requires at least 264 bytes")};
     }
     const ByteReader reader{payload};
+    const auto common = decode_current_common_record(payload);
     const auto sample_name = reader.printable_ascii_field(0x32, 16);
-    const auto instrument_name = reader.printable_ascii_field(0x50, 24);
     const auto left = decode_sbnk_member(reader, false);
     const auto inactive_right = decode_sbnk_member(reader, true);
-    if (!sample_name || !instrument_name || !left || !inactive_right) {
+    if (!common || !sample_name || !left || !inactive_right) {
+        if (!common)
+            return std::unexpected{common.error()};
         return std::unexpected{!left ? left.error()
                                      : (!inactive_right ? inactive_right.error()
                                                         : make_error(ErrorCode::object_malformed, ErrorCategory::object,
                                                                      "current SBNK names are malformed"))};
     }
     CurrentSbnk result;
+    result.common = *common;
     result.sample_name = *sample_name;
-    result.instrument_name = *instrument_name;
     result.left = *left;
     result.inactive_right = *inactive_right;
     result.right_slot_present = !inactive_right->wave_data_name.empty();
@@ -273,48 +324,73 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     return result;
 }
 
-Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload) {
+Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const ObjectHeader &header) {
+    constexpr std::size_t parameter_prefix_offset = 0x78U;
+    constexpr std::size_t parameter_prefix_size = 0xbcU;
+    constexpr std::size_t parameter_tail_size = 0x24U;
+    constexpr std::size_t pending_parameter_bitmap_offset = 0x134U;
+    constexpr std::size_t member_count_offset = 0x144U;
+    constexpr std::size_t first_member_offset = 0x14cU;
+    constexpr std::size_t member_size = 0x14U;
     if (payload.size() <= 0x144U) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
-                                          "current SBAC payload is too short for its slot count")};
+                                          "current SBAC payload is too short for its member count")};
     }
     const ByteReader reader{payload};
     CurrentSbac result;
-    std::copy_n(payload.begin() + 0x40, result.raw_sample_parameter_block.size(),
+    const auto common = decode_current_common_record(payload);
+    if (!common)
+        return std::unexpected{common.error()};
+    result.common = *common;
+    std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_offset), parameter_prefix_size,
                 result.raw_sample_parameter_block.begin());
-    for (std::size_t word_index = 0; word_index < result.value_enable_words.size(); ++word_index) {
-        const auto word = reader.be32(0x120U + word_index * 4U);
+    auto member_region_end = payload.size();
+    if (header.unknown_0x14 >= 4U) {
+        if (payload.size() < first_member_offset + parameter_tail_size) {
+            return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
+                                              "current SBAC payload is too short for its split parameter tail")};
+        }
+        result.storage_layout = SbacStorageLayout::current_split_parameter_tail;
+        result.parameter_tail_offset = payload.size() - parameter_tail_size;
+        member_region_end = *result.parameter_tail_offset;
+        std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(*result.parameter_tail_offset), parameter_tail_size,
+                    result.raw_sample_parameter_block.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_size));
+    }
+    for (std::size_t word_index = 0; word_index < result.pending_parameter_propagation_words.size(); ++word_index) {
+        const auto word = reader.be32(pending_parameter_bitmap_offset + word_index * 4U);
         if (!word) {
             return std::unexpected{word.error()};
         }
-        result.value_enable_words[word_index] = *word;
+        result.pending_parameter_propagation_words[word_index] = *word;
         for (std::uint8_t bit = 0; bit < 32U; ++bit) {
             if ((*word & (std::uint32_t{1} << bit)) == 0) {
                 continue;
             }
             const auto number = static_cast<std::uint8_t>(word_index * 32U + bit);
-            (number <= 88U ? result.enabled_parameter_numbers : result.enabled_numbers_outside_table).push_back(number);
+            (number <= 88U ? result.pending_parameter_numbers : result.pending_numbers_outside_table).push_back(number);
         }
     }
-    const auto bulk_count = reader.u8(0x130);
-    const auto slot_count = reader.u8(0x144);
-    if (!bulk_count || !slot_count) {
+    const auto member_count = reader.u8(member_count_offset);
+    if (!member_count) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
-                                          "current SBAC count fields are truncated")};
+                                          "current SBAC member count is truncated")};
     }
-    result.bulk_assigned_sample_count = *bulk_count;
-    result.active_slot_count = *slot_count;
-    result.maximum_slot_count = payload.size() < 0x14cU ? 0U : (payload.size() - 0x14cU) / 0x14U;
-    const auto decoded_slots = std::min<std::size_t>(*slot_count, result.maximum_slot_count);
+    result.stored_member_count = *member_count;
+    result.maximum_member_count =
+        member_region_end < first_member_offset ? 0U : (member_region_end - first_member_offset) / member_size;
+    const auto decoded_slots = std::min<std::size_t>(*member_count, result.maximum_member_count);
     for (std::size_t index = 0; index < decoded_slots; ++index) {
-        const auto offset = 0x14cU + index * 0x14U;
+        const auto offset = first_member_offset + index * member_size;
         const auto name = reader.printable_ascii_field(offset, 16);
         const auto handle = reader.be32(offset + 16U);
         if (!name || !handle) {
             return std::unexpected{
                 make_error(ErrorCode::container_truncated, ErrorCategory::object, "current SBAC slot is truncated")};
         }
-        result.slots.push_back({*name, *handle, static_cast<std::uint32_t>(offset)});
+        const auto active = payload[offset] != std::byte{};
+        result.slots.push_back({*name, active, *handle, static_cast<std::uint32_t>(offset)});
+        if (active)
+            ++result.effective_member_count;
     }
     return result;
 }
@@ -475,7 +551,7 @@ Result<DecodedObject> decode_object(std::span<const std::byte> payload) {
         return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::sbac) {
-        const auto decoded = decode_sbac(payload);
+        const auto decoded = decode_sbac(payload, *header);
         if (!decoded)
             return std::unexpected{decoded.error()};
         return DecodedObject{*header, ObjectFormat::current, *decoded};

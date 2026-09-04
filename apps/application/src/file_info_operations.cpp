@@ -67,7 +67,7 @@ axk::ReportRow inventory_row(const LoadedSource &source, const axk::ObjectSnapsh
         decoded_fields = "sample_topology;left_wave_data_name;left_cached_wave_data_reference_value";
     } else if (item.object.header.type == axk::ObjectType::sbac) {
         decoded_kind = "DecodedSampleBank";
-        decoded_fields = "active_slot_count;max_slot_count_from_payload";
+        decoded_fields = "stored_member_count;maximum_member_count";
     } else if (item.object.header.type == axk::ObjectType::prog) {
         decoded_kind = "DecodedProgram";
         decoded_fields = "control_record_count";
@@ -308,7 +308,8 @@ Json info_node_json(const LoadedSource &source, const axk::ContentNode &node, st
     auto notes = node.notes;
     if (parent_type == "sample_bank" && node.object_type == "SBNK" && node.quality == axk::RelationshipQuality::known) {
         notes = "Input consistency: counted SBAC slot name uniquely matches a same-scope SBNK header name. The "
-                "companion 32-bit slot word is preserved as raw/opaque.";
+                "companion 32-bit slot word is preserved as transient runtime-pointer residue and is not used as "
+                "resolver input.";
     }
     return {{"nodeId", std::move(node_id)},
             {"nodeType", node.node_type},

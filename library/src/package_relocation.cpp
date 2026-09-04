@@ -513,7 +513,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             if (!name)
                 return std::unexpected{name.error()};
             if (edge.ordinal >= sample_bank->slots.size() || sample_bank->slots[edge.ordinal].name != *name ||
-                sample_bank->slots[edge.ordinal].raw_handle != 0U) {
+                sample_bank->slots[edge.ordinal].transient_member_pointer != 0U) {
                 return std::unexpected{relocation_error(node, "relocated SBAC slot did not decode "
                                                               "to the planned target")};
             }

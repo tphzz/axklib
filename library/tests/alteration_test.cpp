@@ -15,6 +15,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/package.hpp"
 #include "axklib/relationship.hpp"
@@ -1726,7 +1727,8 @@ TEST(Alteration, RenamesHardwareSizedSampleBankAndNormalizesProgramHandle) {
     ASSERT_EQ(after_decoded->slots.size(), 5U);
     for (std::size_t index = 0U; index < after_decoded->slots.size(); ++index) {
         EXPECT_EQ(after_decoded->slots[index].name, before_decoded->slots[index].name);
-        EXPECT_EQ(after_decoded->slots[index].raw_handle, before_decoded->slots[index].raw_handle);
+        EXPECT_EQ(after_decoded->slots[index].transient_member_pointer,
+                  before_decoded->slots[index].transient_member_pointer);
         EXPECT_EQ(after_decoded->slots[index].offset, before_decoded->slots[index].offset);
     }
     EXPECT_EQ(after_group->raw_payload.size(), before_group->raw_payload.size());
@@ -2003,6 +2005,46 @@ TEST(Alteration, PreservesSampleBankOpaqueSuffixWhenAssignmentExtendsSlotTable) 
     ASSERT_GE(payload->size(), suffix.size());
     EXPECT_TRUE(std::ranges::equal(suffix, std::span{*payload}.last(suffix.size())));
     std::filesystem::remove_all(root, error);
+}
+
+TEST(AlterationInternal, AppendsLegacySampleBankMembersWithoutCreatingCurrentParameterTail) {
+    constexpr std::size_t slot_base = 0x14cU;
+    constexpr std::size_t slot_size = 0x14U;
+    std::vector<std::byte> payload(slot_base + slot_size);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SBAC", std::byte{}));
+    ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+    ASSERT_TRUE(writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x30U)));
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0U));
+    payload[0x144U] = std::byte{1};
+    ASSERT_TRUE(writer.write_ascii_field(slot_base, 16U, "Legacy One", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(slot_base + 0x10U, 0x1234'5678U));
+
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto *sample_bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
+    ASSERT_NE(sample_bank, nullptr);
+    ASSERT_EQ(sample_bank->storage_layout, axk::SbacStorageLayout::legacy_without_parameter_tail);
+
+    const auto appended = axk::alteration_internal::append_sbac_members_to_payload(
+        payload, *sample_bank, std::vector<std::string>{"Legacy Two"});
+    ASSERT_TRUE(appended) << appended.error().message;
+    ASSERT_EQ(payload.size(), slot_base + 2U * slot_size);
+    EXPECT_EQ(axk::ByteReader{payload}.be32(0x14U).value(), 2U);
+    EXPECT_EQ(axk::ByteReader{payload}.be32(0x18U).value(), payload.size() - 0x30U);
+    EXPECT_EQ(axk::ByteReader{payload}.be32(0x1cU).value(), 0U);
+
+    const auto reopened = axk::decode_object(payload);
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto *reopened_bank = std::get_if<axk::CurrentSbac>(&reopened->payload);
+    ASSERT_NE(reopened_bank, nullptr);
+    EXPECT_EQ(reopened_bank->storage_layout, axk::SbacStorageLayout::legacy_without_parameter_tail);
+    ASSERT_EQ(reopened_bank->slots.size(), 2U);
+    EXPECT_EQ(reopened_bank->slots[0].name, "Legacy One");
+    EXPECT_EQ(reopened_bank->slots[0].transient_member_pointer, 0x1234'5678U);
+    EXPECT_EQ(reopened_bank->slots[1].name, "Legacy Two");
+    EXPECT_EQ(reopened_bank->slots[1].transient_member_pointer, 0U);
 }
 
 TEST(Alteration, InsertsSampleBankContainingStereoSample) {

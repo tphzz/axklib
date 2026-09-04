@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -140,6 +141,20 @@ TEST(CurrentSbnk, MatchesMaintainedContractAndPreservesInactiveRightLane) {
     ASSERT_TRUE(std::holds_alternative<axk::CurrentSbnk>(decoded->payload));
     const auto &sample = std::get<axk::CurrentSbnk>(decoded->payload);
     EXPECT_EQ(sample.sample_name, "sine wave");
+    EXPECT_EQ(sample.common.embedded_container_name.value, "");
+    EXPECT_EQ(sample.common.embedded_container_name.source.offset, 0x54U);
+    EXPECT_EQ(sample.common.embedded_container_name.source.size, 16U);
+    EXPECT_EQ(sample.common.state_0x42.value, std::to_integer<std::uint8_t>((*payload)[0x42U]));
+    EXPECT_EQ(sample.common.state_0x42.source.offset, 0x42U);
+    EXPECT_EQ(sample.common.state_0x42.source.verification, axk::Verification::unknown);
+    EXPECT_TRUE(sample.common.transient_name_hash_alias_matches);
+    EXPECT_TRUE(sample.common.body_prefix_alias_matches);
+    EXPECT_EQ(sample.common.transient_name_hash_alias.value, 0x01443c30U);
+    EXPECT_EQ(sample.common.transient_name_hash_next_handle.value, 0x01443c30U);
+    EXPECT_EQ(sample.common.body_prefix_alias.value, (std::array{std::byte{'s'}, std::byte{'i'}, std::byte{'n'}}));
+    EXPECT_EQ(sample.common.saver_residue_0x43_0x49.value,
+              (std::array{std::byte{0xb8}, std::byte{0}, std::byte{0x0a}, std::byte{0xf6}, std::byte{0x7a},
+                          std::byte{0x01}, std::byte{0x54}}));
     EXPECT_FALSE(sample.right_slot_present);
     EXPECT_EQ(sample.right_link_role, "unused-zero");
     EXPECT_FALSE(sample.right);
@@ -249,15 +264,91 @@ TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
     ASSERT_TRUE(decoded);
     ASSERT_TRUE(std::holds_alternative<axk::CurrentSbac>(decoded->payload));
     const auto &sample_bank = std::get<axk::CurrentSbac>(decoded->payload);
-    EXPECT_EQ(sample_bank.active_slot_count, 1U);
-    EXPECT_EQ(sample_bank.maximum_slot_count, 9U);
+    EXPECT_EQ(sample_bank.storage_layout, axk::SbacStorageLayout::current_split_parameter_tail);
+    ASSERT_TRUE(sample_bank.parameter_tail_offset);
+    EXPECT_EQ(*sample_bank.parameter_tail_offset, payload->size() - 0x24U);
+    EXPECT_EQ(sample_bank.stored_member_count, 1U);
+    EXPECT_EQ(sample_bank.maximum_member_count, 8U);
     ASSERT_EQ(sample_bank.slots.size(), 1U);
     EXPECT_EQ(sample_bank.slots[0].name, "_NewSample");
-    EXPECT_EQ(sample_bank.slots[0].raw_handle, 21249456U);
-    EXPECT_EQ(sample_bank.value_enable_words[0], 2130756064U);
-    EXPECT_EQ(sample_bank.enabled_parameter_numbers.front(), 5U);
-    EXPECT_EQ(sample_bank.enabled_parameter_numbers.back(), 85U);
-    EXPECT_EQ(sample_bank.enabled_numbers_outside_table, (std::vector<std::uint8_t>{89, 90, 91, 92, 93}));
+    EXPECT_EQ(sample_bank.slots[0].transient_member_pointer, 21249456U);
+    EXPECT_EQ(sample_bank.pending_parameter_propagation_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
+    EXPECT_TRUE(sample_bank.pending_parameter_numbers.empty());
+    EXPECT_TRUE(sample_bank.pending_numbers_outside_table.empty());
+    EXPECT_EQ(sample_bank.effective_member_count, 1U);
+    EXPECT_TRUE(sample_bank.slots[0].active);
+    EXPECT_TRUE(std::ranges::equal(std::span{*payload}.subspan(0x78U, 0xbcU),
+                                   std::span{sample_bank.raw_sample_parameter_block}.first(0xbcU)));
+    EXPECT_TRUE(std::ranges::equal(std::span{*payload}.last(0x24U),
+                                   std::span{sample_bank.raw_sample_parameter_block}.last(0x24U)));
+}
+
+TEST(CurrentSbac, ReconstructsLegacyParameterTailWithoutConsumingMemberRows) {
+    std::vector<std::byte> payload(0x14cU + 2U * 0x14U);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SBAC", std::byte{}));
+    ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+    for (std::size_t index = 0; index < 0xbcU; ++index)
+        payload[0x78U + index] = static_cast<std::byte>(index);
+    ASSERT_TRUE(writer.write_be32(0x134U, 0x80000005U));
+    ASSERT_TRUE(writer.write_be32(0x138U, 0x00000003U));
+    ASSERT_TRUE(writer.write_be32(0x13cU, 0x03000001U));
+    ASSERT_TRUE(writer.write_u8(0x144U, 2U));
+    ASSERT_TRUE(writer.write_ascii_field(0x14cU, 16U, "Legacy One", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(0x15cU, 0x01020304U));
+    ASSERT_TRUE(writer.write_ascii_field(0x160U, 16U, "Legacy Two", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(0x170U, 0x05060708U));
+
+    const auto decoded = axk::decode_object(payload);
+
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto &sample_bank = std::get<axk::CurrentSbac>(decoded->payload);
+    EXPECT_EQ(sample_bank.storage_layout, axk::SbacStorageLayout::legacy_without_parameter_tail);
+    EXPECT_FALSE(sample_bank.parameter_tail_offset);
+    EXPECT_EQ(sample_bank.stored_member_count, 2U);
+    EXPECT_EQ(sample_bank.maximum_member_count, 2U);
+    EXPECT_EQ(sample_bank.pending_parameter_propagation_words,
+              (std::array<std::uint32_t, 3>{0x80000005U, 0x00000003U, 0x03000001U}));
+    EXPECT_EQ(sample_bank.pending_parameter_numbers, (std::vector<std::uint8_t>{0U, 2U, 31U, 32U, 33U, 64U, 88U}));
+    EXPECT_EQ(sample_bank.pending_numbers_outside_table, (std::vector<std::uint8_t>{89U}));
+    EXPECT_EQ(sample_bank.effective_member_count, 2U);
+    EXPECT_TRUE(std::ranges::equal(std::span{payload}.subspan(0x78U, 0xbcU),
+                                   std::span{sample_bank.raw_sample_parameter_block}.first(0xbcU)));
+    EXPECT_TRUE(std::ranges::all_of(std::span{sample_bank.raw_sample_parameter_block}.last(0x24U),
+                                    [](std::byte value) { return value == std::byte{}; }));
+    ASSERT_EQ(sample_bank.slots.size(), 2U);
+    EXPECT_EQ(sample_bank.slots[0].name, "Legacy One");
+    EXPECT_EQ(sample_bank.slots[1].name, "Legacy Two");
+}
+
+TEST(CurrentSbac, PreservesBlankCountedRowsAndDistinguishesEffectiveMembers) {
+    constexpr std::size_t first_member_offset = 0x14cU;
+    constexpr std::size_t member_size = 0x14U;
+    std::vector<std::byte> payload(first_member_offset + 3U * member_size);
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_ascii_field(0U, 12U, "FSFSDEV3SPLX", std::byte{}));
+    ASSERT_TRUE(writer.write_ascii_field(0x0cU, 4U, "SBAC", std::byte{}));
+    ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+    ASSERT_TRUE(writer.write_u8(0x144U, 3U));
+    ASSERT_TRUE(writer.write_ascii_field(first_member_offset, 16U, "First", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(first_member_offset + 0x10U, 0x0144'4068U));
+    ASSERT_TRUE(writer.write_be32(first_member_offset + member_size + 0x10U, 0xdead'beefU));
+    ASSERT_TRUE(writer.write_ascii_field(first_member_offset + 2U * member_size, 16U, "Third", std::byte{' '}));
+    ASSERT_TRUE(writer.write_be32(first_member_offset + 2U * member_size + 0x10U, 0x0144'40c8U));
+
+    const auto decoded = axk::decode_object(payload);
+
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    const auto &sample_bank = std::get<axk::CurrentSbac>(decoded->payload);
+    EXPECT_EQ(sample_bank.stored_member_count, 3U);
+    EXPECT_EQ(sample_bank.effective_member_count, 2U);
+    ASSERT_EQ(sample_bank.slots.size(), 3U);
+    EXPECT_TRUE(sample_bank.slots[0].active);
+    EXPECT_FALSE(sample_bank.slots[1].active);
+    EXPECT_TRUE(sample_bank.slots[2].active);
+    EXPECT_TRUE(sample_bank.slots[1].name.empty());
+    EXPECT_EQ(sample_bank.slots[1].transient_member_pointer, 0xdead'beefU);
 }
 
 TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {

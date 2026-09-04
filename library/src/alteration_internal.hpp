@@ -219,6 +219,8 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
 Result<OperationReport> assign_sbac_members(TransactionState &state, OperationContext context,
                                             const AssignSampleBankMembersOperation &operation,
                                             const CancellationToken &cancellation);
+Result<void> append_sbac_members_to_payload(std::vector<std::byte> &payload, const CurrentSbac &sample_bank,
+                                            const std::vector<std::string> &names);
 Result<OperationReport> rename_sbac(TransactionState &state, OperationContext context,
                                     const RenameSampleBankOperation &operation, const CancellationToken &cancellation);
 

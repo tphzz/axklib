@@ -260,7 +260,7 @@ void evaluate_program(const DeletionIndex &index, const axk::ObjectSnapshot &obj
 void evaluate_sample_bank(const DeletionIndex &index, const axk::ObjectSnapshot &object,
                           std::vector<axk::ObjectDeletionNotice> &notices) {
     const auto *bank = std::get_if<axk::CurrentSbac>(&object.object.payload);
-    if (bank == nullptr || bank->active_slot_count > bank->maximum_slot_count) {
+    if (bank == nullptr || bank->stored_member_count > bank->maximum_member_count) {
         add_notice(notices, "SAMPLE_BANK_UNREADABLE", "Sample Bank membership is unreadable", {object.key});
         return;
     }
@@ -285,7 +285,7 @@ void evaluate_sample_bank(const DeletionIndex &index, const axk::ObjectSnapshot 
             members.insert(sample->key);
         }
     }
-    if (members.size() != bank->slots.size()) {
+    if (members.size() != bank->effective_member_count) {
         add_notice(notices, "SAMPLE_BANK_MEMBER_UNRESOLVED",
                    "Sample Bank membership cannot be represented as a complete exact deletion closure", {object.key});
     }

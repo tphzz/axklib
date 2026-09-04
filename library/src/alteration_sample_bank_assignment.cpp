@@ -17,19 +17,20 @@ namespace {
 constexpr std::size_t slot_base = 0x14cU;
 constexpr std::size_t slot_size = 0x14U;
 constexpr std::size_t trailing_parameter_bytes = 0x24U;
-constexpr std::size_t minimum_record_size = 0x210U;
 
 Result<std::map<std::string, std::vector<SfsId>>>
 sample_bank_memberships(const std::vector<CategoryObject> &sample_banks) {
     std::map<std::string, std::vector<SfsId>> result;
     for (const auto &row : sample_banks) {
         const auto *sample_bank = std::get_if<CurrentSbac>(&row.decoded.payload);
-        if (sample_bank == nullptr || sample_bank->active_slot_count > sample_bank->maximum_slot_count ||
-            sample_bank->slots.size() != sample_bank->active_slot_count) {
+        if (sample_bank == nullptr || sample_bank->stored_member_count > sample_bank->maximum_member_count ||
+            sample_bank->slots.size() != sample_bank->stored_member_count) {
             return std::unexpected{transaction_error("Sample Bank membership is unreadable")};
         }
-        for (const auto &slot : sample_bank->slots)
-            result[slot.name].push_back(row.id);
+        for (const auto &slot : sample_bank->slots) {
+            if (slot.active)
+                result[slot.name].push_back(row.id);
+        }
     }
     return result;
 }
@@ -74,26 +75,58 @@ Result<void> detach_members(TransactionState &state, MutablePartition &partition
     return {};
 }
 
-Result<void> append_members(std::vector<std::byte> &payload, std::size_t existing_count,
-                            const std::vector<std::string> &names) {
+} // namespace
+
+Result<void> append_sbac_members_to_payload(std::vector<std::byte> &payload, const CurrentSbac &sample_bank,
+                                            const std::vector<std::string> &names) {
+    const auto existing_count = static_cast<std::size_t>(sample_bank.stored_member_count);
+    if (sample_bank.slots.size() != existing_count || existing_count > sample_bank.maximum_member_count ||
+        existing_count > maximum_sample_bank_members)
+        return std::unexpected{transaction_error("Target Sample Bank membership is unreadable")};
+    if (names.size() > maximum_sample_bank_members - existing_count)
+        return std::unexpected{transaction_error("Target Sample Bank would exceed 127 Samples")};
+
     const auto final_count = existing_count + names.size();
     const auto existing_slot_end = slot_base + existing_count * slot_size;
-    const auto final_slot_end = slot_base + final_count * slot_size;
     if (payload.size() < existing_slot_end)
         return std::unexpected{transaction_error("Target Sample Bank slot table is truncated")};
-    const auto suffix_start =
-        std::max(existing_slot_end, payload.size() - std::min(payload.size(), trailing_parameter_bytes));
-    if (final_slot_end > suffix_start) {
-        // Preserve the opaque record suffix once the member table consumes the preallocated gap.
-        payload.insert(payload.begin() + static_cast<std::ptrdiff_t>(suffix_start), final_slot_end - suffix_start,
-                       std::byte{});
+
+    std::size_t member_region_end{};
+    if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
+        if (!sample_bank.parameter_tail_offset ||
+            *sample_bank.parameter_tail_offset + trailing_parameter_bytes != payload.size()) {
+            return std::unexpected{transaction_error("Target Sample Bank parameter tail is unreadable")};
+        }
+        member_region_end = *sample_bank.parameter_tail_offset;
+    } else {
+        if (sample_bank.parameter_tail_offset)
+            return std::unexpected{transaction_error("Target Sample Bank legacy layout is inconsistent")};
+        member_region_end = payload.size();
     }
-    payload.resize(std::max({payload.size(), minimum_record_size, final_slot_end + trailing_parameter_bytes}));
+    if (member_region_end < slot_base || (member_region_end - slot_base) % slot_size != 0U)
+        return std::unexpected{transaction_error("Target Sample Bank member capacity is not row-aligned")};
+    if ((member_region_end - slot_base) / slot_size != sample_bank.maximum_member_count)
+        return std::unexpected{transaction_error("Target Sample Bank member capacity changed")};
+
+    if (final_count > sample_bank.maximum_member_count) {
+        const auto added_rows = final_count - sample_bank.maximum_member_count;
+        if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
+            payload.insert(payload.begin() + static_cast<std::ptrdiff_t>(member_region_end), added_rows * slot_size,
+                           std::byte{});
+        } else {
+            payload.resize(payload.size() + added_rows * slot_size);
+        }
+    }
+
     ByteWriter writer{payload};
-    if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x54U)); !written)
+    if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
+        if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x54U)); !written)
+            return std::unexpected{written.error()};
+        if (auto written = writer.write_be32(0x1cU, static_cast<std::uint32_t>(payload.size() - 0x30U)); !written)
+            return std::unexpected{written.error()};
+    } else if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x30U)); !written) {
         return std::unexpected{written.error()};
-    if (auto written = writer.write_be32(0x1cU, static_cast<std::uint32_t>(payload.size() - 0x30U)); !written)
-        return std::unexpected{written.error()};
+    }
     payload[0x144U] = static_cast<std::byte>(final_count);
     for (std::size_t index = 0; index < names.size(); ++index) {
         const auto offset = slot_base + (existing_count + index) * slot_size;
@@ -103,8 +136,6 @@ Result<void> append_members(std::vector<std::byte> &payload, std::size_t existin
     }
     return {};
 }
-
-} // namespace
 
 Result<OperationReport> assign_sbac_members(TransactionState &state, OperationContext context,
                                             const AssignSampleBankMembersOperation &operation,
@@ -133,8 +164,10 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
         return std::unexpected{transaction_error("target Sample Bank is unreadable")};
     const auto *target_bank = std::get_if<CurrentSbac>(&target_row->decoded.payload);
     std::set<std::string> target_names;
-    for (const auto &slot : target_bank->slots)
-        target_names.insert(slot.name);
+    for (const auto &slot : target_bank->slots) {
+        if (slot.active)
+            target_names.insert(slot.name);
+    }
 
     std::map<std::string, SfsId> changed_member_ids;
     std::vector<std::string> appended_names;
@@ -171,7 +204,7 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
         return std::unexpected{transaction_error("Target Sample Bank would exceed 127 Samples")};
 
     auto target_payload = target_row->payload;
-    if (auto appended = append_members(target_payload, target_bank->slots.size(), appended_names); !appended)
+    if (auto appended = append_sbac_members_to_payload(target_payload, *target_bank, appended_names); !appended)
         return std::unexpected{appended.error()};
     if (auto detached =
             detach_members(state, partition, *sample_banks, changed_member_ids, *partition_index, cancellation);

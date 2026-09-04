@@ -217,14 +217,9 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0x31] = std::byte{0x0c};
     if (auto written = put_text(0x32, sample.name, 16); !written)
         return std::unexpected{written.error()};
-    constexpr std::array<std::byte, 7> suffix{std::byte{0xb8}, std::byte{0},    std::byte{0x0a}, std::byte{0xf6},
-                                              std::byte{0x7a}, std::byte{0x01}, std::byte{0x54}};
-    std::ranges::copy(suffix, result.begin() + 0x43);
-    std::fill(result.begin() + 0x50, result.begin() + 0x68, std::byte{' '});
-    writer.be32(0x68, 0x01443c30);
-    writer.be32(0x98, 0x01443c30);
     if (auto written = put_text(0x78, left.spec.name, 16); !written)
         return std::unexpected{written.error()};
+    std::copy_n(result.begin() + 0x78, 3U, result.begin() + 0x6c);
     if (right != nullptr) {
         if (auto written = put_text(0x88, right->spec.name, 16); !written) {
             return std::unexpected{written.error()};
@@ -273,6 +268,8 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     writer.be32(0xf0, static_cast<std::uint32_t>(left.audio.output_frames));
     writer.be32(0xf8, left_loop->start);
     writer.be32(0x100, left_loop->length);
+    writer.be32(0x15c, static_cast<std::uint32_t>(left.audio.output_frames));
+    writer.be32(0x160, left_loop->start + left_loop->length);
     if (right != nullptr) {
         writer.be32(0xf4, static_cast<std::uint32_t>(right->audio.output_frames));
         writer.be32(0xfc, right_loop->start);

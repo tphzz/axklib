@@ -6,13 +6,9 @@ integration.
 ## Public Documentation Boundary
 
 Public documentation describes supported contracts, limits, validation rules,
-and concise hardware compatibility status. It excludes local checkout paths,
-inventories of internal source material, named forensic artifacts,
-investigation tooling, and experiment-worklog narratives. Small retained test
-fixtures may document their identity, hash, topology, and active test purpose,
-but not private acquisition history. Runtime diagnostics follow the same rule:
-they explain the input contract and corrective action without referring to the
-validation history that established it.
+and concise hardware compatibility status. Small retained test fixtures may
+document their identity, hash, topology, and active test purpose. Runtime
+diagnostics describe the input contract and corrective action.
 
 ```mermaid
 flowchart TD

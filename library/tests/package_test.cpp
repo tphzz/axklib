@@ -2355,8 +2355,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             ASSERT_TRUE(normalized_decoded) << normalized_decoded.error().message;
             const auto *normalized_group = std::get_if<axk::CurrentSbac>(&normalized_decoded->payload);
             ASSERT_NE(normalized_group, nullptr);
-            EXPECT_TRUE(
-                std::ranges::all_of(normalized_group->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
+            EXPECT_TRUE(std::ranges::all_of(normalized_group->slots,
+                                            [](const auto &slot) { return slot.transient_member_pointer == 0U; }));
         } else if (node.object_type == "PROG") {
             const auto *program = std::get_if<axk::CurrentProg>(&decoded->payload);
             ASSERT_NE(program, nullptr);
@@ -2552,8 +2552,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
             const auto *sample_bank = std::get_if<axk::CurrentSbac>(&relocated_decoded->payload);
             ASSERT_NE(sample_bank, nullptr);
-            EXPECT_TRUE(
-                std::ranges::all_of(sample_bank->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
+            EXPECT_TRUE(std::ranges::all_of(sample_bank->slots,
+                                            [](const auto &slot) { return slot.transient_member_pointer == 0U; }));
         } else if (node.object_type == "PROG") {
             const auto relocated_decoded = axk::decode_object(*relocated);
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;

@@ -230,9 +230,7 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
             result.push_back(*row);
         }
     } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.object.payload)) {
-        const auto active_slots =
-            std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
-        if (candidates.size() != static_cast<std::size_t>(active_slots)) {
+        if (candidates.size() != sample_bank->effective_member_count) {
             return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
                                               "Sample Bank package export cannot resolve every active Sample member")};
         }

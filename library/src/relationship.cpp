@@ -322,7 +322,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 }
             } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&item->object.payload)) {
                 for (const auto &slot : sample_bank->slots) {
-                    if (slot.name.empty())
+                    if (!slot.active)
                         continue;
                     auto match = match_named_target(*item, slot.name, ObjectType::sbnk, scope_index,
                                                     "active-sbac-slot-name", "active-sbac-slot-name-ambiguous", true);

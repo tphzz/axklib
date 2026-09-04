@@ -108,6 +108,23 @@ struct CurrentSbnkMember {
     std::uint32_t loop_length_frames{};
 };
 
+struct CurrentObjectCommonRecord {
+    FieldValue<std::uint8_t> object_class;
+    FieldValue<std::uint8_t> state;
+    FieldValue<std::string> name;
+    FieldValue<std::uint8_t> state_0x42;
+    FieldValue<std::array<std::byte, 7>> saver_residue_0x43_0x49;
+    FieldValue<std::array<std::byte, 10>> raw_common_state_0x4a_0x53;
+    FieldValue<std::string> embedded_container_name;
+    FieldValue<std::array<std::byte, 4>> raw_common_state_0x64_0x67;
+    FieldValue<std::uint32_t> transient_name_hash_alias;
+    FieldValue<std::array<std::byte, 3>> body_prefix_alias;
+    FieldValue<std::array<std::byte, 5>> saver_residue_0x6f_0x73;
+    FieldValue<std::uint32_t> transient_name_hash_next_handle;
+    bool transient_name_hash_alias_matches{};
+    bool body_prefix_alias_matches{};
+};
+
 struct SbnkControlRecord {
     std::uint8_t device{};
     std::uint8_t function{};
@@ -122,8 +139,8 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
+    CurrentObjectCommonRecord common;
     std::string sample_name;
-    std::string instrument_name;
     bool right_slot_present{};
     std::string right_link_role;
     CurrentSbnkMember left;
@@ -154,18 +171,27 @@ struct CurrentSbnk {
 
 struct SbacSlot {
     std::string name;
-    std::uint32_t raw_handle{};
+    bool active{};
+    std::uint32_t transient_member_pointer{};
     std::uint32_t offset{};
 };
 
+enum class SbacStorageLayout : std::uint8_t {
+    legacy_without_parameter_tail,
+    current_split_parameter_tail,
+};
+
 struct CurrentSbac {
+    CurrentObjectCommonRecord common;
+    SbacStorageLayout storage_layout{SbacStorageLayout::legacy_without_parameter_tail};
+    std::optional<std::size_t> parameter_tail_offset;
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};
-    std::array<std::uint32_t, 3> value_enable_words{};
-    std::vector<std::uint8_t> enabled_parameter_numbers;
-    std::vector<std::uint8_t> enabled_numbers_outside_table;
-    std::uint8_t bulk_assigned_sample_count{};
-    std::uint8_t active_slot_count{};
-    std::size_t maximum_slot_count{};
+    std::array<std::uint32_t, 3> pending_parameter_propagation_words{};
+    std::vector<std::uint8_t> pending_parameter_numbers;
+    std::vector<std::uint8_t> pending_numbers_outside_table;
+    std::uint8_t stored_member_count{};
+    std::size_t effective_member_count{};
+    std::size_t maximum_member_count{};
     std::vector<SbacSlot> slots;
 };
 

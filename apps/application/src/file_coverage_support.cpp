@@ -85,7 +85,8 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
             raw_fields = std::format("SBAC slot {} at 0x{:03x}", index, offset);
             if (row.basis == "active-sbac-slot-name") {
                 notes = "Input consistency: counted SBAC slot name uniquely matches a same-scope SBNK header name. "
-                        "The companion 32-bit slot word is preserved as raw/opaque.";
+                        "The companion 32-bit slot word is preserved as transient runtime-pointer residue and is "
+                        "not used as resolver input.";
             }
         }
     } else if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG") {
@@ -260,7 +261,7 @@ std::vector<axk::ReportRow> sbac_detail_rows(std::span<const LoadedSource> sourc
             const auto match_notes = relation.quality == axk::RelationshipQuality::known
                                          ? "Input consistency: counted SBAC slot name uniquely matches a same-scope "
                                            "SBNK header name. The companion 32-bit slot word is preserved as "
-                                           "raw/opaque."
+                                           "transient runtime-pointer residue and is not used as resolver input."
                                          : relation.notes;
             rows.push_back({
                 {"image", display_path},
@@ -275,11 +276,11 @@ std::vector<axk::ReportRow> sbac_detail_rows(std::span<const LoadedSource> sourc
                                    sfs ? sfs_payload_offset(source, *sbac_item) : sbac_media->data_offset)},
                 {"sbac_name", sbac_item->object.header.name},
                 {"sbac_payload_size", sbac_media != nullptr ? sbac_media->size : std::uint64_t{0}},
-                {"sbac_slot_count_0x144", static_cast<std::uint64_t>(sbac->active_slot_count)},
+                {"sbac_stored_member_count_0x144", static_cast<std::uint64_t>(sbac->stored_member_count)},
                 {"slot_index", static_cast<std::uint64_t>(slot_index)},
                 {"slot_offset", static_cast<std::uint64_t>(slot->offset)},
                 {"slot_sbnk_name", slot->name},
-                {"slot_raw_handle_0x10", static_cast<std::uint64_t>(slot->raw_handle)},
+                {"slot_transient_member_pointer_0x10", static_cast<std::uint64_t>(slot->transient_member_pointer)},
                 {"match_method", relation.basis},
                 {"match_quality", std::string{axk::relationship_quality_name(relation.quality)}},
                 {"match_notes", match_notes},

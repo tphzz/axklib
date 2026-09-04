@@ -246,14 +246,43 @@ decode path.
 `SBNK` objects are sampler-visible Samples. They link to Wave Data storage and
 carry most Sample parameters.
 
+### On-Disk Common Record
+
+Current `SBNK` and `SBAC` objects use the same normalized common-record
+mapping as current Wave Data. The verified load/save transforms classify the
+disk bytes as follows:
+
+| Offset | Size | Classification |
+| --- | ---: | --- |
+| `0x030` | 1 | object class (`0x10` for SBNK, `0x11` for SBAC) |
+| `0x031` | 1 | opaque-preserved object state |
+| `0x032..0x041` | 16 | object name |
+| `0x042` | 1 | opaque-preserved common state transferred by the load/save transforms |
+| `0x043..0x049` | 7 | untransferred saver residue; canonical writers emit zero |
+| `0x04a..0x053` | 10 | opaque-preserved common state |
+| `0x054..0x063` | 16 | source-dependent embedded container text |
+| `0x064..0x067` | 4 | opaque-preserved common state |
+| `0x068..0x06b` | 4 | alias of the transient handle at `0x074..0x077` |
+| `0x06c..0x06e` | 3 | alias of the body prefix at `0x078..0x07a` |
+| `0x06f..0x073` | 5 | untransferred saver residue; canonical writers emit zero |
+| `0x074..0x077` | 4 | transient name-hash collision-chain handle |
+
+The embedded text at `0x054` is not a 24-byte Sample instrument-name field:
+the surrounding bytes belong to distinct common-state and alias lanes. Exact
+alterations preserve opaque state, including `0x042`. The load/save transforms
+prove that byte is durable object state but do not expose its semantic role, so
+it remains an explicitly named raw field rather than an invented user-facing
+property. Fresh writers zero residue and new-object transient handles, then
+rebuild both aliases.
+
 ### Member Resolution Fields
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
 | `0x078` | 16 | ASCII | left member Wave Data name |
 | `0x088` | 16 | ASCII | right member Wave Data name |
-| `0x098` | 4 | u32be | left runtime handle slot |
-| `0x09c` | 4 | u32be | right runtime handle slot |
+| `0x098` | 4 | u32be | left transient runtime object-pointer slot |
+| `0x09c` | 4 | u32be | right transient runtime object-pointer slot |
 | `0x0a0` | 4 | u32be | left cached Wave Data reference value |
 | `0x0a4` | 4 | u32be | right cached Wave Data reference value |
 | `0x0c0` | 4 | u32be | linked Programs 001-032 bitmap |
@@ -267,6 +296,12 @@ resolved object's `SMPL+0x078` value into `+0x0a0/+0x0a4`. The latter fields
 are therefore cached metadata, not authoritative object identifiers. Real
 source media contains stale cached values that disagree with the local named
 target and still loads on hardware.
+
+The object resolver dereferences normalized runtime `+0x60/+0x64` as
+member-object pointers; the direct SBNK body mapping
+places their serialized slots at `0x098/0x09c`. These are transient process
+state, not disk identities. Exact alterations preserve source bytes, while
+fresh writers emit zero and let name resolution populate live pointers.
 
 axklib treats a unique local member-name match as `Known`, whether or not its
 cache agrees. Duplicate local names remain `Tentative`; a cached-value-only
@@ -325,7 +360,14 @@ Function order has an independent implementation-level confirmation matching
 the Yamaha Note 11 table. The public writer rejects controller records outside
 these bounds.
 
-The table below lists the public field names currently exposed by the decoder.
+The tables below list the public field names currently exposed by the decoder.
+The maintained SBNK coverage contract additionally records, for every one of
+the 131 sampler-visible lanes, its physical offset, width, byte encoding,
+allowed raw values, packed mask where applicable, fresh single-member profile
+default, write policy, source basis, and verification level. Report generation fails if
+any visible lane lacks one of those properties. The same rows are projected
+through the verified SBAC split-layout transform, so a Sample Bank
+does not maintain a second, divergent parameter definition.
 
 | Offset | Type | Field |
 | --- | --- | --- |
@@ -417,6 +459,13 @@ conservative current-format default set for fields that are not yet surfaced as
 public write inputs, including filter, envelope, LFO, output, portamento, and
 sample-control defaults for this direct single-member scope.
 
+Writer validation follows the A4000 parameter domains, including pitch-bend
+range `0..24`, filter type `0..16`, filter cutoff/Q velocity sensitivity
+`-63..63` plus raw `64..68` for `Rnd1..Rnd5`, and Sample Portamento rate/time
+`1..127`. Member root key is `0..127` and fine tune is `-63..63`. Fresh
+generation uses the documented profile defaults; template-backed edits preserve
+fields that were not explicitly changed, including opaque packed lanes.
+
 `sample_flags_0x0d0` is read-only topology state. The A4000 reads bit `0`
 separately and handles bits `2..1` as one masked two-bit state. The exact
 bank-member Expand derivation remains unresolved, so writers derive only proven
@@ -495,8 +544,8 @@ for this writer scope.
 | `0x151` | s8 | filter_gain_0x151 |
 | `0x152..0x156` | 5 bytes | single_member_reserved_playback_default_0x152_0x156 |
 | `0x158..0x15b` | 4 bytes | single_member_reserved_tone_default_0x158_0x15b |
-| `0x15c` | u32be | wave_end_address_0x15c |
-| `0x160` | u32be | loop_end_address_0x160 |
+| `0x15c` | u32be | wave_end_address_0x15c (derived cache) |
+| `0x160` | u32be | loop_end_address_0x160 (derived cache) |
 | `0x17c` | u8 | velocity_xfade_high_0x17c |
 | `0x17d` | u8 | velocity_xfade_low_0x17d |
 | `0x17e` | u8 | output1_0x17e |
@@ -506,6 +555,15 @@ for this writer scope.
 | `0x182` | u8 | sample_portamento_type_0x182 |
 | `0x183` | u8 | sample_portamento_rate_0x183 |
 | `0x184` | u8 | sample_portamento_time_0x184 |
+
+`SBNK+0x15c` and `SBNK+0x160` are format-maintained 32-bit derived caches.
+The class-`0x10` parameter update path writes normalized runtime
+`+0x124 = +0xb0 + +0xb8` for wave end and
+`+0x128 = +0xc0 + +0xc8` for loop end. The direct SBNK body mapping places
+those runtime fields at disk `0x15c` and `0x160`. Arithmetic wraps modulo
+`2^32`, matching every checked current SBNK in the maintained HDA and floppy
+corpora. Writers recompute both caches from the serialized left wave/loop
+start and length fields; callers cannot supply them as independent values.
 
 Sample control records are six 4-byte records at:
 
@@ -522,42 +580,89 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x040..0x11f` | 224 | bytes | sample_parameter_block_raw_0x040_0x11f |
-| `0x120..0x12b` | 12 | 3 x u32be | value_enable_words_0x120_0x12b |
-| `0x130` | 1 | u8 | bulk_assigned_sample_count_0x130 |
-| `0x144` | 1 | u8 | active_slot_count_0x144 |
-| `0x14c` | variable | rows | First SBAC member slot row. |
+| `0x078..0x133` | 188 | bytes | First part of the canonical 224-byte Sample Parameter block. |
+| `0x134..0x13f` | 12 | 3 x u32be | Pending Sample Parameter propagation bitmaps. |
+| `0x140..0x143` | 4 | bytes | Reserved; preserve for existing objects. |
+| `0x144` | 1 | u8 | Stored member count. |
+| `0x145..0x14b` | 7 | bytes | Reserved; preserve for existing objects. |
+| `0x14c + n*0x14` | 20 each | rows | Member rows, followed by any preallocated blank-row capacity. |
+| Last `0x24` bytes, layout selector `0x14 >= 4` | 36 | bytes | Final part of the canonical Sample Parameter block. |
 
-SBAC value-enable bitmap decoding:
+The disk layout is not the flat Sample Bank Bulk layout used by the runtime.
+The verified loader transform reconstructs one canonical 224-byte Sample
+Parameter block from disk `0x078..0x133` followed by the terminal 36 bytes.
+The serializer applies the inverse transform. For legacy objects with layout
+selector `0x14 < 4`, no terminal block is stored and the loader supplies
+zero/default bytes for that final 36-byte portion. Offsets `0x040..0x11f` and
+`0x120..0x12b` describe the normalized runtime/Bulk representation, not the
+physical SBAC object.
+
+The member region ends at the object size for a legacy SBAC and at
+`object_size - 0x24` for the current split-tail layout. Its complete-row
+capacity is therefore:
+
+```text
+member_capacity = (member_region_end - 0x14c) / 0x14
+```
+
+Current-layout mutation inserts additional rows before the terminal parameter
+bytes. Legacy mutation extends the row region without creating a terminal tail.
+The two layouts also retain their header-length conventions: legacy objects use
+`0x18 = object_size - 0x30`, while current objects use
+`0x18 = object_size - 0x54` and `0x1c = object_size - 0x30`.
+
+SBAC pending-propagation bitmap decoding:
 
 ```text
 for word_index in 0..2:
     base_p2 = word_index * 32
     for bit in 0..31:
         if word & (1 << bit):
-            enabled_sample_parameter_p2 = base_p2 + bit
+            pending_sample_parameter_p2 = base_p2 + bit
 ```
+
+The `Freeze SampleBank` operation consumes these bits. For every marked P2
+number, it copies the
+bank's corresponding Sample Parameter value into each resolved member Sample,
+clears the consumed bit, and marks the Sample Bank dirty. These words are
+therefore pending operation state, not durable per-bank value-enable settings.
+Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
+zero.
 
 SBAC slot row layout, stride `0x14`:
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `+0x00` | 16 | ASCII | slot SBNK name |
-| `+0x10` | 4 | u32be | raw_handle_0x10 |
+| `+0x00` | 16 | ASCII | Sample (`SBNK`) member name; first byte zero means an inert row. |
+| `+0x10` | 4 | u32be | transient resolved-member runtime pointer residue |
 
-The current reader uses `active_slot_count_0x144` to decide how many rows to
-read, capped by the payload size. The 32-bit handle is retained as a diagnostic
-field. It is opaque source-local state rather than a portable object identity.
-Package export declares each stored assignment-row handle as a relocation, and package
-import writes the hardware-proven zero form while preserving the row order and
-resolved member name. Target matching uses exact name, object type, and local
-placement before it emits a resolved relationship. For directory-backed ISO
+The reader uses the stored member count at `0x144` to decide how many rows to
+read, capped by the generation-specific member capacity. The object resolver
+skips a counted row exactly when its first name byte is zero. For
+every active row it resolves the stored Sample name and writes the resulting
+runtime object pointer at row `+0x10`; it does not read the persisted word as
+resolver input. The effective member count is therefore the number of counted
+rows whose first name byte is nonzero. Blank counted rows remain inert and are
+not compacted during unrelated mutation.
+
+The transient pointer residue is retained for diagnostics and preserved on
+unchanged existing rows. Package import and every fresh or appended row write
+the hardware-proven zero form while preserving row order and resolved member
+name. Target matching uses exact name, object type, and local placement before
+it emits a resolved relationship. For directory-backed ISO
 objects, a counted slot whose Sample name occurs in several source volumes
 resolves to `Known` only when exactly one exact-placement Sample is in the
 Sample Bank's raw ISO volume. Recovered or otherwise non-exact placement stays
 below package-export quality, and multiple matches inside the same raw volume
 remain ambiguous. The package builder does not admit generic `Likely`
 relationships.
+
+The physical-layout contract labels all `332` bytes in the fixed
+`0x000..0x14b` prefix, all `20` bytes in one member-row template, all `224`
+bytes in the canonical Sample Parameter block, and all `36` bytes in the
+optional terminal tail. Both observed layouts therefore have zero unlabeled
+byte classes. Opaque and reserved fields remain explicit preservation
+contracts rather than guessed semantics.
 
 ## PROG: Program Object
 

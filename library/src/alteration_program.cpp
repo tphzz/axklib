@@ -32,12 +32,14 @@ sample_bank_memberships(const std::vector<CategoryObject> &sample_banks) {
     std::map<std::string, std::vector<SfsId>> result;
     for (const auto &row : sample_banks) {
         const auto *sample_bank = std::get_if<CurrentSbac>(&row.decoded.payload);
-        if (sample_bank == nullptr || sample_bank->active_slot_count > sample_bank->maximum_slot_count ||
-            sample_bank->slots.size() != sample_bank->active_slot_count) {
+        if (sample_bank == nullptr || sample_bank->stored_member_count > sample_bank->maximum_member_count ||
+            sample_bank->slots.size() != sample_bank->stored_member_count) {
             return std::unexpected{transaction_error("Sample Bank membership is unreadable")};
         }
-        for (const auto &slot : sample_bank->slots)
-            result[slot.name].push_back(row.id);
+        for (const auto &slot : sample_bank->slots) {
+            if (slot.active)
+                result[slot.name].push_back(row.id);
+        }
     }
     return result;
 }
@@ -302,7 +304,7 @@ Result<OperationReport> delete_sbac(TransactionState &state, OperationContext co
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *sample_bank = std::get_if<CurrentSbac>(&decoded->payload);
-    if (sample_bank == nullptr || sample_bank->active_slot_count > sample_bank->maximum_slot_count) {
+    if (sample_bank == nullptr || sample_bank->stored_member_count > sample_bank->maximum_member_count) {
         return std::unexpected{transaction_error("Sample Bank slots are unreadable")};
     }
     auto programs = category_objects(state, partition, operation.volume_name, "PROG", ObjectType::prog, cancellation);
@@ -321,19 +323,23 @@ Result<OperationReport> delete_sbac(TransactionState &state, OperationContext co
     if (!sample_banks)
         return std::unexpected{sample_banks.error()};
     std::set<std::string> members;
-    for (const auto &slot : sample_bank->slots)
-        members.insert(slot.name);
+    for (const auto &slot : sample_bank->slots) {
+        if (slot.active)
+            members.insert(slot.name);
+    }
     for (const auto &other : *sample_banks) {
         if (other.id == located->second)
             continue;
         const auto *other_sample_bank = std::get_if<CurrentSbac>(&other.decoded.payload);
         for (const auto &slot : other_sample_bank->slots) {
-            if (members.contains(slot.name)) {
+            if (slot.active && members.contains(slot.name)) {
                 return std::unexpected{transaction_error("another Sample Bank shares a Sample")};
             }
         }
     }
     for (const auto &slot : sample_bank->slots) {
+        if (!slot.active)
+            continue;
         auto sample = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
         if (!sample)
             return std::unexpected{sample.error()};
@@ -483,11 +489,13 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
         return std::unexpected{sample_bank_object.error()};
     const auto *sample_bank = std::get_if<CurrentSbac>(&sample_bank_object->payload);
     if (sample_bank == nullptr || sample_bank->slots.empty() ||
-        sample_bank->slots.size() != sample_bank->active_slot_count) {
+        sample_bank->slots.size() != sample_bank->stored_member_count) {
         return std::unexpected{transaction_error("SBAC rename requires a nonempty fully readable slot table")};
     }
     std::set<SfsId> member_ids;
     for (const auto &slot : sample_bank->slots) {
+        if (!slot.active)
+            continue;
         auto member = category_object(state, partition, operation.volume_name, "SBNK", slot.name, "SBNK", cancellation);
         if (!member)
             return std::unexpected{member.error()};
@@ -504,8 +512,10 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
             continue;
         const auto *other_sample_bank = std::get_if<CurrentSbac>(&other.decoded.payload);
         if (std::ranges::any_of(other_sample_bank->slots, [&](const SbacSlot &slot) {
+                if (!slot.active)
+                    return false;
                 return std::ranges::any_of(sample_bank->slots,
-                                           [&](const SbacSlot &own) { return own.name == slot.name; });
+                                           [&](const SbacSlot &own) { return own.active && own.name == slot.name; });
             })) {
             return std::unexpected{transaction_error("another SBAC shares a rename member")};
         }

@@ -52,6 +52,27 @@ template <typename T> Json field_json(const axk::FieldValue<T> &field) {
     return {{"value", field.value}, {"source", source_json(field.source)}};
 }
 
+template <std::size_t Size> Json bytes_field_json(const axk::FieldValue<std::array<std::byte, Size>> &field) {
+    return {{"valueHex", hex(field.value)}, {"source", source_json(field.source)}};
+}
+
+Json common_json(const axk::CurrentObjectCommonRecord &common) {
+    return {{"objectClass", field_json(common.object_class)},
+            {"state", field_json(common.state)},
+            {"name", field_json(common.name)},
+            {"state0x42", field_json(common.state_0x42)},
+            {"saverResidue0x43To0x49", bytes_field_json(common.saver_residue_0x43_0x49)},
+            {"rawCommonState0x4aTo0x53", bytes_field_json(common.raw_common_state_0x4a_0x53)},
+            {"embeddedContainerName", field_json(common.embedded_container_name)},
+            {"rawCommonState0x64To0x67", bytes_field_json(common.raw_common_state_0x64_0x67)},
+            {"transientNameHashAlias", field_json(common.transient_name_hash_alias)},
+            {"bodyPrefixAlias0x6cTo0x6e", bytes_field_json(common.body_prefix_alias)},
+            {"saverResidue0x6fTo0x73", bytes_field_json(common.saver_residue_0x6f_0x73)},
+            {"transientNameHashNextHandle", field_json(common.transient_name_hash_next_handle)},
+            {"transientNameHashAliasMatches", common.transient_name_hash_alias_matches},
+            {"bodyPrefixAliasMatches", common.body_prefix_alias_matches}};
+}
+
 Json placement_json(const axk::ObjectPlacement &placement) {
     return {{"partitionIndex", placement.partition.value},
             {"partitionName", placement.partition_name},
@@ -127,7 +148,7 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
         }
         return {{"kind", "SBNK"},
                 {"sampleName", sample->sample_name},
-                {"instrumentName", sample->instrument_name},
+                {"common", common_json(sample->common)},
                 {"rightSlotPresent", sample->right_slot_present},
                 {"rightLinkRole", sample->right_link_role},
                 {"left", member_json(sample->left)},
@@ -157,15 +178,24 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
     if (const auto *sample_bank = std::get_if<axk::CurrentSbac>(&object.payload)) {
         Json slots = Json::array();
         for (const auto &slot : sample_bank->slots)
-            slots.push_back({{"name", slot.name}, {"rawHandle", slot.raw_handle}, {"offsetBytes", slot.offset}});
+            slots.push_back({{"name", slot.name},
+                             {"active", slot.active},
+                             {"transientMemberPointer", slot.transient_member_pointer},
+                             {"offsetBytes", slot.offset}});
         return {{"kind", "SBAC"},
+                {"common", common_json(sample_bank->common)},
+                {"storageLayout", sample_bank->storage_layout == axk::SbacStorageLayout::current_split_parameter_tail
+                                      ? "current-split-parameter-tail"
+                                      : "legacy-without-parameter-tail"},
+                {"parameterTailOffsetBytes",
+                 sample_bank->parameter_tail_offset ? Json(*sample_bank->parameter_tail_offset) : Json(nullptr)},
                 {"rawSampleParameterBlockHex", hex(sample_bank->raw_sample_parameter_block)},
-                {"valueEnableWords", sample_bank->value_enable_words},
-                {"enabledParameterNumbers", sample_bank->enabled_parameter_numbers},
-                {"enabledNumbersOutsideTable", sample_bank->enabled_numbers_outside_table},
-                {"bulkAssignedSampleCount", sample_bank->bulk_assigned_sample_count},
-                {"activeSlotCount", sample_bank->active_slot_count},
-                {"maximumSlotCount", sample_bank->maximum_slot_count},
+                {"pendingParameterPropagationWords", sample_bank->pending_parameter_propagation_words},
+                {"pendingParameterNumbers", sample_bank->pending_parameter_numbers},
+                {"pendingNumbersOutsideTable", sample_bank->pending_numbers_outside_table},
+                {"storedMemberCount", sample_bank->stored_member_count},
+                {"effectiveMemberCount", sample_bank->effective_member_count},
+                {"maximumMemberCount", sample_bank->maximum_member_count},
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<axk::CurrentProg>(&object.payload)) {

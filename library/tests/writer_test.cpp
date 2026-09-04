@@ -66,6 +66,13 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     return volume;
 }
 
+std::uint32_t read_be32(const std::vector<std::byte> &bytes, std::size_t offset) {
+    return (std::to_integer<std::uint32_t>(bytes[offset]) << 24U) |
+           (std::to_integer<std::uint32_t>(bytes[offset + 1U]) << 16U) |
+           (std::to_integer<std::uint32_t>(bytes[offset + 2U]) << 8U) |
+           std::to_integer<std::uint32_t>(bytes[offset + 3U]);
+}
+
 } // namespace
 
 TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
@@ -417,10 +424,22 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
     const axk::detail::PreparedWaveformMember member{"Mapped Wave", 0x100U, 44'100U, 400U};
     const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
     ASSERT_TRUE(sample_payload) << sample_payload.error().message;
+    EXPECT_TRUE(std::ranges::all_of(std::span{*sample_payload}.subspan(0x43U, 7U),
+                                    [](std::byte value) { return value == std::byte{}; }));
+    EXPECT_TRUE(std::ranges::all_of(std::span{*sample_payload}.subspan(0x4aU, 0x22U),
+                                    [](std::byte value) { return value == std::byte{}; }));
+    EXPECT_TRUE(std::ranges::equal(std::span{*sample_payload}.subspan(0x6cU, 3U),
+                                   std::span{*sample_payload}.subspan(0x78U, 3U)));
+    EXPECT_TRUE(std::ranges::all_of(std::span{*sample_payload}.subspan(0x6fU, 9U),
+                                    [](std::byte value) { return value == std::byte{}; }));
+    EXPECT_EQ(read_be32(*sample_payload, 0x98U), 0U);
+    EXPECT_EQ(read_be32(*sample_payload, 0x9cU), 0U);
     const auto decoded_sample = axk::decode_object(*sample_payload);
     ASSERT_TRUE(decoded_sample) << decoded_sample.error().message;
     const auto *sbnk = std::get_if<axk::CurrentSbnk>(&decoded_sample->payload);
     ASSERT_NE(sbnk, nullptr);
+    EXPECT_TRUE(sbnk->common.transient_name_hash_alias_matches);
+    EXPECT_TRUE(sbnk->common.body_prefix_alias_matches);
     EXPECT_EQ(sbnk->left.root_key, 64U);
     EXPECT_EQ(sbnk->left.fine_tune_cents, 25);
     EXPECT_EQ(sbnk->key_range_low, 24U);
@@ -432,6 +451,8 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
     EXPECT_EQ(sbnk->left.wave_length_frames, 400U);
     EXPECT_EQ(sbnk->left.loop_start_frame, 17U);
     EXPECT_EQ(sbnk->left.loop_length_frames, 335U);
+    EXPECT_EQ(read_be32(*sample_payload, 0x15cU), 400U);
+    EXPECT_EQ(read_be32(*sample_payload, 0x160U), 352U);
 }
 
 TEST(AudioImport, SerializesWaveDataReferenceValuesWithoutAnInventedBase) {
@@ -636,6 +657,11 @@ TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUni
     const auto *sample_bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
     ASSERT_NE(sample_bank, nullptr);
     ASSERT_EQ(sample_bank->slots.size(), 127U);
+    EXPECT_EQ(sample_bank->stored_member_count, 127U);
+    EXPECT_EQ(sample_bank->effective_member_count, 127U);
+    EXPECT_EQ(sample_bank->pending_parameter_propagation_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
+    EXPECT_TRUE(std::ranges::all_of(
+        sample_bank->slots, [](const auto &slot) { return slot.active && slot.transient_member_pointer == 0U; }));
     EXPECT_EQ(sample_bank->slots.front().name, "Sample 1");
     EXPECT_EQ(sample_bank->slots.back().name, "Sample 127");
 
