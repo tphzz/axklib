@@ -172,6 +172,40 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
     return report;
 }
 
+Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
+                                               const UpdateSampleParametersOperation &operation,
+                                               const CancellationToken &cancellation) {
+    auto partition_index = resolve_partition(state, operation.partition);
+    if (!partition_index)
+        return std::unexpected{partition_index.error()};
+    const auto found = state.partitions.find(partition_index->value);
+    if (found == state.partitions.end())
+        return std::unexpected{transaction_error("partition index does not exist")};
+    auto &partition = found->second;
+    auto located =
+        category_object(state, partition, operation.volume_name, "SBNK", operation.sample_name, "SBNK", cancellation);
+    if (!located)
+        return std::unexpected{located.error()};
+    auto payload = current_payload(state, partition, located->second, cancellation);
+    if (!payload)
+        return std::unexpected{payload.error()};
+    if (auto updated = detail::apply_sample_parameters_to_payload(*payload, operation.parameters); !updated)
+        return std::unexpected{updated.error()};
+    if (auto replaced =
+            replace_fixed_object_payload(state, partition, located->second, std::move(*payload), cancellation);
+        !replaced) {
+        return std::unexpected{replaced.error()};
+    }
+
+    OperationReport report;
+    report.id = context.id;
+    report.type = context.type;
+    report.partition = *partition_index;
+    report.volume_name = operation.volume_name;
+    report.object_name = operation.sample_name;
+    return report;
+}
+
 Result<OperationReport> insert_waveform_audio(TransactionState &state, OperationContext context,
                                               const InsertWaveformOperation &operation, const ImportedAudio &audio,
                                               const CancellationToken &cancellation) {

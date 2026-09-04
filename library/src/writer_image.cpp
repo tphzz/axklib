@@ -194,8 +194,11 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                             member, *sample_bank->second->parameter_overrides);
                     }
                     if (member.waveform_id != direct->second->waveform_id ||
-                        member.root_key != direct->second->root_key || member.key_low != direct->second->key_low ||
-                        member.key_high != direct->second->key_high || member.level != direct->second->level) {
+                        member.parameters.root_key.value_or(60U) != direct->second->parameters.root_key.value_or(60U) ||
+                        member.parameters.key_low.value_or(0U) != direct->second->parameters.key_low.value_or(0U) ||
+                        member.parameters.key_high.value_or(127U) !=
+                            direct->second->parameters.key_high.value_or(127U) ||
+                        member.parameters.level.value_or(100U) != direct->second->parameters.level.value_or(100U)) {
                         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                                           "one-member Sample Bank and direct Sample control "
                                                           "parameters must match")};
@@ -246,7 +249,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), reference_value});
         }
         std::map<std::string, std::pair<std::string, std::string>> generated_members;
-        std::map<std::string, const SampleBankParameterOverrides *> bank_parameter_overrides;
+        std::map<std::string, const SampleParameters *> bank_parameter_overrides;
         for (const auto &sample_bank : volume.sample_banks) {
             for (const auto &member : sample_bank.member_samples) {
                 if (!bank_parameter_overrides
@@ -257,7 +260,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 }
             }
         }
-        std::map<std::string, std::vector<std::uint8_t>> linked_programs;
+        std::map<std::string, std::vector<std::uint8_t>> linked_sample_programs;
+        std::map<std::string, std::vector<std::uint8_t>> linked_sample_bank_programs;
         for (const auto &program : volume.programs) {
             if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
                 program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
@@ -268,7 +272,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                                                   "Program profile requires SBAC channel 1 then SBNK channel "
                                                   "2")};
             }
-            linked_programs[program.assignments[1].target_name].push_back(program.number);
+            linked_sample_bank_programs[program.assignments[0].target_name].push_back(program.number);
+            linked_sample_programs[program.assignments[1].target_name].push_back(program.number);
         }
         std::map<std::string, SampleSpec> samples;
         for (const auto &sample : volume.samples) {
@@ -294,8 +299,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return audio;
             };
             const auto add_member = [&](std::string key, std::string name, std::size_t channel) -> Result<void> {
-                WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path, sample.root_key,
-                                  sample.target_sample_rate};
+                WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path,
+                                  sample.parameters.root_key.value_or(60U), sample.target_sample_rate};
                 const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
                 auto payload = detail::prepare_smpl_payload(spec, audio, reference_value, volume.name);
@@ -347,9 +352,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             const auto bank = bank_parameter_overrides.find(sample.name);
             if (bank != bank_parameter_overrides.end() && bank->second != nullptr)
                 effective_sample = detail::apply_sample_bank_parameter_overrides(sample, *bank->second);
-            auto payload =
-                detail::prepare_sbnk_payload(effective_sample, left_member, right_member,
-                                             bank != bank_parameter_overrides.end(), linked_programs[sample.name]);
+            auto payload = detail::prepare_sbnk_payload(effective_sample, left_member, right_member,
+                                                        bank != bank_parameter_overrides.end(),
+                                                        linked_sample_programs[sample.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
@@ -358,7 +363,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             samples.emplace(sample.name, std::move(effective_sample));
         }
         for (const auto &sample_bank : volume.sample_banks) {
-            auto payload = detail::prepare_sbac_payload(sample_bank, samples);
+            auto payload =
+                detail::prepare_sbac_payload(sample_bank, samples, linked_sample_bank_programs[sample_bank.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;

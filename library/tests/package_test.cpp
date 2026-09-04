@@ -114,14 +114,14 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     axk::SampleSpec banked;
     banked.name = "Grouped Sample";
     banked.waveform_id = "wave";
-    banked.root_key = 60U;
-    banked.key_high = 127U;
+    banked.parameters.root_key = 60U;
+    banked.parameters.key_high = 127U;
     volume.samples.push_back(std::move(banked));
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
@@ -136,8 +136,8 @@ axk::VolumeSpec single_sample_volume(const std::filesystem::path &audio_path, st
     axk::SampleSpec sample;
     sample.name = std::move(sample_name);
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     return volume;
 }
@@ -1082,14 +1082,14 @@ TEST(PortablePackage, RejectsAmbiguousExactProgramTargetEvenForVolume) {
     axk::SampleSpec other_member;
     other_member.name = "Other Member";
     other_member.waveform_id = "wave";
-    other_member.root_key = 60U;
-    other_member.key_high = 127U;
+    other_member.parameters.root_key = 60U;
+    other_member.parameters.key_high = 127U;
     volume.samples.push_back(std::move(other_member));
     axk::SampleSpec other_direct;
     other_direct.name = "Other Direct";
     other_direct.waveform_id = "wave";
-    other_direct.root_key = 60U;
-    other_direct.key_high = 127U;
+    other_direct.parameters.root_key = 60U;
+    other_direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(other_direct));
     volume.sample_banks.push_back({"Other Bank", {"Other Member"}});
     volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Other Bank", 1U}, {"SBNK", "Other Direct", 2U}}});
@@ -1261,14 +1261,14 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     axk::SampleSpec banked_two;
     banked_two.name = "Grouped Sample 2";
     banked_two.waveform_id = "wave2";
-    banked_two.root_key = 60U;
-    banked_two.key_high = 127U;
+    banked_two.parameters.root_key = 60U;
+    banked_two.parameters.key_high = 127U;
     authored_volume.samples.push_back(std::move(banked_two));
     axk::SampleSpec direct_two;
     direct_two.name = "Direct Sample 2";
     direct_two.waveform_id = "wave2";
-    direct_two.root_key = 60U;
-    direct_two.key_high = 127U;
+    direct_two.parameters.root_key = 60U;
+    direct_two.parameters.key_high = 127U;
     authored_volume.samples.push_back(std::move(direct_two));
     authored_volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     authored_volume.programs.push_back(
@@ -1636,15 +1636,15 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
         axk::SampleSpec sample;
         sample.name = name;
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         volume.samples.push_back(std::move(sample));
     }
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Ordered Bank", {"Z Sample", "A Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Ordered Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
@@ -3526,8 +3526,8 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     sample.name = "Stereo Sample";
     sample.waveform_id = "left";
     sample.right_waveform_id = "right";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});

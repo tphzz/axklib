@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/file_publication.hpp"
+#include "axklib/sample_parameter_json.hpp"
 #include "axklib/sfs.hpp"
 
 namespace axk {
@@ -143,11 +144,9 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
 }
 
 Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"name", "root_key", "key_low", "key_high"},
-                            {"level", "waveform_id", "right_waveform_id", "interleaved_audio_path",
-                             "left_waveform_name", "right_waveform_name", "target_sample_rate", "fine_tune_cents",
-                             "velocity_low", "velocity_high", "expand_detune", "expand_dephase", "expand_width",
-                             "loop_mode", "loop_start_frame", "loop_length_frames"});
+    if (auto valid = fields(value, context, {"name"},
+                            {"waveform_id", "right_waveform_id", "interleaved_audio_path", "left_waveform_name",
+                             "right_waveform_name", "target_sample_rate", "parameters"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -159,34 +158,10 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
         return std::unexpected{manifest_error(context + " has an invalid audio source field combination")};
     }
     auto name = text(value["name"], context + ".name");
-    auto root = integer(value["root_key"], context + ".root_key", 0, 127);
-    auto low = integer(value["key_low"], context + ".key_low", 0, sampler_original_key_low_limit);
-    auto high = integer(value["key_high"], context + ".key_high", 0, sampler_original_key_high_limit);
     if (!name)
         return std::unexpected{name.error()};
-    if (!root)
-        return std::unexpected{root.error()};
-    if (!low)
-        return std::unexpected{low.error()};
-    if (!high)
-        return std::unexpected{high.error()};
-    if (*low > 127U && *low != sampler_original_key_low_limit)
-        return std::unexpected{manifest_error(context + ".key_low is outside its supported range")};
-    const auto effective_low = *low == sampler_original_key_low_limit ? *root : *low;
-    const auto effective_high = *high == sampler_original_key_high_limit ? *root : *high;
-    if (effective_high < effective_low)
-        return std::unexpected{manifest_error(context + ".key_high precedes key_low")};
     SampleSpec result;
     result.name = *name;
-    result.root_key = static_cast<std::uint8_t>(*root);
-    result.key_low = static_cast<std::uint8_t>(*low);
-    result.key_high = static_cast<std::uint8_t>(*high);
-    if (value.contains("level")) {
-        auto level = integer(value["level"], context + ".level", 0, 127);
-        if (!level)
-            return std::unexpected{level.error()};
-        result.level = static_cast<std::uint8_t>(*level);
-    }
     const auto optional_text = [&](std::string_view field) -> Result<std::optional<std::string>> {
         if (!value.contains(field))
             return std::optional<std::string>{};
@@ -224,113 +199,23 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
     }
-    if (value.contains("fine_tune_cents")) {
-        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
-        if (!fine)
-            return std::unexpected{fine.error()};
-        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
-    }
-    for (const auto field : {std::string_view{"velocity_low"}, std::string_view{"velocity_high"}}) {
-        if (!value.contains(field))
-            continue;
-        auto velocity = integer(value[field], context + "." + std::string{field}, 0, 127);
-        if (!velocity)
-            return std::unexpected{velocity.error()};
-        (field == "velocity_low" ? result.velocity_low : result.velocity_high) = static_cast<std::uint8_t>(*velocity);
-    }
-    for (const auto field :
-         {std::string_view{"expand_detune"}, std::string_view{"expand_dephase"}, std::string_view{"expand_width"}}) {
-        if (!value.contains(field))
-            continue;
-        const auto limit = field == "expand_detune" ? 7 : 63;
-        auto parsed = signed_integer(value[field], context + "." + std::string{field}, -limit, limit);
-        if (!parsed)
-            return std::unexpected{parsed.error()};
-        auto &target = field == "expand_detune"    ? result.expand_detune
-                       : field == "expand_dephase" ? result.expand_dephase
-                                                   : result.expand_width;
-        target = static_cast<std::int8_t>(*parsed);
-    }
-    if (value.contains("loop_mode")) {
-        auto mode = integer(value["loop_mode"], context + ".loop_mode", 0, 5);
-        if (!mode)
-            return std::unexpected{mode.error()};
-        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
-    }
-    if (value.contains("loop_start_frame")) {
-        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
-                             std::numeric_limits<std::uint32_t>::max());
-        if (!start)
-            return std::unexpected{start.error()};
-        result.loop_start_frame = static_cast<std::uint32_t>(*start);
-    }
-    if (value.contains("loop_length_frames")) {
-        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
-                              std::numeric_limits<std::uint32_t>::max());
-        if (!length)
-            return std::unexpected{length.error()};
-        result.loop_length_frames = static_cast<std::uint32_t>(*length);
+    if (value.contains("parameters")) {
+        auto parameters = detail::parse_sample_parameters_json(value["parameters"], context + ".parameters", false,
+                                                               ErrorCode::manifest_invalid, ErrorCategory::manifest);
+        if (!parameters)
+            return std::unexpected{parameters.error()};
+        result.parameters = std::move(*parameters);
     }
     if ((result.right_waveform_id || result.interleaved_audio_path) &&
-        (result.expand_detune != 0 || result.expand_dephase != 0)) {
+        (result.parameters.expand_detune.value_or(0) != 0 || result.parameters.expand_dephase.value_or(0) != 0)) {
         return std::unexpected{manifest_error(context + " stereo Sample cannot use expanded-mono controls")};
     }
     return result;
 }
 
-Result<SampleBankParameterOverrides> sample_bank_parameter_overrides(const Json &value, const std::string &context) {
-    if (auto valid = fields(value, context, {},
-                            {"root_key", "key_low", "key_high", "level", "fine_tune_cents", "velocity_low",
-                             "velocity_high", "expand_detune", "expand_dephase", "expand_width"});
-        !valid) {
-        return std::unexpected{valid.error()};
-    }
-    if (value.empty())
-        return std::unexpected{manifest_error(context + " must contain at least one override")};
-    SampleBankParameterOverrides result;
-    const auto unsigned_field = [&](std::string_view field, std::uint64_t maximum,
-                                    std::optional<std::uint8_t> &target) -> Result<void> {
-        if (!value.contains(field))
-            return {};
-        auto parsed = integer(value[field], context + "." + std::string{field}, 0, maximum);
-        if (!parsed)
-            return std::unexpected{parsed.error()};
-        target = static_cast<std::uint8_t>(*parsed);
-        return {};
-    };
-    if (auto parsed = unsigned_field("root_key", 127, result.root_key); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("key_low", sampler_original_key_low_limit, result.key_low); !parsed)
-        return std::unexpected{parsed.error()};
-    if (result.key_low && *result.key_low > 127U && *result.key_low != sampler_original_key_low_limit)
-        return std::unexpected{manifest_error(context + ".key_low must be 0..127 or 255 (=Orig)")};
-    if (auto parsed = unsigned_field("key_high", sampler_original_key_high_limit, result.key_high); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("level", 127, result.level); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("velocity_low", 127, result.velocity_low); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("velocity_high", 127, result.velocity_high); !parsed)
-        return std::unexpected{parsed.error()};
-    const auto signed_field = [&](std::string_view field, int limit,
-                                  std::optional<std::int8_t> &target) -> Result<void> {
-        if (!value.contains(field))
-            return {};
-        auto parsed = signed_integer(value[field], context + "." + std::string{field}, -limit, limit);
-        if (!parsed)
-            return std::unexpected{parsed.error()};
-        target = static_cast<std::int8_t>(*parsed);
-        return {};
-    };
-    if (auto parsed = signed_field("fine_tune_cents", 63, result.fine_tune_cents); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_detune", 7, result.expand_detune); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_dephase", 63, result.expand_dephase); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_width", 63, result.expand_width); !parsed)
-        return std::unexpected{parsed.error()};
-    return result;
+Result<SampleParameters> sample_bank_parameter_overrides(const Json &value, const std::string &context) {
+    return detail::parse_sample_parameters_json(value, context, true, ErrorCode::manifest_invalid,
+                                                ErrorCategory::manifest);
 }
 
 Result<VolumeSpec> volume(const Json &value, std::string context, const std::filesystem::path &base) {

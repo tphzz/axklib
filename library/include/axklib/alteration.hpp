@@ -57,6 +57,13 @@ struct InsertSampleOperation {
     SampleSpec sample;
 };
 
+struct UpdateSampleParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    SampleParameters parameters;
+};
+
 struct InsertWaveformOperation {
     PartitionSelector partition;
     std::string volume_name;
@@ -187,12 +194,12 @@ struct ImportTx16wDiskSetOperation {
 
 using AlterationOperationData =
     std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
-                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
-                 DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
-                 RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
-                 DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
-                 RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
-                 ClearProgramAssignmentsOperation>;
+                 UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation,
+                 RenameWaveformOperation, RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
+                 AssignSampleBankMembersOperation, RenameSampleBankOperation, DeleteProgramOperation,
+                 InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation, InsertSequenceOperation,
+                 RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
+                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation>;
 
 struct AlterationOperation {
     std::string id;

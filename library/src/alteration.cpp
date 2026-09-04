@@ -65,6 +65,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return delete_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertSampleOperation>)
                     return insert_sbnk(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateSampleParametersOperation>)
+                    return update_sbnk_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertWaveformOperation>)
                     return insert_waveform(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DeleteWaveformOperation>)

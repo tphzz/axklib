@@ -124,6 +124,9 @@ Result<void> replace_fixed_object_payload(TransactionState &state, MutablePartit
 Result<bool> sbnk_program_bit(std::span<const std::byte> payload, std::uint8_t program);
 Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
                                   bool enabled, const CancellationToken &cancellation);
+Result<bool> sbac_program_bit(std::span<const std::byte> payload, std::uint8_t program);
+Result<void> set_sbac_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
+                                  bool enabled, const CancellationToken &cancellation);
 Result<void> set_sbnk_sample_bank_flag(TransactionState &state, MutablePartition &partition, SfsId id, bool enabled,
                                        const CancellationToken &cancellation);
 Result<void> remove_directory_entry(TransactionState &state, MutablePartition &partition, SfsId directory, SfsId child,
@@ -176,6 +179,9 @@ Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext co
                                     const DeleteSampleOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,
                                     const InsertSampleOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
+                                               const UpdateSampleParametersOperation &operation,
+                                               const CancellationToken &cancellation);
 Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
                                         const InsertWaveformOperation &operation,
                                         const CancellationToken &cancellation);

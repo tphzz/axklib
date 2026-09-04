@@ -88,8 +88,8 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     axk::SampleSpec sample;
     sample.name = "Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(sample);
     sample.name = "Direct";
     volume.samples.push_back(sample);
@@ -125,15 +125,15 @@ void write_selected_wav_source(const std::filesystem::path &path) {
     axk::SampleSpec mono;
     mono.name = "Mono Sample";
     mono.waveform_id = "mono";
-    mono.root_key = 60U;
-    mono.key_high = 127U;
+    mono.parameters.root_key = 60U;
+    mono.parameters.key_high = 127U;
     volume.samples.push_back(std::move(mono));
     axk::SampleSpec stereo;
     stereo.name = "Stereo Sample";
     stereo.waveform_id = "left";
     stereo.right_waveform_id = "right";
-    stereo.root_key = 60U;
-    stereo.key_high = 127U;
+    stereo.parameters.root_key = 60U;
+    stereo.parameters.key_high = 127U;
     volume.samples.push_back(std::move(stereo));
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
@@ -188,8 +188,8 @@ void write_batch_volume_source(const std::filesystem::path &path) {
         axk::SampleSpec sample;
         sample.name = std::move(sample_name);
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         result.samples.push_back(std::move(sample));
         return result;
     };
@@ -219,8 +219,8 @@ void write_audio_source_with_orphan_wave_data(const std::filesystem::path &path)
     axk::SampleSpec sample;
     sample.name = "Linked Sample";
     sample.waveform_id = "linked-wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
 
     const axk::HdsBuildManifest manifest{"1.0", 2U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};

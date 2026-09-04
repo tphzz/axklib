@@ -25,12 +25,12 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     axk::SampleSpec sample;
     sample.name = "Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
+    sample.parameters.root_key = 60U;
     volume.samples.push_back(std::move(sample));
     axk::SampleSpec direct_sample;
     direct_sample.name = "Direct Sample";
     direct_sample.waveform_id = "wave";
-    direct_sample.root_key = 60U;
+    direct_sample.parameters.root_key = 60U;
     volume.samples.push_back(std::move(direct_sample));
     volume.sample_banks.push_back({"Sample Bank", {"Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Sample Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});

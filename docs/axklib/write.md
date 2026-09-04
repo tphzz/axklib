@@ -160,10 +160,12 @@ Wave Data object (`SMPL`) and one Sample (`SBNK`) that references it:
     {
       "name": "Tone Sample",
       "waveform_id": "tone",
-      "root_key": 60,
-      "key_low": 0,
-      "key_high": 127,
-      "level": 100
+      "parameters": {
+        "root_key": 60,
+        "key_low": 0,
+        "key_high": 127,
+        "level": 100
+      }
     }
   ]
 }
@@ -301,10 +303,12 @@ Place `tone.wav` next to `cdrom.json` and write:
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
-        "root_key": 60,
-        "key_low": 60,
-        "key_high": 60,
-        "level": 100
+        "parameters": {
+          "root_key": 60,
+          "key_low": 60,
+          "key_high": 60,
+          "level": 100
+        }
       }
     ]
   }
@@ -361,10 +365,12 @@ Place `tone.wav` next to `floppy.json` and write:
       {
         "name": "Authored Tone",
         "waveform_id": "tone",
-        "root_key": 60,
-        "key_low": 60,
-        "key_high": 60,
-        "level": 100
+        "parameters": {
+          "root_key": 60,
+          "key_low": 60,
+          "key_high": 60,
+          "level": 100
+        }
       }
     ]
   }
@@ -630,20 +636,12 @@ Direct and stereo Sample fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required unique ASCII `SBNK` name, at most 16 bytes. |
-| `root_key` | Required MIDI note `0..127`. |
-| `key_low`, `key_high` | Required MIDI limits. Concrete limits are `0..127`; `key_low = 255` and `key_high = 128` encode the sampler's `=Orig` setting and resolve to `root_key` for range validation. The effective high limit must not precede the effective low limit. |
-| `level` | Optional `0..127`; default `100`. |
-| `fine_tune_cents` | Optional signed fine tune `-63..63`; default `0`. |
-| `velocity_low`, `velocity_high` | Optional MIDI limits `0..127`; defaults `0` and `127`, and high must not precede low. |
-| `expand_detune` | Optional signed expanded-mono detune `-7..7`; default `0`. Nonzero detune or dephase selects expanded-mono topology and requires a single Wave Data source. |
-| `expand_dephase`, `expand_width` | Optional signed expanded-mono values `-63..63`; defaults `0` and `63`. Nonzero dephase requires a single Wave Data source. |
-| `loop_mode` | Optional A-series mode `0..5`: `-->`, `->0`, `->0->`, `<--`, `One->`, or `One<-`; default `4` (`One->`). |
-| `loop_start_frame`, `loop_length_frames` | Optional Sample loop window within the linked Wave Data span. Repeating modes `1` and `2` require a non-empty contained range. The other modes accept zero values for the complete span or an explicit contained range. Fresh Samples retain the complete linked Wave Data as their playback window. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
 | `left_waveform_name`, `right_waveform_name` | Optional names for generated interleaved members. |
 | `target_sample_rate` | Optional conversion target for interleaved input. |
+| `parameters` | Optional shared typed [Sample parameter object](sample-parameters.md). Omitted fields receive fresh canonical defaults. |
 
 Direct stereo members must have equal sample rate and logical frame count.
 Interleaved input is split into two physical mono objects and inherently meets
@@ -655,11 +653,13 @@ Sample Bank fields:
 | --- | --- |
 | `name` | Required unique ASCII `SBAC` name, at most 16 bytes. |
 | `member_samples` | Required array of 1..127 distinct existing Sample names. A Sample can belong to only one authored Sample Bank. |
-| `parameter_overrides` | Optional non-empty object applied to every member Sample and stored as the Sample Bank's current parameter state. Supported fields are `root_key`, `key_low`, `key_high`, `level`, `fine_tune_cents`, `velocity_low`, `velocity_high`, `expand_detune`, `expand_dephase`, and `expand_width`, with the same ranges and topology rules as Sample fields. |
+| `parameter_overrides` | Optional non-empty [Sample parameter object](sample-parameters.md), applied atomically to every member Sample and stored as the Sample Bank's current parameter state. |
 
 Fresh Sample Banks use the canonical current parameter defaults. Semantic
 overrides are applied immediately to the member Samples, so the three pending
-propagation bitmaps remain clear. Raw pending-state authoring is not exposed.
+propagation bitmaps remain clear. Their linked-Program bitmaps are derived from
+the authored Program assignments. Raw pending or relationship-bitmap authoring
+is not exposed.
 
 The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
 contains 1..127 mono or stereo Samples. Each Program has exactly two ordered
@@ -731,6 +731,7 @@ Supported operation types:
 | `rename_waveform` | `volume_name`, `waveform_name`, `new_waveform_name` |
 | `delete_sbnk` | `volume_name`, `sample_name` |
 | `insert_sbnk` | `volume_name`, `sample` |
+| `update_sbnk_parameters` | `volume_name`, `sample_name`, non-empty `parameters` |
 | `rename_sbnk` | `volume_name`, `sample_name`, `new_sample_name` |
 | `delete_sbac` | `volume_name`, `sample_bank_name` |
 | `insert_sbac` | `volume_name`, `sample_bank` |
@@ -746,12 +747,16 @@ An `insert_waveform` audio object contains `path`, one or two distinct
 `loop_length_frames`. Relative audio paths resolve from the alteration manifest
 directory.
 
-An `insert_sbnk` object contains `name`, `waveform_name`, `root_key`, `key_low`,
-and `key_high`. Optional fields are `right_waveform_name`, `level`,
-`fine_tune_cents`, `velocity_low`, `velocity_high`, `expand_detune`,
-`expand_dephase`, `expand_width`, `loop_mode`, `loop_start_frame`, and
-`loop_length_frames`. The named Wave Data entries in
-the evolving transaction must already exist at that point.
+An `insert_sbnk` object contains `name` and `waveform_name`, with optional
+`right_waveform_name` and `parameters`. The latter uses the shared
+[Sample parameter contract](sample-parameters.md). The named Wave Data entries
+in the evolving transaction must already exist at that point.
+
+`update_sbnk_parameters` changes an existing Sample with the same non-empty,
+partial `parameters` object. Unspecified parameters and all unrelated opaque
+bytes are preserved. Derived pitch, loop, topology, and Program-portamento
+caches are recomputed when their source fields change. The complete operation
+is transactional.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
 one to 127 distinct existing Sample names. It may also contain the same
@@ -787,6 +792,11 @@ and one supported assignment profile:
   `sample_bank` on `receive_channel` 1 (`A01`) followed by a direct `sample` on
   `receive_channel` 2 (`A02`). This is the full-image authored Program profile.
   The current writer profile does not claim `Bch` or B-channel authoring.
+
+Program insertion and deletion update the target Sample or Sample Bank's
+linked-Program bitmap atomically with the Program directory/object change. A
+pre-existing bitmap disagreement rejects the transaction instead of silently
+normalizing unrelated relationship state.
 
 Program generation is deliberately conservative. It only offers unreferenced
 Sample Banks whose complete same-volume membership is known, then unreferenced

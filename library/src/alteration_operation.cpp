@@ -10,6 +10,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"insert_volume"},
         std::string_view{"delete_sbnk"},
         std::string_view{"insert_sbnk"},
+        std::string_view{"update_sbnk_parameters"},
         std::string_view{"insert_waveform"},
         std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"},

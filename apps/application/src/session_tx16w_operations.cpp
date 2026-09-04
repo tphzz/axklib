@@ -190,9 +190,9 @@ Json plan_json(const axk::tx16w::Inspection &inspection, const axk::tx16w::a_ser
     for (const auto &item : plan.samples) {
         samples.push_back({{"name", item.name},
                            {"waveDataName", item.waveform_id.value_or("")},
-                           {"rootKey", item.root_key},
-                           {"keyLow", item.key_low},
-                           {"keyHigh", item.key_high}});
+                           {"rootKey", item.parameters.root_key.value_or(60U)},
+                           {"keyLow", item.parameters.key_low.value_or(0U)},
+                           {"keyHigh", item.parameters.key_high.value_or(127U)}});
     }
     Json sample_banks = Json::array();
     for (const auto &item : plan.sample_banks)

@@ -90,8 +90,18 @@ void write_program_iso(const std::filesystem::path &root) {
     axk::VolumeSpec volume;
     volume.name = "Graph Volume";
     volume.waveforms.push_back({"wave", "Graph Wave", audio_path, 60U, {}});
-    volume.samples.push_back({"Banked Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
-    volume.samples.push_back({"Direct Sample", "wave", {}, {}, {}, {}, {}, 60U, 0U, 127U, 127U});
+    axk::SampleSpec banked;
+    banked.name = "Banked Sample";
+    banked.waveform_id = "wave";
+    banked.parameters.root_key = 60U;
+    banked.parameters.key_high = 127U;
+    volume.samples.push_back(std::move(banked));
+    axk::SampleSpec direct;
+    direct.name = "Direct Sample";
+    direct.waveform_id = "wave";
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
+    volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Banked Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
 

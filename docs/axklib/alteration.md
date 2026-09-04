@@ -10,7 +10,7 @@ Supported operations are:
 - rename partition;
 - insert, delete, and rename volume;
 - insert, delete, and rename waveform;
-- insert, delete, and rename Sample (`SBNK`);
+- insert, delete, rename, and update parameters on a Sample (`SBNK`);
 - insert, delete, and rename Sample Bank (`SBAC`);
 - assign selected Samples to an existing Sample Bank (`SBAC`);
 - insert, delete, and rename Program.
@@ -36,6 +36,14 @@ a shared or inconsistent membership, a final count above 127, or target payload
 growth beyond the bank's currently allocated record extents rejects the complete
 transaction without changing the image. Appending rows consumes existing slot
 padding first and preserves the target record's opaque suffix bytes.
+
+`update_sbnk_parameters` applies a non-empty partial
+[`SampleParameters`](sample-parameters.md) object to one existing Sample.
+Fields omitted from the update and unrelated opaque bytes are preserved. The
+same validator and byte encoder are used for fresh Samples and existing-object
+updates; derived caches are recomputed from changed source values. Sample Bank
+`parameter_overrides` uses this model too, prepares every member update before
+mutation, and leaves the bank's pending-propagation bits clear.
 
 ## Object deletion planning
 

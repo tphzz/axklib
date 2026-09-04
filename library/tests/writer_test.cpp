@@ -34,9 +34,10 @@ constexpr std::string_view manifest = R"json({
       "name":"V1",
       "waveforms":[{"id":"tone","name":"Tone","path":"audio/tone.wav","root_key":60,
                     "fine_tune_cents":-17,"loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}],
-      "samples":[{"name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":12,"key_high":96,
-                  "fine_tune_cents":-17,"velocity_low":8,"velocity_high":110,
-                  "loop_mode":1,"loop_start_frame":4,"loop_length_frames":80}]
+      "samples":[{"name":"Tone Sample","waveform_id":"tone","parameters":{
+                  "root_key":60,"key_low":12,"key_high":96,"fine_tune_cents":-17,
+                  "velocity_low":8,"velocity_high":110,"loop_mode":1,
+                  "loop_start_frame":4,"loop_length_frames":80}}]
     }]
   }]
 })json";
@@ -49,17 +50,17 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     axk::SampleSpec banked;
     banked.name = "Grouped Sample";
     banked.waveform_id = "wave";
-    banked.root_key = 60U;
-    banked.key_low = 0U;
-    banked.key_high = 127U;
+    banked.parameters.root_key = 60U;
+    banked.parameters.key_low = 0U;
+    banked.parameters.key_high = 127U;
     volume.samples.push_back(std::move(banked));
 
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_low = 0U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_low = 0U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
@@ -87,10 +88,10 @@ TEST(HdsManifest, ParsesStrictSchemaAndResolvesRelativeAudioPaths) {
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].path, "/project/audio/tone.wav");
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].fine_tune_cents, -17);
     EXPECT_EQ(parsed->partitions[0].volumes[0].waveforms[0].loop_start_frame, 4U);
-    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].level, 100U);
-    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_low, 8U);
-    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].velocity_high, 110U);
-    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].loop_length_frames, 80U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].parameters.level.value_or(100U), 100U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].parameters.velocity_low, 8U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].parameters.velocity_high, 110U);
+    EXPECT_EQ(parsed->partitions[0].volumes[0].samples[0].parameters.loop_length_frames, 80U);
     const axk::detail::PreparedWaveformMember member{"Tone", 0x100U, 44'100U, 100U};
     const auto parsed_payload = axk::detail::prepare_sbnk_payload(parsed->partitions[0].volumes[0].samples[0], member);
     ASSERT_TRUE(parsed_payload) << parsed_payload.error().message;
@@ -112,9 +113,10 @@ TEST(HdsManifest, ParsesExpandedMonoAllLoopModesAndOriginalKeyLimits) {
     constexpr std::string_view expanded = R"json({
       "schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"P1","volumes":[{
         "name":"V1","waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
-        "samples":[{"name":"Expanded","waveform_id":"wave","root_key":60,"key_low":255,"key_high":128,
-                    "expand_detune":-5,"expand_dephase":27,"expand_width":-41,
-                    "loop_mode":5,"loop_start_frame":17,"loop_length_frames":80}]
+        "samples":[{"name":"Expanded","waveform_id":"wave","parameters":{
+                    "root_key":60,"key_low":255,"key_high":128,"expand_detune":-5,
+                    "expand_dephase":27,"expand_width":-41,"loop_mode":5,
+                    "loop_start_frame":17,"loop_length_frames":80}}]
       }]}]
     })json";
 
@@ -122,12 +124,12 @@ TEST(HdsManifest, ParsesExpandedMonoAllLoopModesAndOriginalKeyLimits) {
 
     ASSERT_TRUE(parsed) << parsed.error().message;
     const auto &sample = parsed->partitions[0].volumes[0].samples[0];
-    EXPECT_EQ(sample.key_low, axk::sampler_original_key_low_limit);
-    EXPECT_EQ(sample.key_high, axk::sampler_original_key_high_limit);
-    EXPECT_EQ(sample.expand_detune, -5);
-    EXPECT_EQ(sample.expand_dephase, 27);
-    EXPECT_EQ(sample.expand_width, -41);
-    EXPECT_EQ(sample.loop_mode, axk::AudioSamplerLoopMode::reverse_one_shot);
+    EXPECT_EQ(sample.parameters.key_low, axk::sampler_original_key_low_limit);
+    EXPECT_EQ(sample.parameters.key_high, axk::sampler_original_key_high_limit);
+    EXPECT_EQ(sample.parameters.expand_detune, -5);
+    EXPECT_EQ(sample.parameters.expand_dephase, 27);
+    EXPECT_EQ(sample.parameters.expand_width, -41);
+    EXPECT_EQ(sample.parameters.loop_mode, axk::AudioSamplerLoopMode::reverse_one_shot);
 }
 
 TEST(HdsManifest, ParsesSemanticSampleBankParameterOverrides) {
@@ -135,10 +137,11 @@ TEST(HdsManifest, ParsesSemanticSampleBankParameterOverrides) {
       "schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"P1","volumes":[{
         "name":"V1","waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":64}],
         "samples":[
-          {"name":"Banked","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127},
-          {"name":"Direct","waveform_id":"wave","root_key":64,"key_low":255,"key_high":128,
-           "level":87,"fine_tune_cents":-12,"velocity_low":20,"velocity_high":110,
-           "expand_detune":-5,"expand_dephase":27,"expand_width":-41}],
+          {"name":"Banked","waveform_id":"wave","parameters":{"root_key":60,"key_low":0,"key_high":127}},
+          {"name":"Direct","waveform_id":"wave","parameters":{
+           "root_key":64,"key_low":255,"key_high":128,"level":87,"fine_tune_cents":-12,
+           "velocity_low":20,"velocity_high":110,"expand_detune":-5,
+           "expand_dephase":27,"expand_width":-41}}],
         "sample_banks":[{"name":"Bank","member_samples":["Banked"],"parameter_overrides":{
           "root_key":64,"key_low":255,"key_high":128,"level":87,"fine_tune_cents":-12,
           "velocity_low":20,"velocity_high":110,"expand_detune":-5,"expand_dephase":27,"expand_width":-41}}],
@@ -162,13 +165,62 @@ TEST(HdsManifest, ParsesSemanticSampleBankParameterOverrides) {
     EXPECT_EQ(overrides->expand_width, -41);
 }
 
+TEST(HdsManifest, ParsesAllNestedSampleParameterGroupsAndRejectsNonContractFields) {
+    constexpr std::string_view source = R"json({
+      "schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"P1","volumes":[{
+        "name":"V1","waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
+        "samples":[{"name":"Sample","waveform_id":"wave","parameters":{
+          "fixed_pitch":true,"filter_cutoff":91,
+          "feg":{"attack_rate":81,"level_velocity_sensitivity":-23},
+          "peg":{"decay_rate":82,"range":13},
+          "aeg":{"release_rate":83,"attack_mode":2},
+          "lfo":{"speed":88,"pitch_mod_phase_invert":true},
+          "controls":{"6":{"device":126,"function":36,"type":3,"range":-63}},
+          "output2_destination":9,"portamento_rate":37}}]
+      }]}]
+    })json";
+
+    const auto parsed = axk::parse_hds_build_manifest(source);
+
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto &parameters = parsed->partitions[0].volumes[0].samples[0].parameters;
+    EXPECT_EQ(parameters.fixed_pitch, true);
+    EXPECT_EQ(parameters.filter_cutoff, 91U);
+    EXPECT_EQ(parameters.feg.attack_rate, 81U);
+    EXPECT_EQ(parameters.feg.level_velocity_sensitivity, -23);
+    EXPECT_EQ(parameters.peg.decay_rate, 82U);
+    EXPECT_EQ(parameters.peg.range, 13);
+    EXPECT_EQ(parameters.aeg.release_rate, 83U);
+    EXPECT_EQ(parameters.aeg.attack_mode, 2U);
+    EXPECT_EQ(parameters.lfo.speed, 88U);
+    EXPECT_EQ(parameters.lfo.pitch_mod_phase_invert, true);
+    EXPECT_EQ(parameters.controls[5].device, 126U);
+    EXPECT_EQ(parameters.controls[5].function, 36U);
+    EXPECT_EQ(parameters.controls[5].type, 3U);
+    EXPECT_EQ(parameters.controls[5].range, -63);
+    EXPECT_EQ(parameters.output2_destination, 9U);
+    EXPECT_EQ(parameters.portamento_rate, 37U);
+
+    const auto manifest_with_parameters = [](std::string_view parameters) {
+        return std::format(
+            R"json({{"schema_version":"1.0","size_bytes":1048576,"partitions":[{{"name":"P1","volumes":[{{"name":"V1","waveforms":[{{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}}],"samples":[{{"name":"Sample","waveform_id":"wave","parameters":{}}}]}}]}}]}})json",
+            parameters);
+    };
+    for (const auto invalid : {R"json({"feg":{"range":12}})json", R"json({"peg":{"attack_mode":1}})json",
+                               R"json({"aeg":{"init_level":1}})json", R"json({"feg":{}})json",
+                               R"json({"controls":{"1":{}}})json", R"json({"sample_rate":44100})json",
+                               R"json({"wave_start_frame":0})json", R"json({"sample_bank_member":true})json"}) {
+        EXPECT_FALSE(axk::parse_hds_build_manifest(manifest_with_parameters(invalid))) << invalid;
+    }
+}
+
 TEST(HdsManifest, RejectsExpandedMonoBankOverridesForInterleavedStereoMembers) {
     constexpr std::string_view source = R"json({
       "schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"P1","volumes":[{
         "name":"V1","waveforms":[{"id":"direct","name":"Direct Wave","path":"mono.wav","root_key":60}],
         "samples":[
-          {"name":"Stereo","interleaved_audio_path":"stereo.wav","root_key":60,"key_low":0,"key_high":127},
-          {"name":"Direct","waveform_id":"direct","root_key":60,"key_low":0,"key_high":127}],
+          {"name":"Stereo","interleaved_audio_path":"stereo.wav","parameters":{"root_key":60,"key_low":0,"key_high":127}},
+          {"name":"Direct","waveform_id":"direct","parameters":{"root_key":60,"key_low":0,"key_high":127}}],
         "sample_banks":[{"name":"Bank","member_samples":["Stereo"],
                          "parameter_overrides":{"expand_detune":1}}],
         "programs":[{"number":1,"name":"Program","assignments":[
@@ -184,7 +236,7 @@ TEST(HdsManifest, RejectsSampleMembershipInMultipleSampleBanksForJsonAndTypedInp
     constexpr std::string_view source = R"json({
       "schema_version":"1.0","size_bytes":1048576,"partitions":[{"name":"P1","volumes":[{
         "name":"V1","waveforms":[{"id":"wave","name":"Wave","path":"unused.wav","root_key":60}],
-        "samples":[{"name":"Shared","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "samples":[{"name":"Shared","waveform_id":"wave","parameters":{"root_key":60,"key_low":0,"key_high":127}}],
         "sample_banks":[
           {"name":"Bank 1","member_samples":["Shared"]},
           {"name":"Bank 2","member_samples":["Shared"]}],
@@ -277,7 +329,7 @@ TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
       "partitions":[{"name":"P1","volumes":[{
         "name":"V1",
         "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
-        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "samples":[{"name":"Sample","waveform_id":"wave","parameters":{"root_key":60,"key_low":0,"key_high":127}}],
         "sample_banks":[{"name":"Bank","member_sample":"Sample"}]
       }]}]
     })json";
@@ -289,7 +341,7 @@ TEST(HdsManifest, RejectsObsoleteSampleAndSampleBankFields) {
       "partitions":[{"name":"P1","volumes":[{
         "name":"V1",
         "waveforms":[{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}],
-        "samples":[{"name":"Sample","waveform_id":"wave","root_key":60,"key_low":0,"key_high":127}],
+        "samples":[{"name":"Sample","waveform_id":"wave","parameters":{"root_key":60,"key_low":0,"key_high":127}}],
         "sample_banks":[{"name":"Bank","member_samples":["Sample"]}]
       }]}]
     })json";
@@ -311,7 +363,7 @@ TEST(HdsManifest, RejectsUnknownFieldsReferencesAndInvalidGeometry) {
     EXPECT_FALSE(axk::parse_hds_build_manifest(unknown));
 
     auto reference = std::string{manifest};
-    reference.replace(reference.find("\"tone\",\"root_key\"", 200), 19, "\"missing\",\"root_key\"");
+    reference.replace(reference.find("\"waveform_id\":\"tone\""), 20, "\"waveform_id\":\"missing\"");
     EXPECT_FALSE(axk::parse_hds_build_manifest(reference));
 
     auto size = std::string{manifest};
@@ -537,15 +589,15 @@ TEST(AudioImport, SerializesMappedSamplerMetadataIntoWaveDataAndSamplePayloads) 
 
     axk::SampleSpec sample;
     sample.name = "Mapped Sample";
-    sample.root_key = 64U;
-    sample.fine_tune_cents = 25;
-    sample.key_low = 24U;
-    sample.key_high = 96U;
-    sample.velocity_low = 10U;
-    sample.velocity_high = 110U;
-    sample.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
-    sample.loop_start_frame = 17U;
-    sample.loop_length_frames = 335U;
+    sample.parameters.root_key = 64U;
+    sample.parameters.fine_tune_cents = 25;
+    sample.parameters.key_low = 24U;
+    sample.parameters.key_high = 96U;
+    sample.parameters.velocity_low = 10U;
+    sample.parameters.velocity_high = 110U;
+    sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.parameters.loop_start_frame = 17U;
+    sample.parameters.loop_length_frames = 335U;
     const axk::detail::PreparedWaveformMember member{"Mapped Wave", 0x100U, 44'100U, 400U};
     const auto sample_payload = axk::detail::prepare_sbnk_payload(sample, member);
     ASSERT_TRUE(sample_payload) << sample_payload.error().message;
@@ -636,6 +688,89 @@ TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
     EXPECT_EQ(sbnk->left.loop_length_frames, 400U);
 }
 
+TEST(AudioImport, SerializesTheCompleteCanonicalFreshSampleParameterBlock) {
+    axk::SampleSpec sample;
+    sample.name = "Default Sample";
+    const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
+
+    const auto payload = axk::detail::prepare_sbnk_payload(sample, member);
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    std::array<std::byte, 0xe0> expected{};
+    const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
+        expected[offset] = static_cast<std::byte>(value >> 8U);
+        expected[offset + 1U] = static_cast<std::byte>(value);
+    };
+    const auto put_be32 = [&](std::size_t offset, std::uint32_t value) {
+        expected[offset] = static_cast<std::byte>(value >> 24U);
+        expected[offset + 1U] = static_cast<std::byte>(value >> 16U);
+        expected[offset + 2U] = static_cast<std::byte>(value >> 8U);
+        expected[offset + 3U] = static_cast<std::byte>(value);
+    };
+    constexpr std::array<std::byte, 24> controls{
+        std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20}, std::byte{0x47}, std::byte{0x05},
+        std::byte{0x01}, std::byte{0x20}, std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
+        std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}, std::byte{0},    std::byte{0},
+        std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0}};
+    std::ranges::copy(controls, expected.begin());
+    expected[0x28U] = std::byte{2};
+    expected[0x2cU] = std::byte{2};
+    expected[0x2eU] = std::byte{60};
+    put_be16(0x30U, 44'100U);
+    put_be16(0x36U, axk::detail::sample_pitch_word(60U, 0, 44'100U));
+    expected[0x3aU] = std::byte{127};
+    expected[0x3cU] = std::byte{0x30};
+    expected[0x3dU] = std::byte{4};
+    put_be16(0x3eU, 9000U);
+    put_be32(0x48U, 400U);
+    put_be32(0x58U, 400U);
+    const std::array<std::pair<std::size_t, std::uint8_t>, 18> value_defaults{{
+        {0x62U, 127U},
+        {0x63U, 4U},
+        {0x65U, 127U},
+        {0x6cU, 63U},
+        {0x6eU, 100U},
+        {0x72U, 127U},
+        {0x75U, 127U},
+        {0x76U, 127U},
+        {0x77U, 127U},
+        {0x7aU, 26U},
+        {0x7bU, 64U},
+        {0x7cU, 10U},
+        {0x7eU, 127U},
+        {0x7fU, 127U},
+        {0x80U, 127U},
+        {0x89U, 127U},
+        {0x8aU, 127U},
+        {0x8bU, 127U},
+    }};
+    for (const auto &[offset, value] : value_defaults)
+        expected[offset] = static_cast<std::byte>(value);
+    expected[0x93U] = std::byte{12};
+    expected[0x94U] = std::byte{127};
+    expected[0x95U] = std::byte{127};
+    expected[0x96U] = std::byte{126};
+    expected[0x99U] = std::byte{127};
+    expected[0x9eU] = std::byte{1};
+    expected[0x9fU] = std::byte{39};
+    expected[0xa1U] = std::byte{1};
+    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
+                                                std::byte{0x20}};
+    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
+    std::ranges::copy(playback, expected.begin() + 0xaaU);
+    std::ranges::copy(tone, expected.begin() + 0xb0U);
+    put_be32(0xb4U, 400U);
+    put_be32(0xb8U, 400U);
+    std::ranges::copy(controls, expected.begin() + 0xbcU);
+    expected[0xd6U] = std::byte{1};
+    expected[0xd7U] = std::byte{127};
+    expected[0xd9U] = std::byte{127};
+    expected[0xdbU] = std::byte{90};
+    expected[0xdcU] = std::byte{90};
+
+    EXPECT_TRUE(std::ranges::equal(expected, std::span{*payload}.subspan(0xa8U, expected.size())));
+}
+
 TEST(AudioImport, SerializesSampleTopologyFlagsFromMemberCountAndBankMembership) {
     axk::SampleSpec sample;
     sample.name = "Topology Sample";
@@ -671,9 +806,9 @@ TEST(AudioImport, SerializesEveryProvenSampleLoopModeWithIndependentWaveAndLoopW
     for (const auto mode : modes) {
         axk::SampleSpec sample;
         sample.name = "Loop Sample";
-        sample.loop_mode = mode;
-        sample.loop_start_frame = 17U;
-        sample.loop_length_frames = 335U;
+        sample.parameters.loop_mode = mode;
+        sample.parameters.loop_start_frame = 17U;
+        sample.parameters.loop_length_frames = 335U;
 
         const auto payload = axk::detail::prepare_sbnk_payload(sample, member);
 
@@ -692,9 +827,9 @@ TEST(AudioImport, SerializesEveryProvenSampleLoopModeWithIndependentWaveAndLoopW
 TEST(AudioImport, DerivesExpandedMonoTopologyFromSemanticExpandControls) {
     axk::SampleSpec sample;
     sample.name = "Expanded Sample";
-    sample.expand_detune = -5;
-    sample.expand_dephase = 27;
-    sample.expand_width = -41;
+    sample.parameters.expand_detune = -5;
+    sample.parameters.expand_dephase = 27;
+    sample.parameters.expand_width = -41;
     const axk::detail::PreparedWaveformMember left{"Wave L", 0x100U, 44'100U, 400U};
     const std::optional<axk::detail::PreparedWaveformMember> right{
         axk::detail::PreparedWaveformMember{"Wave R", 0x200U, 44'100U, 400U}};
@@ -712,12 +847,202 @@ TEST(AudioImport, DerivesExpandedMonoTopologyFromSemanticExpandControls) {
     EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, left, right));
 }
 
+TEST(AudioImport, SerializesTheSharedWritableSampleParameterModel) {
+    axk::SampleSpec sample;
+    sample.name = "Parameter Sample";
+    sample.parameters.fixed_pitch = true;
+    sample.parameters.key_crossfade = true;
+    sample.parameters.mono_mode = true;
+    sample.parameters.sample_eq_type = 2U;
+    sample.parameters.midi_receive_channel = 16U;
+    sample.parameters.pitch_bend_type = 12U;
+    sample.parameters.pitch_bend_range = 24U;
+    sample.parameters.coarse_tune = -12;
+    sample.parameters.root_key = 64U;
+    sample.parameters.fine_tune_cents = -17;
+    sample.parameters.key_low = 12U;
+    sample.parameters.key_high = 96U;
+    sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.parameters.loop_tempo_hundredths = 12'340U;
+    sample.parameters.loop_start_frame = 17U;
+    sample.parameters.loop_length_frames = 335U;
+    sample.parameters.wave_start_velocity_sensitivity = -37;
+    sample.parameters.filter_type = 15U;
+    sample.parameters.filter_cutoff = 91U;
+    sample.parameters.filter_q_width = 23U;
+    sample.parameters.filter_scaling_break1 = 36U;
+    sample.parameters.filter_scaling_break2 = 96U;
+    sample.parameters.filter_scaling_cutoff1 = -45;
+    sample.parameters.filter_scaling_cutoff2 = 52;
+    sample.parameters.filter_velocity_to_cutoff = 68;
+    sample.parameters.filter_velocity_to_q_width = -31;
+    sample.parameters.expand_detune = -5;
+    sample.parameters.expand_dephase = 27;
+    sample.parameters.expand_width = -41;
+    sample.parameters.random_pitch = 31U;
+    sample.parameters.level = 87U;
+    sample.parameters.pan = -17;
+    sample.parameters.velocity_low_limit = 9U;
+    sample.parameters.velocity_offset = -23;
+    sample.parameters.velocity_high = 110U;
+    sample.parameters.velocity_low = 20U;
+    sample.parameters.level_scaling_break1 = 40U;
+    sample.parameters.level_scaling_break2 = 100U;
+    sample.parameters.level_scaling_level1 = 72U;
+    sample.parameters.level_scaling_level2 = 83U;
+    sample.parameters.velocity_sensitivity = 44;
+    sample.parameters.alternate_group = 16U;
+    sample.parameters.sample_eq_frequency = 37U;
+    sample.parameters.sample_eq_gain_db = -7;
+    sample.parameters.sample_eq_width_tenths = 44U;
+    sample.parameters.filter_cutoff_distance = -19;
+    sample.parameters.feg.attack_rate = 81U;
+    sample.parameters.feg.decay_rate = 82U;
+    sample.parameters.feg.release_rate = 83U;
+    sample.parameters.feg.init_level = -61;
+    sample.parameters.feg.attack_level = -31;
+    sample.parameters.feg.sustain_level = 17;
+    sample.parameters.feg.release_level = 63;
+    sample.parameters.feg.rate_key_scaling = -7;
+    sample.parameters.feg.rate_velocity_sensitivity = -51;
+    sample.parameters.feg.attack_level_velocity_sensitivity = 42;
+    sample.parameters.feg.level_velocity_sensitivity = -23;
+    sample.parameters.peg.attack_rate = 71U;
+    sample.parameters.peg.decay_rate = 72U;
+    sample.parameters.peg.release_rate = 73U;
+    sample.parameters.peg.init_level = -52;
+    sample.parameters.peg.attack_level = -22;
+    sample.parameters.peg.sustain_level = 18;
+    sample.parameters.peg.release_level = 62;
+    sample.parameters.peg.rate_key_scaling = -6;
+    sample.parameters.peg.rate_velocity_sensitivity = -41;
+    sample.parameters.peg.level_velocity_sensitivity = 31;
+    sample.parameters.peg.range = 13;
+    sample.parameters.aeg.attack_rate = 61U;
+    sample.parameters.aeg.decay_rate = 62U;
+    sample.parameters.aeg.release_rate = 63U;
+    sample.parameters.aeg.sustain_level = 84U;
+    sample.parameters.aeg.attack_mode = 2U;
+    sample.parameters.aeg.rate_key_scaling = -5;
+    sample.parameters.aeg.rate_velocity_sensitivity = -31;
+    sample.parameters.lfo.wave = 3U;
+    sample.parameters.lfo.speed = 88U;
+    sample.parameters.lfo.delay_time = 89U;
+    sample.parameters.lfo.key_on_sync = false;
+    sample.parameters.lfo.cutoff_mod_phase_invert = true;
+    sample.parameters.lfo.pitch_mod_phase_invert = true;
+    sample.parameters.lfo.cutoff_mod_depth = 90U;
+    sample.parameters.lfo.pitch_mod_depth = 91U;
+    sample.parameters.lfo.amp_mod_depth = 92U;
+    sample.parameters.filter_gain = -13;
+    sample.parameters.controls = {
+        axk::SampleControlParameters{.device = 65U, .function = 36U, .type = 3U, .range = -63},
+        axk::SampleControlParameters{.device = 66U, .function = 35U, .type = 2U, .range = -42},
+        axk::SampleControlParameters{.device = 67U, .function = 34U, .type = 1U, .range = -21},
+        axk::SampleControlParameters{.device = 68U, .function = 33U, .type = 0U, .range = 0},
+        axk::SampleControlParameters{.device = 69U, .function = 32U, .type = 1U, .range = 21},
+        axk::SampleControlParameters{.device = 70U, .function = 31U, .type = 2U, .range = 42},
+    };
+    sample.parameters.velocity_xfade_high = 96U;
+    sample.parameters.velocity_xfade_low = 32U;
+    sample.parameters.output1_destination = 12U;
+    sample.parameters.output1_level = 90U;
+    sample.parameters.output2_destination = 9U;
+    sample.parameters.output2_level = 45U;
+    sample.parameters.portamento_type = 1U;
+    sample.parameters.portamento_rate = 37U;
+    sample.parameters.portamento_time = 91U;
+    const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
+
+    const auto payload = axk::detail::prepare_sbnk_payload(sample, member);
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_EQ((*payload)[0xd1U], std::byte{0x97});
+    EXPECT_EQ((*payload)[0xd2U], std::byte{16});
+    EXPECT_EQ((*payload)[0xd3U], std::byte{12});
+    EXPECT_EQ((*payload)[0xd4U], std::byte{24});
+    EXPECT_EQ((*payload)[0xd5U], std::byte{0xf4});
+    EXPECT_EQ((*payload)[0xd6U], std::byte{64});
+    EXPECT_EQ((*payload)[0xdcU], std::byte{0xef});
+    EXPECT_EQ((*payload)[0xe2U], std::byte{96});
+    EXPECT_EQ((*payload)[0xe3U], std::byte{12});
+    EXPECT_EQ((*payload)[0xe5U], std::byte{1});
+    EXPECT_EQ(read_be16(*payload, 0xe6U), 12'340U);
+    EXPECT_EQ((*payload)[0x108U], std::byte{0xdb});
+    EXPECT_EQ((*payload)[0x109U], std::byte{15});
+    EXPECT_EQ((*payload)[0x10cU], std::byte{36});
+    EXPECT_EQ((*payload)[0x10eU], std::byte{0xd3});
+    EXPECT_EQ((*payload)[0x110U], std::byte{68});
+    EXPECT_EQ((*payload)[0x115U], std::byte{31});
+    EXPECT_EQ((*payload)[0x117U], std::byte{0xef});
+    EXPECT_EQ((*payload)[0x122U], std::byte{37});
+    EXPECT_EQ((*payload)[0x123U], std::byte{57});
+    EXPECT_EQ((*payload)[0x124U], std::byte{44});
+    EXPECT_EQ((*payload)[0x126U], std::byte{81});
+    EXPECT_EQ((*payload)[0x127U], std::byte{82});
+    EXPECT_EQ((*payload)[0x128U], std::byte{83});
+    EXPECT_EQ((*payload)[0x129U], std::byte{0xc3});
+    EXPECT_EQ((*payload)[0x12aU], std::byte{0xe1});
+    EXPECT_EQ((*payload)[0x12bU], std::byte{17});
+    EXPECT_EQ((*payload)[0x12cU], std::byte{63});
+    EXPECT_EQ((*payload)[0x12dU], std::byte{0xf9});
+    EXPECT_EQ((*payload)[0x12eU], std::byte{0xcd});
+    EXPECT_EQ((*payload)[0x12fU], std::byte{42});
+    EXPECT_EQ((*payload)[0x130U], std::byte{0xe9});
+    EXPECT_EQ((*payload)[0x131U], std::byte{71});
+    EXPECT_EQ((*payload)[0x132U], std::byte{72});
+    EXPECT_EQ((*payload)[0x133U], std::byte{73});
+    EXPECT_EQ((*payload)[0x134U], std::byte{0xcc});
+    EXPECT_EQ((*payload)[0x135U], std::byte{0xea});
+    EXPECT_EQ((*payload)[0x136U], std::byte{18});
+    EXPECT_EQ((*payload)[0x137U], std::byte{62});
+    EXPECT_EQ((*payload)[0x138U], std::byte{0xfa});
+    EXPECT_EQ((*payload)[0x139U], std::byte{0xd7});
+    EXPECT_EQ((*payload)[0x13aU], std::byte{31});
+    EXPECT_EQ((*payload)[0x13bU], std::byte{13});
+    EXPECT_EQ((*payload)[0x13cU], std::byte{61});
+    EXPECT_EQ((*payload)[0x13dU], std::byte{62});
+    EXPECT_EQ((*payload)[0x13eU], std::byte{63});
+    EXPECT_EQ((*payload)[0x141U], std::byte{84});
+    EXPECT_EQ((*payload)[0x143U], std::byte{2});
+    EXPECT_EQ((*payload)[0x144U], std::byte{0xfb});
+    EXPECT_EQ((*payload)[0x145U], std::byte{0xe1});
+    EXPECT_EQ((*payload)[0x146U], std::byte{3});
+    EXPECT_EQ((*payload)[0x147U], std::byte{87});
+    EXPECT_EQ((*payload)[0x149U], std::byte{0x06});
+    EXPECT_EQ((*payload)[0x14aU], std::byte{90});
+    EXPECT_EQ((*payload)[0x151U], std::byte{0xf3});
+    const std::array<std::array<std::uint8_t, 4>, 6> controls{{
+        {65U, 36U, 3U, 0xc1U},
+        {66U, 35U, 2U, 0xd6U},
+        {67U, 34U, 1U, 0xebU},
+        {68U, 33U, 0U, 0U},
+        {69U, 32U, 1U, 21U},
+        {70U, 31U, 2U, 42U},
+    }};
+    for (std::size_t index = 0; index < controls.size(); ++index) {
+        for (std::size_t field = 0; field < controls[index].size(); ++field) {
+            EXPECT_EQ((*payload)[0xa8U + index * 4U + field], static_cast<std::byte>(controls[index][field]));
+            EXPECT_EQ((*payload)[0x164U + index * 4U + field], static_cast<std::byte>(controls[index][field]));
+        }
+    }
+    EXPECT_EQ((*payload)[0x17cU], std::byte{96});
+    EXPECT_EQ((*payload)[0x17dU], std::byte{32});
+    EXPECT_EQ((*payload)[0x17eU], std::byte{12});
+    EXPECT_EQ((*payload)[0x17fU], std::byte{90});
+    EXPECT_EQ((*payload)[0x180U], std::byte{9});
+    EXPECT_EQ((*payload)[0x181U], std::byte{45});
+    EXPECT_EQ((*payload)[0x182U], std::byte{1});
+    EXPECT_EQ((*payload)[0x183U], std::byte{37});
+    EXPECT_EQ((*payload)[0x184U], std::byte{91});
+}
+
 TEST(AudioImport, SerializesOriginalKeyRangeSentinelsAndSpacePaddedNames) {
     axk::SampleSpec sample;
     sample.name = "Pad";
-    sample.root_key = 60U;
-    sample.key_low = axk::sampler_original_key_low_limit;
-    sample.key_high = axk::sampler_original_key_high_limit;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_low = axk::sampler_original_key_low_limit;
+    sample.parameters.key_high = axk::sampler_original_key_high_limit;
     const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
 
     const auto payload = axk::detail::prepare_sbnk_payload(sample, member);
@@ -853,6 +1178,9 @@ TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUni
     }
     EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Empty", {}, {}}, samples));
     EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Duplicate", {"Sample 1", "Sample 1"}, {}}, samples));
+    axk::SampleBankSpec empty_overrides{"Empty Overrides", {"Sample 1"}, {}};
+    empty_overrides.parameter_overrides.emplace();
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload(empty_overrides, samples));
 
     const std::vector<std::string> eight_members{member_names.begin(), member_names.begin() + 8};
     const auto eight = axk::detail::prepare_sbac_payload({"Eight", eight_members, {}}, samples);
@@ -878,6 +1206,15 @@ TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUni
     EXPECT_EQ((*eight)[eight->size() - 0x24U + 0x1bU], std::byte{0x7f});
     EXPECT_EQ((*eight)[eight->size() - 0x24U + 0x1fU], std::byte{0x5a});
     EXPECT_EQ((*eight)[eight->size() - 0x24U + 0x20U], std::byte{0x5a});
+
+    const auto linked = axk::detail::prepare_sbac_payload({"Linked", eight_members, {}}, samples, {1U, 32U, 33U, 128U});
+    ASSERT_TRUE(linked) << linked.error().message;
+    EXPECT_EQ(read_be32(*linked, 0x90U), 0x80000001U);
+    EXPECT_EQ(read_be32(*linked, 0x94U), 0x00000001U);
+    EXPECT_EQ(read_be32(*linked, 0x98U), 0U);
+    EXPECT_EQ(read_be32(*linked, 0x9cU), 0x80000000U);
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Bad Link", eight_members, {}}, samples, {0U}));
+    EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Bad Link", eight_members, {}}, samples, {129U}));
 
     const std::vector<std::string> nine_members{member_names.begin(), member_names.begin() + 9};
     const auto nine = axk::detail::prepare_sbac_payload({"Nine", nine_members, {}}, samples);
@@ -907,23 +1244,100 @@ TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUni
     EXPECT_FALSE(axk::detail::prepare_sbac_payload({"Oversized", member_names, {}}, samples));
 }
 
+TEST(HdsWriter, SerializesTheCompleteCanonicalFreshSampleBankParameterState) {
+    axk::SampleSpec member;
+    member.name = "Member";
+    const std::map<std::string, axk::SampleSpec> samples{{member.name, member}};
+
+    const auto payload = axk::detail::prepare_sbac_payload({"Bank", {member.name}, {}}, samples);
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    std::array<std::byte, 0xe0> actual{};
+    std::copy_n(payload->begin() + 0x78U, 0xbcU, actual.begin());
+    std::copy_n(payload->end() - 0x24U, 0x24U, actual.begin() + 0xbcU);
+    std::array<std::byte, 0xe0> expected{};
+    const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
+        expected[offset] = static_cast<std::byte>(value >> 8U);
+        expected[offset + 1U] = static_cast<std::byte>(value);
+    };
+    constexpr std::array<std::byte, 16> controls{std::byte{0x4a}, std::byte{0x04}, std::byte{0x01}, std::byte{0x20},
+                                                 std::byte{0x47}, std::byte{0x05}, std::byte{0x01}, std::byte{0x20},
+                                                 std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
+                                                 std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
+    std::ranges::copy(controls, expected.begin());
+    expected[0x2cU] = std::byte{2};
+    expected[0x2eU] = std::byte{60};
+    expected[0x2fU] = std::byte{60};
+    put_be16(0x30U, 44'100U);
+    put_be16(0x32U, 44'100U);
+    put_be16(0x36U, axk::detail::sample_pitch_word(60U, 0, 44'100U));
+    put_be16(0x38U, axk::detail::sample_pitch_word(60U, 0, 44'100U));
+    expected[0x3aU] = std::byte{127};
+    expected[0x3cU] = std::byte{0x30};
+    put_be16(0x3eU, 9000U);
+    const std::array<std::pair<std::size_t, std::uint8_t>, 18> value_defaults{{
+        {0x62U, 127U},
+        {0x63U, 4U},
+        {0x65U, 127U},
+        {0x6cU, 63U},
+        {0x6eU, 100U},
+        {0x72U, 127U},
+        {0x75U, 127U},
+        {0x76U, 127U},
+        {0x77U, 127U},
+        {0x7aU, 26U},
+        {0x7bU, 64U},
+        {0x7cU, 10U},
+        {0x7eU, 127U},
+        {0x7fU, 127U},
+        {0x80U, 127U},
+        {0x89U, 127U},
+        {0x8aU, 127U},
+        {0x8bU, 127U},
+    }};
+    for (const auto &[offset, value] : value_defaults)
+        expected[offset] = static_cast<std::byte>(value);
+    expected[0x93U] = std::byte{12};
+    expected[0x94U] = std::byte{127};
+    expected[0x95U] = std::byte{127};
+    expected[0x96U] = std::byte{126};
+    expected[0x97U] = std::byte{8};
+    expected[0x98U] = std::byte{127};
+    expected[0x99U] = std::byte{127};
+    expected[0x9eU] = std::byte{1};
+    expected[0x9fU] = std::byte{39};
+    expected[0xa1U] = std::byte{1};
+    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
+                                                std::byte{0x20}};
+    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
+    std::ranges::copy(playback, expected.begin() + 0xaaU);
+    std::ranges::copy(tone, expected.begin() + 0xb0U);
+    std::ranges::copy(controls, expected.begin() + 0xbcU);
+    expected[0xd6U] = std::byte{1};
+    expected[0xd7U] = std::byte{127};
+    expected[0xd9U] = std::byte{127};
+    expected[0xdbU] = std::byte{90};
+    expected[0xdcU] = std::byte{90};
+
+    EXPECT_EQ(actual, expected);
+}
+
 TEST(HdsWriter, SerializesCanonicalSampleBankDefaultsAndSemanticOverrides) {
     axk::SampleSpec member;
     member.name = "Member";
     std::map<std::string, axk::SampleSpec> samples{{member.name, member}};
     axk::SampleBankSpec sample_bank{"Bank", {member.name}, {}};
-    sample_bank.parameter_overrides = axk::SampleBankParameterOverrides{
-        .root_key = 64U,
-        .key_low = axk::sampler_original_key_low_limit,
-        .key_high = axk::sampler_original_key_high_limit,
-        .level = 87U,
-        .fine_tune_cents = -12,
-        .velocity_low = 20U,
-        .velocity_high = 110U,
-        .expand_detune = -5,
-        .expand_dephase = 27,
-        .expand_width = -41,
-    };
+    sample_bank.parameter_overrides.emplace();
+    sample_bank.parameter_overrides->root_key = 64U;
+    sample_bank.parameter_overrides->fine_tune_cents = -12;
+    sample_bank.parameter_overrides->key_low = axk::sampler_original_key_low_limit;
+    sample_bank.parameter_overrides->key_high = axk::sampler_original_key_high_limit;
+    sample_bank.parameter_overrides->expand_detune = -5;
+    sample_bank.parameter_overrides->expand_dephase = 27;
+    sample_bank.parameter_overrides->expand_width = -41;
+    sample_bank.parameter_overrides->level = 87U;
+    sample_bank.parameter_overrides->velocity_high = 110U;
+    sample_bank.parameter_overrides->velocity_low = 20U;
 
     const auto payload = axk::detail::prepare_sbac_payload(sample_bank, samples);
 
@@ -946,19 +1360,67 @@ TEST(HdsWriter, SerializesCanonicalSampleBankDefaultsAndSemanticOverrides) {
     EXPECT_TRUE(bank->reserved_pending_parameter_numbers.empty());
 }
 
+TEST(HdsWriter, SerializesSharedParametersIntoSampleBankState) {
+    axk::SampleSpec member;
+    member.name = "Member";
+    std::map<std::string, axk::SampleSpec> samples{{member.name, member}};
+    axk::SampleBankSpec sample_bank{"Bank", {member.name}, {}};
+    sample_bank.parameter_overrides.emplace();
+    auto &parameters = *sample_bank.parameter_overrides;
+    parameters.fixed_pitch = true;
+    parameters.filter_cutoff = 91U;
+    parameters.feg.attack_rate = 73U;
+    parameters.peg.range = -17;
+    parameters.aeg.attack_mode = 2U;
+    parameters.lfo.speed = 88U;
+    parameters.filter_gain = -9;
+    parameters.controls[5].device = 126U;
+    parameters.controls[5].function = 36U;
+    parameters.controls[5].type = 3U;
+    parameters.controls[5].range = -63;
+    parameters.velocity_xfade_high = 96U;
+    parameters.output1_destination = 12U;
+    parameters.output1_level = 90U;
+    parameters.portamento_type = 1U;
+    parameters.portamento_rate = 37U;
+    parameters.portamento_time = 91U;
+
+    const auto payload = axk::detail::prepare_sbac_payload(sample_bank, samples);
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_EQ((*payload)[0xa1U], std::byte{0x11});
+    EXPECT_EQ((*payload)[0xdaU], std::byte{91});
+    EXPECT_EQ((*payload)[0xf6U], std::byte{73});
+    EXPECT_EQ((*payload)[0x10bU], std::byte{0xef});
+    EXPECT_EQ((*payload)[0x113U], std::byte{2});
+    EXPECT_EQ((*payload)[0x117U], std::byte{87});
+    EXPECT_EQ((*payload)[0x121U], std::byte{0xf7});
+    EXPECT_EQ((*payload)[0x8cU], std::byte{126});
+    EXPECT_EQ((*payload)[0x8fU], std::byte{0xc1});
+    EXPECT_EQ((*payload)[0x200U], std::byte{126});
+    EXPECT_EQ((*payload)[0x203U], std::byte{0xc1});
+    EXPECT_EQ((*payload)[0x204U], std::byte{96});
+    EXPECT_EQ((*payload)[0x206U], std::byte{12});
+    EXPECT_EQ((*payload)[0x207U], std::byte{90});
+    EXPECT_EQ((*payload)[0x20aU], std::byte{1});
+    EXPECT_EQ((*payload)[0x20bU], std::byte{37});
+    EXPECT_EQ((*payload)[0x20cU], std::byte{91});
+}
+
 TEST(HdsWriter, SampleBankFineTuneOverridePreservesDistinctStereoRootKeys) {
     axk::SampleSpec sample;
     sample.name = "Stereo";
-    sample.root_key = 60U;
+    sample.parameters.root_key = 60U;
     const axk::detail::PreparedWaveformMember left{"Left", 0x100U, 44'100U, 400U};
     const std::optional<axk::detail::PreparedWaveformMember> right{
         axk::detail::PreparedWaveformMember{"Right", 0x200U, 44'100U, 400U}};
     auto payload = axk::detail::prepare_sbnk_payload(sample, left, right);
     ASSERT_TRUE(payload) << payload.error().message;
     (*payload)[0xd7U] = std::byte{72};
-    const axk::SampleBankParameterOverrides overrides{.fine_tune_cents = -12};
+    axk::SampleParameters overrides;
+    overrides.fine_tune_cents = -12;
 
-    const auto applied = axk::detail::apply_sample_bank_parameter_overrides_to_payload(*payload, overrides);
+    const auto applied = axk::detail::apply_sample_parameters_to_payload(*payload, overrides);
 
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ((*payload)[0xd6U], std::byte{60});
@@ -966,6 +1428,65 @@ TEST(HdsWriter, SampleBankFineTuneOverridePreservesDistinctStereoRootKeys) {
     EXPECT_EQ((*payload)[0xdcU], std::byte{0xf4});
     EXPECT_EQ((*payload)[0xddU], std::byte{0xf4});
     EXPECT_NE(read_be16(*payload, 0xdeU), read_be16(*payload, 0xe0U));
+}
+
+TEST(HdsWriter, AppliesSharedSampleBankParametersAndPreservesUnspecifiedBytes) {
+    axk::SampleSpec sample;
+    sample.name = "Member";
+    sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    sample.parameters.loop_start_frame = 10U;
+    sample.parameters.loop_length_frames = 300U;
+    const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
+    auto payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(payload) << payload.error().message;
+    (*payload)[0xd1U] = std::byte{0x20};
+    (*payload)[0x14dU] = std::byte{0x5a};
+    const auto prefix = std::vector<std::byte>(payload->begin(), payload->begin() + 0xa8U);
+
+    axk::SampleParameters overrides;
+    overrides.fixed_pitch = true;
+    overrides.root_key = 67U;
+    overrides.loop_start_frame = 17U;
+    overrides.loop_length_frames = 335U;
+    overrides.filter_cutoff = 91U;
+    overrides.lfo.speed = 88U;
+    overrides.controls[0].range = -63;
+    overrides.output1_level = 90U;
+    overrides.portamento_type = 1U;
+
+    const auto applied = axk::detail::apply_sample_parameters_to_payload(*payload, overrides);
+
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(std::ranges::equal(prefix, std::span{*payload}.first(0xa8U)));
+    EXPECT_EQ((*payload)[0xd1U], std::byte{0x31});
+    EXPECT_EQ((*payload)[0xd6U], std::byte{67});
+    EXPECT_EQ(read_be16(*payload, 0xdeU), axk::detail::sample_pitch_word(67U, 0, 44'100U));
+    EXPECT_EQ(read_be32(*payload, 0xf8U), 17U);
+    EXPECT_EQ(read_be32(*payload, 0x100U), 335U);
+    EXPECT_EQ(read_be32(*payload, 0x160U), 352U);
+    EXPECT_EQ((*payload)[0x10aU], std::byte{91});
+    EXPECT_EQ((*payload)[0x147U], std::byte{87});
+    EXPECT_EQ((*payload)[0x0abU], std::byte{0xc1});
+    EXPECT_EQ((*payload)[0x167U], std::byte{0xc1});
+    EXPECT_EQ((*payload)[0x17fU], std::byte{90});
+    EXPECT_EQ((*payload)[0x182U], std::byte{1});
+    EXPECT_EQ((*payload)[0x14dU], std::byte{0x5a});
+}
+
+TEST(HdsWriter, RejectsExtendedOnlyOverrideForShortCurrentSample) {
+    axk::SampleSpec sample;
+    sample.name = "Short";
+    const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
+    auto payload = axk::detail::prepare_sbnk_payload(sample, member);
+    ASSERT_TRUE(payload);
+    payload->resize(0x164U);
+    axk::SampleParameters overrides;
+    overrides.output1_level = 90U;
+
+    const auto applied = axk::detail::apply_sample_parameters_to_payload(*payload, overrides);
+
+    ASSERT_FALSE(applied);
+    EXPECT_EQ(applied.error().code, axk::ErrorCode::transaction_rejected);
 }
 
 TEST(HdsWriter, AppliesSampleBankOverridesToFreshMemberSamples) {
@@ -983,23 +1504,19 @@ TEST(HdsWriter, AppliesSampleBankOverridesToFreshMemberSamples) {
 
     auto volume = graph_volume(audio_path);
     auto &direct = volume.samples[1];
-    direct.root_key = 64U;
-    direct.key_low = axk::sampler_original_key_low_limit;
-    direct.key_high = axk::sampler_original_key_high_limit;
-    direct.level = 87U;
+    direct.parameters.root_key = 64U;
+    direct.parameters.key_low = axk::sampler_original_key_low_limit;
+    direct.parameters.key_high = axk::sampler_original_key_high_limit;
+    direct.parameters.level = 87U;
     auto &sample_bank = volume.sample_banks.front();
-    sample_bank.parameter_overrides = axk::SampleBankParameterOverrides{
-        .root_key = direct.root_key,
-        .key_low = direct.key_low,
-        .key_high = direct.key_high,
-        .level = direct.level,
-        .fine_tune_cents = {},
-        .velocity_low = {},
-        .velocity_high = {},
-        .expand_detune = -5,
-        .expand_dephase = 27,
-        .expand_width = -41,
-    };
+    sample_bank.parameter_overrides.emplace();
+    sample_bank.parameter_overrides->root_key = direct.parameters.root_key;
+    sample_bank.parameter_overrides->key_low = direct.parameters.key_low;
+    sample_bank.parameter_overrides->key_high = direct.parameters.key_high;
+    sample_bank.parameter_overrides->expand_detune = -5;
+    sample_bank.parameter_overrides->expand_dephase = 27;
+    sample_bank.parameter_overrides->expand_width = -41;
+    sample_bank.parameter_overrides->level = direct.parameters.level;
     axk::HdsBuildManifest manifest_value{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
 
     const auto written = axk::write_hds_image(manifest_value, image_path);
@@ -1023,6 +1540,13 @@ TEST(HdsWriter, AppliesSampleBankOverridesToFreshMemberSamples) {
     EXPECT_EQ(found->raw_payload[0x112U], std::byte{0xfb});
     EXPECT_EQ(found->raw_payload[0x113U], std::byte{0x1b});
     EXPECT_EQ(found->raw_payload[0x114U], std::byte{0xd7});
+    const auto found_bank = std::ranges::find_if(catalog->objects, [](const auto &object) {
+        return object.object.header.type == axk::ObjectType::sbac && object.object.header.name == "Graph Bank";
+    });
+    ASSERT_NE(found_bank, catalog->objects.end());
+    const auto *decoded_bank = std::get_if<axk::CurrentSbac>(&found_bank->object.payload);
+    ASSERT_NE(decoded_bank, nullptr);
+    EXPECT_EQ(decoded_bank->raw_sample_parameter_block[0x1bU], std::byte{1});
     std::filesystem::remove_all(root, error);
 }
 
@@ -1128,10 +1652,10 @@ TEST(HdsWriter, WritesMonoSampleAndRoundTripsExactPhysicalPcm) {
     axk::SampleSpec sample;
     sample.name = "Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60;
-    sample.key_low = 48;
-    sample.key_high = 72;
-    sample.level = 96;
+    sample.parameters.root_key = 60;
+    sample.parameters.key_low = 48;
+    sample.parameters.key_high = 72;
+    sample.parameters.level = 96;
     axk::VolumeSpec volume;
     volume.name = "Volume";
     volume.waveforms.push_back(std::move(waveform));
@@ -1246,7 +1770,7 @@ TEST(MediaManifest, ParsesStrictAuthoredAndTransferModes) {
       "name":"Test Volume",
       "waveforms":[{"id":"tone","name":"Tone","path":"tone.wav","root_key":60}],
       "samples":[{
-        "name":"Tone Sample","waveform_id":"tone","root_key":60,"key_low":0,"key_high":127
+        "name":"Tone Sample","waveform_id":"tone","parameters":{"root_key":60,"key_low":0,"key_high":127}
       }]
     }
   })json";
@@ -1303,8 +1827,8 @@ TEST(MediaWriter, WritesDeterministicFat12AndIso9660ImagesAndReopensExactPcm) {
     axk::SampleSpec sample;
     sample.name = "Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60;
-    sample.key_high = 127;
+    sample.parameters.root_key = 60;
+    sample.parameters.key_high = 127;
     axk::VolumeSpec volume;
     volume.name = "Volume";
     volume.waveforms.push_back(std::move(waveform));

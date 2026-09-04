@@ -455,9 +455,7 @@ def prepare_cross_format_sources(root: Path, cli: Path, sfs_fixture: Path) -> li
             {
                 "name": "Tone Sample",
                 "waveform_id": "tone",
-                "root_key": 60,
-                "key_low": 0,
-                "key_high": 127,
+                "parameters": {"root_key": 60, "key_low": 0, "key_high": 127},
             }
         ],
     }
@@ -559,9 +557,7 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
         {
             "name": name,
             "waveform_id": "wave",
-            "root_key": 60,
-            "key_low": 0,
-            "key_high": 127,
+            "parameters": {"root_key": 60, "key_low": 0, "key_high": 127},
         }
         for name in sample_names
     ]
@@ -660,9 +656,11 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                 "sample": {
                     "name": "Insert Sample",
                     "waveform_name": "Wave",
-                    "root_key": 60,
-                    "key_low": 0,
-                    "key_high": 127,
+                    "parameters": {
+                        "root_key": 60,
+                        "key_low": 0,
+                        "key_high": 127,
+                    },
                 },
             },
             {

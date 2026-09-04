@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/sample_parameter_json.hpp"
+
 namespace axk::detail {
 namespace {
 
@@ -56,68 +58,9 @@ Result<std::string> object_name(const Json &row, std::string_view field, std::st
     return result;
 }
 
-Result<SampleBankParameterOverrides> parameter_overrides(const Json &row, std::string_view context) {
-    if (auto valid = fields(row, {},
-                            {"root_key", "key_low", "key_high", "level", "fine_tune_cents", "velocity_low",
-                             "velocity_high", "expand_detune", "expand_dephase", "expand_width"},
-                            context);
-        !valid) {
-        return std::unexpected{valid.error()};
-    }
-    if (row.empty())
-        return std::unexpected{manifest_error(std::string{context} + " must contain at least one override")};
-    SampleBankParameterOverrides result;
-    const auto unsigned_field = [&](std::string_view field, int maximum,
-                                    std::optional<std::uint8_t> &target) -> Result<void> {
-        if (!row.contains(field))
-            return {};
-        if (!row[field].is_number_integer())
-            return std::unexpected{
-                manifest_error(std::string{context} + "." + std::string{field} + " must be an integer")};
-        const auto value = row[field].get<int>();
-        if (value < 0 || value > maximum)
-            return std::unexpected{
-                manifest_error(std::string{context} + "." + std::string{field} + " is outside its supported range")};
-        target = static_cast<std::uint8_t>(value);
-        return {};
-    };
-    if (auto parsed = unsigned_field("root_key", 127, result.root_key); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("key_low", sampler_original_key_low_limit, result.key_low); !parsed)
-        return std::unexpected{parsed.error()};
-    if (result.key_low && *result.key_low > 127U && *result.key_low != sampler_original_key_low_limit)
-        return std::unexpected{manifest_error(std::string{context} + ".key_low must be 0..127 or 255 (=Orig)")};
-    if (auto parsed = unsigned_field("key_high", sampler_original_key_high_limit, result.key_high); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("level", 127, result.level); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("velocity_low", 127, result.velocity_low); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = unsigned_field("velocity_high", 127, result.velocity_high); !parsed)
-        return std::unexpected{parsed.error()};
-    const auto signed_field = [&](std::string_view field, int limit,
-                                  std::optional<std::int8_t> &target) -> Result<void> {
-        if (!row.contains(field))
-            return {};
-        if (!row[field].is_number_integer())
-            return std::unexpected{
-                manifest_error(std::string{context} + "." + std::string{field} + " must be an integer")};
-        const auto value = row[field].get<int>();
-        if (value < -limit || value > limit)
-            return std::unexpected{
-                manifest_error(std::string{context} + "." + std::string{field} + " is outside its supported range")};
-        target = static_cast<std::int8_t>(value);
-        return {};
-    };
-    if (auto parsed = signed_field("fine_tune_cents", 63, result.fine_tune_cents); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_detune", 7, result.expand_detune); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_dephase", 63, result.expand_dephase); !parsed)
-        return std::unexpected{parsed.error()};
-    if (auto parsed = signed_field("expand_width", 63, result.expand_width); !parsed)
-        return std::unexpected{parsed.error()};
-    return result;
+Result<SampleParameters> parameter_overrides(const Json &row, std::string_view context) {
+    return parse_sample_parameters_json(row, context, true, ErrorCode::transaction_rejected,
+                                        ErrorCategory::transaction);
 }
 
 } // namespace

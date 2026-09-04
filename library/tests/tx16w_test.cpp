@@ -386,9 +386,9 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     EXPECT_EQ(plan->wave_data[0].loop_length_frames, 192U);
     ASSERT_EQ(plan->samples.size(), 1U);
     EXPECT_EQ(plan->samples[0].waveform_id, "C0");
-    EXPECT_EQ(plan->samples[0].root_key, 60U);
-    EXPECT_EQ(plan->samples[0].key_low, 20U);
-    EXPECT_EQ(plan->samples[0].key_high, 126U);
+    EXPECT_EQ(plan->samples[0].parameters.root_key, 60U);
+    EXPECT_EQ(plan->samples[0].parameters.key_low, 20U);
+    EXPECT_EQ(plan->samples[0].parameters.key_high, 126U);
     ASSERT_EQ(plan->sample_banks.size(), 1U);
     EXPECT_EQ(plan->sample_banks[0].name, "Grand Voice");
     EXPECT_EQ(plan->sample_banks[0].member_samples, (std::vector<std::string>{"Piano Low"}));

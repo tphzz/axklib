@@ -282,12 +282,12 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                 sample.name = unique_name(timbre->second->name, 16U, sample_names);
                 sample.waveform_id = wave_plan->name;
                 sample.target_sample_rate = wave_plan->target_sample_rate;
-                sample.root_key = *root;
-                sample.key_low = *low;
-                sample.key_high = *high;
-                sample.loop_mode = wave_plan->loop_mode;
-                sample.loop_start_frame = wave_plan->loop_start_frame;
-                sample.loop_length_frames = wave_plan->loop_length_frames;
+                sample.parameters.root_key = *root;
+                sample.parameters.key_low = *low;
+                sample.parameters.key_high = *high;
+                sample.parameters.loop_mode = wave_plan->loop_mode;
+                sample.parameters.loop_start_frame = wave_plan->loop_start_frame;
+                sample.parameters.loop_length_frames = wave_plan->loop_length_frames;
                 bank.member_samples.push_back(sample.name);
                 plan.samples.push_back(std::move(sample));
                 notice(plan, MappingDisposition::approximated, timbre->second->name, "key_number",

@@ -53,8 +53,8 @@ axk::HdsBuildManifest placement_repair_manifest(const std::filesystem::path &aud
     axk::SampleSpec sample;
     sample.name = "Old Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     return {"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
 }
@@ -159,8 +159,8 @@ axk::HdsBuildManifest all_action_source_manifest(const std::filesystem::path &au
         axk::SampleSpec sample;
         sample.name = name;
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         volume.samples.push_back(std::move(sample));
     }
     volume.sample_banks = {
@@ -205,9 +205,7 @@ nlohmann::json all_action_alteration_manifest() {
               {"sample",
                {{"name", "Insert Sample"},
                 {"waveform_name", "Wave"},
-                {"root_key", 60U},
-                {"key_low", 0U},
-                {"key_high", 127U}}}},
+                {"parameters", {{"root_key", 60U}, {"key_low", 0U}, {"key_high", 127U}}}}}},
              {{"id", "insert-wave"},
               {"type", "insert_waveform"},
               {"partition_index", 0U},

@@ -45,8 +45,8 @@ axk::VolumeSpec program_volume(std::string name, std::string_view bank_prefix,
             axk::SampleSpec sample;
             sample.name = sample_name;
             sample.waveform_id = waveform_id;
-            sample.root_key = 60U;
-            sample.key_high = 127U;
+            sample.parameters.root_key = 60U;
+            sample.parameters.key_high = 127U;
             volume.samples.push_back(std::move(sample));
         }
         volume.sample_banks.push_back({bank_name, {banked_name}});

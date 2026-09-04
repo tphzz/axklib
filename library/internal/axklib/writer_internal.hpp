@@ -160,12 +160,15 @@ Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, cons
                                                     bool sample_bank_member = false,
                                                     const std::vector<std::uint8_t> &linked_programs = {});
 Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample_bank,
-                                                    const std::map<std::string, SampleSpec> &samples);
+                                                    const std::map<std::string, SampleSpec> &samples,
+                                                    const std::vector<std::uint8_t> &linked_programs = {});
+bool has_sample_parameter_values(const SampleParameters &parameters);
+Result<void> validate_sample_parameters(const SampleParameters &parameters);
+Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &parameters);
+void merge_sample_parameters(SampleParameters &destination, const SampleParameters &source);
 std::uint16_t sample_pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate);
-SampleSpec apply_sample_bank_parameter_overrides(const SampleSpec &sample,
-                                                 const SampleBankParameterOverrides &overrides);
-Result<void> apply_sample_bank_parameter_overrides_to_payload(std::vector<std::byte> &payload,
-                                                              const SampleBankParameterOverrides &overrides);
+SampleSpec apply_sample_bank_parameter_overrides(const SampleSpec &sample, const SampleParameters &overrides);
+Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &parameters);
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
 Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record);
 Result<std::vector<std::uint32_t>> plan_extent_byte_counts(std::span<const Extent> extents, std::uint32_t size);

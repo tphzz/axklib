@@ -1,4 +1,5 @@
 #include "axklib/alteration.hpp"
+#include "axklib/sample_parameter_json.hpp"
 
 #include "axklib/utf8.hpp"
 
@@ -149,13 +150,14 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             if (!seen.insert(*id).second)
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
-                *type != "insert_sbnk" && *type != "insert_waveform" && *type != "delete_waveform" &&
-                *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
-                *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
-                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
-                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
-                *type != "import_tx16w_disk_set" && *type != "clear_program_assignments") {
+                *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "insert_waveform" &&
+                *type != "delete_waveform" && *type != "delete_program" && *type != "insert_program" &&
+                *type != "delete_sbac" && *type != "insert_sbac" && *type != "rename_waveform" &&
+                *type != "rename_sbnk" && *type != "assign_sbac_members" && *type != "rename_sbac" &&
+                *type != "rename_program" && *type != "delete_sequence" && *type != "insert_sequence" &&
+                *type != "rename_sequence" && *type != "rename_volume" && *type != "rename_partition" &&
+                *type != "repair_object_placements" && *type != "import_tx16w_disk_set" &&
+                *type != "clear_program_assignments") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -291,11 +293,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!sample.is_object()) {
                     return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
-                const std::set<std::string> required{"name", "waveform_name", "root_key", "key_low", "key_high"};
-                const std::set<std::string> optional{
-                    "right_waveform_name", "level",          "fine_tune_cents", "velocity_low", "velocity_high",
-                    "expand_detune",       "expand_dephase", "expand_width",    "loop_mode",    "loop_start_frame",
-                    "loop_length_frames"};
+                const std::set<std::string> required{"name", "waveform_name"};
+                const std::set<std::string> optional{"right_waveform_name", "parameters"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -310,61 +309,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 const auto sample_context = context + ".sample";
                 auto name = object_name(sample, "name", sample_context);
                 auto waveform = object_name(sample, "waveform_name", sample_context);
-                auto root_key = midi_value(sample, "root_key", sample_context, 0U, true);
-                auto key_low = midi_value(sample, "key_low", sample_context, 0U, true, sampler_original_key_low_limit);
-                auto key_high =
-                    midi_value(sample, "key_high", sample_context, 0U, true, sampler_original_key_high_limit);
-                auto level = midi_value(sample, "level", sample_context, 100U, false);
-                auto fine = bounded_integer(sample, "fine_tune_cents", sample_context, -63, 63, 0);
-                auto velocity_low = midi_value(sample, "velocity_low", sample_context, 0U, false);
-                auto velocity_high = midi_value(sample, "velocity_high", sample_context, 127U, false);
-                auto expand_detune = bounded_integer(sample, "expand_detune", sample_context, -7, 7, 0);
-                auto expand_dephase = bounded_integer(sample, "expand_dephase", sample_context, -63, 63, 0);
-                auto expand_width = bounded_integer(sample, "expand_width", sample_context, -63, 63, 63);
-                auto loop_mode = bounded_integer(sample, "loop_mode", sample_context, 0, 5, 4);
-                auto loop_start = bounded_integer(sample, "loop_start_frame", sample_context, 0,
-                                                  maximum_wave_data_frames_per_channel, 0);
-                auto loop_length = bounded_integer(sample, "loop_length_frames", sample_context, 0,
-                                                   maximum_wave_data_frames_per_channel, 0);
                 if (!name)
                     return std::unexpected{name.error()};
                 if (!waveform)
                     return std::unexpected{waveform.error()};
-                if (!root_key)
-                    return std::unexpected{root_key.error()};
-                if (!key_low)
-                    return std::unexpected{key_low.error()};
-                if (!key_high)
-                    return std::unexpected{key_high.error()};
-                if (!level)
-                    return std::unexpected{level.error()};
-                if (!fine)
-                    return std::unexpected{fine.error()};
-                if (!velocity_low)
-                    return std::unexpected{velocity_low.error()};
-                if (!velocity_high)
-                    return std::unexpected{velocity_high.error()};
-                if (!expand_detune)
-                    return std::unexpected{expand_detune.error()};
-                if (!expand_dephase)
-                    return std::unexpected{expand_dephase.error()};
-                if (!expand_width)
-                    return std::unexpected{expand_width.error()};
-                if (!loop_mode)
-                    return std::unexpected{loop_mode.error()};
-                if (!loop_start)
-                    return std::unexpected{loop_start.error()};
-                if (!loop_length)
-                    return std::unexpected{loop_length.error()};
-                if (*key_low > 127U && *key_low != sampler_original_key_low_limit) {
-                    return std::unexpected{
-                        transaction_error(sample_context + ".key_low is outside its supported range")};
-                }
-                const auto effective_low = *key_low == sampler_original_key_low_limit ? *root_key : *key_low;
-                const auto effective_high = *key_high == sampler_original_key_high_limit ? *root_key : *key_high;
-                if (effective_high < effective_low) {
-                    return std::unexpected{transaction_error(sample_context + ".key_high must not be below key_low")};
-                }
                 SampleSpec spec;
                 spec.name = std::move(*name);
                 spec.waveform_id = std::move(*waveform);
@@ -374,20 +322,34 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                         return std::unexpected{right.error()};
                     spec.right_waveform_id = std::move(*right);
                 }
-                spec.root_key = *root_key;
-                spec.key_low = *key_low;
-                spec.key_high = *key_high;
-                spec.level = *level;
-                spec.fine_tune_cents = static_cast<std::int8_t>(*fine);
-                spec.velocity_low = *velocity_low;
-                spec.velocity_high = *velocity_high;
-                spec.expand_detune = static_cast<std::int8_t>(*expand_detune);
-                spec.expand_dephase = static_cast<std::int8_t>(*expand_dephase);
-                spec.expand_width = static_cast<std::int8_t>(*expand_width);
-                spec.loop_mode = static_cast<AudioSamplerLoopMode>(*loop_mode);
-                spec.loop_start_frame = static_cast<std::uint32_t>(*loop_start);
-                spec.loop_length_frames = static_cast<std::uint32_t>(*loop_length);
+                if (sample.contains("parameters")) {
+                    auto parameters = detail::parse_sample_parameters_json(
+                        sample["parameters"], sample_context + ".parameters", false, ErrorCode::transaction_rejected,
+                        ErrorCategory::transaction);
+                    if (!parameters)
+                        return std::unexpected{parameters.error()};
+                    spec.parameters = std::move(*parameters);
+                }
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
+            } else if (*type == "update_sbnk_parameters") {
+                if (auto valid = exact_fields(
+                        row, {"id", "type", "partition_index", "volume_name", "sample_name", "parameters"}, context);
+                    !valid) {
+                    return std::unexpected{valid.error()};
+                }
+                auto volume = required_text(row, "volume_name", context);
+                auto sample = object_name(row, "sample_name", context);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!sample)
+                    return std::unexpected{sample.error()};
+                auto parameters =
+                    detail::parse_sample_parameters_json(row["parameters"], context + ".parameters", true,
+                                                         ErrorCode::transaction_rejected, ErrorCategory::transaction);
+                if (!parameters)
+                    return std::unexpected{parameters.error()};
+                data = UpdateSampleParametersOperation{std::move(selector), std::move(*volume), std::move(*sample),
+                                                       std::move(*parameters)};
             } else if (*type == "rename_waveform") {
                 if (auto valid = exact_fields(
                         row, {"id", "type", "partition_index", "volume_name", "waveform_name", "new_waveform_name"},

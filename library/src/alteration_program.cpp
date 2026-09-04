@@ -112,14 +112,16 @@ Result<OperationReport> delete_program(TransactionState &state, OperationContext
     if (program == nullptr)
         return std::unexpected{transaction_error("Program is unreadable")};
     std::set<SfsId> assigned_samples;
+    std::set<SfsId> assigned_sample_banks;
     for (const auto &assignment : program->assignments) {
-        if (assignment.name.empty() || assignment.kind != 0x10U)
+        if (assignment.name.empty() || (assignment.kind != 0x10U && assignment.kind != 0x11U))
             continue;
-        auto sample =
-            category_object(state, partition, operation.volume_name, "SBNK", assignment.name, "SBNK", cancellation);
-        if (!sample)
-            return std::unexpected{sample.error()};
-        assigned_samples.insert(sample->second);
+        const auto category = assignment.kind == 0x10U ? "SBNK" : "SBAC";
+        auto target =
+            category_object(state, partition, operation.volume_name, category, assignment.name, category, cancellation);
+        if (!target)
+            return std::unexpected{target.error()};
+        (assignment.kind == 0x10U ? assigned_samples : assigned_sample_banks).insert(target->second);
     }
     auto samples = category_objects(state, partition, operation.volume_name, "SBNK", ObjectType::sbnk, cancellation);
     if (!samples)
@@ -136,8 +138,29 @@ Result<OperationReport> delete_program(TransactionState &state, OperationContext
         return std::unexpected{transaction_error("Program direct assignments do not match SBNK "
                                                  "Program-link bitmaps")};
     }
+    auto sample_banks =
+        category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
+    if (!sample_banks)
+        return std::unexpected{sample_banks.error()};
+    std::set<SfsId> bitmap_sample_banks;
+    for (const auto &sample_bank : *sample_banks) {
+        auto bit = sbac_program_bit(sample_bank.payload, operation.program_number);
+        if (!bit)
+            return std::unexpected{bit.error()};
+        if (*bit)
+            bitmap_sample_banks.insert(sample_bank.id);
+    }
+    if (assigned_sample_banks != bitmap_sample_banks) {
+        return std::unexpected{transaction_error("Program Sample Bank assignments do not match SBAC "
+                                                 "Program-link bitmaps")};
+    }
     for (const auto id : assigned_samples) {
         if (auto updated = set_sbnk_program_bit(state, partition, id, operation.program_number, false, cancellation);
+            !updated)
+            return std::unexpected{updated.error()};
+    }
+    for (const auto id : assigned_sample_banks) {
+        if (auto updated = set_sbac_program_bit(state, partition, id, operation.program_number, false, cancellation);
             !updated)
             return std::unexpected{updated.error()};
     }
@@ -203,16 +226,15 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
         targets.push_back({&assignment, target->second});
     }
     for (const auto &target : targets) {
-        if (target.assignment->target_kind != "SBNK")
-            continue;
-        auto sample_payload = current_payload(state, partition, target.id, cancellation);
-        if (!sample_payload)
-            return std::unexpected{sample_payload.error()};
-        auto bit = sbnk_program_bit(*sample_payload, spec.number);
+        auto target_payload = current_payload(state, partition, target.id, cancellation);
+        if (!target_payload)
+            return std::unexpected{target_payload.error()};
+        auto bit = target.assignment->target_kind == "SBNK" ? sbnk_program_bit(*target_payload, spec.number)
+                                                            : sbac_program_bit(*target_payload, spec.number);
         if (!bit)
             return std::unexpected{bit.error()};
         if (*bit)
-            return std::unexpected{transaction_error("SBNK already links this Program")};
+            return std::unexpected{transaction_error(target.assignment->target_kind + " already links this Program")};
     }
     auto payload = detail::prepare_prog_payload(spec);
     if (!payload)
@@ -228,6 +250,9 @@ Result<OperationReport> insert_program(TransactionState &state, OperationContext
             if (auto updated = set_sbnk_program_bit(state, partition, target.id, spec.number, true, cancellation);
                 !updated)
                 return std::unexpected{updated.error()};
+        } else if (auto updated = set_sbac_program_bit(state, partition, target.id, spec.number, true, cancellation);
+                   !updated) {
+            return std::unexpected{updated.error()};
         }
         state.known_edges.emplace_back(*partition_index, allocated->first, target.id);
     }
@@ -426,10 +451,10 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         if (banked != (source_count == 1U))
             return std::unexpected{transaction_error("Sample membership flag disagrees with its Sample Bank")};
         if (spec.parameter_overrides) {
-            if (auto updated = detail::apply_sample_bank_parameter_overrides_to_payload(*sample_payload,
-                                                                                        *spec.parameter_overrides);
+            if (auto updated = detail::apply_sample_parameters_to_payload(*sample_payload, *spec.parameter_overrides);
                 !updated) {
-                return std::unexpected{updated.error()};
+                return std::unexpected{
+                    transaction_error("Sample Bank parameters are invalid for an existing member Sample")};
             }
             updated_member_payloads.emplace(sample->second, std::move(*sample_payload));
         }

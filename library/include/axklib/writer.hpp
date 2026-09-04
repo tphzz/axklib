@@ -47,6 +47,127 @@ enum class AudioSamplerLoopMode : std::uint8_t {
     reverse_one_shot = 5,
 };
 
+struct SampleFilterEnvelopeParameters {
+    std::optional<std::uint8_t> attack_rate;
+    std::optional<std::uint8_t> decay_rate;
+    std::optional<std::uint8_t> release_rate;
+    std::optional<std::int8_t> init_level;
+    std::optional<std::int8_t> attack_level;
+    std::optional<std::int8_t> sustain_level;
+    std::optional<std::int8_t> release_level;
+    std::optional<std::int8_t> rate_key_scaling;
+    std::optional<std::int8_t> rate_velocity_sensitivity;
+    std::optional<std::int8_t> attack_level_velocity_sensitivity;
+    std::optional<std::int8_t> level_velocity_sensitivity;
+};
+
+struct SamplePitchEnvelopeParameters {
+    std::optional<std::uint8_t> attack_rate;
+    std::optional<std::uint8_t> decay_rate;
+    std::optional<std::uint8_t> release_rate;
+    std::optional<std::int8_t> init_level;
+    std::optional<std::int8_t> attack_level;
+    std::optional<std::int8_t> sustain_level;
+    std::optional<std::int8_t> release_level;
+    std::optional<std::int8_t> rate_key_scaling;
+    std::optional<std::int8_t> rate_velocity_sensitivity;
+    std::optional<std::int8_t> level_velocity_sensitivity;
+    std::optional<std::int8_t> range;
+};
+
+struct SampleAmplitudeEnvelopeParameters {
+    std::optional<std::uint8_t> attack_rate;
+    std::optional<std::uint8_t> decay_rate;
+    std::optional<std::uint8_t> release_rate;
+    std::optional<std::uint8_t> sustain_level;
+    std::optional<std::uint8_t> attack_mode;
+    std::optional<std::int8_t> rate_key_scaling;
+    std::optional<std::int8_t> rate_velocity_sensitivity;
+};
+
+struct SampleLfoParameters {
+    std::optional<std::uint8_t> wave;
+    std::optional<std::uint8_t> speed;
+    std::optional<std::uint8_t> delay_time;
+    std::optional<bool> key_on_sync;
+    std::optional<bool> cutoff_mod_phase_invert;
+    std::optional<bool> pitch_mod_phase_invert;
+    std::optional<std::uint8_t> cutoff_mod_depth;
+    std::optional<std::uint8_t> pitch_mod_depth;
+    std::optional<std::uint8_t> amp_mod_depth;
+};
+
+struct SampleControlParameters {
+    std::optional<std::uint8_t> device;
+    std::optional<std::uint8_t> function;
+    std::optional<std::uint8_t> type;
+    std::optional<std::int8_t> range;
+};
+
+struct SampleParameters {
+    std::optional<bool> fixed_pitch;
+    std::optional<bool> key_crossfade;
+    std::optional<bool> mono_mode;
+    std::optional<std::uint8_t> sample_eq_type;
+    std::optional<std::uint8_t> midi_receive_channel;
+    std::optional<std::uint8_t> pitch_bend_type;
+    std::optional<std::uint8_t> pitch_bend_range;
+    std::optional<std::int8_t> coarse_tune;
+    std::optional<std::uint8_t> root_key;
+    std::optional<std::int8_t> fine_tune_cents;
+    std::optional<std::uint8_t> key_low;
+    std::optional<std::uint8_t> key_high;
+    std::optional<AudioSamplerLoopMode> loop_mode;
+    std::optional<std::uint16_t> loop_tempo_hundredths;
+    std::optional<std::uint32_t> loop_start_frame;
+    std::optional<std::uint32_t> loop_length_frames;
+    std::optional<std::int8_t> wave_start_velocity_sensitivity;
+    std::optional<std::uint8_t> filter_type;
+    std::optional<std::uint8_t> filter_cutoff;
+    std::optional<std::uint8_t> filter_q_width;
+    std::optional<std::uint8_t> filter_scaling_break1;
+    std::optional<std::uint8_t> filter_scaling_break2;
+    std::optional<std::int8_t> filter_scaling_cutoff1;
+    std::optional<std::int8_t> filter_scaling_cutoff2;
+    std::optional<std::int8_t> filter_velocity_to_cutoff;
+    std::optional<std::int8_t> filter_velocity_to_q_width;
+    std::optional<std::int8_t> expand_detune;
+    std::optional<std::int8_t> expand_dephase;
+    std::optional<std::int8_t> expand_width;
+    std::optional<std::uint8_t> random_pitch;
+    std::optional<std::uint8_t> level;
+    std::optional<std::int8_t> pan;
+    std::optional<std::uint8_t> velocity_low_limit;
+    std::optional<std::int8_t> velocity_offset;
+    std::optional<std::uint8_t> velocity_high;
+    std::optional<std::uint8_t> velocity_low;
+    std::optional<std::uint8_t> level_scaling_break1;
+    std::optional<std::uint8_t> level_scaling_break2;
+    std::optional<std::uint8_t> level_scaling_level1;
+    std::optional<std::uint8_t> level_scaling_level2;
+    std::optional<std::int8_t> velocity_sensitivity;
+    std::optional<std::uint8_t> alternate_group;
+    std::optional<std::uint8_t> sample_eq_frequency;
+    std::optional<std::int8_t> sample_eq_gain_db;
+    std::optional<std::uint8_t> sample_eq_width_tenths;
+    std::optional<std::int8_t> filter_cutoff_distance;
+    SampleFilterEnvelopeParameters feg;
+    SamplePitchEnvelopeParameters peg;
+    SampleAmplitudeEnvelopeParameters aeg;
+    SampleLfoParameters lfo;
+    std::optional<std::int8_t> filter_gain;
+    std::array<SampleControlParameters, 6> controls;
+    std::optional<std::uint8_t> velocity_xfade_high;
+    std::optional<std::uint8_t> velocity_xfade_low;
+    std::optional<std::uint8_t> output1_destination;
+    std::optional<std::uint8_t> output1_level;
+    std::optional<std::uint8_t> output2_destination;
+    std::optional<std::uint8_t> output2_level;
+    std::optional<std::uint8_t> portamento_type;
+    std::optional<std::uint8_t> portamento_rate;
+    std::optional<std::uint8_t> portamento_time;
+};
+
 struct WaveformSpec {
     std::string id;
     std::string name;
@@ -67,38 +188,13 @@ struct SampleSpec {
     std::optional<std::string> left_waveform_name;
     std::optional<std::string> right_waveform_name;
     std::optional<std::uint32_t> target_sample_rate;
-    std::uint8_t root_key{};
-    std::uint8_t key_low{};
-    std::uint8_t key_high{};
-    std::uint8_t level{100};
-    std::int8_t fine_tune_cents{};
-    std::uint8_t velocity_low{};
-    std::uint8_t velocity_high{127};
-    std::int8_t expand_detune{};
-    std::int8_t expand_dephase{};
-    std::int8_t expand_width{63};
-    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
-    std::uint32_t loop_start_frame{};
-    std::uint32_t loop_length_frames{};
-};
-
-struct SampleBankParameterOverrides {
-    std::optional<std::uint8_t> root_key{};
-    std::optional<std::uint8_t> key_low{};
-    std::optional<std::uint8_t> key_high{};
-    std::optional<std::uint8_t> level{};
-    std::optional<std::int8_t> fine_tune_cents{};
-    std::optional<std::uint8_t> velocity_low{};
-    std::optional<std::uint8_t> velocity_high{};
-    std::optional<std::int8_t> expand_detune{};
-    std::optional<std::int8_t> expand_dephase{};
-    std::optional<std::int8_t> expand_width{};
+    SampleParameters parameters;
 };
 
 struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
-    std::optional<SampleBankParameterOverrides> parameter_overrides{};
+    std::optional<SampleParameters> parameter_overrides{};
 };
 
 enum class ProgramReceiveMode : std::uint8_t {

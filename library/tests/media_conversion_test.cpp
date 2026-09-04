@@ -92,14 +92,14 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     axk::SampleSpec sample;
     sample.name = "Source Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Source Bank", {"Source Sample"}});
     volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Source Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
@@ -114,8 +114,8 @@ axk::VolumeSpec dense_source_volume(const std::filesystem::path &audio_path) {
         axk::SampleSpec sample;
         sample.name = std::format("Sample {:03}", index);
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         volume.samples.push_back(std::move(sample));
     }
     for (std::uint8_t number = 1U; number <= 64U; ++number) {

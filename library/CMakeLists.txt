@@ -245,6 +245,8 @@ add_library(
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
+  src/sample_parameter_codec.cpp
+  src/sample_parameter_json.cpp
   src/sample_bank_parameter_update.cpp
   src/sfs_write_codec.cpp
   src/writer.cpp

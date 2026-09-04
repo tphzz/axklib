@@ -602,6 +602,7 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
 | `0x078..0x133` | 188 | bytes | First part of the canonical 224-byte Sample Parameter block. |
+| `0x090..0x09f` | 16 | 4 x u32be | Linked Programs 001-128 bitmap within that parameter block. |
 | `0x134..0x13f` | 12 | 3 x u32be | Pending Sample Parameter propagation bitmaps. |
 | `0x140..0x143` | 4 | bytes | Reserved; preserve for existing objects. |
 | `0x144` | 1 | u8 | Stored member count. |
@@ -661,6 +662,12 @@ mono controls. Image creation and `insert_sbac` apply those values immediately
 to every member Sample and store the same current state in the Sample Bank, so
 the pending propagation words remain clear. Raw pending-state authoring is not
 exposed.
+
+The four linked-Program words use the same bit numbering as the Sample bitmap:
+bit zero of the first big-endian word is Program 001. Fresh image creation
+derives them from Program-to-Sample-Bank assignments. Program insertion and
+deletion update both the Program row and the target Sample Bank bitmap in one
+transaction. Unrelated exact mutation preserves the words.
 
 SBAC slot row layout, stride `0x14`:
 

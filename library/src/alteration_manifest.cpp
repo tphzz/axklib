@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "axklib/sample_parameter_json.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer_internal.hpp"
 
@@ -70,32 +71,25 @@ constexpr bool valid_loop_settings(AudioSamplerLoopMode mode, std::uint32_t star
     return length != 0U || start == 0U;
 }
 
-constexpr std::uint8_t effective_key_low(const SampleSpec &sample) {
-    return sample.key_low == sampler_original_key_low_limit ? sample.root_key : sample.key_low;
+bool uses_expanded_mono(const SampleParameters &parameters) {
+    return parameters.expand_detune.value_or(0) != 0 || parameters.expand_dephase.value_or(0) != 0;
 }
 
-constexpr std::uint8_t effective_key_high(const SampleSpec &sample) {
-    return sample.key_high == sampler_original_key_high_limit ? sample.root_key : sample.key_high;
-}
-
-Result<void> validate_sample_parameters(const SampleSpec &sample) {
+Result<void> validate_sample_spec(const SampleSpec &sample) {
     if (auto valid = require_object_name(sample.name, "sample.name"); !valid)
         return valid;
-    if (sample.root_key > 127U || (sample.key_low > 127U && sample.key_low != sampler_original_key_low_limit) ||
-        sample.key_high > sampler_original_key_high_limit || sample.level > 127U || sample.velocity_low > 127U ||
-        sample.velocity_high > 127U || sample.fine_tune_cents < -63 || sample.fine_tune_cents > 63 ||
-        sample.expand_detune < -7 || sample.expand_detune > 7 || sample.expand_dephase < -63 ||
-        sample.expand_dephase > 63 || sample.expand_width < -63 || sample.expand_width > 63)
-        return std::unexpected{manifest_error("sample parameters are outside their supported ranges")};
-    if (effective_key_high(sample) < effective_key_low(sample) || sample.velocity_high < sample.velocity_low)
-        return std::unexpected{manifest_error("sample key and velocity ranges must be ordered")};
-    if (!valid_loop_settings(sample.loop_mode, sample.loop_start_frame, sample.loop_length_frames))
+    if (auto valid = detail::validate_sample_parameters(sample.parameters); !valid)
+        return valid;
+    if (!valid_loop_settings(sample.parameters.loop_mode.value_or(AudioSamplerLoopMode::forward_one_shot),
+                             sample.parameters.loop_start_frame.value_or(0U),
+                             sample.parameters.loop_length_frames.value_or(0U))) {
         return std::unexpected{manifest_error("sample loop settings are invalid")};
+    }
     return {};
 }
 
 Result<void> validate_direct_sample(const SampleSpec &sample) {
-    if (auto valid = validate_sample_parameters(sample); !valid)
+    if (auto valid = validate_sample_spec(sample); !valid)
         return valid;
     if (sample.interleaved_audio_path || sample.left_waveform_name || sample.right_waveform_name ||
         sample.target_sample_rate) {
@@ -111,31 +105,14 @@ Result<void> validate_direct_sample(const SampleSpec &sample) {
             return valid;
         if (*sample.right_waveform_id == *sample.waveform_id)
             return std::unexpected{manifest_error("sample waveform identifiers must be distinct")};
-        if (sample.expand_detune != 0 || sample.expand_dephase != 0)
+        if (uses_expanded_mono(sample.parameters))
             return std::unexpected{manifest_error("stereo Sample cannot use expanded-mono controls")};
     }
     return {};
 }
 
-Result<void> validate_sample_bank_parameter_overrides(const SampleBankParameterOverrides &overrides) {
-    const auto root_key = overrides.root_key.value_or(60U);
-    const auto key_low = overrides.key_low.value_or(0U);
-    const auto key_high = overrides.key_high.value_or(127U);
-    const auto velocity_low = overrides.velocity_low.value_or(0U);
-    const auto velocity_high = overrides.velocity_high.value_or(127U);
-    const auto effective_low = key_low == sampler_original_key_low_limit ? root_key : key_low;
-    const auto effective_high = key_high == sampler_original_key_high_limit ? root_key : key_high;
-    if (root_key > 127U || (key_low > 127U && key_low != sampler_original_key_low_limit) ||
-        key_high > sampler_original_key_high_limit || effective_high < effective_low ||
-        overrides.level.value_or(100U) > 127U || overrides.fine_tune_cents.value_or(0) < -63 ||
-        overrides.fine_tune_cents.value_or(0) > 63 || velocity_low > 127U || velocity_high > 127U ||
-        velocity_high < velocity_low || overrides.expand_detune.value_or(0) < -7 ||
-        overrides.expand_detune.value_or(0) > 7 || overrides.expand_dephase.value_or(0) < -63 ||
-        overrides.expand_dephase.value_or(0) > 63 || overrides.expand_width.value_or(63) < -63 ||
-        overrides.expand_width.value_or(63) > 63) {
-        return std::unexpected{manifest_error("Sample Bank parameter overrides are outside their supported ranges")};
-    }
-    return {};
+Result<void> validate_sample_bank_parameter_overrides(const SampleParameters &overrides) {
+    return detail::validate_sample_parameters(overrides);
 }
 
 Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
@@ -151,6 +128,8 @@ Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
             return std::unexpected{manifest_error("member_samples must be distinct")};
     }
     if (sample_bank.parameter_overrides) {
+        if (!detail::has_sample_parameter_values(*sample_bank.parameter_overrides))
+            return std::unexpected{manifest_error("parameter_overrides must contain at least one parameter")};
         if (auto valid = validate_sample_bank_parameter_overrides(*sample_bank.parameter_overrides); !valid)
             return valid;
     }
@@ -224,7 +203,7 @@ Result<void> validate_volume(const VolumeSpec &volume) {
     std::set<std::string_view> sample_names;
     std::map<std::string_view, const SampleSpec *> sample_specs;
     for (const auto &sample : volume.samples) {
-        if (auto valid = validate_sample_parameters(sample); !valid)
+        if (auto valid = validate_sample_spec(sample); !valid)
             return valid;
         if (!sample_names.insert(sample.name).second)
             return std::unexpected{manifest_error("volume has duplicate Sample names")};
@@ -244,7 +223,7 @@ Result<void> validate_volume(const VolumeSpec &volume) {
                                              *sample.right_waveform_id == *sample.waveform_id)) {
                 return std::unexpected{manifest_error("sample has an invalid right waveform reference")};
             }
-            if (sample.right_waveform_id && (sample.expand_detune != 0 || sample.expand_dephase != 0))
+            if (sample.right_waveform_id && uses_expanded_mono(sample.parameters))
                 return std::unexpected{manifest_error("stereo Sample cannot use expanded-mono controls")};
         } else {
             if (sample.interleaved_audio_path->empty())
@@ -261,7 +240,7 @@ Result<void> validate_volume(const VolumeSpec &volume) {
             }
             if (sample.target_sample_rate && *sample.target_sample_rate == 0U)
                 return std::unexpected{manifest_error("sample.target_sample_rate is out of range")};
-            if (sample.expand_detune != 0 || sample.expand_dephase != 0)
+            if (uses_expanded_mono(sample.parameters))
                 return std::unexpected{manifest_error("interleaved stereo Sample cannot use expanded-mono controls")};
         }
     }
@@ -284,10 +263,10 @@ Result<void> validate_volume(const VolumeSpec &volume) {
                 continue;
             const auto effective =
                 apply_sample_bank_parameter_overrides(*sample_specs.at(member_name), *sample_bank.parameter_overrides);
-            if (auto valid = validate_sample_parameters(effective); !valid)
+            if (auto valid = validate_sample_spec(effective); !valid)
                 return valid;
             if ((effective.right_waveform_id || effective.interleaved_audio_path) &&
-                (effective.expand_detune != 0 || effective.expand_dephase != 0)) {
+                uses_expanded_mono(effective.parameters)) {
                 return std::unexpected{
                     manifest_error("stereo Sample cannot receive expanded-mono Sample Bank controls")};
             }
@@ -371,6 +350,12 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return require_object_name(operation.sample_name, "sample_name");
                 } else if constexpr (std::same_as<T, InsertSampleOperation>) {
                     return validate_direct_sample(operation.sample);
+                } else if constexpr (std::same_as<T, UpdateSampleParametersOperation>) {
+                    if (auto valid = require_object_name(operation.sample_name, "sample_name"); !valid)
+                        return valid;
+                    if (!detail::has_sample_parameter_values(operation.parameters))
+                        return std::unexpected{manifest_error("parameters must contain at least one parameter")};
+                    return detail::validate_sample_parameters(operation.parameters);
                 } else if constexpr (std::same_as<T, InsertWaveformOperation>) {
                     const auto &waveform = operation.waveform;
                     if (waveform.path.empty())

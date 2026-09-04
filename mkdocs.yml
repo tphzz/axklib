@@ -98,6 +98,7 @@ nav:
       - SFZ Export: axklib/sfz.md
       - Report Schemas: axklib/report-schemas.md
       - CLI JSON Schemas: axklib/cli-json-schemas.md
+      - Sample Parameter Authoring: axklib/sample-parameters.md
       - Writer And Alteration: axklib/write.md
   - Distribution:
       - Compatibility: axklib/compatibility.md

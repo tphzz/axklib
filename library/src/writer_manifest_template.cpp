@@ -28,12 +28,10 @@ OrderedJson authored_starter_volume(std::string_view name) {
     result["name"] = name;
     result["waveforms"] =
         OrderedJson::array({{{"id", "tone"}, {"name", "Authored Tone"}, {"path", "tone.wav"}, {"root_key", 60}}});
-    result["samples"] = OrderedJson::array({{{"name", "Authored Tone"},
-                                             {"waveform_id", "tone"},
-                                             {"root_key", 60},
-                                             {"key_low", 60},
-                                             {"key_high", 60},
-                                             {"level", 100}}});
+    result["samples"] =
+        OrderedJson::array({{{"name", "Authored Tone"},
+                             {"waveform_id", "tone"},
+                             {"parameters", {{"root_key", 60}, {"key_low", 60}, {"key_high", 60}, {"level", 100}}}}});
     return result;
 }
 
