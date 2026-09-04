@@ -233,7 +233,8 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}, std::byte{0},    std::byte{0},
         std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0}};
     std::ranges::copy(controls, result.begin() + 0xa8);
-    result[0xd0] = static_cast<std::byte>(sample_bank_member ? 0x03U : 0x02U);
+    const auto topology_flags = (sample_bank_member ? 0x01U : 0U) | (right == nullptr ? 0x02U : 0U);
+    result[0xd0] = static_cast<std::byte>(topology_flags);
     result[0xd4] = std::byte{2};
     for (const auto number : linked_programs) {
         if (number == 0U || number > 128U) {

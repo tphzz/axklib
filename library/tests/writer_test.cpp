@@ -511,6 +511,28 @@ TEST(AudioImport, SerializesMissingWavLoopAsHardwareProvenForwardOneShot) {
     EXPECT_EQ(sbnk->left.loop_length_frames, 400U);
 }
 
+TEST(AudioImport, SerializesSampleTopologyFlagsFromMemberCountAndBankMembership) {
+    axk::SampleSpec sample;
+    sample.name = "Topology Sample";
+    const axk::detail::PreparedWaveformMember left{"Wave L", 0x100U, 44'100U, 400U};
+    const std::optional<axk::detail::PreparedWaveformMember> right{
+        axk::detail::PreparedWaveformMember{"Wave R", 0x200U, 44'100U, 400U}};
+
+    const auto standalone_mono = axk::detail::prepare_sbnk_payload(sample, left);
+    const auto banked_mono = axk::detail::prepare_sbnk_payload(sample, left, {}, true);
+    const auto standalone_stereo = axk::detail::prepare_sbnk_payload(sample, left, right);
+    const auto banked_stereo = axk::detail::prepare_sbnk_payload(sample, left, right, true);
+
+    ASSERT_TRUE(standalone_mono) << standalone_mono.error().message;
+    ASSERT_TRUE(banked_mono) << banked_mono.error().message;
+    ASSERT_TRUE(standalone_stereo) << standalone_stereo.error().message;
+    ASSERT_TRUE(banked_stereo) << banked_stereo.error().message;
+    EXPECT_EQ((*standalone_mono)[0xd0U], std::byte{0x02});
+    EXPECT_EQ((*banked_mono)[0xd0U], std::byte{0x03});
+    EXPECT_EQ((*standalone_stereo)[0xd0U], std::byte{0x00});
+    EXPECT_EQ((*banked_stereo)[0xd0U], std::byte{0x01});
+}
+
 TEST(HdsWriter, AtomicallyWritesAndReopensFreshEmptyVolumeImage) {
     axk::HdsBuildManifest manifest_value{"1.0", axk::minimum_hds_size, {}};
     axk::VolumeSpec volume;
