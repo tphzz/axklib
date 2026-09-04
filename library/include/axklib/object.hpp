@@ -152,6 +152,7 @@ struct CurrentSbnk {
     std::uint8_t mapout_flags{};
     bool uses_program_portamento{};
     bool mono_mode{};
+    bool legacy_velocity_xfade_default_5{};
     std::uint8_t key_range_high{};
     std::uint8_t key_range_low{};
     std::uint8_t sample_level{};

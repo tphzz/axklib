@@ -208,7 +208,7 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     axk::ByteWriter writer{*payload};
     ASSERT_TRUE(writer.write_be32(0x1cU, 0x158U));
     (*payload)[0x164U] = std::byte{1};
-    (*payload)[0x0d1U] |= std::byte{0x03};
+    (*payload)[0x0d1U] |= std::byte{0x0b};
     (*payload)[0x182U] = std::byte{1};
 
     const auto decoded = axk::decode_object(*payload);
@@ -225,6 +225,7 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     EXPECT_EQ(sample.control_records[2].range, -32);
     EXPECT_TRUE(sample.mono_mode);
     EXPECT_TRUE(sample.uses_program_portamento);
+    EXPECT_TRUE(sample.legacy_velocity_xfade_default_5);
     EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
 }
 

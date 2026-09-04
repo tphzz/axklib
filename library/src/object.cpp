@@ -256,6 +256,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     result.mapout_flags = *mapout_flags;
     result.uses_program_portamento = (*mapout_flags & 0x01U) != 0U;
     result.mono_mode = (*mapout_flags & 0x02U) != 0U;
+    result.legacy_velocity_xfade_default_5 = (*mapout_flags & 0x08U) != 0U;
     result.key_range_high = *key_high;
     result.key_range_low = *key_low;
     result.sample_level = *level;

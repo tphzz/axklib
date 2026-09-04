@@ -160,6 +160,7 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"mapoutFlags", sample->mapout_flags},
                 {"usesProgramPortamento", sample->uses_program_portamento},
                 {"monoMode", sample->mono_mode},
+                {"legacyVelocityXfadeDefault5", sample->legacy_velocity_xfade_default_5},
                 {"keyRangeHigh", sample->key_range_high},
                 {"keyRangeLow", sample->key_range_low},
                 {"sampleLevel", sample->sample_level},

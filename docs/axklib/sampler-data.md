@@ -471,19 +471,24 @@ fields that were not explicitly changed, including opaque packed lanes.
 `sample_flags_0x0d0` is read-only topology state. The A4000 reads bit `0`
 separately and handles bits `2..1` as one masked two-bit state. The exact
 bank-member Expand derivation remains unresolved, so writers derive only proven
-fresh-object profiles and graph alterations change only the membership bit
-while preserving the other lanes.
+fresh-object profiles: `0x02` for a standalone mono/single-source object and
+`0x00` for a standalone stereo/two-source object. Graph alterations change only
+the membership bit while preserving the other lanes. Expanded profiles remain
+template-preserved and are not synthesized by the fresh writer.
 
 `mapout_flags_0x0d1` is a packed byte, not one wholly semantic field. Bits
 `7..6` are EQ Type, bit `4` is Fixed Pitch, bit `2` is Key Crossfade, and bit
 `1` is Poly/Mono (`0=Poly`, `1=Mono`). Bit `0` is a derived cache: it is set
 exactly when Sample Portamento Type is `Pgm` (raw `1`) and clear for the other
 types. The writer refreshes that bit whenever it writes Portamento Type while
-preserving the other packed lanes. Bit `3` selects values in an internal
-synthesis cache but has no independent user-facing parameter, so it remains
-preserve-only. Bit `5` has no identified active consumer, is clear throughout
-the maintained HDA corpus, and remains reserved/preserve-only. Fresh objects
-write zero for bits `5` and `3`; template-based edits retain them.
+preserving the other packed lanes. Bit `3` is a legacy-layout default selector:
+when an older object lacks the extended parameter
+tail, the bit initializes Velocity X-Fade High and Low to `5` rather than `0`.
+Current objects store both values directly, so bit `3` remains diagnostic and
+preserve-only. It is exposed as `legacy_velocity_xfade_default_5`. Bit `5` has
+no identified active consumer, is clear throughout observed current objects, and
+remains reserved/preserve-only. Fresh objects write zero for bits `5` and `3`;
+template-based edits retain them.
 
 The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
 reserved. With the current `0x0a8` Sample Parameter base, those reserved bytes

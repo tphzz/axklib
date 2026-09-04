@@ -92,6 +92,7 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"right_link_role", sample->right_link_role},
                 {"uses_program_portamento", sample->uses_program_portamento},
                 {"mono_mode", sample->mono_mode},
+                {"legacy_velocity_xfade_default_5", sample->legacy_velocity_xfade_default_5},
                 {"loop_mode", sample->loop_mode},
                 {"loop_mode_label", sample->loop_mode_label},
                 {"left", member_json(sample->left)},
