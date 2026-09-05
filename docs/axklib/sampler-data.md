@@ -498,12 +498,13 @@ remains reserved/preserve-only. Fresh objects write zero for bits `5` and `3`;
 template-based edits retain them.
 
 The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
-reserved. With the current `0x0a8` Sample Parameter base, those reserved bytes
-map to `SBNK+0x152..0x15b`. Hardware-tested generated direct single-member
-`SBNK` objects require compatible values in this reserved range: `0x152..0x156`
-gates audible playback, and `0x158..0x15b` restores the normal unfiltered tone
-for this writer scope. They have no independent parameter selector; fresh
-writers use the tested compatibility profile and template edits preserve them.
+reserved. With the current `0x0a8` Sample Parameter base, those bytes map to
+`SBNK+0x152..0x15b`. They store five signed big-endian Q13 Sample EQ biquad
+coefficients in `b1`, `b2`, `b0`, `-a1`, `-a2` order. The coefficients are
+derived from EQ Type, Frequency, Gain, and Width and do not have independent
+controls. Fresh writers emit the neutral default vector. An explicit semantic
+EQ edit recomputes all five values; an unrelated template edit preserves the
+stored vector exactly.
 The other manual-reserved lanes remain raw-preserved. In particular,
 `0x13f..0x140` and `0x142` are transported only inside the four-byte group that
 contains AEG Sustain at `0x141`, and `0x14d..0x150` are copied into an internal
@@ -563,8 +564,7 @@ synthesis cache without becoming user-facing parameters.
 | `0x14b` | u8 | lfo_pitch_mod_depth_0x14b |
 | `0x14c` | u8 | lfo_amp_mod_depth_0x14c |
 | `0x151` | s8 | filter_gain_0x151 |
-| `0x152..0x156` | 5 bytes | single_member_reserved_playback_default_0x152_0x156 |
-| `0x158..0x15b` | 4 bytes | single_member_reserved_tone_default_0x158_0x15b |
+| `0x152..0x15b` | 5 x s16be Q13 | sample_eq_biquad_coefficients (`b1`, `b2`, `b0`, `-a1`, `-a2`) |
 | `0x15c` | u32be | wave_end_address_0x15c (derived cache) |
 | `0x160` | u32be | loop_end_address_0x160 (derived cache) |
 | `0x17c` | u8 | velocity_xfade_high_0x17c |

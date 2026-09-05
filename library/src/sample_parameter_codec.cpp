@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
+#include <cstdlib>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -13,6 +16,28 @@ namespace axk::detail {
 namespace {
 
 constexpr std::size_t sample_parameter_block_size = 0xe0U;
+constexpr std::size_t sample_eq_coefficient_offset = 0xaaU;
+constexpr double sample_eq_fixed_point_scale = 8192.0;
+
+constexpr std::array<std::uint32_t, 61> sample_eq_frequency_factor_bits{
+    0x3ababeffU, 0x3acd6bb4U, 0x3ae96ec5U, 0x3b02b8ebU, 0x3b1565a3U, 0x3b28125dU, 0x3b3abf18U, 0x3b521705U, 0x3b696ef5U,
+    0x3b82b90eU, 0x3b93103dU, 0x3ba36771U, 0x3bbabf7bU, 0x3bd21792U, 0x3be96fb7U, 0x3c0063f6U, 0x3c11e62eU, 0x3c23687bU,
+    0x3c3ac109U, 0x3c5219c8U, 0x3c6972c0U, 0x3c835127U, 0x3c91e924U, 0x3ca36ca5U, 0x3cb7dbe2U, 0x3ccf3729U, 0x3ce97ee3U,
+    0x3d0359cbU, 0x3d11f4ffU, 0x3d237d4dU, 0x3d37f39aU, 0x3d4c6c41U, 0x3d69af7dU, 0x3d837c68U, 0x3d922480U, 0x3da0d069U,
+    0x3daf8086U, 0x3dcceeedU, 0x3dea72d8U, 0x3e0407baU, 0x3e12e3fbU, 0x3e21cfd2U, 0x3e38526eU, 0x3e4f018eU, 0x3e6d8fd5U,
+    0x3e864320U, 0x3e95fa07U, 0x3ea9fee7U, 0x3ebe7e80U, 0x3ed7d37bU, 0x3ef690f3U, 0x3f0b6901U, 0x3f240d96U, 0x3f3f0ecaU,
+    0x3f5d19c1U, 0x3f7f16fbU, 0x3f93242aU, 0x3fc62ecaU, 0x400b2f66U, 0x4057a322U, 0x40d98fbcU,
+};
+
+constexpr std::array<std::uint32_t, 13> sample_eq_gain_factor_bits{
+    0x3f800000U, 0x3f8f9e4dU, 0x3fa12478U, 0x3fb4ce08U, 0x3fcaddc8U, 0x3fe39ea9U, 0x3fff64c2U,
+    0x400f4736U, 0x4020c2bfU, 0x40346063U, 0x404a62c2U, 0x406314a1U, 0x407ec9e2U,
+};
+
+constexpr std::array<std::uint32_t, 13> sample_eq_gain_root_bits{
+    0x3f800000U, 0x3f8795a0U, 0x3f8f9e4dU, 0x3f9820d7U, 0x3fa12478U, 0x3faab0d5U, 0x3fb4ce08U,
+    0x3fbf84a7U, 0x3fcaddc8U, 0x3fd6e30dU, 0x3fe39ea9U, 0x3ff11b6aU, 0x3fff64c2U,
+};
 
 Error invalid(std::string message) {
     return make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, std::move(message));
@@ -20,6 +45,112 @@ Error invalid(std::string message) {
 
 template <typename T> bool outside(const std::optional<T> &value, int minimum, int maximum) {
     return value && (static_cast<int>(*value) < minimum || static_cast<int>(*value) > maximum);
+}
+
+double table_float(std::uint32_t bits) { return static_cast<double>(std::bit_cast<float>(bits)); }
+
+int high_shelf_gain_limit(std::uint8_t frequency) {
+    if (frequency < 33U)
+        return 6;
+    if (frequency < 39U)
+        return 7;
+    if (frequency < 43U)
+        return 8;
+    if (frequency < 45U)
+        return 9;
+    if (frequency < 47U)
+        return 10;
+    return frequency < 49U ? 11 : 12;
+}
+
+std::int16_t quantize_sample_eq_coefficient(double value) {
+    const auto scaled = value * sample_eq_fixed_point_scale;
+    const auto rounded = static_cast<std::int32_t>(scaled + (scaled < 0.0 ? -0.5 : 0.5));
+    return static_cast<std::int16_t>(std::clamp(rounded,
+                                                static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::min()),
+                                                static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::max())));
+}
+
+Result<void> refresh_sample_eq_coefficients(std::span<std::byte> block) {
+    const auto type = static_cast<std::uint8_t>(std::to_integer<std::uint8_t>(block[0x29U]) >> 6U);
+    const auto frequency = std::to_integer<std::uint8_t>(block[0x7aU]);
+    auto gain = static_cast<int>(std::to_integer<std::uint8_t>(block[0x7bU])) - 64;
+    const auto width = std::to_integer<std::uint8_t>(block[0x7cU]);
+    if (type > 2U || frequency < 4U || frequency > 58U || gain < -12 || gain > 12 || width < 10U || width > 120U)
+        return std::unexpected{invalid("Stored Sample EQ parameters are outside their supported ranges")};
+
+    if (type == 2U)
+        gain = std::clamp(gain, -high_shelf_gain_limit(frequency), high_shelf_gain_limit(frequency));
+
+    const auto frequency_factor = table_float(sample_eq_frequency_factor_bits[frequency]);
+    const auto squared_frequency = frequency_factor * frequency_factor;
+    const auto gain_factor = table_float(sample_eq_gain_factor_bits[static_cast<std::size_t>(std::abs(gain))]);
+    const auto gain_root = table_float(sample_eq_gain_root_bits[static_cast<std::size_t>(std::abs(gain))]);
+    const auto peak_width_factor = 10.0 * frequency_factor / static_cast<double>(width);
+    const auto shelf_width_factor = 2.0 * frequency_factor;
+
+    double normalizer = 0.0;
+    double b0 = 0.0;
+    double b1 = 0.0;
+    double b2 = 0.0;
+    double minus_a1 = 0.0;
+    double minus_a2 = 0.0;
+    if (type == 0U && gain >= 0) {
+        normalizer = 1.0 / (1.0 + peak_width_factor + squared_frequency);
+        b0 = (1.0 + gain_factor * peak_width_factor + squared_frequency) * normalizer;
+        b1 = 2.0 * (squared_frequency - 1.0) * normalizer;
+        b2 = (1.0 - gain_factor * peak_width_factor + squared_frequency) * normalizer;
+        minus_a1 = -b1;
+        minus_a2 = -(1.0 - peak_width_factor + squared_frequency) * normalizer;
+    } else if (type == 0U) {
+        normalizer = 1.0 / (1.0 + gain_factor * peak_width_factor + squared_frequency);
+        b0 = (1.0 + peak_width_factor + squared_frequency) * normalizer;
+        b1 = 2.0 * (squared_frequency - 1.0) * normalizer;
+        b2 = (1.0 - peak_width_factor + squared_frequency) * normalizer;
+        minus_a1 = -b1;
+        minus_a2 = -(1.0 - gain_factor * peak_width_factor + squared_frequency) * normalizer;
+    } else if (type == 1U && gain >= 0) {
+        normalizer = 1.0 / (1.0 + shelf_width_factor + squared_frequency);
+        b0 = (1.0 + gain_root * shelf_width_factor + gain_factor * squared_frequency) * normalizer;
+        b1 = 2.0 * (gain_factor * squared_frequency - 1.0) * normalizer;
+        b2 = (1.0 - gain_root * shelf_width_factor + gain_factor * squared_frequency) * normalizer;
+        minus_a1 = -2.0 * (squared_frequency - 1.0) * normalizer;
+        minus_a2 = -(1.0 - shelf_width_factor + squared_frequency) * normalizer;
+    } else if (type == 1U) {
+        normalizer = 1.0 / (1.0 + gain_root * shelf_width_factor + gain_factor * squared_frequency);
+        b0 = (1.0 + shelf_width_factor + squared_frequency) * normalizer;
+        b1 = 2.0 * (squared_frequency - 1.0) * normalizer;
+        b2 = (1.0 - shelf_width_factor + squared_frequency) * normalizer;
+        minus_a1 = -2.0 * (gain_factor * squared_frequency - 1.0) * normalizer;
+        minus_a2 = -(1.0 - gain_root * shelf_width_factor + gain_factor * squared_frequency) * normalizer;
+    } else if (gain >= 0) {
+        normalizer = 1.0 / (1.0 + shelf_width_factor + squared_frequency);
+        b0 = (gain_factor + gain_root * shelf_width_factor + squared_frequency) * normalizer;
+        b1 = 2.0 * (squared_frequency - gain_factor) * normalizer;
+        b2 = (gain_factor - gain_root * shelf_width_factor + squared_frequency) * normalizer;
+        minus_a1 = -2.0 * (squared_frequency - 1.0) * normalizer;
+        minus_a2 = -(1.0 - shelf_width_factor + squared_frequency) * normalizer;
+    } else {
+        normalizer = 1.0 / (gain_factor + gain_root * shelf_width_factor + squared_frequency);
+        b0 = (1.0 + shelf_width_factor + squared_frequency) * normalizer;
+        b1 = 2.0 * (squared_frequency - 1.0) * normalizer;
+        b2 = (1.0 - shelf_width_factor + squared_frequency) * normalizer;
+        minus_a1 = -2.0 * (squared_frequency - gain_factor) * normalizer;
+        minus_a2 = -(gain_factor - gain_root * shelf_width_factor + squared_frequency) * normalizer;
+    }
+
+    const std::array coefficients{quantize_sample_eq_coefficient(b1), quantize_sample_eq_coefficient(b2),
+                                  quantize_sample_eq_coefficient(b0), quantize_sample_eq_coefficient(minus_a1),
+                                  quantize_sample_eq_coefficient(minus_a2)};
+    ByteWriter writer{block};
+    for (std::size_t index = 0; index < coefficients.size(); ++index) {
+        if (auto written = writer.write_be16(sample_eq_coefficient_offset + index * 2U,
+                                             static_cast<std::uint16_t>(coefficients[index]));
+            !written) {
+            return std::unexpected{written.error()};
+        }
+    }
+    return {};
 }
 
 bool invalid_envelope(const SampleFilterEnvelopeParameters &value) {
@@ -204,6 +335,8 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
     if (auto valid = validate_sample_parameters(value); !valid)
         return valid;
 
+    const auto changes_sample_eq =
+        value.sample_eq_type || value.sample_eq_frequency || value.sample_eq_gain_db || value.sample_eq_width_tenths;
     auto &mapout = block[0x29U];
     set_masked_bit(mapout, 0x10U, value.fixed_pitch);
     set_masked_bit(mapout, 0x04U, value.key_crossfade);
@@ -266,6 +399,10 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
     if (value.sample_eq_gain_db)
         block[0x7bU] = static_cast<std::byte>(static_cast<std::uint8_t>(*value.sample_eq_gain_db + 64));
     put_u8(block, 0x7cU, value.sample_eq_width_tenths);
+    if (changes_sample_eq) {
+        if (auto refreshed = refresh_sample_eq_coefficients(block); !refreshed)
+            return refreshed;
+    }
     put_s8(block, 0x7dU, value.filter_cutoff_distance);
 
     put_u8(block, 0x7eU, value.feg.attack_rate);

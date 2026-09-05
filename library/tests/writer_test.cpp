@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <limits>
@@ -754,11 +755,11 @@ TEST(AudioImport, SerializesTheCompleteCanonicalFreshSampleParameterBlock) {
     expected[0x9eU] = std::byte{1};
     expected[0x9fU] = std::byte{39};
     expected[0xa1U] = std::byte{1};
-    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
-                                                std::byte{0x20}};
-    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
-    std::ranges::copy(playback, expected.begin() + 0xaaU);
-    std::ranges::copy(tone, expected.begin() + 0xb0U);
+    constexpr std::array eq_coefficients{
+        std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a}, std::byte{0x20},
+        std::byte{0x00}, std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6},
+    };
+    std::ranges::copy(eq_coefficients, expected.begin() + 0xaaU);
     put_be32(0xb4U, 400U);
     put_be32(0xb8U, 400U);
     std::ranges::copy(controls, expected.begin() + 0xbcU);
@@ -1037,6 +1038,70 @@ TEST(AudioImport, SerializesTheSharedWritableSampleParameterModel) {
     EXPECT_EQ((*payload)[0x184U], std::byte{91});
 }
 
+TEST(AudioImport, DerivesSampleEqBiquadCoefficientsFromSemanticParameters) {
+    axk::SampleSpec sample;
+    sample.name = "High Shelf";
+    sample.parameters.sample_eq_type = 2U;
+    sample.parameters.sample_eq_frequency = 51U;
+    sample.parameters.sample_eq_gain_db = 5;
+    sample.parameters.sample_eq_width_tenths = 10U;
+    const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};
+    constexpr std::array expected{
+        std::byte{0xd8}, std::byte{0x40}, std::byte{0x08}, std::byte{0x59}, std::byte{0x2f},
+        std::byte{0x50}, std::byte{0x12}, std::byte{0xdf}, std::byte{0xfd}, std::byte{0x38},
+    };
+
+    const auto payload = axk::detail::prepare_sbnk_payload(sample, member);
+
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_TRUE(std::ranges::equal(expected, std::span{*payload}.subspan(0x152U, expected.size())));
+}
+
+TEST(AudioImport, AppliesSampleEqPeakWidthAndShelfGainRules) {
+    const auto prepare = [](std::uint8_t type, std::uint8_t frequency, std::int8_t gain, std::uint8_t width) {
+        axk::SampleSpec sample;
+        sample.name = "EQ";
+        sample.parameters.sample_eq_type = type;
+        sample.parameters.sample_eq_frequency = frequency;
+        sample.parameters.sample_eq_gain_db = gain;
+        sample.parameters.sample_eq_width_tenths = width;
+        return axk::detail::prepare_sbnk_payload(sample, {"Wave", 0x100U, 44'100U, 400U});
+    };
+    const auto coefficients = [](const std::vector<std::byte> &payload) {
+        std::array<std::int32_t, 5> result{};
+        for (std::size_t index = 0; index < result.size(); ++index) {
+            const auto raw = read_be16(payload, 0x152U + index * 2U);
+            result[index] = raw > static_cast<std::uint16_t>(std::numeric_limits<std::int16_t>::max())
+                                ? static_cast<std::int32_t>(raw) - 65'536
+                                : static_cast<std::int32_t>(raw);
+        }
+        return result;
+    };
+
+    const auto observed_peak = prepare(0U, 27U, 0, 10U);
+    const auto wide_peak = prepare(0U, 27U, 6, 120U);
+    const auto narrow_peak = prepare(0U, 27U, 6, 10U);
+    const auto narrow_low_shelf = prepare(1U, 37U, 6, 10U);
+    const auto wide_low_shelf = prepare(1U, 37U, 6, 120U);
+    const auto limited_high_shelf = prepare(2U, 30U, 12, 10U);
+    const auto explicit_high_shelf_limit = prepare(2U, 30U, 6, 10U);
+
+    ASSERT_TRUE(observed_peak);
+    ASSERT_TRUE(wide_peak);
+    ASSERT_TRUE(narrow_peak);
+    ASSERT_TRUE(narrow_low_shelf);
+    ASSERT_TRUE(wide_low_shelf);
+    ASSERT_TRUE(limited_high_shelf);
+    ASSERT_TRUE(explicit_high_shelf_limit);
+    constexpr std::array<std::int32_t, 5> stored_peak{-15'843, 7'684, 8'192, 15'843, -7'684};
+    const auto derived_peak = coefficients(*observed_peak);
+    for (std::size_t index = 0; index < stored_peak.size(); ++index)
+        EXPECT_LE(std::abs(derived_peak[index] - stored_peak[index]), 1);
+    EXPECT_NE(coefficients(*wide_peak), coefficients(*narrow_peak));
+    EXPECT_EQ(coefficients(*narrow_low_shelf), coefficients(*wide_low_shelf));
+    EXPECT_EQ(coefficients(*limited_high_shelf), coefficients(*explicit_high_shelf_limit));
+}
+
 TEST(AudioImport, SerializesOriginalKeyRangeSentinelsAndSpacePaddedNames) {
     axk::SampleSpec sample;
     sample.name = "Pad";
@@ -1307,11 +1372,11 @@ TEST(HdsWriter, SerializesTheCompleteCanonicalFreshSampleBankParameterState) {
     expected[0x9eU] = std::byte{1};
     expected[0x9fU] = std::byte{39};
     expected[0xa1U] = std::byte{1};
-    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
-                                                std::byte{0x20}};
-    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
-    std::ranges::copy(playback, expected.begin() + 0xaaU);
-    std::ranges::copy(tone, expected.begin() + 0xb0U);
+    constexpr std::array eq_coefficients{
+        std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a}, std::byte{0x20},
+        std::byte{0x00}, std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6},
+    };
+    std::ranges::copy(eq_coefficients, expected.begin() + 0xaaU);
     std::ranges::copy(controls, expected.begin() + 0xbcU);
     expected[0xd6U] = std::byte{1};
     expected[0xd7U] = std::byte{127};
@@ -1368,6 +1433,10 @@ TEST(HdsWriter, SerializesSharedParametersIntoSampleBankState) {
     sample_bank.parameter_overrides.emplace();
     auto &parameters = *sample_bank.parameter_overrides;
     parameters.fixed_pitch = true;
+    parameters.sample_eq_type = 2U;
+    parameters.sample_eq_frequency = 51U;
+    parameters.sample_eq_gain_db = 5;
+    parameters.sample_eq_width_tenths = 10U;
     parameters.filter_cutoff = 91U;
     parameters.feg.attack_rate = 73U;
     parameters.peg.range = -17;
@@ -1388,7 +1457,12 @@ TEST(HdsWriter, SerializesSharedParametersIntoSampleBankState) {
     const auto payload = axk::detail::prepare_sbac_payload(sample_bank, samples);
 
     ASSERT_TRUE(payload) << payload.error().message;
-    EXPECT_EQ((*payload)[0xa1U], std::byte{0x11});
+    constexpr std::array expected_eq{
+        std::byte{0xd8}, std::byte{0x40}, std::byte{0x08}, std::byte{0x59}, std::byte{0x2f},
+        std::byte{0x50}, std::byte{0x12}, std::byte{0xdf}, std::byte{0xfd}, std::byte{0x38},
+    };
+    EXPECT_EQ((*payload)[0xa1U], std::byte{0x91});
+    EXPECT_TRUE(std::ranges::equal(expected_eq, std::span{*payload}.subspan(0x122U, expected_eq.size())));
     EXPECT_EQ((*payload)[0xdaU], std::byte{91});
     EXPECT_EQ((*payload)[0xf6U], std::byte{73});
     EXPECT_EQ((*payload)[0x10bU], std::byte{0xef});
@@ -1441,6 +1515,11 @@ TEST(HdsWriter, AppliesSharedSampleBankParametersAndPreservesUnspecifiedBytes) {
     ASSERT_TRUE(payload) << payload.error().message;
     (*payload)[0xd1U] = std::byte{0x20};
     (*payload)[0x14dU] = std::byte{0x5a};
+    constexpr std::array stored_eq{
+        std::byte{0x01}, std::byte{0x23}, std::byte{0x45}, std::byte{0x67}, std::byte{0x10},
+        std::byte{0x32}, std::byte{0x54}, std::byte{0x76}, std::byte{0x11}, std::byte{0x22},
+    };
+    std::ranges::copy(stored_eq, payload->begin() + 0x152U);
     const auto prefix = std::vector<std::byte>(payload->begin(), payload->begin() + 0xa8U);
 
     axk::SampleParameters overrides;
@@ -1471,6 +1550,7 @@ TEST(HdsWriter, AppliesSharedSampleBankParametersAndPreservesUnspecifiedBytes) {
     EXPECT_EQ((*payload)[0x17fU], std::byte{90});
     EXPECT_EQ((*payload)[0x182U], std::byte{1});
     EXPECT_EQ((*payload)[0x14dU], std::byte{0x5a});
+    EXPECT_TRUE(std::ranges::equal(stored_eq, std::span{*payload}.subspan(0x152U, stored_eq.size())));
 }
 
 TEST(HdsWriter, RejectsExtendedOnlyOverrideForShortCurrentSample) {

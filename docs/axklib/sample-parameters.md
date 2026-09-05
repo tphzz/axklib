@@ -68,6 +68,14 @@ Numbered MIDI receive channels use zero-based storage: raw `0..15` displays as
 | `sample_eq_width_tenths` | `10..120` | `10` |
 | `filter_cutoff_distance` | `-63..63` | `0` |
 
+The four Sample EQ fields also maintain the five signed Q13 biquad coefficients
+stored in the Sample or Sample Bank parameter block. Supplying any EQ field
+recomputes the complete coefficient vector from the resulting semantic values;
+updates that do not touch EQ preserve an existing vector byte-for-byte.
+Width affects Peak/Dip only; the two shelf types use their fixed stored-response
+shape. HiShelv also limits the effective coefficient gain at low frequency
+selections while retaining the requested semantic gain value.
+
 Nonzero `expand_detune` or `expand_dephase` selects the supported expanded-mono
 profile. It is valid only for a Sample with one Wave Data source. Duplicate-
 source expanded mono remains preservation-only and cannot be authored.

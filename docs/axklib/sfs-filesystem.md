@@ -535,11 +535,10 @@ The first writer scope is intentionally narrow:
   objects. The members must have matching 16-bit width, sample rate, and logical
   frame count. One interleaved source can be split into those physical members
   during import; extraction may render them as interleaved stereo again;
-- generated direct single-member `SBNK` objects include hardware-tested reserved
-  Sample Parameter defaults at `SBNK+0x152..0x15b`. Yamaha labels the
-  corresponding decimal Sample Parameter offsets `0170..0179` as reserved, but
-  generated images need compatible values there for audible playback and normal
-  tone.
+- generated `SBNK` objects include the five derived signed Q13 Sample EQ biquad
+  coefficients at `SBNK+0x152..0x15b`. Fresh objects use the neutral default
+  vector; explicit EQ edits recompute the complete vector, while unrelated
+  template edits preserve it.
 - the initial SBAC/PROG profile uses the general supported image geometry. A
   partition may contain multiple independently configured volumes. Each volume
   may contain multiple groups of one through three mono children, with one

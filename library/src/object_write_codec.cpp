@@ -352,11 +352,11 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0x146] = std::byte{1};
     result[0x147] = std::byte{39};
     result[0x149] = std::byte{1};
-    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
-                                                std::byte{0x20}};
-    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
-    std::ranges::copy(playback, result.begin() + 0x152);
-    std::ranges::copy(tone, result.begin() + 0x158);
+    constexpr std::array eq_coefficients{
+        std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a}, std::byte{0x20},
+        std::byte{0x00}, std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6},
+    };
+    std::ranges::copy(eq_coefficients, result.begin() + 0x152);
     std::ranges::copy(controls, result.begin() + 0x164);
     result[0x17e] = std::byte{1};
     result[0x17f] = std::byte{127};
@@ -382,9 +382,10 @@ std::array<std::byte, 0xe0> default_sbac_sample_parameters() {
                                                  std::byte{0x47}, std::byte{0x05}, std::byte{0x01}, std::byte{0x20},
                                                  std::byte{0x49}, std::byte{0x0b}, std::byte{0x01}, std::byte{0xe0},
                                                  std::byte{0x48}, std::byte{0x0c}, std::byte{0x01}, std::byte{0xe0}};
-    constexpr std::array<std::byte, 5> playback{std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a},
-                                                std::byte{0x20}};
-    constexpr std::array<std::byte, 4> tone{std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6}};
+    constexpr std::array eq_coefficients{
+        std::byte{0xc1}, std::byte{0xe0}, std::byte{0x1e}, std::byte{0x3a}, std::byte{0x20},
+        std::byte{0x00}, std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6},
+    };
     std::ranges::copy(controls, result.begin());
     result[0x2c] = std::byte{2};
     result[0x2e] = std::byte{60};
@@ -416,8 +417,7 @@ std::array<std::byte, 0xe0> default_sbac_sample_parameters() {
     result[0x9e] = std::byte{1};
     result[0x9f] = std::byte{39};
     result[0xa1] = std::byte{1};
-    std::ranges::copy(playback, result.begin() + 0xaa);
-    std::ranges::copy(tone, result.begin() + 0xb0);
+    std::ranges::copy(eq_coefficients, result.begin() + 0xaa);
     std::ranges::copy(controls, result.begin() + 0xbc);
     result[0xd6] = std::byte{1};
     result[0xd7] = std::byte{127};
