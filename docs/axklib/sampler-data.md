@@ -112,6 +112,16 @@ Container-specific placement metadata is documented in the format pages:
 WAV per decoded `SMPL` object. Stereo rendering is a separate
 operation driven by `SBNK` relationships.
 
+Audio decoding requires the complete PCM transfer-control byte at `0x84` to
+equal `0x30`. `validate_smpl_pcm_transfer_control(const CurrentSmpl&)` returns
+`audio_unsupported_format` for every other value, including extra-bit variants
+such as `0x31` and `0xb0`. The helper checks only this profile, not PCM bounds or
+sample width. Both full waveform decoding and streaming preview/audition apply
+it before converting PCM. Unsupported audio remains available for inventory,
+relationship resolution, and raw metadata inspection. Export paths retain
+their existing fail-or-skip policy; unsupported objects never produce PCM WAVs.
+This restriction is independent of the object-layout selector at `0x14`.
+
 Current compact metadata fields:
 
 | Offset | Size | Type | Field |
@@ -143,8 +153,8 @@ loop_end_frame_a4000_ui  = loop_start + loop_length
 
 ### Compact-record handling
 
-The normal Wave Data object loader reads exactly `0x7c` bytes beginning at
-object offset `0x30` and normalizes these selected ranges:
+The compact record occupies `0x7c` bytes beginning at object offset `0x30`.
+Its fields use the following overlapping copy layout:
 
 | Object range | Runtime range | Length |
 | --- | --- | ---: |
@@ -155,25 +165,23 @@ object offset `0x30` and normalizes these selected ranges:
 | `0x8e..0xab` | `+0x58..+0x75` | `0x1e` |
 
 The later copies replace overlapping runtime bytes initially populated from
-`0x68..0x6e`. This produces two confirmed aliases on disk:
+`0x68..0x6e`. This produces two aliases on disk:
 `0x68..0x6b == 0x74..0x77` and
 `0x6c..0x6e == 0x78..0x7a`. The latter is only a three-byte prefix; byte
 `0x6f` is not part of the reference.
 
-Object ranges `0x43..0x49` and `0x6f..0x73` are not transferred. The A3000,
-A4000, and A5000 save paths write the entire local `0x7c`-byte buffer without
-initializing those gaps, so their contents are confirmed stack residue rather
-than object fields. Canonical writers emit zero there. The false former
-interpretation of `0x6c..0x6f` as a four-byte group ID has been removed.
+Object ranges `0x43..0x49` and `0x6f..0x73` are non-semantic residue, not
+object fields. Canonical writers emit zero there. In particular, `0x6c..0x6f`
+must not be interpreted as a four-byte group identifier.
 
 The normalized object values at `0x7c`, `0x7e`, `0x7f`, `0x80`, `0x84`,
 `0x85`, `0x8e`, `0x92`, `0x96`, and `0x9a` supply playback metadata. The
 loader derives the Wave Data end and loop end by adding each start and length
 pair. The embedded source/container text at `0x54` is preserved by load and
 save normalization. Current SFS objects store the containing Volume name; it is
-source-dependent outside SFS and is not a second Wave Data identity. Current corpus objects
-store zero at `0x82..0x83`, `0x86..0x8d`, and `0x9e..0xa9`; no current Wave
-Data playback consumer was found for those reserved ranges.
+source-dependent outside SFS and is not a second Wave Data identity. Reserved
+ranges `0x82..0x83`, `0x86..0x8d`, and `0x9e..0xa9` have no supported playback
+meaning; canonical writers emit zero there.
 
 The value at `0x74..0x77` is the transient name-hash collision-chain next
 handle. `0xaa..0xab` is a transient 512-byte transfer counter whose complete
@@ -183,8 +191,11 @@ Sample relationship resolution; it is not a persistent globally unique object
 identifier. Canonical authoring zero-initializes the residue ranges and the
 new-object hash-chain handle and transfer counter instead of reproducing
 captured runtime state. `0x84 & 0x30` selects one of four internal PCM transfer
-codes; canonical authoring emits the corpus-supported value `0x30` and rejects
-other values during portable import.
+codes; canonical authoring emits `0x30`. Other complete control-byte values
+are unsupported for audio decoding and portable import, regardless of the
+masked selector. Individual common-state bits and the complete source/import
+descriptor schema are not exposed for authoring. Their preserved raw values do
+not imply support for editing them.
 
 The shared object loader compares the raw field at `0x14` with `4`: values below
 `4` select the body length at `0x18`, while later layouts select `0x1c`; value
@@ -202,7 +213,18 @@ Loop-mode display values currently surfaced by axklib:
 | `4` | `One->` |
 | `5` | `One<-` |
 
+Fresh Wave Data authoring supports all six modes and defaults to forward
+one-shot (`4`). Wave start is zero and wave length is the logical source frame
+count. When both loop start and loop length are zero, modes `0`, `3`, `4`, and
+`5` use the full logical window. Modes `1` and `2` require an explicit nonempty
+loop. Every explicit window must end at or before the logical frame count;
+the exclusive endpoint may equal that count. The same policy applies to HDS,
+FAT12, and ISO authoring. There is no separate SMPL coarse-tune parameter;
+coarse tune belongs to the Sample parameter model.
+
 PCM export mapping:
+
+These mappings apply only to transfer control `0x30`:
 
 | Stored width | Stored bytes | WAV bytes |
 | ---: | --- | --- |

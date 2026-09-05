@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <limits>
 
 #include "axklib/media.hpp"
@@ -40,9 +41,21 @@ std::int32_t sample_value(const Waveform &waveform, std::uint64_t frame, std::ui
 
 } // namespace
 
+Result<void> validate_smpl_pcm_transfer_control(const CurrentSmpl &smpl) {
+    if (smpl.pcm_transfer_control.value != 0x30U) {
+        return std::unexpected{
+            make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
+                       std::format("Wave Data PCM transfer control 0x{:02x} is unsupported; expected 0x30",
+                                   smpl.pcm_transfer_control.value))};
+    }
+    return {};
+}
+
 static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std::string object_key,
                                                 std::filesystem::path source_path, PartitionIndex partition,
                                                 SfsId sfs_id, std::string name, std::span<const std::byte> payload) {
+    if (const auto profile = validate_smpl_pcm_transfer_control(decoded); !profile)
+        return std::unexpected(profile.error());
     if (decoded.stored_segment_offset != 0U || decoded.stored_segment_bytes != decoded.stored_pcm_bytes) {
         return std::unexpected{
             make_error(ErrorCode::object_missing, ErrorCategory::audio,

@@ -1,12 +1,15 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <variant>
 
 #include <gtest/gtest.h>
 
@@ -1455,6 +1458,60 @@ TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
     EXPECT_EQ(metadata->dump().find("rawPayloadHex"), std::string::npos);
     EXPECT_FALSE(sessions.object_detail(opened->image_id, "owner-b", objects->items.front().id));
     EXPECT_FALSE(sessions.object_detail(opened->image_id, "owner-a", "object-missing"));
+}
+
+TEST_F(ImageSessionTest, RejectsUnsupportedWaveDataTransferControlsForPreviewAndAudition) {
+    for (const unsigned control : {0U, 0x10U, 0x20U, 0x31U, 0xb0U, 0xffU}) {
+        SCOPED_TRACE(control);
+        const auto filename = std::format("transfer-{}.hds", control);
+        const auto path = root_ / filename;
+        std::filesystem::copy_file(fixture_path(), path);
+        {
+            const auto media = axk::open_media(path);
+            ASSERT_TRUE(media);
+            const auto &container = std::get<axk::Container>(media->storage());
+            std::fstream image{path, std::ios::binary | std::ios::in | std::ios::out};
+            ASSERT_TRUE(image);
+            for (const auto &partition : container.partitions()) {
+                for (const auto &record : partition.records) {
+                    if (record.object_type != "SMPL")
+                        continue;
+                    ASSERT_FALSE(record.extents.empty());
+                    const auto offset = (static_cast<std::uint64_t>(partition.start_sector) +
+                                         static_cast<std::uint64_t>(record.extents.front().cluster_offset) *
+                                             partition.sectors_per_cluster) *
+                                            512U +
+                                        0x84U;
+                    image.seekp(static_cast<std::streamoff>(offset));
+                    image.put(static_cast<char>(control));
+                    ASSERT_TRUE(image);
+                }
+            }
+        }
+        axk::app::ImageSessionManager sessions{*sandbox_};
+        const auto opened = sessions.open({"workspace", filename}, "owner-a");
+        ASSERT_TRUE(opened) << opened.error().message;
+        for (const auto type : {"SMPL", "SBNK"}) {
+            const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, type);
+            ASSERT_TRUE(objects);
+            ASSERT_FALSE(objects->items.empty());
+            const auto &id = objects->items.front().id;
+            const auto detail = sessions.object_detail(opened->image_id, "owner-a", id);
+            ASSERT_TRUE(detail);
+            EXPECT_FALSE(detail->at("relationships").empty());
+            if (std::string_view{type} == "SMPL") {
+                EXPECT_EQ(detail->at("object").at("decoded").at("pcmTransferControl").at("value"), control);
+            }
+            const auto preview = sessions.preview(opened->image_id, "owner-a", id, 32U);
+            ASSERT_FALSE(preview);
+            EXPECT_EQ(preview.error().code, "audition_unsupported");
+            const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {id});
+            ASSERT_FALSE(audition);
+            EXPECT_EQ(audition.error().code, "audition_unsupported");
+            EXPECT_EQ(audition.error().context.object_id, id);
+            EXPECT_NE(audition.error().message.find(std::format("0x{:02x}", control)), std::string::npos);
+        }
+    }
 }
 
 TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithTheImage) {

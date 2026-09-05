@@ -11,6 +11,7 @@
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
 #include "axklib/io.hpp"
+#include "axklib/object.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/sfs.hpp"
 
@@ -62,6 +63,8 @@ struct StereoRenderDecision {
     std::uint64_t right_padding_frames{};
 };
 
+// Validates only the transfer profile; callers still validate PCM spans and sample widths.
+AXK_API Result<void> validate_smpl_pcm_transfer_control(const CurrentSmpl &smpl);
 AXK_API Result<Waveform> decode_waveform(const Container &container, const ObjectSnapshot &snapshot,
                                          const CancellationToken &cancellation = {});
 AXK_API Result<Waveform> decode_waveform(const ObjectSnapshot &snapshot, const std::filesystem::path &source_path);

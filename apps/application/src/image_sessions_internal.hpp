@@ -392,6 +392,8 @@ struct axk::app::ImageSessionManager::Implementation {
         const auto *smpl = std::get_if<CurrentSmpl>(&snapshot->second.object.payload);
         if (smpl == nullptr)
             return std::unexpected(session_error("audition_unsupported", "audition requires SMPL Wave Data"));
+        if (const auto profile = validate_smpl_pcm_transfer_control(*smpl); !profile)
+            return std::unexpected(session_error("audition_unsupported", profile.error().message));
         if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
             return std::unexpected(session_error(
                 "companion_disks_required",

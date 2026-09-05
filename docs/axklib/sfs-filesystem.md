@@ -510,6 +510,11 @@ explicitly bounded one-to-three-member `SBAC` / Program profile. These APIs do
 not require a template container image. Existing-image changes use the separate
 transactional alteration APIs described in [Writer And Alteration](write.md).
 
+Current Wave Data uses the shared [SMPL contract](sampler-data.md#smpl-wave-data-object):
+PCM transfer control `0x30`, explicit six-mode loop policy, and logical versus
+physical frame counts. Metadata remains inspectable when a different transfer
+control prevents audio decoding, preview, or audition.
+
 The first writer scope is intentionally narrow:
 
 - image size is capped at `2_147_483_648` bytes;
