@@ -1,0 +1,8 @@
+[
+  {"name":"Neutral PeakDip", "type":0, "frequency":26, "gain_db":0, "width_tenths":10,
+   "coefficients_q13":[-15904,7738,8192,15904,-7738], "tolerance_q13":0},
+  {"name":"PeakDip frequency 27", "type":0, "frequency":27, "gain_db":0, "width_tenths":10,
+   "coefficients_q13":[-15843,7684,8192,15843,-7684], "tolerance_q13":1},
+  {"name":"High shelf frequency 51", "type":2, "frequency":51, "gain_db":5, "width_tenths":10,
+   "coefficients_q13":[-10176,2137,12112,4831,-712], "tolerance_q13":0}
+]

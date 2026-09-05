@@ -546,6 +546,7 @@ if(BUILD_TESTING)
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/sample_eq_test.cpp
   )
   target_compile_features(axk_core_tests PRIVATE cxx_std_23)
   target_compile_definitions(

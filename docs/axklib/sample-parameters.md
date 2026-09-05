@@ -72,6 +72,10 @@ The four Sample EQ fields also maintain the five signed Q13 biquad coefficients
 stored in the Sample or Sample Bank parameter block. Supplying any EQ field
 recomputes the complete coefficient vector from the resulting semantic values;
 updates that do not touch EQ preserve an existing vector byte-for-byte.
+Supplying an EQ value explicitly regenerates the vector even when that value
+equals the value already stored. The coefficient vector is playback state,
+not disposable padding: a discrepancy with the semantic values must not be
+silently normalized during an unrelated edit.
 Width affects Peak/Dip only; the two shelf types use their fixed stored-response
 shape. HiShelv also limits the effective coefficient gain at low frequency
 selections while retaining the requested semantic gain value.
