@@ -397,7 +397,8 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     EXPECT_EQ(plan->programs[0].name, "Concert");
     ASSERT_EQ(plan->programs[0].assignments.size(), 1U);
     EXPECT_EQ(plan->programs[0].assignments[0].target_name, "Grand Voice");
-    EXPECT_EQ(plan->programs[0].assignments[0].receive_mode, axk::ProgramReceiveMode::sample);
+    EXPECT_EQ(plan->programs[0].assignments[0].parameters.receive,
+              axk::ProgramReceiveSetting{axk::ProgramReceiveInherit{}});
     EXPECT_TRUE(std::ranges::any_of(plan->notices, [](const auto &notice) {
         return notice.disposition == axk::tx16w::a_series::MappingDisposition::omitted &&
                notice.source_parameter == "fade";
@@ -607,7 +608,8 @@ TEST(Tx16wASeries, SynthesizesAuditionProgramsWhenPerformanceFileIsAbsent) {
     EXPECT_EQ(plan->programs[0].name, "Solo Voi");
     ASSERT_EQ(plan->programs[0].assignments.size(), 1U);
     EXPECT_EQ(plan->programs[0].assignments[0].target_name, "Solo Voice");
-    EXPECT_EQ(plan->programs[0].assignments[0].receive_mode, axk::ProgramReceiveMode::sample);
+    EXPECT_EQ(plan->programs[0].assignments[0].parameters.receive,
+              axk::ProgramReceiveSetting{axk::ProgramReceiveInherit{}});
     EXPECT_TRUE(std::ranges::any_of(plan->notices, [](const auto &notice) {
         return notice.disposition == axk::tx16w::a_series::MappingDisposition::defaulted &&
                notice.source_parameter == "missing_performance";

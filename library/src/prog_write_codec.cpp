@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "axklib/bytes.hpp"
+#include "axklib/program_parameter_codec.hpp"
 
 namespace axk::detail {
 
@@ -22,11 +23,7 @@ Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program) 
     }
     for (const auto &assignment : program.assignments) {
         if ((assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK") || assignment.target_name.empty() ||
-            (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
-             (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) ||
-            (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U) ||
-            (assignment.receive_mode != ProgramReceiveMode::sample &&
-             assignment.receive_mode != ProgramReceiveMode::midi_channel)) {
+            assignment.target_name.size() > 16U) {
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "Program assignment cannot be represented by the object codec")};
         }
@@ -70,9 +67,6 @@ Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program) 
         if (auto written = writer.write_ascii_field(offset, 16U, assignment.target_name); !written)
             return std::unexpected{written.error()};
         result[offset + 0x14U] = assignment.target_kind == "SBAC" ? std::byte{0x11} : std::byte{0x10};
-        result[offset + 0x15U] = assignment.receive_mode == ProgramReceiveMode::sample
-                                     ? std::byte{0xff}
-                                     : static_cast<std::byte>(assignment.receive_channel - 1U);
     }
     for (std::size_t index = 0; index < 6U; ++index) {
         const auto offset = index < 3U ? 0x98U + index * 0x28U : tail + (index - 3U) * 0x28U;
@@ -88,6 +82,18 @@ Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program) 
                            [](auto value) { return static_cast<std::byte>(value); });
     std::fill_n(result.begin() + static_cast<std::ptrdiff_t>(tail + 0x96U), 16U, std::byte{64});
     result[tail + 0xa6U] = std::byte{4};
+    if (auto applied =
+            apply_program_parameters(result, program.parameters, program.model, ProgramParameterWriteMode::fresh);
+        !applied)
+        return std::unexpected{applied.error()};
+    std::vector<ProgramAssignmentParameterPatch> patches;
+    for (std::size_t index = 0; index < program.assignments.size(); ++index) {
+        const auto &assignment = program.assignments[index];
+        if (has_program_assignment_parameter_values(assignment.parameters))
+            patches.push_back({index, assignment.target_kind, assignment.target_name, assignment.parameters});
+    }
+    if (auto applied = apply_program_assignment_patches(result, patches, program.model); !applied)
+        return std::unexpected{applied.error()};
     return result;
 }
 

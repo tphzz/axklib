@@ -8,6 +8,9 @@
 #include <set>
 #include <tuple>
 #include <unordered_map>
+#include <variant>
+
+#include "axklib/program_parameter_codec.hpp"
 
 namespace axk {
 namespace {
@@ -234,31 +237,18 @@ AssignmentState assignment_state(const ProgAssignment &row) {
 }
 
 ProgramReceiveSelector decode_receive_selector(std::uint8_t selector) {
-    if (selector == 0xffU)
-        return {ProgramReceiveSelectorKind::sample, std::nullopt, selector};
-    if (selector <= 15U)
-        return {ProgramReceiveSelectorKind::a_channel, static_cast<std::uint8_t>(selector + 1U), selector};
-    if (selector == 16U)
-        return {ProgramReceiveSelectorKind::basic_channel, std::nullopt, selector};
-    if (selector <= 32U)
-        return {ProgramReceiveSelectorKind::b_channel, static_cast<std::uint8_t>(selector - 16U), selector};
-    return {ProgramReceiveSelectorKind::unknown, std::nullopt, selector};
+    return {detail::decode_program_receive(selector), selector};
 }
 
 std::string receive_selector_display(const ProgramReceiveSelector &selector) {
-    switch (selector.kind) {
-    case ProgramReceiveSelectorKind::sample:
-        return "=Smp";
-    case ProgramReceiveSelectorKind::a_channel:
-        return std::format("A{:02}", *selector.channel);
-    case ProgramReceiveSelectorKind::basic_channel:
-        return "Bch";
-    case ProgramReceiveSelectorKind::b_channel:
-        return std::format("B{:02}", *selector.channel);
-    case ProgramReceiveSelectorKind::unknown:
+    if (!selector.setting)
         return "unknown";
-    }
-    return "unknown";
+    if (std::holds_alternative<ProgramReceiveInherit>(*selector.setting))
+        return "=Smp";
+    if (std::holds_alternative<ProgramReceiveBasic>(*selector.setting))
+        return "Bch";
+    const auto &channel = std::get<ProgramReceiveChannel>(*selector.setting);
+    return std::format("{}{:02}", channel.port == MidiPort::a ? 'A' : 'B', channel.channel);
 }
 
 std::optional<std::uint8_t> program_number(const ObjectSnapshot &item) {
@@ -374,7 +364,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                     const auto rel_type = type == ObjectType::sbac   ? "PROG_ASSIGNMENT_TO_SBAC"
                                           : type == ObjectType::sbnk ? "PROG_ASSIGNMENT_TO_SBNK"
                                                                      : "PROG_ASSIGNMENT_TO_OBJECT";
-                    const auto selector = decode_receive_selector(row.flags);
+                    const auto selector = decode_receive_selector(row.raw_receive_selector);
                     auto state = decoded_state;
                     if (match.target != nullptr && item->scope_key.starts_with("iso:") && type == ObjectType::sbnk &&
                         match.target->object.header.type != ObjectType::sbnk) {
@@ -426,7 +416,7 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 if (row.assignment_index) {
                     if (const auto *program = std::get_if<CurrentProg>(&source->second->object.payload);
                         program != nullptr && *row.assignment_index < program->assignments.size()) {
-                        nondefault = program->assignments[*row.assignment_index].flags != 0xffU;
+                        nondefault = program->assignments[*row.assignment_index].raw_receive_selector != 0xffU;
                     }
                 }
                 auto &[program_number, all_nondefault] =

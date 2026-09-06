@@ -64,7 +64,11 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Graph Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -147,8 +151,8 @@ TEST(HdsManifest, ParsesSemanticSampleBankParameterOverrides) {
           "root_key":64,"key_low":255,"key_high":128,"level":87,"fine_tune_cents":-12,
           "velocity_low":20,"velocity_high":110,"expand_detune":-5,"expand_dephase":27,"expand_width":-41}}],
         "programs":[{"number":1,"name":"Program","assignments":[
-          {"sample_bank":"Bank","receive_mode":"MIDI_CHANNEL","receive_channel":1},
-          {"sample":"Direct","receive_mode":"MIDI_CHANNEL","receive_channel":2}]}]
+          {"sample_bank":"Bank","parameters": {"receive": {"port": "a", "channel": 1}}},
+          {"sample":"Direct","parameters": {"receive": {"port": "a", "channel": 2}}}]}]
       }]}]
     })json";
 
@@ -225,8 +229,8 @@ TEST(HdsManifest, RejectsExpandedMonoBankOverridesForInterleavedStereoMembers) {
         "sample_banks":[{"name":"Bank","member_samples":["Stereo"],
                          "parameter_overrides":{"expand_detune":1}}],
         "programs":[{"number":1,"name":"Program","assignments":[
-          {"sample_bank":"Bank","receive_mode":"MIDI_CHANNEL","receive_channel":1},
-          {"sample":"Direct","receive_mode":"MIDI_CHANNEL","receive_channel":2}]}]
+          {"sample_bank":"Bank","parameters": {"receive": {"port": "a", "channel": 1}}},
+          {"sample":"Direct","parameters": {"receive": {"port": "a", "channel": 2}}}]}]
       }]}]
     })json";
 
@@ -262,12 +266,12 @@ TEST(HdsManifest, RejectsSampleMembershipInMultipleSampleBanksForJsonAndTypedInp
     volume.programs = {
         {1U,
          "Program1",
-         {{"SBAC", "Bank 1", 1U, axk::ProgramReceiveMode::midi_channel},
-          {"SBNK", "Direct 1", 2U, axk::ProgramReceiveMode::midi_channel}}},
+         {{"SBAC", "Bank 1", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct 1", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}},
         {2U,
          "Program2",
-         {{"SBAC", "Bank 2", 1U, axk::ProgramReceiveMode::midi_channel},
-          {"SBNK", "Direct 2", 2U, axk::ProgramReceiveMode::midi_channel}}},
+         {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}},
     };
     axk::HdsBuildManifest manifest{
         std::string{axk::build_manifest_schema_version}, axk::minimum_hds_size, {{"P1", {std::move(volume)}}}};
@@ -1663,7 +1667,7 @@ TEST(HdsWriter, EncodesTheNativeTx16wProgramAssignmentCapacity) {
     program.name = "Wide";
     for (std::size_t index = 0U; index < axk::maximum_program_assignments; ++index) {
         program.assignments.push_back(
-            {"SBAC", std::format("Bank {}", index + 1U), 0U, axk::ProgramReceiveMode::sample});
+            {"SBAC", std::format("Bank {}", index + 1U), {.receive = axk::ProgramReceiveInherit{}}});
     }
 
     const auto payload = axk::detail::prepare_prog_payload(program);
@@ -1680,7 +1684,7 @@ TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {
     axk::ProgramSpec program;
     program.number = 7U;
     program.name = "Bass";
-    program.assignments.push_back({"SBAC", "Bass Bank", 0U, axk::ProgramReceiveMode::sample});
+    program.assignments.push_back({"SBAC", "Bass Bank", {.receive = axk::ProgramReceiveInherit{}}});
 
     const auto payload = axk::detail::prepare_prog_payload(program);
     ASSERT_TRUE(payload) << payload.error().message;
@@ -1692,7 +1696,7 @@ TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {
     ASSERT_EQ(std::ranges::count_if(current->assignments, [](const auto &row) { return !row.name.empty(); }), 1U);
     EXPECT_EQ(current->assignments.front().name, "Bass Bank");
     EXPECT_EQ(current->assignments.front().kind, 0x11U);
-    EXPECT_EQ(current->assignments.front().flags, 0xffU);
+    EXPECT_EQ(current->assignments.front().raw_receive_selector, 0xffU);
     EXPECT_EQ(current->assignments.front().raw_row[0x28], std::byte{0xff});
 }
 

@@ -91,6 +91,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_program(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, ClearProgramAssignmentsOperation>)
                     return clear_program_assignments(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateProgramParametersOperation>)
+                    return update_program_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DeleteSequenceOperation>)
                     return delete_sequence(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertSequenceOperation>)

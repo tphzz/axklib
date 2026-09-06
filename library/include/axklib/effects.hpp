@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -45,6 +46,18 @@ struct EffectDisplayValue {
     std::string note;
 };
 
+struct EffectParameterWriteDomain {
+    EffectParameterKind kind{EffectParameterKind::unused};
+    std::uint16_t minimum{};
+    std::uint16_t maximum{};
+};
+
+struct EffectWriteInfo {
+    std::uint8_t legacy_type{};
+    std::array<std::uint16_t, 16> reset_words{};
+    std::array<EffectParameterWriteDomain, 16> parameters{};
+};
+
 struct ModelRequirement {
     std::string_view requirement;
     std::vector<std::string_view> compatible_models;
@@ -53,6 +66,8 @@ struct ModelRequirement {
 };
 
 AXK_API std::optional<EffectProfile> parse_effect_profile(std::string_view value) noexcept;
+// Numeric write domains and complete type-change vectors for current ordinary effects (0..96).
+AXK_API std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type) noexcept;
 AXK_API bool effect_type_supported(std::uint16_t raw_type, EffectProfile profile = EffectProfile::a4000) noexcept;
 AXK_API std::optional<EffectTypeInfo> effect_type_info(std::uint16_t raw_type,
                                                        EffectProfile profile = EffectProfile::a4000) noexcept;

@@ -969,7 +969,11 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     direct_sample.name = "Direct Sample";
     volume_spec.samples.push_back(std::move(direct_sample));
     volume_spec.sample_banks.push_back({"Bank", {"Sample"}});
-    volume_spec.programs.push_back({1U, "Pgm 001", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume_spec.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
     const auto image_path = root_ / "program-scope.hds";
     const auto written = axk::write_hds_image(manifest, image_path);
@@ -1072,18 +1076,21 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
         {"Bank 10", {"Member 10"}},
         {"Bank 2", {"Member 2"}},
     };
-    volume_spec.programs.push_back({4U,
-                                    "Ref Pgm",
-                                    {{"SBAC", "Ref Bank", 1U, axk::ProgramReceiveMode::midi_channel},
-                                     {"SBNK", "Ref Direct", 2U, axk::ProgramReceiveMode::midi_channel}}});
-    volume_spec.programs.push_back({127U,
-                                    "Bank 2",
-                                    {{"SBAC", "Bank 2", 1U, axk::ProgramReceiveMode::midi_channel},
-                                     {"SBNK", "Member 10", 2U, axk::ProgramReceiveMode::midi_channel}}});
-    volume_spec.programs.push_back({128U,
-                                    "Bank 10",
-                                    {{"SBAC", "Bank 10", 1U, axk::ProgramReceiveMode::midi_channel},
-                                     {"SBNK", "Member 2", 2U, axk::ProgramReceiveMode::midi_channel}}});
+    volume_spec.programs.push_back(
+        {4U,
+         "Ref Pgm",
+         {{"SBAC", "Ref Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Ref Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume_spec.programs.push_back(
+        {127U,
+         "Bank 2",
+         {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Member 10", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume_spec.programs.push_back(
+        {128U,
+         "Bank 10",
+         {{"SBAC", "Bank 10", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Member 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
     const auto written = axk::write_hds_image(manifest, root_ / "generation.hds");
     ASSERT_TRUE(written) << written.error().message;
@@ -1136,7 +1143,8 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
     EXPECT_EQ(bank_program->program.number, 1U);
     ASSERT_EQ(bank_program->program.assignments.size(), 1U);
     EXPECT_EQ(bank_program->program.assignments.front().target_kind, "SBAC");
-    EXPECT_EQ(bank_program->program.assignments.front().receive_mode, axk::ProgramReceiveMode::sample);
+    EXPECT_EQ(bank_program->program.assignments.front().parameters.receive,
+              axk::ProgramReceiveSetting{axk::ProgramReceiveInherit{}});
     EXPECT_EQ(sample_program->program.number, 2U);
     EXPECT_EQ(sample_program->program.assignments.front().target_kind, "SBNK");
 
@@ -1196,9 +1204,20 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     volume.sample_banks.push_back({"Bank", {"Sample"}});
     volume.sample_banks.push_back({"Second Bank", {"Second Sample"}});
     volume.sample_banks.push_back({"Control Bank", {"Control Sample"}});
-    volume.programs.push_back({4U, "Program", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
-    volume.programs.push_back({5U, "Second", {{"SBAC", "Second Bank", 1U}, {"SBNK", "Direct Second", 2U}}});
-    volume.programs.push_back({6U, "Control", {{"SBAC", "Control Bank", 1U}, {"SBNK", "Direct Control", 2U}}});
+    volume.programs.push_back({4U,
+                               "Program",
+                               {{"SBAC", "Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume.programs.push_back(
+        {5U,
+         "Second",
+         {{"SBAC", "Second Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Second", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume.programs.push_back(
+        {6U,
+         "Control",
+         {{"SBAC", "Control Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Control", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     const auto related_volume = [&](std::string volume_name, std::string bank_name, std::string sample_name,
                                     std::string prefix) {
         axk::VolumeSpec related;
@@ -1219,7 +1238,11 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
         related_direct.parameters.key_high = 127U;
         related.samples.push_back(std::move(related_direct));
         related.sample_banks.push_back({bank_name, {sample_name}});
-        related.programs.push_back({1U, "Related", {{"SBAC", bank_name, 1U}, {"SBNK", direct_name, 2U}}});
+        related.programs.push_back(
+            {1U,
+             "Related",
+             {{"SBAC", bank_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+              {"SBNK", direct_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
         return related;
     };
     auto remote = related_volume("Remote", "Remote Bank", "Remote Sample", "Remote");
@@ -1279,6 +1302,15 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     EXPECT_EQ(decoded.at("assignments").size(), 2U);
     EXPECT_EQ(decoded.at("effectBlocks").size(), 6U);
     EXPECT_EQ(decoded.at("effectBlocks")[5].at("parameterValues").size(), 16U);
+    EXPECT_EQ(decoded.at("parameters").at("level"), 127U);
+    EXPECT_EQ(decoded.at("parameters").at("controllers").at("1").at("device"), 91U);
+    EXPECT_EQ(decoded.at("parameters").at("step_wave").at("step_count"), 8U);
+    EXPECT_EQ(decoded.at("assignments")[0].at("parameters").at("receive"),
+              nlohmann::json({{"port", "a"}, {"channel", 1U}}));
+    EXPECT_EQ(decoded.at("rawCommonParameterBlockHex").get<std::string>().size(), 0x18U * 2U);
+    EXPECT_EQ(decoded.at("rawExtendedParameterBlockHex").get<std::string>().size(), 0x28U * 2U);
+    EXPECT_FALSE(decoded.contains("controlRecords"));
+    EXPECT_FALSE(decoded.at("assignments")[0].contains("levelOffset"));
     EXPECT_EQ(decoded.at("rawCanonicalControlBlockHex"), decoded.at("rawLegacyControlBlockHex"));
     EXPECT_FALSE(decoded.contains("rawControlBlockHex"));
     EXPECT_FALSE(decoded.contains("rawControlTailCopyHex"));

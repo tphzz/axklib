@@ -157,7 +157,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "rename_program" && *type != "delete_sequence" && *type != "insert_sequence" &&
                 *type != "rename_sequence" && *type != "rename_volume" && *type != "rename_partition" &&
                 *type != "repair_object_placements" && *type != "import_tx16w_disk_set" &&
-                *type != "clear_program_assignments") {
+                *type != "clear_program_assignments" && *type != "update_program_parameters") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -444,6 +444,11 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 data = std::move(*assignment);
             } else if (*type == "insert_program") {
                 auto program = detail::parse_insert_program_json(row, std::move(selector), context);
+                if (!program)
+                    return std::unexpected{program.error()};
+                data = std::move(*program);
+            } else if (*type == "update_program_parameters") {
+                auto program = detail::parse_program_parameter_update_json(row, std::move(selector));
                 if (!program)
                     return std::unexpected{program.error()};
                 data = std::move(*program);

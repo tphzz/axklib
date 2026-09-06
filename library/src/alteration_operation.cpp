@@ -30,6 +30,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"repair_object_placements"},
         std::string_view{"import_tx16w_disk_set"},
         std::string_view{"clear_program_assignments"},
+        std::string_view{"update_program_parameters"},
     };
     return names[operation.index()];
 }

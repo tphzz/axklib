@@ -2415,6 +2415,7 @@ export interface components {
             recordSizeOrHeaderUsed0x18: number;
         };
         ImageObjectDetailObject: {
+            /** @description Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model. */
             decoded: {
                 kind: string;
             } & {

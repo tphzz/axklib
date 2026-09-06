@@ -8,7 +8,10 @@
 #include <vector>
 
 #include "axklib/io.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sampler_model.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
@@ -142,6 +145,16 @@ struct ClearProgramAssignmentsOperation {
     std::vector<std::uint16_t> assignment_ordinals;
 };
 
+struct UpdateProgramParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    // No inferred model: the default is unsupported by this current-layout operation.
+    ASeriesModel model{ASeriesModel::a3000};
+    ProgramParameters parameters;
+    std::vector<ProgramAssignmentParameterPatch> assignments;
+};
+
 struct SequenceSpec {
     std::string name;
     std::filesystem::path midi_path;
@@ -199,7 +212,8 @@ using AlterationOperationData =
                  AssignSampleBankMembersOperation, RenameSampleBankOperation, DeleteProgramOperation,
                  InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation, InsertSequenceOperation,
                  RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
-                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation>;
+                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
+                 UpdateProgramParametersOperation>;
 
 struct AlterationOperation {
     std::string id;

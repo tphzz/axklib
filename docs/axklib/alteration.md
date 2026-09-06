@@ -13,7 +13,7 @@ Supported operations are:
 - insert, delete, rename, and update parameters on a Sample (`SBNK`);
 - insert, delete, and rename Sample Bank (`SBAC`);
 - assign selected Samples to an existing Sample Bank (`SBAC`);
-- insert, delete, and rename Program.
+- insert, delete, rename, and update parameters on a Program.
 
 Wave Data insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
 image creation. A subsequent Sample insertion in the same transaction can
@@ -45,7 +45,15 @@ updates; derived caches are recomputed from changed source values. Sample Bank
 `parameter_overrides` uses this model too, prepares every member update before
 mutation, and leaves the bank's pending-propagation bits clear.
 
+`update_program_parameters` applies [Program-wide and guarded assignment
+parameter patches](program-parameters.md) to a current-layout Program. It
+requires an explicit A4000/A5000 model and at least one writable leaf. Assignment
+patches use a counted ordinal plus the expected stored target kind and name.
+It preserves object size, unused rows, opaque state, and all other objects;
+global and assignment edits are committed together or not at all.
+
 ## Object deletion planning
+
 
 Interactive clients should use `inspect_object_deletion()` before deleting a
 Program, Sample Bank, Sample, or Wave Data object. The planner accepts exact

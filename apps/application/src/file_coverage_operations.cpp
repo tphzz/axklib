@@ -98,7 +98,7 @@ std::vector<axk::ReportRow> program_detail_rows(std::span<const LoadedSource> so
                 {"assignment_name", assignment.name},
                 {"assignment_raw_handle_0x10", static_cast<std::uint64_t>(assignment.raw_handle)},
                 {"assignment_kind_byte_0x14", static_cast<std::uint64_t>(assignment.kind)},
-                {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.flags)},
+                {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.raw_receive_selector)},
                 {"assignment_output1_byte_0x1d",
                  static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(assignment.raw_row[0x1d]))},
                 {"assignment_output2_byte_0x28",
@@ -235,7 +235,7 @@ std::vector<axk::ReportRow> program_ignored_detail_rows(std::span<const LoadedSo
                     {"raw_name_guess", assignment.name},
                     {"assignment_raw_handle_0x10", static_cast<std::uint64_t>(assignment.raw_handle)},
                     {"assignment_kind_byte_0x14", static_cast<std::uint64_t>(assignment.kind)},
-                    {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.flags)},
+                    {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.raw_receive_selector)},
                     {"reason", std::move(reason)},
                 });
             }

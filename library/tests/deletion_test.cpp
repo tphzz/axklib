@@ -62,7 +62,10 @@ axk::HdsBuildManifest deletion_manifest(const std::filesystem::path &audio_path)
     direct.name = "Direct";
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Bank", {"Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
+    volume.programs.push_back({1U,
+                               "Pgm 001",
+                               {{"SBAC", "Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     result.partitions.push_back({"hd1", {std::move(volume)}});
     return result;
 }

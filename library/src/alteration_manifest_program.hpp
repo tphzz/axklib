@@ -10,6 +10,8 @@ namespace axk::detail {
 
 Result<InsertProgramOperation> parse_insert_program_json(const nlohmann::json &row, PartitionSelector selector,
                                                          std::string_view context);
+Result<UpdateProgramParametersOperation> parse_program_parameter_update_json(const nlohmann::json &row,
+                                                                             PartitionSelector selector);
 Result<ClearProgramAssignmentsOperation>
 parse_clear_program_assignments_json(const nlohmann::json &row, PartitionSelector selector, std::string_view context);
 

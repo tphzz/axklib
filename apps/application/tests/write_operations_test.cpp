@@ -168,8 +168,14 @@ axk::HdsBuildManifest all_action_source_manifest(const std::filesystem::path &au
         {"Old Bank", {"Old Bank Sample"}},
     };
     volume.programs = {
-        {128U, "Pgm 128", {{"SBAC", "Delete Bank", 1U}, {"SBNK", "Delete Direct", 2U}}},
-        {127U, "Pgm 127", {{"SBAC", "Old Bank", 1U}, {"SBNK", "Old Direct", 2U}}},
+        {128U,
+         "Pgm 128",
+         {{"SBAC", "Delete Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Delete Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}},
+        {127U,
+         "Pgm 127",
+         {{"SBAC", "Old Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Old Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}},
     };
 
     axk::VolumeSpec deleted_volume;
@@ -257,8 +263,8 @@ nlohmann::json all_action_alteration_manifest() {
                {{"number", 128U},
                 {"name", "Inserted"},
                 {"assignments",
-                 {{{"sample_bank", "Insert Bank"}, {"receive_mode", "MIDI_CHANNEL"}, {"receive_channel", 1U}},
-                  {{"sample", "Delete Direct"}, {"receive_mode", "MIDI_CHANNEL"}, {"receive_channel", 2U}}}}}}},
+                 {{{"sample_bank", "Insert Bank"}, {"parameters", {{"receive", {{"port", "a"}, {"channel", 1U}}}}}},
+                  {{"sample", "Delete Direct"}, {"parameters", {{"receive", {{"port", "a"}, {"channel", 2U}}}}}}}}}}},
              {{"id", "rename-program"},
               {"type", "rename_program"},
               {"partition_index", 0U},

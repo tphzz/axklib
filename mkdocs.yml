@@ -99,6 +99,7 @@ nav:
       - Report Schemas: axklib/report-schemas.md
       - CLI JSON Schemas: axklib/cli-json-schemas.md
       - Sample Parameter Authoring: axklib/sample-parameters.md
+      - Program Parameters: axklib/program-parameters.md
       - Writer And Alteration: axklib/write.md
   - Distribution:
       - Compatibility: axklib/compatibility.md

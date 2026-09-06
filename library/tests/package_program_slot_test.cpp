@@ -51,7 +51,10 @@ axk::VolumeSpec program_volume(std::string name, std::string_view bank_prefix,
         }
         volume.sample_banks.push_back({bank_name, {banked_name}});
         volume.programs.push_back(
-            {slot, std::format("Pgm {:03}", slot), {{"SBAC", bank_name, 1U}, {"SBNK", direct_name, 2U}}});
+            {slot,
+             std::format("Pgm {:03}", slot),
+             {{"SBAC", bank_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+              {"SBNK", direct_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     }
     return volume;
 }

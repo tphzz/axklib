@@ -1,0 +1,285 @@
+#include "axklib/program_parameter_codec.hpp"
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <utility>
+#include <variant>
+
+#include "axklib/bytes.hpp"
+
+namespace axk::detail {
+
+bool has_program_parameter_values(const ProgramParameters &value) {
+    const auto any = [](const auto &values) {
+        return std::ranges::any_of(values, [](const auto &leaf) { return leaf.has_value(); });
+    };
+    const auto ad = [](const ProgramAdChannelParameters &channel) {
+        return channel.pan || channel.output1.destination || channel.output1.level || channel.output2.destination ||
+               channel.output2.level;
+    };
+    return value.level || value.transpose || any(value.controller_reset.a) || any(value.controller_reset.b) ||
+           any(value.note_toggle.a) || any(value.note_toggle.b) || value.portamento.type || value.portamento.rate ||
+           value.portamento.time || value.lfo.cycle || value.lfo.sync || value.lfo.wave || value.lfo.initial_phase ||
+           value.lfo.tempo || value.lfo.reset_channel || value.lfo.reset_note || value.lfo.sample_hold_speed ||
+           value.step_wave.step_count || value.step_wave.slope || any(value.step_wave.values) || value.ad.enabled ||
+           value.ad.source || ad(value.ad.left) || ad(value.ad.right) || any(value.effect_connections) ||
+           std::ranges::any_of(value.controllers,
+                               [](const auto &controller) {
+                                   return controller.device || controller.function || controller.type ||
+                                          controller.range;
+                               }) ||
+           std::ranges::any_of(value.effects, [&](const auto &effect) {
+               return effect.enabled || effect.input_level || effect.output_level || effect.pan || effect.width ||
+                      effect.destination || effect.type || any(effect.parameters);
+           });
+}
+
+namespace {
+
+constexpr std::array<std::uint8_t, 7> step_counts{2, 3, 4, 6, 8, 12, 16};
+
+template <typename T> bool outside(const std::optional<T> &value, int minimum, int maximum) {
+    return value && (static_cast<int>(*value) < minimum || static_cast<int>(*value) > maximum);
+}
+
+bool any_channel(const std::array<std::optional<bool>, 16> &values) {
+    return std::ranges::any_of(values, [](const auto &value) { return value.has_value(); });
+}
+
+Result<void> validate(const ProgramParameters &value, ASeriesModel model) {
+    if (model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Program parameter writes require an A4000 or A5000 target model")};
+    const auto extended = model == ASeriesModel::a5000;
+    const auto &lfo = value.lfo;
+    const auto &portamento = value.portamento;
+    if (outside(value.level, 0, 127) || outside(value.transpose, -127, 127) || outside(portamento.type, 0, 3) ||
+        outside(portamento.rate, 1, 127) || outside(portamento.time, 1, 127) || outside(lfo.cycle, 0, 6) ||
+        outside(lfo.sync, 0, extended ? 2 : 1) || outside(lfo.wave, 0, 6) || outside(lfo.initial_phase, 0, 3) ||
+        outside(lfo.tempo, 25, 250) || outside(lfo.reset_channel, -2, extended ? 32 : 16) ||
+        outside(lfo.reset_note, -1, 127) || outside(lfo.sample_hold_speed, 0, 127) ||
+        outside(value.step_wave.slope, 0, 3) ||
+        (value.step_wave.step_count &&
+         std::ranges::find(step_counts, *value.step_wave.step_count) == step_counts.end()) ||
+        std::ranges::any_of(value.step_wave.values, [](const auto &step) { return outside(step, 0, 127); })) {
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Program parameter is outside its supported domain")};
+    }
+    if (!extended && (any_channel(value.controller_reset.b) || any_channel(value.note_toggle.b)))
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Program MIDI port B parameters require an A5000 target model")};
+    if (outside(value.ad.source, 0, 2) || outside(value.effect_connections[0], 0, 4) ||
+        outside(value.effect_connections[1], 0, 4) || (!extended && value.effect_connections[1]))
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Program A/D source or effect connection is not supported for the model")};
+    for (const auto *channel : {&value.ad.left, &value.ad.right}) {
+        if (outside(channel->pan, -63, 63) || outside(channel->output1.destination, 0, extended ? 12 : 9) ||
+            outside(channel->output2.destination, 0, extended ? 12 : 9) || outside(channel->output1.level, 0, 127) ||
+            outside(channel->output2.level, 0, 127))
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "Program A/D parameter is outside its supported domain")};
+    }
+    for (const auto &controller : value.controllers) {
+        if (outside(controller.device, 0, 126) || outside(controller.function, 0, extended ? 128 : 71) ||
+            outside(controller.type, 0, 3) || outside(controller.range, -63, 63))
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "Program controller parameter is outside its supported domain")};
+    }
+    return {};
+}
+
+template <typename T> void put(std::span<std::byte> bytes, std::size_t offset, const std::optional<T> &value) {
+    if (value)
+        bytes[offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
+}
+
+template <typename T>
+void put_bits(std::span<std::byte> bytes, std::size_t offset, unsigned mask, unsigned shift,
+              const std::optional<T> &value) {
+    if (value) {
+        const auto original = std::to_integer<unsigned>(bytes[offset]);
+        bytes[offset] = static_cast<std::byte>((original & ~mask) | ((static_cast<unsigned>(*value) << shift) & mask));
+    }
+}
+
+void put_channels(std::span<std::byte> bytes, std::size_t offset, const std::array<std::optional<bool>, 16> &values) {
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        const auto byte = offset + (index < 8U ? 1U : 0U);
+        const auto bit = static_cast<unsigned>(index % 8U);
+        put_bits(bytes, byte, 1U << bit, bit, values[index]);
+    }
+}
+
+void read_channels(const ByteReader &reader, std::size_t offset, std::array<std::optional<bool>, 16> &values) {
+    const auto bits = *reader.be16(offset);
+    for (std::size_t index = 0; index < values.size(); ++index)
+        values[index] = (bits & (1U << index)) != 0U;
+}
+
+template <typename T> std::optional<T> known(T value, int minimum, int maximum) {
+    return static_cast<int>(value) < minimum || static_cast<int>(value) > maximum ? std::nullopt
+                                                                                  : std::optional<T>{value};
+}
+
+void write_ad_outputs(std::span<std::byte> bytes, std::size_t offset, const ProgramAdChannelParameters &value) {
+    put(bytes, offset, value.output1.destination);
+    put(bytes, offset + 1U, value.output1.level);
+    put(bytes, offset + 2U, value.output2.destination);
+    put(bytes, offset + 3U, value.output2.level);
+}
+
+void read_ad_outputs(const ByteReader &reader, std::size_t offset, ProgramAdChannelParameters &value) {
+    value.output1.destination = known(*reader.u8(offset), 0, 12);
+    value.output1.level = known(*reader.u8(offset + 1U), 0, 127);
+    value.output2.destination = known(*reader.u8(offset + 2U), 0, 12);
+    value.output2.level = known(*reader.u8(offset + 3U), 0, 127);
+}
+
+void project_left_ad_outputs(std::span<std::byte> bytes, std::size_t current) {
+    const auto output1 = std::to_integer<unsigned>(bytes[current]);
+    const auto output2 = std::to_integer<unsigned>(bytes[current + 2U]);
+    bytes[0x87U] = bytes[0x89U] = std::byte{};
+    // Output 1 wins a shared legacy bucket. Unmatched legacy levels stay intact.
+    if (output2 >= 1U && output2 <= 5U) {
+        bytes[0x89U] = bytes[current + 2U];
+        bytes[0x8aU] = bytes[current + 3U];
+    } else if (output2 >= 6U && output2 <= 9U) {
+        bytes[0x87U] = static_cast<std::byte>(output2 - 5U);
+        bytes[0x88U] = bytes[current + 3U];
+    }
+    if (output1 >= 1U && output1 <= 4U) {
+        bytes[0x87U] = bytes[current];
+        bytes[0x88U] = bytes[current + 1U];
+    } else if (output1 >= 5U && output1 <= 9U) {
+        bytes[0x89U] = static_cast<std::byte>(output1 - 4U);
+        bytes[0x8aU] = bytes[current + 1U];
+    }
+}
+
+} // namespace
+
+ProgramParameters decode_program_parameters(std::span<const std::byte> payload, const ProgLayout &layout) {
+    const ByteReader reader{payload.first(layout.logical_size)};
+    ProgramParameters result;
+    result.level = known(*reader.u8(0x8bU), 0, 127);
+    result.transpose = known(*reader.s8(0x8eU), -127, 127);
+    result.portamento.type = known(*reader.u8(0x90U), 0, 3);
+    result.portamento.rate = known(*reader.u8(0x91U), 1, 127);
+    result.portamento.time = known(*reader.u8(0x92U), 1, 127);
+    read_channels(reader, 0x82U, result.controller_reset.a);
+    read_channels(reader, 0x84U, result.note_toggle.a);
+    const auto flags = *reader.u8(0x80U);
+    const auto lfo = *reader.u8(0x81U);
+    result.lfo.sync = known(static_cast<std::uint8_t>(flags >> 6U), 0, 2);
+    result.lfo.cycle = known(static_cast<std::uint8_t>(lfo & 7U), 0, 6);
+    result.lfo.wave = known(static_cast<std::uint8_t>((lfo >> 3U) & 7U), 0, 6);
+    result.lfo.initial_phase = static_cast<std::uint8_t>(lfo >> 6U);
+    result.lfo.reset_channel = known(*reader.s8(0x8fU), -2, 32);
+    result.lfo.sample_hold_speed = known(*reader.u8(0x93U), 0, 127);
+    result.lfo.tempo = known(*reader.u8(0x94U), 25, 250);
+    result.lfo.reset_note = known(*reader.s8(0x95U), -1, 127);
+    result.ad.enabled = (flags & 1U) != 0U;
+    result.ad.source = known(static_cast<std::uint8_t>((flags >> 1U) & 3U), 0, 2);
+    result.ad.left.pan = known(*reader.s8(0x86U), -63, 63);
+    result.effect_connections[0] = known(static_cast<std::uint8_t>((flags >> 3U) & 7U), 0, 4);
+    const auto controls = layout.parameter_tail_offset ? *layout.parameter_tail_offset + 0x78U : 0x110U;
+    for (std::size_t index = 0; index < result.controllers.size(); ++index) {
+        const auto offset = controls + index * 4U;
+        auto &controller = result.controllers[index];
+        controller.device = known(*reader.u8(offset), 0, 126);
+        controller.function = known(*reader.u8(offset + 1U), 0, layout.parameter_tail_offset ? 128 : 63);
+        controller.type = known(*reader.u8(offset + 2U), 0, 3);
+        controller.range = known(*reader.s8(offset + 3U), -63, 63);
+    }
+    if (layout.parameter_tail_offset) {
+        const auto tail = *layout.parameter_tail_offset;
+        read_channels(reader, tail + 0x88U, result.controller_reset.b);
+        read_channels(reader, tail + 0x8aU, result.note_toggle.b);
+        read_ad_outputs(reader, tail + 0x8dU, result.ad.left);
+        read_ad_outputs(reader, tail + 0x92U, result.ad.right);
+        result.ad.right.pan = known(*reader.s8(tail + 0x91U), -63, 63);
+        result.effect_connections[1] = known(static_cast<std::uint8_t>(*reader.u8(tail + 0x8cU) & 7U), 0, 4);
+        const auto step = *reader.u8(tail + 0xa6U);
+        if ((step & 7U) < step_counts.size())
+            result.step_wave.step_count = step_counts[step & 7U];
+        result.step_wave.slope = static_cast<ProgramStepWaveSlope>((step >> 3U) & 3U);
+        for (std::size_t index = 0; index < result.step_wave.values.size(); ++index)
+            result.step_wave.values[index] = known(*reader.u8(tail + 0x96U + index), 0, 127);
+    }
+    return result;
+}
+
+Result<void> apply_program_parameters(std::vector<std::byte> &payload, const ProgramParameters &value,
+                                      ASeriesModel model, ProgramParameterWriteMode mode) {
+    const auto decoded = decode_object(payload);
+    if (!decoded)
+        return std::unexpected{decoded.error()};
+    const auto *program = std::get_if<CurrentProg>(&decoded->payload);
+    if (!program || !program->layout.parameter_tail_offset)
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Program parameter writes require the current Program layout")};
+    if (auto valid = validate(value, model); !valid)
+        return valid;
+    const auto tail = *program->layout.parameter_tail_offset;
+    auto bytes = payload;
+    put_bits(bytes, 0x80U, 1U, 0U, value.ad.enabled);
+    put_bits(bytes, 0x80U, 6U, 1U, value.ad.source);
+    put_bits(bytes, 0x80U, 0x38U, 3U, value.effect_connections[0]);
+    put_bits(bytes, tail + 0x8cU, 7U, 0U, value.effect_connections[1]);
+    put(bytes, 0x86U, value.ad.left.pan);
+    put(bytes, tail + 0x91U, value.ad.right.pan);
+    write_ad_outputs(bytes, tail + 0x8dU, value.ad.left);
+    write_ad_outputs(bytes, tail + 0x92U, value.ad.right);
+    if (!std::ranges::equal(std::span{bytes}.subspan(tail + 0x8dU, 4U), std::span{payload}.subspan(tail + 0x8dU, 4U)))
+        project_left_ad_outputs(bytes, tail + 0x8dU);
+    for (std::size_t index = 0; index < value.controllers.size(); ++index) {
+        const auto current = tail + 0x78U + index * 4U;
+        const auto legacy = 0x110U + index * 4U;
+        const auto &controller = value.controllers[index];
+        put(bytes, current, controller.device);
+        put(bytes, current + 1U, controller.function);
+        put(bytes, current + 2U, controller.type);
+        put(bytes, current + 3U, controller.range);
+        if (!std::ranges::equal(std::span{bytes}.subspan(current, 4U), std::span{payload}.subspan(current, 4U))) {
+            std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(current), 4U,
+                        bytes.begin() + static_cast<std::ptrdiff_t>(legacy));
+            if (std::to_integer<unsigned>(bytes[legacy + 1U]) > 63U)
+                bytes[legacy + 1U] = std::byte{};
+        }
+    }
+    put(bytes, 0x8bU, value.level);
+    put(bytes, 0x8eU, value.transpose);
+    put(bytes, 0x90U, value.portamento.type);
+    put(bytes, 0x91U, value.portamento.rate);
+    put(bytes, 0x92U, value.portamento.time);
+    put_channels(bytes, 0x82U, value.controller_reset.a);
+    put_channels(bytes, 0x84U, value.note_toggle.a);
+    put_channels(bytes, tail + 0x88U, value.controller_reset.b);
+    put_channels(bytes, tail + 0x8aU, value.note_toggle.b);
+    put_bits(bytes, 0x80U, 0xc0U, 6U, value.lfo.sync);
+    put_bits(bytes, 0x81U, 0x07U, 0U, value.lfo.cycle);
+    put_bits(bytes, 0x81U, 0x38U, 3U, value.lfo.wave);
+    put_bits(bytes, 0x81U, 0xc0U, 6U, value.lfo.initial_phase);
+    put(bytes, 0x8fU, value.lfo.reset_channel);
+    put(bytes, 0x93U, value.lfo.sample_hold_speed);
+    put(bytes, 0x94U, value.lfo.tempo);
+    put(bytes, 0x95U, value.lfo.reset_note);
+    if (value.step_wave.step_count) {
+        const auto found = std::ranges::find(step_counts, *value.step_wave.step_count);
+        put_bits(bytes, tail + 0xa6U, 7U, 0U,
+                 std::optional<std::uint8_t>{static_cast<std::uint8_t>(found - step_counts.begin())});
+    }
+    put_bits(bytes, tail + 0xa6U, 0x18U, 3U, value.step_wave.slope);
+    for (std::size_t index = 0; index < value.step_wave.values.size(); ++index)
+        put(bytes, tail + 0x96U + index, value.step_wave.values[index]);
+    if (auto effects = apply_program_effect_parameters(bytes, program->layout, value, model, mode); !effects)
+        return effects;
+    payload = std::move(bytes);
+    return {};
+}
+
+} // namespace axk::detail

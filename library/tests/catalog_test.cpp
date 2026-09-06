@@ -513,7 +513,7 @@ TEST(ProgramRelationships, DecodesReceiveChannelIndependentlyFromOutput2) {
         assignment.name = "Sample";
         assignment.raw_handle = 1U;
         assignment.kind = 0x10U;
-        assignment.flags = selector;
+        assignment.raw_receive_selector = selector;
         assignment.raw_row[0x1d] = std::byte{0};
         assignment.raw_row[0x28] = std::byte{0};
         current_program.assignments.push_back(assignment);
@@ -535,35 +535,32 @@ TEST(ProgramRelationships, DecodesReceiveChannelIndependentlyFromOutput2) {
     const auto sample_channel = relationship_for(0xffU);
     EXPECT_EQ(sample_channel.assignment_state, axk::AssignmentState::stored_assignment);
     ASSERT_TRUE(sample_channel.receive_selector);
-    EXPECT_EQ(sample_channel.receive_selector->kind, axk::ProgramReceiveSelectorKind::sample);
-    EXPECT_FALSE(sample_channel.receive_selector->channel);
+    EXPECT_EQ(sample_channel.receive_selector->setting, axk::ProgramReceiveSetting{axk::ProgramReceiveInherit{}});
     EXPECT_EQ(sample_channel.receive_selector->raw_value, 0xffU);
     EXPECT_EQ(sample_channel.receive_channel_display, "=Smp");
 
     const auto a01 = relationship_for(0U);
     ASSERT_TRUE(a01.receive_selector);
-    EXPECT_EQ(a01.receive_selector->kind, axk::ProgramReceiveSelectorKind::a_channel);
-    EXPECT_EQ(a01.receive_selector->channel, 1U);
+    EXPECT_EQ(a01.receive_selector->setting,
+              (axk::ProgramReceiveSetting{axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}));
     EXPECT_EQ(a01.receive_channel_display, "A01");
     EXPECT_EQ(relationship_for(15U).receive_channel_display, "A16");
 
     const auto basic_channel = relationship_for(16U);
     ASSERT_TRUE(basic_channel.receive_selector);
-    EXPECT_EQ(basic_channel.receive_selector->kind, axk::ProgramReceiveSelectorKind::basic_channel);
-    EXPECT_FALSE(basic_channel.receive_selector->channel);
+    EXPECT_EQ(basic_channel.receive_selector->setting, axk::ProgramReceiveSetting{axk::ProgramReceiveBasic{}});
     EXPECT_EQ(basic_channel.receive_channel_display, "Bch");
 
     const auto b01 = relationship_for(17U);
     ASSERT_TRUE(b01.receive_selector);
-    EXPECT_EQ(b01.receive_selector->kind, axk::ProgramReceiveSelectorKind::b_channel);
-    EXPECT_EQ(b01.receive_selector->channel, 1U);
+    EXPECT_EQ(b01.receive_selector->setting,
+              (axk::ProgramReceiveSetting{axk::ProgramReceiveChannel{axk::MidiPort::b, 1U}}));
     EXPECT_EQ(b01.receive_channel_display, "B01");
     EXPECT_EQ(relationship_for(32U).receive_channel_display, "B16");
 
     const auto unknown = relationship_for(33U);
     ASSERT_TRUE(unknown.receive_selector);
-    EXPECT_EQ(unknown.receive_selector->kind, axk::ProgramReceiveSelectorKind::unknown);
-    EXPECT_FALSE(unknown.receive_selector->channel);
+    EXPECT_FALSE(unknown.receive_selector->setting);
     EXPECT_EQ(unknown.receive_channel_display, "unknown");
 }
 
@@ -583,7 +580,7 @@ TEST(ProgramRelationships, TreatsOutput2AsIndependentFromExactSampleBankAssignme
     assignment.name = "VCO Pad";
     assignment.raw_handle = 21'255'888U;
     assignment.kind = 0x11U;
-    assignment.flags = 0xffU;
+    assignment.raw_receive_selector = 0xffU;
     assignment.raw_row[0x28] = std::byte{0x07};
     current_program.assignments.push_back(assignment);
     axk::DecodedObject program;
@@ -686,14 +683,14 @@ TEST(ProgramRelationships, DoesNotRedirectAMissingNamedTargetToTheProgramsOnlyRe
     exact.name = "Astro";
     exact.raw_handle = 1U;
     exact.kind = 0x10U;
-    exact.flags = 0xffU;
+    exact.raw_receive_selector = 0xffU;
     exact.raw_row[0x28] = std::byte{0xff};
 
     axk::ProgAssignment missing;
     missing.name = "ASR10 MergeX   *";
     missing.raw_handle = 2U;
     missing.kind = 0x10U;
-    missing.flags = 0U;
+    missing.raw_receive_selector = 0U;
     missing.raw_row[0x28] = std::byte{0xff};
 
     axk::CurrentProg current_program;
@@ -739,14 +736,14 @@ TEST(ProgramRelationships, TreatsAcidBMissingSqr2RowAsStoredMetadataOnly) {
     exact.name = "SQR2B";
     exact.raw_handle = 1U;
     exact.kind = 0x11U;
-    exact.flags = 0xffU;
+    exact.raw_receive_selector = 0xffU;
     exact.raw_row[0x28] = std::byte{0xff};
 
     axk::ProgAssignment missing;
     missing.name = "SQR2           *";
     missing.raw_handle = 2U;
     missing.kind = 0x11U;
-    missing.flags = 0xffU;
+    missing.raw_receive_selector = 0xffU;
     missing.raw_row[0x28] = std::byte{0xff};
 
     axk::CurrentProg current_program;
@@ -1138,7 +1135,7 @@ TEST(ProgramRelationships, ResolvesAnExactTargetWhoseStoredNameEndsInStar) {
     active.name = "STAR SAMPLE    *";
     active.raw_handle = 0U;
     active.kind = 0x10U;
-    active.flags = 1U;
+    active.raw_receive_selector = 1U;
     active.raw_row[0x0f] = std::byte{0x2a};
     active.raw_row[0x28] = std::byte{0xff};
     axk::CurrentProg current_program;
@@ -1158,8 +1155,8 @@ TEST(ProgramRelationships, ResolvesAnExactTargetWhoseStoredNameEndsInStar) {
     EXPECT_EQ(graph.relationships.front().quality, axk::RelationshipQuality::known);
     EXPECT_EQ(graph.relationships.front().basis, "assignment-kind-0x10+name");
     ASSERT_TRUE(graph.relationships.front().receive_selector);
-    EXPECT_EQ(graph.relationships.front().receive_selector->kind, axk::ProgramReceiveSelectorKind::a_channel);
-    EXPECT_EQ(graph.relationships.front().receive_selector->channel, 2U);
+    EXPECT_EQ(graph.relationships.front().receive_selector->setting,
+              (axk::ProgramReceiveSetting{axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}));
     EXPECT_EQ(graph.relationships.front().receive_channel_display, "A02");
 }
 
@@ -1238,7 +1235,7 @@ TEST(ContentTree, DistinguishesContainedObjectsFromProgramReferences) {
     assignment.name = "Local Bank";
     assignment.raw_handle = 1U;
     assignment.kind = 0x11U;
-    assignment.flags = 1U;
+    assignment.raw_receive_selector = 1U;
     assignment.raw_row[0x28] = std::byte{0};
     current_program.assignments.push_back(assignment);
     axk::DecodedObject program;

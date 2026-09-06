@@ -15,12 +15,13 @@
     {"id":"assign-sample-bank-members","type":"assign_sbac_members","partition_index":0,"volume_name":"Volume","sample_bank_name":"Insert Bank","sample_names":["Sample A","Sample B"]},
     {"id":"rename-sample-bank","type":"rename_sbac","partition_index":0,"volume_name":"Volume","sample_bank_name":"Old Bank","new_sample_bank_name":"New Bank"},
     {"id":"delete-program","type":"delete_program","partition_index":0,"volume_name":"Volume","program_number":128},
-    {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"name":"Program","assignments":[{"sample_bank":"Group","receive_mode":"MIDI_CHANNEL","receive_channel":1},{"sample":"Direct Sample","receive_mode":"MIDI_CHANNEL","receive_channel":2}]}},
+    {"id":"insert-program","type":"insert_program","partition_index":{"operation_ref":"delete-program"},"volume_name":"Volume","program":{"number":128,"name":"Program","assignments":[{"sample_bank":"Group","parameters": {"receive": {"port": "a", "channel": 1}}},{"sample":"Direct Sample","parameters": {"receive": {"port": "a", "channel": 2}}}]}},
     {"id":"rename-program","type":"rename_program","partition_index":0,"volume_name":"Volume","program_number":1,"new_program_name":"Piano"},
     {"id":"delete-sequence","type":"delete_sequence","partition_index":0,"volume_name":"Volume","sequence_name":"Delete Sequence"},
     {"id":"insert-sequence","type":"insert_sequence","partition_index":{"operation_ref":"delete-sequence"},"volume_name":"Volume","sequence":{"name":"Insert Sequence","midi_path":"sequence.mid","system_exclusive_policy":"reject"}},
     {"id":"rename-sequence","type":"rename_sequence","partition_index":0,"volume_name":"Volume","sequence_name":"Old Sequence","new_sequence_name":"New Sequence"},
     {"id":"rename-volume","type":"rename_volume","partition_index":0,"volume_name":"Old Volume","new_volume_name":"New Volume"},
-    {"id":"rename-partition","type":"rename_partition","partition_index":0,"partition_name":"Old Partition","new_partition_name":"New Partition"}
+    {"id":"rename-partition","type":"rename_partition","partition_index":0,"partition_name":"Old Partition","new_partition_name":"New Partition"},
+    {"id":"update-program","type":"update_program_parameters","partition_index":0,"volume_name":"Volume","program_number":1,"model":"A4000","parameters":{"level":87,"effects":{"1":{"enabled":false}}},"assignments":[{"ordinal":0,"expected_target_kind":"SBAC","expected_target_name":"Group","parameters":{"pan_offset":100}}]}
   ]
 }

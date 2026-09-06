@@ -589,13 +589,11 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                                 "assignments": [
                                     {
                                         "sample_bank": "Delete Bank",
-                                        "receive_channel": 1,
-                                        "receive_mode": "MIDI_CHANNEL",
+                                        "parameters": {"receive": {"port": "a", "channel": 1}},
                                     },
                                     {
                                         "sample": "Delete Direct",
-                                        "receive_channel": 2,
-                                        "receive_mode": "MIDI_CHANNEL",
+                                        "parameters": {"receive": {"port": "a", "channel": 2}},
                                     },
                                 ],
                             },
@@ -605,13 +603,11 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                                 "assignments": [
                                     {
                                         "sample_bank": "Old Bank",
-                                        "receive_channel": 1,
-                                        "receive_mode": "MIDI_CHANNEL",
+                                        "parameters": {"receive": {"port": "a", "channel": 1}},
                                     },
                                     {
                                         "sample": "Old Direct",
-                                        "receive_channel": 2,
-                                        "receive_mode": "MIDI_CHANNEL",
+                                        "parameters": {"receive": {"port": "a", "channel": 2}},
                                     },
                                 ],
                             },
@@ -740,13 +736,11 @@ def prepare_all_action_alteration(root: Path, cli: Path) -> None:
                     "assignments": [
                         {
                             "sample_bank": "Insert Bank",
-                            "receive_channel": 1,
-                            "receive_mode": "MIDI_CHANNEL",
+                            "parameters": {"receive": {"port": "a", "channel": 1}},
                         },
                         {
                             "sample": "Delete Direct",
-                            "receive_channel": 2,
-                            "receive_mode": "MIDI_CHANNEL",
+                            "parameters": {"receive": {"port": "a", "channel": 2}},
                         },
                     ],
                 },

@@ -740,6 +740,10 @@ Supported operation types:
 | `delete_program` | `volume_name`, `program_number` |
 | `insert_program` | `volume_name`, `program` |
 | `rename_program` | `volume_name`, `program_number`, `new_program_name` |
+| `update_program_parameters` | `volume_name`, `program_number`, explicit `model`, non-empty global and/or guarded assignment patches |
+
+The [Program parameter contract](program-parameters.md) defines the current-layout
+update groups, numeric domains, effect initialization rules, and assignment guards.
 
 An `insert_waveform` audio object contains `path`, one or two distinct
 `waveform_names`, and `root_key`. Optional fields are `target_sample_rate`,
@@ -781,17 +785,23 @@ preserves opaque bytes after the active member table when that table expands.
 
 An `insert_program` object contains a Program `number`, its sampler-visible
 `name` (`1..8` printable ASCII characters without leading or trailing spaces),
-and one supported assignment profile:
+and `1..16` ordered assignments. Each assignment has exactly one `sample_bank`
+or `sample` target and an optional `parameters` object. The Program also accepts
+optional `model` (`A4000` by default, or `A5000`) and Program-wide `parameters`.
+See [Program Parameters](program-parameters.md) for the shared fresh/update
+parameter contract.
 
-- A single `sample_bank` or `sample` assignment with
-  `"receive_mode":"SAMPLE"`. It omits `receive_channel` and encodes the
-  sampler's `Rch Assign =Smp` mode. Axkdeck's **Generate Programs** action uses
-  this profile to make otherwise unassigned Sample Banks and Samples directly
-  auditionable.
-- Exactly two ordered assignments using `"receive_mode":"MIDI_CHANNEL"`: a
-  `sample_bank` on `receive_channel` 1 (`A01`) followed by a direct `sample` on
-  `receive_channel` 2 (`A02`). This is the full-image authored Program profile.
-  The current writer profile does not claim `Bch` or B-channel authoring.
+- Omitted assignment receive settings, or `"parameters":{"receive":"inherit"}`,
+  encode the sampler's `Rch Assign =Smp` selection. Axkdeck's **Generate Programs**
+  action uses one inherited assignment to make otherwise unassigned Sample
+  Banks and Samples directly auditionable.
+- `"receive":"basic"` selects `Bch`; `"receive":{"port":"a","channel":1}`
+  selects `A01`. Channels are `1..16`; port `b` requires model `A5000`.
+- Full-image and inserted-volume authoring retain their narrower profile:
+  exactly two assignments, a `sample_bank` on A1 followed by a direct `sample`
+  on A2. Expanding the parameter contract does not relax this topology rule.
+
+The obsolete `receive_mode` and `receive_channel` input fields are rejected.
 
 Program insertion and deletion update the target Sample or Sample Bank's
 linked-Program bitmap atomically with the Program directory/object change. A

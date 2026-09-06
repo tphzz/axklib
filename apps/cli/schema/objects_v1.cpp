@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/program_parameter_json.hpp"
+
 namespace axk::cli::schema::objects_v1 {
 namespace {
 
@@ -139,14 +141,8 @@ OrderedJson decoded_json(const DecodedObject &object) {
             assignments.push_back({{"name", row.name},
                                    {"raw_handle", row.raw_handle},
                                    {"kind", row.kind},
-                                   {"flags", row.flags},
-                                   {"level_offset", row.level_offset},
-                                   {"velocity_sensitivity", row.velocity_sensitivity},
-                                   {"pan_offset", row.pan_offset},
-                                   {"key_limit_high", row.key_limit_high},
-                                   {"key_limit_low", row.key_limit_low},
-                                   {"velocity_limit_high", row.velocity_limit_high},
-                                   {"velocity_limit_low", row.velocity_limit_low},
+                                   {"raw_receive_selector", row.raw_receive_selector},
+                                   {"parameters", detail::program_assignment_parameters_json(row.parameters)},
                                    {"raw_row_hex", hex(row.raw_row)}});
         }
         auto effects = OrderedJson::array();
@@ -154,12 +150,6 @@ OrderedJson decoded_json(const DecodedObject &object) {
             effects.push_back({{"raw_block_hex", hex(block.raw_bytes)},
                                {"type", block.type},
                                {"parameter_values", block.parameter_values}});
-        auto controls = OrderedJson::array();
-        for (const auto &control : program->control_records)
-            controls.push_back({{"device", control.device},
-                                {"function", control.function},
-                                {"type", control.type},
-                                {"range", control.range}});
         const auto &layout = program->layout;
         return {{"kind", "PROG"},
                 {"common", common_json(program->common)},
@@ -172,7 +162,9 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"assignment_capacity", layout.assignment_capacity},
                 {"parameter_tail_offset",
                  layout.parameter_tail_offset ? OrderedJson(*layout.parameter_tail_offset) : OrderedJson(nullptr)},
-                {"control_records", std::move(controls)},
+                {"parameters", detail::program_parameters_json(program->parameters)},
+                {"raw_common_parameter_block_hex", hex(program->raw_common_parameter_block)},
+                {"raw_extended_parameter_block_hex", hex(program->raw_extended_parameter_block)},
                 {"raw_canonical_control_block_hex", hex(program->raw_canonical_control_block)},
                 {"raw_legacy_control_block_hex", hex(program->raw_legacy_control_block)},
                 {"effect_blocks", std::move(effects)},

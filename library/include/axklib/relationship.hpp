@@ -8,16 +8,14 @@
 
 #include "axklib/catalog.hpp"
 #include "axklib/export.hpp"
+#include "axklib/program_assignment_parameters.hpp"
 
 namespace axk {
 
 enum class RelationshipQuality : std::uint8_t { known, likely, tentative, unknown };
 enum class AssignmentState : std::uint8_t { stored_assignment, source_load_assignment, unknown };
-enum class ProgramReceiveSelectorKind : std::uint8_t { sample, a_channel, basic_channel, b_channel, unknown };
-
 struct ProgramReceiveSelector {
-    ProgramReceiveSelectorKind kind{ProgramReceiveSelectorKind::unknown};
-    std::optional<std::uint8_t> channel;
+    std::optional<ProgramReceiveSetting> setting;
     std::uint8_t raw_value{};
 };
 

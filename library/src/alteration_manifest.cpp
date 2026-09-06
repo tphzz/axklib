@@ -149,13 +149,9 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
             return std::unexpected{manifest_error("Program assignment target must be SBAC or SBNK")};
         if (auto valid = require_object_name(assignment.target_name, "program assignment target"); !valid)
             return valid;
-        if (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
-            (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) {
-            return std::unexpected{manifest_error("MIDI_CHANNEL Program assignment requires channel 1..16")};
-        }
-        if (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U)
-            return std::unexpected{manifest_error("SAMPLE Program assignment must not specify a MIDI channel")};
     }
+    if (const auto payload = prepare_prog_payload(program); !payload)
+        return std::unexpected{payload.error()};
     return {};
 }
 
@@ -163,10 +159,9 @@ Result<void> validate_authored_program(const ProgramSpec &program) {
     if (auto valid = validate_program_fields(program); !valid)
         return valid;
     if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-        program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
-        program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
-        program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
-        program.assignments[1].receive_channel != 2U) {
+        program.assignments[0].parameters.receive != ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 1U}} ||
+        program.assignments[1].target_kind != "SBNK" ||
+        program.assignments[1].parameters.receive != ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 2U}}) {
         return std::unexpected{manifest_error("authored Program assignments must be SBAC/channel 1 then "
                                               "SBNK/channel 2")};
     }
@@ -447,6 +442,8 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         }
                     }
                     return {};
+                } else if constexpr (std::same_as<T, UpdateProgramParametersOperation>) {
+                    return detail::validate_program_parameter_update(operation);
                 } else if constexpr (std::same_as<T, DeleteSequenceOperation>) {
                     return require_object_name(operation.sequence_name, "sequence_name");
                 } else if constexpr (std::same_as<T, InsertSequenceOperation>) {

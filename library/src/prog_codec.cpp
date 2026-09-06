@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "axklib/bytes.hpp"
+#include "axklib/program_parameter_codec.hpp"
 
 namespace axk::detail {
 
@@ -68,14 +69,15 @@ Result<CurrentProg> decode_prog(std::span<const std::byte> payload, const Object
     result.common = std::move(common);
     result.layout = *layout;
     result.program_name = *reader.decoded_ascii_field(0x78U, 8U);
+    result.parameters = decode_program_parameters(payload, *layout);
+    std::ranges::copy(*reader.slice(0x80U, 0x18U), result.raw_common_parameter_block.begin());
+    if (layout->parameter_tail_offset) {
+        const auto extended = *reader.slice(*layout->parameter_tail_offset + 0x88U, 0x28U);
+        result.raw_extended_parameter_block.assign(extended.begin(), extended.end());
+    }
     const auto controls = layout->parameter_tail_offset ? *layout->parameter_tail_offset + 0x78U : 0x110U;
     std::ranges::copy(*reader.slice(controls, 16U), result.raw_canonical_control_block.begin());
     std::ranges::copy(*reader.slice(0x110U, 16U), result.raw_legacy_control_block.begin());
-    for (std::size_t index = 0; index < 4U; ++index) {
-        const auto offset = controls + index * 4U;
-        result.control_records.push_back(
-            {*reader.u8(offset), *reader.u8(offset + 1U), *reader.u8(offset + 2U), *reader.s8(offset + 3U)});
-    }
     const auto effects = layout->parameter_tail_offset ? 6U : 3U;
     for (std::size_t index = 0; index < effects; ++index) {
         const auto offset = index < 3U ? 0x98U + index * 0x28U : *layout->parameter_tail_offset + (index - 3U) * 0x28U;
@@ -90,6 +92,7 @@ Result<CurrentProg> decode_prog(std::span<const std::byte> payload, const Object
         }
         for (std::size_t parameter = 0; parameter < effect.parameter_values.size(); ++parameter)
             effect.parameter_values[parameter] = *reader.be16(offset + 8U + parameter * 2U);
+        result.parameters.effects[index] = decode_program_effect_parameters(effect, index);
         result.effect_blocks.push_back(effect);
     }
     result.assignments.reserve(layout->stored_assignment_count);
@@ -98,18 +101,13 @@ Result<CurrentProg> decode_prog(std::span<const std::byte> payload, const Object
         if (!offset)
             return std::unexpected{offset.error()};
         ProgAssignment row;
+        row.parameters = decode_program_assignment_parameters(*reader.slice(*offset, prog_assignment_stride),
+                                                              layout->storage_layout);
         row.offset = *offset;
         row.name = payload[*offset] == std::byte{} ? std::string{} : *reader.decoded_ascii_field(*offset, 16U);
         row.raw_handle = *reader.be32(*offset + 0x10U);
         row.kind = *reader.u8(*offset + 0x14U);
-        row.flags = *reader.u8(*offset + 0x15U);
-        row.level_offset = *reader.s8(*offset + 0x16U);
-        row.velocity_sensitivity = *reader.s8(*offset + 0x17U);
-        row.pan_offset = *reader.s8(*offset + 0x18U);
-        row.key_limit_high = *reader.u8(*offset + 0x1eU);
-        row.key_limit_low = *reader.u8(*offset + 0x1fU);
-        row.velocity_limit_high = *reader.u8(*offset + 0x21U);
-        row.velocity_limit_low = *reader.u8(*offset + 0x22U);
+        row.raw_receive_selector = *reader.u8(*offset + 0x15U);
         std::ranges::copy(*reader.slice(*offset, prog_assignment_stride), row.raw_row.begin());
         result.assignments.push_back(std::move(row));
     }

@@ -3,6 +3,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include "axklib/program_parameter_json.hpp"
+
 namespace {
 
 using Json = nlohmann::ordered_json;
@@ -201,9 +203,6 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<axk::CurrentProg>(&object.payload)) {
-        Json controls = Json::array();
-        for (const auto &control : program->control_records)
-            controls.push_back(control_json(control));
         Json effects = Json::array();
         for (const auto &effect : program->effect_blocks)
             effects.push_back({{"rawBlockHex", hex(effect.raw_bytes)},
@@ -211,18 +210,13 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                                {"parameterValues", effect.parameter_values}});
         Json assignments = Json::array();
         for (const auto &assignment : program->assignments) {
-            assignments.push_back({{"name", assignment.name},
-                                   {"rawHandle", assignment.raw_handle},
-                                   {"kind", assignment.kind},
-                                   {"flags", assignment.flags},
-                                   {"levelOffset", assignment.level_offset},
-                                   {"velocitySensitivity", assignment.velocity_sensitivity},
-                                   {"panOffset", assignment.pan_offset},
-                                   {"keyLimitHigh", assignment.key_limit_high},
-                                   {"keyLimitLow", assignment.key_limit_low},
-                                   {"velocityLimitHigh", assignment.velocity_limit_high},
-                                   {"velocityLimitLow", assignment.velocity_limit_low},
-                                   {"rawRowHex", hex(assignment.raw_row)}});
+            assignments.push_back(
+                {{"name", assignment.name},
+                 {"rawHandle", assignment.raw_handle},
+                 {"kind", assignment.kind},
+                 {"rawReceiveSelector", assignment.raw_receive_selector},
+                 {"parameters", axk::detail::program_assignment_parameters_json(assignment.parameters)},
+                 {"rawRowHex", hex(assignment.raw_row)}});
         }
         const auto &layout = program->layout;
         return {
@@ -236,7 +230,9 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
             {"assignmentCapacity", layout.assignment_capacity},
             {"parameterTailOffset", layout.parameter_tail_offset ? Json(*layout.parameter_tail_offset) : Json(nullptr)},
             {"programName", program->program_name},
-            {"controlRecords", std::move(controls)},
+            {"parameters", axk::detail::program_parameters_json(program->parameters)},
+            {"rawCommonParameterBlockHex", hex(program->raw_common_parameter_block)},
+            {"rawExtendedParameterBlockHex", hex(program->raw_extended_parameter_block)},
             {"rawCanonicalControlBlockHex", hex(program->raw_canonical_control_block)},
             {"rawLegacyControlBlockHex", hex(program->raw_legacy_control_block)},
             {"effectBlocks", std::move(effects)},

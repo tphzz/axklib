@@ -13,7 +13,10 @@
 
 #include "axklib/error.hpp"
 #include "axklib/io.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sampler_model.hpp"
 
 namespace axk {
 
@@ -197,22 +200,18 @@ struct SampleBankSpec {
     std::optional<SampleParameters> parameter_overrides{};
 };
 
-enum class ProgramReceiveMode : std::uint8_t {
-    midi_channel,
-    sample,
-};
-
 struct ProgramAssignmentSpec {
     std::string target_kind;
     std::string target_name;
-    std::uint8_t receive_channel{};
-    ProgramReceiveMode receive_mode{ProgramReceiveMode::midi_channel};
+    ProgramAssignmentParameters parameters{};
 };
 
 struct ProgramSpec {
     std::uint8_t number{};
     std::string name;
     std::vector<ProgramAssignmentSpec> assignments;
+    ASeriesModel model{ASeriesModel::a4000};
+    ProgramParameters parameters{};
 };
 
 struct VolumeSpec {

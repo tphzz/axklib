@@ -102,7 +102,11 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Source Bank", {"Source Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Source Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Source Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -123,7 +127,10 @@ axk::VolumeSpec dense_source_volume(const std::filesystem::path &audio_path) {
         volume.sample_banks.push_back({bank_name, {volume.samples[number - 1U].name}});
         volume.programs.push_back({number,
                                    std::format("Pgm {:03}", number),
-                                   {{"SBAC", bank_name, 1U}, {"SBNK", volume.samples[64U + number - 1U].name, 2U}}});
+                                   {{"SBAC", bank_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                    {"SBNK",
+                                     volume.samples[64U + number - 1U].name,
+                                     {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     }
     return volume;
 }

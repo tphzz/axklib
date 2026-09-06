@@ -1,4 +1,5 @@
 #include "axklib/application/write_operations.hpp"
+#include "axklib/program_spec_json.hpp"
 
 #include <algorithm>
 #include <array>
@@ -314,23 +315,11 @@ Json program_generation_manifest_json(const axk::AlterationManifest &manifest) {
         const auto *partition = std::get_if<axk::PartitionIndex>(&insert->partition);
         if (partition == nullptr)
             continue;
-        Json assignments = Json::array();
-        for (const auto &assignment : insert->program.assignments) {
-            Json row{{"receive_mode",
-                      assignment.receive_mode == axk::ProgramReceiveMode::sample ? "SAMPLE" : "MIDI_CHANNEL"}};
-            row[assignment.target_kind == "SBAC" ? "sample_bank" : "sample"] = assignment.target_name;
-            if (assignment.receive_mode == axk::ProgramReceiveMode::midi_channel)
-                row["receive_channel"] = assignment.receive_channel;
-            assignments.push_back(std::move(row));
-        }
         operations.push_back({{"id", operation.id},
                               {"type", "insert_program"},
                               {"partition_index", partition->value},
                               {"volume_name", insert->volume_name},
-                              {"program",
-                               {{"number", insert->program.number},
-                                {"name", insert->program.name},
-                                {"assignments", std::move(assignments)}}}});
+                              {"program", axk::detail::program_spec_json(insert->program)}});
     }
     return {{"schema_version", manifest.schema_version}, {"operations", std::move(operations)}};
 }

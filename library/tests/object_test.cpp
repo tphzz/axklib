@@ -384,14 +384,14 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     EXPECT_EQ(program.assignments[0].name, "Sample Bank");
     EXPECT_EQ(program.assignments[0].raw_handle, 0x12345678U);
     EXPECT_EQ(program.assignments[0].kind, 2U);
-    EXPECT_EQ(program.assignments[0].level_offset, -12);
-    EXPECT_EQ(program.assignments[0].pan_offset, -7);
-    EXPECT_EQ(program.assignments[0].key_limit_high, 100U);
-    EXPECT_EQ(program.assignments[0].key_limit_low, 12U);
-    EXPECT_EQ(program.assignments[0].velocity_limit_high, 110U);
-    EXPECT_EQ(program.assignments[0].velocity_limit_low, 4U);
+    EXPECT_EQ(program.assignments[0].parameters.level_offset, -12);
+    EXPECT_EQ(program.assignments[0].parameters.pan_offset, -7);
+    EXPECT_EQ(program.assignments[0].parameters.key_high, 100U);
+    EXPECT_EQ(program.assignments[0].parameters.key_low, 12U);
+    EXPECT_EQ(program.assignments[0].parameters.velocity_high, 110U);
+    EXPECT_EQ(program.assignments[0].parameters.velocity_low, 4U);
     EXPECT_TRUE(program.assignments[1].name.empty());
-    EXPECT_EQ(program.control_records[0].device, 0U);
+    EXPECT_EQ(program.parameters.controllers[0].device, 0U);
 }
 
 TEST(CurrentSummary, RetainsSequenceAndProfilePayloads) {

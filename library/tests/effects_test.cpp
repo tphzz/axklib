@@ -1,4 +1,5 @@
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -6,6 +7,36 @@
 #include <gtest/gtest.h>
 
 #include "axklib/effects.hpp"
+
+TEST(Effects, NumericWriteMetadataCoversOrdinaryTypesAndHiddenDefaults) {
+    for (std::uint16_t type = 0; type <= 96; ++type) {
+        const auto info = axk::effect_write_info(type);
+        ASSERT_TRUE(info);
+        EXPECT_EQ(info->legacy_type, type <= 54U ? type : 0U);
+        for (std::size_t index = 0; index < info->parameters.size(); ++index) {
+            const auto &domain = info->parameters[index];
+            if (domain.kind != axk::EffectParameterKind::stored_value)
+                continue;
+            EXPECT_LE(domain.minimum, info->reset_words[index]);
+            EXPECT_GE(domain.maximum, info->reset_words[index]);
+        }
+    }
+    EXPECT_FALSE(axk::effect_write_info(97));
+    EXPECT_FALSE(axk::effect_write_info(65535));
+    const auto hall = axk::effect_write_info(47);
+    ASSERT_TRUE(hall);
+    const std::array<std::uint16_t, 16> expected{50, 18, 10, 8, 13, 49, 0, 4, 50, 8, 64, 5, 5, 5, 5, 5};
+    EXPECT_EQ(hall->reset_words, expected);
+    EXPECT_EQ(hall->parameters[11].kind, axk::EffectParameterKind::unused);
+    const auto scratch = axk::effect_write_info(1);
+    ASSERT_TRUE(scratch);
+    EXPECT_EQ(scratch->reset_words[1], 1800);
+    EXPECT_EQ(scratch->reset_words[15], 3);
+    const auto distortion = axk::effect_write_info(67);
+    ASSERT_TRUE(distortion);
+    EXPECT_EQ(distortion->parameters[3].maximum, 20);
+    EXPECT_EQ(distortion->reset_words[15], 35082);
+}
 
 TEST(Effects, ExposesProfilesTypesParametersAndModelRequirements) {
     EXPECT_EQ(axk::parse_effect_profile("auto"), axk::EffectProfile::a4000);

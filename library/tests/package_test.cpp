@@ -124,7 +124,11 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Graph Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -152,7 +156,10 @@ axk::VolumeSpec single_sample_bank_volume(const std::filesystem::path &audio_pat
     direct.name = "Direct Sample";
     volume.samples.push_back(std::move(direct));
     volume.programs.push_back(
-        {1U, "Pgm 001", {{"SBAC", volume.sample_banks.front().name, 1U}, {"SBNK", volume.samples.back().name, 2U}}});
+        {1U,
+         "Pgm 001",
+         {{"SBAC", volume.sample_banks.front().name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", volume.samples.back().name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -750,8 +757,16 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
     volume.samples.push_back(std::move(third_direct));
     volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     volume.sample_banks.push_back({"Graph Bank 3", {"Grouped Sample 3"}});
-    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
-    volume.programs.push_back({3U, "Pgm 003", {{"SBAC", "Graph Bank 3", 1U}, {"SBNK", "Direct Sample 3", 2U}}});
+    volume.programs.push_back(
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume.programs.push_back(
+        {3U,
+         "Pgm 003",
+         {{"SBAC", "Graph Bank 3", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 3", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);
     ASSERT_TRUE(written) << written.error().message;
@@ -866,7 +881,11 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
     auto target_volume = graph_volume(audio_path);
     target_volume.name = "Target Volume";
     target_volume.sample_banks.front().name = "Graph Bank     *";
-    target_volume.programs = {{2U, "Pgm 002", {{"SBAC", "Graph Bank     *", 1U}, {"SBNK", "Direct Sample", 2U}}}};
+    target_volume.programs = {
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank     *", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}}};
     axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     const auto target_written = axk::write_hds_image(target_manifest, target_path);
@@ -1092,7 +1111,11 @@ TEST(PortablePackage, RejectsAmbiguousExactProgramTargetEvenForVolume) {
     other_direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(other_direct));
     volume.sample_banks.push_back({"Other Bank", {"Other Member"}});
-    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Other Bank", 1U}, {"SBNK", "Other Direct", 2U}}});
+    volume.programs.push_back(
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Other Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Other Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
@@ -1272,7 +1295,10 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     authored_volume.samples.push_back(std::move(direct_two));
     authored_volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     authored_volume.programs.push_back(
-        {2U, "Pgm 002", {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     auto second_volume = single_sample_volume(audio_path, "Graph Volume 2", "Graph Wave 3", "Grouped Sample 3");
     manifest.partitions.push_back({"P1", {std::move(authored_volume), std::move(second_volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
@@ -1647,7 +1673,11 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
     direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Ordered Bank", {"Z Sample", "A Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Ordered Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Ordered Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);

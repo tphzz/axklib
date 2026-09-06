@@ -389,8 +389,9 @@ std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sou
                 if (program == nullptr || *relation.assignment_index >= program->assignments.size())
                     continue;
                 const auto &assignment = program->assignments[*relation.assignment_index];
-                const auto detail = std::format("{}@slot{}:kind0x{:02x}:flag0x{:02x}", program_item->object.header.name,
-                                                *relation.assignment_index, assignment.kind, assignment.flags);
+                const auto detail =
+                    std::format("{}@slot{}:kind0x{:02x}:flag0x{:02x}", program_item->object.header.name,
+                                *relation.assignment_index, assignment.kind, assignment.raw_receive_selector);
                 if (direct) {
                     direct_details.push_back(detail);
                 } else {

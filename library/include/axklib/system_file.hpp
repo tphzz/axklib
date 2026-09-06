@@ -10,17 +10,14 @@
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
 #include "axklib/object.hpp"
+#include "axklib/sampler_model.hpp"
 #include "axklib/sfs.hpp"
 
 namespace axk {
 
 enum class SystemFileKind : std::uint8_t { a3000_system, a4000_a5000_system2 };
 
-enum class ASeriesModel : std::uint8_t { a3000, a4000, a5000 };
-
 enum class ProgramMode : std::uint8_t { single, multi };
-
-enum class MidiPort : std::uint8_t { a, b };
 
 struct SystemMidiAddress {
     MidiPort port{MidiPort::a};

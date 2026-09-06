@@ -45,6 +45,75 @@ std::vector<std::byte> program_bytes(std::uint32_t version, std::uint16_t count,
 
 } // namespace
 
+TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
+    for (const auto version : {1U, 2U}) {
+        auto bytes = program_bytes(version, 1U, 1U);
+        bytes[0x8b] = std::byte{90};
+        bytes[0x111] = std::byte{5};
+        bytes[0x112] = std::byte{1};
+        bytes[0x113] = std::byte{20};
+        bytes[0x136] = std::byte{12};
+        bytes[0x13d] = std::byte{7};
+        bytes[0x148] = std::byte{9};
+        bytes[0x14f] = std::byte{20};
+        bytes[0x152] = std::byte{30};
+        const auto decoded = axk::decode_object(bytes);
+        ASSERT_TRUE(decoded);
+        const auto &program = std::get<axk::CurrentProg>(decoded->payload);
+        EXPECT_EQ(program.parameters.level, 90U);
+        EXPECT_EQ(program.parameters.controllers[0].device, 71U);
+        EXPECT_EQ(program.parameters.controllers[0].function, 5U);
+        EXPECT_EQ(program.parameters.controllers[0].range, 20);
+        EXPECT_FALSE(program.parameters.ad.left.output1.destination);
+        EXPECT_FALSE(program.parameters.ad.right.pan);
+        EXPECT_FALSE(program.parameters.step_wave.step_count);
+        EXPECT_FALSE(program.parameters.controller_reset.b[0]);
+        EXPECT_FALSE(program.parameters.effects[3].enabled);
+        const auto &row = program.assignments[0];
+        EXPECT_EQ(row.parameters.level_offset, 12);
+        EXPECT_FALSE(row.parameters.output1);
+        EXPECT_FALSE(row.parameters.output2);
+        EXPECT_FALSE(row.parameters.output1_level_offset);
+        EXPECT_FALSE(row.parameters.output2_level_offset);
+        EXPECT_EQ(row.raw_row[0x1d], std::byte{7});
+        EXPECT_EQ(row.raw_row[0x2f], std::byte{20});
+    }
+}
+
+TEST(ProgCodec, InvalidParametersRemainRawWithoutRejectingReadableObjects) {
+    auto bytes = program_bytes(4U, 1U, 1U);
+    const auto tail = bytes.size() - 0xb0U;
+    bytes[0x8b] = std::byte{255};
+    bytes[tail + 0x79] = std::byte{255};
+    bytes[tail + 0xa6] = std::byte{255};
+    bytes[0x135] = std::byte{254};
+    bytes[0x136] = std::byte{128};
+    bytes[0x143] = std::byte{0xea};
+    bytes[0x9e] = std::byte{97};
+    bytes[0xa0] = std::byte{255};
+    bytes[0xa1] = std::byte{255};
+    const auto decoded = axk::decode_object(bytes);
+    ASSERT_TRUE(decoded);
+    const auto &program = std::get<axk::CurrentProg>(decoded->payload);
+    EXPECT_FALSE(program.parameters.level);
+    EXPECT_FALSE(program.parameters.controllers[0].function);
+    EXPECT_FALSE(program.parameters.step_wave.step_count);
+    EXPECT_FALSE(program.parameters.effects[0].type);
+    EXPECT_FALSE(program.parameters.effects[0].parameters[0]);
+    EXPECT_EQ(program.raw_common_parameter_block[0xb], std::byte{255});
+    EXPECT_EQ(program.raw_canonical_control_block[1], std::byte{255});
+    EXPECT_EQ(program.effect_blocks[0].raw_bytes[6], std::byte{97});
+    EXPECT_EQ(program.effect_blocks[0].raw_bytes[8], std::byte{255});
+    const auto &row = program.assignments[0];
+    EXPECT_FALSE(row.parameters.receive);
+    EXPECT_FALSE(row.parameters.level_offset);
+    EXPECT_FALSE(row.parameters.portamento);
+    EXPECT_FALSE(row.parameters.mono);
+    EXPECT_FALSE(row.parameters.key_crossfade);
+    EXPECT_EQ(row.raw_row[0x15], std::byte{254});
+    EXPECT_EQ(row.raw_row[0x23], std::byte{0xea});
+}
+
 TEST(ProgCodec, ReadsStoredCountNotCapacityOrTerminalBytes) {
     for (const std::uint32_t version : {1U, 2U, 4U}) {
         for (const auto count : std::array<std::uint16_t, 8>{0, 1, 2, 3, 8, 9, 16, 999}) {
@@ -56,7 +125,7 @@ TEST(ProgCodec, ReadsStoredCountNotCapacityOrTerminalBytes) {
             ASSERT_TRUE(decoded) << decoded.error().message;
             const auto &program = std::get<axk::CurrentProg>(decoded->payload);
             EXPECT_EQ(program.assignments.size(), count);
-            EXPECT_EQ(program.control_records[0].device, version == 4U ? 74U : 71U);
+            EXPECT_EQ(program.parameters.controllers[0].device, version == 4U ? 74U : 71U);
             EXPECT_EQ(program.layout.stored_assignment_count, count);
             EXPECT_EQ(program.layout.assignment_capacity, capacity);
             EXPECT_EQ(program.layout.logical_size, bytes.size() - 512U);
@@ -169,7 +238,8 @@ TEST(ProgCodec, FreshWritesActualCountCompleteTailAndNeutralDefaults) {
         spec.number = 1U;
         spec.name = "PROG";
         for (std::size_t index = 0; index < count; ++index)
-            spec.assignments.push_back({"SBNK", "Target" + std::to_string(index), 0U, axk::ProgramReceiveMode::sample});
+            spec.assignments.push_back(
+                {"SBNK", "Target" + std::to_string(index), {.receive = axk::ProgramReceiveInherit{}}});
         const auto bytes = axk::detail::prepare_prog_payload(spec);
         ASSERT_TRUE(bytes) << bytes.error().message;
         const auto capacity = std::max<std::size_t>(8U, count);
@@ -225,7 +295,7 @@ TEST(ProgCodec, FreshWritesActualCountCompleteTailAndNeutralDefaults) {
     invalid.number = 1U;
     invalid.name = "EMPTY";
     EXPECT_FALSE(axk::detail::prepare_prog_payload(invalid));
-    invalid.assignments.resize(17U, {"SBNK", "Target", 0U, axk::ProgramReceiveMode::sample});
+    invalid.assignments.resize(17U, {"SBNK", "Target", {.receive = axk::ProgramReceiveInherit{}}});
     EXPECT_FALSE(axk::detail::prepare_prog_payload(invalid));
 }
 

@@ -119,6 +119,9 @@ add_library(
   src/media_yamaha.cpp
   src/object.cpp
   src/prog_codec.cpp
+        src/program_parameter_codec.cpp
+        src/program_effect_parameter_codec.cpp
+        src/program_assignment_parameter_codec.cpp
   src/package.cpp
   src/package_archive.cpp
   src/package_build.cpp
@@ -228,6 +231,8 @@ add_library(
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp
+  src/alteration_program_parameters.cpp
+  src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
   src/alteration_tx16w.cpp
@@ -249,6 +254,9 @@ add_library(
   src/prog_write_codec.cpp
   src/sample_parameter_codec.cpp
   src/sample_parameter_json.cpp
+  src/program_parameter_json.cpp
+  src/program_assignment_parameter_json.cpp
+  src/program_spec_json.cpp
   src/sample_bank_parameter_update.cpp
   src/sfs_write_codec.cpp
   src/writer.cpp
@@ -516,6 +524,7 @@ if(BUILD_TESTING)
     axk_core_tests
     tests/bytes_test.cpp
     tests/alteration_test.cpp
+    tests/program_parameter_alteration_test.cpp
     tests/audio_import_test.cpp
     tests/audio_test.cpp
     tests/wav_stream_test.cpp
@@ -536,6 +545,11 @@ if(BUILD_TESTING)
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/prog_codec_test.cpp
+    tests/program_parameters_test.cpp
+    tests/program_effect_parameters_test.cpp
+    tests/program_assignment_parameters_test.cpp
+    tests/program_parameter_json_test.cpp
+    tests/program_parameter_bounds_test.cpp
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
     tests/package_test.cpp

@@ -186,6 +186,38 @@ TEST(CliSchema, AlterationV1DistinguishesNullEmptyAndPresentValues) {
     EXPECT_EQ(parsed["operations"][0]["freed_clusters"], std::numeric_limits<std::uint64_t>::max());
 }
 
+TEST(CliSchema, ProgramMetadataUsesSharedParameterGroupsBesideRawStorage) {
+    axk::CurrentProg program;
+    program.parameters.level = 87U;
+    program.parameters.controllers[0].function = 5U;
+    program.parameters.effects[0].type = 1U;
+    program.parameters.effects[0].parameters[0] = 123U;
+    program.assignments.resize(1U);
+    program.assignments[0].parameters.receive = axk::ProgramReceiveBasic{};
+    program.assignments[0].parameters.pan_offset = 100;
+    program.assignments[0].raw_row[0x34] = std::byte{0xa5};
+    object_schema::ObjectOutput object;
+    object.header.raw_type = "PROG";
+    object.decoded.payload = std::move(program);
+    object_schema::ObjectsOutput output{
+        .shape = object_schema::ContainerShape::media, .container_kind = "object", .objects = {std::move(object)}};
+    const auto serialized = object_schema::serialize(output, false);
+    ASSERT_TRUE(serialized);
+    const auto decoded = nlohmann::json::parse(*serialized)["objects"][0]["decoded"];
+    ASSERT_TRUE(decoded.contains("parameters"));
+    EXPECT_EQ(decoded["parameters"]["level"], 87U);
+    EXPECT_EQ(decoded["parameters"]["controllers"]["1"]["function"], 5U);
+    EXPECT_EQ(decoded["parameters"]["effects"]["1"]["parameters"]["1"], 123U);
+    EXPECT_EQ(decoded["assignments"][0]["parameters"]["receive"], "basic");
+    EXPECT_EQ(decoded["assignments"][0]["parameters"]["pan_offset"], 100);
+    EXPECT_EQ(decoded["assignments"][0]["raw_row_hex"].get<std::string>().substr(104, 2), "a5");
+    EXPECT_FALSE(decoded.contains("control_records"));
+    EXPECT_FALSE(decoded["assignments"][0].contains("pan_offset"));
+    EXPECT_FALSE(decoded["assignments"][0].contains("flags"));
+    EXPECT_TRUE(decoded.contains("raw_common_parameter_block_hex"));
+    EXPECT_TRUE(decoded.contains("raw_extended_parameter_block_hex"));
+}
+
 TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
     schema::AlterationOutput output{
         .source_path_utf8 = std::string{"\xc3\x28", 2U},

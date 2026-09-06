@@ -12,6 +12,8 @@
 
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 
 namespace axk {
 
@@ -200,17 +202,11 @@ struct CurrentSbac {
 inline constexpr std::size_t maximum_stored_program_assignments = 999U;
 
 struct ProgAssignment {
+    ProgramAssignmentParameters parameters;
     std::string name;
     std::uint32_t raw_handle{};
     std::uint8_t kind{};
-    std::uint8_t flags{};
-    std::int8_t level_offset{};
-    std::int8_t velocity_sensitivity{};
-    std::int8_t pan_offset{};
-    std::uint8_t key_limit_high{};
-    std::uint8_t key_limit_low{};
-    std::uint8_t velocity_limit_high{};
-    std::uint8_t velocity_limit_low{};
+    std::uint8_t raw_receive_selector{};
     std::array<std::byte, 0x38> raw_row{};
     std::size_t offset{};
 };
@@ -239,7 +235,9 @@ struct CurrentProg {
     CurrentObjectCommonRecord common;
     ProgLayout layout;
     std::string program_name;
-    std::vector<SbnkControlRecord> control_records;
+    ProgramParameters parameters;
+    std::array<std::byte, 0x18> raw_common_parameter_block{};
+    std::vector<std::byte> raw_extended_parameter_block;
     std::array<std::byte, 16> raw_canonical_control_block{};
     std::array<std::byte, 16> raw_legacy_control_block{};
     std::vector<ProgEffectBlock> effect_blocks;

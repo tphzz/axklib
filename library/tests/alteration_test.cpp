@@ -69,7 +69,8 @@ axk::HdsBuildManifest chain_source_manifest(const std::filesystem::path &audio_p
     axk::ProgramSpec program;
     program.number = 33U;
     program.name = "Pgm 033";
-    program.assignments = {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}};
+    program.assignments = {{"SBAC", "Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                           {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}};
     volume.programs.push_back(std::move(program));
     return result;
 }
@@ -104,7 +105,8 @@ axk::HdsBuildManifest wide_sample_bank_source_manifest(const std::filesystem::pa
     axk::ProgramSpec program;
     program.number = 33U;
     program.name = "Pgm 033";
-    program.assignments = {{"SBAC", "Group", 1U}, {"SBNK", "Direct", 2U}};
+    program.assignments = {{"SBAC", "Group", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                           {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}};
     volume.programs.push_back(std::move(program));
     return result;
 }
@@ -126,7 +128,8 @@ axk::HdsBuildManifest capacity_sample_bank_source_manifest(const std::filesystem
     axk::ProgramSpec program;
     program.number = 33U;
     program.name = "Pgm 033";
-    program.assignments = {{"SBAC", "Target", 1U}, {"SBNK", "Direct", 2U}};
+    program.assignments = {{"SBAC", "Target", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                           {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}};
     volume.programs.push_back(std::move(program));
     return result;
 }
@@ -717,11 +720,17 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"rename_volume"},
         std::string_view{"rename_partition"},
     };
-    ASSERT_EQ(parsed->operations.size(), expected.size());
+    ASSERT_EQ(parsed->operations.size(), expected.size() + 1U);
     for (std::size_t index = 0; index < expected.size(); ++index) {
         EXPECT_EQ(axk::operation_type_name(parsed->operations[index].data), expected[index]);
         EXPECT_EQ(parsed->operations[index].data.index(), index);
     }
+    const auto *updated = std::get_if<axk::UpdateProgramParametersOperation>(&parsed->operations.back().data);
+    ASSERT_NE(updated, nullptr);
+    EXPECT_EQ(updated->parameters.level, 87U);
+    EXPECT_EQ(updated->parameters.effects[0].enabled, false);
+    ASSERT_EQ(updated->assignments.size(), 1U);
+    EXPECT_EQ(updated->assignments[0].parameters.pan_offset, 100);
     const auto *deleted = std::get_if<axk::DeleteProgramOperation>(&parsed->operations[13].data);
     ASSERT_NE(deleted, nullptr);
     EXPECT_EQ(deleted->program_number, 128U);
@@ -783,8 +792,9 @@ TEST(Alteration, InsertsSamplerControlledProgramForDirectSample) {
     const auto manifest = axk::parse_alteration_manifest(R"({
       "schema_version":"1.0","operations":[
         {"id":"generate","type":"insert_program","partition_index":0,"volume_name":"Samples",
-         "program":{"number":1,"name":"Old Samp","assignments":[
-           {"sample":"Old Sample","receive_mode":"SAMPLE"}
+         "program":{"number":1,"name":"Old Samp","model":"A4000",
+         "parameters":{"level":87,"lfo":{"tempo":222}},"assignments":[
+           {"sample":"Old Sample","parameters": {"receive": "inherit", "pan_offset":100}}
          ]}}
       ]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
@@ -802,9 +812,12 @@ TEST(Alteration, InsertsSamplerControlledProgramForDirectSample) {
     const auto *decoded_program = std::get_if<axk::CurrentProg>(&program->object.payload);
     ASSERT_NE(decoded_program, nullptr);
     EXPECT_EQ(decoded_program->program_name, "Old Samp");
+    EXPECT_EQ(decoded_program->parameters.level, 87);
+    EXPECT_EQ(decoded_program->parameters.lfo.tempo, 222);
     ASSERT_FALSE(decoded_program->assignments.empty());
     EXPECT_EQ(decoded_program->assignments.front().name, "Old Sample");
-    EXPECT_EQ(decoded_program->assignments.front().flags, 0xffU);
+    EXPECT_EQ(decoded_program->assignments.front().raw_receive_selector, 0xffU);
+    EXPECT_EQ(decoded_program->assignments.front().parameters.pan_offset, 100);
 
     const auto sample = std::ranges::find_if(catalog->objects, [](const auto &object) {
         return object.object.header.type == axk::ObjectType::sbnk && object.object.header.name == "Old Sample";
@@ -832,7 +845,7 @@ TEST(Alteration, InsertsProgramThatSharesAnExistingSampleBankTarget) {
       "schema_version":"1.0","operations":[
         {"id":"shared","type":"insert_program","partition_index":0,"volume_name":"Chain",
          "program":{"number":34,"name":"Shared","assignments":[
-           {"sample_bank":"Bank","receive_mode":"SAMPLE"}
+           {"sample_bank":"Bank","parameters": {"receive": "inherit"}}
          ]}}
       ]})");
     ASSERT_TRUE(manifest) << manifest.error().message;

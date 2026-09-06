@@ -738,6 +738,11 @@ three-digit slot ID. The displayed Program name is read from payload
 `0x078..0x07f`; if that field is empty, axklib displays `Pgm NNN` for slots
 1 through 128.
 
+The shared typed read/write groups, supported domains, and omission rules are
+documented in [Program Parameters](program-parameters.md). Raw blocks and rows
+remain available beside the semantic projection; an unavailable decoded leaf
+does not mean a stored zero or default.
+
 ### Program Common Fields
 
 The checked layout distinguishes legacy selectors `1`/`2` from current `4`.
@@ -757,19 +762,30 @@ records, or `(logical_length - 0x120) / 0x38` for legacy records.
 | `0x068..0x077` | 16 | bytes | raw_0x068_0x077 |
 | `0x080` | 1 | u8 | program_flags_ad_source_effect_connection_lfo_sync_0x080 |
 | `0x081` | 1 | u8 | program_lfo_cycle_wave_initial_phase_0x081 |
-| `0x082..0x085` | 4 | bytes | raw_0x082_0x085 |
-| `0x086` | 1 | u8 | raw_0x086_u8 |
-| `0x087..0x08a` | 4 | bytes | raw_0x087_0x08a |
-| `0x08f` | 1 | u8 | program_lfo_reset_midi_channel_0x08f |
+| `0x082..0x085` | 4 | 2 x u16be | Port-A controller-reset and note-toggle channel maps. |
+| `0x086` | 1 | s8 | A/D left Pan. |
+| `0x087..0x08a` | 4 | bytes | Legacy A/D output destinations and levels. |
+| `0x08b` | 1 | u8 | Program level. |
+| `0x08c..0x08d` | 2 | bytes | Preserved common state, not writable parameters. |
+| `0x08e` | 1 | s8 | Transpose. |
+| `0x08f` | 1 | s8 | LFO reset channel selection. |
 | `0x090` | 1 | u8 | program_portamento_type_0x090 |
 | `0x091` | 1 | u8 | program_portamento_rate_0x091 |
 | `0x092` | 1 | u8 | program_portamento_time_0x092 |
 | `0x093` | 1 | u8 | sample_and_hold_speed_0x093 |
 | `0x094` | 1 | u8 | program_lfo_tempo_0x094 |
-| `0x095` | 1 | u8 | program_lfo_reset_note_0x095 |
+| `0x095` | 1 | s8 | LFO reset note selection. |
 | `0x096..0x097` | 2 | u16be | Stored assignment count. |
 | `0x110..0x11f` | 16 | 4 records | Legacy controller projection; authoritative only in legacy records. |
 | `tail + 0x78..0x87` | 16 | 4 records | Canonical current controller records. |
+| `tail + 0x88..0x8b` | 4 | 2 x u16be | Port-B controller-reset and note-toggle channel maps. |
+| `tail + 0x8c` | 1 | packed u8 | Effect 4..6 connection in bits 2..0. |
+| `tail + 0x8d..0x90` | 4 | bytes | Current left A/D destinations and levels, alternating. |
+| `tail + 0x91` | 1 | s8 | Right A/D Pan. |
+| `tail + 0x92..0x95` | 4 | bytes | Current right A/D destinations and levels, alternating. |
+| `tail + 0x96..0xa5` | 16 | u8 values | StepWave values. |
+| `tail + 0xa6` | 1 | packed u8 | Step count selector in bits 2..0; slope in bits 4..3; upper bits preserved. |
+| `tail + 0xa7..0xaf` | 9 | bytes | Preserved opaque terminal bytes. |
 
 Program controller records are 4-byte rows: `device_u8`, `function_u8`,
 `type_u8`, and signed `range_s8`.
@@ -800,12 +816,13 @@ accepted display range.
 Legacy type decoding uses `+0x07`. Selector `1` maps stored types `47..51`
 to zero and subtracts five from types `52` and higher. Raw bytes are retained.
 Current ordinary type values are `0..96`; observed raw `97` is also readable
-and preservable. Read admission does not enforce a future effect editor's
+and preservable. Read admission does not enforce an effect writer's
 value domains. Metadata distinguishes numeric values, control actions, and
 unused slots; nonnumeric slots do not invent a numeric display transform.
-Display status remains explicitly known or unknown. A future type-change operation must reset
-all sixteen parameter defaults; bypass must retain them. Neither operation is
-added by this codec contract.
+Display status remains explicitly known or unknown. The typed parameter update
+operation resets all sixteen words on an actual type change, then applies
+explicit parameter values. Bypass and reasserting the same type preserve words.
+These write rules do not normalize an object during reading.
 
 ### Program Assignment Rows
 
@@ -830,30 +847,30 @@ are not a repair template for existing Programs.
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
 | `+0x00` | 16 | ASCII | assignment_name |
-| `+0x10` | 4 | u32be | assignment_raw_handle_or_selector |
+| `+0x10` | 4 | u32be | Opaque source-local assignment handle. |
 | `+0x14` | 1 | u8 | assigned_object_type |
 | `+0x15` | 1 | u8 | midi_receive_channel_assign |
-| `+0x16` | 1 | u8 | level_offset |
-| `+0x17` | 1 | u8 | velocity_sensitivity |
-| `+0x18` | 1 | u8 | pan_offset |
-| `+0x19` | 1 | u8 | velocity_xfade_high_offset |
-| `+0x1a` | 1 | u8 | fine_tune_offset |
-| `+0x1b` | 1 | u8 | velocity_xfade_low_offset |
-| `+0x1c` | 1 | u8 | coarse_tune_offset |
-| `+0x1d` | 1 | u8 | output1 |
+| `+0x16` | 1 | s8 | level_offset |
+| `+0x17` | 1 | s8 | velocity_sensitivity_offset |
+| `+0x18` | 1 | s8 | pan_offset |
+| `+0x19` | 1 | s8 | velocity_xfade_high_offset |
+| `+0x1a` | 1 | s8 | fine_tune_offset |
+| `+0x1b` | 1 | s8 | velocity_xfade_low_offset |
+| `+0x1c` | 1 | s8 | coarse_tune_offset |
+| `+0x1d` | 1 | s8 | Current output1 replacement; -1 inherits. |
 | `+0x1e` | 1 | u8 | key_limit_high |
 | `+0x1f` | 1 | u8 | key_limit_low |
-| `+0x20` | 1 | u8 | key_range_shift |
+| `+0x20` | 1 | s8 | key_range_shift |
 | `+0x21` | 1 | u8 | velocity_limit_high |
 | `+0x22` | 1 | u8 | velocity_limit_low |
 | `+0x23` | 1 | u8 | portamento_mono_key_xfade_flags |
-| `+0x24` | 1 | u8 | alternate_group_number |
-| `+0x25` | 1 | u8 | aeg_attack_rate_offset |
-| `+0x26` | 1 | u8 | aeg_decay_rate_offset |
-| `+0x27` | 1 | u8 | aeg_release_rate_offset |
-| `+0x28` | 1 | u8 | output2 |
-| `+0x29` | 1 | u8 | filter_cutoff_offset |
-| `+0x2a` | 1 | u8 | filter_gain_offset |
+| `+0x24` | 1 | s8 | Alternate group replacement; -1 inherits. |
+| `+0x25` | 1 | s8 | aeg_attack_rate_offset |
+| `+0x26` | 1 | s8 | aeg_decay_rate_offset |
+| `+0x27` | 1 | s8 | aeg_release_rate_offset |
+| `+0x28` | 1 | s8 | Current output2 replacement; -1 inherits. |
+| `+0x29` | 1 | s8 | filter_cutoff_offset |
+| `+0x2a` | 1 | s8 | filter_gain_offset |
 
 For named kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignments, the 32-bit
 handle is opaque source-local state rather than a portable object identity.
@@ -864,15 +881,15 @@ are not covered by this relocation profile.
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `+0x2b` | 1 | u8 | filter_q_width_offset |
-| `+0x2c` | 1 | u8 | cutoff_distance_offset |
-| `+0x2d..0x2e` | 2 | bytes | reserved_0045_0046 |
-| `+0x2f` | 1 | u8 | output1_level_offset |
-| `+0x30..0x31` | 2 | bytes | reserved_0048_0049 |
-| `+0x32` | 1 | u8 | output2_level_offset |
+| `+0x2b` | 1 | s8 | filter_q_width_offset |
+| `+0x2c` | 1 | s8 | cutoff_distance_offset |
+| `+0x2d..0x2e` | 2 | bytes | Legacy output1 destination/level projection. |
+| `+0x2f` | 1 | s8 | Current output1_level_offset. |
+| `+0x30..0x31` | 2 | bytes | Legacy output2 destination/level projection. |
+| `+0x32` | 1 | s8 | Current output2_level_offset. |
 | `+0x33` | 1 | u8 | midi_control_on |
-| `+0x34` | 1 | u8 | reserved_0052 |
-| `+0x35..0x37` | 3 | bytes | reserved_0053_0055 |
+| `+0x34` | 1 | bits | Selection/isolation and unnamed state; preserve, not an authoring input. |
+| `+0x35..0x37` | 3 | bytes | Preserved opaque row suffix. |
 
 Assignment kind byte mapping currently used for read-side relationship matching:
 
