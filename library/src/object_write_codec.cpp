@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <format>
 #include <limits>
 #include <map>
 #include <optional>
@@ -514,77 +513,6 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
     return result;
 }
 
-Result<std::vector<std::byte>> serialize_prog(const ProgramSpec &program) {
-    if (program.number == 0U || program.number > 128U || program.name.empty() || program.name.size() > 8U ||
-        program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Program number or assignment count exceeds the encoded capacity")};
-    }
-    for (const auto &assignment : program.assignments) {
-        if ((assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK") || assignment.target_name.empty() ||
-            (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
-             (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) ||
-            (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U)) {
-            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
-                                              "Program assignment cannot be represented by the object codec")};
-        }
-    }
-    constexpr std::size_t assignment_offset = 0x120U;
-    constexpr std::size_t assignment_stride = 0x38U;
-    constexpr std::size_t payload_tail_size = 8U;
-    const auto payload_size = assignment_offset + program.assignments.size() * assignment_stride + payload_tail_size;
-    std::vector<std::byte> result(std::max<std::size_t>(0x390U, payload_size));
-    ObjectPayloadWriter writer{result};
-    std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
-                           [](char value) { return static_cast<std::byte>(value); });
-    std::ranges::transform(std::string_view{"PROG"}, result.begin() + 0x0c,
-                           [](char value) { return static_cast<std::byte>(value); });
-    writer.be32(0x14, 4);
-    writer.be32(0x18, static_cast<std::uint32_t>(result.size() - 0xe0U));
-    writer.be32(0x1c, static_cast<std::uint32_t>(result.size() - 0x30U));
-    result[0x30] = std::byte{0x14};
-    result[0x31] = std::byte{0x0c};
-    const auto object_name = std::format("{:03}", program.number);
-    auto name = ascii(object_name, 16);
-    if (!name)
-        return std::unexpected{name.error()};
-    std::ranges::copy(*name, result.begin() + 0x32);
-    auto display = ascii(program.name, 8);
-    if (!display)
-        return std::unexpected{display.error()};
-    std::ranges::copy(*display, result.begin() + 0x78);
-    constexpr std::array<std::byte, 24> defaults{
-        std::byte{0},    std::byte{5},    std::byte{0xff}, std::byte{0xff}, std::byte{0},    std::byte{0},
-        std::byte{0},    std::byte{1},    std::byte{0x40}, std::byte{0},    std::byte{0x40}, std::byte{0x7f},
-        std::byte{0},    std::byte{0},    std::byte{0},    std::byte{0xfe}, std::byte{0},    std::byte{0x5a},
-        std::byte{0x5a}, std::byte{0x27}, std::byte{0x78}, std::byte{0xff}, std::byte{0},    std::byte{2}};
-    std::ranges::copy(defaults, result.begin() + 0x80);
-    for (std::size_t index = 0; index < program.assignments.size(); ++index) {
-        const auto &assignment = program.assignments[index];
-        const auto offset = assignment_offset + index * assignment_stride;
-        auto target = ascii(assignment.target_name, 16);
-        if (!target)
-            return std::unexpected{target.error()};
-        std::ranges::copy(*target, result.begin() + static_cast<std::ptrdiff_t>(offset));
-        result[offset + 0x14U] = assignment.target_kind == "SBAC" ? std::byte{0x11} : std::byte{0x10};
-        result[offset + 0x15U] = assignment.receive_mode == ProgramReceiveMode::sample
-                                     ? std::byte{0xff}
-                                     : static_cast<std::byte>(assignment.receive_channel - 1U);
-        result[offset + 0x1dU] = std::byte{0xff};
-        result[offset + 0x1eU] = std::byte{0x7f};
-        result[offset + 0x21U] = std::byte{0x7f};
-        result[offset + 0x23U] = std::byte{0xff};
-        result[offset + 0x24U] = std::byte{0xff};
-        result[offset + 0x28U] = std::byte{0xff};
-        result[offset + 0x2dU] = std::byte{0xff};
-        result[offset + 0x30U] = std::byte{0xff};
-        result[offset + 0x33U] = std::byte{1};
-    }
-    if (auto written = writer.finish(); !written)
-        return std::unexpected{written.error()};
-    return result;
-}
-
 } // namespace
 
 Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
@@ -626,10 +554,6 @@ SampleSpec detail::apply_sample_bank_parameter_overrides(const SampleSpec &sampl
     auto result = sample;
     detail::merge_sample_parameters(result.parameters, overrides);
     return result;
-}
-
-Result<std::vector<std::byte>> detail::prepare_prog_payload(const ProgramSpec &program) {
-    return serialize_prog(program);
 }
 
 } // namespace axk

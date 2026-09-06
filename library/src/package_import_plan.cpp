@@ -407,7 +407,7 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             adjustment.adjustment_id != package_import_internal::program_assignment_adjustment_identity(adjustment) ||
             !adjustment_ids.emplace(adjustment.adjustment_id).second || row_owner.empty() ||
             !adjusted_rows.emplace(row_owner, adjustment.assignment_ordinal).second ||
-            adjustment.program_slot.empty() || adjustment.assignment_ordinal >= 128U ||
+            adjustment.program_slot.empty() || adjustment.assignment_ordinal >= maximum_stored_program_assignments ||
             (adjustment.target_object_type != "SBAC" && adjustment.target_object_type != "SBNK") ||
             adjustment.target_name.empty() || adjustment.reason_code != "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION" ||
             adjustment.disposition != PackageProgramAssignmentDisposition::clear_assignment ||

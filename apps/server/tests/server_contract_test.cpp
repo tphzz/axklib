@@ -931,7 +931,10 @@ TEST(ServerContract, ProgramAssignmentCleanupInspectionAndJobUseReviewedSelectio
     EXPECT_FALSE(
         axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_reason));
     auto invalid_ordinal = inspection;
-    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 16U;
+    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 998U;
+    EXPECT_TRUE(
+        axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_ordinal));
+    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 999U;
     EXPECT_FALSE(
         axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_ordinal));
 

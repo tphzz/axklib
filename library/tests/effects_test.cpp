@@ -1,4 +1,7 @@
+#include <array>
 #include <cstdint>
+#include <optional>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -39,4 +42,39 @@ TEST(Effects, MatchesValidatedEnumNumericAndBoundaryDisplays) {
     const auto missing = axk::format_effect_parameter(std::nullopt, 1, 0);
     EXPECT_TRUE(missing.value.empty());
     EXPECT_FALSE(missing.table_index);
+}
+
+TEST(Effects, PreservesWideStoredParameterValues) {
+    const auto delay = axk::format_effect_parameter(1, 2, std::optional<std::uint16_t>{4600});
+    EXPECT_EQ(delay.value, "460ms");
+    EXPECT_EQ(delay.table_index, 4599);
+    const auto offset = axk::format_effect_parameter(2, 9, std::optional<std::uint16_t>{884});
+    EXPECT_EQ(offset.value, "-884");
+}
+
+TEST(Effects, DistinguishesStoredDomainsActionsAndUnusedSlots) {
+    const auto frequency = axk::effect_parameter_info(36, 7);
+    ASSERT_TRUE(frequency);
+    EXPECT_EQ(frequency->raw_min, "28");
+    EXPECT_EQ(frequency->raw_max, "58");
+    EXPECT_EQ(axk::effect_parameter_info(67, 4)->raw_max, "20");
+    EXPECT_EQ(axk::effect_parameter_info(88, 10)->raw_max, "64");
+    EXPECT_EQ(axk::effect_parameter_info(91, 7)->raw_max, "3");
+    for (const auto &[type, number] : std::array<std::pair<std::uint16_t, std::uint8_t>, 7>{
+             {{91, 15}, {92, 13}, {93, 11}, {94, 14}, {94, 15}, {95, 16}, {96, 16}}}) {
+        const auto parameter = axk::effect_parameter_info(type, number);
+        ASSERT_TRUE(parameter);
+        EXPECT_EQ(parameter->kind, axk::EffectParameterKind::control_action);
+        EXPECT_EQ(parameter->raw_max, "0");
+        EXPECT_FALSE(axk::format_effect_parameter(type, number, 0).table_index);
+    }
+    for (const auto &[type, first] :
+         std::array<std::pair<std::uint16_t, std::uint8_t>, 3>{{{39, 13}, {63, 13}, {72, 11}}}) {
+        for (auto number = first; number <= 16U; ++number) {
+            const auto parameter = axk::effect_parameter_info(type, number);
+            ASSERT_TRUE(parameter);
+            EXPECT_EQ(parameter->kind, axk::EffectParameterKind::unused);
+            EXPECT_FALSE(axk::format_effect_parameter(type, number, 0).table_index);
+        }
+    }
 }

@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/object.hpp"
+
 namespace axk::detail {
 namespace {
 
@@ -122,18 +124,17 @@ parse_clear_program_assignments_json(const Json &row, PartitionSelector selector
         return std::unexpected{number.error()};
     if (!row["assignment_ordinals"].is_array())
         return std::unexpected{invalid(std::string{context} + ".assignment_ordinals must be an array")};
-    std::vector<std::uint8_t> ordinals;
+    std::vector<std::uint16_t> ordinals;
     ordinals.reserve(row["assignment_ordinals"].size());
     for (const auto &value : row["assignment_ordinals"]) {
         if (!value.is_number_integer()) {
             return std::unexpected{invalid(std::string{context} + ".assignment_ordinals entries must be integers")};
         }
-        const auto ordinal = value.get<int>();
-        if (ordinal < 0 || ordinal >= static_cast<int>(maximum_program_assignments)) {
+        if (value < 0 || value >= maximum_stored_program_assignments) {
             return std::unexpected{
-                invalid(std::string{context} + ".assignment_ordinals entries must be between 0 and 15")};
+                invalid(std::string{context} + ".assignment_ordinals entries must be between 0 and 998")};
         }
-        ordinals.push_back(static_cast<std::uint8_t>(ordinal));
+        ordinals.push_back(value.get<std::uint16_t>());
     }
     return ClearProgramAssignmentsOperation{std::move(selector), std::move(*volume), *number, std::move(ordinals)};
 }

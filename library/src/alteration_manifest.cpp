@@ -436,14 +436,14 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (operation.program_number == 0U || operation.program_number > 128U)
                         return std::unexpected{manifest_error("program_number must be between 1 and 128")};
                     if (operation.assignment_ordinals.empty() ||
-                        operation.assignment_ordinals.size() > maximum_program_assignments) {
-                        return std::unexpected{manifest_error("assignment_ordinals must contain 1..16 ordinals")};
+                        operation.assignment_ordinals.size() > maximum_stored_program_assignments) {
+                        return std::unexpected{manifest_error("assignment_ordinals must contain 1..999 ordinals")};
                     }
-                    std::set<std::uint8_t> ordinals;
+                    std::set<std::uint16_t> ordinals;
                     for (const auto ordinal : operation.assignment_ordinals) {
-                        if (ordinal >= maximum_program_assignments || !ordinals.insert(ordinal).second) {
+                        if (ordinal >= maximum_stored_program_assignments || !ordinals.insert(ordinal).second) {
                             return std::unexpected{
-                                manifest_error("assignment_ordinals must contain distinct values between 0 and 15")};
+                                manifest_error("assignment_ordinals must contain distinct values between 0 and 998")};
                         }
                     }
                     return {};

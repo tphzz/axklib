@@ -11,6 +11,7 @@
 namespace axk {
 
 enum class EffectProfile : std::uint8_t { a3000, a4000, a5000 };
+enum class EffectParameterKind : std::uint8_t { stored_value, control_action, unused };
 
 struct EffectTypeInfo {
     std::uint16_t raw_type{};
@@ -33,6 +34,7 @@ struct EffectParameterInfo {
     std::string_view raw_shift;
     std::string_view value_source;
     std::string_view table_source;
+    EffectParameterKind kind{EffectParameterKind::stored_value};
 };
 
 struct EffectDisplayValue {
@@ -57,7 +59,7 @@ AXK_API std::optional<EffectTypeInfo> effect_type_info(std::uint16_t raw_type,
 AXK_API std::optional<EffectParameterInfo> effect_parameter_info(std::uint16_t raw_type, std::uint8_t parameter_number,
                                                                  EffectProfile profile = EffectProfile::a4000) noexcept;
 AXK_API EffectDisplayValue format_effect_parameter(std::optional<std::uint16_t> raw_type, std::uint8_t parameter_number,
-                                                   std::optional<std::uint8_t> raw_value,
+                                                   std::optional<std::uint16_t> raw_value,
                                                    EffectProfile profile = EffectProfile::a4000);
 AXK_API ModelRequirement effect_slot_requirement(std::uint8_t effect_number);
 AXK_API ModelRequirement effect_output_destination_requirement(std::optional<std::uint8_t> raw_value);

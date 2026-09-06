@@ -45,7 +45,7 @@ def render(value: object) -> str:
         "struct EffectTypeData { std::uint16_t raw_type; std::uint16_t printed_number; std::string_view printed_label; std::string_view ui_label; bool validated; };",
         "struct EffectParameterData { std::uint16_t raw_type; std::uint8_t parameter_number; std::string_view effect_label; std::string_view parameter_label; std::string_view range_text; std::string_view raw_min; std::string_view raw_max; std::string_view raw_interval; std::string_view raw_scaler; std::string_view raw_shift; std::string_view value_source; std::string_view table_source; };",
         "struct EffectEnumValue { std::string_view table; std::uint16_t index; std::string_view label; };",
-        "struct KnownEffectDisplay { std::uint16_t raw_type; std::uint8_t parameter_number; std::uint8_t raw_value; std::string_view display; };",
+        "struct KnownEffectDisplay { std::uint16_t raw_type; std::uint8_t parameter_number; std::uint16_t raw_value; std::string_view display; };",
         "",
         f"inline constexpr std::array<EffectTypeData, {len(types)}> effect_types{{",
     ]

@@ -600,7 +600,7 @@ Result<OperationReport> rename_sbnk(TransactionState &state, OperationContext co
                 continue;
             if (assignment.raw_handle != 0U)
                 return std::unexpected{transaction_error("Program assignment has unsupported nonzero handle")};
-            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_name);
+            put_padded_name(payload, assignment.offset, operation.new_sample_name);
             changed = true;
         }
         if (changed) {

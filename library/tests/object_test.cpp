@@ -359,6 +359,10 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     axk::ByteWriter writer{payload};
     ASSERT_TRUE(writer.write_ascii_field(0, 12, "FSFSDEV3SPLX", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x0c, 4, "PROG", std::byte{}));
+    ASSERT_TRUE(writer.write_be32(0x14, 4));
+    ASSERT_TRUE(writer.write_be32(0x18, 0x2b0));
+    ASSERT_TRUE(writer.write_be32(0x1c, 0x360));
+    ASSERT_TRUE(writer.write_be16(0x96, 2));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "001", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x120, 16, "Sample Bank", std::byte{' '}));
     ASSERT_TRUE(writer.write_be32(0x130, 0x12345678));
@@ -376,7 +380,7 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     ASSERT_TRUE(decoded);
     ASSERT_TRUE(std::holds_alternative<axk::CurrentProg>(decoded->payload));
     const auto &program = std::get<axk::CurrentProg>(decoded->payload);
-    ASSERT_EQ(program.assignments.size(), 11U);
+    ASSERT_EQ(program.assignments.size(), 2U);
     EXPECT_EQ(program.assignments[0].name, "Sample Bank");
     EXPECT_EQ(program.assignments[0].raw_handle, 0x12345678U);
     EXPECT_EQ(program.assignments[0].kind, 2U);

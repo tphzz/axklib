@@ -151,11 +151,31 @@ OrderedJson decoded_json(const DecodedObject &object) {
         }
         auto effects = OrderedJson::array();
         for (const auto &block : program->effect_blocks)
-            effects.push_back(hex(block));
+            effects.push_back({{"raw_block_hex", hex(block.raw_bytes)},
+                               {"type", block.type},
+                               {"parameter_values", block.parameter_values}});
+        auto controls = OrderedJson::array();
+        for (const auto &control : program->control_records)
+            controls.push_back({{"device", control.device},
+                                {"function", control.function},
+                                {"type", control.type},
+                                {"range", control.range}});
+        const auto &layout = program->layout;
         return {{"kind", "PROG"},
-                {"raw_control_block_hex", hex(program->raw_control_block)},
-                {"raw_control_tail_copy_hex", hex(program->raw_control_tail_copy)},
-                {"effect_blocks_hex", std::move(effects)},
+                {"common", common_json(program->common)},
+                {"program_name", program->program_name},
+                {"storage_layout",
+                 layout.parameter_tail_offset ? "current-split-parameter-tail" : "legacy-without-parameter-tail"},
+                {"layout_version", layout.version},
+                {"logical_size", layout.logical_size},
+                {"stored_assignment_count", layout.stored_assignment_count},
+                {"assignment_capacity", layout.assignment_capacity},
+                {"parameter_tail_offset",
+                 layout.parameter_tail_offset ? OrderedJson(*layout.parameter_tail_offset) : OrderedJson(nullptr)},
+                {"control_records", std::move(controls)},
+                {"raw_canonical_control_block_hex", hex(program->raw_canonical_control_block)},
+                {"raw_legacy_control_block_hex", hex(program->raw_legacy_control_block)},
+                {"effect_blocks", std::move(effects)},
                 {"assignments", std::move(assignments)}};
     }
     if (const auto *sequence = std::get_if<CurrentSequence>(&object.payload)) {

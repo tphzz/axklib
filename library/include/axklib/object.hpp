@@ -197,6 +197,8 @@ struct CurrentSbac {
     std::vector<SbacSlot> slots;
 };
 
+inline constexpr std::size_t maximum_stored_program_assignments = 999U;
+
 struct ProgAssignment {
     std::string name;
     std::uint32_t raw_handle{};
@@ -210,14 +212,37 @@ struct ProgAssignment {
     std::uint8_t velocity_limit_high{};
     std::uint8_t velocity_limit_low{};
     std::array<std::byte, 0x38> raw_row{};
+    std::size_t offset{};
+};
+
+enum class ProgStorageLayout : std::uint8_t {
+    legacy_without_parameter_tail,
+    current_split_parameter_tail,
+};
+
+struct ProgLayout {
+    ProgStorageLayout storage_layout{ProgStorageLayout::legacy_without_parameter_tail};
+    std::uint32_t version{};
+    std::size_t logical_size{};
+    std::uint16_t stored_assignment_count{};
+    std::size_t assignment_capacity{};
+    std::optional<std::size_t> parameter_tail_offset;
+};
+
+struct ProgEffectBlock {
+    std::array<std::byte, 0x28> raw_bytes{};
+    std::uint16_t type{};
+    std::array<std::uint16_t, 16> parameter_values{};
 };
 
 struct CurrentProg {
+    CurrentObjectCommonRecord common;
+    ProgLayout layout;
     std::string program_name;
     std::vector<SbnkControlRecord> control_records;
-    std::vector<std::byte> raw_control_block;
-    std::vector<std::byte> raw_control_tail_copy;
-    std::array<std::vector<std::byte>, 3> effect_blocks;
+    std::array<std::byte, 16> raw_canonical_control_block{};
+    std::array<std::byte, 16> raw_legacy_control_block{};
+    std::vector<ProgEffectBlock> effect_blocks;
     std::vector<ProgAssignment> assignments;
 };
 

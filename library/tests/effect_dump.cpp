@@ -1,5 +1,7 @@
+#include <array>
 #include <cstdint>
 #include <iostream>
+#include <set>
 
 #include <nlohmann/json.hpp>
 
@@ -10,7 +12,12 @@ int main() {
         for (std::uint8_t parameter = 1; parameter <= 16U; ++parameter) {
             if (!axk::effect_parameter_info(raw_type, parameter))
                 continue;
-            for (std::uint8_t raw_value = 0;; ++raw_value) {
+            std::set<std::uint16_t> values;
+            for (std::uint16_t value = 0; value <= 127U; ++value)
+                values.insert(value);
+            for (const auto value : std::array<std::uint16_t, 6>{255, 256, 884, 4600, 14800, 65535})
+                values.insert(value);
+            for (const auto raw_value : values) {
                 const auto display = axk::format_effect_parameter(raw_type, parameter, raw_value);
                 std::cout << nlohmann::ordered_json{
                          {"raw_type", raw_type},
@@ -23,8 +30,6 @@ int main() {
                      }
                          .dump()
                   << '\n';
-                if (raw_value == 127U)
-                    break;
             }
         }
     }

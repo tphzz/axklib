@@ -294,6 +294,7 @@ Result<OperationReport> rename_program(TransactionState &state, OperationContext
     std::fill(payload->begin() + 0x78, payload->begin() + 0x80, std::byte{' '});
     std::ranges::transform(operation.new_program_name, payload->begin() + 0x78,
                            [](char value) { return static_cast<std::byte>(value); });
+    std::copy_n(payload->begin() + 0x78, 3U, payload->begin() + 0x6c);
     if (auto replaced =
             replace_fixed_object_payload(state, partition, located->second, std::move(*payload), cancellation);
         !replaced) {
@@ -588,8 +589,8 @@ Result<OperationReport> rename_sbac(TransactionState &state, OperationContext co
                 return std::unexpected{transaction_error("Program already assigns rename destination")};
             if (assignment.name != operation.sample_bank_name)
                 continue;
-            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_bank_name);
-            if (auto written = writer.write_be32(0x130U + index * 0x38U, 0U); !written)
+            put_padded_name(payload, assignment.offset, operation.new_sample_bank_name);
+            if (auto written = writer.write_be32(assignment.offset + 0x10U, 0U); !written)
                 return std::unexpected{written.error()};
             changed = true;
         }

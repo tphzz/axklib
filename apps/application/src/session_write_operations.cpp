@@ -359,8 +359,13 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     revision = input.at("expectedRevision").get<std::uint64_t>();
                     content_scope_id = input.at("contentScopeId").get<std::string>();
                     for (const auto &row : input.at("assignments")) {
-                        selections.push_back({row.at("programObjectId").get<std::string>(),
-                                              row.at("assignmentOrdinal").get<std::uint8_t>()});
+                        const auto &ordinal_value = row.at("assignmentOrdinal");
+                        if (!ordinal_value.is_number_integer() || ordinal_value < 0 ||
+                            ordinal_value >= axk::maximum_stored_program_assignments)
+                            return std::unexpected(
+                                operation_error("invalid_request", "assignmentOrdinal must be between 0 and 998"));
+                        selections.push_back(
+                            {row.at("programObjectId").get<std::string>(), ordinal_value.get<std::uint16_t>()});
                     }
                 } catch (const Json::exception &) {
                     return std::unexpected(operation_error(
@@ -379,7 +384,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                   context);
                 if (!altered)
                     return std::unexpected(altered.error());
-                std::map<std::pair<std::string, std::uint8_t>, const ImageProgramAssignmentCleanupCandidate *>
+                std::map<std::pair<std::string, std::uint16_t>, const ImageProgramAssignmentCleanupCandidate *>
                     candidates;
                 for (const auto &candidate : plan->inspection.candidates)
                     candidates.emplace(std::pair{candidate.program_object_id, candidate.assignment_ordinal},

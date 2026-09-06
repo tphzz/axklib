@@ -359,7 +359,7 @@ struct ImageProgramAssignmentCleanupCandidate {
     std::string program_object_id;
     std::uint8_t program_number{};
     std::string program_name;
-    std::uint8_t assignment_ordinal{};
+    std::uint16_t assignment_ordinal{};
     std::string assignment_name;
     std::string target_object_type;
     std::string receive_channel_display;
@@ -378,7 +378,7 @@ struct ImageProgramAssignmentCleanupInspection {
 
 struct ImageProgramAssignmentCleanupSelection {
     std::string program_object_id;
-    std::uint8_t assignment_ordinal{};
+    std::uint16_t assignment_ordinal{};
 };
 
 struct ImageProgramAssignmentCleanupPlan {

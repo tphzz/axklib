@@ -7,6 +7,7 @@
 #include "axklib/bytes.hpp"
 #include "axklib/generated/current_sbnk_fields.hpp"
 #include "axklib/lookups.hpp"
+#include "axklib/prog_codec.hpp"
 #include "axklib/sequence.hpp"
 
 namespace axk {
@@ -398,81 +399,6 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     return result;
 }
 
-Result<CurrentProg> decode_prog(std::span<const std::byte> payload) {
-    const ByteReader reader{payload};
-    CurrentProg result;
-    if (payload.size() >= 0x88U) {
-        const auto program_name = reader.decoded_ascii_field(0x78, 8);
-        if (!program_name)
-            return std::unexpected{program_name.error()};
-        result.program_name = *program_name;
-    }
-    constexpr std::size_t control_count = 4;
-    for (std::size_t index = 0; index < control_count; ++index) {
-        const auto offset = 0x110U + index * 4U;
-        if (offset + 4U > payload.size())
-            break;
-        const auto device = reader.u8(offset);
-        const auto function = reader.u8(offset + 1U);
-        const auto type = reader.u8(offset + 2U);
-        const auto range = reader.s8(offset + 3U);
-        if (!device || !function || !type || !range) {
-            return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
-                                              "current PROG control record is truncated")};
-        }
-        result.control_records.push_back({*device, *function, *type, *range});
-    }
-    const auto slice = [&](std::size_t start, std::size_t end) {
-        if (start >= payload.size())
-            return std::vector<std::byte>{};
-        end = std::min(end, payload.size());
-        return std::vector<std::byte>{payload.begin() + static_cast<std::ptrdiff_t>(start),
-                                      payload.begin() + static_cast<std::ptrdiff_t>(end)};
-    };
-    result.raw_control_block = slice(0x110, 0x120);
-    result.raw_control_tail_copy = slice(0x358, 0x368);
-    constexpr std::array effect_offsets{0x98U, 0xc0U, 0xe8U};
-    for (std::size_t index = 0; index < effect_offsets.size(); ++index) {
-        result.effect_blocks[index] = slice(effect_offsets[index], effect_offsets[index] + 0x28U);
-    }
-    const auto assignment_count = payload.size() < 0x120U ? 0U : (payload.size() - 0x120U) / 0x38U;
-    for (std::size_t index = 0; index < assignment_count; ++index) {
-        const auto offset = 0x120U + index * 0x38U;
-        ProgAssignment assignment;
-        const auto name = reader.decoded_ascii_field(offset, 16);
-        const auto handle = reader.be32(offset + 0x10U);
-        const auto kind = reader.u8(offset + 0x14U);
-        const auto flags = reader.u8(offset + 0x15U);
-        const auto level = reader.s8(offset + 0x16U);
-        const auto velocity = reader.s8(offset + 0x17U);
-        const auto pan = reader.s8(offset + 0x18U);
-        const auto key_high = reader.u8(offset + 0x1eU);
-        const auto key_low = reader.u8(offset + 0x1fU);
-        const auto velocity_high = reader.u8(offset + 0x21U);
-        const auto velocity_low = reader.u8(offset + 0x22U);
-        if (!name || !handle || !kind || !flags || !level || !velocity || !pan || !key_high || !key_low ||
-            !velocity_high || !velocity_low) {
-            return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
-                                              "current PROG assignment row is truncated")};
-        }
-        assignment.name = *name;
-        assignment.raw_handle = *handle;
-        assignment.kind = *kind;
-        assignment.flags = *flags;
-        assignment.level_offset = *level;
-        assignment.velocity_sensitivity = *velocity;
-        assignment.pan_offset = *pan;
-        assignment.key_limit_high = *key_high;
-        assignment.key_limit_low = *key_low;
-        assignment.velocity_limit_high = *velocity_high;
-        assignment.velocity_limit_low = *velocity_low;
-        std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(offset), assignment.raw_row.size(),
-                    assignment.raw_row.begin());
-        result.assignments.push_back(std::move(assignment));
-    }
-    return result;
-}
-
 } // namespace
 
 const NumericField *CurrentSbnk::find_numeric_field(std::string_view name) const noexcept {
@@ -560,7 +486,10 @@ Result<DecodedObject> decode_object(std::span<const std::byte> payload) {
         return DecodedObject{*header, ObjectFormat::current, *decoded};
     }
     if (header->type == ObjectType::prog) {
-        const auto decoded = decode_prog(payload);
+        const auto common = decode_current_common_record(payload);
+        if (!common)
+            return std::unexpected{common.error()};
+        const auto decoded = detail::decode_prog(payload, *header, *common);
         if (!decoded)
             return std::unexpected{decoded.error()};
         return DecodedObject{*header, ObjectFormat::current, *decoded};

@@ -1267,6 +1267,21 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     EXPECT_EQ(ambiguous.candidate_target_count, 2U);
     EXPECT_EQ(second_program.program_number, 5U);
     EXPECT_EQ(second_program.assignment_name, "Other Missing");
+    const auto metadata = sessions.object_detail(opened->image_id, "owner-a", missing.program_object_id);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    const auto &decoded = metadata->at("object").at("decoded");
+    EXPECT_EQ(decoded.at("kind"), "PROG");
+    EXPECT_EQ(decoded.at("layoutVersion"), 4U);
+    EXPECT_EQ(decoded.at("logicalSize"), 912U);
+    EXPECT_EQ(decoded.at("storedAssignmentCount"), 2U);
+    EXPECT_EQ(decoded.at("assignmentCapacity"), 8U);
+    EXPECT_EQ(decoded.at("parameterTailOffset"), 0x2e0U);
+    EXPECT_EQ(decoded.at("assignments").size(), 2U);
+    EXPECT_EQ(decoded.at("effectBlocks").size(), 6U);
+    EXPECT_EQ(decoded.at("effectBlocks")[5].at("parameterValues").size(), 16U);
+    EXPECT_EQ(decoded.at("rawCanonicalControlBlockHex"), decoded.at("rawLegacyControlBlockHex"));
+    EXPECT_FALSE(decoded.contains("rawControlBlockHex"));
+    EXPECT_FALSE(decoded.contains("rawControlTailCopyHex"));
     EXPECT_TRUE(std::ranges::all_of(inspection->candidates,
                                     &axk::app::ImageProgramAssignmentCleanupCandidate::default_selected));
 
@@ -1282,9 +1297,9 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     ASSERT_NE(first_cleanup, nullptr);
     ASSERT_NE(second_cleanup, nullptr);
     EXPECT_EQ(first_cleanup->program_number, 4U);
-    EXPECT_EQ(first_cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 1U}));
+    EXPECT_EQ(first_cleanup->assignment_ordinals, (std::vector<std::uint16_t>{0U, 1U}));
     EXPECT_EQ(second_cleanup->program_number, 5U);
-    EXPECT_EQ(second_cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 1U}));
+    EXPECT_EQ(second_cleanup->assignment_ordinals, (std::vector<std::uint16_t>{0U, 1U}));
 
     const auto rejected = sessions.plan_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision,
                                                                    volume_item->id, {{missing.program_object_id, 2U}});

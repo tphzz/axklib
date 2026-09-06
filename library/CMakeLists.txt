@@ -118,6 +118,7 @@ add_library(
   src/media_object_directory.cpp
   src/media_yamaha.cpp
   src/object.cpp
+  src/prog_codec.cpp
   src/package.cpp
   src/package_archive.cpp
   src/package_build.cpp
@@ -245,6 +246,7 @@ add_library(
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
+  src/prog_write_codec.cpp
   src/sample_parameter_codec.cpp
   src/sample_parameter_json.cpp
   src/sample_bank_parameter_update.cpp
@@ -533,6 +535,7 @@ if(BUILD_TESTING)
     tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
+    tests/prog_codec_test.cpp
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
     tests/package_test.cpp

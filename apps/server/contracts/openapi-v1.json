@@ -2753,7 +2753,7 @@
             "type": "string"
           },
           "assignmentOrdinal": {
-            "maximum": 15,
+            "maximum": 998,
             "minimum": 0,
             "type": "integer"
           },
@@ -4505,7 +4505,7 @@
             "type": "string"
           },
           "assignmentOrdinal": {
-            "maximum": 15,
+            "maximum": 998,
             "minimum": 0,
             "type": "integer"
           },
@@ -4723,7 +4723,7 @@
         "additionalProperties": false,
         "properties": {
           "assignmentOrdinal": {
-            "maximum": 15,
+            "maximum": 998,
             "minimum": 0,
             "type": "integer"
           },
@@ -10499,7 +10499,7 @@
             "type": "string"
           },
           "assignmentOrdinal": {
-            "maximum": 127,
+            "maximum": 998,
             "minimum": 0,
             "type": "integer"
           },

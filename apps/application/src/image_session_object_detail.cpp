@@ -206,7 +206,9 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
             controls.push_back(control_json(control));
         Json effects = Json::array();
         for (const auto &effect : program->effect_blocks)
-            effects.push_back(hex(effect));
+            effects.push_back({{"rawBlockHex", hex(effect.raw_bytes)},
+                               {"type", effect.type},
+                               {"parameterValues", effect.parameter_values}});
         Json assignments = Json::array();
         for (const auto &assignment : program->assignments) {
             assignments.push_back({{"name", assignment.name},
@@ -222,13 +224,23 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                                    {"velocityLimitLow", assignment.velocity_limit_low},
                                    {"rawRowHex", hex(assignment.raw_row)}});
         }
-        return {{"kind", "PROG"},
-                {"programName", program->program_name},
-                {"controlRecords", std::move(controls)},
-                {"rawControlBlockHex", hex(program->raw_control_block)},
-                {"rawControlTailCopyHex", hex(program->raw_control_tail_copy)},
-                {"effectBlocksHex", std::move(effects)},
-                {"assignments", std::move(assignments)}};
+        const auto &layout = program->layout;
+        return {
+            {"kind", "PROG"},
+            {"common", common_json(program->common)},
+            {"storageLayout",
+             layout.parameter_tail_offset ? "current-split-parameter-tail" : "legacy-without-parameter-tail"},
+            {"layoutVersion", layout.version},
+            {"logicalSize", layout.logical_size},
+            {"storedAssignmentCount", layout.stored_assignment_count},
+            {"assignmentCapacity", layout.assignment_capacity},
+            {"parameterTailOffset", layout.parameter_tail_offset ? Json(*layout.parameter_tail_offset) : Json(nullptr)},
+            {"programName", program->program_name},
+            {"controlRecords", std::move(controls)},
+            {"rawCanonicalControlBlockHex", hex(program->raw_canonical_control_block)},
+            {"rawLegacyControlBlockHex", hex(program->raw_legacy_control_block)},
+            {"effectBlocks", std::move(effects)},
+            {"assignments", std::move(assignments)}};
     }
     if (const auto *sequence = std::get_if<axk::CurrentSequence>(&object.payload)) {
         Json tempo_events = Json::array();

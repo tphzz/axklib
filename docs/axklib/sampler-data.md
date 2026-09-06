@@ -170,6 +170,11 @@ The later copies replace overlapping runtime bytes initially populated from
 `0x6c..0x6e == 0x78..0x7a`. The latter is only a three-byte prefix; byte
 `0x6f` is not part of the reference.
 
+This table describes the A4000/A5000 common-copy path. The A3000 path
+copies only `0x30..0x41` in the first range; it does not transfer byte `0x42`.
+Preserve that byte as opaque on read. A Program's layout selector alone does
+not identify which model last saved its shared common record.
+
 Object ranges `0x43..0x49` and `0x6f..0x73` are non-semantic residue, not
 object fields. Canonical writers emit zero there. In particular, `0x6c..0x6f`
 must not be interpreted as a four-byte group identifier.
@@ -735,6 +740,18 @@ three-digit slot ID. The displayed Program name is read from payload
 
 ### Program Common Fields
 
+The checked layout distinguishes legacy selectors `1`/`2` from current `4`.
+Other selectors are unsupported. Legacy logical length is header `0x18` plus
+`0x30`; current length is header `0x18` plus `0xe0` and must also equal header
+`0x1c` plus `0x30`. Bytes beyond logical length are container padding, not
+additional rows. Truncated extents and conflicting length declarations fail.
+
+The big-endian count at `0x96` is authoritative, including zero. It must not
+exceed 999 or the integral physical row capacity. Legacy records have no
+terminal block. Current records end in a `0xb0`-byte parameter block at
+`tail = logical_length - 0xb0`. Capacity is `(tail - 0x120) / 0x38` for current
+records, or `(logical_length - 0x120) / 0x38` for legacy records.
+
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
 | `0x068..0x077` | 16 | bytes | raw_0x068_0x077 |
@@ -750,17 +767,20 @@ three-digit slot ID. The displayed Program name is read from payload
 | `0x093` | 1 | u8 | sample_and_hold_speed_0x093 |
 | `0x094` | 1 | u8 | program_lfo_tempo_0x094 |
 | `0x095` | 1 | u8 | program_lfo_reset_note_0x095 |
-| `0x096..0x097` | 2 | bytes | raw_0x096_0x097 |
-| `0x110..0x11f` | 16 | 4 records | Program controller records. |
-| `0x358..0x367` | 16 | bytes | control_tail_raw_0x358_0x367 |
+| `0x096..0x097` | 2 | u16be | Stored assignment count. |
+| `0x110..0x11f` | 16 | 4 records | Legacy controller projection; authoritative only in legacy records. |
+| `tail + 0x78..0x87` | 16 | 4 records | Canonical current controller records. |
 
 Program controller records are 4-byte rows: `device_u8`, `function_u8`,
 `type_u8`, and signed `range_s8`.
 
 ### Program Effect Blocks
 
-Program effect blocks start at `0x098`, `0x0c0`, and `0x0e8`. Each block is
-`0x28` bytes.
+The first three physical effect blocks start at `0x098`, `0x0c0`, and `0x0e8`.
+Current records additionally store blocks four through six at `tail`,
+`tail + 0x28`, and `tail + 0x50`. Legacy records have only three physical
+blocks. Each block is `0x28` bytes; all sixteen parameters remain unsigned
+16-bit words throughout decode and display, without byte truncation.
 
 | Block offset | Size | Type | Field |
 | --- | ---: | --- | --- |
@@ -770,16 +790,42 @@ Program effect blocks start at `0x098`, `0x0c0`, and `0x0e8`. Each block is
 | `+0x03` | 1 | s8 | pan_s8 |
 | `+0x04` | 1 | u8 | output_u8 |
 | `+0x05` | 1 | s8 | width_raw_s8 |
-| `+0x06` | 1 | u8 | type_u8 |
-| `+0x07` | 1 | u8 | type_mirror_or_reserved_u8 |
+| `+0x06` | 1 | u8 | Current effect type. |
+| `+0x07` | 1 | u8 | Legacy effect type projection. |
 | `+0x08` | 32 | 16 x u16be | effect parameter words |
 
 `width_display` is calculated as `width_raw_s8 + 63` when the result is in the
 accepted display range.
 
+Legacy type decoding uses `+0x07`. Selector `1` maps stored types `47..51`
+to zero and subtracts five from types `52` and higher. Raw bytes are retained.
+Current ordinary type values are `0..96`; observed raw `97` is also readable
+and preservable. Read admission does not enforce a future effect editor's
+value domains. Metadata distinguishes numeric values, control actions, and
+unused slots; nonnumeric slots do not invent a numeric display transform.
+Display status remains explicitly known or unknown. A future type-change operation must reset
+all sixteen parameter defaults; bypass must retain them. Neither operation is
+added by this codec contract.
+
 ### Program Assignment Rows
 
 Program assignment rows start at `0x120` and use a `0x38` byte stride.
+
+Only counted rows are decoded. Empty and unsupported counted rows retain their
+ordinals and raw bytes; unused capacity and terminal bytes never add graph
+edges. Explicit cleanup clears selected counted rows without changing the
+stored count, moving other rows, shrinking capacity, or rebuilding the tail.
+Rename and package relocation patch only their named fields, preserving opaque
+bytes and unresolved relationships. Program display-name rename also updates
+its three-byte common prefix alias at `0x6c..0x6e`.
+
+Fresh native Programs remain limited to `1..16` assignments. They allocate
+`max(8, count)` rows and the complete terminal block, so their length is
+`0x1d0 + max(8, count) * 0x38`. The writer initializes neutral common data,
+six effect blocks, both controller projections, A/D defaults, StepWave values,
+and empty-row defaults, then writes the requested identity and assignments.
+It writes the actual count and zero transient handles. These fresh defaults
+are not a repair template for existing Programs.
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |

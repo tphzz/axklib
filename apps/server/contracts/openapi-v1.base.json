@@ -2609,7 +2609,7 @@
           "existingObjectKey": {"type": ["string", "null"]},
           "programSlot": {"type": "string", "minLength": 1},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "targetObjectType": {"enum": ["SBAC", "SBNK"]},
           "targetName": {"type": "string", "minLength": 1},
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
@@ -4567,7 +4567,7 @@
           "programObjectId": {"type": "string", "minLength": 1},
           "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "assignmentName": {"type": "string", "minLength": 1},
           "targetObjectType": {"enum": ["SBAC", "SBNK"]},
           "receiveChannelDisplay": {"type": "string"},
@@ -4598,7 +4598,7 @@
         "required": ["programObjectId", "assignmentOrdinal"],
         "properties": {
           "programObjectId": {"type": "string", "minLength": 1},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15}
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998}
         }
       },
       "ImageProgramAssignmentCleanupRequest": {
@@ -4625,7 +4625,7 @@
           "programObjectId": {"type": "string", "minLength": 1},
           "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "assignmentName": {"type": "string", "minLength": 1}
         }
       },

@@ -752,15 +752,15 @@ TEST(AlterationManifest, ParsesStrictUnresolvedProgramAssignmentCleanup) {
     const auto parsed = axk::parse_alteration_manifest(R"({
       "schema_version":"1.0","operations":[
         {"id":"clean","type":"clear_program_assignments","partition_index":0,
-         "volume_name":"Programs","program_number":128,"assignment_ordinals":[0,15]}
+         "volume_name":"Programs","program_number":128,"assignment_ordinals":[0,998]}
       ]})");
     ASSERT_TRUE(parsed) << parsed.error().message;
     const auto *cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&parsed->operations.front().data);
     ASSERT_NE(cleanup, nullptr);
     EXPECT_EQ(cleanup->program_number, 128U);
-    EXPECT_EQ(cleanup->assignment_ordinals, (std::vector<std::uint8_t>{0U, 15U}));
+    EXPECT_EQ(cleanup->assignment_ordinals, (std::vector<std::uint16_t>{0U, 998U}));
 
-    for (const auto *ordinals : {"[]", "[0,0]", "[16]"}) {
+    for (const auto *ordinals : {"[]", "[0,0]", "[999]", "[-1]", "[4294967296]", "[18446744073709551615]", "[0.5]"}) {
         const auto rejected = axk::parse_alteration_manifest(std::format(
             R"({{"schema_version":"1.0","operations":[{{"id":"clean","type":"clear_program_assignments",)"
             R"("partition_index":0,"volume_name":"Programs","program_number":1,"assignment_ordinals":{}}}]}})",
@@ -1348,7 +1348,7 @@ TEST(Alteration, RenameVolumePreservesCompleteAllocationBitmapsBeyondFirst4096Cl
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Alteration, RenameProgramChangesOnlyTheSamplerVisibleDisplayName) {
+TEST(Alteration, RenameProgramChangesOnlyTheDisplayNameAndItsPrefixAlias) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-rename-program";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
@@ -1394,9 +1394,10 @@ TEST(Alteration, RenameProgramChangesOnlyTheSamplerVisibleDisplayName) {
     const auto *decoded = std::get_if<axk::CurrentProg>(&after_program->object.payload);
     ASSERT_NE(decoded, nullptr);
     EXPECT_EQ(decoded->program_name, "Renamed");
+    EXPECT_TRUE(decoded->common.body_prefix_alias_matches);
     ASSERT_EQ(after_program->raw_payload.size(), before_payload.size());
     for (std::size_t offset = 0U; offset < before_payload.size(); ++offset) {
-        if (offset < 0x78U || offset >= 0x80U) {
+        if ((offset < 0x78U || offset >= 0x80U) && (offset < 0x6cU || offset >= 0x6fU)) {
             EXPECT_EQ(after_program->raw_payload[offset], before_payload[offset])
                 << "unexpected Program payload change at offset " << offset;
         }

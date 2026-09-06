@@ -2419,10 +2419,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             for (const auto index : portable_rows)
                 EXPECT_EQ(normalized_program->assignments[index].raw_handle, 0U);
 
-            const auto empty_row = std::ranges::find_if(program->assignments,
-                                                        [](const auto &assignment) { return assignment.name.empty(); });
-            ASSERT_NE(empty_row, program->assignments.end());
-            const auto empty_index = static_cast<std::size_t>(std::distance(program->assignments.begin(), empty_row));
+            const auto empty_index = program->assignments.size();
+            ASSERT_LT(empty_index, program->layout.assignment_capacity);
             auto invalid_handle = node.raw_payload;
             invalid_handle[0x130U + empty_index * 0x38U] = std::byte{0x01};
             const auto invalid_decoded = axk::decode_object(invalid_handle);

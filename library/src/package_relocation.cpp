@@ -117,7 +117,7 @@ Result<void> clear_program_assignment_rows_in_place(std::vector<std::byte> &payl
             return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
                                               "Program assignment adjustment does not name a stored assignment row")};
         }
-        const auto offset = 0x120U + static_cast<std::size_t>(ordinal) * 0x38U;
+        const auto offset = assignment.offset;
         if (offset > payload.size() || 0x38U > payload.size() - offset) {
             return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
                                               "Program assignment adjustment row is out of bounds")};
@@ -181,12 +181,12 @@ Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const
                 return std::unexpected{relocation_error(node, "SBAC relationship source is not decoded")};
             source_name = sample_bank->slots[edge.ordinal].name;
         } else if (edge.role == "PROG_ASSIGNMENT_TO_SBAC" || edge.role == "PROG_ASSIGNMENT_TO_SBNK") {
-            offset = 0x120U + static_cast<std::size_t>(edge.ordinal) * 0x38U;
             const auto *program = std::get_if<CurrentProg>(&decoded->payload);
             if (program == nullptr || edge.ordinal >= program->assignments.size()) {
                 return std::unexpected{relocation_error(node, "Program relationship source is not decoded")};
             }
             source_name = program->assignments[edge.ordinal].name;
+            offset = program->assignments[edge.ordinal].offset;
         } else {
             return std::unexpected{relocation_error(node, "package relocation encountered an unsupported edge role")};
         }
@@ -301,7 +301,7 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
             const auto &assignment = program->assignments[index];
             const auto supported_kind = assignment.kind == 0x10U || assignment.kind == 0x11U;
             if (!assignment.name.empty() && supported_kind) {
-                const auto offset = 0x130U + static_cast<std::uint32_t>(index) * 0x38U;
+                const auto offset = static_cast<std::uint32_t>(assignment.offset + 0x10U);
                 if (auto added = add_range(result, object, offset, 4U, "PROG_ASSIGNMENT_HANDLE"); !added)
                     return std::unexpected{added.error()};
             }
@@ -441,7 +441,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
             if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U)) {
-                if (auto written = write_be32(0x130U + index * 0x38U, 0U); !written)
+                if (auto written = write_be32(assignment.offset + 0x10U, 0U); !written)
                     return std::unexpected{written.error()};
             }
         }

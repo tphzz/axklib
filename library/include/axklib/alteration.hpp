@@ -139,7 +139,7 @@ struct ClearProgramAssignmentsOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::uint8_t program_number{};
-    std::vector<std::uint8_t> assignment_ordinals;
+    std::vector<std::uint16_t> assignment_ordinals;
 };
 
 struct SequenceSpec {
