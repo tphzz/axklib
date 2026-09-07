@@ -84,7 +84,7 @@ if(BUILD_TESTING)
   add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
                                        tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
-                                       tests/extraction_operations_test.cpp tests/file_operations_test.cpp
+                                       tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
                                        tests/midi_operations_test.cpp
                                        tests/operation_registry_test.cpp tests/package_operations_test.cpp
@@ -110,4 +110,15 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_application_tests)
   axk_enable_coverage(axk_application_tests)
   gtest_discover_tests(axk_application_tests PROPERTIES LABELS application)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT AXK_ENABLE_SANITIZERS AND NOT AXK_ENABLE_THREAD_SANITIZER)
+    # Sanitizers reserve large virtual address ranges incompatible with this hard address-space ceiling.
+    add_executable(axk_export_memory_test tests/export_parameter_ownership_test.cpp)
+    target_compile_features(axk_export_memory_test PRIVATE cxx_std_23)
+    target_compile_definitions(axk_export_memory_test PRIVATE AXK_EXPORT_MEMORY_TEST)
+    target_link_libraries(axk_export_memory_test PRIVATE axklib::application GTest::gtest)
+    axk_set_project_warnings(axk_export_memory_test)
+    axk_enable_coverage(axk_export_memory_test)
+    add_test(NAME Application.ExportParameterMemory COMMAND axk_export_memory_test)
+    set_tests_properties(Application.ExportParameterMemory PROPERTIES LABELS "application;memory" TIMEOUT 120)
+  endif()
 endif()

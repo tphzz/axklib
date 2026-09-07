@@ -661,12 +661,10 @@ propagation bitmaps remain clear. Their linked-Program bitmaps are derived from
 the authored Program assignments. Raw pending or relationship-bitmap authoring
 is not exposed.
 
-The current authored `SBAC`/`PROG` profile is intentionally narrow. Each Sample Bank
-contains 1..127 mono or stereo Samples. Each Program has exactly two ordered
-assignments: one distinct `sample_bank` on receive channel `1`, followed
-by one direct `sample` on receive channel `2`. Every Sample Bank and direct Sample
-used by the Program profile is assigned once, and the direct Program Sample remains
-mono-only. Sequence (`SEQU`) and profile (`PRF3`)
+Each authored Sample Bank contains 1..127 mono or stereo Samples. Programs admit
+0..999 ordered Sample Bank or standalone Sample assignments with independently
+chosen receive settings. Targets may be shared by multiple Programs, and banks
+need not be assigned to any Program. Sequence (`SEQU`) and profile (`PRF3`)
 payload authoring are not exposed; transfer mode can preserve existing objects
 of those known types.
 
@@ -732,6 +730,9 @@ Supported operation types:
 | `delete_sbnk` | `volume_name`, `sample_name` |
 | `insert_sbnk` | `volume_name`, `sample` |
 | `update_sbnk_parameters` | `volume_name`, `sample_name`, non-empty `parameters` |
+| `update_sample_bank_parameters` | `volume_name`, `sample_bank_name`, non-empty `parameters` |
+| `update_wave_data_parameters` | `volume_name`, `waveform_name`, non-empty `parameters` |
+| `retarget_sample_wave_data` | `volume_name`, `sample_name`, `waveform_name`, `expected_payload_sha256`; stereo also requires `right_waveform_name` |
 | `rename_sbnk` | `volume_name`, `sample_name`, `new_sample_name` |
 | `delete_sbac` | `volume_name`, `sample_bank_name` |
 | `insert_sbac` | `volume_name`, `sample_bank` |
@@ -741,6 +742,7 @@ Supported operation types:
 | `insert_program` | `volume_name`, `program` |
 | `rename_program` | `volume_name`, `program_number`, `new_program_name` |
 | `update_program_parameters` | `volume_name`, `program_number`, explicit `model`, non-empty global and/or guarded assignment patches |
+| `replace_program_assignments` | `volume_name`, `program_number`, explicit `model`, `expected_payload_sha256`, complete `assignments` array |
 
 The [Program parameter contract](program-parameters.md) defines the current-layout
 update groups, numeric domains, effect initialization rules, and assignment guards.
@@ -752,9 +754,15 @@ An `insert_waveform` audio object contains `path`, one or two distinct
 directory.
 
 An `insert_sbnk` object contains `name` and `waveform_name`, with optional
-`right_waveform_name` and `parameters`. The latter uses the shared
+`right_waveform_name`, `parameters`, and `playback_window`. The parameters use the shared
 [Sample parameter contract](sample-parameters.md). The named Wave Data entries
 in the evolving transaction must already exist at that point.
+The optional `playback_window` object has exactly `start_frame` and
+`length_frames`. An omitted window inherits the Wave Data's logical window;
+an explicit window must fit its complete physical PCM storage. Stereo rates
+must agree and an inherited window must agree between both members. See
+[Sample playback windows](sample-parameters.md#playback-window) and
+[guarded structural edits](alteration.md) for preservation and rejection rules.
 
 `update_sbnk_parameters` changes an existing Sample with the same non-empty,
 partial `parameters` object. Unspecified parameters and all unrelated opaque
@@ -779,13 +787,13 @@ contains one to 127 distinct existing Sample names. Existing target members are
 left in place; all other selected Samples are appended in manifest order. The
 target Sample Bank's object identity and incoming Program relationships are
 preserved. The final bank may contain at most 127 members. This metadata-only
-operation can grow the target payload only within its currently allocated record
-extents; insufficient extent capacity rejects the transaction atomically. It
+operation grows record allocation when necessary; insufficient free space
+rejects the transaction atomically. It
 preserves opaque bytes after the active member table when that table expands.
 
 An `insert_program` object contains a Program `number`, its sampler-visible
 `name` (`1..8` printable ASCII characters without leading or trailing spaces),
-and `1..16` ordered assignments. Each assignment has exactly one `sample_bank`
+and `0..999` ordered assignments. Each assignment has exactly one `sample_bank`
 or `sample` target and an optional `parameters` object. The Program also accepts
 optional `model` (`A4000` by default, or `A5000`) and Program-wide `parameters`.
 See [Program Parameters](program-parameters.md) for the shared fresh/update
@@ -797,9 +805,11 @@ parameter contract.
   Banks and Samples directly auditionable.
 - `"receive":"basic"` selects `Bch`; `"receive":{"port":"a","channel":1}`
   selects `A01`. Channels are `1..16`; port `b` requires model `A5000`.
-- Full-image and inserted-volume authoring retain their narrower profile:
-  exactly two assignments, a `sample_bank` on A1 followed by a direct `sample`
-  on A2. Expanding the parameter contract does not relax this topology rule.
+- Full-image and inserted-volume authoring accept the same ordered assignment
+  contract. Banks may exist without Programs, and targets may be shared across
+  Programs. Linked-Program bitmaps are derived from all assignments. A Sample
+  still cannot belong to multiple banks or be both a bank member and a direct
+  Program target. Empty Programs allocate eight initialized spare rows.
 
 The obsolete `receive_mode` and `receive_channel` input fields are rejected.
 

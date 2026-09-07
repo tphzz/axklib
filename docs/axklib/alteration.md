@@ -9,11 +9,11 @@ Supported operations are:
 
 - rename partition;
 - insert, delete, and rename volume;
-- insert, delete, and rename waveform;
-- insert, delete, rename, and update parameters on a Sample (`SBNK`);
-- insert, delete, and rename Sample Bank (`SBAC`);
+- insert, delete, rename, and update metadata on Wave Data (`SMPL`);
+- insert, delete, rename, retarget Wave Data, and update parameters on a Sample (`SBNK`);
+- insert, delete, rename, and update parameters on a Sample Bank (`SBAC`);
 - assign selected Samples to an existing Sample Bank (`SBAC`);
-- insert, delete, rename, and update parameters on a Program.
+- insert, delete, rename, update parameters, and replace assignments on a Program.
 
 Wave Data insertion uses the same WAV, FLAC, and AIFF conversion pipeline as fresh
 image creation. A subsequent Sample insertion in the same transaction can
@@ -32,10 +32,31 @@ retain their current row and order. Other selected Samples are detached from
 their previous Sample Banks and appended in request order; source banks remain
 present and may become empty. The target Sample Bank keeps its SFS identity, so
 Program assignments to it remain valid. A Sample assigned directly to a Program,
-a shared or inconsistent membership, a final count above 127, or target payload
-growth beyond the bank's currently allocated record extents rejects the complete
-transaction without changing the image. Appending rows consumes existing slot
-padding first and preserves the target record's opaque suffix bytes.
+a shared or inconsistent membership, a final count above 127, or insufficient
+free allocation rejects the complete transaction without changing the image.
+Appending rows consumes existing slot padding first, grows allocation when
+needed, and preserves the parameter tail and opaque suffix bytes.
+
+`update_wave_data_parameters` changes only an existing Wave Data object's metadata.
+Its target fields are `partition_index`, `volume_name`, and `waveform_name`.
+The non-empty `parameters` object accepts `root_key` (0..127),
+`fine_tune_cents` (-63..63), `loop_mode` (0..5), and unsigned frame values
+`wave_start_frame`, `wave_length_frames`, `loop_start_frame`, and
+`loop_length_frames`. Playback windows must fit the complete stored PCM and loops
+must fit the playback window. Nonrepeating modes allow a zero start/length loop;
+repeating modes require a nonempty loop. Pitch edits update their derived cache.
+PCM8/PCM16 storage and unrelated metadata are preserved exactly. This does not
+change the independent parameters of referencing Samples, resample audio,
+change encoding, or admit incomplete/unsupported transfer profiles.
+
+`update_sample_bank_parameters` applies a non-empty partial `parameters` object
+to an existing Sample Bank and all its members atomically. Its target fields are
+`partition_index`, `volume_name`, and `sample_bank_name`. It uses the same typed
+Sample parameter contract, validates each member's merged values, and preserves
+unrelated object bytes, Wave Data and relationship identities. Current complete
+bank layouts with clear pending propagation state are supported. Pending state,
+unresolved or multiply-owned members, and invalid merged values reject the entire
+transaction without publishing a partial change.
 
 `update_sbnk_parameters` applies a non-empty partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.
@@ -51,6 +72,36 @@ requires an explicit A4000/A5000 model and at least one writable leaf. Assignmen
 patches use a counted ordinal plus the expected stored target kind and name.
 It preserves object size, unused rows, opaque state, and all other objects;
 global and assignment edits are committed together or not at all.
+
+`replace_program_assignments` supplies the complete ordered active row list
+(zero through 999 rows). It requires `volume_name`, `program_number`, an explicit
+`model`, and `expected_payload_sha256`, the lowercase SHA-256 of the complete
+source Program payload at that point in the transaction. Each row is one of:
+
+- `{"retain_ordinal": 2}` to preserve an existing row exactly;
+- `{"retain_ordinal": 2, "sample": "New", "parameters": {"level_offset": 5}}`
+  to retarget and optionally patch an existing row;
+- `{"sample_bank": "Bank"}` or `{"sample": "Sample"}` to append a fresh row
+  with optional assignment `parameters`.
+
+Ordinals are zero-based and cannot be retained twice. Omitted active rows are
+removed. Retained rows keep opaque state; fresh rows use neutral defaults.
+Retargeting clears the old transient handle. The operation maintains target
+Program bitmaps, preserves existing unused capacity and the complete parameter
+tail, and grows allocation only when necessary. Stale payload identity,
+unresolved targets, inconsistent bitmaps, or allocation failure reject the
+whole transaction. Legacy Program conversion is not implicit.
+
+`retarget_sample_wave_data` requires `volume_name`, `sample_name`, a new
+`waveform_name`, and `expected_payload_sha256` for the complete source Sample.
+Stereo Samples also require `right_waveform_name`. Both sources must exist in
+the same volume. This operation preserves the Sample's mono/stereo source
+topology, playback and loop windows, and parameters, while updating names,
+references, rates, and derived pitch caches. Preserved windows must fit each
+complete PCM8/PCM16 source; stereo source rates must agree. Different physical
+lengths are allowed when both contain the preserved window. Duplicate-source
+expanded mono and implicit topology conversion are not supported. All other
+Sample bytes and all Wave Data bytes remain unchanged.
 
 ## Object deletion planning
 

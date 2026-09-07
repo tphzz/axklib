@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -65,6 +66,20 @@ struct UpdateSampleParametersOperation {
     std::string volume_name;
     std::string sample_name;
     SampleParameters parameters;
+};
+
+struct UpdateSampleBankParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    SampleParameters parameters;
+};
+
+struct UpdateWaveDataParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string waveform_name;
+    WaveDataParameters parameters;
 };
 
 struct InsertWaveformOperation {
@@ -205,15 +220,38 @@ struct ImportTx16wDiskSetOperation {
     tx16w::ImportMode import_mode{tx16w::ImportMode::hierarchy};
 };
 
-using AlterationOperationData =
-    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
-                 UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation,
-                 RenameWaveformOperation, RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
-                 AssignSampleBankMembersOperation, RenameSampleBankOperation, DeleteProgramOperation,
-                 InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation, InsertSequenceOperation,
-                 RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
-                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
-                 UpdateProgramParametersOperation>;
+struct ProgramAssignmentEdit {
+    std::optional<std::size_t> retain_ordinal;
+    std::optional<ProgramAssignmentSpec> assignment;
+};
+
+struct ReplaceProgramAssignmentsOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    ASeriesModel model{ASeriesModel::a4000};
+    std::string expected_payload_sha256;
+    std::vector<ProgramAssignmentEdit> assignments;
+};
+
+struct RetargetSampleWaveDataOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    std::string waveform_name;
+    std::string expected_payload_sha256;
+    std::optional<std::string> right_waveform_name{};
+};
+
+using AlterationOperationData = std::variant<
+    DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
+    UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation,
+    RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
+    RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
+    DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
+    RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
+    ClearProgramAssignmentsOperation, UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
+    UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation>;
 
 struct AlterationOperation {
     std::string id;

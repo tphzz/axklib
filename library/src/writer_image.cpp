@@ -150,67 +150,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "PRF3 is reserved for partition support files")};
         }
-        if (volume.sample_banks.empty() != volume.programs.empty() ||
-            volume.sample_banks.size() != volume.programs.size()) {
-            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                              "current SBAC/PROG profile requires one Sample Bank per Program")};
-        }
-        if (!volume.programs.empty()) {
-            std::map<std::string, const SampleSpec *> sample_specs;
-            std::map<std::string, const SampleBankSpec *> sample_bank_specs;
-            for (const auto &sample : volume.samples)
-                sample_specs.emplace(sample.name, &sample);
-            for (const auto &sample_bank : volume.sample_banks)
-                sample_bank_specs.emplace(sample_bank.name, &sample_bank);
-            std::set<std::string> assigned_sample_banks;
-            std::set<std::string> assigned_direct;
-            for (const auto &program : volume.programs) {
-                if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-                    program.assignments[0].parameters.receive !=
-                        ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 1U}} ||
-                    program.assignments[1].target_kind != "SBNK" ||
-                    program.assignments[1].parameters.receive !=
-                        ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 2U}}) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "Program profile requires SBAC channel 1 "
-                                                      "then SBNK channel 2")};
-                }
-                const auto sample_bank = sample_bank_specs.find(program.assignments[0].target_name);
-                const auto direct = sample_specs.find(program.assignments[1].target_name);
-                if (sample_bank == sample_bank_specs.end() || direct == sample_specs.end() ||
-                    !assigned_sample_banks.insert(sample_bank->first).second ||
-                    !assigned_direct.insert(direct->first).second ||
-                    std::ranges::contains(sample_bank->second->member_samples, direct->first)) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "Program targets must be unique, known, and separate")};
-                }
-                if (direct->second->right_waveform_id || direct->second->interleaved_audio_path) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "SBAC/PROG writer profile supports mono Samples only")};
-                }
-                if (sample_bank->second->member_samples.size() == 1U) {
-                    auto member = *sample_specs.at(sample_bank->second->member_samples[0]);
-                    if (sample_bank->second->parameter_overrides) {
-                        member = detail::apply_sample_bank_parameter_overrides(
-                            member, *sample_bank->second->parameter_overrides);
-                    }
-                    if (member.waveform_id != direct->second->waveform_id ||
-                        member.parameters.root_key.value_or(60U) != direct->second->parameters.root_key.value_or(60U) ||
-                        member.parameters.key_low.value_or(0U) != direct->second->parameters.key_low.value_or(0U) ||
-                        member.parameters.key_high.value_or(127U) !=
-                            direct->second->parameters.key_high.value_or(127U) ||
-                        member.parameters.level.value_or(100U) != direct->second->parameters.level.value_or(100U)) {
-                        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                          "one-member Sample Bank and direct Sample control "
-                                                          "parameters must match")};
-                    }
-                }
-            }
-            if (assigned_sample_banks.size() != sample_bank_specs.size()) {
-                return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "every Sample Bank must be assigned once")};
-            }
-        }
+        if (auto valid = detail::validate_authored_volume(volume); !valid)
+            return std::unexpected{
+                make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, valid.error().message)};
         const auto volume_id = next++;
         std::array<std::uint32_t, 5> category_ids{};
         for (auto &value : category_ids)
@@ -264,18 +206,12 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
         std::map<std::string, std::vector<std::uint8_t>> linked_sample_programs;
         std::map<std::string, std::vector<std::uint8_t>> linked_sample_bank_programs;
         for (const auto &program : volume.programs) {
-            if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-                program.assignments[0].parameters.receive !=
-                    ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 1U}} ||
-                program.assignments[1].target_kind != "SBNK" ||
-                program.assignments[1].parameters.receive !=
-                    ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 2U}}) {
-                return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "Program profile requires SBAC channel 1 then SBNK channel "
-                                                  "2")};
+            for (const auto &assignment : program.assignments) {
+                auto &links = assignment.target_kind == "SBAC" ? linked_sample_bank_programs : linked_sample_programs;
+                auto &programs = links[assignment.target_name];
+                if (!std::ranges::contains(programs, program.number))
+                    programs.push_back(program.number);
             }
-            linked_sample_bank_programs[program.assignments[0].target_name].push_back(program.number);
-            linked_sample_programs[program.assignments[1].target_name].push_back(program.number);
         }
         std::map<std::string, SampleSpec> samples;
         for (const auto &sample : volume.samples) {

@@ -128,10 +128,10 @@ TEST(ProgramSpecJson, DefaultsToA4000AndInheritedAssignmentReceive) {
 
 TEST(ProgramSpecJson, RejectsObsoleteAndMalformedContractsWithoutNarrowing) {
     const Json base = {{"number", 1}, {"name", "Neutral"}, {"assignments", Json::array({{{"sample", "Direct"}}})}};
-    for (const auto &change : std::array<Json, 8>{
-             Json{{"number", std::numeric_limits<std::uint64_t>::max()}}, Json{{"number", true}}, Json{{"number", 1.5}},
-             Json{{"model", "A3000"}}, Json{{"model", nullptr}}, Json{{"parameters", nullptr}},
-             Json{{"assignments", Json::array()}}, Json{{"unknown", 1}}}) {
+    for (const auto &change :
+         std::array<Json, 8>{Json{{"number", std::numeric_limits<std::uint64_t>::max()}}, Json{{"number", true}},
+                             Json{{"number", 1.5}}, Json{{"model", "A3000"}}, Json{{"model", nullptr}},
+                             Json{{"parameters", nullptr}}, Json{{"assignments", nullptr}}, Json{{"unknown", 1}}}) {
         auto input = base;
         input.update(change);
         EXPECT_FALSE(axk::detail::parse_program_spec_json(input)) << input.dump();

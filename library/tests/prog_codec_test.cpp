@@ -45,6 +45,33 @@ std::vector<std::byte> program_bytes(std::uint32_t version, std::uint16_t count,
 
 } // namespace
 
+TEST(ProgCodec, FreshAuthoringUsesTheFullCurrentCountRange) {
+    for (const auto count : {0U, 1U, 2U, 8U, 9U, 16U, 17U, 999U}) {
+        SCOPED_TRACE(count);
+        axk::ProgramSpec spec;
+        spec.number = 1U;
+        spec.name = "COUNT";
+        for (unsigned index = 0; index < count; ++index)
+            spec.assignments.push_back({"SBNK", "Target" + std::to_string(index), {}});
+        const auto payload = axk::detail::prepare_prog_payload(spec);
+        ASSERT_TRUE(payload) << payload.error().message;
+        const auto capacity = std::max(8U, count);
+        EXPECT_EQ(payload->size(), 0x1d0U + capacity * 0x38U);
+        EXPECT_EQ(axk::ByteReader{*payload}.be16(0x96U).value(), count);
+        const auto decoded = axk::decode_object(*payload);
+        ASSERT_TRUE(decoded) << decoded.error().message;
+        const auto *program = std::get_if<axk::CurrentProg>(&decoded->payload);
+        ASSERT_NE(program, nullptr);
+        EXPECT_EQ(program->assignments.size(), count);
+        EXPECT_EQ((*payload)[payload->size() - 0xb0U + 0xa6U], std::byte{4});
+    }
+    axk::ProgramSpec too_many;
+    too_many.number = 1U;
+    too_many.name = "INVALID";
+    too_many.assignments.resize(1'000U, {"SBNK", "Target", {}});
+    EXPECT_FALSE(axk::detail::prepare_prog_payload(too_many));
+}
+
 TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
     for (const auto version : {1U, 2U}) {
         auto bytes = program_bytes(version, 1U, 1U);
@@ -294,8 +321,8 @@ TEST(ProgCodec, FreshWritesActualCountCompleteTailAndNeutralDefaults) {
     axk::ProgramSpec invalid;
     invalid.number = 1U;
     invalid.name = "EMPTY";
-    EXPECT_FALSE(axk::detail::prepare_prog_payload(invalid));
-    invalid.assignments.resize(17U, {"SBNK", "Target", {.receive = axk::ProgramReceiveInherit{}}});
+    EXPECT_TRUE(axk::detail::prepare_prog_payload(invalid));
+    invalid.assignments.resize(1000U, {"SBNK", "Target", {.receive = axk::ProgramReceiveInherit{}}});
     EXPECT_FALSE(axk::detail::prepare_prog_payload(invalid));
 }
 

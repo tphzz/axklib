@@ -227,6 +227,14 @@ add_library(
   src/alteration_program.cpp
   src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
+  src/alteration_sample_bank_parameters.cpp
+  src/alteration_wave_data_parameters.cpp
+  src/alteration_manifest_program_replacement.cpp
+  src/alteration_program_replacement.cpp
+  src/alteration_sample_retarget.cpp
+  src/alteration_manifest_sample_retarget.cpp
+  src/prog_assignment_replacement_codec.cpp
+  src/wave_data_parameter_update.cpp
   src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp
   src/alteration_placement.cpp
@@ -563,6 +571,14 @@ if(BUILD_TESTING)
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/fresh_object_graph_test.cpp
+    tests/sample_bank_parameter_alteration_test.cpp
+    tests/sample_parameter_edit_validation_test.cpp
+    tests/wave_data_parameter_alteration_test.cpp
+    tests/program_assignment_replacement_test.cpp
+    tests/sample_playback_window_test.cpp
+    tests/sample_wave_data_retarget_test.cpp
+    tests/sample_bank_member_growth_test.cpp
     tests/smpl_writer_test.cpp
     tests/sample_eq_test.cpp
   )

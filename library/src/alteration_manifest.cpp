@@ -1,4 +1,6 @@
 #include "alteration_manifest_internal.hpp"
+#include "alteration_manifest_program.hpp"
+#include "alteration_manifest_wave_data.hpp"
 
 #include <algorithm>
 #include <array>
@@ -141,8 +143,8 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
         return std::unexpected{manifest_error("program.number must be between 1 and 128")};
     if (auto valid = require_program_name(program.name, "program.name"); !valid)
         return valid;
-    if (program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
-        return std::unexpected{manifest_error("program.assignments must contain 1..16 assignments")};
+    if (program.assignments.size() > maximum_program_assignments) {
+        return std::unexpected{manifest_error("program.assignments must contain 0..999 assignments")};
     }
     for (const auto &assignment : program.assignments) {
         if (assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK")
@@ -152,19 +154,6 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
     }
     if (const auto payload = prepare_prog_payload(program); !payload)
         return std::unexpected{payload.error()};
-    return {};
-}
-
-Result<void> validate_authored_program(const ProgramSpec &program) {
-    if (auto valid = validate_program_fields(program); !valid)
-        return valid;
-    if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-        program.assignments[0].parameters.receive != ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 1U}} ||
-        program.assignments[1].target_kind != "SBNK" ||
-        program.assignments[1].parameters.receive != ProgramReceiveSetting{ProgramReceiveChannel{MidiPort::a, 2U}}) {
-        return std::unexpected{manifest_error("authored Program assignments must be SBAC/channel 1 then "
-                                              "SBNK/channel 2")};
-    }
     return {};
 }
 
@@ -268,20 +257,18 @@ Result<void> validate_volume(const VolumeSpec &volume) {
         }
     }
 
-    if (volume.sample_banks.empty() != volume.programs.empty() ||
-        volume.sample_banks.size() != volume.programs.size()) {
-        return std::unexpected{
-            manifest_error("volume requires one Program for every Sample Bank in the current writer profile")};
-    }
     std::set<std::uint8_t> program_numbers;
     for (const auto &program : volume.programs) {
-        if (auto valid = validate_authored_program(program); !valid)
+        if (auto valid = validate_program_fields(program); !valid)
             return valid;
         if (!program_numbers.insert(program.number).second)
             return std::unexpected{manifest_error("volume has duplicate Program numbers")};
-        if (!sample_bank_names.contains(program.assignments[0].target_name) ||
-            !sample_names.contains(program.assignments[1].target_name)) {
-            return std::unexpected{manifest_error("Program assignment references an unknown target")};
+        for (const auto &assignment : program.assignments) {
+            const auto &names = assignment.target_kind == "SBAC" ? sample_bank_names : sample_names;
+            if (!names.contains(assignment.target_name))
+                return std::unexpected{manifest_error("Program assignment references an unknown target")};
+            if (assignment.target_kind == "SBNK" && banked_samples.contains(assignment.target_name))
+                return std::unexpected{manifest_error("A bank member cannot also be a direct Program assignment")};
         }
     }
     return {};
@@ -351,6 +338,20 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (!detail::has_sample_parameter_values(operation.parameters))
                         return std::unexpected{manifest_error("parameters must contain at least one parameter")};
                     return detail::validate_sample_parameters(operation.parameters);
+                } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {
+                    if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
+                        return valid;
+                    if (!detail::has_sample_parameter_values(operation.parameters))
+                        return std::unexpected{manifest_error("parameters must contain at least one parameter")};
+                    return detail::validate_sample_parameters(operation.parameters);
+                } else if constexpr (std::same_as<T, ReplaceProgramAssignmentsOperation>) {
+                    return detail::validate_program_assignment_replacement(operation);
+                } else if constexpr (std::same_as<T, RetargetSampleWaveDataOperation>) {
+                    return detail::validate_sample_retarget(operation);
+                } else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>) {
+                    if (auto valid = require_object_name(operation.waveform_name, "waveform_name"); !valid)
+                        return valid;
+                    return detail::validate_wave_data_parameters(operation.parameters);
                 } else if constexpr (std::same_as<T, InsertWaveformOperation>) {
                     const auto &waveform = operation.waveform;
                     if (waveform.path.empty())
@@ -515,6 +516,8 @@ Result<void> validate_placement_repair_transaction(const AlterationManifest &man
 }
 
 } // namespace
+
+Result<void> validate_authored_volume(const VolumeSpec &volume) { return validate_volume(volume); }
 
 Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
     if (manifest.schema_version != alteration_manifest_schema_version)

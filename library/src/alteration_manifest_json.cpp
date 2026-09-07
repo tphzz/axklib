@@ -17,6 +17,7 @@
 #include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_program.hpp"
 #include "alteration_manifest_sequence.hpp"
+#include "alteration_manifest_wave_data.hpp"
 
 namespace axk {
 namespace {
@@ -150,14 +151,16 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             if (!seen.insert(*id).second)
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
-                *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "insert_waveform" &&
-                *type != "delete_waveform" && *type != "delete_program" && *type != "insert_program" &&
-                *type != "delete_sbac" && *type != "insert_sbac" && *type != "rename_waveform" &&
-                *type != "rename_sbnk" && *type != "assign_sbac_members" && *type != "rename_sbac" &&
-                *type != "rename_program" && *type != "delete_sequence" && *type != "insert_sequence" &&
-                *type != "rename_sequence" && *type != "rename_volume" && *type != "rename_partition" &&
-                *type != "repair_object_placements" && *type != "import_tx16w_disk_set" &&
-                *type != "clear_program_assignments" && *type != "update_program_parameters") {
+                *type != "insert_sbnk" && *type != "update_sbnk_parameters" &&
+                *type != "update_sample_bank_parameters" && *type != "insert_waveform" && *type != "delete_waveform" &&
+                *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
+                *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
+                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
+                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
+                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
+                *type != "import_tx16w_disk_set" && *type != "clear_program_assignments" &&
+                *type != "update_program_parameters" && *type != "update_wave_data_parameters" &&
+                *type != "replace_program_assignments" && *type != "retarget_sample_wave_data") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -178,7 +181,17 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             } else
                 return std::unexpected{transaction_error("partition selector is invalid")};
             AlterationOperationData data;
-            if (*type == "repair_object_placements") {
+            if (*type == "retarget_sample_wave_data") {
+                auto parsed = detail::parse_sample_retarget_json(row, std::move(selector));
+                if (!parsed)
+                    return std::unexpected{parsed.error()};
+                data = std::move(*parsed);
+            } else if (*type == "replace_program_assignments") {
+                auto parsed = detail::parse_program_assignment_replacement_json(row, std::move(selector));
+                if (!parsed)
+                    return std::unexpected{parsed.error()};
+                data = std::move(*parsed);
+            } else if (*type == "repair_object_placements") {
                 auto parsed = detail::parse_placement_operation_json(row, std::move(selector), context);
                 if (!parsed)
                     return std::unexpected{parsed.error()};
@@ -294,7 +307,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
                 const std::set<std::string> required{"name", "waveform_name"};
-                const std::set<std::string> optional{"right_waveform_name", "parameters"};
+                const std::set<std::string> optional{"right_waveform_name", "parameters", "playback_window"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -316,6 +329,12 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 SampleSpec spec;
                 spec.name = std::move(*name);
                 spec.waveform_id = std::move(*waveform);
+                if (sample.contains("playback_window")) {
+                    auto window = detail::parse_sample_playback_window_json(sample["playback_window"]);
+                    if (!window)
+                        return std::unexpected{window.error()};
+                    spec.playback_window = *window;
+                }
                 if (sample.contains("right_waveform_name")) {
                     auto right = object_name(sample, "right_waveform_name", sample_context);
                     if (!right)
@@ -331,14 +350,15 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     spec.parameters = std::move(*parameters);
                 }
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
-            } else if (*type == "update_sbnk_parameters") {
+            } else if (*type == "update_sbnk_parameters" || *type == "update_sample_bank_parameters") {
+                const auto name_field = *type == "update_sbnk_parameters" ? "sample_name" : "sample_bank_name";
                 if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", "sample_name", "parameters"}, context);
+                        row, {"id", "type", "partition_index", "volume_name", name_field, "parameters"}, context);
                     !valid) {
                     return std::unexpected{valid.error()};
                 }
                 auto volume = required_text(row, "volume_name", context);
-                auto sample = object_name(row, "sample_name", context);
+                auto sample = object_name(row, name_field, context);
                 if (!volume)
                     return std::unexpected{volume.error()};
                 if (!sample)
@@ -348,8 +368,28 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                                                          ErrorCode::transaction_rejected, ErrorCategory::transaction);
                 if (!parameters)
                     return std::unexpected{parameters.error()};
-                data = UpdateSampleParametersOperation{std::move(selector), std::move(*volume), std::move(*sample),
-                                                       std::move(*parameters)};
+                if (*type == "update_sbnk_parameters")
+                    data = UpdateSampleParametersOperation{std::move(selector), std::move(*volume), std::move(*sample),
+                                                           std::move(*parameters)};
+                else
+                    data = UpdateSampleBankParametersOperation{std::move(selector), std::move(*volume),
+                                                               std::move(*sample), std::move(*parameters)};
+            } else if (*type == "update_wave_data_parameters") {
+                if (auto valid = exact_fields(
+                        row, {"id", "type", "partition_index", "volume_name", "waveform_name", "parameters"}, context);
+                    !valid)
+                    return std::unexpected{valid.error()};
+                auto volume = required_text(row, "volume_name", context);
+                auto waveform = object_name(row, "waveform_name", context);
+                auto parameters = detail::parse_wave_data_parameters_json(row["parameters"]);
+                if (!volume)
+                    return std::unexpected{volume.error()};
+                if (!waveform)
+                    return std::unexpected{waveform.error()};
+                if (!parameters)
+                    return std::unexpected{parameters.error()};
+                data = UpdateWaveDataParametersOperation{std::move(selector), std::move(*volume), std::move(*waveform),
+                                                         std::move(*parameters)};
             } else if (*type == "rename_waveform") {
                 if (auto valid = exact_fields(
                         row, {"id", "type", "partition_index", "volume_name", "waveform_name", "new_waveform_name"},

@@ -17,7 +17,7 @@ namespace axk::detail {
 
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program) {
     if (program.number == 0U || program.number > 128U || program.name.empty() || program.name.size() > 8U ||
-        program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
+        program.assignments.size() > maximum_program_assignments) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Program number or assignment count exceeds the encoded capacity")};
     }

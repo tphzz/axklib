@@ -63,26 +63,41 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     }
 
     SampleParameters effective;
-    effective.root_key = sample->left.root_key;
-    effective.key_low = sample->key_range_low;
-    effective.key_high = sample->key_range_high;
-    effective.loop_mode = static_cast<AudioSamplerLoopMode>(sample->loop_mode);
-    effective.loop_start_frame = sample->left.loop_start_frame;
-    effective.loop_length_frames = sample->left.loop_length_frames;
-    effective.filter_scaling_break1 = std::to_integer<std::uint8_t>(payload[0x10cU]);
-    effective.filter_scaling_break2 = std::to_integer<std::uint8_t>(payload[0x10dU]);
-    effective.expand_detune = signed_byte(payload, 0x112U);
-    effective.expand_dephase = signed_byte(payload, 0x113U);
-    effective.expand_width = signed_byte(payload, 0x114U);
-    effective.velocity_high = sample->velocity_range_high;
-    effective.velocity_low = sample->velocity_range_low;
-    effective.level_scaling_break1 = std::to_integer<std::uint8_t>(payload[0x11cU]);
-    effective.level_scaling_break2 = std::to_integer<std::uint8_t>(payload[0x11dU]);
+    const auto changes_loop = overrides.loop_mode || overrides.loop_start_frame || overrides.loop_length_frames;
+    const auto changes_expand = overrides.expand_detune || overrides.expand_dephase || overrides.expand_width;
+    // A targeted edit validates its dependencies, not unrelated retained parameter state.
+    if (overrides.root_key || overrides.key_low || overrides.key_high) {
+        effective.root_key = sample->left.root_key;
+        effective.key_low = sample->key_range_low;
+        effective.key_high = sample->key_range_high;
+    }
+    if (changes_loop) {
+        effective.loop_mode = static_cast<AudioSamplerLoopMode>(sample->loop_mode);
+        effective.loop_start_frame = sample->left.loop_start_frame;
+        effective.loop_length_frames = sample->left.loop_length_frames;
+    }
+    if (overrides.filter_scaling_break1 || overrides.filter_scaling_break2) {
+        effective.filter_scaling_break1 = std::to_integer<std::uint8_t>(payload[0x10cU]);
+        effective.filter_scaling_break2 = std::to_integer<std::uint8_t>(payload[0x10dU]);
+    }
+    if (changes_expand) {
+        effective.expand_detune = signed_byte(payload, 0x112U);
+        effective.expand_dephase = signed_byte(payload, 0x113U);
+        effective.expand_width = signed_byte(payload, 0x114U);
+    }
+    if (overrides.velocity_high || overrides.velocity_low) {
+        effective.velocity_high = sample->velocity_range_high;
+        effective.velocity_low = sample->velocity_range_low;
+    }
+    if (overrides.level_scaling_break1 || overrides.level_scaling_break2) {
+        effective.level_scaling_break1 = std::to_integer<std::uint8_t>(payload[0x11cU]);
+        effective.level_scaling_break2 = std::to_integer<std::uint8_t>(payload[0x11dU]);
+    }
     merge_sample_parameters(effective, overrides);
     if (auto valid = validate_sample_parameters(effective); !valid)
         return std::unexpected{invalid("parameters are invalid for the existing Sample")};
 
-    const auto mode = *effective.loop_mode;
+    const auto mode = effective.loop_mode.value_or(static_cast<AudioSamplerLoopMode>(sample->loop_mode));
     const auto left_loop_start = overrides.loop_start_frame.value_or(sample->left.loop_start_frame);
     const auto left_loop_length = overrides.loop_length_frames.value_or(sample->left.loop_length_frames);
     const auto right_loop_start =
@@ -91,10 +106,11 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
         overrides.loop_length_frames.value_or(sample->right ? sample->right->loop_length_frames : 0U);
     const auto changes_pitch = overrides.root_key || overrides.fine_tune_cents;
     if ((changes_pitch && (sample->left.sample_rate == 0U || (sample->right && sample->right->sample_rate == 0U))) ||
-        (sample->right_slot_present &&
+        (changes_expand && sample->right_slot_present &&
          (effective.expand_detune.value_or(0) != 0 || effective.expand_dephase.value_or(0) != 0)) ||
-        !valid_loop_window(sample->left, mode, left_loop_start, left_loop_length) ||
-        (sample->right && !valid_loop_window(*sample->right, mode, right_loop_start, right_loop_length))) {
+        (changes_loop &&
+         (!valid_loop_window(sample->left, mode, left_loop_start, left_loop_length) ||
+          (sample->right && !valid_loop_window(*sample->right, mode, right_loop_start, right_loop_length))))) {
         return std::unexpected{invalid("parameters are invalid for the existing Sample")};
     }
 

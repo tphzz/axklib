@@ -65,8 +65,7 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     EXPECT_TRUE(volume.sample_banks.front().member_sample_keys.empty());
     EXPECT_FALSE(volume.sample_banks.front().relationship_sample_keys.empty());
     EXPECT_TRUE(std::ranges::all_of(volume.samples, [](const auto &sample) {
-        return sample.members.size() == 1U && !sample.rendered_wav_path && !sample.parameter_contexts.empty() &&
-               sample.parameter_contexts.front().object_key == sample.object_key;
+        return sample.members.size() == 1U && !sample.rendered_wav_path && !sample.decoded.numeric_fields.empty();
     }));
     EXPECT_TRUE(std::ranges::all_of(volume.waveforms, [](const auto &waveform) {
         return waveform.user_facing_aliases.size() == 1U &&

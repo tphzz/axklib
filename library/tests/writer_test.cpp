@@ -1677,7 +1677,7 @@ TEST(HdsWriter, EncodesTheNativeTx16wProgramAssignmentCapacity) {
     const auto *current = std::get_if<axk::CurrentProg>(&decoded->payload);
     ASSERT_NE(current, nullptr);
     EXPECT_EQ(current->assignments.size(), axk::maximum_program_assignments);
-    EXPECT_EQ(current->assignments.back().name, "Bank 16");
+    EXPECT_EQ(current->assignments.back().name, std::format("Bank {}", axk::maximum_program_assignments));
 }
 
 TEST(HdsWriter, EncodesSamplerControlledSingleTargetProgram) {

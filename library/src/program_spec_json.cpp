@@ -65,9 +65,9 @@ Result<ProgramSpec> parse_program_spec_json(const Json &value) {
     }
     if (auto valid = child(value, "parameters", result.parameters, parse_program_parameters_json); !valid)
         return std::unexpected{valid.error()};
-    if (!value.contains("assignments") || !value["assignments"].is_array() || value["assignments"].empty() ||
+    if (!value.contains("assignments") || !value["assignments"].is_array() ||
         value["assignments"].size() > maximum_program_assignments)
-        return std::unexpected{invalid("assignments must contain 1..16 rows")};
+        return std::unexpected{invalid("assignments must contain 0..999 rows")};
     for (const auto &row : value["assignments"]) {
         auto parsed = assignment(row);
         if (!parsed)

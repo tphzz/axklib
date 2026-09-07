@@ -30,7 +30,7 @@ inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 102
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 inline constexpr std::size_t maximum_sample_bank_members = 127U;
-inline constexpr std::size_t maximum_program_assignments = 16U;
+inline constexpr std::size_t maximum_program_assignments = 999U;
 inline constexpr std::uint8_t sampler_original_key_high_limit = 0x80U;
 inline constexpr std::uint8_t sampler_original_key_low_limit = 0xffU;
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
@@ -48,6 +48,16 @@ enum class AudioSamplerLoopMode : std::uint8_t {
     reverse = 3,
     forward_one_shot = 4,
     reverse_one_shot = 5,
+};
+
+struct WaveDataParameters {
+    std::optional<std::uint8_t> root_key;
+    std::optional<std::int8_t> fine_tune_cents;
+    std::optional<AudioSamplerLoopMode> loop_mode;
+    std::optional<std::uint32_t> wave_start_frame;
+    std::optional<std::uint32_t> wave_length_frames;
+    std::optional<std::uint32_t> loop_start_frame;
+    std::optional<std::uint32_t> loop_length_frames;
 };
 
 struct SampleFilterEnvelopeParameters {
@@ -183,6 +193,11 @@ struct WaveformSpec {
     std::uint32_t loop_length_frames{};
 };
 
+struct SamplePlaybackWindow {
+    std::uint32_t start_frame{};
+    std::uint32_t length_frames{};
+};
+
 struct SampleSpec {
     std::string name;
     std::optional<std::string> waveform_id;
@@ -192,6 +207,7 @@ struct SampleSpec {
     std::optional<std::string> right_waveform_name;
     std::optional<std::uint32_t> target_sample_rate;
     SampleParameters parameters;
+    std::optional<SamplePlaybackWindow> playback_window{};
 };
 
 struct SampleBankSpec {

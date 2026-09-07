@@ -302,7 +302,8 @@ Result<void> validate_sample_parameters(const SampleParameters &value) {
         outside(value.expand_detune, -7, 7) || outside(value.expand_dephase, -63, 63) ||
         outside(value.expand_width, -63, 63) || outside(value.random_pitch, 0, 63) || outside(value.level, 0, 127) ||
         outside(value.pan, -64, 63) || outside(value.velocity_low_limit, 0, 127) ||
-        outside(value.velocity_offset, -127, 127) || velocity_high < velocity_low ||
+        outside(value.velocity_offset, -127, 127) || outside(value.velocity_low, 0, 127) ||
+        outside(value.velocity_high, 0, 127) || velocity_high < velocity_low ||
         outside(value.level_scaling_break1, 0, 127) || outside(value.level_scaling_break2, 0, 127) ||
         value.level_scaling_break1.value_or(0U) > value.level_scaling_break2.value_or(127U) ||
         outside(value.level_scaling_level1, 0, 127) || outside(value.level_scaling_level2, 0, 127) ||

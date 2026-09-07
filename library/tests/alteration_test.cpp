@@ -719,13 +719,20 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"rename_sequence"},
         std::string_view{"rename_volume"},
         std::string_view{"rename_partition"},
+        std::string_view{"update_program_parameters"},
+        std::string_view{"update_sample_bank_parameters"},
+        std::string_view{"update_wave_data_parameters"},
+        std::string_view{"replace_program_assignments"},
+        std::string_view{"retarget_sample_wave_data"},
     };
-    ASSERT_EQ(parsed->operations.size(), expected.size() + 1U);
+    ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
         EXPECT_EQ(axk::operation_type_name(parsed->operations[index].data), expected[index]);
-        EXPECT_EQ(parsed->operations[index].data.index(), index);
+        if (index < 21U) {
+            EXPECT_EQ(parsed->operations[index].data.index(), index);
+        }
     }
-    const auto *updated = std::get_if<axk::UpdateProgramParametersOperation>(&parsed->operations.back().data);
+    const auto *updated = std::get_if<axk::UpdateProgramParametersOperation>(&parsed->operations[21].data);
     ASSERT_NE(updated, nullptr);
     EXPECT_EQ(updated->parameters.level, 87U);
     EXPECT_EQ(updated->parameters.effects[0].enabled, false);
@@ -2151,7 +2158,7 @@ TEST(Alteration, AssignsSamplesToExistingSampleBankWithoutChangingItsIdentityOrO
     std::filesystem::remove_all(root, error);
 }
 
-TEST(Alteration, RejectsSampleBankAssignmentBeyondExistingExtentCapacityAtomically) {
+TEST(Alteration, GrowsSampleBankAssignmentBeyondExistingExtentCapacityAtomically) {
     const auto root = std::filesystem::temp_directory_path() / "axklib-alteration-assign-bank-capacity";
     const auto audio = root / "tone.wav";
     const auto source = root / "source.hds";
@@ -2172,13 +2179,11 @@ TEST(Alteration, RejectsSampleBankAssignmentBeyondExistingExtentCapacityAtomical
 
     const auto before = bytes(source);
     const auto inspected = axk::inspect_hds_alteration(source, manifest);
-    ASSERT_FALSE(inspected);
-    EXPECT_EQ(inspected.error().message, "Target Sample Bank does not have enough allocated record capacity");
+    ASSERT_TRUE(inspected) << inspected.error().message;
     const auto applied = axk::alter_hds(source, manifest, output);
-    ASSERT_FALSE(applied);
-    EXPECT_EQ(applied.error().message, "Target Sample Bank does not have enough allocated record capacity");
+    ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ(bytes(source), before);
-    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_TRUE(std::filesystem::exists(output));
     std::filesystem::remove_all(root, error);
 }
 

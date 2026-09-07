@@ -147,7 +147,7 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
 Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
     if (auto valid = fields(value, context, {"name"},
                             {"waveform_id", "right_waveform_id", "interleaved_audio_path", "left_waveform_name",
-                             "right_waveform_name", "target_sample_rate", "parameters"});
+                             "right_waveform_name", "target_sample_rate", "parameters", "playback_window"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -187,6 +187,12 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
     result.right_waveform_id = *right_id;
     result.left_waveform_name = *left_name;
     result.right_waveform_name = *right_name;
+    if (value.contains("playback_window")) {
+        auto window = detail::parse_sample_playback_window_json(value["playback_window"]);
+        if (!window)
+            return std::unexpected{window.error()};
+        result.playback_window = *window;
+    }
     if (interleaved) {
         auto source = path(value["interleaved_audio_path"], context + ".interleaved_audio_path", base);
         if (!source)

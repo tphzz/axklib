@@ -218,9 +218,24 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "Sample references an unencodable Wave Data sample rate")};
     }
+    const auto window =
+        sample.playback_window.value_or(SamplePlaybackWindow{0U, static_cast<std::uint32_t>(left.audio.output_frames)});
+    const auto window_end = static_cast<std::uint64_t>(window.start_frame) + window.length_frames;
+    if (window.length_frames == 0U || window_end > left.audio.output_frames ||
+        (right && window_end > right->audio.output_frames))
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "Sample playback window must fit its backing Wave Data")};
     auto left_loop = loop_window(loop_mode, loop_start, loop_length, left.audio.output_frames);
     if (!left_loop)
         return std::unexpected{left_loop.error()};
+    if (sample.playback_window) {
+        if (loop_start == 0U && loop_length == 0U && !requires_explicit_loop_window(loop_mode))
+            left_loop = LoopWindow{window.start_frame, window.length_frames};
+        if (left_loop->start < window.start_frame ||
+            static_cast<std::uint64_t>(left_loop->start) + left_loop->length > window_end)
+            return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                              "Sample loop window must fit its playback window")};
+    }
     if (expand_detune < -7 || expand_detune > 7 || expand_dephase < -63 || expand_dephase > 63 || expand_width < -63 ||
         expand_width > 63 || (right != nullptr && (expand_detune != 0 || expand_dephase != 0))) {
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
@@ -231,7 +246,7 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         auto checked = loop_window(loop_mode, loop_start, loop_length, right->audio.output_frames);
         if (!checked)
             return std::unexpected{checked.error()};
-        right_loop = *checked;
+        right_loop = sample.playback_window ? *left_loop : *checked;
     }
     std::vector<std::byte> result(0x188);
     ObjectPayloadWriter writer{result};
@@ -293,17 +308,22 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0xe4] = std::byte{0x30};
     result[0xe5] = static_cast<std::byte>(loop_mode);
     writer.be16(0xe6, 9000);
-    writer.be32(0xe8, 0U);
-    writer.be32(0xec, 0U);
-    writer.be32(0xf0, static_cast<std::uint32_t>(left.audio.output_frames));
+    writer.be32(0xe8, window.start_frame);
+    writer.be32(0xec, window.start_frame);
+    writer.be32(0xf0, window.length_frames);
     writer.be32(0xf8, left_loop->start);
     writer.be32(0x100, left_loop->length);
-    writer.be32(0x15c, static_cast<std::uint32_t>(left.audio.output_frames));
+    writer.be32(0x15c, static_cast<std::uint32_t>(window_end));
     writer.be32(0x160, left_loop->start + left_loop->length);
     if (right != nullptr) {
-        writer.be32(0xf4, static_cast<std::uint32_t>(right->audio.output_frames));
+        writer.be32(0xf4, sample.playback_window ? window.length_frames
+                                                 : static_cast<std::uint32_t>(right->audio.output_frames));
         writer.be32(0xfc, right_loop->start);
         writer.be32(0x104, right_loop->length);
+    } else if (sample.playback_window) {
+        writer.be32(0xf4, window.length_frames);
+        writer.be32(0xfc, left_loop->start);
+        writer.be32(0x104, left_loop->length);
     }
     const std::array<std::pair<std::size_t, std::uint8_t>, 32> defaults{
         {{0x109, 0},
@@ -514,6 +534,28 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
 }
 
 } // namespace
+
+Result<void> detail::apply_sample_bank_parameters_to_payload(std::vector<std::byte> &payload,
+                                                             const SampleParameters &overrides) {
+    auto decoded = decode_object(payload);
+    if (!decoded)
+        return std::unexpected{decoded.error()};
+    const auto *bank = std::get_if<CurrentSbac>(&decoded->payload);
+    if (!bank || bank->storage_layout != SbacStorageLayout::current_split_parameter_tail ||
+        !bank->parameter_tail_offset || *bank->parameter_tail_offset + 0x24U != payload.size())
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample Bank parameter update requires a current complete layout")};
+    if (std::ranges::any_of(bank->pending_parameter_propagation_words, [](auto word) { return word != 0U; }))
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample Bank has pending parameter propagation")};
+    auto parameters = bank->raw_sample_parameter_block;
+    if (auto applied = apply_sbac_parameter_overrides(parameters, overrides); !applied)
+        return applied;
+    std::copy_n(parameters.begin(), 0xbcU, payload.begin() + 0x78U);
+    std::copy_n(parameters.begin() + 0xbcU, 0x24U,
+                payload.begin() + static_cast<std::ptrdiff_t>(*bank->parameter_tail_offset));
+    return {};
+}
 
 Result<std::vector<std::byte>> detail::prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
                                                             std::uint32_t reference_value,

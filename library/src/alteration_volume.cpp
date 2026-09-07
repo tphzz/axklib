@@ -232,12 +232,13 @@ Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t
     return {};
 }
 
-Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
-                                                                        MutablePartition &partition, SfsId id,
-                                                                        std::uint64_t required_size,
-                                                                        const CancellationToken &cancellation) {
-    if (current_payload_kind(partition, id) != PayloadKind::directory)
-        return std::unexpected{transaction_error("only SFS directory records may grow")};
+Result<std::pair<std::uint64_t, std::uint64_t>> grow_record_capacity(TransactionState &state,
+                                                                     MutablePartition &partition, SfsId id,
+                                                                     std::uint64_t required_size,
+                                                                     const CancellationToken &cancellation) {
+    const auto kind = current_payload_kind(partition, id);
+    if (kind != PayloadKind::directory && kind != PayloadKind::object)
+        return std::unexpected{transaction_error("only SFS directory and object records may grow")};
     MutablePartition::InsertedRecord *target{};
     if (const auto found = partition.inserted.find(id); found != partition.inserted.end()) {
         target = &found->second;
@@ -246,7 +247,7 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     } else {
         const auto *source = record(*partition.source, id);
         if (source == nullptr)
-            return std::unexpected{transaction_error("cannot grow a missing SFS directory")};
+            return std::unexpected{transaction_error("cannot grow a missing SFS record")};
         auto raw = read_raw(*state.source, source->record_offset.value, 72U);
         if (!raw)
             return std::unexpected{raw.error()};
@@ -268,7 +269,7 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     const auto current_clusters = capacity / 1024U;
     if (required_clusters > std::numeric_limits<std::uint32_t>::max() ||
         required_clusters - current_clusters > std::numeric_limits<std::uint32_t>::max()) {
-        return std::unexpected{transaction_error("SFS directory growth exceeds the supported cluster count")};
+        return std::unexpected{transaction_error("SFS record growth exceeds the supported cluster count")};
     }
     const auto additional_clusters = static_cast<std::uint32_t>(required_clusters - current_clusters);
     auto added = allocate_extents(partition, additional_clusters);
@@ -279,7 +280,7 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(Transact
     const auto required_lists =
         extents.size() <= 4U ? 0U : (extents.size() + extents_per_list_cluster - 1U) / extents_per_list_cluster;
     if (required_lists < target->continuation_clusters.size())
-        return std::unexpected{transaction_error("SFS directory growth cannot discard continuation lists")};
+        return std::unexpected{transaction_error("SFS record growth cannot discard continuation lists")};
     const auto additional_lists = required_lists - target->continuation_clusters.size();
     if (additional_lists != 0U) {
         auto lists = allocate_list_clusters(partition, additional_lists);
@@ -369,7 +370,7 @@ Result<void> append_directory_entry(TransactionState &state, MutablePartition &p
     } else {
         payload->insert(payload->end(), entry.begin(), entry.end());
     }
-    if (auto grown = grow_directory_capacity(state, partition, directory, payload->size(), cancellation); !grown)
+    if (auto grown = grow_record_capacity(state, partition, directory, payload->size(), cancellation); !grown)
         return std::unexpected{grown.error()};
     return replace_record_payload(state, partition, directory, std::move(*payload), cancellation);
 }

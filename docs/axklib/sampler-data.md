@@ -466,8 +466,8 @@ read path. Real images use nonzero upper halves, including shared stereo starts,
 so the words must not be reduced to their overlapping low-16 aliases.
 Template-backed serialization preserves the full words except for explicit
 supported updates. Fresh Sample authoring supports all loop modes `0..5`,
-keeps the complete linked Wave Data as the playback window, and serializes the
-requested loop window independently. Repeating modes `1` and `2` require a
+defaults to the imported PCM span and accepts a bounded explicit `playback_window`,
+and serializes the requested loop window independently. Repeating modes `1` and `2` require a
 non-empty explicit loop window. The other modes accept either the complete
 linked Wave Data span or an explicit non-empty loop window. Sample
 preview and audition therefore:
@@ -836,7 +836,7 @@ Rename and package relocation patch only their named fields, preserving opaque
 bytes and unresolved relationships. Program display-name rename also updates
 its three-byte common prefix alias at `0x6c..0x6e`.
 
-Fresh native Programs remain limited to `1..16` assignments. They allocate
+Fresh Programs accept `0..999` counted assignments. They allocate
 `max(8, count)` rows and the complete terminal block, so their length is
 `0x1d0 + max(8, count) * 0x38`. The writer initializes neutral common data,
 six effect blocks, both controller projections, A/D defaults, StepWave values,

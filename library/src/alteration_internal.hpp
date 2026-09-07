@@ -121,6 +121,18 @@ Result<std::vector<CategoryObject>> category_objects(TransactionState &state, Mu
                                                      ObjectType expected_type, const CancellationToken &cancellation);
 Result<void> replace_fixed_object_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                           std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<OperationReport> update_sample_bank_parameters(TransactionState &state, OperationContext context,
+                                                      const UpdateSampleBankParametersOperation &operation,
+                                                      const CancellationToken &cancellation);
+Result<OperationReport> retarget_sample_wave_data(TransactionState &state, OperationContext context,
+                                                  const RetargetSampleWaveDataOperation &operation,
+                                                  const CancellationToken &cancellation);
+Result<OperationReport> update_wave_data_parameters(TransactionState &state, OperationContext context,
+                                                    const UpdateWaveDataParametersOperation &operation,
+                                                    const CancellationToken &cancellation);
+Result<OperationReport> replace_program_assignments(TransactionState &state, OperationContext context,
+                                                    const ReplaceProgramAssignmentsOperation &operation,
+                                                    const CancellationToken &cancellation);
 Result<bool> sbnk_program_bit(std::span<const std::byte> payload, std::uint8_t program);
 Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
                                   bool enabled, const CancellationToken &cancellation);
@@ -142,10 +154,10 @@ Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::u
 Result<std::vector<std::uint32_t>> allocate_list_clusters(MutablePartition &partition, std::size_t count);
 std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<const Extent> added);
 Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size);
-Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
-                                                                        MutablePartition &partition, SfsId id,
-                                                                        std::uint64_t required_size,
-                                                                        const CancellationToken &cancellation);
+Result<std::pair<std::uint64_t, std::uint64_t>> grow_record_capacity(TransactionState &state,
+                                                                     MutablePartition &partition, SfsId id,
+                                                                     std::uint64_t required_size,
+                                                                     const CancellationToken &cancellation);
 Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partition, std::vector<std::byte> payload,
                                                         PayloadKind kind, std::optional<SfsId> requested_id = {},
                                                         std::uint16_t directory_tail = 0U);

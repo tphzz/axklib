@@ -5,6 +5,7 @@ parameters. The same model is used by:
 
 - `SampleSpec.parameters` when creating a Sample;
 - `UpdateSampleParametersOperation.parameters` when altering an existing Sample;
+- `UpdateSampleBankParametersOperation.parameters` for an existing bank and all members;
 - `SampleBankSpec.parameter_overrides` for the current Sample Bank (`SBAC`)
   parameter state and immediate member-wide application; and
 - the corresponding `parameters` and `parameter_overrides` JSON objects.
@@ -39,6 +40,23 @@ start, and loop length are shared Sample settings: the writer mirrors them to
 every active stereo member and recomputes the associated internal caches.
 Numbered MIDI receive channels use zero-based storage: raw `0..15` displays as
 `01..16`; raw `16` is `Bch`.
+
+## Playback Window
+
+`SampleSpec.playback_window` is separate from the shared parameter block because
+its bounds depend on backing PCM. Its JSON shape is
+`"playback_window": {"start_frame": 65536, "length_frames": 1000}` alongside
+`parameters`, not inside it. The positive-length absolute frame window must fit
+every source and end at or before frame `16777216`. Fresh audio-backed Samples
+default to the imported PCM span, excluding generated guard frames. Insertion
+into an existing image defaults to the current Wave Data playback window.
+
+An explicit window updates both stored start/length lanes and derived endpoints,
+without trimming or changing PCM. Explicit loop coordinates remain absolute and
+must lie inside the selected playback window. Nonrepeating modes default an
+omitted loop to that window; repeating modes still require an explicit loop.
+This is not a bank-wide override: different members can have different sources
+and playback extents. Existing Sample retargeting preserves its existing window.
 
 ## Filter, Expansion, Level, And EQ
 

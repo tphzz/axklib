@@ -144,31 +144,6 @@ void populate_logical_exports(const ObjectCatalog &catalog, const RelationshipGr
                                                unique_wav_name(output.display_name, rendered_names[destination]);
                 }
             }
-            output.parameter_contexts.push_back({item.key, base.display_name,
-                                                 output.members.empty() || output.members.front().role == "left"
-                                                     ? "SBNK_LEFT_MEMBER_TO_SMPL"
-                                                     : "SBNK_RIGHT_MEMBER_TO_SMPL",
-                                                 *sample});
-            std::set<std::string> context_keys{item.key};
-            for (const auto &member : output.members) {
-                for (const auto *relation : graph.parents(member.waveform_key)) {
-                    if (!relation->target_key || *relation->target_key != member.waveform_key ||
-                        relation->quality != RelationshipQuality::known ||
-                        (relation->type != "SBNK_LEFT_MEMBER_TO_SMPL" &&
-                         relation->type != "SBNK_RIGHT_MEMBER_TO_SMPL") ||
-                        !context_keys.insert(relation->source_key).second) {
-                        continue;
-                    }
-                    const auto *source = object(catalog, relation->source_key);
-                    if (source == nullptr)
-                        continue;
-                    const auto *parameters = std::get_if<CurrentSbnk>(&source->object.payload);
-                    if (parameters != nullptr) {
-                        output.parameter_contexts.push_back(
-                            {source->key, source->object.header.name, relation->type, *parameters});
-                    }
-                }
-            }
             volumes.at(destination).samples.push_back(std::move(output));
         }
     }

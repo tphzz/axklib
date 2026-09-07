@@ -206,6 +206,9 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
     auto target_payload = target_row->payload;
     if (auto appended = append_sbac_members_to_payload(target_payload, *target_bank, appended_names); !appended)
         return std::unexpected{appended.error()};
+    auto growth = grow_record_capacity(state, partition, located->second, target_payload.size(), cancellation);
+    if (!growth)
+        return std::unexpected{growth.error()};
     if (auto detached =
             detach_members(state, partition, *sample_banks, changed_member_ids, *partition_index, cancellation);
         !detached) {
@@ -214,10 +217,6 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
     if (auto replaced =
             replace_record_payload(state, partition, located->second, std::move(target_payload), cancellation);
         !replaced) {
-        if (replaced.error().message == "record payload growth exceeds its current extent capacity") {
-            return std::unexpected{
-                transaction_error("Target Sample Bank does not have enough allocated record capacity")};
-        }
         return std::unexpected{replaced.error()};
     }
     for (const auto &[name, id] : changed_member_ids) {
@@ -232,6 +231,7 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
     report.object_name = operation.sample_bank_name;
+    report.allocated_clusters = growth->first + growth->second;
     return report;
 }
 

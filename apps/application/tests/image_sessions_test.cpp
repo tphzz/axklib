@@ -1082,15 +1082,9 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
          {{"SBAC", "Ref Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
           {"SBNK", "Ref Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     volume_spec.programs.push_back(
-        {127U,
-         "Bank 2",
-         {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
-          {"SBNK", "Member 10", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+        {127U, "Bank 2", {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}}}});
     volume_spec.programs.push_back(
-        {128U,
-         "Bank 10",
-         {{"SBAC", "Bank 10", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
-          {"SBNK", "Member 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+        {128U, "Bank 10", {{"SBAC", "Bank 10", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}}}});
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume_spec)}}}};
     const auto written = axk::write_hds_image(manifest, root_ / "generation.hds");
     ASSERT_TRUE(written) << written.error().message;

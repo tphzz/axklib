@@ -31,6 +31,10 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"import_tx16w_disk_set"},
         std::string_view{"clear_program_assignments"},
         std::string_view{"update_program_parameters"},
+        std::string_view{"update_sample_bank_parameters"},
+        std::string_view{"update_wave_data_parameters"},
+        std::string_view{"replace_program_assignments"},
+        std::string_view{"retarget_sample_wave_data"},
     };
     return names[operation.index()];
 }

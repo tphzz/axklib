@@ -13,6 +13,20 @@
 #include "axklib/writer_internal.hpp"
 
 namespace axk::detail {
+
+Result<SamplePlaybackWindow> parse_sample_playback_window_json(const nlohmann::json &value) {
+    const auto valid_frame = [](const nlohmann::json &number) {
+        return number.is_number_integer() && number >= 0 && number <= maximum_wave_data_frames_per_channel;
+    };
+    if (!value.is_object() || value.size() != 2U || !value.contains("start_frame") ||
+        !value.contains("length_frames") || !valid_frame(value["start_frame"]) ||
+        !valid_frame(value["length_frames"]) || value["length_frames"] == 0 ||
+        value["start_frame"].get<std::uint64_t>() + value["length_frames"].get<std::uint64_t>() >
+            maximum_wave_data_frames_per_channel)
+        return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                          "playback_window requires a nonempty bounded start_frame and length_frames")};
+    return SamplePlaybackWindow{value["start_frame"].get<std::uint32_t>(), value["length_frames"].get<std::uint32_t>()};
+}
 namespace {
 
 using Json = nlohmann::json;

@@ -9,6 +9,8 @@
 
 namespace axk::detail {
 
+Result<SamplePlaybackWindow> parse_sample_playback_window_json(const nlohmann::json &value);
+
 Result<SampleParameters> parse_sample_parameters_json(const nlohmann::json &value, std::string_view context,
                                                       bool require_nonempty, ErrorCode error_code,
                                                       ErrorCategory error_category);

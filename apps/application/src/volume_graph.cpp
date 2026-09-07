@@ -102,19 +102,19 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                 };
             }
             OrderedJson parameter_contexts = OrderedJson::array();
-            for (const auto &context : sample.parameter_contexts) {
+            {
                 OrderedJson numeric_fields = OrderedJson::object();
                 numeric_fields["sample_parameter_base_0x0a8"] = 0xa8;
-                for (const auto &field : context.decoded.numeric_fields) {
+                for (const auto &field : sample.decoded.numeric_fields) {
                     if (field.value)
                         numeric_fields[field.name] = *field.value;
                 }
                 OrderedJson controls = OrderedJson::array();
-                for (std::size_t index = 0; index < context.decoded.control_records.size(); ++index) {
-                    const auto &control = context.decoded.control_records[index];
+                for (std::size_t index = 0; index < sample.decoded.control_records.size(); ++index) {
+                    const auto &control = sample.decoded.control_records[index];
                     controls.push_back({
                         {"index", index + 1U},
-                        {"offset", context.decoded.control_record_storage_offset + index * 4U},
+                        {"offset", sample.decoded.control_record_storage_offset + index * 4U},
                         {"device_u8", control.device},
                         {"function_u8", control.function},
                         {"type_u8", control.type},
@@ -122,27 +122,27 @@ axk::Result<std::string> serialize_volume_graph(const VolumeExport &volume, cons
                     });
                 }
                 numeric_fields["sample_control_records"] = std::move(controls);
-                numeric_fields["sample_control_record_storage_offset"] = context.decoded.control_record_storage_offset;
-                numeric_fields["sample_control_tail_copy_present"] = context.decoded.control_record_tail_copy_present;
+                numeric_fields["sample_control_record_storage_offset"] = sample.decoded.control_record_storage_offset;
+                numeric_fields["sample_control_tail_copy_present"] = sample.decoded.control_record_tail_copy_present;
                 numeric_fields["sample_control_copies_match"] =
-                    context.decoded.control_record_copies_match
-                        ? OrderedJson(*context.decoded.control_record_copies_match)
+                    sample.decoded.control_record_copies_match
+                        ? OrderedJson(*sample.decoded.control_record_copies_match)
                         : OrderedJson(nullptr);
                 parameter_contexts.push_back({
-                    {"sample_object_key", context.object_key},
-                    {"sample_name", context.display_name},
-                    {"relationship_type", context.relationship_type},
+                    {"sample_object_key", sample.object_key},
+                    {"sample_name", sample.display_name},
+                    {"relationship_type", sample.members.empty() || sample.members.front().role == "left"
+                                              ? "SBNK_LEFT_MEMBER_TO_SMPL"
+                                              : "SBNK_RIGHT_MEMBER_TO_SMPL"},
                     {"member_parameters", std::move(numeric_fields)},
-                    {"left_member", member_json(context.decoded.left)},
-                    {"right_member",
-                     context.decoded.right ? member_json(*context.decoded.right) : OrderedJson(nullptr)},
-                    {"selected_member", member_json(context.decoded.left)},
-                    {"sample_topology", context.decoded.right ? "two-member" : "single-member"},
-                    {"linked_program_numbers", context.decoded.linked_program_numbers},
+                    {"left_member", member_json(sample.decoded.left)},
+                    {"right_member", sample.decoded.right ? member_json(*sample.decoded.right) : OrderedJson(nullptr)},
+                    {"selected_member", member_json(sample.decoded.left)},
+                    {"sample_topology", sample.decoded.right ? "two-member" : "single-member"},
+                    {"linked_program_numbers", sample.decoded.linked_program_numbers},
                 });
             }
-            const auto &range_sample =
-                sample.parameter_contexts.empty() ? sample.decoded : sample.parameter_contexts.front().decoded;
+            const auto &range_sample = sample.decoded;
             const auto range_low = range_sample.key_range_low;
             const auto range_high = range_sample.key_range_high;
             OrderedJson resolved_range = {
