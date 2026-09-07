@@ -177,14 +177,13 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
                 return std::unexpected{appended.error()};
         }
         const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
-            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster, partition.bitmap_cluster);
+            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster,
+            partition.bitmap_copy1_cluster, partition.bitmap_copy2_cluster);
         if (!bitmap_layout || bitmap_layout->rounded_bytes != item.bitmap.size())
             return std::unexpected{transaction_error("alteration allocation bitmap geometry is inconsistent")};
-        if (auto appended = append_patch(patches, state, bitmap_layout->header_addressed_offset, item.bitmap);
-            !appended)
+        if (auto appended = append_patch(patches, state, bitmap_layout->bitmap_copy2_offset, item.bitmap); !appended)
             return std::unexpected{appended.error()};
-        if (auto appended = append_patch(patches, state, bitmap_layout->fixed_location_offset, item.bitmap);
-            !appended) {
+        if (auto appended = append_patch(patches, state, bitmap_layout->bitmap_copy1_offset, item.bitmap); !appended) {
             return std::unexpected{appended.error()};
         }
     }
@@ -356,12 +355,12 @@ Result<void> validate_temporary(const std::filesystem::path &temporary, const Tr
                 offset += count;
             }
         }
-        const auto bitmap_layout =
-            detail::sfs_allocation_bitmap_layout(partition->start_sector, partition->cluster_count,
-                                                 partition->sectors_per_cluster, partition->bitmap_cluster);
+        const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
+            partition->start_sector, partition->cluster_count, partition->sectors_per_cluster,
+            partition->bitmap_copy1_cluster, partition->bitmap_copy2_cluster);
         if (!bitmap_layout || bitmap_layout->rounded_bytes > std::numeric_limits<std::size_t>::max())
             return std::unexpected{transaction_error("post-write allocation bitmap exceeds platform limits")};
-        auto bitmap = read_raw(temporary, bitmap_layout->header_addressed_offset,
+        auto bitmap = read_raw(temporary, bitmap_layout->bitmap_copy2_offset,
                                static_cast<std::size_t>(bitmap_layout->rounded_bytes));
         if (!bitmap)
             return std::unexpected{bitmap.error()};
@@ -384,7 +383,7 @@ Result<void> validate_mutable_partition_geometry(const Partition &partition, std
     const auto bitmap_bytes = (static_cast<std::uint64_t>(partition.cluster_count) + 7U) / 8U;
     const auto cluster_bytes = static_cast<std::uint64_t>(partition.sectors_per_cluster) * 512U;
     const auto bitmap_span = (bitmap_bytes + cluster_bytes - 1U) / cluster_bytes;
-    const auto bitmap_end = static_cast<std::uint64_t>(partition.bitmap_cluster) + bitmap_span;
+    const auto bitmap_end = static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) + bitmap_span;
     const auto index_end =
         static_cast<std::uint64_t>(partition.directory_index_cluster) + partition.directory_index_span_clusters;
     const auto physical_cluster_capacity =
@@ -392,7 +391,7 @@ Result<void> validate_mutable_partition_geometry(const Partition &partition, std
     const auto partition_end_sector = static_cast<std::uint64_t>(partition.start_sector) + partition.sector_count;
     if (bitmap_span == 0U || partition.cluster_count > physical_cluster_capacity ||
         bitmap_end > partition.cluster_count || index_end > partition.cluster_count ||
-        !(bitmap_end <= partition.directory_index_cluster || index_end <= partition.bitmap_cluster) ||
+        !(bitmap_end <= partition.directory_index_cluster || index_end <= partition.bitmap_copy2_cluster) ||
         partition_end_sector > image_size_bytes / 512U) {
         return std::unexpected{transaction_error("source allocation geometry cannot safely support alteration")};
     }
@@ -454,12 +453,15 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
         if (!allocation_is_safe_for_mutation(partition.allocation) && !explicitly_repairable) {
             return std::unexpected{transaction_error("source allocation cannot safely support alteration")};
         }
+        if (!locate_partition_root_record(partition))
+            return std::unexpected{transaction_error("source partition has no unambiguous readable SFS root")};
         const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
-            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster, partition.bitmap_cluster);
+            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster,
+            partition.bitmap_copy1_cluster, partition.bitmap_copy2_cluster);
         if (!bitmap_layout || bitmap_layout->rounded_bytes > std::numeric_limits<std::size_t>::max())
             return std::unexpected{transaction_error("source allocation bitmap exceeds platform limits")};
         std::vector<std::byte> bitmap(static_cast<std::size_t>(bitmap_layout->rounded_bytes));
-        if (auto read = state.source->read_exact_at(bitmap_layout->header_addressed_offset, bitmap); !read)
+        if (auto read = state.source->read_exact_at(bitmap_layout->bitmap_copy2_offset, bitmap); !read)
             return std::unexpected{read.error()};
         MutablePartition mutable_partition;
         mutable_partition.source = &partition;

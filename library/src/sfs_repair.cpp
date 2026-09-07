@@ -83,13 +83,14 @@ Result<detail::TemporaryPublication> copy_source(const RandomAccessReader &sourc
 }
 
 bool allocation_has_only_repairable_byte_mismatches(const AllocationSummary &allocation) {
-    return allocation.extent_byte_total_mismatch_count != 0U && allocation.stored_copies_match &&
+    return allocation.bitmap_copy1_valid && allocation.bitmap_copy2_valid && allocation.active_bitmap_copy != 0U &&
+           allocation.extent_byte_total_mismatch_count != 0U && allocation.stored_copies_match &&
            allocation.invalid_extent_record_count == 0U && allocation.extent_total_mismatch_count == 0U &&
            allocation.conflicting_cluster_count == 0U &&
-           allocation.fixed_location.marked_used_without_index_extent_count == 0U &&
-           allocation.fixed_location.index_extent_marked_free_count == 0U &&
-           allocation.header_addressed.marked_used_without_index_extent_count == 0U &&
-           allocation.header_addressed.index_extent_marked_free_count == 0U;
+           allocation.bitmap_copy1.marked_used_without_index_extent_count == 0U &&
+           allocation.bitmap_copy1.index_extent_marked_free_count == 0U &&
+           allocation.bitmap_copy2.marked_used_without_index_extent_count == 0U &&
+           allocation.bitmap_copy2.index_extent_marked_free_count == 0U;
 }
 
 Result<SfsExtentLayoutRepairTarget> normalized_target(const Partition &partition, const IndexRecord &record) {
@@ -316,7 +317,8 @@ Result<SfsExtentLayoutRepairPlan> inspect_sfs_extent_layout_repair(const Contain
                     repair_error("extent-layout repair requires clean allocation metadata in every other partition")};
             continue;
         }
-        if (!allocation_has_only_repairable_byte_mismatches(partition.allocation))
+        if (partition.sectors_per_cluster != 2U ||
+            !allocation_has_only_repairable_byte_mismatches(partition.allocation))
             return std::unexpected{repair_error("extent byte totals are not the only allocation inconsistency")};
         const auto initial_size = plan.targets.size();
         for (const auto &record : partition.records) {
@@ -380,13 +382,14 @@ Result<SfsExtentLayoutRepairResult> repair_sfs_extent_layout(const std::filesyst
         if (target_begin == plan->targets.end())
             continue;
         const auto layout = detail::sfs_allocation_bitmap_layout(
-            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster, partition.bitmap_cluster);
+            partition.start_sector, partition.cluster_count, partition.sectors_per_cluster,
+            partition.bitmap_copy1_cluster, partition.bitmap_copy2_cluster);
         if (!layout)
             return std::unexpected{layout.error()};
         if (layout->rounded_bytes > std::numeric_limits<std::size_t>::max())
             return std::unexpected{repair_error("extent-layout repair bitmap exceeds the supported size")};
         std::vector<std::byte> bitmap(static_cast<std::size_t>(layout->rounded_bytes));
-        if (auto read = (*source)->read_exact_at(layout->fixed_location_offset, bitmap); !read)
+        if (auto read = (*source)->read_exact_at(layout->bitmap_copy1_offset, bitmap); !read)
             return std::unexpected{read.error()};
 
         for (const auto &target : plan->targets) {
@@ -407,9 +410,9 @@ Result<SfsExtentLayoutRepairResult> repair_sfs_extent_layout(const std::filesyst
             if (auto released = release_trailing_allocations(bitmap, target); !released)
                 return std::unexpected{released.error()};
         }
-        if (auto written = publication->write_at(layout->fixed_location_offset, bitmap); !written)
+        if (auto written = publication->write_at(layout->bitmap_copy1_offset, bitmap); !written)
             return std::unexpected{written.error()};
-        if (auto written = publication->write_at(layout->header_addressed_offset, bitmap); !written)
+        if (auto written = publication->write_at(layout->bitmap_copy2_offset, bitmap); !written)
             return std::unexpected{written.error()};
     }
     if (auto flushed = publication->flush(); !flushed)

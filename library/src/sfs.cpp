@@ -15,10 +15,7 @@
 namespace axk::sfs_detail {
 
 constexpr std::string_view magic{"YAMAHA_dev3"};
-constexpr std::uint64_t partition_header_size = 1024;
-constexpr std::uint64_t index_block_size = 1024;
 constexpr std::uint64_t index_record_size = 72;
-constexpr std::uint64_t records_per_index_block = 14;
 constexpr std::uint16_t direct_extent_limit = 4;
 constexpr std::uint64_t continuation_header_size = 12;
 
@@ -380,96 +377,13 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     if (!start) {
         return std::unexpected{start.error()};
     }
-    const auto header =
-        read_bytes(image, *start, static_cast<std::size_t>(partition_header_size), options.cancellation);
-    if (!header) {
-        return std::unexpected{header.error()};
-    }
-    if (!begins_with(*header, magic)) {
-        return std::unexpected{partition_error(ErrorCode::container_unrecognized,
-                                               "partition header does not contain Yamaha SFS magic", result.index,
-                                               *start)};
-    }
-    const auto backup_offset = checked_add(*start, partition_header_size);
-    if (!backup_offset) {
-        return std::unexpected{backup_offset.error()};
-    }
-    const auto backup =
-        read_bytes(image, *backup_offset, static_cast<std::size_t>(partition_header_size), options.cancellation);
-    if (!backup) {
-        return std::unexpected{backup.error()};
-    }
-    result.backup_header_matches = *header == *backup;
-    if (!result.backup_header_matches) {
-        result.diagnostics.push_back(partition_error(ErrorCode::container_backup_mismatch,
-                                                     "backup partition header differs from primary", result.index,
-                                                     *backup_offset));
-    }
-    const ByteReader reader{*header};
-    const auto name = reader.ascii_field(0x40, 16);
-    const auto cluster_count = reader.be32(0x90);
-    const auto sectors_per_cluster = reader.be32(0x94);
-    const auto bitmap_cluster = reader.be32(0x9c);
-    const auto index_cluster = reader.be32(0xa4);
-    const auto index_span = reader.be32(0xa8);
-    if (!name || !cluster_count || !sectors_per_cluster || !bitmap_cluster || !index_cluster || !index_span ||
-        *cluster_count == 0 || *sectors_per_cluster == 0 || *index_span == 0) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition contains incomplete or zero SFS geometry", result.index,
-                                               *start)};
-    }
-    result.name = *name;
-    result.cluster_count = *cluster_count;
-    result.sectors_per_cluster = *sectors_per_cluster;
-    result.bitmap_cluster = *bitmap_cluster;
-    result.directory_index_cluster = *index_cluster;
-    result.directory_index_span_clusters = *index_span;
-    std::copy_n(header->begin() + 0xac, result.unresolved_header_tail.size(), result.unresolved_header_tail.begin());
-
-    const auto physical_cluster_capacity = static_cast<std::uint64_t>(result.sector_count) / result.sectors_per_cluster;
-    if (result.cluster_count > physical_cluster_capacity) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition cluster count exceeds its physical sector capacity",
-                                               result.index, *start + 0x90U)};
-    }
-
+    const auto bitmap_layout = read_partition_geometry(image, result, sector_size, options);
+    if (!bitmap_layout)
+        return std::unexpected{bitmap_layout.error()};
     const auto cluster_bytes = checked_multiply(sector_size, result.sectors_per_cluster);
-    const auto raw_index_bytes = cluster_bytes ? checked_multiply(*cluster_bytes, result.directory_index_span_clusters)
-                                               : Result<std::uint64_t>{std::unexpected{cluster_bytes.error()}};
-    if (!cluster_bytes || !raw_index_bytes || *raw_index_bytes > options.max_index_bytes ||
-        *raw_index_bytes > std::numeric_limits<std::size_t>::max()) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition index span exceeds configured bounds", result.index,
-                                               *start + 0xa8U)};
-    }
-    const auto index_end = checked_add(result.directory_index_cluster, result.directory_index_span_clusters);
-    if (!index_end || *index_end > result.cluster_count) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition index extends beyond the cluster range", result.index,
-                                               *start + 0xa4U)};
-    }
-    const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
-        result.start_sector, result.cluster_count, result.sectors_per_cluster, result.bitmap_cluster, sector_size);
-    if (!bitmap_layout || bitmap_layout->useful_bytes > std::numeric_limits<std::size_t>::max() ||
-        bitmap_layout->rounded_bytes > std::numeric_limits<std::size_t>::max() ||
-        bitmap_layout->rounded_bytes > options.max_allocation_bitmap_bytes) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap exceeds the configured memory bound", result.index,
-                                               *start + 0x9cU)};
-    }
-    const auto bitmap_end = checked_add(result.bitmap_cluster, bitmap_layout->span_clusters);
-    if (!bitmap_end || *bitmap_end > result.cluster_count) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap extends beyond the cluster range", result.index,
-                                               *start + 0x9cU)};
-    }
-    const auto allocation_regions_are_disjoint =
-        *bitmap_end <= result.directory_index_cluster || *index_end <= result.bitmap_cluster;
-    if (!allocation_regions_are_disjoint) {
-        return std::unexpected{partition_error(ErrorCode::container_invalid_geometry,
-                                               "partition bitmap overlaps the directory index", result.index,
-                                               *start + 0x9cU)};
-    }
+    const auto index_block_size = *cluster_bytes;
+    const auto records_per_index_block = index_block_size / index_record_size;
+    const auto raw_index_bytes = checked_multiply(*cluster_bytes, result.directory_index_span_clusters);
     const auto index_offset =
         cluster_offset(result.start_sector, sector_size, result.sectors_per_cluster, result.directory_index_cluster);
     if (!index_offset) {
@@ -489,8 +403,7 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
                                                "partition allocation ownership exceeds the configured memory bound",
                                                result.index)};
     }
-    const auto first_payload_u64 = index_end;
-    const auto first_payload = static_cast<std::uint32_t>(*first_payload_u64);
+    const auto first_payload = result.directory_index_cluster + result.directory_index_span_clusters;
     std::vector<std::uint32_t> owners(result.cluster_count);
     std::ranges::fill(std::span{owners}.first(first_payload), reserved_owner);
     for (std::size_t block = 0; block + index_block_size <= index_data->size(); block += index_block_size) {
@@ -623,56 +536,56 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     if (const auto directories = validate_directory_graph(result, options); !directories) {
         return std::unexpected{directories.error()};
     }
-    const auto header_addressed =
-        read_bytes(image, bitmap_layout->header_addressed_offset,
-                   static_cast<std::size_t>(bitmap_layout->rounded_bytes), options.cancellation);
-    const auto fixed_location =
-        read_bytes(image, bitmap_layout->fixed_location_offset, static_cast<std::size_t>(bitmap_layout->rounded_bytes),
-                   options.cancellation);
-    if (!header_addressed || !fixed_location) {
-        return std::unexpected{header_addressed ? fixed_location.error() : header_addressed.error()};
+    const auto bitmap_copy2 = read_bytes(image, bitmap_layout->bitmap_copy2_offset,
+                                         static_cast<std::size_t>(bitmap_layout->rounded_bytes), options.cancellation);
+    const auto bitmap_copy1 = read_bytes(image, bitmap_layout->bitmap_copy1_offset,
+                                         static_cast<std::size_t>(bitmap_layout->rounded_bytes), options.cancellation);
+    if (!bitmap_copy2 || !bitmap_copy1) {
+        return std::unexpected{bitmap_copy2 ? bitmap_copy1.error() : bitmap_copy2.error()};
     }
     const auto useful_size = static_cast<std::size_t>(bitmap_layout->useful_bytes);
-    const auto header_useful = std::span<const std::byte>{*header_addressed}.first(useful_size);
-    const auto fixed_useful = std::span<const std::byte>{*fixed_location}.first(useful_size);
-    result.allocation.stored_copies_match = *header_addressed == *fixed_location;
-    for (std::size_t index = 0U; index < header_addressed->size(); ++index) {
-        if ((*header_addressed)[index] != (*fixed_location)[index])
+    const auto header_useful = std::span<const std::byte>{*bitmap_copy2}.first(useful_size);
+    const auto fixed_useful = std::span<const std::byte>{*bitmap_copy1}.first(useful_size);
+    result.allocation.stored_copies_match = *bitmap_copy2 == *bitmap_copy1;
+    for (std::size_t index = 0U; index < bitmap_copy2->size(); ++index) {
+        if ((*bitmap_copy2)[index] != (*bitmap_copy1)[index])
             ++result.allocation.stored_copy_mismatch_byte_count;
     }
-    result.allocation.header_addressed.used_cluster_count = count_bitmap_bits(header_useful, result.cluster_count);
-    result.allocation.fixed_location.used_cluster_count = count_bitmap_bits(fixed_useful, result.cluster_count);
+    result.allocation.bitmap_copy2.used_cluster_count = count_bitmap_bits(header_useful, result.cluster_count);
+    result.allocation.bitmap_copy1.used_cluster_count = count_bitmap_bits(fixed_useful, result.cluster_count);
     const std::vector<std::byte> clear_bitmap(useful_size, std::byte{0});
-    result.allocation.header_addressed.used_cluster_ranges =
+    result.allocation.bitmap_copy2.used_cluster_ranges =
         mismatch_ranges(header_useful, clear_bitmap, result.cluster_count, result.cluster_count);
-    result.allocation.fixed_location.used_cluster_ranges =
+    result.allocation.bitmap_copy1.used_cluster_ranges =
         mismatch_ranges(fixed_useful, clear_bitmap, result.cluster_count, result.cluster_count);
     result.allocation.reconstructed_used_cluster_count = count_bitmap_bits(reconstructed, result.cluster_count);
-    result.allocation.header_addressed.marked_used_without_index_extent_count =
+    result.allocation.bitmap_copy2.marked_used_without_index_extent_count =
         mismatch_cluster_count(header_useful, reconstructed, result.cluster_count);
-    result.allocation.header_addressed.index_extent_marked_free_count =
+    result.allocation.bitmap_copy2.index_extent_marked_free_count =
         mismatch_cluster_count(reconstructed, header_useful, result.cluster_count);
-    result.allocation.fixed_location.marked_used_without_index_extent_count =
+    result.allocation.bitmap_copy1.marked_used_without_index_extent_count =
         mismatch_cluster_count(fixed_useful, reconstructed, result.cluster_count);
-    result.allocation.fixed_location.index_extent_marked_free_count =
+    result.allocation.bitmap_copy1.index_extent_marked_free_count =
         mismatch_cluster_count(reconstructed, fixed_useful, result.cluster_count);
-    result.allocation.header_addressed.marked_used_without_index_extent =
+    result.allocation.bitmap_copy2.marked_used_without_index_extent =
         mismatch_ranges(header_useful, reconstructed, result.cluster_count, options.max_mismatch_ranges);
-    result.allocation.header_addressed.index_extent_marked_free =
+    result.allocation.bitmap_copy2.index_extent_marked_free =
         mismatch_ranges(reconstructed, header_useful, result.cluster_count, options.max_mismatch_ranges);
-    result.allocation.fixed_location.marked_used_without_index_extent =
+    result.allocation.bitmap_copy1.marked_used_without_index_extent =
         mismatch_ranges(fixed_useful, reconstructed, result.cluster_count, options.max_mismatch_ranges);
-    result.allocation.fixed_location.index_extent_marked_free =
+    result.allocation.bitmap_copy1.index_extent_marked_free =
         mismatch_ranges(reconstructed, fixed_useful, result.cluster_count, options.max_mismatch_ranges);
-    result.allocation.header_not_fixed =
+    result.allocation.copy2_not_copy1 =
         mismatch_ranges(header_useful, fixed_useful, result.cluster_count, options.max_mismatch_ranges);
-    result.allocation.fixed_not_header =
+    result.allocation.copy1_not_copy2 =
         mismatch_ranges(fixed_useful, header_useful, result.cluster_count, options.max_mismatch_ranges);
-    if (first_payload_u64 && *first_payload_u64 <= std::numeric_limits<std::uint32_t>::max() &&
-        *cluster_bytes <= std::numeric_limits<std::uint32_t>::max()) {
-        const auto free = calculate_sfs_free_space(result.cluster_count, static_cast<std::uint32_t>(*first_payload_u64),
-                                                   result.allocation.header_addressed.used_cluster_count,
-                                                   static_cast<std::uint32_t>(*cluster_bytes));
+    if (result.allocation.active_bitmap_copy != 0U && *cluster_bytes <= std::numeric_limits<std::uint32_t>::max()) {
+        const auto free =
+            calculate_sfs_free_space(result.cluster_count, first_payload,
+                                     (result.allocation.active_bitmap_copy == 1U ? result.allocation.bitmap_copy1
+                                                                                 : result.allocation.bitmap_copy2)
+                                         .used_cluster_count,
+                                     static_cast<std::uint32_t>(*cluster_bytes));
         if (free) {
             result.allocation.free_space = *free;
         } else {

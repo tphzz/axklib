@@ -134,12 +134,15 @@ struct AllocationBitmapSummary {
 };
 
 struct AllocationSummary {
-    AllocationBitmapSummary fixed_location;
-    AllocationBitmapSummary header_addressed;
+    bool bitmap_copy1_valid{true};
+    bool bitmap_copy2_valid{true};
+    std::uint8_t active_bitmap_copy{1};
+    AllocationBitmapSummary bitmap_copy1;
+    AllocationBitmapSummary bitmap_copy2;
     bool stored_copies_match{};
     std::uint64_t stored_copy_mismatch_byte_count{};
-    std::vector<AllocationMismatchRange> fixed_not_header;
-    std::vector<AllocationMismatchRange> header_not_fixed;
+    std::vector<AllocationMismatchRange> copy1_not_copy2;
+    std::vector<AllocationMismatchRange> copy2_not_copy1;
     std::uint32_t reconstructed_used_cluster_count{};
     std::uint32_t invalid_extent_record_count{};
     std::uint32_t extent_total_mismatch_count{};
@@ -157,7 +160,9 @@ struct Partition {
     std::uint32_t sector_count{};
     std::uint32_t cluster_count{};
     std::uint32_t sectors_per_cluster{};
-    std::uint32_t bitmap_cluster{};
+    std::uint32_t active_bitmap_cluster{};
+    std::uint32_t bitmap_copy1_cluster{};
+    std::uint32_t bitmap_copy2_cluster{};
     std::uint32_t directory_index_cluster{};
     std::uint32_t directory_index_span_clusters{};
     bool backup_header_matches{};

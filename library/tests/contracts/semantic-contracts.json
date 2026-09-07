@@ -18,7 +18,7 @@
       "verification_class": "verified"
     },
     {
-      "expected_semantic_sha256": "b9bca68caf91a4b9c3e611bd6307f1b3a7c5f90adeb55b26e61c6fd72631d318",
+      "expected_semantic_sha256": "5319421f0da616a7b701c2a3fb3b35e2b172ea4d2bbb55d80301235ccebdd1b9",
       "id": "sfs-read-multi-sbnk-authored",
       "input_path": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
       "input_sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
@@ -26,7 +26,7 @@
       "verification_class": "verified"
     },
     {
-      "expected_semantic_sha256": "6586f5045eb87f5d2d944734e3435b4332561cf213286183857eb08e038f8cf3",
+      "expected_semantic_sha256": "e6da3ec2df42e56fdbae267628956270302b75f2f492bb447c8b6a7ca3df632c",
       "id": "sfs-read-single-sbnk-authored",
       "input_path": "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
       "input_sha256": "9604f208c23360f2b69c78bc7ae94cf9f9c12cf96ffddb3567dfadd8200cc816",

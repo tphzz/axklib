@@ -63,7 +63,8 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
                                              "image geometry is outside the supported 512-byte alteration profile"));
     }
     if (!std::ranges::all_of(container->partitions(), [](const Partition &partition) {
-            return allocation_is_safe_for_mutation(partition.allocation);
+            return allocation_is_safe_for_mutation(partition.allocation) &&
+                   locate_partition_root_record(partition).has_value();
         })) {
         return std::unexpected(
             session_error("image_integrity_unsafe",

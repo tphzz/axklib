@@ -473,8 +473,8 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         std::fill(header.begin() + 0x88, header.begin() + 0x90, std::byte{0xff});
         for (const auto &[offset, value] : std::array<std::pair<std::size_t, std::uint32_t>, 7>{
                  {{0x90, static_cast<std::uint32_t>(geometry.cluster_count)},
-                  {0x94, 2},
-                  {0x98, 2},
+                  {0x94, detail::sfs_initial_bitmap_cluster},
+                  {0x98, detail::sfs_initial_bitmap_cluster},
                   {0x9c, static_cast<std::uint32_t>(geometry.bitmap_cluster)},
                   {0xa0, detail::sfs_directory_index_capacity},
                   {0xa4, static_cast<std::uint32_t>(geometry.directory_index_cluster)},
@@ -553,13 +553,13 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         }
         const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
             geometry.start_sector, static_cast<std::uint32_t>(geometry.cluster_count), 2U,
-            static_cast<std::uint32_t>(geometry.bitmap_cluster));
+            detail::sfs_initial_bitmap_cluster, static_cast<std::uint32_t>(geometry.bitmap_cluster));
         if (!bitmap_layout || bitmap_layout->rounded_bytes != bitmap.size()) {
             return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                               "prepared SFS allocation bitmap geometry is inconsistent")};
         }
-        if (!publication->write_at(bitmap_layout->fixed_location_offset, bitmap) ||
-            !publication->write_at(bitmap_layout->header_addressed_offset, bitmap) ||
+        if (!publication->write_at(bitmap_layout->bitmap_copy1_offset, bitmap) ||
+            !publication->write_at(bitmap_layout->bitmap_copy2_offset, bitmap) ||
             !publication->write_at((geometry.start_sector + geometry.directory_index_cluster * 2U) * 512U, index))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition allocation data")};

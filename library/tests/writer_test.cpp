@@ -1174,11 +1174,11 @@ TEST(HdsWriter, WritesCompleteMatchingAllocationBitmapsBeyondFirst4096Clusters) 
         return bytes;
     };
     const auto partition_start = geometry.start_sector * 512U;
-    const auto fixed_location = read_bitmap(partition_start + 2048U);
-    const auto header_addressed = read_bitmap(partition_start + geometry.bitmap_cluster * 1024U);
-    EXPECT_TRUE(std::ranges::any_of(std::span{header_addressed}.subspan(512U),
+    const auto bitmap_copy1 = read_bitmap(partition_start + 2048U);
+    const auto bitmap_copy2 = read_bitmap(partition_start + geometry.bitmap_cluster * 1024U);
+    EXPECT_TRUE(std::ranges::any_of(std::span{bitmap_copy2}.subspan(512U),
                                     [](std::byte value) { return value != std::byte{}; }));
-    EXPECT_EQ(fixed_location, header_addressed);
+    EXPECT_EQ(bitmap_copy1, bitmap_copy2);
 
     std::filesystem::remove(audio_path, error);
     std::filesystem::remove(image_path, error);

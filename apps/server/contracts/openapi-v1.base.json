@@ -1463,7 +1463,7 @@
       "ImageAllocationRun": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["startCluster", "clusterCount", "startSector", "sectorCount", "byteOffset", "byteCount", "fixedBitmapUsed", "headerBitmapUsed", "reconstructedUsed", "allocationKind", "owners", "consistencyFlags"],
+        "required": ["startCluster", "clusterCount", "startSector", "sectorCount", "byteOffset", "byteCount", "bitmapCopy1Used", "bitmapCopy2Used", "reconstructedUsed", "allocationKind", "owners", "consistencyFlags"],
         "properties": {
           "startCluster": {"type": "integer", "minimum": 0},
           "clusterCount": {"type": "integer", "minimum": 1},
@@ -1471,8 +1471,8 @@
           "sectorCount": {"type": "integer", "minimum": 1},
           "byteOffset": {"type": "integer", "minimum": 0},
           "byteCount": {"type": "integer", "minimum": 1},
-          "fixedBitmapUsed": {"type": "boolean"},
-          "headerBitmapUsed": {"type": "boolean"},
+          "bitmapCopy1Used": {"type": "boolean"},
+          "bitmapCopy2Used": {"type": "boolean"},
           "reconstructedUsed": {"type": "boolean", "description": "True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded."},
           "allocationKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DIRECTORY", "SUPPORT", "DATA", "UNKNOWN", "FREE", "UNCLAIMED", "CONFLICT"]},
           "owners": {"type": "array", "items": {"$ref": "#/components/schemas/ImageAllocationOwner"}},
@@ -1500,7 +1500,7 @@
           "totalExtentCount": {"type": "integer", "minimum": 0},
           "maximumExtentCount": {"type": "integer", "minimum": 0},
           "bitmapCopyMismatchClusters": {"type": "integer", "minimum": 0},
-          "claimedButFreeClusters": {"type": "integer", "minimum": 0, "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap."},
+          "claimedButFreeClusters": {"type": "integer", "minimum": 0, "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the active allocation bitmap."},
           "usedWithoutClaimClusters": {"type": "integer", "minimum": 0},
           "conflictingClusters": {"type": "integer", "minimum": 0},
           "invalidExtentRecords": {"type": "integer", "minimum": 0}

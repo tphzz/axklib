@@ -52,7 +52,7 @@ Common units:
 | Sector | Stored in the disk superblock, commonly `512` bytes. |
 | Cluster | `sector_size * sectors_per_cluster`; commonly two sectors. |
 | Index record | `72` bytes. |
-| Index block | `1024` bytes, with 14 usable records and 16 bytes of overhead. |
+| Index block | One cluster; `floor(cluster_bytes / 72)` complete records. |
 | Directory entry | `32` bytes in current directory payloads. |
 | Extent triplet | `12` bytes. |
 
@@ -99,25 +99,27 @@ they are not required for hardware loading.
 ## Partition Header
 
 Each active partition starts at its partition start sector. The partition header
-is 1024 bytes and is followed by a duplicate copy.
+occupies one sector. Its duplicate is one cluster after the primary, at
+`partition_start_sector + sectors_per_cluster`. The rest of each reserved
+header cluster is padding, not additional header fields.
 
 | Offset | Size | Type | Meaning |
 | --- | ---: | --- | --- |
 | `0x000` | 11 | ASCII | Partition signature `YAMAHA_dev3`. |
 | `0x040` | 16 | ASCII | Partition name, space-padded. |
-| `0x080` | 4 | u32be | Static or mode value; currently not interpreted by public APIs. |
+| `0x080` | 4 | u32be | Sectors per cluster. |
 | `0x084` | 4 | u32be | Static or mode value; currently not interpreted by public APIs. |
 | `0x088` | 8 | bytes | Reserved bytes; currently not interpreted by public APIs. |
 | `0x090` | 4 | u32be | Number of clusters in the partition. |
-| `0x094` | 4 | u32be | Sectors per cluster. |
-| `0x098` | 4 | u32be | Header-related value; currently surfaced only as raw structure. |
-| `0x09c` | 4 | u32be | Cluster offset to the allocation bitmap. |
+| `0x094` | 4 | u32be | Active allocation bitmap cluster. Independent of cluster size. |
+| `0x098` | 4 | i32be | Bitmap copy 1 location; a negative value marks the copy unavailable. |
+| `0x09c` | 4 | i32be | Bitmap copy 2 location; a negative value marks the copy unavailable. |
 | `0x0a0` | 4 | u32be | Formatter capacity value. Fresh axklib images write `5012`; its exact packing semantics remain unresolved, and readers derive usable record capacity from the index geometry instead of trusting this field. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
 | `0x0a8` | 4 | u32be | Directory/file index span in clusters. |
 
-For generated images, the full primary and duplicate 1024-byte partition-header
-sectors are part of the write contract. The writer starts with a zero-filled
+For generated A-series images, the full primary and duplicate 1024-byte header
+clusters are part of the write contract. The writer starts with a zero-filled
 header, writes the explicit geometry and compatibility fields documented below,
 and publishes the same completed bytes twice. Former fixed tail bytes and the
 validated residue range at `+0x1bc..+0x1e3` remain zero. Do not omit the duplicate
@@ -133,8 +135,10 @@ absolute_offset = absolute_sector * sector_size
 
 ## Allocation Bitmap
 
-Partition-header field `0x09c` identifies the cluster offset of the
-header-addressed allocation bitmap copy. Each allocation bitmap stores one bit
+Partition-header field `0x094` selects the active bitmap. It must match a
+positive location in `0x098` or `0x09c`. A negative location denotes an
+unavailable copy at its arithmetic absolute value, not a masked sign bit.
+Each allocation bitmap stores one bit
 per cluster. A set bit means the cluster is allocated; a clear bit means it is
 free.
 
@@ -153,13 +157,15 @@ SFS stores two complete copies of the allocation bitmap:
 
 | Copy | Location |
 | --- | --- |
-| Fixed-location copy | `partition_start_byte + 0x800` |
-| Header-addressed copy | Cluster offset stored at partition-header field `0x09c` |
+| Copy 1 | Absolute value of the signed cluster location at `0x098` |
+| Copy 2 | Absolute value of the signed cluster location at `0x09c` |
 
 Each copy occupies the cluster-rounded span needed for all partition clusters,
-not only its first 512-byte sector. For example, a bitmap for 359,999 clusters
+not only its first 512-byte sector. It lies in the reserved prefix before the
+index, without overlapping another metadata region or either header cluster.
+For example, a bitmap for 359,999 clusters
 has 45,000 meaningful bytes and occupies 45,056 bytes in a 1024-byte-cluster
-partition. The fixed-location span ends where the header-addressed span begins
+partition. The first span ends where the second span begins
 in the current formatter geometry.
 
 Readers must retain and compare both complete copies. Validation independently
@@ -190,13 +196,17 @@ unreachability explains why the sampler can ignore the remnant, but it does not
 make the record and bitmap agree. The validator does not silently discard or
 repair these records.
 
-The fixed-location data is not a 512-byte preview and the header-addressed copy
-is not solely authoritative. Generated images and alterations write the same
+Neither copy is a 512-byte preview. Free-space accounting uses the selected
+valid copy; invalid selection leaves free space unavailable. Generated images and alterations write the same
 complete, cluster-rounded bytes to both locations. Before publication, axklib
 reopens the independently written image and requires both stored copies to be
 identical and to agree with reconstructed extents. A mismatch, invalid extent,
 extent-total discrepancy, or cross-linked cluster makes the image read-only for
-mutation; browsing, validation, and export remain available.
+mutation; browsing, validation, and export remain available. Unavailable bitmap
+copies also prohibit mutation. Raw reading supports other validated cluster
+sizes, including 4096-byte clusters. Creation and alteration remain limited to
+the supported A-series layout; reading a foreign device's files does not enable
+writing its objects or interpreting its audio.
 
 ## Free Space
 
@@ -238,31 +248,33 @@ index_offset = (partition_start_sector
                * sector_size
 ```
 
-The index is divided into 1024-byte blocks. Each block contains 14 records of 72
-bytes; the final 16 bytes are block overhead.
+The index is divided into cluster-sized blocks. A 1024-byte block has 14 records
+and 16 trailing bytes; a 4096-byte block has 56 records and 64 trailing bytes.
+Scanning stops at the declared index span, not the first recognizable object.
 
 ```text
-record_offset_in_index = (sfs_id // 14) * 1024 + (sfs_id % 14) * 72
+records_per_block = cluster_bytes // 72
+record_offset_in_index = (sfs_id // records_per_block) * cluster_bytes + (sfs_id % records_per_block) * 72
 absolute_record_offset = index_offset + record_offset_in_index
 ```
 
 The inverse mapping is:
 
 ```text
-block = record_offset_in_index // 1024
-slot  = (record_offset_in_index % 1024) // 72
-sfs_id = block * 14 + slot
+block = record_offset_in_index // cluster_bytes
+slot  = (record_offset_in_index % cluster_bytes) // 72
+sfs_id = block * records_per_block + slot
 ```
 
-Offsets inside the 16-byte block overhead are not records.
+Offsets in the trailing bytes are not records.
 
 The index span also creates a finite record-slot capacity independent of payload
 free space:
 
 ```text
 index_bytes = directory_index_span_clusters * sectors_per_cluster * sector_size
-index_blocks = index_bytes // 1024
-total_record_slots = index_blocks * 14
+index_blocks = directory_index_span_clusters
+total_record_slots = index_blocks * records_per_block
 allocatable_record_slots = total_record_slots - 3
 ```
 
@@ -448,7 +460,7 @@ Allocation-integrity failures use stable validation codes:
 
 | Code | Meaning |
 | --- | --- |
-| `SFS_ALLOCATION_BITMAP_COPIES_DIFFER` | The complete fixed-location and header-addressed copies are not byte-identical. |
+| `SFS_ALLOCATION_BITMAP_COPIES_DIFFER` | The complete first and second copies are not byte-identical. |
 | `SFS_ALLOCATION_MISMATCH` | At least one stored copy disagrees with reconstructed index extents, or an index record has another invalid or internally inconsistent extent condition. |
 | `SFS_ALLOCATION_CROSS_LINK` | At least one cluster is claimed by multiple reserved, data, or continuation owners. |
 | `SFS_EXTENT_BYTE_TOTAL_MISMATCH` | A record's extent byte counts do not sum to its logical data size. |
@@ -470,8 +482,8 @@ automated inspection.
 The view deliberately presents three different allocation layers instead of
 collapsing them into one inferred state:
 
-- the fixed-location allocation bitmap;
-- the header-addressed allocation bitmap copy; and
+- the first allocation bitmap;
+- the second allocation bitmap copy; and
 - implicit reserved-metadata ownership plus index-record continuation and data
   extents. Only continuation and data extents contribute to the reconstructed
   allocation bitmap.
@@ -530,7 +542,7 @@ The first writer scope is intentionally narrow:
 - generated disk headers include the bounded superblock compatibility block,
   initialized sector-2 disk metadata, full primary and duplicate partition-header
   sectors for the supported hard-disk metadata profile, and complete matching
-  fixed-location and header-addressed allocation bitmap copies;
+  first and second allocation bitmap copies;
 - generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
 - generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
 - generated current Sample (`SBNK`) object payloads use the current single-member

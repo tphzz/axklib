@@ -33,7 +33,6 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
         std::uint64_t extent_count{};
         std::uint64_t continuation_clusters{};
         std::uint64_t first_payload = partition.cluster_count;
-        std::uint64_t first_object = partition.cluster_count;
         for (const auto &record : partition.records) {
             if (record.continuation_clusters.empty())
                 ++direct_records;
@@ -43,13 +42,14 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
             continuation_clusters += record.continuation_clusters.size();
             for (const auto &extent : record.extents)
                 first_payload = std::min(first_payload, static_cast<std::uint64_t>(extent.cluster_offset));
-            if (record.payload_kind == axk::PayloadKind::object) {
-                for (const auto &extent : record.extents)
-                    first_object = std::min(first_object, static_cast<std::uint64_t>(extent.cluster_offset));
-            }
         }
         std::string warnings;
         const auto &allocation = partition.allocation;
+        for (const auto &diagnostic : partition.diagnostics) {
+            if (!warnings.empty())
+                warnings += "; ";
+            warnings += diagnostic.message;
+        }
         const auto free = allocation.free_space;
         rows.push_back({
             {"source_image", axk::text::path_to_utf8(path)},
@@ -58,31 +58,33 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
             {"start_sector", static_cast<std::uint64_t>(partition.start_sector)},
             {"sectors_per_cluster", static_cast<std::uint64_t>(partition.sectors_per_cluster)},
             {"cluster_count", static_cast<std::uint64_t>(partition.cluster_count)},
-            {"fixed_bitmap_offset",
-             static_cast<std::uint64_t>(partition.start_sector) * container.superblock().sector_size_bytes + 2048U},
-            {"header_bitmap_offset",
+            {"bitmap_copy1_offset",
+             static_cast<std::uint64_t>(partition.start_sector) * container.superblock().sector_size_bytes +
+                 static_cast<std::uint64_t>(partition.bitmap_copy1_cluster) * cluster_size},
+            {"bitmap_copy2_offset",
              (static_cast<std::uint64_t>(partition.start_sector) +
-              static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+              static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) * partition.sectors_per_cluster) *
                  container.superblock().sector_size_bytes},
             {"index_offset",
              (static_cast<std::uint64_t>(partition.start_sector) +
               static_cast<std::uint64_t>(partition.directory_index_cluster) * partition.sectors_per_cluster) *
                  container.superblock().sector_size_bytes},
-            {"scanned_index_bytes", (first_object - partition.directory_index_cluster) * cluster_size},
+            {"scanned_index_bytes", partition.directory_index_span_clusters * cluster_size},
+            {"active_bitmap_copy", static_cast<std::uint64_t>(allocation.active_bitmap_copy)},
+            {"bitmap_copy1_valid", allocation.bitmap_copy1_valid},
+            {"bitmap_copy2_valid", allocation.bitmap_copy2_valid},
             {"valid_index_record_count", static_cast<std::uint64_t>(partition.records.size())},
             {"invalid_extent_record_count", static_cast<std::uint64_t>(allocation.invalid_extent_record_count)},
             {"direct_extent_record_count", direct_records},
             {"continuation_extent_record_count", continuation_records},
             {"data_extent_count", extent_count},
             {"continuation_list_cluster_count", continuation_clusters},
-            {"fixed_bitmap_used_cluster_count",
-             static_cast<std::uint64_t>(allocation.fixed_location.used_cluster_count)},
-            {"header_bitmap_used_cluster_count",
-             static_cast<std::uint64_t>(allocation.header_addressed.used_cluster_count)},
+            {"bitmap_copy1_used_cluster_count", static_cast<std::uint64_t>(allocation.bitmap_copy1.used_cluster_count)},
+            {"bitmap_copy2_used_cluster_count", static_cast<std::uint64_t>(allocation.bitmap_copy2.used_cluster_count)},
             {"bitmap_copies_match", allocation.stored_copies_match},
             {"bitmap_copy_mismatch_byte_count", allocation.stored_copy_mismatch_byte_count},
-            {"fixed_used_header_free_count", mismatch_cluster_count(allocation.fixed_not_header)},
-            {"header_used_fixed_free_count", mismatch_cluster_count(allocation.header_not_fixed)},
+            {"copy1_used_copy2_free_count", mismatch_cluster_count(allocation.copy1_not_copy2)},
+            {"copy2_used_copy1_free_count", mismatch_cluster_count(allocation.copy2_not_copy1)},
             {"reconstructed_used_cluster_count",
              static_cast<std::uint64_t>(allocation.reconstructed_used_cluster_count)},
             {"first_payload_cluster", first_payload},
@@ -91,20 +93,20 @@ std::vector<axk::ReportRow> allocation_summary_rows(const std::filesystem::path 
              free ? static_cast<std::uint64_t>(free->free_cluster_count) : std::uint64_t{0}},
             {"sampler_free_bytes", free ? free->free_bytes : std::uint64_t{0}},
             {"sampler_visible_free_kib", free ? free->sampler_visible_free_kib : std::uint64_t{0}},
-            {"fixed_used_not_reconstructed_count",
-             static_cast<std::uint64_t>(allocation.fixed_location.marked_used_without_index_extent_count)},
-            {"reconstructed_used_not_fixed_count",
-             static_cast<std::uint64_t>(allocation.fixed_location.index_extent_marked_free_count)},
-            {"header_used_not_reconstructed_count",
-             static_cast<std::uint64_t>(allocation.header_addressed.marked_used_without_index_extent_count)},
-            {"reconstructed_used_not_header_count",
-             static_cast<std::uint64_t>(allocation.header_addressed.index_extent_marked_free_count)},
+            {"copy1_used_not_reconstructed_count",
+             static_cast<std::uint64_t>(allocation.bitmap_copy1.marked_used_without_index_extent_count)},
+            {"reconstructed_used_not_copy1_count",
+             static_cast<std::uint64_t>(allocation.bitmap_copy1.index_extent_marked_free_count)},
+            {"copy2_used_not_reconstructed_count",
+             static_cast<std::uint64_t>(allocation.bitmap_copy2.marked_used_without_index_extent_count)},
+            {"reconstructed_used_not_copy2_count",
+             static_cast<std::uint64_t>(allocation.bitmap_copy2.index_extent_marked_free_count)},
             {"extent_total_mismatch_count", static_cast<std::uint64_t>(allocation.extent_total_mismatch_count)},
             {"extent_byte_total_mismatch_count",
              static_cast<std::uint64_t>(allocation.extent_byte_total_mismatch_count)},
             {"conflicting_cluster_count", static_cast<std::uint64_t>(allocation.conflicting_cluster_count)},
             {"conflicts_truncated", allocation.conflicts_truncated},
-            {"warning_count", std::uint64_t{0}},
+            {"warning_count", static_cast<std::uint64_t>(partition.diagnostics.size())},
             {"warnings", warnings},
         });
     }
@@ -151,15 +153,15 @@ std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path
     };
     for (const auto &partition : partitions) {
         append(partition, "fixed-used-without-index-extent",
-               partition.allocation.fixed_location.marked_used_without_index_extent);
+               partition.allocation.bitmap_copy1.marked_used_without_index_extent);
         append(partition, "index-extent-references-free-cluster-in-fixed",
-               partition.allocation.fixed_location.index_extent_marked_free);
+               partition.allocation.bitmap_copy1.index_extent_marked_free);
         append(partition, "header-used-without-index-extent",
-               partition.allocation.header_addressed.marked_used_without_index_extent);
+               partition.allocation.bitmap_copy2.marked_used_without_index_extent);
         append(partition, "index-extent-references-free-cluster-in-header",
-               partition.allocation.header_addressed.index_extent_marked_free);
-        append(partition, "fixed-used-header-free", partition.allocation.fixed_not_header);
-        append(partition, "header-used-fixed-free", partition.allocation.header_not_fixed);
+               partition.allocation.bitmap_copy2.index_extent_marked_free);
+        append(partition, "fixed-used-header-free", partition.allocation.copy1_not_copy2);
+        append(partition, "header-used-fixed-free", partition.allocation.copy2_not_copy1);
         const auto claim_kind = [](axk::AllocationClaimKind kind) {
             switch (kind) {
             case axk::AllocationClaimKind::reserved:

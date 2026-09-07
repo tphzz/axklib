@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
             for (const auto &entry : record.directory_entries) {
                 entries.push_back({{"flags", entry.flags},
                                    {"raw_link_id", entry.raw_link_id.value},
-                                   {"target_link_id", entry.target_link_id ? nlohmann::json{entry.target_link_id->value}
+                                   {"target_link_id", entry.target_link_id ? nlohmann::json(entry.target_link_id->value)
                                                                            : nlohmann::json{}},
                                    {"state", entry.state == axk::DirectoryEntryState::live ? "live" : "deleted"},
                                    {"name", entry.name}});
@@ -74,14 +74,16 @@ int main(int argc, char **argv) {
              {"sector_count", partition.sector_count},
              {"cluster_count", partition.cluster_count},
              {"sectors_per_cluster", partition.sectors_per_cluster},
-             {"bitmap_cluster", partition.bitmap_cluster},
+             {"active_bitmap_cluster", partition.active_bitmap_cluster},
+             {"bitmap_copy1_cluster", partition.bitmap_copy1_cluster},
+             {"bitmap_copy2_cluster", partition.bitmap_copy2_cluster},
              {"directory_index_cluster", partition.directory_index_cluster},
              {"directory_index_span_clusters", partition.directory_index_span_clusters},
              {"backup_header_matches", partition.backup_header_matches},
              {"records", std::move(records)},
              {"allocation",
-              {{"fixed_bitmap_used_cluster_count", partition.allocation.fixed_location.used_cluster_count},
-               {"header_bitmap_used_cluster_count", partition.allocation.header_addressed.used_cluster_count},
+              {{"bitmap_copy1_used_cluster_count", partition.allocation.bitmap_copy1.used_cluster_count},
+               {"bitmap_copy2_used_cluster_count", partition.allocation.bitmap_copy2.used_cluster_count},
                {"bitmap_copies_match", partition.allocation.stored_copies_match},
                {"reconstructed_used_cluster_count", partition.allocation.reconstructed_used_cluster_count},
                {"invalid_extent_record_count", partition.allocation.invalid_extent_record_count},

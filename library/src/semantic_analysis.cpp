@@ -222,6 +222,12 @@ bool ValidationReport::valid() const noexcept {
 ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                     const RelationshipGraph &graph) {
     ValidationReport result;
+    for (const auto &diagnostic : container.diagnostics()) {
+        if (diagnostic.code == ErrorCode::container_invalid_geometry ||
+            diagnostic.code == ErrorCode::container_backup_mismatch)
+            result.issues.push_back(
+                {"SFS_CONTAINER_METADATA_INVALID", ValidationSeverity::error, diagnostic.message, {}, {}});
+    }
     result.coverage.object_count = catalog.objects.size();
     result.coverage.relationship_count = graph.relationships.size();
     for (const auto &item : catalog.objects) {
@@ -308,7 +314,24 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
     }
     for (const auto &partition : container.partitions()) {
         const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);
+        if (!locate_partition_root_record(partition))
+            result.issues.push_back({"SFS_DIRECTORY_ROOT_INVALID",
+                                     ValidationSeverity::error,
+                                     "partition does not contain exactly one readable root directory",
+                                     partition_path,
+                                     {}});
         for (const auto &diagnostic : partition.diagnostics) {
+            if (diagnostic.code == ErrorCode::container_invalid_geometry ||
+                diagnostic.code == ErrorCode::container_backup_mismatch) {
+                result.issues.push_back({diagnostic.code == ErrorCode::container_invalid_geometry
+                                             ? "SFS_INVALID_GEOMETRY"
+                                             : "SFS_PARTITION_BACKUP_MISMATCH",
+                                         ValidationSeverity::error,
+                                         diagnostic.message,
+                                         partition_path,
+                                         {}});
+                continue;
+            }
             if (diagnostic.code != ErrorCode::relationship_unresolved ||
                 diagnostic.context.object_type != "directory-entry") {
                 continue;
@@ -338,7 +361,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
             result.issues.push_back({
                 "SFS_ALLOCATION_BITMAP_COPIES_DIFFER",
                 ValidationSeverity::error,
-                std::format("the fixed-location and header-addressed SFS allocation bitmaps differ in {} byte(s)",
+                std::format("the first and second SFS allocation bitmaps differ in {} byte(s)",
                             partition.allocation.stored_copy_mismatch_byte_count),
                 partition_path,
                 {},
@@ -354,16 +377,16 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
                 {},
             });
         }
-        const auto fixed_without_record = partition.allocation.fixed_location.marked_used_without_index_extent_count;
-        const auto fixed_marked_free = partition.allocation.fixed_location.index_extent_marked_free_count;
-        const auto header_without_record = partition.allocation.header_addressed.marked_used_without_index_extent_count;
-        const auto header_marked_free = partition.allocation.header_addressed.index_extent_marked_free_count;
+        const auto fixed_without_record = partition.allocation.bitmap_copy1.marked_used_without_index_extent_count;
+        const auto fixed_marked_free = partition.allocation.bitmap_copy1.index_extent_marked_free_count;
+        const auto header_without_record = partition.allocation.bitmap_copy2.marked_used_without_index_extent_count;
+        const auto header_marked_free = partition.allocation.bitmap_copy2.index_extent_marked_free_count;
         if (partition.allocation.invalid_extent_record_count != 0U ||
             partition.allocation.extent_total_mismatch_count != 0U || fixed_without_record != 0U ||
             fixed_marked_free != 0U || header_without_record != 0U || header_marked_free != 0U) {
             auto message = std::format(
-                "partition allocation metadata disagrees with index extents: fixed bitmap has {} "
-                "used-without-extent and {} extent-marked-free cluster(s); header-addressed bitmap has {} "
+                "partition allocation metadata disagrees with index extents: bitmap copy 1 has {} "
+                "used-without-extent and {} extent-marked-free cluster(s); bitmap copy 2 has {} "
                 "used-without-extent and {} extent-marked-free cluster(s); {} record(s) contain invalid "
                 "extents; {} record(s) have extent totals that disagree with their headers",
                 fixed_without_record, fixed_marked_free, header_without_record, header_marked_free,

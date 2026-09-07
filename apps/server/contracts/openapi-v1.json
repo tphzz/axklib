@@ -2161,6 +2161,12 @@
             ],
             "type": "string"
           },
+          "bitmapCopy1Used": {
+            "type": "boolean"
+          },
+          "bitmapCopy2Used": {
+            "type": "boolean"
+          },
           "byteCount": {
             "minimum": 1,
             "type": "integer"
@@ -2184,12 +2190,6 @@
               "type": "string"
             },
             "type": "array"
-          },
-          "fixedBitmapUsed": {
-            "type": "boolean"
-          },
-          "headerBitmapUsed": {
-            "type": "boolean"
           },
           "owners": {
             "items": {
@@ -2221,8 +2221,8 @@
           "sectorCount",
           "byteOffset",
           "byteCount",
-          "fixedBitmapUsed",
-          "headerBitmapUsed",
+          "bitmapCopy1Used",
+          "bitmapCopy2Used",
           "reconstructedUsed",
           "allocationKind",
           "owners",
@@ -2248,7 +2248,7 @@
             "type": "integer"
           },
           "claimedButFreeClusters": {
-            "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap.",
+            "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the active allocation bitmap.",
             "minimum": 0,
             "type": "integer"
           },

@@ -187,7 +187,7 @@ void mark_clusters_used(const std::filesystem::path &path, const axk::Partition 
     std::vector<char> bitmap(bitmap_size);
     const std::array offsets{
         (static_cast<std::uint64_t>(partition.start_sector) +
-         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+         static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) * partition.sectors_per_cluster) *
             512U,
         static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U,
     };
@@ -259,7 +259,7 @@ void mark_cluster_free(const std::filesystem::path &path, const axk::Partition &
     const auto mask = static_cast<unsigned char>(0x80U >> (cluster % 8U));
     const std::array offsets{
         (static_cast<std::uint64_t>(partition.start_sector) +
-         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+         static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) * partition.sectors_per_cluster) *
                 512U +
             byte_index,
         static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U + byte_index,
@@ -353,8 +353,8 @@ void convert_to_parseable_1024_byte_sector_geometry(const std::filesystem::path 
     const auto table_offset = 0x0a8U + static_cast<std::size_t>(partition.index.value) * 8U;
     put_be32(table_offset, aligned_start / 2U);
     put_be32(table_offset + 4U, (container.superblock().total_sector_count - aligned_start) / 2U);
-    put_be32(partition_destination + 0x94U, 1U);
-    put_be32(partition_destination + 1024U + 0x94U, 1U);
+    put_be32(partition_destination + 0x80U, 1U);
+    put_be32(partition_destination + 1024U + 0x80U, 1U);
     std::copy_n(image.begin(), 512U, image.begin() + 1024U);
 
     std::ofstream output{path, std::ios::binary | std::ios::trunc};
@@ -1271,10 +1271,10 @@ TEST(Alteration, RenameVolumePreservesClosureAllocationAndExactPcm) {
     const auto after = axk::open_image(output);
     ASSERT_TRUE(after) << after.error().message;
     const auto &after_partition = after->partitions().front();
-    EXPECT_EQ(after_partition.allocation.fixed_location.used_cluster_count,
-              before_partition.allocation.fixed_location.used_cluster_count);
-    EXPECT_EQ(after_partition.allocation.header_addressed.used_cluster_count,
-              before_partition.allocation.header_addressed.used_cluster_count);
+    EXPECT_EQ(after_partition.allocation.bitmap_copy1.used_cluster_count,
+              before_partition.allocation.bitmap_copy1.used_cluster_count);
+    EXPECT_EQ(after_partition.allocation.bitmap_copy2.used_cluster_count,
+              before_partition.allocation.bitmap_copy2.used_cluster_count);
     EXPECT_EQ(after_partition.allocation.reconstructed_used_cluster_count,
               before_partition.allocation.reconstructed_used_cluster_count);
     EXPECT_TRUE(axk::allocation_is_safe_for_mutation(before_partition.allocation));

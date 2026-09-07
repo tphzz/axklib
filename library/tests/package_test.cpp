@@ -296,7 +296,7 @@ void clear_cluster_claim(std::fstream &image, const axk::Partition &partition, s
     const auto mask = static_cast<unsigned char>(0x80U >> (cluster % 8U));
     const std::array offsets{
         (static_cast<std::uint64_t>(partition.start_sector) +
-         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+         static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) * partition.sectors_per_cluster) *
                 512U +
             byte_index,
         static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U + byte_index,

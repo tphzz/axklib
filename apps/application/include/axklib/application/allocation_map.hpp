@@ -40,8 +40,8 @@ struct ImageAllocationRun {
     std::uint64_t sector_count{};
     std::uint64_t byte_offset{};
     std::uint64_t byte_count{};
-    bool fixed_bitmap_used{};
-    bool header_bitmap_used{};
+    bool bitmap_copy1_used{};
+    bool bitmap_copy2_used{};
     bool reconstructed_used{};
     std::string allocation_kind;
     std::vector<ImageAllocationOwner> owners;

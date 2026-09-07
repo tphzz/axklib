@@ -2084,14 +2084,14 @@ export interface components {
                 | 'FREE'
                 | 'UNCLAIMED'
                 | 'CONFLICT';
+            bitmapCopy1Used: boolean;
+            bitmapCopy2Used: boolean;
             byteCount: number;
             byteOffset: number;
             clusterCount: number;
             consistencyFlags: (
                 'BITMAP_COPY_MISMATCH' | 'CLAIMED_BUT_FREE' | 'USED_WITHOUT_CLAIM' | 'MULTIPLE_CLAIMS'
             )[];
-            fixedBitmapUsed: boolean;
-            headerBitmapUsed: boolean;
             owners: components['schemas']['ImageAllocationOwner'][];
             /** @description True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded. */
             reconstructedUsed: boolean;
@@ -2105,7 +2105,7 @@ export interface components {
             /** @description Bitmap-allocated payload clusters. The implicit reserved metadata prefix is excluded. */
             allocatedClusters: number;
             bitmapCopyMismatchClusters: number;
-            /** @description Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap. */
+            /** @description Payload clusters claimed by a decoded data extent or continuation record but clear in the active allocation bitmap. */
             claimedButFreeClusters: number;
             conflictingClusters: number;
             continuationClusters: number;

@@ -133,9 +133,10 @@ bool allocation_is_safe_for_mutation(const AllocationSummary &allocation) noexce
     const auto bitmap_matches_extents = [](const AllocationBitmapSummary &bitmap) {
         return bitmap.marked_used_without_index_extent_count == 0U && bitmap.index_extent_marked_free_count == 0U;
     };
-    return allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
-           allocation.fixed_not_header.empty() && allocation.header_not_fixed.empty() &&
-           bitmap_matches_extents(allocation.fixed_location) && bitmap_matches_extents(allocation.header_addressed) &&
+    return allocation.bitmap_copy1_valid && allocation.bitmap_copy2_valid && allocation.active_bitmap_copy != 0U &&
+           allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
+           allocation.copy1_not_copy2.empty() && allocation.copy2_not_copy1.empty() &&
+           bitmap_matches_extents(allocation.bitmap_copy1) && bitmap_matches_extents(allocation.bitmap_copy2) &&
            allocation.invalid_extent_record_count == 0U && allocation.extent_total_mismatch_count == 0U &&
            allocation.extent_byte_total_mismatch_count == 0U && allocation.conflicting_cluster_count == 0U;
 }

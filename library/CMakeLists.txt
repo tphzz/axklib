@@ -151,6 +151,7 @@ add_library(
   src/sfs_allocation.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/sfs_geometry.cpp
   src/sfs_repair.cpp
   src/system_file.cpp
   src/tx16w.cpp
@@ -564,6 +565,7 @@ if(BUILD_TESTING)
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp
+    tests/sfs_geometry_test.cpp
     tests/sfs_write_codec_test.cpp
     tests/system_file_test.cpp
     tests/tx16w_test.cpp
