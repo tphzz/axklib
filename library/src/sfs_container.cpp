@@ -2,6 +2,7 @@
 
 #include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
+#include "media_signatures.hpp"
 #include "sfs_internal.hpp"
 
 #include <algorithm>
@@ -156,6 +157,15 @@ Result<Container> open_image(std::shared_ptr<const RandomAccessReader> image, st
     }
     if (options.progress)
         options.progress->report({ProgressPhase::opening, 0, std::nullopt, text::path_to_utf8(source_path), {}});
+    if (image->size() >= 0x220U) {
+        const auto descriptor = sfs_detail::read_bytes(*image, 0x200U, 0x20U, options.cancellation);
+        if (!descriptor)
+            return std::unexpected{descriptor.error()};
+        if (detail::ex5_descriptor_signature(*descriptor)) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "EX5 disk is not SFS; use read-only open_media access")};
+        }
+    }
     const auto primary_bytes = sfs_detail::read_bytes(*image, 0, sfs_default_sector_size, options.cancellation);
     if (!primary_bytes)
         return std::unexpected{primary_bytes.error()};

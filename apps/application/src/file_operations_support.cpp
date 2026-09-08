@@ -145,6 +145,8 @@ std::string info_media_kind_name(axk::MediaKind kind) {
         return "sfs";
     case axk::MediaKind::fat12_floppy:
         return "fat12_floppy";
+    case axk::MediaKind::ex5_disk:
+        return "ex5_disk";
     case axk::MediaKind::fat12_floppy_set:
         return "fat12_floppy_set";
     case axk::MediaKind::iso9660:

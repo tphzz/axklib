@@ -53,7 +53,8 @@ not include CLI11 or CLI headers.
 
 The media source modules preserve a separate responsibility boundary:
 
-- `media_fat12.cpp` owns the supported FAT12 container profile.
+- `media_fat12.cpp` owns shared FAT directory and file reads; `media_ex5.cpp`
+  supplies the separate read-only EX5 disk geometry and content projection.
 - `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
 - `media_a3k_archive.cpp` owns the bounded read-only A3K archive profile.
 - `media_build.cpp` inventories metadata before loading a selected dependency

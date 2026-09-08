@@ -85,6 +85,7 @@ std::string media_kind_name(axk::MediaKind kind) {
     case axk::MediaKind::iso9660:
         return "ISO9660";
     case axk::MediaKind::a3k_archive:
+    case axk::MediaKind::ex5_disk:
     case axk::MediaKind::fat12_floppy:
     case axk::MediaKind::fat12_floppy_set:
     case axk::MediaKind::standalone_object:

@@ -7,6 +7,7 @@
 
 #include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
+#include "media_ex5_internal.hpp"
 #include "media_internal.hpp"
 
 namespace axk {
@@ -148,8 +149,8 @@ MediaContainer::MediaContainer(MediaStorage storage) : storage_{std::move(storag
 MediaKind MediaContainer::kind() const noexcept {
     if (std::holds_alternative<Container>(storage_))
         return MediaKind::sfs;
-    if (std::holds_alternative<FatImage>(storage_))
-        return MediaKind::fat12_floppy;
+    if (const auto *fat = std::get_if<FatImage>(&storage_))
+        return fat->geometry().profile == FatProfile::ex5_disk ? MediaKind::ex5_disk : MediaKind::fat12_floppy;
     if (std::holds_alternative<FloppyDiskSet>(storage_))
         return MediaKind::fat12_floppy_set;
     if (std::holds_alternative<IsoImage>(storage_))
@@ -267,6 +268,12 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
     auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
     if (!prefix)
         return std::unexpected{prefix.error()};
+    if (detail::ex5_disk_signature(*prefix)) {
+        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!fat)
+            return std::unexpected{fat.error()};
+        return MediaContainer{std::move(*fat)};
+    }
     if (detail::object_prefix(*prefix)) {
         auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
         if (!object)

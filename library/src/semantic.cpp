@@ -3,6 +3,7 @@
 #include "axklib/media.hpp"
 #include "axklib/terminology.hpp"
 #include "axklib/utf8.hpp"
+#include "media_ex5_internal.hpp"
 #include "semantic_support.hpp"
 
 #include <algorithm>
@@ -419,6 +420,8 @@ ContentTree build_content_tree(const Container &container, const ObjectCatalog &
 
 ContentTree build_content_tree(const MediaContainer &container, const ObjectCatalog &catalog,
                                const RelationshipGraph &graph, bool include_default_programs) {
+    if (container.kind() == MediaKind::ex5_disk)
+        return detail::ex5_content_tree(std::get<FatImage>(container.storage()));
     if (const auto *sfs = std::get_if<Container>(&container.storage()))
         return build_content_tree(*sfs, catalog, graph, include_default_programs);
 

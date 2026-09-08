@@ -2,26 +2,33 @@
 
 The native library exposes opened container variants through
 `axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
-floppies, ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
+floppies, EX5 disks, ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
 `FSFSDEV3SPLX` object files, and AXK object directories. The individual
 `axk::FatImage`, `axk::IsoImage`, `axk::A3kArchive`, and
 `axk::StandaloneObject` types are available when an application already knows
 the container kind.
 
-These readers implement the supported profiles for Yamaha
-A-series media. They are not general-purpose FAT or ISO libraries. An image
+These readers implement specific supported Yamaha media profiles.
+They are not general-purpose FAT or ISO libraries. An image
 outside that compatibility scope may happen to use the accepted structures,
 but that does not make arbitrary media a supported input contract.
 
 ## FAT12 profile
 
-The FAT reader accepts FAT12 only. It checks the BPB geometry, duplicated FATs,
+The A-series floppy profile accepts FAT12 only. It checks the BPB geometry, duplicated FATs,
 cluster bounds, chain termination, loops, bad and reserved cluster markers,
 cross-linked files, root and subdirectory records, duplicate names, and declared
 file sizes. Directory entries use their DOS 8.3 identity; long-filename entries
-are ignored. FAT16, FAT32, exFAT, filesystem repair, and in-place filesystem
+are ignored. Generic FAT16, FAT32, exFAT, filesystem repair, and in-place filesystem
 mutation are unsupported. `axklib create floppy` separately creates the narrow
 fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
+
+## EX5 disk profile
+
+The separate [EX5 Disk Images](ex5.md) profile provides read-only directory and
+raw-file access through `FatImage`. It uses EX5-specific recognition and size
+fields, not generic FAT16 detection. Files remain opaque and are not projected
+into the A-series sampler-object catalog.
 
 ## ISO9660 profile
 
@@ -98,6 +105,7 @@ The public format pages divide the byte contracts by layer:
 | Layer or file class | Exact public contract |
 | --- | --- |
 | FAT12 boot sector, FAT entries, directory entries, DOS 8.3 names, and generated root filenames | [FAT12 Floppy Images](floppy.md) |
+| EX5 disk descriptor, FAT16 geometry, directories and raw file reads | [EX5 Disk Images](ex5.md) |
 | ISO descriptors, both path tables, directory records, raw folder names, `0000` catalogs, group-label files, and generated `Fnnn` names | [CD-ROM Images](cdrom.md) |
 | A3K header, payload area, terminal index, and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
 | Complete `FSFSDEV3SPLX<type>` files and decoded `SMPL`, `SBNK`, `SBAC`, and `PROG` fields | [Sampler Data Structures](sampler-data.md) |
@@ -116,7 +124,7 @@ opaque support-file formats.
 
 ## Yamaha object layer
 
-All object payloads use the same current-object decoders as SFS images. The
+A-series object payloads use the same current-object decoders as SFS images. The
 normalized object catalog can therefore be passed to the normal relationship
 graph service.
 

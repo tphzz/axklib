@@ -111,6 +111,7 @@ add_library(
   src/media_a3k_archive.cpp
   src/media_catalog.cpp
   src/media_fat12.cpp
+  src/media_ex5.cpp
   src/media_fat12_catalog.cpp
   src/media_floppy_catalog.cpp
   src/media_floppy_set_reader.cpp
@@ -548,6 +549,7 @@ if(BUILD_TESTING)
     tests/hardening_test.cpp
     tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
+    tests/media_ex5_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
     tests/media_floppy_catalog_test.cpp
