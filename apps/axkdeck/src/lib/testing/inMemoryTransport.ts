@@ -135,6 +135,59 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
+    inspectFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        layout: import('../filesystemExport').FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<import('../filesystemExport').FilesystemExportInspection> {
+        return this.invoke('inspectFilesystemExport', [sessionId, expectedRevision, entryIds, layout]);
+    }
+    startFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        destination: import('../filesystemExport').FilesystemExportDestination,
+        layout: import('../filesystemExport').FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemExport', [sessionId, expectedRevision, entryIds, destination, layout]);
+    }
+    filesystem(
+        sessionId: number,
+        query?: import('../filesystem').FilesystemQuery,
+    ): Promise<import('../filesystem').FilesystemPage> {
+        if (this.options.operations?.filesystem) return this.invoke('filesystem', [sessionId, query]);
+        return Promise.resolve({
+            revision: this.options.opened.revision ?? 1,
+            available: false,
+            filesystemName: '',
+            deviceView: 'a-series',
+            items: [],
+            totalCount: 0,
+            rootCapabilities: [],
+        });
+    }
+    startFilesystemImportInspection(
+        sessionId: number,
+        expectedRevision: number,
+        parentEntryId: string,
+        entries: import('../filesystem').FilesystemImportEntry[],
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemImportInspection', [sessionId, expectedRevision, parentEntryId, entries]);
+    }
+    startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
+        return this.invoke('startFilesystemInputInspection', [inputs]);
+    }
+    startSu700Import(request: import('../su700Import').Su700Request): Promise<JobState> {
+        return this.invoke('startSu700Import', [request]);
+    }
+    startFilesystemEdits(
+        sessionId: number,
+        expectedRevision: number,
+        edits: import('../filesystem').FilesystemEdit[],
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemEdits', [sessionId, expectedRevision, edits]);
+    }
     readonly storageMode: ImageTransport['storageMode'];
     readonly connectionMode: ImageTransport['connectionMode'];
     readonly supportsClientUploads: boolean;

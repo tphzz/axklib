@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     sandboxDirectory: vi.fn(),
     inspectSandboxMediaSource: vi.fn(),
     openImage: vi.fn(),
+    filesystem: vi.fn(),
     refreshImage: vi.fn(),
     attachCompanions: vi.fn(),
     closeImage: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('./lib/createTransport', () => ({
         sandboxDirectory: mocks.sandboxDirectory,
         inspectSandboxMediaSource: mocks.inspectSandboxMediaSource,
         openImage: mocks.openImage,
+        filesystem: mocks.filesystem,
         refreshImage: mocks.refreshImage,
         attachCompanions: mocks.attachCompanions,
         closeImage: mocks.closeImage,
@@ -99,6 +101,15 @@ async function chooseNestedImage(buttonName: 'Open image' | 'Open another image'
 describe('App panel layout', () => {
     beforeEach(() => {
         delete window.__AXKLIB_SERVER__;
+        mocks.filesystem.mockReset().mockResolvedValue({
+            revision: 1,
+            available: false,
+            deviceView: 'a-series',
+            filesystemName: '',
+            rootCapabilities: [],
+            items: [],
+            totalCount: 0,
+        });
         mocks.sandboxRoots.mockReset().mockResolvedValue([{ id: 'workspace', displayName: 'Yamaha', writable: true }]);
         mocks.sandboxDirectory.mockReset().mockImplementation(async (directory) => ({
             directory,
@@ -895,6 +906,28 @@ describe('App panel layout', () => {
         expect(screen.getByText('Partitions and volumes')).toBeTruthy();
     });
 
+    it('keeps a Files initialization failure retryable without hiding Device status', async () => {
+        mocks.filesystem.mockRejectedValueOnce(new Error('Filesystem temporarily unavailable'));
+        renderAcknowledgedApp();
+        await chooseNestedImage();
+        const files = screen.getByRole('button', { name: 'Files' });
+        await waitFor(() => expect(files).toHaveProperty('disabled', false));
+        await fireEvent.click(files);
+        const alert = await screen.findByRole('alert');
+        expect(alert.textContent).toContain('Filesystem temporarily unavailable');
+        mocks.filesystem.mockResolvedValue({
+            revision: 1,
+            available: true,
+            deviceView: 'a-series',
+            filesystemName: 'SFS',
+            rootCapabilities: [],
+            items: [],
+            totalCount: 0,
+        });
+        await fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    });
+
     it('closes the active image and returns to the initial empty state', async () => {
         renderAcknowledgedApp();
 
@@ -1577,7 +1610,7 @@ describe('App panel layout', () => {
         ).toBe('My Volume');
         expect(mocks.planImagePackageImport).not.toHaveBeenCalled();
 
-        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Review' }));
 
         await vi.waitFor(() =>
             expect(mocks.planImagePackageImport).toHaveBeenCalledWith(

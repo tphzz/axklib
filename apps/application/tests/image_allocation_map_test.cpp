@@ -106,8 +106,10 @@ TEST(ImageAllocationMap, IdentifiesFilesystemDirectoriesAndSupportFiles) {
     root.payload_kind = axk::PayloadKind::directory;
     root.directory_id = axk::LinkId{1U};
     root.parent_directory_id = axk::LinkId{1U};
-    root.directory_entries = {
-        {.flags = 0x20U, .raw_link_id = axk::LinkId{0U}, .target_link_id = axk::LinkId{0U}, .name = "sfserram"}};
+    root.directory_entries = {{.entry_size_bytes = 0x20U,
+                               .raw_link_id = axk::LinkId{0U},
+                               .target_link_id = axk::LinkId{0U},
+                               .name = "sfserram"}};
     root.extents = {{4U, 1U, 128U}};
     partition.records = {support, root};
 

@@ -14,13 +14,17 @@
 
 namespace axk::sfs_detail {
 
-DirectoryEntry make_directory_entry(std::uint16_t flags, std::uint32_t raw_link, std::string name,
+DirectoryEntry make_directory_entry(std::uint16_t entry_size_bytes, std::uint32_t raw_link, std::string name,
                                     std::uint64_t offset) {
     const auto raw_link_id = LinkId{raw_link};
     const auto state = directory_entry_state(raw_link_id);
     return {
-        flags, raw_link_id,     state == DirectoryEntryState::live ? std::optional<LinkId>{raw_link_id} : std::nullopt,
-        state, std::move(name), offset,
+        entry_size_bytes,
+        raw_link_id,
+        state == DirectoryEntryState::live ? std::optional<LinkId>{raw_link_id} : std::nullopt,
+        state,
+        std::move(name),
+        offset,
     };
 }
 
@@ -32,14 +36,14 @@ std::vector<DirectoryEntry> parse_directory_entries(std::span<const std::byte> p
         const auto link = reader.be32(offset + 4U);
         if (!prefix || !link || (*prefix == 0 && *link == 0))
             break;
-        const auto flags = reader.be16(offset);
+        const auto entry_size_bytes = reader.be16(offset);
         const auto name_size = reader.be16(offset + 2U);
-        if (!flags || !name_size || *name_size == 0 || *name_size > 24U)
+        if (!entry_size_bytes || *entry_size_bytes != 32U || !name_size || *name_size == 0 || *name_size > 24U)
             break;
         const auto name = reader.ascii_field(offset + 8U, *name_size, false);
         if (!name)
             break;
-        result.push_back(make_directory_entry(*flags, *link, *name, offset));
+        result.push_back(make_directory_entry(*entry_size_bytes, *link, *name, offset));
     }
     return result;
 }
@@ -52,6 +56,8 @@ void classify_record(IndexRecord &record, std::span<const std::byte> payload) {
             record.object_name = header->name;
         return;
     }
+    if ((record.attributes & 0x80000000U) != 0U && (record.attributes & 0x01ffffffU) != 0x00646972U)
+        return;
     auto entries = parse_directory_entries(payload);
     if (entries.size() >= 2U && entries[0].name == "." && entries[1].name == ".." && entries[0].target_link_id &&
         entries[1].target_link_id) {

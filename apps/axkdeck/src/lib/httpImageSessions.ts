@@ -17,7 +17,7 @@ import {
     validationSummary,
 } from './httpTransportModels';
 import { collectPages } from './pagination';
-import type { ImageLocation } from './storageLocations';
+import type { ImageLocation, InputFileLocation } from './storageLocations';
 import type {
     CompanionSelection,
     AllocationMapReference,
@@ -43,12 +43,124 @@ import type {
     VolumeDeletionInspection,
     WaveDataOrphanInspection,
 } from './transport';
-import { randomIdempotencyKey } from './httpTransportWire';
+import { randomIdempotencyKey, serverInput } from './httpTransportWire';
+import { startSu700Import } from './httpSu700Import';
+import type { Su700Request } from './su700Import';
 import type { DiskTreeItem } from './types';
+import type { FilesystemEdit, FilesystemPage, FilesystemQuery, FilesystemImportEntry } from './filesystem';
+import type {
+    FilesystemExportDestination,
+    FilesystemExportInspection,
+    FilesystemExportLayout,
+} from './filesystemExport';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
 export class HttpImageSessions {
+    startSu700Import(request: Su700Request): Promise<JobState> {
+        return startSu700Import(this.client, this.jobs, (id) => this.get(id).remoteId, request);
+    }
+    async startFilesystemImportInspection(
+        sessionId: number,
+        expectedRevision: number,
+        parentEntryId: string,
+        entries: FilesystemImportEntry[],
+    ): Promise<JobState> {
+        if (!entries.length || entries.length > 10000) throw new Error('Choose between 1 and 10000 import entries');
+        const job = await this.client.invoke<never>('images.filesystem.import.inspect', {
+            imageId: this.get(sessionId).remoteId,
+            expectedRevision,
+            parentEntryId,
+            entries,
+        });
+        if (!this.jobs.isJob(job)) throw new Error('images.filesystem.import.inspect did not return a job');
+        return this.jobs.map(job);
+    }
+    async startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
+        if (!inputs.length || inputs.length > 10000) throw new Error('Choose between 1 and 10000 import inputs');
+        const job = await this.client.invoke<never>('filesystem.inputs.inspect', { inputs: inputs.map(serverInput) });
+        if (!this.jobs.isJob(job)) throw new Error('filesystem.inputs.inspect did not return a job');
+        return this.jobs.map(job);
+    }
+    async inspectFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        layout: FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<FilesystemExportInspection> {
+        if (!entryIds.length) throw new Error('At least one filesystem entry is required');
+        const session = this.get(sessionId);
+        const result = await this.client.invoke<FilesystemExportInspection>('images.filesystem.export.inspect', {
+            imageId: session.remoteId,
+            expectedRevision,
+            entryIds,
+            layout,
+        });
+        if (this.jobs.isJob(result)) throw new Error('images.filesystem.export.inspect unexpectedly returned a job');
+        return result;
+    }
+
+    async startFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        destination: FilesystemExportDestination,
+        layout: FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<JobState> {
+        if (!entryIds.length) throw new Error('At least one filesystem entry is required');
+        const session = this.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.filesystem.export',
+            {
+                imageId: session.remoteId,
+                expectedRevision,
+                entryIds,
+                destination,
+                layout,
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.filesystem.export did not return a job');
+        return this.jobs.map(job);
+    }
+
+    async filesystem(sessionId: number, filter: FilesystemQuery = {}): Promise<FilesystemPage> {
+        const session = this.get(sessionId);
+        const query = new URLSearchParams({ expectedRevision: String(session.revision), limit: '200' });
+        for (const [key, value] of Object.entries(filter)) {
+            if (value !== undefined) query.set(key, String(value));
+        }
+        const page = await this.client.request<components['schemas']['ImageFilesystemPage']>(
+            'GET',
+            `/images/${encodeURIComponent(session.remoteId)}/filesystem?${query}`,
+        );
+        const kinds = { ROOT: 'root', PARTITION: 'partition', DIRECTORY: 'directory', FILE: 'file' } as const;
+        return { ...page, items: page.items.map((entry) => ({ ...entry, kind: kinds[entry.kind] })) };
+    }
+    async startFilesystemEdits(
+        sessionId: number,
+        expectedRevision: number,
+        edits: FilesystemEdit[],
+    ): Promise<JobState> {
+        if (!edits.length) throw new Error('At least one filesystem edit is required');
+        const session = this.get(sessionId);
+        const job = await this.client.invoke<never>(
+            'images.filesystem.edit',
+            {
+                imageId: session.remoteId,
+                // Entry identities belong to the reviewed revision, not the latest heartbeat.
+                expectedRevision,
+                acknowledgeDeviceRelationships: true,
+                edits: edits.map((edit) =>
+                    edit.kind === 'PUT_FILE' ? { ...edit, source: serverInput(edit.source) } : edit,
+                ),
+            },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('images.filesystem.edit did not return a job');
+        return this.jobs.map(job);
+    }
+
     private readonly sessions = new Map<number, SessionState>();
     private nextSessionId = 1;
 

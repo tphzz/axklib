@@ -8,6 +8,8 @@ import { clientUploadLocation, serverFileLocation } from '../storageLocations';
 import type { ClientUploadSource } from '../clientUploadSource';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
+import { ImportCompletion } from '../../features/import/importCompletion.svelte';
+import { JobController } from '../../features/jobs/actions';
 
 const audioImportDialogSource = readFileSync(
     resolve(process.cwd(), 'src/lib/components/AudioImportDialog.svelte'),
@@ -82,6 +84,7 @@ function transport(): ImageTransport {
 function destinationProps(volumeName: string, partitionIndex = 0) {
     const partitionName = `Partition ${partitionIndex + 1}`;
     return {
+        completion: new ImportCompletion(transport(), new JobController(transport())),
         target: { kind: 'EXISTING_VOLUME' as const, partitionIndex, volumeName },
         destinationMode: 'existing' as const,
         destinationPartitionIndex: partitionIndex,
@@ -103,6 +106,96 @@ function destinationProps(volumeName: string, partitionIndex = 0) {
 }
 
 describe('AudioImportDialog', () => {
+    it('retains completion warnings with Done and never offers another import', async () => {
+        const imageTransport = transport();
+        imageTransport.waitForJob = vi.fn().mockResolvedValue({
+            jobId: 1,
+            status: 'completed',
+            result: { kind: 'ALTERATION', warnings: [{ message: 'Audio conversion clipped' }], operations: [] },
+        });
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        await completion.run(async () => ({ jobId: 1, kind: 'alter', status: 'queued' }), vi.fn());
+        const oncancel = vi.fn();
+        const oncommit = vi.fn();
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [],
+                ...destinationProps('Import'),
+                completion,
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit,
+                oncancel,
+            },
+        });
+        expect(screen.getByRole('region', { name: 'Import warnings' }).textContent).toContain(
+            'Audio conversion clipped',
+        );
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        expect(oncancel).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+        expect(oncommit).not.toHaveBeenCalled();
+    });
+    it('keeps a committed import open and only refreshes when Refresh is clicked', async () => {
+        const imageTransport = transport();
+        imageTransport.waitForJob = vi.fn().mockResolvedValue({ jobId: 1, status: 'completed' });
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        let finishRefresh!: () => void;
+        const refresh = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Offline'))
+            .mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishRefresh = resolve;
+                    }),
+            );
+        const start = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
+        await completion.run(start, refresh);
+        const oncancel = vi.fn();
+        const { container } = render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [serverFileLocation({ rootId: 'workspace', relativePath: 'audio.wav' })],
+                ...destinationProps('Import'),
+                completion,
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit: vi.fn(),
+                oncancel,
+            },
+        });
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        const footer = container.querySelector('.dialog-footer')!;
+        const buttons = within(footer as HTMLElement).getAllByRole('button') as HTMLButtonElement[];
+        expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Close', 'Refresh']);
+        expect(buttons[0].disabled).toBe(false);
+        expect(footer.querySelector('.dialog-footer-status')).toBeTruthy();
+        const style = document.createElement('style');
+        style.textContent =
+            readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8').match(
+                /\.dialog-footer \.secondary-button,\s*\.dialog-footer \.primary-button,\s*\.dialog-footer \.danger-button\s*\{[^}]+\}/,
+            )?.[0] ?? '';
+        document.head.append(style);
+        for (const button of buttons) {
+            expect(getComputedStyle(button).height).toBe('30px');
+            expect(getComputedStyle(button).marginTop).toBe('0px');
+            expect(getComputedStyle(button).marginBottom).toBe('0px');
+        }
+        style.remove();
+        expect(oncancel).not.toHaveBeenCalled();
+        await fireEvent.click(buttons[1]);
+        await waitFor(() => expect(completion.phase).toBe('refreshing'));
+        expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        finishRefresh();
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+        expect(start).toHaveBeenCalledTimes(1);
+        expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
     it('owns the compact spacing around the reusable destination chooser', () => {
         expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*10px;/s);
     });
@@ -155,7 +248,7 @@ describe('AudioImportDialog', () => {
     });
 
     it('imports inspected Samples into a newly named Sample Bank', async () => {
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         render(AudioImportDialog, {
             props: {
                 transport: transport(),
@@ -176,15 +269,19 @@ describe('AudioImportDialog', () => {
         const name = screen.getByRole('textbox', { name: 'Sample Bank name' });
         await fireEvent.input(name, { target: { value: 'existing' } });
         expect(screen.getByText('Sample Bank name already exists: existing')).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Import 1 file' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
 
         await fireEvent.input(name, { target: { value: 'Bass Bank' } });
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() =>
-            expect(oncommit).toHaveBeenCalledWith([expect.objectContaining({ sampleName: 'Bass' })], {
-                kind: 'SAMPLE_BANK',
-                sampleBankName: 'Bass Bank',
-            }),
+            expect(oncommit).toHaveBeenCalledWith(
+                [expect.objectContaining({ sampleName: 'Bass' })],
+                {
+                    kind: 'SAMPLE_BANK',
+                    sampleBankName: 'Bass Bank',
+                },
+                [],
+            ),
         );
     });
 
@@ -233,7 +330,7 @@ describe('AudioImportDialog', () => {
             },
         });
 
-        expect(screen.getByText('Choose audio files')).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Choose audio files' })).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
         await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
 
@@ -255,7 +352,7 @@ describe('AudioImportDialog', () => {
                 projectedOutputBytesTotal: 192_000,
             }),
         );
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const workspaceFile = serverFileLocation(
             { rootId: 'workspace', relativePath: 'audio/16bit_11k.wav' },
             'Yamaha/audio/16bit_11k.wav',
@@ -278,7 +375,7 @@ describe('AudioImportDialog', () => {
         expect(imageTransport.uploadClientFile).not.toHaveBeenCalled();
         expect(imageTransport.inspectAudio).toHaveBeenCalledWith(workspaceFile);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() =>
             expect(oncommit).toHaveBeenCalledWith(
                 [
@@ -289,6 +386,7 @@ describe('AudioImportDialog', () => {
                     }),
                 ],
                 { kind: 'SAMPLES' },
+                [],
             ),
         );
         expect(imageTransport.releaseClientUpload).not.toHaveBeenCalled();
@@ -333,7 +431,7 @@ describe('AudioImportDialog', () => {
         await waitFor(() => expect(screen.getByText('Inspecting 1 of 2 files')).toBeTruthy());
         expect(screen.queryByText('Sample names must be 1-16 printable ASCII characters.')).toBeNull();
         expect(screen.queryByLabelText('Sample name for First.wav')).toBeNull();
-        expect((screen.getByRole('button', { name: 'Import 2 files' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
 
         inspections.get('Second.wav')!(
             sourceInfo({
@@ -420,7 +518,7 @@ describe('AudioImportDialog', () => {
 
     it('reviews stereo names and releases the staged upload after one commit', async () => {
         const imageTransport = transport();
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const oncancel = vi.fn();
         const file = new File([new Uint8Array(512)], 'Stereo piano.flac', { type: 'audio/flac' });
         render(AudioImportDialog, {
@@ -444,7 +542,7 @@ describe('AudioImportDialog', () => {
         await fireEvent.input(screen.getByLabelText('Root key for Stereo piano.flac'), {
             target: { value: '69' },
         });
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
 
         await waitFor(() =>
             expect(oncommit).toHaveBeenCalledWith(
@@ -466,6 +564,7 @@ describe('AudioImportDialog', () => {
                     },
                 ],
                 { kind: 'SAMPLES' },
+                [],
             ),
         );
         expect(imageTransport.releaseClientUpload).toHaveBeenCalledWith(
@@ -475,8 +574,8 @@ describe('AudioImportDialog', () => {
     });
 
     it('shows neutral progress instead of self-conflicts while a committed import refreshes the catalog', async () => {
-        let finishCommit!: () => void;
-        const commit = new Promise<void>((resolve) => {
+        let finishCommit!: (success: boolean) => void;
+        const commit = new Promise<boolean>((resolve) => {
             finishCommit = resolve;
         });
         const imageTransport = transport();
@@ -496,7 +595,7 @@ describe('AudioImportDialog', () => {
         const rendered = render(AudioImportDialog, { props: baseProps });
 
         expect(await screen.findAllByDisplayValue('Fresh')).toHaveLength(2);
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() => expect(oncommit).toHaveBeenCalledOnce());
         await rendered.rerender({
             ...baseProps,
@@ -510,15 +609,15 @@ describe('AudioImportDialog', () => {
         expect(screen.queryByText(/^Fits/)).toBeNull();
         expect(screen.queryByRole('button', { name: 'Import details for Fresh.wav' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Remove Fresh.wav' })).toBeNull();
-        expect((screen.getByRole('button', { name: 'Importing' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
 
-        finishCommit();
+        finishCommit(true);
         await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
     });
 
     it('restores current validation after a commit fails', async () => {
         let failCommit!: (error: Error) => void;
-        const commit = new Promise<void>((_resolve, reject) => {
+        const commit = new Promise<boolean>((_resolve, reject) => {
             failCommit = reject;
         });
         const file = serverFileLocation({ rootId: 'workspace', relativePath: 'Retry.wav' }, 'Retry.wav');
@@ -537,12 +636,12 @@ describe('AudioImportDialog', () => {
         render(AudioImportDialog, { props: baseProps });
 
         expect(await screen.findAllByDisplayValue('Retry')).toHaveLength(2);
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() => expect(oncommit).toHaveBeenCalledOnce());
         expect(screen.getByText('Importing…')).toBeTruthy();
 
         failCommit(new Error('Import transaction failed'));
-        expect(await screen.findByText('Import transaction failed')).toBeTruthy();
+        expect(await screen.findAllByText('Import transaction failed')).toHaveLength(2);
         expect(screen.queryByText('Importing…')).toBeNull();
         expect(screen.getByText(/^Fits/)).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Import details for Retry.wav' })).toBeTruthy();
@@ -586,7 +685,7 @@ describe('AudioImportDialog', () => {
                 ],
             }),
         );
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         render(AudioImportDialog, {
             props: {
                 transport: imageTransport,
@@ -629,7 +728,7 @@ describe('AudioImportDialog', () => {
         expect(within(card).getByText('Import adjustments')).toBeTruthy();
         expect(within(card).getAllByText('An additional WAV sampler loop was ignored.')).toHaveLength(2);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() =>
             expect(oncommit).toHaveBeenCalledWith(
                 [
@@ -646,6 +745,7 @@ describe('AudioImportDialog', () => {
                     }),
                 ],
                 { kind: 'SAMPLES' },
+                ['An additional WAV sampler loop was ignored.', 'An additional WAV sampler loop was ignored.'],
             ),
         );
     });
@@ -670,7 +770,7 @@ describe('AudioImportDialog', () => {
                 projectedOutputBytesTotal: (targetSampleRate ?? 44_100) * 2,
             }),
         );
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const file = new File([new Uint8Array(128)], 'Unsupported rate.wav', { type: 'audio/wav' });
         render(AudioImportDialog, {
             props: {
@@ -695,7 +795,7 @@ describe('AudioImportDialog', () => {
         await waitFor(() => expect((selector as HTMLSelectElement).value).toBe('22050'));
         expect(screen.getByText('WAV PCM_16 · Mono · 96,000 Hz · 16-bit · resampled TPDF · 1.00 s')).toBeTruthy();
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() =>
             expect(oncommit).toHaveBeenCalledWith(
                 [
@@ -704,6 +804,7 @@ describe('AudioImportDialog', () => {
                     }),
                 ],
                 { kind: 'SAMPLES' },
+                [],
             ),
         );
     });
@@ -816,6 +917,6 @@ describe('AudioImportDialog', () => {
         expect(imageTransport.releaseClientUpload).toHaveBeenCalledWith(
             expect.objectContaining({ reference: { uploadId: 'Too large.wav' } }),
         );
-        expect((screen.getByRole('button', { name: 'Import 1 file' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(false);
     });
 });

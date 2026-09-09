@@ -5,6 +5,7 @@
 #include "axklib/application/directory_archive_operations.hpp"
 #include "axklib/application/extraction_operations.hpp"
 #include "axklib/application/file_operations.hpp"
+#include "axklib/application/filesystem_export_operations.hpp"
 #include "axklib/application/image_session_operations.hpp"
 #include "axklib/application/midi_operations.hpp"
 #include "axklib/application/package_operations.hpp"
@@ -230,6 +231,8 @@ axk::app::Result<void> axk::app::bind_session_application_operations(
     if (auto bound = bind_session_package_operations(registry, sandbox, uploads, images, journals, downloads); !bound)
         return bound;
     if (auto bound = bind_session_volume_package_operations(registry, sandbox, images, downloads); !bound)
+        return bound;
+    if (auto bound = bind_filesystem_export_operations(registry, sandbox, images, downloads); !bound)
         return bound;
     if (auto bound = bind_session_volume_floppy_export_operations(registry, sandbox, images, downloads, media_limits);
         !bound)

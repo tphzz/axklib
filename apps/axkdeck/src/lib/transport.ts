@@ -1,4 +1,6 @@
 import type { DiskTreeItem } from './types';
+import type { FilesystemTransport } from './filesystem';
+import type { Su700Transport } from './su700Import';
 import type {
     DirectoryListing,
     DirectoryLocation,
@@ -472,7 +474,7 @@ export interface ImageOpenOptions {
     onUpdate?: (job: JobState) => void;
 }
 
-export interface ImageTransport extends ProgramAssignmentCleanupTransport {
+export interface ImageTransport extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;

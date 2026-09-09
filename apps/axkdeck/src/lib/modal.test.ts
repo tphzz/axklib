@@ -4,12 +4,52 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, within } from '@testing-library/svelte';
+import ImportDestinationChooser from './components/ImportDestinationChooser.svelte';
 
 import { modal } from './modal';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 describe('modal', () => {
+    it('lets an expanded destination chooser consume Escape before dismissing its dialog', async () => {
+        const dialog = document.createElement('div');
+        document.body.append(dialog);
+        const onescape = vi.fn();
+        const action = modal(dialog, { onescape });
+        const component = render(ImportDestinationChooser, {
+            target: dialog,
+            props: {
+                mode: 'existing',
+                partitionIndex: 0,
+                volumeName: 'Samples',
+                partitions: [{ partitionIndex: 0, name: 'Partition' }],
+                volumes: [
+                    { partitionIndex: 0, name: 'Partition', volumeName: 'Samples', label: 'Partition / Samples' },
+                ],
+                disabled: false,
+                onmode: vi.fn(),
+                onvolume: vi.fn(),
+                onpartition: vi.fn(),
+                onname: vi.fn(),
+            },
+        });
+        try {
+            const input = within(dialog).getByRole('combobox', { name: 'Destination volume' });
+            await fireEvent.click(input);
+            expect(input.getAttribute('aria-expanded')).toBe('true');
+            await fireEvent.keyDown(input, { key: 'Escape' });
+            expect(input.getAttribute('aria-expanded')).toBe('false');
+            expect(onescape).not.toHaveBeenCalled();
+            await fireEvent.keyDown(input, { key: 'Escape' });
+            expect(onescape).toHaveBeenCalledOnce();
+        } finally {
+            component.unmount();
+            action.destroy();
+            dialog.remove();
+        }
+    });
+
     it('owns focus, traps tab navigation, handles Escape, and restores background state', async () => {
         const background = document.createElement('button');
         const dialog = document.createElement('div');

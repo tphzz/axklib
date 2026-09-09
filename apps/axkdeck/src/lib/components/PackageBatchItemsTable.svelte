@@ -282,9 +282,12 @@
         line-height: 1.25;
     }
 
+    .batch-table-header,
     .batch-table-rows {
         min-height: 0;
         overflow-y: auto;
+        scrollbar-gutter: stable;
+        padding-right: calc(8px + var(--overlay-scrollbar-clearance));
     }
 
     .batch-table-row + .batch-table-row {

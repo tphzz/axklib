@@ -1,6 +1,13 @@
+#include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <span>
+#include <stdexcept>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -22,6 +29,185 @@ bool journal_state_empty(const std::filesystem::path &path) {
             return false;
     }
     return true;
+}
+
+class BoundedJournalReader final : public axk::RandomAccessReader {
+  public:
+    explicit BoundedJournalReader(std::uint64_t count, std::byte value) : count_(count), value_(value) {}
+    std::uint64_t size() const noexcept override { return count_; }
+    axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> destination) const override {
+        largest_read = std::max(largest_read, destination.size());
+        if (destination.size() > 4096U || offset > count_ || destination.size() > count_ - offset ||
+            bytes_read + destination.size() > count_)
+            return std::unexpected(axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
+                                                   "journal reader exceeded its single bounded pass"));
+        bytes_read += destination.size();
+        std::ranges::fill(destination, value_);
+        return {};
+    }
+    mutable std::size_t largest_read{};
+    mutable std::uint64_t bytes_read{};
+
+  private:
+    std::uint64_t count_;
+    std::byte value_;
+};
+
+TEST(AlterationJournalStoreTest, StreamsReaderBackedPatchesAndAppliesOnlyFrozenJournalBytes) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-stream-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    constexpr std::size_t size = 2U * 1024U * 1024U + 17U;
+    {
+        std::ofstream output{root / "workspace/image.hds", std::ios::binary};
+        const std::string block(4096U, '0');
+        for (std::size_t offset = 0; offset < size; offset += block.size())
+            output.write(block.data(), static_cast<std::streamsize>(std::min(block.size(), size - offset)));
+    }
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target);
+    auto input = std::make_shared<BoundedJournalReader>(size - 2U, std::byte{'X'});
+    const std::array patches{axk::app::AlterationJournalPatch{1U,
+                                                              axk::app::AlterationJournalBytes{*target, 1U, size - 2U},
+                                                              axk::app::AlterationJournalBytes{input, 0U, size - 2U}}};
+    axk::app::AlterationJournalStore store{root / "journals", 8U * 1024U * 1024U, {}, 4096U};
+    const auto applied = store.apply(*target, size, patches);
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_LE(input->largest_read, 4096U);
+    EXPECT_EQ(input->bytes_read, size - 2U);
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0" + std::string(size - 2U, 'X') + "0");
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
+    target = {};
+}
+
+TEST(AlterationJournalStoreTest, RejectsOverlappingPatchesBeforeWriting) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-overlap-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target);
+    const std::array patches{
+        axk::app::AlterationJournalPatch{2U, {std::byte{'2'}, std::byte{'3'}}, {std::byte{'A'}, std::byte{'B'}}},
+        axk::app::AlterationJournalPatch{3U, {std::byte{'3'}}, {std::byte{'C'}}}};
+    axk::app::AlterationJournalStore store{root / "journals"};
+    EXPECT_FALSE(store.apply(*target, 10U, patches));
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
+}
+
+TEST(AlterationJournalStoreTest, CancelsStreamedCommitAndRestoresTheFrozenOriginal) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-stream-cancel-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target);
+    const std::array patches{axk::app::AlterationJournalPatch{
+        2U, axk::app::AlterationJournalBytes{*target, 2U, 4U},
+        axk::app::AlterationJournalBytes{std::make_shared<BoundedJournalReader>(4U, std::byte{'X'}), 0U, 4U}}};
+    axk::CancellationSource cancellation;
+    axk::app::AlterationJournalStore store{root / "journals", 4096U,
+                                           [&](std::string_view phase, std::size_t index) {
+                                               if (phase == "after-patch-chunk" && index == 0U)
+                                                   cancellation.cancel();
+                                               return false;
+                                           },
+                                           2U};
+    const auto applied = store.apply(*target, 10U, patches, cancellation.token());
+    ASSERT_FALSE(applied);
+    EXPECT_EQ(applied.error().code, "operation_cancelled");
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+    EXPECT_TRUE(store.storage_ready());
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
+}
+
+TEST(AlterationJournalStoreTest, RecoversStreamedOriginalsAfterAnInterruptedWrite) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-stream-recover-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    axk::app::AlterationJournalStore store{
+        root / "journals", 4096U,
+        [](std::string_view phase, std::size_t index) { return phase == "after-patch-chunk" && index == 0U; }, 2U};
+    {
+        auto target = sandbox->open_mutation({"workspace", "image.hds"});
+        ASSERT_TRUE(target);
+        const std::array patches{axk::app::AlterationJournalPatch{
+            2U, axk::app::AlterationJournalBytes{*target, 2U, 4U},
+            axk::app::AlterationJournalBytes{std::make_shared<BoundedJournalReader>(4U, std::byte{'X'}), 0U, 4U}}};
+        EXPECT_FALSE(store.apply(*target, 10U, patches));
+    }
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "01XX456789");
+    const auto recovered = store.recover(*sandbox);
+    ASSERT_TRUE(recovered) << recovered.error().message;
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
+}
+
+TEST(AlterationJournalStoreTest, RejectsInvalidAndFailingReaderRangesWithoutWriting) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-stream-input-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target);
+    auto failing = std::make_shared<BoundedJournalReader>(4U, std::byte{'X'});
+    failing->bytes_read = 4U;
+    const std::array inputs{axk::app::AlterationJournalBytes{nullptr, 0U, 4U},
+                            axk::app::AlterationJournalBytes{*target, 9U, 4U},
+                            axk::app::AlterationJournalBytes{failing, 0U, 4U}};
+    axk::app::AlterationJournalStore store{root / "journals"};
+    for (const auto &input : inputs) {
+        const std::array patches{
+            axk::app::AlterationJournalPatch{2U, axk::app::AlterationJournalBytes{*target, 2U, 4U}, input}};
+        EXPECT_FALSE(store.apply(*target, 10U, patches));
+        EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+        EXPECT_TRUE(journal_state_empty(root / "journals"));
+        EXPECT_TRUE(store.storage_ready());
+    }
+}
+
+TEST(AlterationJournalStoreTest, QuarantinesAnUnexpectedExceptionUntilRecovery) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-exception-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    axk::app::AlterationJournalStore store{root / "journals"};
+    {
+        auto target = sandbox->open_mutation({"workspace", "image.hds"});
+        ASSERT_TRUE(target);
+        const std::array patches{axk::app::AlterationJournalPatch{2U, {std::byte{'2'}}, {std::byte{'A'}}}};
+        EXPECT_THROW(static_cast<void>(store.apply(*target, 10U, patches, {},
+                                                   []() -> axk::app::Result<void> {
+                                                       throw std::runtime_error("injected validation exception");
+                                                   })),
+                     std::runtime_error);
+        EXPECT_FALSE(store.storage_ready());
+        EXPECT_FALSE(store.apply(*target, 10U, patches));
+    }
+    ASSERT_TRUE(store.recover(*sandbox));
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+    EXPECT_TRUE(store.storage_ready());
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
 }
 
 TEST(AlterationJournalStoreTest, DefaultLimitCoversTheSupportedImageBoundary) {

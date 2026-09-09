@@ -18,6 +18,7 @@
         onvolume: (partitionIndex: number | null, volumeName: string) => void;
         onpartition: (partitionIndex: number) => void;
         onname: (name: string) => void;
+        unavailableModes?: Partial<Record<ImportDestinationMode, string>>;
     }
 
     let {
@@ -31,9 +32,11 @@
         onvolume,
         onpartition,
         onname,
+        unavailableModes = {},
     }: Props = $props();
 
     let query = $state('');
+    const descriptionId = $props.id();
     let activeIndex = $state(-1);
     let listOpen = $state(false);
     let filtering = $state(false);
@@ -156,11 +159,26 @@
         <button
             type="button"
             aria-pressed={mode === 'existing'}
-            disabled={disabled || volumes.length === 0}
-            onclick={() => onmode('existing')}>Existing</button
+            title={unavailableModes.existing ?? (volumes.length === 0 ? 'No existing volumes available' : undefined)}
+            aria-describedby={unavailableModes.existing ? `${descriptionId}-existing` : undefined}
+            disabled={disabled || !!unavailableModes.existing || volumes.length === 0}
+            onclick={() => {
+                if (!disabled && !unavailableModes.existing && volumes.length) onmode('existing');
+            }}>Existing</button
         >
-        <button type="button" aria-pressed={mode === 'create'} {disabled} onclick={() => onmode('create')}>New</button>
+        <button
+            type="button"
+            aria-pressed={mode === 'create'}
+            title={unavailableModes.create}
+            aria-describedby={unavailableModes.create ? `${descriptionId}-create` : undefined}
+            disabled={disabled || !!unavailableModes.create}
+            onclick={() => {
+                if (!disabled && !unavailableModes.create) onmode('create');
+            }}>New</button
+        >
     </div>
+    {#if unavailableModes.existing}<span hidden id={`${descriptionId}-existing`}>{unavailableModes.existing}</span>{/if}
+    {#if unavailableModes.create}<span hidden id={`${descriptionId}-create`}>{unavailableModes.create}</span>{/if}
 
     <select
         class="destination-partition dialog-field-control"

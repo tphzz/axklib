@@ -23,6 +23,7 @@ enum class MediaKind : std::uint8_t {
     sfs,
     fat12_floppy,
     ex5_disk,
+    fat16_disk,
     fat12_floppy_set,
     iso9660,
     a3k_archive,
@@ -33,7 +34,7 @@ enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifie
 enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
 enum class FloppySetMarker : std::uint8_t { none, ordinary, continuation, final, invalid };
 enum class FloppySetStatus : std::uint8_t { incomplete, complete };
-enum class FatProfile : std::uint8_t { a_series_floppy, ex5_disk };
+enum class FatProfile : std::uint8_t { a_series_floppy, ex5_disk, fat16, ex5_removable };
 
 struct YamahaFloppyCatalogEntry {
     std::uint16_t slot{};
@@ -83,6 +84,7 @@ struct FatFile {
     std::uint32_t size{};
     std::vector<std::uint16_t> clusters;
     std::uint64_t first_data_offset{};
+    std::uint8_t attributes{};
 };
 
 struct FatDirectory {
@@ -90,6 +92,7 @@ struct FatDirectory {
     std::string name;
     std::uint64_t directory_offset{};
     std::vector<std::uint16_t> clusters;
+    std::uint8_t attributes{};
 };
 
 struct IsoFile {
@@ -166,8 +169,8 @@ struct StructuredObjectPath {
     MenuLabel volume_label;
 };
 
-// Read-only Yamaha A-series FAT12 floppy and EX5 FAT16 disk profiles.
-// Generic FAT16, FAT32, exFAT and filesystem writes are unsupported.
+// FAT12, standard FAT16 and the distinct EX5 hard-disk FAT16 profile.
+// FAT32 and exFAT are unsupported.
 class AXK_API FatImage {
   public:
     [[nodiscard]] static Result<FatImage> open(std::shared_ptr<const RandomAccessReader> reader,
@@ -205,6 +208,27 @@ class AXK_API FatImage {
     std::optional<YamahaFloppyCatalog> yamaha_catalog_;
     FloppyDiskIdentity disk_identity_;
     std::vector<MediaValidationIssue> validation_issues_;
+};
+
+struct FatDiskPartition {
+    std::uint8_t number{};
+    std::uint64_t byte_offset{};
+    std::uint64_t size_bytes{};
+    FatImage volume;
+};
+
+// Primary MBR partitions. Each volume is read through its own bounded view.
+class AXK_API FatDiskImage {
+  public:
+    [[nodiscard]] static Result<FatDiskImage> open(std::shared_ptr<const RandomAccessReader> reader,
+                                                   std::string source_name = {},
+                                                   const CancellationToken &cancellation = {});
+    [[nodiscard]] const std::vector<FatDiskPartition> &partitions() const noexcept { return partitions_; }
+    [[nodiscard]] const std::string &source_name() const noexcept { return source_name_; }
+
+  private:
+    std::string source_name_;
+    std::vector<FatDiskPartition> partitions_;
 };
 
 // Read-only primary ISO9660 profile for Yamaha A-series CD-ROM media. Joliet
@@ -364,8 +388,8 @@ class AXK_API AxkObjectDirectory {
     std::vector<MediaObject> objects_;
 };
 
-using MediaStorage =
-    std::variant<Container, FatImage, FloppyDiskSet, IsoImage, A3kArchive, StandaloneObject, AxkObjectDirectory>;
+using MediaStorage = std::variant<Container, FatImage, FatDiskImage, FloppyDiskSet, IsoImage, A3kArchive,
+                                  StandaloneObject, AxkObjectDirectory>;
 
 class AXK_API MediaContainer {
   public:

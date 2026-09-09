@@ -867,7 +867,7 @@ describe('PackageBatchImportWorkflow', () => {
             status: 'ready',
             hasUnvalidatedChanges: true,
         });
-        expect(setStatus).toHaveBeenLastCalledWith('Image changed; check import conflicts again');
+        expect(setStatus).toHaveBeenLastCalledWith('Image changed; review the import again');
 
         await workflow.replan();
 
@@ -889,7 +889,7 @@ describe('PackageBatchImportWorkflow', () => {
         expect(workflow.request?.status).toBe('ready');
     });
 
-    it('refreshes and closes after an already-submitted job cannot be confirmed', async () => {
+    it('retains an already-submitted job until checking its status confirms completion', async () => {
         const source = serverFileLocation({ rootId: 'workspace', relativePath: 'one.axkvol' }, 'one.axkvol');
         const refreshSession = vi.fn().mockResolvedValue(undefined);
         const setStatus = vi.fn();
@@ -899,21 +899,15 @@ describe('PackageBatchImportWorkflow', () => {
             planImagePackageImport: vi.fn().mockResolvedValue(plan(['One'], 'uncertain-plan')),
             releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
             startImagePackageImport: vi.fn().mockResolvedValue({ jobId: 11, status: 'queued' }),
+            waitForJob: vi.fn().mockResolvedValue({ jobId: 11, status: 'completed' }),
         } as unknown as ImageTransport;
         const workflow = new PackageBatchImportWorkflow({
             transport,
             jobs: {
-                run: vi.fn(
-                    async (
-                        start: () => Promise<unknown>,
-                        _onUpdate: (job: unknown) => void,
-                        onStarted: (job: unknown) => void | Promise<void>,
-                    ) => {
-                        const job = await start();
-                        await onStarted(job);
-                        throw new Error('job result violated its declared schema');
-                    },
-                ),
+                run: vi.fn(async (start: () => Promise<unknown>) => {
+                    await start();
+                    throw new Error('job result violated its declared schema');
+                }),
             } as unknown as JobController,
             picker,
             pickerHistory: new PackagePickerHistory(),
@@ -938,10 +932,13 @@ describe('PackageBatchImportWorkflow', () => {
         await workflow.replan();
         await workflow.apply();
 
+        expect(refreshSession).not.toHaveBeenCalled();
+        expect(workflow.completion.phase).toBe('unconfirmed');
+        expect(workflow.request?.status).toBe('applying');
+        await workflow.recoverCompletion();
+        expect(transport.waitForJob).toHaveBeenCalledWith(11, expect.any(Function));
         expect(refreshSession).toHaveBeenCalledWith({ partitionIndex: 0, volumeName: 'One' });
         expect(workflow.request).toBeNull();
-        expect(setStatus).toHaveBeenLastCalledWith(
-            'Import completion could not be confirmed; review the refreshed image before retrying',
-        );
+        expect(setStatus).toHaveBeenLastCalledWith('Imported 1 packages');
     });
 });

@@ -1,3 +1,5 @@
+import { on } from 'svelte/events';
+
 export interface ModalOptions {
     onescape?: () => void;
 }
@@ -89,7 +91,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             first.focus();
         }
     };
-    node.addEventListener('keydown', keydown);
+    const removeKeydown = on(node, 'keydown', keydown);
     let userInteracted = false;
     const markInteraction = (): void => {
         userInteracted = true;
@@ -121,7 +123,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             options = next;
         },
         destroy() {
-            node.removeEventListener('keydown', keydown);
+            removeKeydown();
             node.removeEventListener('pointerdown', markInteraction);
             node.removeEventListener('input', markInteraction);
             observer.disconnect();

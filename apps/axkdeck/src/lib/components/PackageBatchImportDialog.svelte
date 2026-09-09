@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
     import { tick } from 'svelte';
     import type { BatchPackageItem, PackageBatchDestinationStrategy } from '../../features/import/packageBatchTypes';
     import type {
@@ -25,6 +26,8 @@
     ]);
 
     interface Props {
+        completion: ImportCompletion;
+        onrecover: () => void;
         desktop: boolean;
         canChangeSources: boolean;
         items: BatchPackageItem[];
@@ -70,6 +73,8 @@
     }
 
     let {
+        completion,
+        onrecover,
         desktop,
         canChangeSources,
         items,
@@ -113,7 +118,7 @@
     let batchResults = $state<HTMLElement>();
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
-    const locked = $derived(status === 'applying');
+    const locked = $derived(completion.phase !== 'refresh-failed' && (completion.locked || status === 'applying'));
     const changeSources = $derived(items.some((item) => item.localPath !== null) ? onchooselocal : onchooseworkspace);
     const selectedItems = $derived(items.filter((item) => item.selected));
     const selectedCount = $derived(selectedItems.length);
@@ -177,12 +182,12 @@
     );
     const footerStatus = $derived.by(() => {
         if (status === 'loading') return 'Preparing packages…';
-        if (status === 'planning') return 'Planning batch import…';
+        if (status === 'planning') return 'Reviewing import';
         if (status === 'applying') return 'Importing packages…';
         if (error) return 'Import failed';
         if (hasUnvalidatedChanges) {
             if (selectedCount === 0) return 'Select at least one package';
-            return displayPlan ? 'Review import issues' : 'Check import conflicts';
+            return displayPlan ? 'Review import issues' : 'Review changes before importing';
         }
         if (visibleConflicts.length > 0) {
             return `${visibleConflicts.length} issue${visibleConflicts.length === 1 ? '' : 's'} prevent import`;
@@ -223,7 +228,9 @@
                 <Icon name="archive" size={16} />
                 <h2 id="batch-package-title">Import packages</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="batch-package-content" bind:this={batchPackageContent}>
@@ -377,27 +384,37 @@
             {/if}
         </div>
 
-        <footer class="dialog-footer batch-package-footer">
-            {#if items.length > 0}
-                <button
-                    class="secondary-button"
-                    type="button"
-                    disabled={busy || selectedCount === 0}
-                    onclick={() => void replanAndRevealSummary()}
-                >
-                    Check conflicts
-                </button>
-            {/if}
-            <p class:error-status={Boolean(error)} class="batch-footer-status" role="status" aria-live="polite">
-                {footerStatus}
+        <footer class="dialog-footer">
+            <p
+                class:error-status={Boolean(error)}
+                class="dialog-footer-status"
+                role="status"
+                title={footerStatus}
+                aria-live="polite"
+            >
+                {completion.message || footerStatus}
             </p>
-            <div class="batch-package-footer-actions">
-                <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
-                {#if items.length > 0}
+            <div class="dialog-footer-actions">
+                <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}
+                    >{completion.phase === 'refresh-failed' ? 'Close' : 'Cancel'}</button
+                >
+                {#if ['unconfirmed', 'checking', 'refresh-failed', 'refreshing'].includes(completion.phase)}
+                    <button
+                        class="primary-button"
+                        type="button"
+                        disabled={completion.busy || (completion.phase === 'unconfirmed' && !completion.canCheck)}
+                        onclick={onrecover}
+                        >{['unconfirmed', 'checking'].includes(completion.phase) ? 'Check status' : 'Refresh'}</button
+                    >
+                {:else if items.length > 0}
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        disabled={busy || selectedCount === 0}
+                        onclick={() => void replanAndRevealSummary()}>Review</button
+                    >
                     <button class="primary-button" type="button" disabled={!canImport} onclick={onconfirm}>
-                        {status === 'applying'
-                            ? 'Importing…'
-                            : `Import ${selectedCount} package${selectedCount === 1 ? '' : 's'}`}
+                        Import
                     </button>
                 {/if}
             </div>
@@ -503,25 +520,7 @@
         margin: 0;
     }
 
-    .batch-package-footer {
-        flex-wrap: wrap;
-        justify-content: flex-start;
-    }
-
-    .batch-footer-status {
-        margin: 0;
-        color: var(--color-text-muted);
-        font-size: var(--dialog-metadata-font-size);
-    }
-
-    .batch-footer-status.error-status {
+    .error-status {
         color: var(--color-danger);
-    }
-
-    .batch-package-footer-actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-left: auto;
     }
 </style>

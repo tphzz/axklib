@@ -14,11 +14,24 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/file_relationship_operations.cpp
                                    src/filesystem.cpp src/filesystem_directory.cpp
                                    src/filesystem_directory_publication.cpp src/filesystem_entry_mutations.cpp
+                                   src/filesystem_edit_operations.cpp
+                                   src/filesystem_export.cpp
+                                   src/filesystem_export_plan.cpp
+                                   src/filesystem_export_jobs.cpp
+                                   src/operation_registry_filesystem.cpp
+                                   src/image_filesystem_reader.cpp
+                                   src/filesystem_edit_jobs.cpp
+                                   src/su700_import_roots.cpp
+                                   src/su700_import_operations.cpp src/image_su700_import.cpp
+                                   src/filesystem_inputs.cpp
+                                   src/image_filesystem_import.cpp
+                                   src/filesystem_import_inspection.cpp
                                    src/filesystem_file_publication.cpp src/filesystem_native.cpp
                                    src/filesystem_native_publication.cpp src/filesystem_paths.cpp
                                    src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
                                    src/image_session_access.cpp src/image_session_allocation_map.cpp src/image_session_audition.cpp
                                    src/image_allocation_map.cpp
+                                   src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
                                    src/image_session_program_generation.cpp
@@ -85,7 +98,13 @@ if(BUILD_TESTING)
                                        tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
-                                       tests/filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
+                                       tests/filesystem_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
+                                       tests/filesystem_edit_operations_test.cpp
+                                       tests/filesystem_fat_edit_test.cpp
+                                       tests/filesystem_inputs_test.cpp
+                                       tests/su700_import_test.cpp
+                                       tests/filesystem_export_test.cpp
+                                       tests/filesystem_export_profiles_test.cpp
                                        tests/midi_operations_test.cpp
                                        tests/operation_registry_test.cpp tests/package_operations_test.cpp
                                        tests/path_reservations_test.cpp

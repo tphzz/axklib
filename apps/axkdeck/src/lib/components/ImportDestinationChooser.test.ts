@@ -42,6 +42,22 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ImportDestinationChooser', () => {
+    it('keeps unsupported destination modes visible and disabled', async () => {
+        const onmode = vi.fn();
+        render(ImportDestinationChooser, {
+            props: props({
+                mode: 'create',
+                unavailableModes: { existing: 'Requires a new volume' },
+                onmode,
+            }),
+        });
+        const existing = screen.getByRole('button', { name: 'Existing' }) as HTMLButtonElement;
+        expect(existing.disabled).toBe(true);
+        expect(existing.title).toBe('Requires a new volume');
+        expect(screen.getByRole('button', { name: 'New' }).getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(existing);
+        expect(onmode).not.toHaveBeenCalled();
+    });
     it('uses one compact destination-volume row with concise mode labels', () => {
         render(ImportDestinationChooser, { props: props() });
 

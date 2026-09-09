@@ -1,4 +1,6 @@
 import type { UnlistenFn } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
+import { dispatchNativeFilesystemDrop } from './nativeFilesystemDropTarget';
 import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview';
 import { audioExtensions, audioMediaType } from './audioImport';
 import type { ClientUploadSource } from './clientUploadSource';
@@ -13,6 +15,8 @@ export interface NativeDropPosition {
 }
 
 interface NativeMediaDropCallbacks {
+    enabled: () => boolean;
+    interfaceZoom: () => number;
     onHover: (paths: readonly string[], position?: NativeDropPosition) => void;
     onDrop: (
         files: ClientUploadSource[],
@@ -57,9 +61,19 @@ async function admittedFiles(paths: readonly string[]): Promise<ClientUploadSour
 }
 
 export async function listenForNativeMediaDrops(callbacks: NativeMediaDropCallbacks): Promise<UnlistenFn> {
+    const logicalCoordinates = await invoke<boolean>('native_drop_coordinates_are_logical');
     let hoveringPaths: readonly string[] = [];
     return getCurrentWebview().onDragDropEvent((event) => {
         const payload: DragDropEvent = event.payload;
+        if (!callbacks.enabled()) {
+            dispatchNativeFilesystemDrop(
+                payload,
+                logicalCoordinates ? callbacks.interfaceZoom() : window.devicePixelRatio,
+            );
+            hoveringPaths = [];
+            callbacks.onHover([]);
+            return;
+        }
         if (payload.type === 'enter') {
             hoveringPaths = payload.paths.filter(supported);
             callbacks.onHover(hoveringPaths, payload.position);
@@ -78,7 +92,11 @@ export async function listenForNativeMediaDrops(callbacks: NativeMediaDropCallba
         hoveringPaths = [];
         callbacks.onHover([], payload.position);
         void admittedFiles(payload.paths)
-            .then((files) => callbacks.onDrop(files, payload.position, payload.paths.length))
-            .catch(callbacks.onError);
+            .then((files) => {
+                if (callbacks.enabled()) return callbacks.onDrop(files, payload.position, payload.paths.length);
+            })
+            .catch((error) => {
+                if (callbacks.enabled()) callbacks.onError(error);
+            });
     });
 }

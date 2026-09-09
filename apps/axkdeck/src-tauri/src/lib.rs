@@ -1,9 +1,19 @@
 mod allocation_inspector;
 mod desktop_preferences;
+mod directory_tar;
+#[cfg(test)]
+mod directory_tar_tests;
 mod file_publication;
 mod local_directory_exports;
 mod local_packages;
 mod local_workspaces;
+mod native_directory;
+mod native_drag;
+mod native_drag_cache;
+#[cfg(test)]
+mod native_drag_cache_tests;
+mod native_drag_platform;
+mod private_directory;
 mod remote_settings;
 mod retained_download;
 mod server_sidecar;
@@ -21,7 +31,7 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 use allocation_inspector::{open_allocation_inspector, save_allocation_map_json};
 use desktop_preferences::{DesktopPreferencesStore, InterfaceScaleMode};
 use local_directory_exports::{
-    DirectorySaveCandidateStore, save_retained_directory_export,
+    DirectorySaveCandidateStore, cancel_retained_directory_export, save_retained_directory_export,
     select_local_directory_export_destination,
 };
 use local_packages::{
@@ -125,9 +135,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{current_build_info, parse_log_level};
-    use crate::local_directory_exports::{
-        checked_tar_path, extract_directory_tar, normalize_directory_destination,
-    };
+    use crate::directory_tar::{ExportControl, checked_tar_path, extract_directory_tar};
+    use crate::local_directory_exports::normalize_directory_destination;
     use crate::local_packages::{
         normalize_package_destination, package_picker_hint, supported_media_extension,
         supported_package_extension, valid_retained_content_path,
@@ -313,8 +322,12 @@ mod tests {
         std::io::Write::write_all(&mut archive, b"<region>\n").expect("write payload");
         std::io::Write::write_all(&mut archive, &[0_u8; 503]).expect("write padding");
         std::io::Write::write_all(&mut archive, &[0_u8; 1024]).expect("write end blocks");
-        extract_directory_tar(&mut archive, &root.join("Instrument"))
-            .expect("extract directory archive");
+        extract_directory_tar(
+            &mut archive,
+            &root.join("Instrument"),
+            &ExportControl::default(),
+        )
+        .expect("extract directory archive");
         assert_eq!(
             std::fs::read_to_string(root.join("Instrument/Instrument.sfz"))
                 .expect("read extracted SFZ"),
@@ -452,6 +465,7 @@ pub fn run() {
         .manage(Mutex::new(WorkspaceCandidateStore::default()))
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
         .manage(Mutex::new(DirectorySaveCandidateStore::default()))
+        .manage(native_drag::state())
         .manage(startup.clone())
         .setup(move |app| {
             setup_startup.enable_logging();
@@ -526,6 +540,13 @@ pub fn run() {
             save_retained_media,
             select_local_directory_export_destination,
             save_retained_directory_export,
+            cancel_retained_directory_export,
+            native_directory::read_native_drop_directory,
+            native_drag::reserve_native_files_drag,
+            native_drag::prepare_native_files_drag,
+            native_drag::cancel_native_files_drag,
+            native_drag::start_native_files_drag,
+            native_directory::native_drop_coordinates_are_logical,
             open_developer_tools,
             diagnostic_log_level,
             desktop_build_info,

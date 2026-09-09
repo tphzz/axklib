@@ -147,7 +147,8 @@ class Sandbox {
                                             const axk::RandomAccessReader &source) const;
     [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;
     [[nodiscard]] Result<void> publish_directory(const DirectoryRef &destination, bool overwrite,
-                                                 const std::filesystem::path &staging) const;
+                                                 const std::filesystem::path &staging,
+                                                 const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_file(const FileRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_directory(const DirectoryRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_output_file(const FileRef &reference, bool overwrite) const;

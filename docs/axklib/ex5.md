@@ -1,9 +1,34 @@
 # EX5 Disk Images
 
-The EX5 disk profile supports read-only filesystem access: directory listing,
+The EX5 disk reader supports directory listing,
 DOS 8.3 file names, allocation chains, exact file bytes and bounded range reads.
-It does not decode EX5 sound or sequence payloads, generate EX5 images, repair
-allocation, or modify existing images. This is not generic FAT16 support.
+It does not decode EX5 sound or sequence payloads, generate EX5 images or repair
+allocation. This is not generic FAT16 geometry.
+The native application raw-files service can journal edits to existing EX5
+images; see [FAT edit preparation and publication](media.md#internal-edit-preparation).
+The Files workspace exposes those raw edits through its shared import review,
+directory creation and confirmed deletion workflows. Write capabilities depend
+on validated filesystem metadata and a writable source; no EX5 payload decoder
+or sampler-object repair is implied.
+
+## Removable-media profile
+
+EX5 removable-media volumes with boot OEM `YAMAHA??` and type label `FAT16`
+are recognized separately as `FatProfile::ex5_removable`. They start at byte
+zero and use ordinary BPB sector-count fields, unlike the hard-disk geometry
+below. Their FAT chains retain the EX5 `0xffff`-only end marker.
+
+The admitted formatter boundary is 65,525 data clusters. This is one cluster
+beyond standard FAT16 classification; the supplied approximately 2 GiB MO
+image has 4,194,176 declared sectors, one reserved sector, two 256-sector
+FATs, a 512-entry root and 64 sectors per cluster. The reader retains strict
+table-size, source-range and chain checks. This narrow EX5 profile does not
+relax standard FAT16 or admit FAT32.
+
+Both EX5 profiles return `MediaKind::ex5_disk` and expose native FAT attributes.
+The removable reader uses DOS 8.3 identities and bounded
+raw file reads. Its recognition does not depend on the image filename or
+the editable volume label.
 
 ## Recognition
 

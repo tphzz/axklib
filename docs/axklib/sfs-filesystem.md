@@ -304,7 +304,41 @@ reads is:
 | `0x0a` | 4 | u32be | First data cluster for direct records, or continuation-list cluster for multi-extent records. |
 | `0x0e` | 4 | u32be | First direct extent cluster count for direct records. |
 | `0x12` | 4 | u32be | First direct extent byte count for direct records. |
-| `0x42` | 6 | bytes | Record metadata and flags. The reader does not require these bytes to resolve payload extents. |
+| `0x3a` | 4 | u32be | Creation-time field; the A4000 profile uses the unavailable value `0xffffffff`. |
+| `0x3e` | 4 | u32be | Modification-time field; the A4000 profile uses the unavailable value `0xffffffff`. |
+| `0x42` | 4 | u32be | Native attribute/type word, exposed as `IndexRecord::attributes`. |
+| `0x46` | 2 | u16be | Filesystem link count, exposed as `IndexRecord::link_count`. |
+
+These are native SFS attributes, not POSIX permissions. The `0x80000000`
+bit marks a live index record. `0x08000000` enables the normal file-write
+path. `0x20000000` selects partition-unit allocation instead of the smaller
+allocation unit. The low bytes can contain the type tags `dir` (`0x646972`)
+or `lnk` (`0x6c6e6b`). Other bits remain unnamed and must be preserved.
+In particular, a directory without the write-enable bit is not equivalent
+to a user-locked directory: directory updates temporarily enable writing.
+The Files view exposes confirmed flags and the complete raw word without
+presenting them as editable Unix-style permissions.
+
+A live allocation-free empty file has zero extent count, cluster count and
+logical size, with the live bit set. It remains an addressable record and
+reads as zero bytes; it must not be mistaken for an unused index slot or
+consume payload clusters. Reserved support files can also use this form.
+Malformed zero-extent records with a nonzero size are not admitted as empty
+files. Adding these records to the inventory does not create sampler objects.
+For live records, the native directory type is authoritative: ordinary file
+bytes that happen to resemble dot-directory entries do not become directories.
+
+The link count counts references to the record, not entries contained in it.
+An ordinary file normally has one link. A directory with one parent has two
+links before child directories are added: its parent's entry and its own `.`.
+Each child's `..` adds another link. The root's `.` and `..` both refer to
+itself. Ordinary file children do not increase their containing directory's
+link count. Existing values must be preserved unless the corresponding links
+are changed; deleting one name must not free data still referenced elsewhere.
+
+The time fields above are not usable wall-clock dates in the A4000 profile.
+Do not interpret the unavailable sentinel as an epoch value or invent a clock
+encoding for other devices. Preserve existing raw values on unrelated edits.
 
 The data-size field is the number of logical bytes to return to the object or
 directory decoder. Allocated storage can be larger because cluster allocation is
@@ -372,7 +406,7 @@ an SFS ID in the same partition.
 
 | Entry offset | Size | Type | Meaning |
 | --- | ---: | --- | --- |
-| `0x00` | 2 | u16be | Entry flags or class. |
+| `0x00` | 2 | u16be | Entry size in bytes: `0x0020` for the supported 32-byte layout. Not an attribute mask. |
 | `0x02` | 2 | u16be | Name length including the NUL byte in current entries. |
 | `0x04` | 4 | u32be | Link ID. For current reads this maps to an SFS ID. |
 | `0x08` | variable | ASCII | Entry name bytes, NUL-terminated or padded. |
@@ -622,6 +656,99 @@ values from small formulas. It does not copy broad binary templates.
 These fields are part of the compatibility envelope for generated images.
 Applications should use the typed writer or JSON manifest rather than
 constructing them manually.
+
+## Raw File Editing
+
+`axklib/filesystem_edit.hpp` provides `write_sfs_file_edits` for raw operations
+within one existing SFS partition. It publishes a new destination image and
+refuses an existing destination, including the source path. The native
+application service and `images.filesystem.edit` job provide journaled in-place
+SFS edits. The Files workspace supports empty directory creation, confirmed
+batch file/recursive-directory deletion, batch Add files, and raw file/directory
+export through the existing workspace or desktop destination pickers. Add files
+reviews source snapshots, editable destination names and per-file Skip/Replace
+choices before one atomic submission. Import from disk adds recursive workspace
+directory contents through the same review, including empty directories and
+directory merging. The source folder itself is not added as a wrapper; symlinks
+and special files are excluded. The same workspace controls support admitted
+[FAT16 roots](media.md#internal-edit-preparation), using their native name and
+attribute constraints. Native drag/drop remains unfinished.
+
+- `CreateFilesystemDirectory` creates an empty directory containing only `.`
+  and `..`. An existing directory is merged; an existing file is a conflict.
+- `PutFilesystemFile` takes an immutable `RandomAccessReader`. Existing files
+  default to Skip; Replace must be explicit. A directory/file collision fails.
+  Replacing one of several names for a file preserves the other names' data.
+- `RemoveFilesystemEntry` removes a file or empty directory. Removing a
+  nonempty directory requires explicit recursive confirmation.
+
+Paths are component vectors relative to the selected partition root. New names
+use 1 to 23 printable ASCII bytes, without slash, backslash, `.` or `..` path
+components. Root/support records and support-directory descendants are protected,
+including access through another name. Filesystem links and allocation must be
+consistent before editing; sampler-object relationships are neither required
+nor repaired. A raw edit can therefore make a sampler assignment unresolved.
+
+Input files and source images must remain immutable while the operation runs;
+applications must coordinate path leases and session revisions. Content hashes
+are rechecked before publication. Image/file copying uses bounded 1-MiB chunks;
+directory buffers are loaded only when needed. The output is reopened and
+validated before atomic create-only publication. Cancellation, failed input
+reads, allocation exhaustion and changed input content discard the candidate.
+Untouched payloads and index records are preserved; edits update the necessary
+directory, extent, reference-count and bitmap fields. Unknown native attributes
+remain preserved rather than being translated into POSIX permissions.
+
+The shared planner first validates a read-only candidate and produces sorted,
+non-overlapping reader-backed patches. Separate-output publication and native
+session edits use this same plan. No complete candidate image or imported file
+needs to be buffered in memory.
+
+`axklib/filesystem_import.hpp` provides `inspect_sfs_file_import` for ordered
+path/type review before supplying file readers. It uses the writer's path rules,
+metadata protection and filesystem admission. Per-row decisions distinguish new
+directories, merged directories, new files, skipped files, replacement files and
+blocking conflicts. It tracks preceding incoming entries and directory aliases
+so their collisions follow the same Skip/Replace behavior as execution. Replacing
+one name of a multiply linked file leaves its other names unchanged. Reviews
+accept up to 10,000 entries and bound cached path/directory entries to 250,000;
+exceeding the cache limit fails the complete review. No imported payloads are
+read, no image bytes change and no disk space is reserved. A successful path
+review does not establish that the subsequent batch fits available allocation.
+
+At the application layer, `apply_filesystem_edits` requires the owning session,
+its expected revision and an exclusive path lease. Its Files admission is
+separate from sampler-object geometry rules. Original and replacement ranges
+are frozen in the normal alteration journal before modifying the source. A
+successful commit refreshes the session and increments its revision. A confirmed
+rollback is checked against the original image hash and refreshes native file
+access metadata without changing the session revision or logical identities.
+Input changes, cancellation and rejected plans remain failures, not partial
+successes.
+
+`ImageSessionManager::resolve_filesystem_edits` resolves opaque Files entry IDs
+against the owning session and expected revision. Create/import destinations
+use path-component vectors relative to an existing directory; delete requests
+identify an existing entry. The resolver uses stored ancestry and a structured
+partition map, not parsed IDs or display paths. A batch must stay within one
+partition. The executor rechecks the revision when acquiring mutation access.
+Directory aliases receive distinct traversal identities; clients must revalidate
+the selected path when refreshing after a revision change.
+
+The job accepts sandbox `FileRef` or completed `UploadRef` inputs and requires
+explicit acknowledgement that raw changes may break sampler relationships.
+Each `PUT_FILE` also requires the exact `expectedSource` snapshot returned by
+the cancellable `filesystem.inputs.inspect` job: source revision, size and
+SHA-256. Inputs are checked before mutation and within journal commit validation;
+changed content or host-file identity requires inspection and review again.
+Snapshots do not pin files or keep uploads alive between review and execution.
+Source-file reservations and upload leases last for the operation. The job is
+an execution primitive, not a persisted review plan or a GUI mutation command.
+
+Host regressions cover empty files, directory growth, fragmented continuation
+extents, alias replacement, native attributes, protected metadata, collisions,
+streaming failures, cancellation, partition isolation and sampler-authored
+payload preservation. These checks are not hardware or release certification.
 
 ## Minimal Read Walkthrough
 

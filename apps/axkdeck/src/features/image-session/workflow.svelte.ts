@@ -1,3 +1,4 @@
+import { collectVolumes, findPartition, findSourceItem } from './sourceTree';
 import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type {
@@ -104,6 +105,7 @@ export class ImageSessionWorkflow {
     extentLayoutRepairAvailable = $state(false);
     allocationInspectionAvailable = $state(false);
     imageFormat = $state<string | null>(null);
+    revision = $state(0);
     integrityDialogOpen = $state(false);
     integrityIssues = $state<ImageValidationIssue[]>([]);
     integrityLoading = $state(false);
@@ -553,6 +555,7 @@ export class ImageSessionWorkflow {
         this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
         this.allocationInspectionAvailable = opened.allocationInspectionAvailable;
         this.imageFormat = opened.format ?? null;
+        this.revision = opened.revision;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -646,6 +649,7 @@ export class ImageSessionWorkflow {
         this.extentLayoutRepairAvailable = false;
         this.allocationInspectionAvailable = false;
         this.imageFormat = null;
+        this.revision = 0;
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;
@@ -663,36 +667,4 @@ function sameImageSource(left: ImageLocation, right: ImageLocation): boolean {
 
 function noImageSource(): DiskTreeItem {
     return { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
-}
-
-function collectVolumes(items: readonly DiskTreeItem[]): DiskTreeItem[] {
-    const result: DiskTreeItem[] = [];
-    for (const item of items) {
-        if (item.kind === 'volume') result.push(item);
-        result.push(...collectVolumes(item.children ?? []));
-    }
-    return result;
-}
-
-function findPartition(items: readonly DiskTreeItem[], partitionIndex: number): DiskTreeItem | null {
-    for (const item of items) {
-        if (item.kind === 'partition' && item.partitionIndex === partitionIndex) return item;
-        const nested = findPartition(item.children ?? [], partitionIndex);
-        if (nested) return nested;
-    }
-    return null;
-}
-
-function findSourceItem(items: DiskTreeItem[], partitionIndex: number, volumeName?: string): DiskTreeItem | null {
-    for (const item of items) {
-        if (
-            item.partitionIndex === partitionIndex &&
-            (volumeName === undefined ? item.kind === 'partition' : item.kind === 'volume' && item.name === volumeName)
-        ) {
-            return item;
-        }
-        const nested = findSourceItem(item.children ?? [], partitionIndex, volumeName);
-        if (nested) return nested;
-    }
-    return null;
 }

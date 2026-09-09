@@ -200,6 +200,10 @@ std::optional<ParsedRecord> parse_record_header(std::span<const std::byte> bytes
     const auto reserved = reader.be16(2);
     const auto cluster_count = reader.be16(4);
     const auto data_size = reader.be32(6);
+    if (extent_count && reserved && cluster_count && data_size && *extent_count == 0U && *reserved == 0U &&
+        *cluster_count == 0U && *data_size == 0U && (reader.be32(0x42U).value() & 0x80000000U) != 0U) {
+        return ParsedRecord{};
+    }
     if (!extent_count || !reserved || !cluster_count || !data_size || *extent_count == 0 || *reserved != 0 ||
         *cluster_count == 0 || *data_size == 0) {
         return std::nullopt;
@@ -414,7 +418,8 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             const auto relative = block + slot * index_record_size;
             const auto bytes =
                 std::span<const std::byte>{*index_data}.subspan(relative, static_cast<std::size_t>(index_record_size));
-            if (std::all_of(bytes.begin(), bytes.begin() + 4, [](std::byte value) { return value == std::byte{}; })) {
+            if (std::all_of(bytes.begin(), bytes.begin() + 4, [](std::byte value) { return value == std::byte{}; }) &&
+                (ByteReader{bytes}.be32(0x42U).value() & 0x80000000U) == 0U) {
                 continue;
             }
             const auto parsed = parse_record_header(bytes);
@@ -431,6 +436,8 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             record.extent_count = parsed->extent_count;
             record.cluster_count = parsed->cluster_count;
             record.data_size = parsed->data_size;
+            record.attributes = ByteReader{bytes}.be32(0x42).value();
+            record.link_count = ByteReader{bytes}.be16(0x46).value();
             Result<std::vector<Extent>> extents = std::unexpected{make_error(
                 ErrorCode::allocation_invalid_extent, ErrorCategory::allocation, "extent parser was not selected")};
             if (record.extent_count <= direct_extent_limit) {

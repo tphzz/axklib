@@ -78,7 +78,8 @@ ContentTree ex5_content_tree(const FatImage &image) {
         node.children = std::move(children[directory->path]);
         children[parent(directory->path)].push_back(std::move(node));
     }
-    ContentNode root{"ex5-root", "directory", "EX5 disk"};
+    const bool ex5 = image.geometry().profile != FatProfile::fat16;
+    ContentNode root{ex5 ? "ex5-root" : "fat16-root", "directory", ex5 ? "EX5 disk" : "FAT16 volume"};
     root.children = std::move(children[""]);
     ContentTree result;
     result.source_path = image.source_name();

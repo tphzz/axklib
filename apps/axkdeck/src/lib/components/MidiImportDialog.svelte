@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
     import { onDestroy, untrack } from 'svelte';
     import { validSamplerName } from '../audioImport';
     import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
@@ -38,7 +39,11 @@
         ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
         ondestinationpartition: (partitionIndex: number) => void;
         ondestinationname: (volumeName: string) => void;
-        oncommit: (items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy) => Promise<void>;
+        completion: ImportCompletion;
+        oncommit: (
+            items: SequenceImportItem[],
+            systemExclusivePolicy: SequenceSystemExclusivePolicy,
+        ) => Promise<boolean>;
         oncancel: () => void;
     }
 
@@ -73,10 +78,13 @@
         ondestinationpartition,
         ondestinationname,
         oncommit,
+        completion,
         oncancel,
     }: Props = $props();
     let rows = $state<Row[]>([]);
-    let busy = $state(false);
+    let localBusy = $state(false);
+    const busy = $derived(localBusy || completion.locked);
+    const closeDisabled = $derived(localBusy || completion.busy || completion.phase === 'unconfirmed');
     let generalError = $state('');
     let includeSystemExclusive = $state(false);
     let nextRowId = 0;
@@ -193,9 +201,9 @@
     }
 
     async function cancel(): Promise<void> {
-        if (busy) return;
+        if (closeDisabled) return;
         abortController.abort();
-        busy = true;
+        localBusy = true;
         await stagingPromise;
         await releaseUploads();
         oncancel();
@@ -211,18 +219,29 @@
 
     async function commit(): Promise<void> {
         if (!ready || busy) return;
-        busy = true;
+        localBusy = true;
         generalError = '';
         try {
-            await oncommit(
+            const completed = await oncommit(
                 rows.map((row) => ({ source: row.source!, sequenceName: row.sequenceName })),
                 includeSystemExclusive ? 'preserve' : 'exclude',
             );
-            await releaseUploads();
-            oncancel();
+            if (completed || completion.phase === 'warnings') {
+                await releaseUploads();
+                if (completed) oncancel();
+            }
         } catch (error) {
             generalError = error instanceof Error ? error.message : String(error);
-            busy = false;
+        } finally {
+            localBusy = false;
+        }
+    }
+
+    async function recover(): Promise<void> {
+        const completed = await completion.recover();
+        if (completed || completion.phase === 'warnings') {
+            await releaseUploads();
+            if (completed) oncancel();
         }
     }
 
@@ -259,7 +278,13 @@
     >
         <header class="dialog-header">
             <h2>Import MIDI</h2>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={() => void cancel()}>
+            <button
+                class="icon-button"
+                type="button"
+                aria-label="Close"
+                disabled={closeDisabled}
+                onclick={() => void cancel()}
+            >
                 <Icon name="close" size={15} />
             </button>
         </header>
@@ -297,44 +322,46 @@
                         <span role="columnheader">Status</span>
                         <span aria-hidden="true"></span>
                     </div>
-                    {#each rows as row, index (row.id)}
-                        <div class="midi-import-row" role="row">
-                            <strong title={row.fileName}>{row.fileName}</strong>
-                            <input
-                                aria-label={`Sequence name for ${row.fileName}`}
-                                data-dialog-initial-focus={index === 0 ? 'select' : undefined}
-                                value={row.sequenceName}
-                                maxlength="16"
-                                disabled={busy}
-                                oninput={(event) => replaceRow(row.id, { sequenceName: event.currentTarget.value })}
-                            />
-                            <span class:error={validationErrors[index]}>
-                                {#if row.status === 'uploading'}
-                                    Uploading {Math.round(row.progress * 100)}%
-                                {:else if row.status === 'inspecting'}
-                                    Inspecting
-                                {:else if row.status === 'ready'}
-                                    {inspectionSummary(row)}
-                                {:else if row.status === 'failed'}
-                                    {row.error}
-                                {:else}
-                                    Preparing
-                                {/if}
-                            </span>
-                            <button
-                                class="icon-button"
-                                type="button"
-                                aria-label={`Remove ${row.fileName}`}
-                                disabled={busy || !['ready', 'failed'].includes(row.status)}
-                                onclick={() => void removeRow(row)}
-                            >
-                                <Icon name="trash" size={13} />
-                            </button>
-                        </div>
-                        {#if validationErrors[index] && row.status !== 'failed'}
-                            <p class="midi-row-error" role="alert">{validationErrors[index]}</p>
-                        {/if}
-                    {/each}
+                    <div class="midi-import-rows" role="rowgroup">
+                        {#each rows as row, index (row.id)}
+                            <div class="midi-import-row" role="row">
+                                <strong title={row.fileName}>{row.fileName}</strong>
+                                <input
+                                    aria-label={`Sequence name for ${row.fileName}`}
+                                    data-dialog-initial-focus={index === 0 ? 'select' : undefined}
+                                    value={row.sequenceName}
+                                    maxlength="16"
+                                    disabled={busy}
+                                    oninput={(event) => replaceRow(row.id, { sequenceName: event.currentTarget.value })}
+                                />
+                                <span class:error={validationErrors[index]}>
+                                    {#if row.status === 'uploading'}
+                                        Uploading {Math.round(row.progress * 100)}%
+                                    {:else if row.status === 'inspecting'}
+                                        Inspecting
+                                    {:else if row.status === 'ready'}
+                                        {inspectionSummary(row)}
+                                    {:else if row.status === 'failed'}
+                                        {row.error}
+                                    {:else}
+                                        Preparing
+                                    {/if}
+                                </span>
+                                <button
+                                    class="icon-button"
+                                    type="button"
+                                    aria-label={`Remove ${row.fileName}`}
+                                    disabled={busy || !['ready', 'failed'].includes(row.status)}
+                                    onclick={() => void removeRow(row)}
+                                >
+                                    <Icon name="trash" size={13} />
+                                </button>
+                            </div>
+                            {#if validationErrors[index] && row.status !== 'failed'}
+                                <p class="midi-row-error" role="alert">{validationErrors[index]}</p>
+                            {/if}
+                        {/each}
+                    </div>
                 </div>
                 <section class="system-exclusive-options" aria-label="System Exclusive import">
                     <label>
@@ -369,12 +396,38 @@
                 </section>
             {/if}
             {#if generalError}<p class="dialog-error" role="alert">{generalError}</p>{/if}
+            {#if completion.warnings.length}
+                <div class="completion-warnings dialog-warning" role="region" aria-label="Import warnings">
+                    {#each completion.warnings as warning}<p>{warning}</p>{/each}
+                </div>
+            {/if}
         </div>
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={busy} onclick={() => void cancel()}>Cancel</button>
-            {#if files.length > 0}
+            <span class="dialog-footer-status" role="status" title={completion.message || generalError}
+                >{completion.message ||
+                    generalError ||
+                    (ready ? 'Ready to import' : files.length ? 'Checking MIDI files' : 'Choose MIDI files')}</span
+            >
+            <button class="secondary-button" type="button" disabled={closeDisabled} onclick={() => void cancel()}
+                >{completion.phase === 'warnings'
+                    ? 'Done'
+                    : completion.phase === 'refresh-failed'
+                      ? 'Close'
+                      : 'Cancel'}</button
+            >
+            {#if completion.phase === 'refresh-failed' || completion.phase === 'unconfirmed' || completion.phase === 'checking' || completion.phase === 'refreshing'}
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={completion.busy || (completion.phase === 'unconfirmed' && !completion.canCheck)}
+                    onclick={() => void recover()}
+                    >{completion.phase === 'refresh-failed' || completion.phase === 'refreshing'
+                        ? 'Refresh'
+                        : 'Check status'}</button
+                >
+            {:else if files.length > 0 && completion.phase !== 'warnings'}
                 <button class="primary-button" type="button" disabled={!ready || busy} onclick={() => void commit()}>
-                    {busy ? 'Importing' : `Import ${rows.length} ${rows.length === 1 ? 'file' : 'files'}`}
+                    Import
                 </button>
             {/if}
         </footer>
@@ -382,6 +435,16 @@
 </div>
 
 <style>
+    .completion-warnings {
+        flex: none;
+        max-height: 96px;
+        overflow: auto;
+        padding-right: var(--overlay-scrollbar-clearance);
+        scrollbar-gutter: stable;
+    }
+    .completion-warnings p {
+        margin: 0 0 4px;
+    }
     .midi-import-dialog {
         width: min(760px, calc(100vw - 32px));
         max-width: none;
@@ -396,17 +459,25 @@
     .midi-import-body {
         flex: 1 1 auto;
         min-height: 0;
-        overflow: auto;
+        overflow: hidden;
         display: flex;
         flex-direction: column;
         padding: 10px 12px 12px;
         gap: 10px;
     }
     .midi-import-list {
-        display: grid;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
         border: 1px solid var(--color-border);
         border-radius: 5px;
         overflow: hidden;
+    }
+    .midi-import-rows {
+        min-height: 0;
+        overflow: auto;
+        padding-right: var(--overlay-scrollbar-clearance);
+        scrollbar-gutter: stable;
     }
     .midi-import-head,
     .midi-import-row {
@@ -418,6 +489,8 @@
         padding: 4px 8px;
     }
     .midi-import-head {
+        flex: none;
+        padding-right: calc(8px + var(--overlay-scrollbar-clearance));
         color: var(--color-text-muted);
         border-bottom: 1px solid var(--color-border);
         font-size: var(--dialog-table-header-font-size);
@@ -459,6 +532,7 @@
         font-size: var(--dialog-metadata-font-size);
     }
     .system-exclusive-options {
+        flex: none;
         display: grid;
         gap: 3px;
         padding: 8px;

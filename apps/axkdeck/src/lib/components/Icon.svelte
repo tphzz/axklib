@@ -8,6 +8,7 @@
         | 'copy'
         | 'disc'
         | 'eject'
+        | 'file'
         | 'file-plus'
         | 'folder'
         | 'folder-open'
@@ -79,8 +80,9 @@
         <path d="M3 7.5V6h6l2 3h9l1 2" /><path d="m3 9 2 10h14l2-8H5" />
     {:else if name === 'folder-plus'}
         <path d="M3 7.5V19h18V8H11l-2-3H3v2.5Z" /><path d="M12 11v5M9.5 13.5h5" />
-    {:else if name === 'file-plus'}
-        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5M12 11v6M9 14h6" />
+    {:else if name === 'file' || name === 'file-plus'}
+        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5" />
+        {#if name === 'file-plus'}<path d="M12 11v6M9 14h6" />{/if}
     {:else if name === 'hard-drive'}
         <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 13h18" /><circle cx="17" cy="16" r="1" />
     {:else if name === 'home'}

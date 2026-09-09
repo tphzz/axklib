@@ -1,4 +1,6 @@
 import { HttpImageTransport } from './httpTransport';
+import type { FilesystemPage } from './filesystem';
+import type { FilesystemExportInspection } from './filesystemExport';
 import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
@@ -36,6 +38,27 @@ import type {
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    startSu700Import(): Promise<JobState> {
+        return Promise.reject(new Error('No server connection'));
+    }
+    startFilesystemImportInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startFilesystemInputInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    inspectFilesystemExport(): Promise<FilesystemExportInspection> {
+        return this.unavailable();
+    }
+    startFilesystemExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    filesystem(): Promise<FilesystemPage> {
+        return this.unavailable();
+    }
+    startFilesystemEdits(): Promise<JobState> {
+        return this.unavailable();
+    }
     readonly storageMode = 'unavailable' as const;
     readonly connectionMode = 'unavailable' as const;
     readonly supportsClientUploads = false;

@@ -11,6 +11,329 @@ The complete contract is available in the rendered
 
 ## Storage Model
 
+### Floppy Session Identity
+
+An image session's `floppySet` includes ordinary standalone Yamaha disks as
+well as multi-disk sets. `ORDINARY` denotes the ordinary `A3000.SYM` marker;
+it is distinct from `NONE`, `CONTINUATION`, `FINAL` and `INVALID`.
+A member's `index` preserves a parsed two-digit catalog ordinal (1-99), or
+is zero when its label contains no valid ordinal. Zero does not mean a missing
+disk, and clients must not replace it with an invented disk number.
+`nextRequiredIndex` reports the next ordinal indicated by a continuation
+marker. These metadata ranges do not change the 32-member attachment limit.
+
+### Files Inside An Image
+
+`GET /api/v1/images/{imageId}/filesystem` lists the stored filesystem entries
+inside an owned image session. It is separate from host workspace browsing and
+the semantic `/content` tree. Supported containers are SFS, FAT12, standard and EX5 FAT16,
+ISO9660 and physical members of a floppy set. Archives and standalone object
+sources report `available: false`.
+
+Every request supplies `expectedRevision`. Without a selector the response lists
+roots. `parentId` lists immediate children; `rootId` with `query` searches names
+throughout that root, including unloaded directories. `entryId`, `objectId` and
+`contentScopeId` support identity-based lookup. Choose only one selector. Results
+use `offset`, `limit` and `totalCount`; the normal server page limit applies.
+
+Entries contain exact stored names, a root-relative path, parent/ancestor IDs,
+kind, optional logical file size, direct child count and storage details.
+`rawAttributes` retains the native SFS or FAT attribute value; `attributes`
+lists confirmed native flags without translating them into POSIX permissions.
+`filesystemMetadata` identifies reserved SFS support entries. Those entries
+remain visible and selectable even when their empty reserved index target is
+absent from the payload-bearing inventory, without an unresolved-target warning.
+`objectId` is present only for a unique mapping to a decoded object. Entry IDs
+are opaque: clients must not derive record numbers or links from them. A changed
+revision invalidates the cached index and clients must revalidate selections.
+SFS traversal bounds cycles and depth, and all indexes enforce an entry-count
+limit and an estimated metadata-memory budget. Unresolved directory targets are exposed with an issue and unknown size,
+not interpreted as an empty supported object. This API does not authorize any
+filesystem mutation or raw file export.
+
+Every page includes `rootCapabilities`, keyed by the opaque root ID. The
+`createDirectory`, `putFile` and `deleteEntry` flags report supported raw writes
+for that root, independently of device-object editing. Currently these are
+enabled for SFS, standard plain/primary-MBR FAT16 and EX5 HD/removable roots
+that pass the writer's filesystem admission checks, with a writable file source
+and transaction path reservations available. Other profiles remain read-only.
+Unsafe FAT metadata also leaves the root read-only without hiding readable files.
+`maximumNameBytes`, `namePattern` and `nameHint`
+describe new entry names for the frontend; actual writes validate names again.
+Capabilities are not permission grants or conflict inspections: a particular
+entry may still be protected, and revisions and current write conditions are
+rechecked at execution. Clients must submit the revision reviewed by the user,
+not silently replace it with a newer heartbeat revision.
+
+`POST /api/v1/image-filesystem-edits` submits an idempotent raw filesystem mutation job.
+The request supplies `imageId`, `expectedRevision`,
+`acknowledgeDeviceRelationships: true` and an ordered `edits` array:
+
+- `CREATE_DIRECTORY`: `parentEntryId` and a `relativePath` component array.
+- `PUT_FILE`: the same destination, `source` containing exactly one `fileRef`
+  or `uploadRef`, a required `expectedSource` snapshot from input inspection,
+  and optional `conflict` (`SKIP` by default or `REPLACE`).
+- `DELETE`: `entryId` and explicit `recursive`. Nonempty directories require
+  `recursive: true`; partition roots and structural metadata remain protected.
+
+Entry IDs are resolved inside the session, not interpreted by clients. All
+changes must target one partition. Jobs reserve host input files and retain
+upload leases; the session owns the exclusive image lease during its journaled
+transaction. Stale revisions, invalid paths and failed transactions do not
+partially apply a batch. The result reports the new revision and the warning
+that raw filesystem changes do not repair sampler relationships. Axkdeck exposes
+New directory and confirmed file/recursive directory batch deletion through this
+job. A selected directory covers selected descendants; the GUI submits only
+top-level selected targets after showing the complete selection for review.
+Axkdeck also exposes batch Add files through the Files toolbar and the entry
+context menu's Import submenu. A selected file uses its parent directory; with
+no selection the active partition/root is the destination. The review captures
+that destination and image revision before choosing sources. Partition and
+entry Import submenus also expose Import from disk for recursive workspace
+directory contents. All these controls use the active root's capabilities and
+name constraints. FAT destinations require explicitly reviewed uppercase ASCII
+8.3 names; no aliases are synthesized from incompatible source names.
+
+Dropping raw files or directories onto a Files directory row
+targets that directory; empty tree space targets the active root. The pointer
+target takes precedence over object selection. File rows, metadata entries,
+read-only roots and busy reviews do not accept drops. A dropped folder retains
+its own name and empty children, unlike the contents-only directory picker.
+The shared review still requires confirmation before any image write.
+
+Browser acquisition uses the [File and Directory Entries API](https://wicg.github.io/entries-api/).
+Handles are captured synchronously and directory batches are read until exhausted.
+The scan is bounded to 10,000 entries, 63 path components, 4,194,304 serialized
+path characters and 8 GiB of aggregate payload. Each file fits a 32-bit size.
+Read errors, duplicate/cyclic paths and cancellation reject the complete scan;
+no partial scan is uploaded. Uploads arriving after dismissal are released.
+Native desktop drop-in uses the same review and limits. The desktop reader
+checks the drop-granted filesystem scope and stops directory enumeration at the
+remaining entry budget. Links, reparse points and special files are rejected.
+File contents are read lazily in bounded chunks, with size, available identity
+and modification-time checks before and after reading; changed sources fail the
+import rather than committing a partial tree. The single native drop listener
+routes raw Files paths before Device-specific extension filtering. Pointer
+targeting accounts for the platform's native coordinate units and interface zoom.
+Desktop Files rows also support copy-only native drag-out for the selected
+files/directories. Ordinary clicks do not export. A deliberate drag captures
+the current revision and selection, uses the existing download export job and
+stages its exact files before handing them to the OS. Releasing before
+preparation finishes cancels the handoff. Changed images, protected selections
+and exports needing filename/omission review do not silently proceed; the latter
+use the ordinary Export review instead. No image entries are moved or deleted.
+
+The desktop cache uses opaque, single-use preparation tickets, owner-only
+directories and cross-process leases. It reserves both archive and extraction
+bytes against an 8 GiB logical-byte quota and a 16-export limit; entry counts
+are bounded independently. Unused tickets expire after ten minutes. Handed-off
+files remain available for 24 hours, including across application restarts,
+because the receiving application may read paths after the drop completes.
+Cleanup runs while the app is open and before new reservations; live downloads
+and native drags retain leases. A full cache rejects new drag exports rather
+than removing recently handed-off files. Export to disk remains available.
+Linux uses GTK URI-list copy negotiation with escaped paths and a data provider
+retained through drag-end. Windows/macOS use the native `drag` adapter in copy
+mode. Linux acceptance covers consecutive directory, single-file and
+multiselection drags, early release and Escape cancellation at 100% and 150%
+interface scale, including delayed receiver reads. The GTK adapter completes
+the initiating widget's pointer sequence after native handoff, so the next drag
+does not consume an extra click. Windows/macOS integration is not yet OS-verified.
+
+Desktop retained-directory saves download and extract through one bounded
+staging path. The archive and declared payload limits are each 4 GiB, with at
+most 100,000 archive entries and 1 MiB transfer buffers. Extraction accepts only
+regular files and directories with safe relative paths; links, duplicate paths,
+malformed archives and nonzero data after the archive terminator are rejected.
+Failure removes the owned staging file and directory without publishing a
+partial destination. Native folder publication is atomic and no-replace:
+a file, directory or symbolic link created at the chosen destination during
+download or extraction is preserved, and the export reports a conflict.
+Shared staging cancellation is checked between reads and
+writes and before publication; it does not interrupt a blocked network read.
+The Files export dialog exposes this cancellation during local saving through
+the picker-issued destination identity. It waits for staging cleanup before
+allowing a retry or close. Cancellation arriving after atomic publication does
+not undo a completed export. Other directory-export dialogs do not yet expose
+this local-save cancellation control.
+
+The native `apply_filesystem_edits` application service also supports standard
+plain/primary-MBR FAT16 and the separate EX5 HD/removable profiles. This is raw
+filesystem access, not sampler-object mutation. It uses the same exclusive path
+lease, reviewed session revision, streamed journal ranges, input revalidation,
+rollback and recovery as SFS. Successful commits refresh the session once;
+cancelled or rejected commits that roll back remain retryable at the original
+revision. A quarantined interrupted transaction must be recovered before opening
+a new session. FAT entry-ID jobs, import review and advertised write capabilities
+use this service. Native partition arguments
+use zero-based volume ordinals, not original one-based MBR slot numbers.
+
+`POST /api/v1/filesystem-input-inspections` starts a cancellable read job for
+1-10,000 raw `inputs`, each containing one `fileRef` or completed `uploadRef`.
+No image session or sampler-object decode is needed. The result preserves input
+order as `inputs: [{source, snapshot}]`, where the snapshot contains `revision`,
+`sizeBytes` and lowercase hexadecimal `sha256`. Hashing uses bounded reads;
+empty and extensionless inputs are valid. Each file must fit the filesystem's
+32-bit size field. Host sources require shared path reservations and uploads
+are owner-scoped.
+
+Submit that exact reviewed snapshot as `expectedSource` on every `PUT_FILE`.
+Execution verifies file identity, size and content before mutation and again
+during journal commit validation. A different file with identical bytes still
+requires a new review. Changes during commit trigger rollback; changes since
+review fail with `filesystem_input_changed`. There is no implicit snapshot
+refresh or compatibility path for requests without a snapshot. Upload expiry
+or deletion requires acquiring and inspecting the input again.
+
+### SU700 Floppy Import
+
+Filesystem root capabilities advertise `supportedImports: ["SU700_FLOPPY"]`
+only for writable SFS roots containing a recognized existing SU700 volume.
+Empty or unidentified SFS roots do not imply SU700 support.
+
+`POST /api/v1/su700-import-inspections` starts the cancellable
+`images.su700.import.inspect` job. Supply a file/upload `source`, nullable
+`destination`, and nullable `includedExtras`. A destination specifies
+`imageId`, `expectedRevision`, `rootEntryId`, and a new `volumeName` of 1-16
+printable ASCII characters without path separators or edge spaces.
+Source-only inspection returns `COMPLETE`, `UNRELATED`, or `UNSUPPORTED`,
+the source snapshot, song/sample counts, and destination-relative file paths.
+Destination inspection additionally checks collisions and available allocation
+space without writing. `includedExtras: null` includes all unreferenced files;
+an explicit array selects their source paths.
+
+`POST /api/v1/su700-imports` starts `images.su700.import` with the same fields,
+a non-null destination, and the reviewed `expectedSource` snapshot. Execution
+revalidates source identity/content and destination revision, then uses one
+atomic filesystem transaction. Submit a stable idempotency key; recover an
+uncertain submission using that same key rather than issuing another import.
+
+Only complete, flat FAT12 floppy images are supported. Control bytes, payloads,
+and stored eight-byte basenames are preserved, including spaces before `.SSQ`
+and `.SSP`. Songs go to `SUSQ`, samples to `SUSP`, and control/selected extra
+files to the new volume root. Missing or incomplete payloads and ambiguous
+references fail before mutation. Existing volumes are never merged/replaced;
+multi-disk reconstruction and SU700 image creation are not supported.
+
+### Generic Filesystem Import
+
+`POST /api/v1/image-filesystem-import-inspections` starts the cancellable
+`images.filesystem.import.inspect` read job for an admitted SFS or FAT16 destination. Supply
+`imageId`, `expectedRevision`, `parentEntryId` and 1-10,000 ordered `entries`.
+Each entry contains `relativePath` components, `directory`, `sizeBytes` and
+optional `conflict` (`SKIP` or `REPLACE`). Directories have zero size and must
+precede their children. The destination is resolved through the owned session;
+stale image revisions and protected destinations are rejected.
+
+The result retains the destination/revision and entry order. Each entry adds
+`action`, nullable `existingSizeBytes` and `issue`; `conflictCount` counts
+blocking rows. Actions are `CREATE_DIRECTORY`, `MERGE_DIRECTORY`, `CREATE_FILE`,
+`SKIP_FILE`, `REPLACE_FILE` and `CONFLICT`. Existing directories merge;
+file/directory collisions remain blocking. File collisions, including an earlier
+incoming entry at the same path, follow the requested Skip/Replace policy.
+Earlier incoming files are included in the reported existing size and identified
+in the issue text. Directory aliases share collision state; replacing a file
+alias does not replace its other names.
+
+This is path/type review, not an allocation reservation or source inspection.
+The job reads filesystem metadata without importing payloads or mutating the
+image. It bounds cached directory/path entries to 250,000 and fails rather than
+returning a partial review when that limit is exceeded. Execution still requires
+the reviewed input snapshots, validates allocation and rechecks the image revision.
+The GUI session-bound import driver exposes both review jobs and their
+observation/cancellation paths. Add files uses the shared batch storage picker
+or local file chooser with bounded sequential `FILE` uploads, including empty
+and extensionless files. Filename and Skip/Replace changes invalidate the
+destination review, and confirmation submits the complete ordered batch with
+its exact input snapshots. At most 100 editable rows are rendered per review
+page without truncating the batch. Blocking conflicts and all-skipped batches
+cannot submit. A known job with an unconfirmed outcome is observed, never
+resubmitted; failed writes require refresh and committed writes whose refresh
+failed only retry refresh. Temporary uploads are released after closing or
+known completion. An unconfirmed write retains its uploads until its outcome
+is known or they expire, so closing the dialog cannot remove pending inputs.
+
+Import from disk uses the shared readable-directory picker and traverses its
+contents through paginated sandbox listings. It imports regular files and
+directories, including empty child directories, without wrapping them in the
+selected source folder's name. Symlinks, reparse points, special files and names
+not representable by the sandbox listing are excluded. The review is a captured
+selection, not a live directory synchronization; every included file still
+requires its independently checked source snapshot. An empty selection cannot
+submit. Failed traversal never returns a partial selection.
+
+Traversal is iterative and bounded to 10,000 entries, fewer than 1,024 path
+components and 4,194,304 cumulative source/destination path characters. It checks
+page identities, immediate-child paths, duplicate entries and cursor progress;
+cancellation or image navigation stops acquisition. Directory rows merge by
+default. Renaming a directory updates only its own descendants, including when
+several source directories are explicitly renamed to the same destination.
+All entries are reviewed and submitted together, with parents before children.
+Client-side folder drops use the separate bounded browser/native readers
+described above. Native OS directory-picker acceptance remains a separate check
+from this workspace-directory workflow.
+
+The native application service in `axklib/application/filesystem_export.hpp`
+provides raw export inspection and execution independently of object extraction.
+It accepts owned image-session entry IDs and a reviewed revision. Selected
+directories include their descendants and empty directories; selecting an
+ancestor and its child exports that subtree once. Structural metadata is omitted
+from a subtree with a notice and cannot be selected directly for export.
+
+Inspection reports stored source paths, output path components, sizes and
+host-name changes. Invalid host-name characters are replaced, Windows device
+names are escaped, and ASCII case-insensitive output collisions are rejected.
+Execution streams exact file bytes in at most 1 MiB chunks through structured
+SFS, FAT or ISO locators, without interpreting sampler objects. It holds the
+session read lease and destination reservation, verifies source identity and
+content before publication, and uses the sandbox publisher for a new or empty
+destination. Cancellation or a failure before publication leaves that destination
+unchanged and removes temporary output. The shared publisher checks cancellation
+between copy chunks and before committing the destination.
+
+`POST /api/v1/image-filesystem-export-inspections` accepts `imageId`,
+`expectedRevision`, `entryIds` and `layout` and returns `rootDirectory`, the expanded
+entries, notices and `totalBytes`. `layout` is required:
+
+- `EXPORT_FOLDER`: after removing duplicate and descendant selections, a single
+  directory or partition becomes the destination root. `rootDirectory` describes
+  that root; `entries` contains only its descendants, with paths relative to the
+  chosen destination. An empty root is exportable even when `entries` is empty.
+  Single files and multiple independent selections retain their names inside the
+  destination, with `rootDirectory: null`.
+- `SELECTED_ENTRIES`: preserve selected entry names as top-level paths, including
+  selected directory names. `rootDirectory` is null. Native drag-out uses this
+  layout so the operating system receives the selected folders themselves.
+
+For example, exporting `AMENBOSH` to a folder named `Renamed` writes
+`Renamed/SONGCONT.DAT`, not `Renamed/AMENBOSH/SONGCONT.DAT`. The preview tree shows
+this same structure. Native and server-workspace destinations share this policy.
+
+`POST /api/v1/image-filesystem-exports` adds a `destination` and
+submits an idempotent export job. Its result includes the same export summary:
+
+- `WORKSPACE`: `output` is a sandbox `DirectoryRef`. The job reserves the entire
+  destination exclusively and publishes a new/empty directory.
+- `DOWNLOAD`: `directoryName` supplies the retained TAR basename. The existing
+  download store enforces ownership, retention, archive quotas and its TAR path
+  limits. `download.contentPath` provides the authenticated download endpoint.
+
+Both routes use the same verified staging service. Download creation observes
+job cancellation while building the archive. An image revision change requires
+a new inspection rather than silently changing the reviewed revision. Export
+does not modify the image or repair sampler relationships.
+
+The Files review uses a bounded, expandable tree with paged rows and a fixed
+header and footer. Expansion does not change the export selection. Clean exports
+close after publication and archive cleanup, reporting success in the workspace
+status. Notices and cleanup warnings remain visible with Done; failed exports
+retain their recovery actions.
+
+The GUI destination review supports workspace and managed-local destinations;
+desktop drag exports use the same retained-download route. Filesystem root flags
+describe mutation capabilities; operation availability is exposed through
+the existing operation registry.
+
 Disk images and durable outputs belong to the server filesystem. The server
 persists named workspaces selected by an authenticated operator. API requests
 identify entries with a root ID and a normalized relative path; they never send
@@ -66,8 +389,11 @@ workspace. Workspace directories must not be identical, ancestors, or
 descendants of one another, because each root is an independent reservation and
 sandbox boundary.
 
-Temporary uploads are only for browser-selected audio, portable package, and
-JSON manifest files. A client creates an upload, streams bounded chunks, and
+Temporary uploads support browser-selected audio, MIDI, portable packages,
+JSON manifests, supported media inputs and raw Files inputs. Raw inputs use
+kind `FILE` with `application/octet-stream`; arbitrary extensions and empty
+files are accepted. Typed audio/media/package upload restrictions remain in
+force. A client creates an upload, streams bounded chunks, and
 completes it before using its `UploadRef`. An operation can consume an upload
 only where its request schema explicitly permits one. Source disk images use a
 server `FileRef`, not an upload.
@@ -176,14 +502,21 @@ The journal stores both the original and replacement bytes for every changed
 extent, so its exact size is approximately twice the changed payload plus
 metadata. `maximumAlterationJournalBytes` defaults to 4,362,076,160 bytes,
 which covers a complete rewrite at the supported 2 GiB image boundary plus
-64 MiB of metadata, and may be configured up to 8 GiB. Journal publication and
-recovery use bounded streaming I/O; the configured limit is a storage and
-admission bound, not a request to allocate that amount of memory. Before
+64 MiB of metadata, and may be configured up to 8 GiB. Journal publication,
+application and recovery use bounded streaming I/O; the configured limit is a
+storage and admission bound, not a request to allocate that amount of memory. Before
 mutating an image, the server verifies both the exact encoded journal size and
 available space in the state directory. Capacity failures leave the target
 image unchanged and report the required and configured or available byte
 counts. The active limit is reported by
 `GET /api/v1/system/capabilities`.
+
+Journal patches accept owned metadata buffers or shared reader-backed ranges.
+All ranges are frozen on disk before mutation; apply and rollback read those
+frozen bytes, not potentially changed input files. Overlapping or out-of-range
+patches are rejected before writing. Each read/write chunk is bounded to at most
+1 MiB. Cancellation during application restores the original bytes before
+returning; interrupted transactions retain their normal startup recovery path.
 
 The application listener is plaintext because Crow TLS is intentionally not
 enabled. Non-loopback startup is therefore rejected unless

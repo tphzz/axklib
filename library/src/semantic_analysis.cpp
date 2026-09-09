@@ -133,7 +133,8 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
     std::unordered_set<std::uint8_t> partitions_with_unknown_records;
     for (const auto &partition : container.partitions()) {
         if (std::ranges::any_of(partition.records, [](const IndexRecord &record) {
-                return record.sfs_id.value != 0U && record.payload_kind == PayloadKind::unknown;
+                return record.sfs_id.value != 0U && record.data_size != 0U &&
+                       record.payload_kind == PayloadKind::unknown;
             })) {
             partitions_with_unknown_records.insert(partition.index.value);
         }

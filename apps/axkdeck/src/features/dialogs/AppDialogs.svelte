@@ -249,6 +249,8 @@
 {/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}
     <PackageImportDialog
+        completion={packageImport.completion}
+        onrecover={() => void packageImport.recoverCompletion()}
         targetName={packageImport.targetName()}
         destinationMode={packageImport.request.destinationMode}
         destinationPartitionIndex={packageImport.request.destinationPartitionIndex}
@@ -286,6 +288,8 @@
 {/if}
 {#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-batch-import', packageBatchImport.request.status !== 'choosing' || packageBatchImport.request.items.length > 0 || Boolean(packageBatchImport.request.error))}
     <PackageBatchImportDialog
+        completion={packageBatchImport.completion}
+        onrecover={() => void packageBatchImport.recoverCompletion()}
         desktop={isDesktop}
         canChangeSources={packageBatchImport.request.canChangeSources}
         items={packageBatchImport.request.items}
@@ -500,6 +504,7 @@
 {/if}
 {#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import' && directChoiceVisible('audio-import', audioImport.request.files.length > 0)}
     <AudioImportDialog
+        completion={audioImport.completion}
         {transport}
         files={audioImport.request.files}
         target={audioImport.destination()}
@@ -520,12 +525,13 @@
             void audioImport.setExistingVolume(partitionIndex, volumeName)}
         ondestinationpartition={(partitionIndex) => audioImport.setDestinationPartition(partitionIndex)}
         ondestinationname={(volumeName) => audioImport.setDestinationVolumeName(volumeName)}
-        oncommit={(items, grouping) => audioImport.commit(items, grouping)}
+        oncommit={(items, grouping, reviewedWarnings) => audioImport.commit(items, grouping, reviewedWarnings)}
         oncancel={() => (audioImport.request = null)}
     />
 {/if}
 {#if sequenceImport.request && pickerRequest?.parentDialog !== 'sequence-import' && directChoiceVisible('sequence-import', sequenceImport.request.files.length > 0)}
     <MidiImportDialog
+        completion={sequenceImport.completion}
         {transport}
         files={sequenceImport.request.files}
         target={sequenceImport.destination()}
@@ -551,6 +557,8 @@
 {/if}
 {#if tx16wImport.request}
     <Tx16wImportDialog
+        completion={tx16wImport.completion}
+        onrecover={() => void tx16wImport.recoverCompletion()}
         request={tx16wImport.request}
         volumeOptions={tx16wImport.volumeOptions()}
         ontarget={(target) => void tx16wImport.selectTarget(target)}

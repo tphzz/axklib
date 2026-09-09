@@ -29,6 +29,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/utf8.hpp"
+#include "image_filesystem_internal.hpp"
 
 namespace axk::app::image_sessions_internal {
 
@@ -136,6 +137,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::function<Result<void>()> verify_source_unchanged;
         std::string target_snapshot_id;
         std::optional<MediaContainer> media;
+        std::optional<detail::ImageFilesystemIndex> filesystem_index;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
         std::unordered_map<std::string, axk::WaveformStatus> waveform_status_by_id;
@@ -349,6 +351,7 @@ struct axk::app::ImageSessionManager::Implementation {
         current.verify_source_unchanged = std::move(fresh.verify_source_unchanged);
         current.target_snapshot_id = std::move(fresh.target_snapshot_id);
         current.media = std::move(fresh.media);
+        current.filesystem_index.reset();
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
         current.waveform_status_by_id = std::move(fresh.waveform_status_by_id);

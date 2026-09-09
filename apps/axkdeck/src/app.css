@@ -1365,6 +1365,40 @@ input:focus-visible {
   padding: 7px 12px;
 }
 
+.dialog-footer-status {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--dialog-metadata-font-size);
+}
+
+.dialog-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.dialog-results {
+  flex: none;
+  max-height: 96px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: calc(8px + var(--overlay-scrollbar-clearance));
+}
+
+.dialog-results p {
+  margin: 4px 0;
+}
+
+.dialog-footer > button {
+  flex-shrink: 0;
+}
+
 .dialog-header {
   border-bottom: 1px solid var(--color-border);
   background: rgb(255 255 255 / 2%);
@@ -1380,6 +1414,7 @@ input:focus-visible {
 .dialog-footer .danger-button {
   height: 30px;
   margin: 0;
+  font-size: var(--dialog-body-font-size);
 }
 
 .dialog-header > div {
@@ -1654,6 +1689,45 @@ input:focus-visible {
   grid-template-columns: minmax(260px, 1fr) minmax(260px, 0.9fr);
   min-height: 290px;
   gap: 14px;
+}
+
+.package-import-review {
+  height: min(680px, calc(100dvh - 32px));
+}
+
+.package-import-review .package-dialog-content {
+  flex: 1;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.package-import-review .package-review-grid {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.package-import-review .package-tree-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.package-import-review .package-tree {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.package-import-review .package-tree,
+.package-import-review .package-plan-section {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: calc(8px + var(--overlay-scrollbar-clearance));
+}
+
+.package-import-review .dialog-error {
+  max-height: 64px;
+  overflow-y: auto;
 }
 
 .package-tree-section,

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import Icon from './Icon.svelte';
     import { modal } from '../modal';
 
     interface Props {
@@ -20,11 +21,13 @@
     >
         <header class="dialog-header">
             <h2>{title}</h2>
-            <button class="icon-button" type="button" aria-label="Close" onclick={onclose}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={onclose}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
         <div class="import-unavailable-content"><p>{message}</p></div>
         <footer class="dialog-footer">
-            <button class="primary-button" type="button" onclick={onclose}>OK</button>
+            <button class="secondary-button" type="button" onclick={onclose}>Close</button>
         </footer>
     </div>
 </div>

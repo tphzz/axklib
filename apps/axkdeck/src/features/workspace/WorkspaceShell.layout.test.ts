@@ -17,6 +17,14 @@ function section(start: string, end: string): string {
 }
 
 describe('WorkspaceShell layout contract', () => {
+    it('places contributed panes explicitly instead of relying on grid auto-placement', () => {
+        const shell = readFileSync(resolve(process.cwd(), 'src/features/workspace/WorkspaceShell.svelte'), 'utf8');
+        expect(shell).toMatch(/\.workspace-center\s*\{\s*grid-row: 2;\s*grid-column: 2;/);
+        expect(shell).toMatch(/\.sidebar-closed \.workspace-center\s*\{\s*grid-column: 1;/);
+        expect(shell).toMatch(/\.workspace-inspector\s*\{\s*grid-row: 2;\s*grid-column: -2;/);
+        expect(shell).toMatch(/\.global-controls\s*\{\s*grid-column: 3;/);
+        expect(shell).toMatch(/\.workspace-mode-switch\s*\{\s*grid-column: 4;/);
+    });
     it('uses one responsive library track for the navigator and workspace tabs', () => {
         const shellRule = rule('.app-shell');
         const headerRule = rule('.app-header');

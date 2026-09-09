@@ -411,13 +411,13 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         std::string_view filename;
         std::uint32_t allocated;
         std::uint64_t free_kib;
-        std::size_t known_record_count;
+        std::size_t record_count;
         std::string_view last_known_type;
         std::string_view last_known_name;
     };
     constexpr std::array cases{
-        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 25, "SBNK", "_NewSample"},
-        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 40, "SBNK", "JS03   *********"},
+        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 26, "SBNK", "_NewSample"},
+        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 41, "SBNK", "JS03   *********"},
     };
     const auto root = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored";
 
@@ -434,8 +434,8 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, expected.allocated);
         ASSERT_TRUE(partition.allocation.free_space);
         EXPECT_EQ(partition.allocation.free_space->sampler_visible_free_kib, expected.free_kib);
-        ASSERT_GE(partition.records.size(), expected.known_record_count);
-        const auto &last = partition.records[expected.known_record_count - 1U];
+        ASSERT_EQ(partition.records.size(), expected.record_count);
+        const auto &last = partition.records.back();
         EXPECT_EQ(last.object_type, expected.last_known_type);
         EXPECT_EQ(last.object_name, expected.last_known_name);
         EXPECT_TRUE(partition.allocation.bitmap_copy1.marked_used_without_index_extent.empty());
@@ -610,6 +610,47 @@ TEST(SfsReader, KeepsThirdPartyAlternatingByteRecordUnknown) {
     EXPECT_EQ(record.payload_kind, axk::PayloadKind::unknown);
     EXPECT_TRUE(record.object_type.empty());
     EXPECT_TRUE(record.object_name.empty());
+}
+
+TEST(SfsReader, KeepsLiveEmptyFilesWithoutAllocatingPayloadClusters) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size + 4U * 72U;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x9e000000U));
+    ASSERT_TRUE(writer.write_be16(index + 0x46U, 1U));
+    auto reader = std::make_shared<axk::MemoryReader>(std::move(bytes));
+    const auto image = axk::open_image(reader, "empty-file.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &partition = image->partitions().front();
+    const auto file = std::ranges::find(partition.records, axk::SfsId{4U}, &axk::IndexRecord::sfs_id);
+    ASSERT_NE(file, partition.records.end());
+    EXPECT_EQ(file->data_size, 0U);
+    EXPECT_EQ(file->cluster_count, 0U);
+    EXPECT_TRUE(file->extents.empty());
+    EXPECT_EQ(file->attributes, 0x9e000000U);
+    EXPECT_EQ(file->link_count, 1U);
+    EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 1U);
+    EXPECT_TRUE(partition.diagnostics.empty());
+    const auto payload = image->read_record_data(partition.index, file->sfs_id, 0U);
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_TRUE(payload->empty());
+    EXPECT_FALSE(image->read_record_range(partition.index, file->sfs_id, 0U, 1U));
+}
+
+TEST(SfsReader, DoesNotTreatDeletedOrMalformedEmptySlotsAsLiveFiles) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size + 4U * 72U;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x1e000000U));
+    ASSERT_TRUE(writer.write_be32(index + 72U + 0x42U, 0x9e000000U));
+    ASSERT_TRUE(writer.write_be32(index + 72U + 6U, 1U));
+    const auto image = axk::open_image(std::make_shared<axk::MemoryReader>(std::move(bytes)), "invalid-empty.hds");
+    ASSERT_TRUE(image);
+    const auto &partition = image->partitions().front();
+    EXPECT_EQ(partition.records.size(), 1U);
+    EXPECT_TRUE(std::ranges::any_of(partition.diagnostics, [index](const axk::Error &error) {
+        return error.code == axk::ErrorCode::object_malformed && error.context.raw_offset == index + 72U;
+    }));
 }
 
 TEST(SfsReader, EnumeratesEverySupportedPartitionCountAtMinimumAndTwoGiB) {
@@ -957,6 +998,21 @@ TEST(SfsReader, PermitsMissingFormatterSupportTargetsOnlyAtThePartitionRoot) {
     const auto validation = axk::validate_semantics(*image, {}, {});
     EXPECT_EQ(std::ranges::find(validation.issues, "SFS_DIRECTORY_ENTRY_TARGET_MISSING", &axk::ValidationIssue::code),
               validation.issues.end());
+}
+
+TEST(SfsReader, ReadsNativeAttributesSeparatelyFromDirectoryEntrySize) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x94646972U));
+    ASSERT_TRUE(writer.write_be16(index + 0x46U, 3U));
+    const auto image = axk::open_image(std::make_shared<axk::MemoryReader>(std::move(bytes)), "attributes.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &record = image->partitions().front().records.front();
+    EXPECT_EQ(record.attributes, 0x94646972U);
+    EXPECT_EQ(record.link_count, 3U);
+    ASSERT_FALSE(record.directory_entries.empty());
+    EXPECT_EQ(record.directory_entries.front().entry_size_bytes, 32U);
 }
 
 TEST(SfsReader, RejectsNonSfsAndCancellationWithoutPartialContainer) {

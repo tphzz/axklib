@@ -5,6 +5,8 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
 import PackageImportDialog from './PackageImportDialog.svelte';
+import { ImportCompletion } from '../../features/import/importCompletion.svelte';
+import { JobController } from '../../features/jobs/actions';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
@@ -198,6 +200,11 @@ function programSlotPlan(
 }
 
 const callbacks = {
+    completion: new ImportCompletion(
+        { waitForJob: vi.fn() },
+        new JobController({ waitForJob: vi.fn(), cancelJob: vi.fn() }),
+    ),
+    onrecover: vi.fn(),
     canChangeSource: true,
     destinationMode: 'existing' as const,
     destinationPartitionIndex: 0,
@@ -304,12 +311,12 @@ describe('PackageImportDialog', () => {
         expect(screen.getByText('Drum Bank')).toBeTruthy();
         expect(screen.getByText('Kick')).toBeTruthy();
         expect(screen.getByRole('heading', { name: 'Import into TARGET' })).toBeTruthy();
-        const importButton = screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement;
+        const importButton = screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement;
         expect(importButton.disabled).toBe(true);
         expect(importButton.title).toBe('Resolve import issues before importing.');
         await fireEvent.input(screen.getByDisplayValue('Kick'), { target: { value: 'Kick 2' } });
         expect(onrename).toHaveBeenCalledWith('sample-1', 'Kick 2');
-        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Review' }));
         expect(onreplan).toHaveBeenCalledOnce();
     });
 
@@ -377,7 +384,7 @@ describe('PackageImportDialog', () => {
         expect(screen.getByText('1 unresolved Program assignment will be cleared')).toBeTruthy();
         expect(screen.getByText('Voyager')).toBeTruthy();
         expect(screen.getByText(/Sample Bank “BPF Sweep B” · existing Program/)).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('requires an explicit preserve-or-skip decision for an undecodable Sequence', async () => {
@@ -457,7 +464,7 @@ describe('PackageImportDialog', () => {
                 'Existing Sequence “Opaque Sequence” in Existing could not be decoded. It is unrelated to this import and will be preserved unchanged.',
             ),
         ).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('renders a shared dependency once in every owning branch without duplicate keys', () => {
@@ -544,7 +551,7 @@ describe('PackageImportDialog', () => {
         const start = screen.getByRole('spinbutton', { name: 'Destination start' });
         await fireEvent.input(start, { target: { value: '9' } });
         expect(onprogramstart).toHaveBeenCalledWith('placement-1', 9);
-        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Review' }));
         expect(onreplan).toHaveBeenCalledOnce();
     });
 
@@ -579,10 +586,10 @@ describe('PackageImportDialog', () => {
         expect((destinationStart as HTMLInputElement).value).toBe('9');
         await fireEvent.input(destinationStart, { target: { value: '13' } });
         expect(onprogramstart).toHaveBeenCalledWith('placement-1', 13);
-        const checkConflicts = screen.getByRole('button', { name: 'Check conflicts' }) as HTMLButtonElement;
+        const checkConflicts = screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement;
         expect(checkConflicts.disabled).toBe(false);
         expect(screen.queryByText('Ready to import')).toBeNull();
-        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
         await fireEvent.click(checkConflicts);
         expect(onreplan).toHaveBeenCalledOnce();
     });
@@ -612,8 +619,8 @@ describe('PackageImportDialog', () => {
 
         expect(screen.getByRole('spinbutton', { name: 'Program 001' })).toBeTruthy();
         expect(screen.getByRole('spinbutton', { name: 'Program 004' })).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Check conflicts' }) as HTMLButtonElement).disabled).toBe(true);
-        expect((screen.getByRole('button', { name: 'Import package' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Review' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('shows non-renamable plan blockers without offering a false naming remedy', () => {
@@ -649,7 +656,7 @@ describe('PackageImportDialog', () => {
         expect(screen.queryByText('Choose unused destination names.')).toBeNull();
         expect(screen.queryByDisplayValue('Kick')).toBeNull();
         expect(screen.queryByText('Image space')).toBeNull();
-        expect(screen.queryByRole('button', { name: 'Check conflicts' })).toBeNull();
+        expect(screen.getByRole('button', { name: 'Review' }).closest('footer')).toBeTruthy();
     });
 
     it('groups repeated plan conflicts and node-scoped rename actions without duplicate keys', () => {
@@ -708,7 +715,7 @@ describe('PackageImportDialog', () => {
         });
 
         expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(false);
-        expect((screen.getByRole('button', { name: 'Change' }) as HTMLButtonElement).disabled).toBe(false);
+        expect((screen.getByRole('button', { name: 'Change' }) as HTMLButtonElement).disabled).toBe(true);
         const cancel = screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement;
         expect(cancel.disabled).toBe(false);
         await fireEvent.click(cancel);

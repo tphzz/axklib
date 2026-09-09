@@ -48,7 +48,7 @@ Result<std::uint16_t> fat_entry(std::span<const std::byte> fat, std::uint16_t cl
     const auto offset = static_cast<std::size_t>(cluster) * 2U;
     if (offset > fat.size() || fat.size() - offset < 2U)
         return std::unexpected{detail::media_error(ErrorCode::allocation_invalid_extent,
-                                                   "EX5 FAT entry exceeds the allocation table", source)};
+                                                   "FAT16 entry exceeds the allocation table", source)};
     return detail::le16(fat, offset);
 }
 
@@ -65,7 +65,8 @@ Result<std::vector<std::uint16_t>> fat_chain(std::span<const std::byte> fat, con
     auto cluster = first;
     std::uint64_t capacity{};
     while (true) {
-        if (cluster < 2U || cluster >= geometry.data_cluster_count + 2U) {
+        if (cluster < 2U || cluster >= geometry.data_cluster_count + 2U ||
+            (geometry.profile == FatProfile::fat16 && cluster >= 0xfff0U)) {
             return std::unexpected{detail::media_error(
                 ErrorCode::allocation_invalid_extent,
                 std::format("FAT chain for '{}' leaves the data area at cluster {}", name, cluster), source)};
@@ -80,15 +81,17 @@ Result<std::vector<std::uint16_t>> fat_chain(std::span<const std::byte> fat, con
         const auto next = fat_entry(fat, cluster, geometry, source);
         if (!next)
             return std::unexpected{next.error()};
-        const bool ex5 = geometry.profile == FatProfile::ex5_disk;
-        if ((ex5 && *next == 0xffffU) || (!ex5 && *next >= 0xff8U))
+        const bool ex5 = geometry.profile == FatProfile::ex5_disk || geometry.profile == FatProfile::ex5_removable;
+        const bool fat16 = geometry.profile == FatProfile::fat16;
+        if ((ex5 && *next == 0xffffU) || (fat16 && *next >= 0xfff8U) || (!ex5 && !fat16 && *next >= 0xff8U))
             break;
-        if (!ex5 && *next == 0xff7U) {
+        if (!ex5 && *next == (fat16 ? 0xfff7U : 0xff7U)) {
             return std::unexpected{
                 detail::media_error(ErrorCode::allocation_invalid_extent,
                                     std::format("FAT chain for '{}' reaches bad cluster marker", name), source)};
         }
-        if (*next == 0U || *next == 1U || (!ex5 && *next >= 0xff0U && *next <= 0xff6U)) {
+        if (*next == 0U || *next == 1U ||
+            (!ex5 && *next >= (fat16 ? 0xfff0U : 0xff0U) && *next <= (fat16 ? 0xfff6U : 0xff6U))) {
             return std::unexpected{detail::media_error(
                 ErrorCode::allocation_invalid_extent,
                 std::format("FAT chain for '{}' has invalid successor 0x{:03x}", name, *next), source)};
@@ -189,12 +192,12 @@ Result<void> scan_fat_directory(std::vector<FatFile> &files, std::vector<FatDire
                 return std::unexpected{detail::media_error(ErrorCode::unsupported_profile,
                                                            "FAT directory exceeds bounded traversal limits", source)};
             }
-            directories.push_back({path, name, entry_offset, *chain});
+            directories.push_back({path, name, entry_offset, *chain, attributes});
             pending.push_back({path, *chain});
             continue;
         }
         if (size == 0U && first_cluster == 0U) {
-            files.push_back({path, name, entry_offset, first_cluster, size, {}, 0U});
+            files.push_back({path, name, entry_offset, first_cluster, size, {}, 0U, attributes});
             continue;
         }
         const auto chain = fat_chain(fat, geometry, first_cluster, size, path, source);
@@ -208,8 +211,8 @@ Result<void> scan_fat_directory(std::vector<FatFile> &files, std::vector<FatDire
                     std::format("FAT entries '{}' and '{}' share cluster {}", found->second, path, cluster), source)};
             }
         }
-        files.push_back(
-            {path, name, entry_offset, first_cluster, size, *chain, fat_cluster_offset(geometry, first_cluster)});
+        files.push_back({path, name, entry_offset, first_cluster, size, *chain,
+                         fat_cluster_offset(geometry, first_cluster), attributes});
     }
     return {};
 }
@@ -268,9 +271,17 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
         }
         geometry.data_cluster_count =
             static_cast<std::uint32_t>((geometry.total_sectors - metadata_sectors) / geometry.sectors_per_cluster);
-        if (geometry.data_cluster_count == 0U || geometry.data_cluster_count >= 4085U) {
+        const bool ex5_removable = detail::clean_ascii(std::span{*boot}.subspan(3U, 8U)) == "YAMAHA??" &&
+                                   detail::clean_ascii(std::span{*boot}.subspan(54U, 8U)) == "FAT16";
+        if (geometry.data_cluster_count == 0U || geometry.data_cluster_count > (ex5_removable ? 65525U : 65524U)) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                              "unsupported FAT variant: only FAT12 is accepted")};
+                                              "unsupported FAT variant: only FAT12 and FAT16 are accepted")};
+        }
+        if (geometry.data_cluster_count >= 4085U) {
+            if ((*boot)[510U] != std::byte{0x55} || (*boot)[511U] != std::byte{0xaa})
+                return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                           "FAT16 boot signature is invalid", source_name)};
+            geometry.profile = ex5_removable ? FatProfile::ex5_removable : FatProfile::fat16;
         }
         geometry.fat_offset = static_cast<std::uint64_t>(geometry.reserved_sectors) * geometry.bytes_per_sector;
         geometry.root_offset =
@@ -284,12 +295,12 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     constexpr std::uint64_t fat12_entry_count = 4096U;
     constexpr std::uint64_t fat12_table_bytes = fat12_entry_count * 3U / 2U;
     const auto maximum_fat_bytes =
-        geometry.profile == FatProfile::ex5_disk
+        geometry.profile != FatProfile::a_series_floppy
             ? 0x20000U
             : ((fat12_table_bytes + geometry.bytes_per_sector - 1U) / geometry.bytes_per_sector) *
                   geometry.bytes_per_sector;
     const auto highest_data_cluster = static_cast<std::uint64_t>(geometry.data_cluster_count) + 1U;
-    const auto highest_entry_offset = geometry.profile == FatProfile::ex5_disk
+    const auto highest_entry_offset = geometry.profile != FatProfile::a_series_floppy
                                           ? highest_data_cluster * 2U
                                           : highest_data_cluster + highest_data_cluster / 2U;
     if (fat_size > maximum_fat_bytes || highest_entry_offset > fat_size || fat_size - highest_entry_offset < 2U) {
@@ -368,7 +379,7 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     result.geometry_ = geometry;
     result.files_ = std::move(files);
     result.directories_ = std::move(directories);
-    if (geometry.profile == FatProfile::ex5_disk)
+    if (geometry.profile != FatProfile::a_series_floppy)
         return result;
     auto catalog = detail::inspect_yamaha_floppy_catalog(result, cancellation);
     result.yamaha_catalog_ = std::move(catalog.catalog);

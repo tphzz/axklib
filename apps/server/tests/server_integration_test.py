@@ -404,6 +404,7 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
         "audio": "audio/wav",
         "manifest": "application/json",
         "package": "application/vnd.axklib.package",
+        "file": "application/octet-stream",
     }
     status, created = http_request(
         port,
@@ -419,14 +420,15 @@ def upload_bytes(port: int, filename: str, kind: str, content: bytes) -> str:
     )
     assert status == 201, created
     upload_id = str(created["data"]["uploadId"])
-    status, response, headers = raw_http_request(
-        port,
-        "PUT",
-        f"/api/v1/uploads/{upload_id}",
-        content,
-        {"Content-Type": "application/octet-stream", "Upload-Offset": "0"},
-    )
-    assert status == 200 and headers["upload-offset"] == str(len(content)), response
+    if content:
+        status, response, headers = raw_http_request(
+            port,
+            "PUT",
+            f"/api/v1/uploads/{upload_id}",
+            content,
+            {"Content-Type": "application/octet-stream", "Upload-Offset": "0"},
+        )
+        assert status == 200 and headers["upload-offset"] == str(len(content)), response
     status, completed = http_request(
         port, "POST", f"/api/v1/uploads/{upload_id}/complete"
     )
@@ -789,6 +791,182 @@ def cli_version(cli: Path) -> dict[str, str]:
         assert separator, line
         values[name] = value
     return values
+
+
+def exercise_raw_filesystem_exports(
+    port: int, root: Path, process: subprocess.Popen[bytes], image_id: str, directory_id: str
+) -> None:
+    request: dict[str, Any] = {
+        "imageId": image_id, "expectedRevision": 2, "entryIds": [directory_id],
+        "layout": "EXPORT_FOLDER",
+    }
+    status, inspected = http_request(port, "POST", "/api/v1/image-filesystem-export-inspections", request)
+    assert status == 200, inspected
+    assert inspected["data"]["totalBytes"] == len(b"raw\x00payload"), inspected
+    assert len(inspected["data"]["entries"]) == 2, inspected
+    assert inspected["data"]["rootDirectory"]["name"] == "Raw Files", inspected
+    request["destination"] = {
+        "kind": "WORKSPACE", "output": {"rootId": "workspace", "relativePath": "raw-export"},
+    }
+    status, missing = http_request(port, "POST", "/api/v1/image-filesystem-exports", request)
+    assert status == 400, missing
+    status, started = http_request(
+        port, "POST", "/api/v1/image-filesystem-exports", request, {"Idempotency-Key": "raw-export"},
+    )
+    assert status == 202, started
+    completed = wait_for_job(port, started["data"]["jobId"], process)
+    assert completed["state"] == "COMPLETED", completed
+    assert completed["result"]["destination"] == "WORKSPACE"
+    assert (root / "raw-export/EMPTY").read_bytes() == b""
+    assert (root / "raw-export/PAYLOAD").read_bytes() == b"raw\x00payload"
+    assert not (root / "raw-export/Raw Files").exists()
+    status, replay = http_request(
+        port, "POST", "/api/v1/image-filesystem-exports", request, {"Idempotency-Key": "raw-export"},
+    )
+    assert status == 202 and replay["data"]["jobId"] == started["data"]["jobId"], replay
+    request["destination"] = {"kind": "DOWNLOAD", "directoryName": "Raw Files"}
+    status, started = http_request(
+        port, "POST", "/api/v1/image-filesystem-exports", request, {"Idempotency-Key": "raw-download"},
+    )
+    assert status == 202, started
+    completed = wait_for_job(port, started["data"]["jobId"], process)
+    assert completed["state"] == "COMPLETED", completed
+    download = completed["result"]["download"]
+    status, content, _ = raw_http_request(port, "GET", download["contentPath"])
+    assert status == 200
+    with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as archive:
+        files = {member.name: archive.extractfile(member).read() for member in archive.getmembers() if member.isfile()}
+        assert sorted(files.values()) == [b"", b"raw\x00payload"], files
+        assert sorted(files) == ["EMPTY", "PAYLOAD"], files
+    request["expectedRevision"] = 1
+    status, started = http_request(
+        port, "POST", "/api/v1/image-filesystem-exports", request, {"Idempotency-Key": "raw-export-stale"},
+    )
+    assert status == 202, started
+    rejected = wait_for_job(port, started["data"]["jobId"], process)
+    assert rejected["state"] == "FAILED" and rejected["error"]["code"] == "image_revision_stale", rejected
+
+
+def exercise_raw_filesystem_jobs(
+    port: int, root: Path, process: subprocess.Popen[bytes]
+) -> None:
+    copy = root / "raw-files.hds"
+    copy.write_bytes((root / "fixture.hds").read_bytes())
+    status, opened = http_request(
+        port, "POST", "/api/v1/images",
+        {"source": {"kind": "FILE", "file": {"rootId": "workspace", "relativePath": copy.name}}},
+    )
+    assert status == 202, opened
+    ready = wait_for_job(port, opened["data"]["jobId"], process)
+    assert ready["state"] == "COMPLETED", ready
+    image_id = ready["result"]["imageId"]
+    url = f"/api/v1/images/{image_id}/filesystem"
+    status, roots = http_request(port, "GET", f"{url}?expectedRevision=1")
+    assert status == 200, roots
+    root_id = roots["data"]["items"][0]["id"]
+    assert roots["data"]["rootCapabilities"] == [{
+        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True,
+        "maximumNameBytes": 23, "namePattern": "^[ -~]{1,23}$",
+        "nameHint": "Use 1-23 printable ASCII characters.",
+        "supportedImports": [],
+    }], roots
+    upload_id = upload_bytes(port, "EMPTY", "file", b"")
+    payload_id = upload_bytes(port, "PAYLOAD", "file", b"raw\x00payload")
+    sources = [{"uploadRef": {"uploadId": id_}} for id_ in (upload_id, payload_id)]
+    status, inspection = http_request(
+        port, "POST", "/api/v1/filesystem-input-inspections", {"inputs": sources},
+    )
+    assert status == 202, inspection
+    inspected = wait_for_job(port, inspection["data"]["jobId"], process)
+    assert inspected["state"] == "COMPLETED", inspected
+    snapshots = [entry["snapshot"] for entry in inspected["result"]["inputs"]]
+    assert [entry["source"] for entry in inspected["result"]["inputs"]] == sources
+    assert [snapshot["sizeBytes"] for snapshot in snapshots] == [0, 11]
+    assert [snapshot["sha256"] for snapshot in snapshots] == [
+        hashlib.sha256(data).hexdigest() for data in (b"", b"raw\x00payload")
+    ]
+    review_request = {
+        "imageId": image_id, "expectedRevision": 1, "parentEntryId": root_id,
+        "entries": [
+            {"relativePath": ["Raw Files"], "directory": True, "sizeBytes": 0},
+            {"relativePath": ["Raw Files", "EMPTY"], "directory": False, "sizeBytes": 0},
+            {"relativePath": ["Raw Files", "PAYLOAD"], "directory": False, "sizeBytes": 11},
+        ],
+    }
+    before_review = hashlib.sha256(copy.read_bytes()).hexdigest()
+    status, review_job = http_request(port, "POST", "/api/v1/image-filesystem-import-inspections", review_request)
+    assert status == 202, review_job
+    review = wait_for_job(port, review_job["data"]["jobId"], process)
+    assert review["state"] == "COMPLETED", review
+    assert review["result"]["revision"] == 1 and review["result"]["conflictCount"] == 0
+    assert [row["action"] for row in review["result"]["entries"]] == ["CREATE_DIRECTORY", "CREATE_FILE", "CREATE_FILE"]
+    assert all(row["existingSizeBytes"] is None for row in review["result"]["entries"])
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() == before_review
+    request = {
+        "imageId": image_id, "expectedRevision": 1,
+        "acknowledgeDeviceRelationships": True,
+        "edits": [
+            {"kind": "CREATE_DIRECTORY", "parentEntryId": root_id, "relativePath": ["Raw Files"]},
+            {"kind": "PUT_FILE", "parentEntryId": root_id, "relativePath": ["Raw Files", "EMPTY"],
+             "source": sources[0], "expectedSource": snapshots[0]},
+            {"kind": "PUT_FILE", "parentEntryId": root_id, "relativePath": ["Raw Files", "PAYLOAD"],
+             "source": sources[1], "expectedSource": snapshots[1]},
+        ],
+    }
+    status, missing_key = http_request(port, "POST", "/api/v1/image-filesystem-edits", request)
+    assert status == 400, missing_key
+    status, submitted = http_request(
+        port, "POST", "/api/v1/image-filesystem-edits", request,
+        {"Idempotency-Key": "raw-files-create"},
+    )
+    assert status == 202, submitted
+    completed = wait_for_job(port, submitted["data"]["jobId"], process)
+    assert completed["state"] == "COMPLETED", completed
+    assert completed["result"]["revision"] == 2
+    review_request["expectedRevision"] = 2
+    status, review_job = http_request(port, "POST", "/api/v1/image-filesystem-import-inspections", review_request)
+    assert status == 202, review_job
+    review = wait_for_job(port, review_job["data"]["jobId"], process)
+    assert review["state"] == "COMPLETED", review
+    assert [row["action"] for row in review["result"]["entries"]] == ["MERGE_DIRECTORY", "SKIP_FILE", "SKIP_FILE"]
+    assert [row["existingSizeBytes"] for row in review["result"]["entries"]] == [None, 0, 11]
+    status, replay = http_request(
+        port, "POST", "/api/v1/image-filesystem-edits", request,
+        {"Idempotency-Key": "raw-files-create"},
+    )
+    assert status == 202 and replay["data"]["jobId"] == submitted["data"]["jobId"], replay
+    query = urlencode({"expectedRevision": 2, "rootId": root_id, "query": "Raw Files"})
+    status, entries = http_request(port, "GET", f"{url}?{query}")
+    assert status == 200, entries
+    directory = entries["data"]["items"][0]
+    query = urlencode({"expectedRevision": 2, "parentId": directory["id"]})
+    status, entries = http_request(port, "GET", f"{url}?{query}")
+    assert status == 200 and entries["data"]["items"][0]["sizeBytes"] == 0, entries
+    before_export = hashlib.sha256(copy.read_bytes()).hexdigest()
+    exercise_raw_filesystem_exports(port, root, process, image_id, directory["id"])
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() == before_export
+    request["expectedRevision"] = 2
+    request["edits"] = [{"kind": "DELETE", "entryId": directory["id"], "recursive": False}]
+    original = hashlib.sha256(copy.read_bytes()).hexdigest()
+    status, submitted = http_request(
+        port, "POST", "/api/v1/image-filesystem-edits", request,
+        {"Idempotency-Key": "raw-files-recursive-required"},
+    )
+    assert status == 202, submitted
+    rejected = wait_for_job(port, submitted["data"]["jobId"], process)
+    assert rejected["state"] == "FAILED", rejected
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() == original
+    request["edits"][0]["recursive"] = True
+    status, submitted = http_request(
+        port, "POST", "/api/v1/image-filesystem-edits", request,
+        {"Idempotency-Key": "raw-files-delete"},
+    )
+    assert status == 202, submitted
+    deleted = wait_for_job(port, submitted["data"]["jobId"], process)
+    assert deleted["state"] == "COMPLETED", deleted
+    assert deleted["result"]["revision"] == 3
+    status, closed = http_request(port, "DELETE", f"/api/v1/images/{image_id}")
+    assert status == 200, closed
 
 
 def exercise(server: Path, cli: Path, fixture: Path) -> None:
@@ -1522,6 +1700,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, _, _ = raw_http_request(port, "GET", archive_path)
             assert status == 404
 
+            exercise_raw_filesystem_jobs(port, root_path, process)
             session_fixture = root_path / "session-fixture.hds"
             session_fixture.write_bytes((root_path / "fixture.hds").read_bytes())
             status, opened = http_request(
@@ -1562,6 +1741,26 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port, "GET", f"/api/v1/images/{image_id}"
             )
             assert status == 200, opened_image
+            filesystem_url = f"/api/v1/images/{image_id}/filesystem"
+            revision = opened_image["data"]["revision"]
+            status, stored_roots = http_request(
+                port, "GET", f"{filesystem_url}?expectedRevision={revision}&limit=1"
+            )
+            assert status == 200, stored_roots
+            assert stored_roots["data"]["available"] is True
+            root_entry = stored_roots["data"]["items"][0]
+            assert root_entry["kind"] == "PARTITION"
+            assert root_entry["parentId"] is None
+            assert root_entry["rootId"] == root_entry["id"]
+            stored_query = urlencode({"expectedRevision": revision, "parentId": root_entry["id"]})
+            status, stored_children = http_request(port, "GET", f"{filesystem_url}?{stored_query}")
+            assert status == 200, stored_children
+            assert stored_children["data"]["items"]
+            assert all(entry["parentId"] == root_entry["id"] for entry in stored_children["data"]["items"])
+            status, _ = http_request(port, "GET", filesystem_url)
+            assert status == 400
+            status, _ = http_request(port, "GET", f"{filesystem_url}?expectedRevision={revision + 1}")
+            assert status == 409
             status, workspace_snapshot = http_request(
                 port, "GET", "/api/v1/workspaces"
             )

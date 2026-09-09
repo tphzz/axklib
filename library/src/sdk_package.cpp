@@ -58,6 +58,8 @@ std::string media_kind_name(MediaKind kind) {
         return "fat12-floppy";
     case MediaKind::ex5_disk:
         return "ex5-disk";
+    case MediaKind::fat16_disk:
+        return "fat16-disk";
     case MediaKind::fat12_floppy_set:
         return "fat12-floppy-set";
     case MediaKind::iso9660:

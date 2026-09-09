@@ -11,8 +11,11 @@
     import Icon from './Icon.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
 
     interface Props {
+        completion: ImportCompletion;
+        onrecover: () => void;
         targetName: string;
         destinationMode: ImportDestinationMode;
         destinationPartitionIndex: number | null;
@@ -64,6 +67,8 @@
     ]);
 
     let {
+        completion,
+        onrecover,
         targetName,
         destinationMode,
         destinationPartitionIndex,
@@ -99,7 +104,7 @@
     }: Props = $props();
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
-    const locked = $derived(status === 'applying');
+    const locked = $derived(completion.phase !== 'refresh-failed' && (completion.locked || status === 'applying'));
     const canImport = $derived(status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges);
     const importDisabledReason = $derived(
         canImport
@@ -107,7 +112,7 @@
             : status !== 'ready'
               ? 'Wait for package planning to finish.'
               : hasUnvalidatedChanges
-                ? 'Check conflicts before importing.'
+                ? 'Review changes before importing.'
                 : 'Resolve import issues before importing.',
     );
     const treeRows = $derived(packageTree(inspection));
@@ -173,17 +178,28 @@
     const visibleConflictCount = $derived(
         placementIssues.length + renameActions.length + nonRenameConflicts.length + undecidedOpaqueSequences.length,
     );
-    const showConflictCheck = $derived(
-        hasUnvalidatedChanges || renameActions.length > 0 || editableProgramPlacements.length > 0,
-    );
     const destinationReady = $derived(
         importDestination(destinationMode, destinationPartitionIndex, destinationVolumeName) !== null,
     );
-    const canCheckConflicts = $derived(
-        status === 'ready' &&
-            (hasUnvalidatedChanges ||
-                renameActions.length > 0 ||
-                placementIssues.some((placement) => placement.mode !== 'UNAVAILABLE')),
+    const canCheckConflicts = $derived(!busy && destinationReady && !!inspection);
+    const footerStatus = $derived(
+        completion.message ||
+            error ||
+            (status === 'loading'
+                ? 'Inspecting package'
+                : status === 'planning'
+                  ? 'Reviewing import'
+                  : status === 'applying'
+                    ? 'Importing'
+                    : !sourceName
+                      ? 'Choose a package'
+                      : !destinationReady
+                        ? 'Choose a valid destination'
+                        : hasUnvalidatedChanges || !plan
+                          ? 'Review changes before importing'
+                          : canImport
+                            ? 'Ready to import'
+                            : 'Resolve import issues'),
     );
     const insertedObjects = $derived(
         (plan?.allocation ?? []).reduce((total, allocation) => total + allocation.insertedObjectCount, 0),
@@ -268,6 +284,7 @@
 <div class="dialog-backdrop" role="presentation">
     <div
         class="dialog-shell dialog-shell-wide package-dialog"
+        class:package-import-review={!!sourceName}
         role="dialog"
         aria-modal="true"
         aria-label="Import axklib package"
@@ -279,7 +296,9 @@
                 <Icon name="archive" size={16} />
                 <h2>Import package</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={locked} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="package-dialog-content">
@@ -301,8 +320,11 @@
                         <strong>{sourceName}</strong>
                     </div>
                     {#if canChangeSource}
-                        <button class="secondary-button" type="button" disabled={locked} onclick={onchange}
-                            >Change</button
+                        <button
+                            class="secondary-button"
+                            type="button"
+                            disabled={busy || completion.locked}
+                            onclick={onchange}>Change</button
                         >
                     {/if}
                 </section>
@@ -313,7 +335,7 @@
                     volumeName={destinationVolumeName}
                     partitions={partitionOptions}
                     volumes={volumeOptions}
-                    disabled={locked || status === 'loading' || status === 'planning'}
+                    disabled={busy || completion.locked}
                     onmode={ondestinationmode}
                     onvolume={ondestinationvolume}
                     onpartition={ondestinationpartition}
@@ -538,23 +560,6 @@
                                             </label>
                                         {/each}
                                     </div>
-                                {:else if !hasUnvalidatedChanges}
-                                    <p class="package-plan-ready">
-                                        <Icon name="check" size={14} /> Ready to import
-                                    </p>
-                                {/if}
-                                {#if showConflictCheck}
-                                    <div class="package-conflict-actions">
-                                        {#if hasUnvalidatedChanges}
-                                            <small>Changes must be checked before import.</small>
-                                        {/if}
-                                        <button
-                                            class="secondary-button"
-                                            type="button"
-                                            disabled={!canCheckConflicts}
-                                            onclick={onreplan}>Check conflicts</button
-                                        >
-                                    </div>
                                 {/if}
                                 {#if plan.programAssignmentAdjustments.length > 0}
                                     <div class="package-adjustments" aria-label="Program assignment adjustments">
@@ -588,22 +593,6 @@
                                             : warning.message}
                                     </p>
                                 {/each}
-                            {:else if !destinationReady}
-                                <p class="dialog-progress" role="status">Choose a valid import destination.</p>
-                                <div class="package-conflict-actions">
-                                    <button class="secondary-button" type="button" disabled>Check conflicts</button>
-                                </div>
-                            {:else if status === 'planning'}
-                                <p class="dialog-progress" role="status">Planning import…</p>
-                            {:else}
-                                <p class="dialog-progress" role="status">
-                                    Check the selected destination for conflicts and available image space.
-                                </p>
-                                <div class="package-conflict-actions">
-                                    <button class="secondary-button" type="button" disabled={busy} onclick={onreplan}
-                                        >Check conflicts</button
-                                    >
-                                </div>
                             {/if}
                         </section>
                     </div>
@@ -613,8 +602,22 @@
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}>Cancel</button>
-            {#if sourceName}
+            <span class="dialog-footer-status" role="status" title={footerStatus}>{footerStatus}</span>
+            <button class="secondary-button" type="button" disabled={locked} onclick={oncancel}
+                >{completion.phase === 'refresh-failed' ? 'Close' : 'Cancel'}</button
+            >
+            {#if ['unconfirmed', 'checking', 'refresh-failed', 'refreshing'].includes(completion.phase)}
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={completion.busy || (completion.phase === 'unconfirmed' && !completion.canCheck)}
+                    onclick={onrecover}
+                    >{['unconfirmed', 'checking'].includes(completion.phase) ? 'Check status' : 'Refresh'}</button
+                >
+            {:else if sourceName}
+                <button class="secondary-button" type="button" disabled={!canCheckConflicts} onclick={onreplan}
+                    >Review</button
+                >
                 <button
                     class="primary-button"
                     type="button"
@@ -622,7 +625,7 @@
                     title={importDisabledReason}
                     onclick={onconfirm}
                 >
-                    {status === 'applying' ? 'Importing…' : 'Import package'}
+                    Import
                 </button>
             {/if}
         </footer>

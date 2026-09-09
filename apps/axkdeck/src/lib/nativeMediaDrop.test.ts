@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({
     lstat: vi.fn(),
     open: vi.fn(),
     unlisten: vi.fn(),
+    invoke: vi.fn(async () => true),
 }));
+vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 
 vi.mock('@tauri-apps/api/webview', () => ({
     getCurrentWebview: () => ({
@@ -23,8 +25,63 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 }));
 
 import { listenForNativeMediaDrops } from './nativeMediaDrop';
+import { registerNativeFilesystemDropTarget } from './nativeFilesystemDropTarget';
 
 describe('native media drops', () => {
+    it.each([true, false])('routes Files before extension filtering with logical coordinates=%s', async (logical) => {
+        mocks.invoke.mockResolvedValueOnce(logical);
+        vi.stubGlobal('devicePixelRatio', 2);
+        const receiver = vi.fn(),
+            onDrop = vi.fn();
+        const dispose = registerNativeFilesystemDropTarget(receiver);
+        const stop = await listenForNativeMediaDrops({
+            interfaceZoom: () => 1.5,
+            enabled: () => false,
+            onHover: vi.fn(),
+            onDrop,
+            onError: vi.fn(),
+        });
+        mocks.dragHandler!({ payload: { type: 'drop', paths: ['/EMPTY', '/FOLDER'], position: { x: 300, y: 150 } } });
+        expect(receiver).toHaveBeenCalledWith(
+            expect.objectContaining({ paths: ['/EMPTY', '/FOLDER'] }),
+            logical ? { x: 200, y: 100 } : { x: 150, y: 75 },
+        );
+        expect(mocks.lstat).not.toHaveBeenCalled();
+        expect(onDrop).not.toHaveBeenCalled();
+        dispose();
+        stop();
+        vi.unstubAllGlobals();
+    });
+    it('does not acquire or route a Device drop after the workspace changes mode', async () => {
+        let enabled = false;
+        const onDrop = vi.fn(),
+            onError = vi.fn();
+        await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => enabled,
+            onHover: vi.fn(),
+            onDrop,
+            onError,
+        });
+        const event = { payload: { type: 'drop', paths: ['/samples/take.wav'], position: { x: 1, y: 1 } } };
+        mocks.dragHandler!(event);
+        expect(mocks.lstat).not.toHaveBeenCalled();
+        enabled = true;
+        let finish!: (value: { isFile: boolean; size: number }) => void;
+        mocks.lstat.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        mocks.dragHandler!(event);
+        expect(mocks.lstat).toHaveBeenCalledOnce();
+        enabled = false;
+        finish({ isFile: true, size: 3 });
+        await vi.waitFor(() => expect(mocks.lstat).toHaveResolved());
+        expect(onDrop).not.toHaveBeenCalled();
+        expect(onError).not.toHaveBeenCalled();
+    });
     beforeEach(() => {
         mocks.dragHandler = null;
         mocks.lstat.mockReset();
@@ -43,7 +100,13 @@ describe('native media drops', () => {
         const onDrop = vi.fn();
         const onError = vi.fn();
 
-        const unlisten = await listenForNativeMediaDrops({ onHover, onDrop, onError });
+        const unlisten = await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => true,
+            onHover,
+            onDrop,
+            onError,
+        });
         expect(mocks.dragHandler).not.toBeNull();
 
         mocks.dragHandler!({
@@ -89,7 +152,7 @@ describe('native media drops', () => {
         const onDrop = vi.fn();
         const onError = vi.fn();
 
-        await listenForNativeMediaDrops({ onHover, onDrop, onError });
+        await listenForNativeMediaDrops({ interfaceZoom: () => 1, enabled: () => true, onHover, onDrop, onError });
         mocks.dragHandler!({
             payload: { type: 'drop', paths: ['/samples/take.aiff'], position: { x: 5, y: 7 } },
         });
@@ -103,7 +166,13 @@ describe('native media drops', () => {
         mocks.lstat.mockResolvedValue({ isFile: true, isSymlink: false, size: 4 * 1024 * 1024 * 1024 + 1 });
         const onError = vi.fn();
 
-        await listenForNativeMediaDrops({ onHover: vi.fn(), onDrop: vi.fn(), onError });
+        await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => true,
+            onHover: vi.fn(),
+            onDrop: vi.fn(),
+            onError,
+        });
         mocks.dragHandler!({
             payload: { type: 'drop', paths: ['/samples/huge.wav'], position: { x: 5, y: 7 } },
         });
@@ -116,7 +185,13 @@ describe('native media drops', () => {
         const onHover = vi.fn();
         const onDrop = vi.fn();
 
-        await listenForNativeMediaDrops({ onHover, onDrop, onError: vi.fn() });
+        await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => true,
+            onHover,
+            onDrop,
+            onError: vi.fn(),
+        });
         mocks.dragHandler!({
             payload: {
                 type: 'enter',
@@ -145,7 +220,13 @@ describe('native media drops', () => {
     it('admits TX16W disk images without reading them eagerly', async () => {
         const onDrop = vi.fn();
 
-        await listenForNativeMediaDrops({ onHover: vi.fn(), onDrop, onError: vi.fn() });
+        await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => true,
+            onHover: vi.fn(),
+            onDrop,
+            onError: vi.fn(),
+        });
         mocks.dragHandler!({
             payload: {
                 type: 'drop',
@@ -166,7 +247,13 @@ describe('native media drops', () => {
     it('admits portable packages and A3K archives without reading them eagerly', async () => {
         const onDrop = vi.fn();
 
-        await listenForNativeMediaDrops({ onHover: vi.fn(), onDrop, onError: vi.fn() });
+        await listenForNativeMediaDrops({
+            interfaceZoom: () => 1,
+            enabled: () => true,
+            onHover: vi.fn(),
+            onDrop,
+            onError: vi.fn(),
+        });
         mocks.dragHandler!({
             payload: {
                 type: 'drop',

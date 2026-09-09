@@ -65,7 +65,7 @@ inline constexpr std::uint32_t sfs_deleted_directory_link_prefix = 0xf0000000U;
 }
 
 struct DirectoryEntry {
-    std::uint16_t flags{};
+    std::uint16_t entry_size_bytes{};
     LinkId raw_link_id;
     std::optional<LinkId> target_link_id;
     DirectoryEntryState state{DirectoryEntryState::live};
@@ -94,6 +94,8 @@ struct IndexRecord {
     std::optional<LinkId> directory_id;
     std::optional<LinkId> parent_directory_id;
     std::vector<DirectoryEntry> directory_entries;
+    std::uint32_t attributes{};
+    std::uint16_t link_count{};
 };
 
 struct AllocationMismatchRange {

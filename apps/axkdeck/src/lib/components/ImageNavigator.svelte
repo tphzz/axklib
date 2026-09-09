@@ -4,11 +4,13 @@
     import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import Icon from './Icon.svelte';
+    import ImageActions from './ImageActions.svelte';
     import ImageTreeContextMenu from './ImageTreeContextMenu.svelte';
     import TreeNode from './TreeNode.svelte';
 
     interface Props {
         image: ImageLocation | null;
+        navigationOnly?: boolean;
         items: DiskTreeItem[];
         selectedId: string;
         selectedVolumeIds?: readonly string[];
@@ -41,6 +43,7 @@
 
     let {
         image,
+        navigationOnly = false,
         items,
         selectedId,
         selectedVolumeIds = [],
@@ -67,7 +70,6 @@
         onimageaction,
     }: Props = $props();
     let filter = $state('');
-    let imageMenuOpen = $state(false);
     let treeMenu = $state<{
         item: DiskTreeItem;
         left: number;
@@ -80,9 +82,6 @@
     let rootLoadError = $state(false);
     let rootLoadGeneration = 0;
 
-    const pathParts = $derived(image?.displayName.replaceAll('\\', '/').split('/').filter(Boolean) ?? []);
-    const imageName = $derived(pathParts.at(-1) ?? 'No image open');
-    const imageLocation = $derived(pathParts.slice(0, -1).join('/'));
     const contentItems = $derived.by(() => {
         if (items.length !== 1 || items[0]?.kind !== 'disk') return items;
         return items[0].children ?? loadedRootChildren;
@@ -170,124 +169,29 @@
     }
 
     function closeMenus(): void {
-        imageMenuOpen = false;
         treeMenu = null;
     }
 </script>
 
 <svelte:window onclick={closeMenus} onkeydown={(event) => event.key === 'Escape' && closeMenus()} />
 
-<aside class="image-navigator" aria-label="Image navigator">
-    <section class="image-summary" aria-label="Active image">
-        <header class="image-summary-heading">
-            <p class="eyebrow">Image</p>
-            {#if storageLocationsAvailable}
-                <button
-                    class="icon-button"
-                    type="button"
-                    aria-label="Image options"
-                    aria-expanded={imageMenuOpen}
-                    title="Image options"
-                    disabled={opening}
-                    onclick={(event) => {
-                        event.stopPropagation();
-                        imageMenuOpen = !imageMenuOpen;
-                    }}
-                >
-                    <Icon name="more" size={15} />
-                </button>
-            {/if}
-        </header>
-
-        {#if image}
-            <div class="active-image" role="group" aria-label={`Current image: ${imageName}`} aria-busy={opening}>
-                <Icon name="hard-drive" size={16} />
-                <span class="active-image-copy">
-                    <strong title={image.displayName}>{imageName}</strong>
-                    <small title={imageLocation}
-                        >{opening ? 'Opening image' : imageLocation || 'Storage location'}</small
-                    >
-                </span>
-                <div class="active-image-actions">
-                    <button
-                        class="icon-button"
-                        type="button"
-                        aria-label="Open another image"
-                        title="Open another image"
-                        disabled={opening}
-                        onclick={onopen}
-                    >
-                        <Icon name="folder-open" size={15} />
-                    </button>
-                    <button
-                        class="icon-button"
-                        type="button"
-                        aria-label="Eject image"
-                        title="Eject image"
-                        disabled={opening}
-                        onclick={onclose}
-                    >
-                        <Icon name="eject" size={15} />
-                    </button>
-                </div>
-            </div>
-        {:else}
-            <div class="image-empty-state">
-                <div class="image-empty-actions">
-                    <button class="primary-button" type="button" disabled={opening} onclick={onopen}>
-                        <Icon name="folder-open" size={14} /> Open image
-                    </button>
-                    <button class="secondary-button" type="button" disabled={opening} onclick={oncreate}>
-                        <Icon name="file-plus" size={14} /> Create image
-                    </button>
-                </div>
-            </div>
-        {/if}
-
-        {#if imageMenuOpen}
-            <div
-                class="image-options-menu"
-                role="menu"
-                tabindex="-1"
-                onclick={(event) => event.stopPropagation()}
-                onkeydown={(event) => event.stopPropagation()}
-            >
-                {#if image}
-                    <button
-                        type="button"
-                        role="menuitem"
-                        onclick={() => {
-                            imageMenuOpen = false;
-                            onintegrity();
-                        }}
-                    >
-                        <Icon name="info" size={14} /> Image integrity...
-                    </button>
-                    <button
-                        type="button"
-                        role="menuitem"
-                        onclick={() => {
-                            imageMenuOpen = false;
-                            oncreate();
-                        }}
-                    >
-                        <Icon name="file-plus" size={14} /> Create new image
-                    </button>
-                {/if}
-                <button
-                    type="button"
-                    role="menuitem"
-                    onclick={() => {
-                        imageMenuOpen = false;
-                        onmanagelocations();
-                    }}
-                >
-                    <Icon name="settings" size={14} /> Storage locations
-                </button>
-            </div>
-        {/if}
-    </section>
-
+<aside
+    class="image-navigator"
+    class:navigation-only={navigationOnly}
+    aria-label={navigationOnly ? 'Device navigation' : 'Image navigator'}
+>
+    {#if !navigationOnly}
+        <ImageActions
+            {image}
+            {opening}
+            {storageLocationsAvailable}
+            {onopen}
+            {oncreate}
+            {onclose}
+            {onintegrity}
+            {onmanagelocations}
+        />
+    {/if}
     <section class="image-contents" aria-label="Image contents">
         <div class="panel-heading">
             <div>
@@ -381,3 +285,9 @@
         />
     {/key}
 {/if}
+
+<style>
+    .navigation-only {
+        display: contents;
+    }
+</style>

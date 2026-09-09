@@ -112,12 +112,14 @@ add_library(
   src/media_catalog.cpp
   src/media_fat12.cpp
   src/media_ex5.cpp
+  src/media_fat_disk.cpp
   src/media_fat12_catalog.cpp
   src/media_floppy_catalog.cpp
   src/media_floppy_set_reader.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
   src/media_yamaha.cpp
+  src/su700.cpp
   src/object.cpp
   src/prog_codec.cpp
         src/program_parameter_codec.cpp
@@ -152,6 +154,16 @@ add_library(
   src/sfs_allocation.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/sfs_files_edit.cpp
+  src/sfs_files_import.cpp
+  src/sfs_files_preparation.cpp
+  src/filesystem_preparation.cpp
+  src/fat_files_edit.cpp
+  src/fat_files_import.cpp
+  src/fat_files_state.cpp
+  src/fat_files_preparation.cpp
+  src/sfs_files_publication.cpp
+  src/sfs_files_state.cpp
   src/sfs_geometry.cpp
   src/sfs_repair.cpp
   src/system_file.cpp
@@ -549,6 +561,7 @@ if(BUILD_TESTING)
     tests/hardening_test.cpp
     tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
+    tests/su700_test.cpp
     tests/media_ex5_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
@@ -567,6 +580,8 @@ if(BUILD_TESTING)
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp
+    tests/sfs_files_test.cpp
+    tests/fat_files_test.cpp
     tests/sfs_geometry_test.cpp
     tests/sfs_write_codec_test.cpp
     tests/system_file_test.cpp

@@ -268,7 +268,7 @@ TEST(Fat12Reader, ReadsSubdirectoriesAndRejectsCrossLinkedFiles) {
     EXPECT_EQ(invalid.error().code, axk::ErrorCode::allocation_invalid_extent);
 }
 
-TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
+TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndInvalidFat16Geometry) {
     auto loop = fat_fixture(2);
     auto result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(loop)), "loop.ima");
     ASSERT_FALSE(result);
@@ -296,7 +296,7 @@ TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
     fat16.resize(5000U * 512U);
     result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(fat16)), "fat16.img");
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
 
     auto traversal = fat_fixture();
     traversal[3U * 512U + 2U] = std::byte{'/'};

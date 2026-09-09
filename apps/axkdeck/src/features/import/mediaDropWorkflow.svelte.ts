@@ -22,6 +22,8 @@ export interface MediaDropNotice {
 }
 
 interface MediaDropDependencies {
+    enabled: () => boolean;
+    interfaceZoom: () => number;
     isDesktop: boolean;
     workspaceView: () => WorkspaceView;
     audioImport: AudioImportWorkflow;
@@ -53,6 +55,8 @@ export class MediaDropWorkflow {
         let disposed = false;
         let unlisten: (() => void) | null = null;
         void listenForNativeMediaDrops({
+            enabled: this.dependencies.enabled,
+            interfaceZoom: this.dependencies.interfaceZoom,
             onHover: (paths) => this.updateHover(paths),
             onDrop: (files, _position, droppedPathCount) => {
                 const kind = classifyDroppedNames(files.map((file) => file.name));

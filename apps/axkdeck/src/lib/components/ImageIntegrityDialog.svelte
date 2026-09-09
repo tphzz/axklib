@@ -33,7 +33,7 @@
         role="dialog"
         aria-modal="true"
         aria-labelledby="image-integrity-title"
-        use:modal
+        use:modal={{ onescape: repairing ? undefined : onclose }}
     >
         <header class="dialog-header">
             <div>
@@ -45,6 +45,7 @@
                 type="button"
                 aria-label="Close image integrity"
                 title="Close"
+                disabled={repairing}
                 onclick={onclose}
             >
                 <Icon name="close" size={16} />
@@ -106,11 +107,6 @@
         </div>
 
         <footer class="dialog-footer">
-            {#if repairAvailable}
-                <button class="primary-button" type="button" data-dialog-initial-focus onclick={onrepair}>
-                    {repairing ? 'Cancel repair' : 'Repair copy...'}
-                </button>
-            {/if}
             <button
                 class="secondary-button"
                 type="button"
@@ -118,6 +114,16 @@
                 disabled={repairing}
                 onclick={onclose}>Close</button
             >
+            {#if repairAvailable}
+                <button
+                    class={repairing ? 'secondary-button' : 'primary-button'}
+                    type="button"
+                    data-dialog-initial-focus
+                    onclick={onrepair}
+                >
+                    {repairing ? 'Cancel repair' : 'Repair copy...'}
+                </button>
+            {/if}
         </footer>
     </div>
 </div>

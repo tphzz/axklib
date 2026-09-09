@@ -420,7 +420,27 @@ ContentTree build_content_tree(const Container &container, const ObjectCatalog &
 
 ContentTree build_content_tree(const MediaContainer &container, const ObjectCatalog &catalog,
                                const RelationshipGraph &graph, bool include_default_programs) {
-    if (container.kind() == MediaKind::ex5_disk)
+    if (const auto *disk = std::get_if<FatDiskImage>(&container.storage())) {
+        ContentTree tree;
+        tree.source_path = disk->source_name();
+        for (const auto &partition : disk->partitions()) {
+            auto volume = detail::ex5_content_tree(partition.volume);
+            auto root = std::move(volume.roots.front());
+            std::vector<ContentNode *> pending{&root};
+            while (!pending.empty()) {
+                auto *node = pending.back();
+                pending.pop_back();
+                node->node_id = std::format("fat16-partition-{}:{}", partition.number, node->node_id);
+                for (auto &child : node->children)
+                    pending.push_back(&child);
+            }
+            root.node_id = std::format("fat16-partition-{}", partition.number);
+            root.display_name = std::format("Partition {}", partition.number);
+            tree.roots.push_back(std::move(root));
+        }
+        return tree;
+    }
+    if (container.kind() == MediaKind::ex5_disk || container.kind() == MediaKind::fat16_disk)
         return detail::ex5_content_tree(std::get<FatImage>(container.storage()));
     if (const auto *sfs = std::get_if<Container>(&container.storage()))
         return build_content_tree(*sfs, catalog, graph, include_default_programs);

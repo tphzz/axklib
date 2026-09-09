@@ -351,7 +351,7 @@ Result<std::vector<MediaObject>> FatImage::objects(MediaObjectReadMode mode, std
                                                    const CancellationToken &cancellation) const {
     constexpr std::size_t metadata_prefix_size = 0xacU;
     std::vector<MediaObject> result;
-    if (geometry_.profile == FatProfile::ex5_disk)
+    if (geometry_.profile != FatProfile::a_series_floppy)
         return result;
     for (const auto &file : files_) {
         if (file.size > maximum_object_bytes)

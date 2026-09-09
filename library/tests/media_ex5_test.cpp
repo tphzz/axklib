@@ -11,72 +11,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 
-namespace {
-
-constexpr std::size_t sector_bytes = 512U;
-constexpr std::size_t boot_offset = 256U * sector_bytes;
-constexpr std::size_t fat_offset = 258U * sector_bytes;
-constexpr std::size_t fat_bytes = 17U * sector_bytes;
-constexpr std::size_t root_offset = fat_offset + 2U * fat_bytes;
-constexpr std::size_t data_offset = root_offset + sector_bytes;
-
-void le16(std::vector<std::byte> &bytes, std::size_t offset, std::uint16_t value) {
-    bytes[offset] = static_cast<std::byte>(value & 0xffU);
-    bytes[offset + 1U] = static_cast<std::byte>(value >> 8U);
-}
-
-void le32(std::vector<std::byte> &bytes, std::size_t offset, std::uint32_t value) {
-    le16(bytes, offset, static_cast<std::uint16_t>(value & 0xffffU));
-    le16(bytes, offset + 2U, static_cast<std::uint16_t>(value >> 16U));
-}
-
-void ascii(std::vector<std::byte> &bytes, std::size_t offset, std::string_view text) {
-    for (const auto c : text)
-        bytes[offset++] = static_cast<std::byte>(c);
-}
-
-void fat_entry(std::vector<std::byte> &bytes, std::uint16_t cluster, std::uint16_t next) {
-    le16(bytes, fat_offset + static_cast<std::size_t>(cluster) * 2U, next);
-    le16(bytes, fat_offset + fat_bytes + static_cast<std::size_t>(cluster) * 2U, next);
-}
-
-std::vector<std::byte> ex5_fixture() {
-    std::vector<std::byte> bytes(data_offset + 4096U * sector_bytes);
-    ascii(bytes, 0, "YAMAHA_dev3");
-    ascii(bytes, 0x210U, "SY1200 V0.0.0   ");
-    ascii(bytes, boot_offset + 3U, "YAMAHA??");
-    le16(bytes, boot_offset + 11U, 512U);
-    bytes[boot_offset + 13U] = std::byte{1};
-    le16(bytes, boot_offset + 14U, 2U);
-    bytes[boot_offset + 16U] = std::byte{2};
-    le16(bytes, boot_offset + 17U, 16U);
-    le16(bytes, boot_offset + 19U, 4096U);
-    bytes[boot_offset + 21U] = std::byte{0xf8};
-    le16(bytes, boot_offset + 22U, 17U);
-    le16(bytes, boot_offset + 24U, 32U);
-    le16(bytes, boot_offset + 26U, 8U);
-    le32(bytes, boot_offset + 32U, 4096U + 34U);
-    ascii(bytes, boot_offset + 54U, "FAT16   ");
-    bytes[boot_offset + 510U] = std::byte{0x55};
-    bytes[boot_offset + 511U] = std::byte{0xaa};
-    fat_entry(bytes, 0, 0xfff8U);
-    fat_entry(bytes, 1, 0xffffU);
-    fat_entry(bytes, 2, 0xffffU);
-    fat_entry(bytes, 3, 7U);
-    fat_entry(bytes, 7, 0xffffU);
-    ascii(bytes, root_offset, "DEMOS      ");
-    bytes[root_offset + 11U] = std::byte{0x10};
-    le16(bytes, root_offset + 26U, 2U);
-    ascii(bytes, data_offset, "DEMO1   S1A");
-    bytes[data_offset + 11U] = std::byte{0x20};
-    le16(bytes, data_offset + 26U, 3U);
-    le32(bytes, data_offset + 28U, 700U);
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(data_offset + sector_bytes), 512U, std::byte{0x31});
-    std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(data_offset + 5U * sector_bytes), 188U, std::byte{0x72});
-    return bytes;
-}
-
-} // namespace
+#include "media_ex5_fixture.hpp"
 
 TEST(Ex5Reader, RecognizesDescriptorBeforeResidualSfsAndReadsFragmentedFile) {
     auto media = axk::open_media(std::make_shared<axk::MemoryReader>(ex5_fixture()), "ex5.hds");
@@ -87,11 +22,13 @@ TEST(Ex5Reader, RecognizesDescriptorBeforeResidualSfsAndReadsFragmentedFile) {
     EXPECT_EQ(fat->geometry().profile, axk::FatProfile::ex5_disk);
     ASSERT_EQ(fat->directories().size(), 1U);
     EXPECT_EQ(fat->directories().front().path, "DEMOS");
+    EXPECT_EQ(fat->directories().front().attributes, 0x10U);
     EXPECT_EQ(fat->geometry().data_cluster_count, 4096U);
     EXPECT_EQ(fat->geometry().data_offset, data_offset);
     ASSERT_EQ(fat->files().size(), 1U);
     const auto &file = fat->files().front();
     EXPECT_EQ(file.path, "DEMOS/DEMO1.S1A");
+    EXPECT_EQ(file.attributes, 0x20U);
     EXPECT_EQ(file.clusters, (std::vector<std::uint16_t>{3U, 7U}));
     const auto read = fat->read_file_range(file, 508U, 8U);
     ASSERT_TRUE(read) << read.error().message;
@@ -222,4 +159,103 @@ TEST(Ex5Reader, ReportsPhysicalDirectoryEntryOffsetsAcrossFragmentation) {
     ASSERT_EQ(image->files().size(), 1U);
     EXPECT_EQ(image->files().front().directory_offset, offset);
     EXPECT_EQ(image->files().front().path, "DEMOS/EMPTY.S1A");
+}
+
+TEST(Fat16Reader, ReadsUnwrappedVolumeUsingStandardSectorCountsAndEndMarkers) {
+    const auto source = ex5_fixture();
+    std::vector<std::byte> bytes(source.begin() + boot_offset, source.end());
+    ascii(bytes, 3U, "MSDOS5.0");
+    le16(bytes, 19U, 0U);
+    le32(bytes, 32U, static_cast<std::uint32_t>(bytes.size() / sector_bytes));
+    for (const auto copy : {fat_offset - boot_offset, fat_offset - boot_offset + fat_bytes})
+        le16(bytes, copy + 7U * 2U, 0xfff8U);
+    const auto image = axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "mo.hda");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto *fat = std::get_if<axk::FatImage>(&image->storage());
+    ASSERT_NE(fat, nullptr);
+    ASSERT_EQ(fat->files().size(), 1U);
+    EXPECT_EQ(fat->files().front().path, "DEMOS/DEMO1.S1A");
+    EXPECT_EQ(fat->geometry().data_cluster_count, 4096U);
+    const auto contents = fat->read_file(fat->files().front());
+    ASSERT_TRUE(contents);
+    EXPECT_EQ(contents->size(), 700U);
+    EXPECT_EQ(contents->back(), std::byte{0x72});
+    EXPECT_TRUE(fat->objects()->empty());
+}
+
+TEST(Fat16Reader, ReadsPrimaryPartitionsAndRejectsOverlapOrTruncatedVolumes) {
+    const auto source = ex5_fixture();
+    std::vector<std::byte> volume(source.begin() + boot_offset, source.end());
+    ascii(volume, 3U, "MSDOS5.0");
+    le16(volume, 19U, 0U);
+    le32(volume, 32U, static_cast<std::uint32_t>(volume.size() / sector_bytes));
+    constexpr std::size_t start = 63U * sector_bytes;
+    std::vector<std::byte> bytes(start + 2U * volume.size());
+    bytes[510U] = std::byte{0x55};
+    bytes[511U] = std::byte{0xaa};
+    for (std::size_t slot = 0U; slot < 2U; ++slot) {
+        const auto offset = start + slot * volume.size();
+        bytes[446U + slot * 16U + 4U] = std::byte{0x06};
+        le32(bytes, 446U + slot * 16U + 8U, static_cast<std::uint32_t>(offset / sector_bytes));
+        le32(bytes, 446U + slot * 16U + 12U, static_cast<std::uint32_t>(volume.size() / sector_bytes));
+        std::copy(volume.begin(), volume.end(), bytes.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+    const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(bytes), "disk.hda");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto *disk = std::get_if<axk::FatDiskImage>(&media->storage());
+    ASSERT_NE(disk, nullptr);
+    ASSERT_EQ(disk->partitions().size(), 2U);
+    EXPECT_EQ(disk->partitions()[1].byte_offset, start + volume.size());
+    EXPECT_EQ(disk->partitions()[1].volume.files().front().size, 700U);
+    const auto tree = axk::build_content_tree(*media, {}, {});
+    ASSERT_EQ(tree.roots.size(), 2U);
+    ASSERT_FALSE(tree.roots[0].children.empty());
+    ASSERT_FALSE(tree.roots[1].children.empty());
+    EXPECT_NE(tree.roots[0].children[0].node_id, tree.roots[1].children[0].node_id);
+    auto invalid = bytes;
+    le32(invalid, 462U + 8U, 63U);
+    EXPECT_FALSE(axk::open_media(std::make_shared<axk::MemoryReader>(std::move(invalid)), "overlap.hda"));
+    invalid = bytes;
+    le32(invalid, 446U + 12U, 1U);
+    EXPECT_FALSE(axk::open_media(std::make_shared<axk::MemoryReader>(std::move(invalid)), "truncated.hda"));
+    bytes[446U + 4U] = std::byte{0x05};
+    EXPECT_FALSE(axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "extended.hda"));
+}
+
+TEST(Ex5Reader, RemovableUsesStandardBpbButAdmitsTheFormatterClusterBoundary) {
+    constexpr std::size_t fats = 512U;
+    constexpr std::size_t fat_size = 256U * 512U;
+    constexpr std::size_t root = fats + 2U * fat_size;
+    constexpr std::size_t data = root + 32U * 512U;
+    std::vector<std::byte> bytes(data + 65525U * 512U);
+    ascii(bytes, 3U, "YAMAHA??");
+    ascii(bytes, 54U, "FAT16   ");
+    le16(bytes, 11U, 512U);
+    bytes[13U] = std::byte{1};
+    le16(bytes, 14U, 1U);
+    bytes[16U] = std::byte{2};
+    le16(bytes, 17U, 512U);
+    bytes[21U] = std::byte{0xf8};
+    le16(bytes, 22U, 256U);
+    le32(bytes, 32U, static_cast<std::uint32_t>(bytes.size() / 512U));
+    bytes[510U] = std::byte{0x55};
+    bytes[511U] = std::byte{0xaa};
+    for (const auto copy : {fats, fats + fat_size}) {
+        le16(bytes, copy, 0xfff8U);
+        le16(bytes, copy + 2U, 0xffffU);
+        le16(bytes, copy + 2U * 0xfff5U, 0xffffU);
+    }
+    ascii(bytes, root, "END     BIN");
+    bytes[root + 11U] = std::byte{0x21};
+    le16(bytes, root + 26U, 0xfff5U);
+    le32(bytes, root + 28U, 1U);
+    bytes[data + (0xfff5U - 2U) * 512U] = std::byte{0x42};
+    const auto image = axk::open_media(std::make_shared<axk::MemoryReader>(bytes), "mo.hda");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &fat = std::get<axk::FatImage>(image->storage());
+    EXPECT_EQ(fat.geometry().profile, axk::FatProfile::ex5_removable);
+    EXPECT_EQ(fat.geometry().data_cluster_count, 65525U);
+    EXPECT_EQ(fat.read_file(fat.files().front()).value(), (std::vector<std::byte>{std::byte{0x42}}));
+    ascii(bytes, 3U, "MSDOS5.0");
+    EXPECT_FALSE(axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "not-ex5.hda"));
 }

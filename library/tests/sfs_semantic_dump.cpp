@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
         for (const auto &record : partition.records) {
             nlohmann::ordered_json entries = nlohmann::ordered_json::array();
             for (const auto &entry : record.directory_entries) {
-                entries.push_back({{"flags", entry.flags},
+                entries.push_back({{"entry_size_bytes", entry.entry_size_bytes},
                                    {"raw_link_id", entry.raw_link_id.value},
                                    {"target_link_id", entry.target_link_id ? nlohmann::json(entry.target_link_id->value)
                                                                            : nlohmann::json{}},

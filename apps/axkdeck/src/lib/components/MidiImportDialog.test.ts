@@ -1,10 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ClientUploadSource } from '../clientUploadSource';
 import { clientUploadLocation, serverFileLocation } from '../storageLocations';
 import type { ImageTransport, MidiInspection } from '../transport';
 import MidiImportDialog from './MidiImportDialog.svelte';
+import { ImportCompletion } from '../../features/import/importCompletion.svelte';
+import { JobController } from '../../features/jobs/actions';
 
 function inspection(overrides: Partial<MidiInspection> = {}): MidiInspection {
     return {
@@ -37,6 +41,7 @@ function transport(midiInspection = inspection()): ImageTransport {
 
 function destinationProps() {
     return {
+        completion: new ImportCompletion(transport(), new JobController(transport())),
         target: { kind: 'EXISTING_VOLUME' as const, partitionIndex: 1, volumeName: 'Songs' },
         destinationMode: 'existing' as const,
         destinationPartitionIndex: 1,
@@ -55,6 +60,138 @@ function destinationProps() {
 }
 
 describe('MidiImportDialog', () => {
+    it('retains completion warnings with Done and never offers another import', async () => {
+        const imageTransport = transport();
+        imageTransport.waitForJob = vi.fn().mockResolvedValue({
+            jobId: 1,
+            status: 'completed',
+            result: { kind: 'ALTERATION', warnings: [{ message: 'New validation warning' }], operations: [] },
+        });
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        await completion.run(async () => ({ jobId: 1, kind: 'alter', status: 'queued' }), vi.fn());
+        const oncancel = vi.fn();
+        const oncommit = vi.fn();
+        render(MidiImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [],
+                ...destinationProps(),
+                completion,
+                existingSequenceNames: [],
+                oncommit,
+                oncancel,
+            },
+        });
+        expect(screen.getByRole('region', { name: 'Import warnings' }).textContent).toContain('New validation warning');
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        expect(oncancel).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+        expect(oncommit).not.toHaveBeenCalled();
+    });
+    it('keeps a committed import open and only refreshes when Refresh is clicked', async () => {
+        const imageTransport = transport();
+        imageTransport.waitForJob = vi.fn().mockResolvedValue({ jobId: 1, status: 'completed' });
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        let finishRefresh!: () => void;
+        const refresh = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Offline'))
+            .mockImplementation(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finishRefresh = resolve;
+                    }),
+            );
+        const start = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
+        await completion.run(start, refresh);
+        const oncancel = vi.fn();
+        render(MidiImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [serverFileLocation({ rootId: 'workspace', relativePath: 'song.mid' })],
+                ...destinationProps(),
+                completion,
+                existingSequenceNames: [],
+                oncommit: vi.fn(),
+                oncancel,
+            },
+        });
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        expect((screen.getAllByRole('button', { name: 'Close' })[1] as HTMLButtonElement).disabled).toBe(false);
+        expect(oncancel).not.toHaveBeenCalled();
+        const style = document.createElement('style');
+        style.textContent =
+            readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8').match(
+                /\.dialog-footer \.secondary-button,\s*\.dialog-footer \.primary-button,\s*\.dialog-footer \.danger-button\s*\{[^}]+\}/,
+            )?.[0] ?? '';
+        document.head.append(style);
+        const footerButtons = screen
+            .getByRole('button', { name: 'Refresh' })
+            .closest('footer')!
+            .querySelectorAll('button');
+        expect(Array.from(footerButtons).map((button) => button.textContent?.trim())).toEqual(['Close', 'Refresh']);
+        for (const button of footerButtons) {
+            expect(getComputedStyle(button).height).toBe('30px');
+            expect(getComputedStyle(button).marginTop).toBe('0px');
+            expect(getComputedStyle(button).marginBottom).toBe('0px');
+        }
+        style.remove();
+        await fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+        await waitFor(() => expect(completion.phase).toBe('refreshing'));
+        expect((screen.getByRole('button', { name: 'Refresh' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        finishRefresh();
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+        expect(start).toHaveBeenCalledTimes(1);
+        expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it('blocks dismissal and editing while an acknowledged import needs status recovery', async () => {
+        const imageTransport = transport();
+        imageTransport.waitForJob = vi.fn().mockRejectedValue(new Error('Offline'));
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        await completion.run(async () => ({ jobId: 1, kind: 'alter', status: 'queued' }), vi.fn());
+        const oncancel = vi.fn();
+        render(MidiImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [serverFileLocation({ rootId: 'workspace', relativePath: 'song.mid' })],
+                ...destinationProps(),
+                completion,
+                existingSequenceNames: [],
+                oncommit: vi.fn(),
+                oncancel,
+            },
+        });
+        expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).disabled).toBe(true);
+        expect(screen.getByRole('button', { name: 'Check status' })).toBeTruthy();
+        await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+        expect(oncancel).not.toHaveBeenCalled();
+    });
+
+    it('uses a separate bounded row region for a long review list', async () => {
+        const { container } = render(MidiImportDialog, {
+            props: {
+                transport: transport(),
+                files: Array.from({ length: 30 }, (_, index) =>
+                    serverFileLocation({ rootId: 'workspace', relativePath: `song${index}.mid` }),
+                ),
+                ...destinationProps(),
+                existingSequenceNames: [],
+                oncommit: vi.fn(),
+                oncancel: vi.fn(),
+            },
+        });
+        await waitFor(() => expect(screen.getAllByRole('textbox')).toHaveLength(30));
+        const rows = container.querySelector('.midi-import-rows');
+        expect(rows?.getAttribute('role')).toBe('rowgroup');
+        expect(rows?.querySelectorAll('.midi-import-row')).toHaveLength(30);
+        expect(rows?.contains(container.querySelector('.midi-import-head'))).toBe(false);
+        expect(rows?.contains(container.querySelector('.dialog-footer'))).toBe(false);
+    });
+
     it('offers the shared workspace and local source choices before staging files', async () => {
         const onchooseworkspace = vi.fn();
         const onchooselocal = vi.fn();
@@ -71,7 +208,7 @@ describe('MidiImportDialog', () => {
             },
         });
 
-        expect(screen.getByText('Choose MIDI files')).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Choose MIDI files' })).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: /Storage location/ }));
         await fireEvent.click(screen.getByRole('button', { name: /This computer/ }));
         expect(onchooseworkspace).toHaveBeenCalledOnce();
@@ -80,7 +217,7 @@ describe('MidiImportDialog', () => {
 
     it('uses collision-free Sequence names and imports workspace files directly', async () => {
         const imageTransport = transport();
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const workspaceFile = serverFileLocation(
             { rootId: 'workspace', relativePath: 'midi/Demo Song.mid' },
             'Yamaha/midi/Demo Song.mid',
@@ -97,7 +234,7 @@ describe('MidiImportDialog', () => {
         });
 
         expect(await screen.findByDisplayValue('Demo Song 2')).toBeTruthy();
-        const importButton = screen.getByRole('button', { name: 'Import 1 file' });
+        const importButton = screen.getByRole('button', { name: 'Import' });
         await waitFor(() => expect((importButton as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(importButton);
         await waitFor(() =>
@@ -108,7 +245,7 @@ describe('MidiImportDialog', () => {
 
     it('uploads local MIDI with the MIDI contract and releases it after import', async () => {
         const imageTransport = transport();
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const oncancel = vi.fn();
         const file = new File([new Uint8Array(32)], 'Pattern.mid', { type: 'audio/midi' });
         render(MidiImportDialog, {
@@ -129,7 +266,7 @@ describe('MidiImportDialog', () => {
             expect.any(Function),
             expect.any(AbortSignal),
         );
-        const importButton = screen.getByRole('button', { name: 'Import 1 file' });
+        const importButton = screen.getByRole('button', { name: 'Import' });
         await waitFor(() => expect((importButton as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(importButton);
         await waitFor(() =>
@@ -148,7 +285,7 @@ describe('MidiImportDialog', () => {
                 systemExclusiveManufacturerIds: ['43'],
             }),
         );
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const workspaceFile = serverFileLocation(
             { rootId: 'workspace', relativePath: 'midi/System.mid' },
             'Yamaha/midi/System.mid',
@@ -168,7 +305,7 @@ describe('MidiImportDialog', () => {
         expect((include as HTMLInputElement).checked).toBe(false);
         expect(await screen.findByText(/2 SysEx events will be excluded/i)).toBeTruthy();
         expect((include as HTMLInputElement).disabled).toBe(true);
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() => expect(oncommit).toHaveBeenCalledWith(expect.any(Array), 'exclude'));
     });
 
@@ -180,7 +317,7 @@ describe('MidiImportDialog', () => {
                 systemExclusivePreservationSupported: true,
             }),
         );
-        const oncommit = vi.fn().mockResolvedValue(undefined);
+        const oncommit = vi.fn().mockResolvedValue(true);
         const workspaceFile = serverFileLocation(
             { rootId: 'workspace', relativePath: 'midi/System.mid' },
             'Yamaha/midi/System.mid',
@@ -199,7 +336,7 @@ describe('MidiImportDialog', () => {
         const include = await screen.findByRole('checkbox', { name: 'Include SysEx events' });
         await waitFor(() => expect((include as HTMLInputElement).disabled).toBe(false));
         await fireEvent.click(include);
-        await fireEvent.click(screen.getByRole('button', { name: 'Import 1 file' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() => expect(oncommit).toHaveBeenCalledWith(expect.any(Array), 'preserve'));
     });
 

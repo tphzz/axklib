@@ -47,6 +47,7 @@ struct FileRoutes {
     ItemRoute image;
     ItemRoute attach_companions;
     ItemRoute image_content;
+    ItemRoute image_filesystem;
     ItemRoute image_objects;
     SubItemRoute image_object;
     ItemRoute image_relationships;

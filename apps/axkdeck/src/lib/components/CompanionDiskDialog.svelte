@@ -46,7 +46,9 @@
                 <Icon name="folder-plus" size={16} />
                 <h2>Add companion disks</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="companion-disk-content">

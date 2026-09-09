@@ -29,6 +29,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/filesystem_edit_operations.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/application/session_placement_operations.hpp"
@@ -51,6 +52,8 @@ using axk::app::detail::reader_sha256;
 axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                                UploadStore &uploads, ImageSessionManager &images,
                                                                AlterationJournalStore &journals) {
+    if (auto bound = bind_filesystem_edit_operations(registry, sandbox, uploads, images, journals); !bound)
+        return bound;
     const auto alter_session = [&sandbox, &uploads, &images,
                                 &journals](const Json &input, const OperationContext &context) -> Result<Json> {
         const auto operation_started = Clock::now();

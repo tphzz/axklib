@@ -7,17 +7,10 @@ import {
     packageImportExtensionSetCopy,
     packageImportUploadKind,
 } from '../../lib/packageImportMedia';
-import type {
-    ImageSessionPackageImportPlan,
-    ImageTransport,
-    PackageInspection,
-    PackageOpaqueSequenceDecision,
-} from '../../lib/transport';
+import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { reportError } from '../../lib/diagnostics';
-import type { PickerController } from '../dialogs/picker';
-import type { JobController } from '../jobs/actions';
 import {
     collectImportDestinations,
     importDestination,
@@ -28,56 +21,27 @@ import {
     type ImportVolumeOption,
 } from './packageDestinations';
 import { PackagePickerHistory } from './packagePickerHistory';
+import { ImportCompletion } from './importCompletion.svelte';
+import type { PackageImportDependencies, PackageImportRequest } from './packageWorkflowTypes';
+export type { PackageImportRequest } from './packageWorkflowTypes';
 
 const packageExtensionSet = packageImportExtensionSetCopy();
 
-export interface PackageImportRequest {
-    item: DiskTreeItem | null;
-    canChangeSource: boolean;
-    source: InputFileLocation | null;
-    upload: ClientUploadLocation | null;
-    localSourcePath: string | null;
-    sourceName: string;
-    destinationMode: ImportDestinationMode;
-    destinationPartitionIndex: number | null;
-    destinationVolumeName: string;
-    inspection: PackageInspection | null;
-    plan: ImageSessionPackageImportPlan | null;
-    renames: Record<string, string>;
-    programSlots: Record<string, number>;
-    opaqueSequenceActions: Record<string, PackageOpaqueSequenceDecision['action']>;
-    hasUnvalidatedChanges: boolean;
-    status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
-    progress: number;
-    error: string;
-}
-
-interface PackageImportDependencies {
-    transport: ImageTransport;
-    jobs: JobController;
-    picker: PickerController;
-    isDesktop: boolean;
-    sessionId: () => number | null;
-    invalidateSession: (sessionId: number) => Promise<void>;
-    refreshSession: (preferred: { partitionIndex: number; volumeName?: string }) => Promise<void>;
-    setStatus: (status: string) => void;
-    pickerHistory?: PackagePickerHistory;
-    mutationsAvailable?: () => boolean;
-    selectedSource?: () => DiskTreeItem;
-    sourceItems?: () => DiskTreeItem[];
-}
-
 export class PackageImportWorkflow {
     request = $state<PackageImportRequest | null>(null);
+    readonly completion: ImportCompletion;
     private generation = 0;
     private abortController: AbortController | null = null;
     private readonly pickerHistory: PackagePickerHistory;
 
     constructor(private readonly dependencies: PackageImportDependencies) {
         this.pickerHistory = dependencies.pickerHistory ?? new PackagePickerHistory();
+        this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
     }
 
     open(item: DiskTreeItem | null): void {
+        if (this.request?.status === 'applying') return;
+        this.completion.reset();
         ++this.generation;
         this.abortController?.abort();
         this.abortController = null;
@@ -250,7 +214,7 @@ export class PackageImportWorkflow {
     }
 
     async close(): Promise<void> {
-        if (this.request?.status === 'applying') return;
+        if (this.request?.status === 'applying' && this.completion.phase !== 'refresh-failed') return;
         await this.dispose();
     }
 
@@ -425,6 +389,7 @@ export class PackageImportWorkflow {
             : null;
         if (
             !request?.source ||
+            request.status !== 'ready' ||
             !request.plan?.valid ||
             request.hasUnvalidatedChanges ||
             sessionId === null ||
@@ -434,31 +399,37 @@ export class PackageImportWorkflow {
         }
         const importedSource = request.source;
         const generation = ++this.generation;
+        let resourcesReleased = false;
         this.request = { ...request, status: 'applying', error: '' };
         this.dependencies.setStatus(`Importing package into ${destination.volumeName}`);
         try {
             await this.dependencies.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
+            await this.completion.run(
                 () => this.dependencies.transport.startImagePackageImport(request.plan!.planToken),
+                async () => {
+                    if (generation !== this.generation) return;
+                    if (importedSource.kind === 'server-file') {
+                        this.pickerHistory.lastImportedWorkspaceFile = importedSource.reference;
+                    } else if (request.localSourcePath) {
+                        this.pickerHistory.lastImportedLocalPath = request.localSourcePath;
+                    }
+                    if (!resourcesReleased) {
+                        await this.releaseResources(request);
+                        resourcesReleased = true;
+                    }
+                    await this.dependencies.refreshSession({
+                        partitionIndex: destination.partitionIndex,
+                        volumeName: destination.volumeName,
+                    });
+                    if (generation !== this.generation) return;
+                    this.request = null;
+                    this.dependencies.setStatus(`Imported package into ${destination.volumeName}`);
+                },
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
             );
-            if (completed.status !== 'completed') throw new Error(completed.error ?? 'Package import did not complete');
-            if (importedSource.kind === 'server-file') {
-                this.pickerHistory.lastImportedWorkspaceFile = importedSource.reference;
-            } else if (request.localSourcePath) {
-                this.pickerHistory.lastImportedLocalPath = request.localSourcePath;
-            }
-            if (request.upload) {
-                await this.dependencies.transport.releaseClientUpload(request.upload).catch(() => undefined);
-            }
-            this.request = null;
-            await this.dependencies.refreshSession({
-                partitionIndex: destination.partitionIndex,
-                volumeName: destination.volumeName,
-            });
-            this.dependencies.setStatus(`Imported package into ${destination.volumeName}`);
+            if (generation === this.generation) this.syncCompletion();
         } catch (error) {
             const message = userFacingMessage(error);
             this.dependencies.setStatus(message);
@@ -466,6 +437,20 @@ export class PackageImportWorkflow {
                 this.request = { ...this.request, status: 'ready', error: message };
             }
         }
+    }
+
+    async recoverCompletion(): Promise<void> {
+        const generation = this.generation;
+        await this.completion.recover();
+        if (generation === this.generation) this.syncCompletion();
+    }
+
+    private syncCompletion(): void {
+        if (!this.request) return;
+        const error = this.completion.message;
+        if (this.completion.phase === 'idle') this.completion.reset();
+        this.request = { ...this.request, status: this.completion.phase === 'idle' ? 'ready' : 'applying', error };
+        this.dependencies.setStatus(error);
     }
 
     private async releaseResources(request: PackageImportRequest): Promise<void> {

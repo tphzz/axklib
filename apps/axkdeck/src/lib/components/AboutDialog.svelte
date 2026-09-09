@@ -27,7 +27,9 @@
                 </span>
                 <h2 id="about-title">About axkdeck</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close About" onclick={onclose}>×</button>
+            <button class="icon-button" type="button" aria-label="Close About" onclick={onclose}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="about-content">

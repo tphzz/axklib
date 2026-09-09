@@ -101,6 +101,7 @@ class ServerApplication {
     crow::response image_page_response(const crow::request &request, const std::string &image_id, Loader loader,
                                        Serializer serializer);
     crow::response image_content_response(const crow::request &request, const std::string &image_id);
+    crow::response image_filesystem_response(const crow::request &request, const std::string &image_id);
     crow::response image_objects_response(const crow::request &request, const std::string &image_id);
     crow::response image_object_response(const crow::request &request, const std::string &image_id,
                                          const std::string &object_id);
