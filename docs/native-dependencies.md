@@ -75,3 +75,37 @@ The project linkage boundary is fixed across platforms:
 `BUILD_SHARED_LIBS` does not change these target types. This avoids application
 packages that depend on private axklib or codec libraries beside the executable.
 The native library does not link or invoke a scripting runtime.
+
+## Local Linux x64 build with Clang 19
+
+The `release-clang19` preset selects Clang 19 and libc++ for the native project
+and the `x64-linux-clang19-axk` target dependencies. Linux CI continues to use
+Clang 18 and libc++; macOS uses Apple Clang. Local Clang validation complements
+those platform builds but does not replace them.
+
+On Debian 13, install the compiler and standard-library development packages:
+
+```bash
+sudo apt-get install clang-19 libc++-19-dev libc++abi-19-dev
+```
+
+Run these commands from the axklib source root:
+
+```bash
+cmake --preset release-clang19
+cmake --build --preset release-clang19 --parallel 4
+ctest --preset release-clang19
+```
+
+This preset deliberately uses `build/native/release`, so existing CLI, server,
+and desktop commands consume the Clang 19 build. It replaces the release build
+in that directory; it is not a separate build alongside the `release` preset.
+Before switching an existing release directory between compilers, standard
+libraries, or target triplets, delete that disposable directory, including its
+`vcpkg_installed` subdirectory, and configure again with the intended preset.
+Do not reuse GCC objects or libstdc++ target dependencies in the libc++ build.
+
+Use `release-clang19` when recreating this local configuration. The generic
+`release` preset retains the selected toolchain in an existing CMake cache,
+but on a clean Linux configuration the default axklib triplet selects Clang 18.
+Debug and sanitizer build directories are configured independently.

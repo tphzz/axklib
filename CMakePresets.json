@@ -37,6 +37,22 @@
       }
     },
     {
+      "name": "release-clang19",
+      "inherits": "release",
+      "displayName": "Native Linux x64 Release (Clang 19, libc++)",
+      "description": "Replaces the local release build; clean build/native/release before switching toolchains.",
+      "binaryDir": "${sourceDir}/build/native/release",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-linux-clang19-axk",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/library/cmake/toolchains/LinuxClang19Libcxx.cmake"
+      }
+    },
+    {
       "name": "asan",
       "inherits": "debug",
       "displayName": "Native ASan and UBSan",
@@ -93,6 +109,10 @@
       "configurePreset": "release"
     },
     {
+      "name": "release-clang19",
+      "configurePreset": "release-clang19"
+    },
+    {
       "name": "asan",
       "configurePreset": "asan"
     },
@@ -125,6 +145,13 @@
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "release-clang19",
+      "configurePreset": "release-clang19",
       "output": {
         "outputOnFailure": true
       }

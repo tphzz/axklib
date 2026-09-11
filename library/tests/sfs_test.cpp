@@ -648,7 +648,7 @@ TEST(SfsReader, DoesNotTreatDeletedOrMalformedEmptySlotsAsLiveFiles) {
     ASSERT_TRUE(image);
     const auto &partition = image->partitions().front();
     EXPECT_EQ(partition.records.size(), 1U);
-    EXPECT_TRUE(std::ranges::any_of(partition.diagnostics, [index](const axk::Error &error) {
+    EXPECT_TRUE(std::ranges::any_of(partition.diagnostics, [](const axk::Error &error) {
         return error.code == axk::ErrorCode::object_malformed && error.context.raw_offset == index + 72U;
     }));
 }

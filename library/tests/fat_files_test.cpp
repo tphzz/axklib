@@ -35,7 +35,6 @@ std::vector<std::byte> read(const axk::RandomAccessReader &reader) {
     EXPECT_TRUE(reader.read_exact_at(0U, bytes));
     return bytes;
 }
-constexpr auto plain_root = root_offset - boot_offset;
 constexpr auto plain_data = data_offset - boot_offset;
 void set_plain_fat(std::vector<std::byte> &bytes, std::uint16_t cluster, std::uint16_t next) {
     for (const auto offset : {fat_offset - boot_offset, fat_offset - boot_offset + fat_bytes})
