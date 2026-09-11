@@ -273,13 +273,13 @@ TEST(HdsManifest, RejectsSampleMembershipInMultipleSampleBanksForJsonAndTypedInp
          {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
           {"SBNK", "Direct 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}},
     };
-    axk::HdsBuildManifest manifest{
+    axk::HdsBuildManifest typed_manifest{
         std::string{axk::build_manifest_schema_version}, axk::minimum_hds_size, {{"P1", {std::move(volume)}}}};
     const auto output = std::filesystem::temp_directory_path() / "axklib-duplicate-bank-membership.hds";
     std::error_code error;
     std::filesystem::remove(output, error);
 
-    const auto written = axk::write_hds_image(manifest, output);
+    const auto written = axk::write_hds_image(typed_manifest, output);
 
     EXPECT_FALSE(written);
     EXPECT_FALSE(std::filesystem::exists(output));
