@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -236,7 +237,10 @@ impl DragCache {
         }
         let mut random = [0_u8; 16];
         getrandom::fill(&mut random).map_err(failure)?;
-        let id: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let mut id = String::with_capacity(random.len() * 2);
+        for byte in random {
+            write!(&mut id, "{byte:02x}").expect("writing to a String cannot fail");
+        }
         let path = self.root.join(&id);
         create_private_directory(&path).map_err(failure)?;
         let result = (|| {

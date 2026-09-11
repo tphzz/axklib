@@ -25,6 +25,13 @@ fn cache_accounts_across_instances_and_retains_handed_off_paths() {
     let mut first = DragCache::open(&path, limits).unwrap();
     let mut second = DragCache::open(&path, limits).unwrap();
     let ticket = first.reserve(2048, 100).unwrap();
+    assert_eq!(ticket.id.len(), 32);
+    assert!(
+        ticket
+            .id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    );
     first.begin(&ticket.id).unwrap();
     assert!(first.begin(&ticket.id).is_err());
     std::fs::create_dir(&ticket.destination).unwrap();
