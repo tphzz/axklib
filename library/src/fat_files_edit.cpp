@@ -219,9 +219,9 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                 } else {
                     release(node);
                     const auto size = static_cast<std::uint32_t>(operation.contents->size());
-                    const auto count = static_cast<std::uint32_t>(
+                    const auto cluster_count = static_cast<std::uint32_t>(
                         (static_cast<std::uint64_t>(size) + geometry.cluster_size() - 1U) / geometry.cluster_size());
-                    auto clusters = allocate(count);
+                    auto clusters = allocate(cluster_count);
                     if (!clusters)
                         return std::unexpected(clusters.error());
                     node.clusters = std::move(*clusters);
@@ -237,15 +237,15 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                         while (i < node.clusters.size() && node.clusters[i] == node.clusters[i - 1U] + 1U)
                             ++i;
                         const auto capacity = static_cast<std::uint64_t>(i - first) * geometry.cluster_size();
-                        const auto count = std::min<std::uint64_t>(capacity, size - consumed);
+                        const auto byte_count = std::min<std::uint64_t>(capacity, size - consumed);
                         const auto offset = cluster_offset(node.clusters[first]);
-                        patches.push_back({offset, operation.contents, consumed, count});
-                        if (count < capacity) {
+                        patches.push_back({offset, operation.contents, consumed, byte_count});
+                        if (byte_count < capacity) {
                             auto padding = std::make_shared<MemoryReader>(
-                                std::vector<std::byte>(static_cast<std::size_t>(capacity - count)));
-                            patches.push_back({offset + count, padding, 0U, padding->size()});
+                                std::vector<std::byte>(static_cast<std::size_t>(capacity - byte_count)));
+                            patches.push_back({offset + byte_count, padding, 0U, padding->size()});
                         }
-                        consumed += count;
+                        consumed += byte_count;
                     }
                 }
                 store(node);
