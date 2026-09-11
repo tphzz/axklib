@@ -1299,7 +1299,7 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     EXPECT_EQ(decoded.at("parameters").at("level"), 127U);
     EXPECT_EQ(decoded.at("parameters").at("controllers").at("1").at("device"), 91U);
     EXPECT_EQ(decoded.at("parameters").at("step_wave").at("step_count"), 8U);
-    EXPECT_EQ(decoded.at("assignments")[0].at("parameters").at("receive"),
+    EXPECT_EQ(nlohmann::json(decoded.at("assignments")[0].at("parameters").at("receive")),
               nlohmann::json({{"port", "a"}, {"channel", 1U}}));
     EXPECT_EQ(decoded.at("rawCommonParameterBlockHex").get<std::string>().size(), 0x18U * 2U);
     EXPECT_EQ(decoded.at("rawExtendedParameterBlockHex").get<std::string>().size(), 0x28U * 2U);
