@@ -263,6 +263,39 @@ fn receiving_archive_propagates_read_and_write_failures() {
     );
 }
 
+fn configure_test_http_stream(stream: &std::net::TcpStream) {
+    // Accepted sockets can inherit the listener's nonblocking mode on BSD systems.
+    stream.set_nonblocking(false).unwrap();
+    let timeout = Some(std::time::Duration::from_secs(5));
+    stream.set_read_timeout(timeout).unwrap();
+    stream.set_write_timeout(timeout).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn test_http_stream_resets_inherited_nonblocking_mode() {
+    use rustix::fs::{OFlags, fcntl_getfl};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::Duration;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let _client =
+        TcpStream::connect_timeout(&listener.local_addr().unwrap(), Duration::from_secs(5))
+            .unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    assert!(fcntl_getfl(&stream).unwrap().contains(OFlags::NONBLOCK));
+
+    configure_test_http_stream(&stream);
+
+    assert!(!fcntl_getfl(&stream).unwrap().contains(OFlags::NONBLOCK));
+    assert_eq!(stream.read_timeout().unwrap(), Some(Duration::from_secs(5)));
+    assert_eq!(
+        stream.write_timeout().unwrap(),
+        Some(Duration::from_secs(5))
+    );
+}
+
 #[test]
 fn retained_http_download_publishes_only_complete_valid_archives_and_cleans_staging() {
     use crate::local_directory_exports::download_retained_directory_export;
@@ -296,12 +329,7 @@ fn retained_http_download_publishes_only_complete_valid_archives_and_cleans_stag
                     Err(error) => panic!("test HTTP accept: {error}"),
                 }
             };
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            stream
-                .set_write_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
+            configure_test_http_stream(&stream);
             let mut request = Vec::new();
             let mut byte = [0];
             while !request.ends_with(b"\r\n\r\n") {
