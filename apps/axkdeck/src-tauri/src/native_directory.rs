@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use tauri_plugin_fs::FsExt;
 
@@ -28,11 +29,7 @@ fn directory_names(path: &Path, limit: usize) -> Result<Vec<String>, String> {
         if names.len() == limit {
             return Err("Choose at most 10000 entries".to_owned());
         }
-        let name = entry
-            .map_err(|error| error.to_string())?
-            .file_name()
-            .into_string()
-            .map_err(|_| "A dropped name cannot be represented as text".to_owned())?;
+        let name = directory_name_text(entry.map_err(|error| error.to_string())?.file_name())?;
         bytes += name.len();
         if name.encode_utf16().count() > 255 || bytes > 4194304 {
             return Err("Dropped names exceed the metadata limit".to_owned());
@@ -55,6 +52,11 @@ fn directory_names(path: &Path, limit: usize) -> Result<Vec<String>, String> {
         }
     }
     Ok(names)
+}
+
+fn directory_name_text(name: OsString) -> Result<String, String> {
+    name.into_string()
+        .map_err(|_| "A dropped name cannot be represented as text".to_owned())
 }
 
 #[tauri::command]
@@ -91,7 +93,32 @@ fn scoped_directory_names(
 
 #[cfg(test)]
 mod tests {
-    use super::{directory_names, scoped_directory_names};
+    use super::{directory_name_text, directory_names, scoped_directory_names};
+
+    #[test]
+    fn directory_name_text_preserves_unicode() {
+        let name = "Sample \u{00e9} \u{1f3b5}";
+        assert_eq!(directory_name_text(name.into()).unwrap(), name);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn directory_name_text_rejects_non_unicode_without_filesystem_io() {
+        #[cfg(unix)]
+        let invalid = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(vec![0xff])
+        };
+        #[cfg(windows)]
+        let invalid = {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[0xd800])
+        };
+        assert_eq!(
+            directory_name_text(invalid).unwrap_err(),
+            "A dropped name cannot be represented as text"
+        );
+    }
 
     #[test]
     fn names_are_bounded_and_empty_directories_are_valid() {
@@ -126,11 +153,6 @@ mod tests {
             std::os::unix::fs::symlink(root.join("EMPTY"), root.join("LINK")).unwrap();
             assert!(directory_names(&root.join("LINK"), 2).is_err());
             std::fs::remove_file(root.join("LINK")).unwrap();
-            use std::os::unix::ffi::OsStringExt;
-            let invalid = root.join(std::ffi::OsString::from_vec(vec![0xff]));
-            std::fs::write(&invalid, []).unwrap();
-            assert!(directory_names(&root, 10).unwrap_err().contains("text"));
-            std::fs::remove_file(invalid).unwrap();
         }
         std::fs::remove_file(root.join("RAW")).unwrap();
         std::fs::remove_dir(root.join("EMPTY")).unwrap();
