@@ -72,6 +72,8 @@ struct FatGeometry {
     std::uint64_t root_offset{};
     std::uint64_t data_offset{};
     std::uint32_t data_cluster_count{};
+    std::uint64_t physical_size_bytes{};
+    std::uint32_t backed_data_cluster_count{};
 
     [[nodiscard]] std::uint32_t cluster_size() const noexcept;
 };

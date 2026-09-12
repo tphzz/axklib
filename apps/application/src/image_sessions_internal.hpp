@@ -135,7 +135,9 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<ImageValidationItem> validation;
         std::shared_ptr<const RandomAccessReader> source_reader;
         std::function<Result<void>()> verify_source_unchanged;
-        std::string target_snapshot_id;
+        std::string source_revision;
+        std::optional<std::string> content_fingerprint;
+        std::mutex fingerprint_mutex;
         std::optional<MediaContainer> media;
         std::optional<detail::ImageFilesystemIndex> filesystem_index;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
@@ -349,7 +351,8 @@ struct axk::app::ImageSessionManager::Implementation {
         current.validation = std::move(fresh.validation);
         current.source_reader = std::move(fresh.source_reader);
         current.verify_source_unchanged = std::move(fresh.verify_source_unchanged);
-        current.target_snapshot_id = std::move(fresh.target_snapshot_id);
+        current.source_revision = std::move(fresh.source_revision);
+        current.content_fingerprint.reset();
         current.media = std::move(fresh.media);
         current.filesystem_index.reset();
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);

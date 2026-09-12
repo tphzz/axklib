@@ -4,8 +4,6 @@
 #include <span>
 #include <utility>
 
-#include "axklib/package_archive.hpp"
-
 namespace axk::detail {
 Result<void> inspect_fat_file_edit_support(std::shared_ptr<const RandomAccessReader> source, PartitionIndex partition,
                                            const CancellationToken &cancellation) {
@@ -22,9 +20,6 @@ Result<PreparedFilesystemEdits> prepare_fat_file_edits(std::shared_ptr<const Ran
     auto state = fat_files::open(source, partition, cancellation);
     if (!state)
         return std::unexpected(state.error());
-    const auto snapshot = package_internal::sha256_reader(*source, cancellation);
-    if (!snapshot)
-        return std::unexpected(snapshot.error());
     for (const auto &edit : edits)
         if (auto applied = state->apply(edit); !applied)
             return std::unexpected(applied.error());
@@ -36,7 +31,6 @@ Result<PreparedFilesystemEdits> prepare_fat_file_edits(std::shared_ptr<const Ran
     auto preview = filesystem_preview(source, *patches);
     if (auto checked = fat_files::open(preview, partition, cancellation); !checked)
         return std::unexpected(checked.error());
-    return PreparedFilesystemEdits{source->size(), package_internal::hex_digest(*snapshot), std::move(*patches),
-                                   std::move(preview)};
+    return PreparedFilesystemEdits{source->size(), std::move(*patches), std::move(preview)};
 }
 } // namespace axk::detail

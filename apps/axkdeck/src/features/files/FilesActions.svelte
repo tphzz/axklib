@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { onDestroy, tick } from 'svelte';
     import type { FilesystemEntry, FilesystemMutationDriver } from '../../lib/filesystem';
     import Icon from '../../lib/components/Icon.svelte';
     import ObjectContextMenu from '../../lib/components/ObjectContextMenu.svelte';
-    import type { FilesController } from './controller.svelte';
+    import type { FilesController, FilesContext } from './controller.svelte';
     import { FilesEditWorkflow } from './editWorkflow.svelte';
     import FilesEditDialog from './FilesEditDialog.svelte';
     import type {
@@ -30,7 +30,20 @@
         imageImport?: FilesystemImageImporter;
         setStatus?: (message: string) => void;
     } = $props();
-    const workflow = new FilesEditWorkflow();
+    const workflow = new FilesEditWorkflow(
+        (review, name, revision) => controller.recordRename(review.revision, review.entries[0], name, revision),
+        (message) => {
+            setStatus(message);
+            void tick().then(() => {
+                const workspace = toolbar?.closest('[data-navigation-workspace]');
+                const row = [...(workspace?.querySelectorAll<HTMLElement>('[data-file-entry]') ?? [])].find(
+                    (entry) => entry.dataset.fileEntry === controller.focused?.id,
+                );
+                row?.focus({ preventScroll: true });
+            });
+        },
+    );
+    let toolbar: HTMLDivElement;
     const importer = new FilesImportWorkflow((message) => setStatus(message));
     let resolving = $state(false);
     let menu = $state<{ left: number; top: number } | null>(null);
@@ -71,6 +84,24 @@
             !exportBlocked &&
             controller.selection.length > 0 &&
             controller.selection.every((entry) => !!entry.parentId && !entry.filesystemMetadata && !entry.issue),
+    );
+    const canRename = $derived(
+        !!driver &&
+            !!controller.capabilities?.renameEntry &&
+            !resolving &&
+            !workflow.review &&
+            !importer.target &&
+            !imageImport?.busy &&
+            !exportBlocked &&
+            controller.selection.length === 1 &&
+            controller.selection.every(
+                (entry) =>
+                    !!entry.parentId &&
+                    (entry.kind === 'file' || entry.kind === 'directory') &&
+                    !entry.filesystemMetadata &&
+                    !entry.issue &&
+                    !entry.attributes.includes('Read-only'),
+            ),
     );
     const canImport = $derived(
         !!imports &&
@@ -135,6 +166,33 @@
                 },
                 driver,
             );
+    }
+
+    export function renameSelection(): void {
+        if (canRename && driver && controller.capabilities) {
+            const boundDriver = driver;
+            const current = controller;
+            let context: FilesContext | undefined;
+            workflow.open(
+                {
+                    kind: 'rename',
+                    revision: controller.revision,
+                    entries: controller.selection,
+                    capabilities: controller.capabilities,
+                },
+                {
+                    ...boundDriver,
+                    refresh: async () => {
+                        context ??= current.capture();
+                        await boundDriver.refresh();
+                        await tick();
+                        await controller.initialize(context);
+                        if (!controller.initialized || controller.error)
+                            throw new Error(controller.error || 'Filesystem refresh failed');
+                    },
+                },
+            );
+        }
     }
 
     export function isBusy(): boolean {
@@ -206,11 +264,12 @@
 
     export function openMenu(event: MouseEvent): void {
         event.preventDefault();
-        if (canCreate || canImport || canDelete || canExport) menu = { left: event.clientX, top: event.clientY };
+        if (canCreate || canImport || canDelete || canRename || canExport)
+            menu = { left: event.clientX, top: event.clientY };
     }
 </script>
 
-<div class="files-actions">
+<div class="files-actions" bind:this={toolbar}>
     <span class="files-selection-count" role="status"
         >{controller.selection.length ? `${controller.selection.length} selected` : ''}</span
     >
@@ -238,6 +297,14 @@
             disabled={!canImport}
             onclick={() => void openDestination('import')}><Icon name="file-plus" size={14} /></button
         >{/if}
+    <button
+        class="icon-button"
+        type="button"
+        title="Rename..."
+        aria-label="Rename..."
+        disabled={!canRename}
+        onclick={renameSelection}><Icon name="rename" size={14} /></button
+    >
     <button
         class="icon-button"
         type="button"
@@ -273,6 +340,7 @@
             ? [{ label: imageImport.label, action: () => void imageImport?.open() }]
             : []}
         ondelete={canDelete ? deleteSelection : undefined}
+        onrename={canRename ? renameSelection : undefined}
         onexportfiles={canExport ? () => onexport?.(exportTargets) : undefined}
         onclose={() => (menu = null)}
     />

@@ -47,7 +47,7 @@ Result<Json> run(const Json &request, const OperationContext &context, const San
         if (auto verified = input->verify(request.at("expectedSource"), context.cancellation); !verified)
             return std::unexpected(verified.error());
     }
-    auto snapshot = input->snapshot(context.cancellation);
+    auto snapshot = execute ? Result<Json>{request.at("expectedSource")} : input->snapshot(context.cancellation);
     if (!snapshot)
         return std::unexpected(snapshot.error());
     auto opened = FatImage::open(input->reader, {}, context.cancellation);
@@ -132,16 +132,19 @@ Result<Json> run(const Json &request, const OperationContext &context, const San
         result["issue"] = reviewed.error().message;
         return result;
     }
-    if (auto verified = input->verify(*snapshot, context.cancellation); !verified)
+    if (auto verified = execute ? input->verify_identity() : input->verify(*snapshot, context.cancellation); !verified)
         return std::unexpected(verified.error());
     if (!execute) {
         result["destinationReady"] = true;
         result["totalBytes"] = total;
         return result;
     }
+    FilesystemInputVerification verification{{}, [&]() { return input->verify(*snapshot, context.cancellation); }};
+    for (const auto &edit : reviewed->edits)
+        if (const auto *put = std::get_if<PutFilesystemFile>(&edit))
+            verification.reviewed_readers.push_back(put->contents);
     auto updated = apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, reviewed->partition,
-                                          reviewed->edits, context.cancellation, context.progress,
-                                          [&]() { return input->verify(*snapshot); });
+                                          reviewed->edits, context.cancellation, context.progress, verification);
     if (!updated)
         return std::unexpected(updated.error());
     return Json{{"imageId", image_id},

@@ -101,7 +101,8 @@ struct ImageSessionRead {
     ImageSourceRef source;
     std::shared_ptr<const RandomAccessReader> reader;
     const MediaContainer *media{};
-    std::string target_snapshot_id;
+    // Explicit content identity for retained plans, evaluated only while this read lease is held.
+    std::function<Result<std::string>(const CancellationToken &)> content_fingerprint;
     std::vector<const ObjectSnapshot *> catalog_objects;
     std::vector<CatalogIssue> catalog_issues;
     std::unordered_map<std::string, std::string> object_keys_by_id;

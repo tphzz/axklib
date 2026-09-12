@@ -71,4 +71,44 @@ inline std::vector<std::byte> ex5_fixture() {
     return bytes;
 }
 
+inline std::vector<std::byte> ex5_capacity_fixture(bool unused_tail = false, bool populated = false) {
+    constexpr std::size_t cluster_bytes = 4U * sector_bytes;
+    constexpr std::size_t table_bytes = 17U * sector_bytes;
+    constexpr std::size_t root = sector_bytes + 2U * table_bytes;
+    constexpr std::size_t data = root + 512U * 32U;
+    const auto declared = data + 4096U * cluster_bytes + (unused_tail ? sector_bytes : 0U);
+    std::vector<std::byte> bytes(declared - sector_bytes);
+    ascii(bytes, 3U, "YAMAHA??");
+    le16(bytes, 11U, 512U);
+    bytes[13] = std::byte{4};
+    le16(bytes, 14U, 1U);
+    bytes[16] = std::byte{2};
+    le16(bytes, 17U, 512U);
+    bytes[21] = std::byte{0xf8};
+    le16(bytes, 22U, 17U);
+    le32(bytes, 32U, static_cast<std::uint32_t>(declared / sector_bytes));
+    ascii(bytes, 54U, "FAT16   ");
+    le16(bytes, 510U, 0xaa55U);
+    for (const auto offset : {sector_bytes, sector_bytes + table_bytes}) {
+        le16(bytes, offset, 0xfff8U);
+        le16(bytes, offset + 2U, 0xffffU);
+        if (populated) {
+            le16(bytes, offset + 4U, 0xffffU);
+            le16(bytes, offset + 6U, 0xffffU);
+        }
+    }
+    if (populated) {
+        ascii(bytes, root, "DEMOS      ");
+        bytes[root + 11U] = std::byte{0x10};
+        le16(bytes, root + 26U, 2U);
+        ascii(bytes, data, "DEMO1   S1A");
+        bytes[data + 11U] = std::byte{0x20};
+        le16(bytes, data + 26U, 3U);
+        le32(bytes, data + 28U, 700U);
+        std::fill_n(bytes.begin() + data + cluster_bytes, 512U, std::byte{0x31});
+        std::fill_n(bytes.begin() + data + cluster_bytes + 512U, 188U, std::byte{0x72});
+    }
+    return bytes;
+}
+
 } // namespace

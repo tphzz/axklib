@@ -22,6 +22,7 @@ struct Record {
     std::vector<std::byte> directory;
     bool changed{};
     bool directory_changed{};
+    bool directory_renamed{};
     bool payload_changed{};
     bool deleted{};
 };

@@ -37,12 +37,55 @@ const access: FilesystemAccess = {
 };
 
 describe('FilesController', () => {
+    it.each([2, 3])('restores renamed navigation only at the confirmed revision, received %s', async (revision) => {
+        const folder = entry('folder', 'disk', 'directory');
+        const child = {
+            ...file,
+            parentId: 'folder',
+            path: '/folder/child',
+            name: 'child',
+            ancestorIds: ['disk', 'folder'],
+        };
+        let currentRevision = 1;
+        const files = new FilesController({
+            inspect: async (query = {}) => {
+                const renamed = currentRevision > 1;
+                const entries = [
+                    root,
+                    { ...folder, name: renamed ? 'Renamed' : 'folder', path: renamed ? '/Renamed' : '/folder' },
+                    { ...child, path: renamed ? '/Renamed/child' : child.path },
+                ];
+                const items = query.entryId
+                    ? entries.filter((value) => value.id === query.entryId)
+                    : query.parentId
+                      ? entries.filter((value) => value.parentId === query.parentId)
+                      : query.rootId
+                        ? entries.filter((value) => value.name.includes(query.query ?? ''))
+                        : [root];
+                return { ...page(items), revision: currentRevision };
+            },
+        });
+        await files.initialize();
+        await files.toggle(folder);
+        files.select(child);
+        files.scrollTop = 42;
+        files.recordRename(1, folder, 'Renamed', 2);
+        currentRevision = revision;
+        await files.initialize();
+        expect(files.scrollTop).toBe(42);
+        if (revision === 2) {
+            expect(files.selected?.path).toBe('/Renamed/child');
+            expect(files.expanded('folder')).toBe(true);
+        } else expect(files.selection).toEqual([]);
+    });
+
     it('uses capabilities for the active root and replaces them after a refresh', async () => {
         const capability = {
             rootId: root.id,
             createDirectory: true,
             putFile: true,
             deleteEntry: true,
+            renameEntry: true,
             maximumNameBytes: 23,
             namePattern: '^[ -~]{1,23}$',
             nameHint: 'Printable ASCII',

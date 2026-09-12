@@ -1,3 +1,4 @@
+#include "content_digest.hpp"
 #include "image_sessions_internal.hpp"
 
 axk::app::Result<axk::app::ImageSessionRead>
@@ -16,6 +17,23 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
     if (const auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
         return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     auto lease = std::make_shared<std::unique_lock<std::mutex>>(std::move(access));
+    auto fingerprint = [state = *session, lease](const CancellationToken &cancellation) -> Result<std::string> {
+        static_cast<void>(lease);
+        const std::scoped_lock cache_lock{state->fingerprint_mutex};
+        if (auto checked = cancellation.check(); !checked)
+            return std::unexpected(core_error(checked.error(), state->source));
+        if (auto checked = state->verify_source_unchanged(); !checked)
+            return std::unexpected(checked.error());
+        if (!state->content_fingerprint) {
+            auto digest = detail::reader_sha256(*state->source_reader, cancellation);
+            if (!digest)
+                return std::unexpected(digest.error());
+            if (auto checked = state->verify_source_unchanged(); !checked)
+                return std::unexpected(checked.error());
+            state->content_fingerprint = std::move(*digest);
+        }
+        return *state->content_fingerprint;
+    };
     std::vector<const ObjectSnapshot *> catalog_objects;
     catalog_objects.reserve((*session)->snapshots_by_id.size());
     std::unordered_map<std::string, std::string> object_keys_by_id;
@@ -33,7 +51,7 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
     }
     return ImageSessionRead{
         (*session)->image_id,           (*session)->revision,       (*session)->source,
-        (*session)->source_reader,      &*(*session)->media,        (*session)->target_snapshot_id,
+        (*session)->source_reader,      &*(*session)->media,        std::move(fingerprint),
         std::move(catalog_objects),     (*session)->catalog_issues, std::move(object_keys_by_id),
         std::move(volume_scopes_by_id), std::move(lease),           (*session)->verify_source_unchanged};
 }
@@ -109,10 +127,8 @@ axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, 
     }
     if ((*session)->mutating)
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
-    if (filesystem_partition)
-        if (auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
-            return std::unexpected(
-                session_error("image_source_changed", "image source changed after it was opened", true));
+    if (auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
+        return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
         return std::unexpected(upgraded.error());
     const FileRef source{(*session)->source.root_id, (*session)->source.relative_path};
@@ -120,6 +136,10 @@ axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, 
     if (!target) {
         (*session)->path_lease.downgrade();
         return std::unexpected(target.error());
+    }
+    if ((*target)->revision() != (*session)->source_revision || !(*target)->verify_unchanged()) {
+        (*session)->path_lease.downgrade();
+        return std::unexpected(session_error("image_source_changed", "image source changed before mutation", true));
     }
     (*session)->mutating = true;
     (*session)->mutation_guard.emplace(std::move(access));
@@ -186,13 +206,12 @@ axk::app::Result<void> axk::app::ImageSessionManager::refresh_rolled_back_mutati
         return std::unexpected(prepared.error());
     auto current = std::static_pointer_cast<Implementation::Session>(prepared->current_state);
     auto fresh = std::static_pointer_cast<Implementation::Session>(prepared->refreshed_state);
-    if (current->target_snapshot_id != fresh->target_snapshot_id)
-        return std::unexpected(
-            session_error("image_source_changed", "rolled-back image does not match its original snapshot", true));
     // A byte-exact rollback can still change native timestamps. Refresh only
     // file access metadata, keeping the same revision and logical identities.
     current->source_reader = std::move(fresh->source_reader);
     current->verify_source_unchanged = std::move(fresh->verify_source_unchanged);
+    current->source_revision = std::move(fresh->source_revision);
+    current->content_fingerprint.reset();
     return {};
 }
 

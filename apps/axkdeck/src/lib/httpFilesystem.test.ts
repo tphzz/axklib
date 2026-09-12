@@ -257,6 +257,7 @@ describe('Files HTTP binding', () => {
                 createDirectory: true,
                 putFile: true,
                 deleteEntry: true,
+                renameEntry: true,
                 maximumNameBytes: 23,
                 namePattern: '^[ -~]{1,23}$',
                 nameHint: 'Printable ASCII',

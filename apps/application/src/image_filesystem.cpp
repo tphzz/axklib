@@ -49,7 +49,8 @@ axk::app::ImageSessionManager::filesystem(std::string_view image_id, std::string
     if (!implementation_->path_reservations || !source || !source->writable ||
         state->source.kind != ImageSourceKind::file)
         for (auto &capability : page.root_capabilities) {
-            capability.create_directory = capability.put_file = capability.delete_entry = false;
+            capability.create_directory = capability.put_file = capability.delete_entry = capability.rename_entry =
+                false;
             capability.supported_imports.clear();
         }
     const auto search = fold_ascii(query.query);

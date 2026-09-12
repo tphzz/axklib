@@ -71,6 +71,9 @@ Result<PublicationOutcome> write_sfs_file_edits(const std::filesystem::path &sou
             return std::unexpected{digest.error()};
         input_digests.emplace(put->contents, *digest);
     }
+    const auto snapshot = package_internal::sha256_reader(**source, cancellation);
+    if (!snapshot)
+        return std::unexpected(snapshot.error());
     auto prepared = detail::prepare_sfs_file_edits(*source, partition, edits, cancellation);
     if (!prepared)
         return std::unexpected{prepared.error()};
@@ -94,7 +97,7 @@ Result<PublicationOutcome> write_sfs_file_edits(const std::filesystem::path &sou
     const auto unchanged = package_internal::sha256_reader(**source, cancellation);
     if (!unchanged)
         return std::unexpected{unchanged.error()};
-    if (package_internal::hex_digest(*unchanged) != prepared->source_snapshot_id)
+    if (*unchanged != *snapshot)
         return std::unexpected{
             sfs_files::error("source image changed during filesystem editing", ErrorCode::transaction_stale)};
     for (const auto &[reader, expected] : input_digests) {

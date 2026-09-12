@@ -1,6 +1,7 @@
 #include "filesystem_entry_paths.hpp"
 #include "image_sessions_internal.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <expected>
 #include <mutex>
@@ -42,6 +43,11 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
         return std::unexpected(unchanged.error());
     if (edits.empty() || edits.size() > 10000U)
         return std::unexpected(session_error("invalid_request", "Choose between 1 and 10000 filesystem changes"));
+    // Paths resolved from this revision must not be retargeted by earlier renames in a batch.
+    if (edits.size() != 1U && std::ranges::any_of(edits, [](const auto &edit) {
+            return std::holds_alternative<RenameImageFilesystemEntry>(edit);
+        }))
+        return std::unexpected(session_error("invalid_request", "Rename requires a single-entry edit request"));
     if (!state->filesystem_index) {
         auto index = detail::build_image_filesystem(*state->media, state->source_reader, state->snapshots_by_id,
                                                     state->descriptors_by_id, state->content);
@@ -60,8 +66,9 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
             [&](const auto &request) -> Result<FilesystemEdit> {
                 using Request = std::decay_t<decltype(request)>;
                 constexpr bool removing = std::is_same_v<Request, RemoveImageFilesystemEntry>;
+                constexpr bool renaming = std::is_same_v<Request, RenameImageFilesystemEntry>;
                 const auto &id = [&]() -> const std::string & {
-                    if constexpr (removing)
+                    if constexpr (removing || renaming)
                         return request.entry_id;
                     else
                         return request.parent_entry_id;
@@ -74,10 +81,13 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                     return std::unexpected(
                         session_error("invalid_request", "Choose entries from one filesystem partition"));
                 result.partition = selected->partition;
-                if constexpr (removing) {
+                if constexpr (removing || renaming) {
                     if (!entry.parent_id)
-                        return std::unexpected(
-                            session_error("filesystem_entry_protected", "Partition roots cannot be deleted"));
+                        return std::unexpected(session_error("filesystem_entry_protected",
+                                                             "Partition roots cannot be deleted or renamed"));
+                    if constexpr (renaming)
+                        if (auto checked = check_relative_path({request.new_name}); !checked)
+                            return std::unexpected(checked.error());
                 } else {
                     if (entry.kind == "file")
                         return std::unexpected(session_error("invalid_request", "The destination must be a directory"));
@@ -87,6 +97,8 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                 auto path = std::move(selected->path);
                 if constexpr (removing) {
                     return RemoveFilesystemEntry{std::move(path), request.recursive};
+                } else if constexpr (renaming) {
+                    return RenameFilesystemEntry{std::move(path), request.new_name};
                 } else {
                     path.insert(path.end(), request.relative_path.begin(), request.relative_path.end());
                     if constexpr (std::is_same_v<Request, CreateImageFilesystemDirectory>)

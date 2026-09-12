@@ -31,7 +31,12 @@ struct RemoveFilesystemEntry {
     FilesystemPath path;
     bool recursive{};
 };
-using FilesystemEdit = std::variant<CreateFilesystemDirectory, PutFilesystemFile, RemoveFilesystemEntry>;
+struct RenameFilesystemEntry {
+    FilesystemPath path;
+    std::string new_name;
+};
+using FilesystemEdit =
+    std::variant<CreateFilesystemDirectory, PutFilesystemFile, RemoveFilesystemEntry, RenameFilesystemEntry>;
 
 // Publishes a new destination image. The source and input readers must remain
 // immutable for the operation; callers coordinate shared-image path leases.

@@ -46,17 +46,56 @@ function setup() {
         observe: vi.fn(),
         cancel: vi.fn(),
     };
-    const workflow = new FilesImportWorkflow();
-    workflow.open(3, filesystemEntry(), writableFilesRoot, imports, {
-        execute: vi.fn(),
+    const status = vi.fn();
+    const workflow = new FilesImportWorkflow(status);
+    const mutations = {
+        execute: vi.fn().mockResolvedValue({ ...job, result: { imageId: 'image', revision: 4, warnings: [] } }),
         observe: vi.fn(),
         cancel: vi.fn(),
-        refresh: vi.fn(),
-    });
-    return { workflow, imports, view: render(FilesImportDialog, { workflow }) };
+        refresh: vi.fn().mockResolvedValue(undefined),
+    };
+    workflow.open(3, filesystemEntry(), writableFilesRoot, imports, mutations);
+    return { workflow, imports, mutations, status, view: render(FilesImportDialog, { workflow }) };
 }
 
 describe('Files import dialog', () => {
+    it('closes a dropped-file import only after cleanup and refresh finish', async () => {
+        const { workflow, imports, mutations, status, view } = setup();
+        const source = serverFileLocation({ rootId: 'host', relativePath: 'tone.bin' });
+        vi.mocked(imports.upload).mockResolvedValue([source]);
+        await workflow.chooseDropped(async () => [
+            {
+                directory: false,
+                relativePath: ['TONE.BIN'],
+                source: { name: 'TONE.BIN', size: 42, type: '', readChunk: vi.fn() },
+            },
+        ]);
+        let finishCleanup!: () => void;
+        let finishRefresh!: () => void;
+        vi.mocked(imports.release).mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finishCleanup = resolve;
+                }),
+        );
+        mutations.refresh.mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finishRefresh = resolve;
+                }),
+        );
+        await fireEvent.click(view.getByRole('button', { name: 'Import' }));
+        await waitFor(() => expect(workflow.phase).toBe('refreshing'));
+        expect(view.getByRole('dialog')).toBeTruthy();
+        expect(mutations.refresh).not.toHaveBeenCalled();
+        finishCleanup();
+        await waitFor(() => expect(mutations.refresh).toHaveBeenCalledOnce());
+        expect(view.getByRole('dialog')).toBeTruthy();
+        finishRefresh();
+        await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+        expect(status).toHaveBeenCalledWith('Imported files');
+        expect(mutations.execute).toHaveBeenCalledOnce();
+    });
     it('describes dropped folders without claiming contents-only import', async () => {
         const { workflow, view } = setup();
         await workflow.chooseDropped(async () => [{ directory: true, relativePath: ['DROP'] }]);

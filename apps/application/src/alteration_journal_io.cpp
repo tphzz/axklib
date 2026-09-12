@@ -445,8 +445,8 @@ axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const 
 
 axk::app::Result<void> axk::app::journal_io::restore_original_bytes(SandboxMutation &target,
                                                                     const std::filesystem::path &journal_path,
-                                                                    const Inspection &journal,
-                                                                    std::size_t chunk_bytes) {
+                                                                    const Inspection &journal, std::size_t chunk_bytes,
+                                                                    const std::function<bool()> &after_flush) {
     auto reader = Reader::open(journal_path, std::numeric_limits<std::uint64_t>::max());
     if (!reader)
         return std::unexpected(reader.error());
@@ -463,5 +463,11 @@ axk::app::Result<void> axk::app::journal_io::restore_original_bytes(SandboxMutat
             offset += size;
         }
     }
-    return target.flush();
+    if (auto flushed = target.flush(); !flushed)
+        return flushed;
+    if (after_flush && after_flush())
+        return std::unexpected(journal_error("simulated rollback interruption", true));
+    if (auto bound = target.verify_bound(); !bound)
+        return bound;
+    return compare_target(target, journal_path, journal, false, chunk_bytes);
 }

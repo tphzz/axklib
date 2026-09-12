@@ -1,5 +1,6 @@
 #include "axklib/application/filesystem_edit_operations.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -34,10 +35,12 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
                                                    std::uint64_t expected_revision, PartitionIndex partition,
                                                    std::span<const FilesystemEdit> edits,
                                                    const CancellationToken &cancellation, ProgressSink *progress,
-                                                   const std::function<Result<void>()> &validate_inputs) {
+                                                   const FilesystemInputVerification &input_verification) {
     using write_operations_internal::core_error;
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(core_error(checked.error()));
+    if (!input_verification.reviewed_readers.empty() && !input_verification.verify)
+        return std::unexpected(Error{"invalid_request", "Reviewed inputs require commit verification"});
     auto mutation = images.begin_filesystem_mutation(image_id, owner_id, expected_revision, partition);
     if (!mutation)
         return std::unexpected(mutation.error());
@@ -49,6 +52,9 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
             continue;
         if (put->contents->size() > std::numeric_limits<std::uint32_t>::max())
             return std::unexpected(Error{"filesystem_input_too_large", "file input exceeds the filesystem size field"});
+        if (std::ranges::find(input_verification.reviewed_readers, put->contents) !=
+            input_verification.reviewed_readers.end())
+            continue;
         auto hash = detail::reader_sha256(*put->contents, cancellation);
         if (!hash)
             return std::unexpected(hash.error());
@@ -61,12 +67,8 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
                               : axk::detail::prepare_fat_file_edits(mutation->target, partition, edits, cancellation);
     if (!prepared)
         return std::unexpected(core_error(prepared.error()));
-    const auto unchanged = detail::reader_sha256(*mutation->target, cancellation);
-    if (!unchanged)
+    if (auto unchanged = mutation->target->verify_unchanged(); !unchanged)
         return std::unexpected(unchanged.error());
-    if (*unchanged != prepared->source_snapshot_id)
-        return std::unexpected(
-            Error{"image_source_changed", "image changed while planning filesystem edits", {}, true});
     std::vector<AlterationJournalPatch> patches;
     patches.reserve(prepared->patches.size());
     for (const auto &patch : prepared->patches)
@@ -75,18 +77,20 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
                            {patch.source, patch.source_offset, patch.size}});
     std::optional<PreparedImageSessionCommit> refreshed;
     const auto validate = [&]() -> Result<void> {
-        if (validate_inputs) {
-            if (auto result = validate_inputs(); !result)
+        if (input_verification.verify) {
+            if (auto result = input_verification.verify(); !result)
                 return result;
         }
         for (const auto &[reader, expected] : inputs) {
-            const auto hash = detail::reader_sha256(*reader);
+            const auto hash = detail::reader_sha256(*reader, cancellation);
             if (!hash)
                 return std::unexpected(hash.error());
             if (*hash != expected)
                 return std::unexpected(Error{"filesystem_input_changed", "file input changed during import", {}, true});
         }
-        auto result = images.prepare_mutation_commit(image_id, owner_id, expected_revision);
+        if (progress)
+            progress->report({ProgressPhase::validating, 0U, 1U, "Refreshing image metadata", std::nullopt});
+        auto result = images.prepare_mutation_commit(image_id, owner_id, expected_revision, cancellation);
         if (!result)
             return std::unexpected(result.error());
         refreshed.emplace(std::move(*result));
@@ -94,10 +98,12 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
     };
     if (progress)
         progress->report({ProgressPhase::publishing, 0U, 1U, "Committing filesystem changes", std::nullopt});
-    if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, cancellation, validate);
+    bool rollback_verified{};
+    if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, cancellation, validate,
+                                      [&] { rollback_verified = true; });
         !applied) {
         refreshed.reset();
-        if (journals.storage_ready()) {
+        if (rollback_verified && journals.storage_ready()) {
             if (auto bound = mutation->target->verify_bound(); !bound)
                 return std::unexpected(bound.error());
             if (auto restored = images.refresh_rolled_back_mutation(image_id, owner_id, expected_revision); !restored)

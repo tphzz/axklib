@@ -80,8 +80,11 @@ Entry IDs are resolved inside the session, not interpreted by clients. All
 changes must target one partition. Jobs reserve host input files and retain
 upload leases; the session owns the exclusive image lease during its journaled
 transaction. Stale revisions, invalid paths and failed transactions do not
-partially apply a batch. The result reports the new revision and the warning
-that raw filesystem changes do not repair sampler relationships. Axkdeck exposes
+partially apply a batch. The result reports the new revision and any new completion
+warnings. The acknowledged notice that raw filesystem changes do not repair sampler
+relationships is not repeated as a completion warning. A clean Files import closes
+after temporary-resource cleanup and workspace refresh; new warnings or recovery
+errors remain visible. Axkdeck exposes
 New directory and confirmed file/recursive directory batch deletion through this
 job. A selected directory covers selected descendants; the GUI submits only
 top-level selected targets after showing the complete selection for review.
@@ -168,6 +171,41 @@ a new session. FAT entry-ID jobs, import review and advertised write capabilitie
 use this service. Native partition arguments
 use zero-based volume ordinals, not original one-based MBR slot numbers.
 
+Normal image opening, Files export and Files editing do not calculate a
+whole-image content hash. Before a Files write, native file identity, size and
+revision must still match the opened session, including a second check after
+freezing the journal and before the first write. After writing, identity and
+size are checked without requiring unchanged timestamps. Changed ranges are
+read back and the image metadata is reopened and validated before commit.
+The application serializes its own writes through path reservations and session
+leases. Do not edit an open image in another process: native revision checks
+have the host filesystem's timestamp precision and are not a content comparison or
+an operating-system-wide exclusive lock. There is no separate unsafe fast mode.
+
+Consumers that explicitly require a content identity, such as retained package
+plans, obtain a real SHA-256 lazily under the session read lease. The digest is
+cached only for that session revision, with source checks even on cache hits,
+and invalidated after commit or rollback. Package application still verifies
+the planned content fingerprint. Standalone copy-publishing writers retain
+their own source-content checks.
+
+Writable roots advertise `renameEntry` separately from other Files actions.
+Submit `{"kind":"RENAME","entryId":"...","newName":"..."}` through
+`images.filesystem.edit`. A rename request must contain exactly one edit:
+mixing identity-bound edits with path changes is rejected. Rename changes a
+file or directory name within its existing parent, never moves or overwrites
+another entry. Roots, filesystem metadata and protected entries cannot be
+renamed. Native name limits apply, including explicit uppercase 8.3 FAT names.
+Existing FAT long-name records attached to the renamed entry are retired;
+other long-name records are preserved. Payloads, allocation, links and unrelated
+metadata remain unchanged. Guarded EX5 media retain their existing capacity
+constraints and size. Raw Files rename does not rename embedded sampler objects
+or repair their relationships; use Device actions for semantic object renames.
+
+In axkdeck, select one file or directory and choose **Rename...**, the rename
+toolbar icon, or **F2**. The prefilled dialog closes after confirmed writing and
+refresh, retaining navigation where the renamed entry still matches the view.
+
 `POST /api/v1/filesystem-input-inspections` starts a cancellable read job for
 1-10,000 raw `inputs`, each containing one `fileRef` or completed `uploadRef`.
 No image session or sampler-object decode is needed. The result preserves input
@@ -184,6 +222,12 @@ requires a new review. Changes during commit trigger rollback; changes since
 review fail with `filesystem_input_changed`. There is no implicit snapshot
 refresh or compatibility path for requests without a snapshot. Upload expiry
 or deletion requires acquiring and inspecting the input again.
+Repeated references to one input share a retained reader and one verification
+before planning and one during commit; conflicting reviewed snapshots are
+rejected. The native application service hashes unreviewed readers before and
+after use by default. Callers may explicitly supply an already-reviewed reader
+and its commit verifier instead, but cannot omit that verifier. SU700 imports
+verify the complete backing floppy, not each derived file range separately.
 
 ### SU700 Floppy Import
 
@@ -517,6 +561,10 @@ frozen bytes, not potentially changed input files. Overlapping or out-of-range
 patches are rejected before writing. Each read/write chunk is bounded to at most
 1 MiB. Cancellation during application restores the original bytes before
 returning; interrupted transactions retain their normal startup recovery path.
+Cancellation during final validation also rolls back before the commit marker.
+Rollback and recovery flush and read back the restored ranges before removing
+the journal. Failed restoration verification retains the journal and blocks
+further writes pending recovery.
 
 The application listener is plaintext because Crow TLS is intentionally not
 enabled. Non-loopback startup is therefore rejected unless

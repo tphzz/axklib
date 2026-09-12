@@ -12,7 +12,6 @@
 #include <utility>
 
 #include "axklib/utf8.hpp"
-#include "content_digest.hpp"
 #include "filesystem_export_internal.hpp"
 
 namespace axk::app {
@@ -67,13 +66,6 @@ Result<void> write_staging(const ImageSessionRead &session, const detail::Filesy
         if (!output)
             return std::unexpected(Error{"filesystem_export_failed", "Export file could not be closed"});
     }
-    if (auto verified = session.verify_source_unchanged(); !verified)
-        return std::unexpected(Error{"image_source_changed", verified.error().message, {}, true});
-    const auto digest = detail::reader_sha256(*session.reader, cancellation);
-    if (!digest)
-        return std::unexpected(digest.error());
-    if (*digest != session.target_snapshot_id)
-        return std::unexpected(Error{"image_source_changed", "Image bytes changed during filesystem export"});
     if (auto verified = session.verify_source_unchanged(); !verified)
         return std::unexpected(Error{"image_source_changed", verified.error().message, {}, true});
     return {};

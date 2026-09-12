@@ -5,6 +5,7 @@ export const writableFilesRoot: FilesystemRootCapabilities = {
     createDirectory: true,
     putFile: true,
     deleteEntry: true,
+    renameEntry: true,
     maximumNameBytes: 23,
     namePattern: '^[ -~]{1,23}$',
     nameHint: 'Use 1-23 printable ASCII characters.',

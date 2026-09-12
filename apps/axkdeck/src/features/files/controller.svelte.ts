@@ -25,6 +25,7 @@ export interface FilesContext {
     revision: number;
     rootId: string;
     states: Record<string, RootState>;
+    rename?: { fromRevision: number; toRevision: number; entry: FilesystemEntry; name: string };
 }
 
 export class FilesController {
@@ -47,6 +48,7 @@ export class FilesController {
     private generation = 0;
     private searchGeneration = 0;
     private disposed = false;
+    private rename: FilesContext['rename'];
 
     constructor(private readonly access: FilesystemAccess) {}
 
@@ -131,7 +133,13 @@ export class FilesController {
             revision: this.revision,
             rootId: this.rootId,
             states: JSON.parse(JSON.stringify(this.states)) as Record<string, RootState>,
+            rename: this.rename,
         };
+    }
+
+    recordRename(fromRevision: number, entry: FilesystemEntry, name: string, toRevision: number): void {
+        if (this.revision === fromRevision && toRevision === fromRevision + 1)
+            this.rename = { fromRevision, toRevision, entry: { ...entry }, name };
     }
 
     async initialize(context = this.capture()): Promise<void> {
@@ -147,6 +155,33 @@ export class FilesController {
         try {
             const first = await this.access.inspect({ limit: 200 });
             if (!this.current(generation)) return;
+            const rename = context.rename;
+            if (rename && context.revision === rename.fromRevision && first.revision === rename.toRevision) {
+                const newPath = rename.entry.path.slice(0, rename.entry.path.lastIndexOf('/') + 1) + rename.name;
+                const remap = (entry: FilesystemEntry): FilesystemEntry => {
+                    if (entry.rootId !== rename.entry.rootId) return entry;
+                    if (entry.id === rename.entry.id && entry.path === rename.entry.path)
+                        return { ...entry, name: rename.name, path: newPath };
+                    if (rename.entry.kind === 'directory' && entry.path.startsWith(rename.entry.path + '/'))
+                        return { ...entry, path: newPath + entry.path.slice(rename.entry.path.length) };
+                    return entry;
+                };
+                context = {
+                    ...context,
+                    revision: first.revision,
+                    states: Object.fromEntries(
+                        Object.entries(context.states).map(([id, state]) => [
+                            id,
+                            {
+                                ...state,
+                                focused: state.focused ? remap(state.focused) : null,
+                                selection: { ...state.selection, items: state.selection.items.map(remap) },
+                            },
+                        ]),
+                    ),
+                };
+            }
+            this.rename = undefined;
             const roots = [...first.items];
             while (roots.length < first.totalCount) {
                 const page = await this.access.inspect({ offset: roots.length, limit: 200 });

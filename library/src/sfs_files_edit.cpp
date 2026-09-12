@@ -190,6 +190,28 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                 if (!*found)
                     return std::unexpected{error("filesystem entry to delete does not exist")};
                 return remove(*parent, **found, operation.recursive);
+            } else if constexpr (std::is_same_v<T, RenameFilesystemEntry>) {
+                if (!existing)
+                    return std::unexpected{error("filesystem entry to rename does not exist")};
+                auto destination = operation.path;
+                destination.back() = operation.new_name;
+                if (auto checked = check_path(destination); !checked)
+                    return checked;
+                auto collision = find_entry(*parent, operation.new_name);
+                if (!collision)
+                    return std::unexpected{collision.error()};
+                if (*collision)
+                    return std::unexpected{error("filesystem name is unchanged or already exists")};
+                auto bytes = std::span{parent->directory}.subspan(**found, 32U);
+                if (auto written =
+                        ByteWriter{bytes}.write_be16(2U, static_cast<std::uint16_t>(operation.new_name.size() + 1U));
+                    !written)
+                    return written;
+                std::ranges::fill(bytes.subspan(8U), std::byte{});
+                for (std::size_t i = 0; i < operation.new_name.size(); ++i)
+                    bytes[8U + i] = static_cast<std::byte>(operation.new_name[i]);
+                parent->directory_renamed = true;
+                return {};
             } else if constexpr (std::is_same_v<T, CreateFilesystemDirectory>) {
                 if (existing)
                     return existing->info.payload_kind == PayloadKind::directory

@@ -118,6 +118,7 @@ export class ImageSessionWorkflow {
     private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
     private lastAutomaticIntegrityKey = '';
+    private automaticCapacityWarnings = new Set<string>();
     private nextOpenRequestId = 1;
     private openProgressTimer: ReturnType<typeof setTimeout> | null = null;
     private openProgressActive = false;
@@ -538,6 +539,7 @@ export class ImageSessionWorkflow {
         this.integrityDialogOpen = false;
         this.integrityIssues = [];
         this.integrityError = '';
+        this.integrityLoading = false;
         this.companionSources = opened.companionSources;
         this.floppySet = opened.floppySet;
         mutation.setCapabilities(opened);
@@ -569,13 +571,23 @@ export class ImageSessionWorkflow {
             await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
         else catalog.clear();
         this.status = validationStatus(opened.validation);
-        if (opened.validation.errorCount > 0) await this.showAllocationBlockers(opened);
+        if (opened.validation.errorCount > 0 || (opened.format === 'ex5-disk' && opened.validation.warningCount > 0))
+            await this.showAutomaticIntegrityIssues(opened);
+        else this.automaticCapacityWarnings.clear();
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
     }
 
-    private async showAllocationBlockers(opened: OpenedImage): Promise<void> {
-        await this.loadIntegrityIssues(opened.sessionId);
-        if (this.sessionId !== opened.sessionId || this.integrityError) return;
+    private async showAutomaticIntegrityIssues(opened: OpenedImage): Promise<void> {
+        await this.loadIntegrityIssues(opened.sessionId, opened.revision);
+        if (this.sessionId !== opened.sessionId || this.revision !== opened.revision || this.integrityError) return;
+        const capacityWarnings = new Set<string>();
+        for (const issue of this.integrityIssues) {
+            if (issue.code !== 'EX5_CAPACITY_EXCEEDS_IMAGE' && issue.code !== 'EX5_FILE_DATA_UNAVAILABLE') continue;
+            const key = JSON.stringify([opened.sessionId, issue.code, issue.samplerPath, issue.message]);
+            if (!this.automaticCapacityWarnings.has(key)) this.integrityDialogOpen = true;
+            capacityWarnings.add(key);
+        }
+        this.automaticCapacityWarnings = capacityWarnings;
         const blockerCodes = [...new Set(this.integrityIssues.map((issue) => issue.code))]
             .filter((code) => allocationBlockerCodes.has(code))
             .sort();
@@ -586,16 +598,17 @@ export class ImageSessionWorkflow {
         this.integrityDialogOpen = true;
     }
 
-    private async loadIntegrityIssues(sessionId: number): Promise<void> {
+    private async loadIntegrityIssues(sessionId: number, revision = this.revision): Promise<void> {
         this.integrityLoading = true;
         this.integrityError = '';
         try {
             const issues = await this.transport.validationIssues(sessionId);
-            if (this.sessionId === sessionId) this.integrityIssues = issues;
+            if (this.sessionId === sessionId && this.revision === revision) this.integrityIssues = issues;
         } catch (error) {
-            if (this.sessionId === sessionId) this.integrityError = userFacingMessage(error);
+            if (this.sessionId === sessionId && this.revision === revision)
+                this.integrityError = userFacingMessage(error);
         } finally {
-            if (this.sessionId === sessionId) this.integrityLoading = false;
+            if (this.sessionId === sessionId && this.revision === revision) this.integrityLoading = false;
         }
     }
 
@@ -636,6 +649,7 @@ export class ImageSessionWorkflow {
         this.integrityLoading = false;
         this.integrityError = '';
         this.lastAutomaticIntegrityKey = '';
+        this.automaticCapacityWarnings.clear();
         collaborators.mutation.reset();
         this.objectDeletionAvailable = false;
         this.waveDataCleanupAvailable = false;

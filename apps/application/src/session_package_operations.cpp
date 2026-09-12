@@ -156,9 +156,12 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 const auto planning_started = Clock::now();
                 const auto packages = std::span<const axk::PortablePackage>{package_set->packages};
                 axk::package_import_internal::RetainedPackageImportStats planning_stats;
+                const auto fingerprint = session->content_fingerprint(context.cancellation);
+                if (!fingerprint)
+                    return std::unexpected(fingerprint.error());
                 const axk::package_import_internal::RetainedPackageImportTarget target{
                     session->reader,          std::filesystem::path{session->source.relative_path},
-                    session->media,           session->target_snapshot_id,
+                    session->media,           *fingerprint,
                     session->catalog_objects, session->catalog_issues,
                     &planning_stats,          true};
                 auto plan = axk::package_import_internal::plan_package_import_retained(

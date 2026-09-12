@@ -136,16 +136,35 @@ axk::app::Result<void> axk::app::SandboxMutation::verify_bound() const {
                                            implementation_->reference.relative_path));
     auto identity = native_identity(current->get(), implementation_->reference.relative_path);
     const auto same = identity && identity->volume_serial == implementation_->identity.volume_serial &&
-                      identity->file_id == implementation_->identity.file_id;
+                      identity->file_id == implementation_->identity.file_id && identity->size == implementation_->size;
 #else
     struct stat status{};
     const auto same =
         ::fstatat(*implementation_->parent, implementation_->filename.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0 &&
         S_ISREG(status.st_mode) && static_cast<std::uint64_t>(status.st_dev) == implementation_->identity.device &&
-        static_cast<std::uint64_t>(status.st_ino) == implementation_->identity.inode;
+        static_cast<std::uint64_t>(status.st_ino) == implementation_->identity.inode && status.st_size >= 0 &&
+        static_cast<std::uint64_t>(status.st_size) == implementation_->size;
 #endif
     if (!same)
         return std::unexpected(entry_error("entry_mutation_failed", "sandbox mutation target changed",
+                                           implementation_->reference.relative_path));
+    return {};
+}
+
+std::string axk::app::SandboxMutation::revision() const {
+    return implementation_ ? revision_token(implementation_->identity) : std::string{};
+}
+
+axk::app::Result<void> axk::app::SandboxMutation::verify_unchanged() const {
+    if (auto bound = verify_bound(); !bound)
+        return bound;
+#if defined(_WIN32)
+    const auto current = native_identity(implementation_->file.get(), implementation_->reference.relative_path);
+#else
+    const auto current = native_identity(*implementation_->file, implementation_->reference.relative_path);
+#endif
+    if (!current || !same_file_revision(*current, implementation_->identity))
+        return std::unexpected(entry_error("image_source_changed", "image changed before publication",
                                            implementation_->reference.relative_path));
     return {};
 }

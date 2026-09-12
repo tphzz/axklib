@@ -80,6 +80,12 @@ axk_set_project_warnings(axk_application)
 axk_enable_sanitizers(axk_application)
 axk_enable_coverage(axk_application)
 
+if(AXK_BUILD_BENCHMARKS)
+  add_executable(axk_files_edit_benchmark benchmarks/files_edit_benchmark.cpp)
+  target_link_libraries(axk_files_edit_benchmark PRIVATE axklib::application)
+  axk_set_project_warnings(axk_files_edit_benchmark)
+endif()
+
 include("${AXK_REPOSITORY_ROOT}/library/cmake/AxkHeaderSelfContainment.cmake")
 file(GLOB_RECURSE AXK_APPLICATION_PUBLIC_HEADERS CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/include/axklib/application/*.hpp")

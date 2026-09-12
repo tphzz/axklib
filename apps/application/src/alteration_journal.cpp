@@ -127,14 +127,15 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
                                                                std::uint64_t image_size_bytes,
                                                                std::span<const AlterationJournalPatch> patches,
                                                                const CancellationToken &cancellation,
-                                                               const std::function<Result<void>()> &validate) {
+                                                               const std::function<Result<void>()> &validate,
+                                                               const std::function<void()> &on_rollback_verified) {
     if (!storage_ready())
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
         return std::unexpected(journal_error("alteration target size changed"));
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected(Error{"operation_cancelled", checked.error().message});
-    if (auto bound = target->verify_bound(); !bound)
+    if (auto bound = target->verify_unchanged(); !bound)
         return std::unexpected(bound.error());
     for (const auto &patch : patches) {
         if (auto compared = compare_original_patch(*target, patch, maximum_patch_write_bytes_, cancellation); !compared)
@@ -174,13 +175,17 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         return compared;
     }
     const auto rollback = [&]() -> Result<void> {
-        return journal_io::restore_original_bytes(*target, path, *journal, maximum_patch_write_bytes_);
+        return journal_io::restore_original_bytes(*target, path, *journal, maximum_patch_write_bytes_, [&] {
+            return interruption_hook_ && interruption_hook_("after-rollback-flush", 0U);
+        });
     };
     const auto rollback_and_remove = [&](bool remove_marker) -> Result<void> {
         if (auto restored = rollback(); !restored) {
             quarantine();
             return restored;
         }
+        if (on_rollback_verified)
+            on_rollback_verified();
         if (auto removed = remove_file(path, "alteration journal"); !removed) {
             quarantine();
             return removed;
@@ -205,6 +210,14 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         journal_guard.resolved = true;
         return {};
     };
+    if (auto unchanged = target->verify_unchanged(); !unchanged) {
+        if (auto removed = remove_file(path, "stale alteration journal"); !removed) {
+            quarantine();
+            return removed;
+        }
+        journal_guard.resolved = true;
+        return unchanged;
+    }
     auto frozen = FileReader::open(path);
     if (!frozen) {
         if (auto removed = remove_file(path, "unreadable alteration journal"); !removed) {
@@ -295,6 +308,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
             return bound;
         }
     }
+    if (auto checked = cancellation.check(); !checked) {
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
+        return std::unexpected(Error{"operation_cancelled", checked.error().message});
+    }
     const auto marker = commit_marker_path(path);
     const auto &journal_checksum = journal_publication->file_checksum;
     auto marker_publication =
@@ -362,8 +380,9 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
                     journal_io::recognize_uncommitted_target(**target, path, *journal, maximum_patch_write_bytes_);
                 !recognized)
                 return recognized;
-            if (auto restored =
-                    journal_io::restore_original_bytes(**target, path, *journal, maximum_patch_write_bytes_);
+            if (auto restored = journal_io::restore_original_bytes(
+                    **target, path, *journal, maximum_patch_write_bytes_,
+                    [&] { return interruption_hook_ && interruption_hook_("after-rollback-flush", 0U); });
                 !restored)
                 return restored;
         }

@@ -52,8 +52,9 @@ Result<std::array<std::byte, 11>> short_name(std::string_view name) {
 
 Result<std::vector<std::uint16_t>> State::allocate(std::uint32_t count) {
     std::vector<std::uint16_t> result;
-    const auto limit = geometry.profile == FatProfile::fat16 ? std::min(geometry.data_cluster_count + 2U, 0xfff0U)
-                                                             : geometry.data_cluster_count + 2U;
+    const auto limit = geometry.profile == FatProfile::fat16
+                           ? std::min(geometry.backed_data_cluster_count + 2U, 0xfff0U)
+                           : geometry.backed_data_cluster_count + 2U;
     for (std::uint32_t cluster = 2U; cluster < limit && result.size() < count; ++cluster) {
         if (auto check = cancellation.check(); !check)
             return std::unexpected(check.error());
@@ -61,7 +62,10 @@ Result<std::vector<std::uint16_t>> State::allocate(std::uint32_t count) {
             result.push_back(static_cast<std::uint16_t>(cluster));
     }
     if (result.size() != count)
-        return std::unexpected(error("FAT volume has insufficient free clusters"));
+        return std::unexpected(
+            error(geometry.backed_data_cluster_count < geometry.data_cluster_count
+                      ? "FAT volume has insufficient safely usable space; its incomplete final cluster is excluded"
+                      : "FAT volume has insufficient free clusters"));
     for (std::size_t i = 0; i < result.size(); ++i)
         put16(fat, static_cast<std::size_t>(result[i]) * 2U,
               i + 1U == result.size() ? std::uint16_t{0xffffU} : result[i + 1U]);
@@ -159,6 +163,40 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                 if (found == nodes.end())
                     return std::unexpected(error("FAT entry to delete does not exist"));
                 return remove(path, operation.recursive);
+            } else if constexpr (std::is_same_v<T, RenameFilesystemEntry>) {
+                if (found == nodes.end())
+                    return std::unexpected(error("FAT entry to rename does not exist"));
+                if ((std::to_integer<std::uint8_t>(found->second.entry[11]) & 0x01U) != 0U)
+                    return std::unexpected(error("FAT read-only entries cannot be renamed"));
+                auto name = short_name(operation.new_name);
+                if (!name)
+                    return std::unexpected(name.error());
+                const auto destination = parent_path + (parent_path.empty() ? "" : "/") + operation.new_name;
+                if (nodes.contains(destination))
+                    return std::unexpected(error("FAT name is unchanged or already exists"));
+                auto &node = found->second;
+                std::copy(name->begin(), name->end(), node.entry.begin());
+                // Explicit uppercase short names no longer retain a previous long-name alias.
+                node.entry[12] &= std::byte{0xe7};
+                for (const auto offset : node.long_slots)
+                    nodes.at(parent_path).directory_data[offset] = std::byte{0xe5};
+                node.long_slots.clear();
+                store(node);
+                std::vector<std::string> keys;
+                for (const auto &[key, value] : nodes) {
+                    static_cast<void>(value);
+                    if (key == path || key.starts_with(path + '/'))
+                        keys.push_back(key);
+                }
+                for (const auto &key : keys) {
+                    auto moved = nodes.extract(key);
+                    moved.key() = destination + key.substr(path.size());
+                    auto &parent = moved.mapped().parent;
+                    if (parent == path || parent.starts_with(path + '/'))
+                        parent = destination + parent.substr(path.size());
+                    nodes.insert(std::move(moved));
+                }
+                return {};
             } else {
                 constexpr bool directory = std::is_same_v<T, CreateFilesystemDirectory>;
                 if (found != nodes.end()) {

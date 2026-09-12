@@ -3191,6 +3191,30 @@
           {
             "additionalProperties": false,
             "properties": {
+              "entryId": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "RENAME"
+              },
+              "newName": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "entryId",
+              "newName"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
               "kind": {
                 "const": "CREATE_DIRECTORY"
               },
@@ -3862,6 +3886,9 @@
           "putFile": {
             "type": "boolean"
           },
+          "renameEntry": {
+            "type": "boolean"
+          },
           "rootId": {
             "type": "string"
           },
@@ -3881,6 +3908,7 @@
           "createDirectory",
           "putFile",
           "deleteEntry",
+          "renameEntry",
           "maximumNameBytes",
           "namePattern",
           "nameHint",
@@ -20223,11 +20251,9 @@
                     "acknowledgeDeviceRelationships": true,
                     "edits": [
                       {
-                        "kind": "CREATE_DIRECTORY",
-                        "parentEntryId": "x",
-                        "relativePath": [
-                          "x"
-                        ]
+                        "entryId": "x",
+                        "kind": "RENAME",
+                        "newName": "x"
                       }
                     ],
                     "expectedRevision": 1,

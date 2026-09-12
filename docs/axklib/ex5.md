@@ -30,6 +30,42 @@ The removable reader uses DOS 8.3 identities and bounded
 raw file reads. Its recognition does not depend on the image filename or
 the editable volume label.
 
+### One-sector capacity mismatch
+
+A narrow removable-media exception permits a declared size exactly 512 bytes
+larger than a sector-aligned image. It requires the EX5 OEM/type markers, the
+valid FAT16 boot signature, 512-byte sectors, one reserved sector, two matching
+FATs, 512 root entries and 4 to 64 sectors per cluster. Other truncation, generic
+FAT volumes and the hard-disk profile remain subject to strict size checks.
+This exception does not establish that an image was never truncated.
+
+`EX5_CAPACITY_EXCEEDS_IMAGE` reports the declared and physical sizes, absent
+sector and number of incomplete clusters. The Files inspector retains these
+storage details. Axkdeck opens Image integrity automatically for this warning;
+dismissal does not hide it from later inspection or repeat it on every refresh.
+A newly reported unavailable file produces another warning.
+
+The reader preserves the declared geometry for chain validation. Boot records,
+both FATs, the root and all reachable directories must be completely readable;
+missing directory metadata still rejects the image. File ranges that physically
+exist remain readable, including logical payload ending before the missing
+sector in an incomplete cluster. A file whose logical bytes cross the image end
+is listed with `EX5_FILE_DATA_UNAVAILABLE`; complete export fails explicitly.
+Missing bytes are never synthesized.
+
+Guarded raw edits remain available on writable sources with valid allocation
+metadata. Allocation uses only complete, physically backed clusters. This also
+applies to directory growth and padded file writes. Transaction patches remain
+bounded by the original image length, with the existing cancellation and rollback
+contract. An incomplete final cluster cannot supply free space even if its FAT
+entry is free. When the absent sector lies only in unused tail space, no data
+cluster needs excluding.
+
+Opening or editing does not change the BPB, extend the file, or reserve the
+incomplete cluster in its FAT. This is guarded access, not repair: retain a
+backup, and do not assume subsequent EX hardware writes observe these software
+bounds.
+
 ## Recognition
 
 The disk descriptor at byte `0x210` contains the exact 16-byte signature
@@ -78,6 +114,9 @@ has `FatProfile::ex5_disk`. `FatGeometry::total_sectors` is the normalized end
 of the addressable filesystem, measured from image sector zero; it is not the
 raw boot field at `0x20`. `boot_offset`, `fat_offset`, `root_offset`, and
 `data_offset` are absolute byte offsets.
+`physical_size_bytes` records the actual reader length, while
+`backed_data_cluster_count` counts complete physically present data clusters.
+`data_cluster_count` remains the declared chain-validation boundary.
 
 - `directories()` includes empty and nested directories, excluding dot entries.
 - `files()` lists regular files with their sizes, physical directory-entry
@@ -87,7 +126,7 @@ raw boot field at `0x20`. `boot_offset`, `fat_offset`, `root_offset`, and
 - `build_content_tree()` exposes directories and files, not synthesized
   A-series Programs, Samples or Wave Data. The sampler-object catalog is empty.
 
-The reader rejects cyclic or cross-linked reachable chains, truncated files,
+The reader rejects cyclic or cross-linked reachable chains, insufficient file chains,
 out-of-range successors, duplicate names and unsafe path components.
 Names use the short directory identity; long-name entries are ignored. Deleted
 entries and unreferenced allocation are not recovered. Overallocated file chains

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -44,6 +45,7 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                 if (!rows.is_array() || rows.empty() || rows.size() > 10000U)
                     return std::unexpected(Error{"invalid_request", "Choose between 1 and 10000 filesystem changes"});
                 std::vector<std::pair<filesystem_inputs::OpenedInput, Json>> inputs;
+                std::map<std::string, std::size_t> input_indices;
                 std::vector<ImageFilesystemEdit> requests;
                 for (const auto &row : rows) {
                     if (auto checked = context.cancellation.check(); !checked)
@@ -52,6 +54,9 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                     if (kind == "DELETE") {
                         requests.emplace_back(RemoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
                                                                          row.at("recursive").get<bool>()});
+                    } else if (kind == "RENAME") {
+                        requests.emplace_back(RenameImageFilesystemEntry{row.at("entryId").get<std::string>(),
+                                                                         row.at("newName").get<std::string>()});
                     } else if (kind == "CREATE_DIRECTORY" || kind == "PUT_FILE") {
                         const auto parent = row.at("parentEntryId").get<std::string>();
                         const auto path = row.at("relativePath").get<FilesystemPath>();
@@ -62,16 +67,25 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                             if (conflict != "SKIP" && conflict != "REPLACE")
                                 return std::unexpected(
                                     Error{"invalid_request", "Choose SKIP or REPLACE for file conflicts"});
-                            auto file = filesystem_inputs::open(row.at("source"), context.owner_id, sandbox, uploads);
-                            if (!file)
-                                return std::unexpected(file.error());
                             const auto &expected = row.at("expectedSource");
-                            if (auto checked = file->verify(expected, context.cancellation); !checked)
-                                return std::unexpected(checked.error());
-                            requests.emplace_back(PutImageFilesystemFile{parent, path, file->reader,
-                                                                         conflict == "SKIP" ? FileConflict::skip
-                                                                                            : FileConflict::replace});
-                            inputs.emplace_back(std::move(*file), expected);
+                            const auto key = row.at("source").dump();
+                            auto found = input_indices.find(key);
+                            if (found == input_indices.end()) {
+                                auto file =
+                                    filesystem_inputs::open(row.at("source"), context.owner_id, sandbox, uploads);
+                                if (!file)
+                                    return std::unexpected(file.error());
+                                if (auto checked = file->verify(expected, context.cancellation); !checked)
+                                    return std::unexpected(checked.error());
+                                found = input_indices.emplace(key, inputs.size()).first;
+                                inputs.emplace_back(std::move(*file), expected);
+                            } else if (inputs[found->second].second != expected) {
+                                return std::unexpected(Error{"filesystem_input_changed",
+                                                             "Repeated source has conflicting reviewed snapshots"});
+                            }
+                            requests.emplace_back(PutImageFilesystemFile{
+                                parent, path, inputs[found->second].first.reader,
+                                conflict == "SKIP" ? FileConflict::skip : FileConflict::replace});
                         }
                     } else
                         return std::unexpected(Error{"invalid_request", "Unknown filesystem edit kind"});
@@ -81,19 +95,23 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                     return std::unexpected(resolved.error());
                 const auto validate_inputs = [&]() -> Result<void> {
                     for (const auto &[file, expected] : inputs) {
-                        if (auto checked = file.verify(expected); !checked)
+                        if (auto checked = file.verify(expected, context.cancellation); !checked)
                             return checked;
                     }
                     return {};
                 };
+                FilesystemInputVerification verification{{}, validate_inputs};
+                for (const auto &[file, expected] : inputs) {
+                    static_cast<void>(expected);
+                    verification.reviewed_readers.push_back(file.reader);
+                }
                 auto result =
                     apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, resolved->partition,
-                                           resolved->edits, context.cancellation, context.progress, validate_inputs);
+                                           resolved->edits, context.cancellation, context.progress, verification);
                 if (!result)
                     return std::unexpected(result.error());
-                return Json{{"imageId", result->image_id},
-                            {"revision", result->revision},
-                            {"warnings", Json::array({"Raw filesystem changes do not repair sampler relationships."})}};
+                // The relationship notice was acknowledged before execution, not produced by this write.
+                return Json{{"imageId", result->image_id}, {"revision", result->revision}, {"warnings", Json::array()}};
             } catch (const Json::exception &) {
                 return std::unexpected(Error{"invalid_request", "Filesystem edit request is incomplete or malformed"});
             }

@@ -25,7 +25,6 @@ struct FilesystemWritePatch {
 
 struct PreparedFilesystemEdits {
     std::uint64_t image_size_bytes{};
-    std::string source_snapshot_id;
     std::vector<FilesystemWritePatch> patches;
     std::shared_ptr<const RandomAccessReader> preview;
 };

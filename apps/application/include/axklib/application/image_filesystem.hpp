@@ -48,6 +48,7 @@ struct ImageFilesystemRootCapabilities {
     bool create_directory{};
     bool put_file{};
     bool delete_entry{};
+    bool rename_entry{};
     std::size_t maximum_name_bytes{};
     std::string name_pattern{};
     std::string name_hint{};
@@ -80,8 +81,12 @@ struct RemoveImageFilesystemEntry {
     std::string entry_id;
     bool recursive{};
 };
-using ImageFilesystemEdit =
-    std::variant<CreateImageFilesystemDirectory, PutImageFilesystemFile, RemoveImageFilesystemEntry>;
+struct RenameImageFilesystemEntry {
+    std::string entry_id;
+    std::string new_name;
+};
+using ImageFilesystemEdit = std::variant<CreateImageFilesystemDirectory, PutImageFilesystemFile,
+                                         RemoveImageFilesystemEntry, RenameImageFilesystemEntry>;
 
 struct ResolvedImageFilesystemEdits {
     PartitionIndex partition;

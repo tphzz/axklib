@@ -5,17 +5,12 @@
 #include <span>
 #include <utility>
 
-#include "axklib/package_archive.hpp"
-
 namespace axk::detail {
 Result<PreparedFilesystemEdits> prepare_sfs_file_edits(std::shared_ptr<const RandomAccessReader> source,
                                                        PartitionIndex partition, std::span<const FilesystemEdit> edits,
                                                        const CancellationToken &cancellation) {
     if (!source)
         return std::unexpected(sfs_files::error("filesystem source is required"));
-    const auto snapshot = package_internal::sha256_reader(*source, cancellation);
-    if (!snapshot)
-        return std::unexpected(snapshot.error());
     auto state = sfs_files::open(source, partition, cancellation);
     if (!state)
         return std::unexpected(state.error());
@@ -37,7 +32,6 @@ Result<PreparedFilesystemEdits> prepare_sfs_file_edits(std::shared_ptr<const Ran
         return std::unexpected(reopened.error());
     if (auto checked = sfs_files::validate(*reopened, partition); !checked)
         return std::unexpected(checked.error());
-    return PreparedFilesystemEdits{source->size(), package_internal::hex_digest(*snapshot), std::move(*patches),
-                                   std::move(preview)};
+    return PreparedFilesystemEdits{source->size(), std::move(*patches), std::move(preview)};
 }
 } // namespace axk::detail

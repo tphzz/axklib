@@ -4,21 +4,24 @@
     import type { FilesEditWorkflow } from './editWorkflow.svelte';
     let { workflow }: { workflow: FilesEditWorkflow } = $props();
     const review = $derived(workflow.review!);
-    const title = $derived(review.kind === 'create' ? 'New directory' : 'Delete filesystem entries');
+    const title = $derived(
+        review.kind === 'create'
+            ? 'New directory'
+            : review.kind === 'rename'
+              ? `Rename ${review.entries[0].kind}`
+              : 'Delete filesystem entries',
+    );
+    const nameLabel = $derived(review.kind === 'rename' ? 'Name' : 'Directory name');
     const label = $derived(
-        workflow.phase === 'running'
+        ['ready', 'running', 'refreshing'].includes(workflow.phase)
             ? review.kind === 'create'
-                ? 'Creating'
-                : 'Deleting'
-            : workflow.phase === 'refreshing'
-              ? 'Refreshing'
-              : workflow.phase === 'ready'
-                ? review.kind === 'create'
-                    ? 'Create'
-                    : 'Delete permanently'
-                : workflow.phase === 'unconfirmed' && workflow.jobId !== null
-                  ? 'Check status'
-                  : 'Refresh',
+                ? 'Create'
+                : review.kind === 'rename'
+                  ? 'Rename'
+                  : 'Delete permanently'
+            : workflow.phase === 'unconfirmed' && workflow.jobId !== null
+              ? 'Check status'
+              : 'Refresh',
     );
     const failed = $derived(['failed', 'refresh-failed', 'unconfirmed'].includes(workflow.phase));
     function submit(event: SubmitEvent): void {
@@ -42,22 +45,22 @@
                     type="button"
                     class="icon-button"
                     aria-label="Close"
-                    disabled={workflow.busy}
+                    disabled={!workflow.canClose}
                     onclick={() => workflow.close()}><Icon name="close" size={14} /></button
                 >
             </header>
             <div class="volume-action-content">
-                {#if review.kind === 'create'}
+                {#if review.kind !== 'delete'}
                     <p class="destination" title={review.entries[0].path || review.entries[0].name}>
                         {review.entries[0].path || review.entries[0].name}
                     </p>
                     <label
-                        ><span>Directory name</span>
+                        ><span>{nameLabel}</span>
                         <input
                             class="dialog-field-control"
-                            aria-label="Directory name"
+                            aria-label={nameLabel}
                             autocomplete="off"
-                            data-dialog-initial-focus="caret"
+                            data-dialog-initial-focus={review.kind === 'rename' ? 'select' : 'caret'}
                             bind:value={workflow.name}
                             disabled={workflow.phase !== 'ready'}
                         />
@@ -76,26 +79,29 @@
             </div>
             <footer class="dialog-footer">
                 <span
-                    class="files-action-status"
+                    class="dialog-footer-status files-action-status"
                     class:dialog-error={failed}
                     role={failed ? 'alert' : 'status'}
                     title={workflow.message}>{workflow.message}</span
                 >
-                <button
-                    class="secondary-button"
-                    type="button"
-                    disabled={workflow.phase === 'refreshing' ||
-                        (workflow.busy && (workflow.jobId === null || workflow.cancelling))}
-                    onclick={() => (workflow.busy ? void workflow.cancel() : workflow.close())}
-                    >{workflow.phase === 'ready' || workflow.phase === 'running' ? 'Cancel' : 'Close'}</button
-                >
-                <button
-                    class={review.kind === 'delete' && (workflow.phase === 'ready' || workflow.phase === 'running')
-                        ? 'danger-button'
-                        : 'primary-button'}
-                    type="submit"
-                    disabled={!workflow.canSubmit}>{label}</button
-                >
+                <div class="dialog-footer-actions">
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        disabled={(!workflow.busy && !workflow.canClose) ||
+                            workflow.phase === 'refreshing' ||
+                            (workflow.busy && (workflow.jobId === null || workflow.cancelling))}
+                        onclick={() => (workflow.busy ? void workflow.cancel() : workflow.close())}
+                        >{workflow.phase === 'ready' || workflow.phase === 'running' ? 'Cancel' : 'Close'}</button
+                    >
+                    <button
+                        class={review.kind === 'delete' && (workflow.phase === 'ready' || workflow.phase === 'running')
+                            ? 'danger-button'
+                            : 'primary-button'}
+                        type="submit"
+                        disabled={!workflow.canSubmit}>{label}</button
+                    >
+                </div>
             </footer>
         </form>
     </div>

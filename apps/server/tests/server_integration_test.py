@@ -865,7 +865,7 @@ def exercise_raw_filesystem_jobs(
     assert status == 200, roots
     root_id = roots["data"]["items"][0]["id"]
     assert roots["data"]["rootCapabilities"] == [{
-        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True,
+        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True, "renameEntry": True,
         "maximumNameBytes": 23, "namePattern": "^[ -~]{1,23}$",
         "nameHint": "Use 1-23 printable ASCII characters.",
         "supportedImports": [],
@@ -924,6 +924,7 @@ def exercise_raw_filesystem_jobs(
     assert completed["state"] == "COMPLETED", completed
     assert completed["result"]["revision"] == 2
     review_request["expectedRevision"] = 2
+    assert completed["result"]["warnings"] == [], completed
     status, review_job = http_request(port, "POST", "/api/v1/image-filesystem-import-inspections", review_request)
     assert status == 202, review_job
     review = wait_for_job(port, review_job["data"]["jobId"], process)
@@ -945,7 +946,25 @@ def exercise_raw_filesystem_jobs(
     before_export = hashlib.sha256(copy.read_bytes()).hexdigest()
     exercise_raw_filesystem_exports(port, root, process, image_id, directory["id"])
     assert hashlib.sha256(copy.read_bytes()).hexdigest() == before_export
-    request["expectedRevision"] = 2
+    rename_request = {
+        "imageId": image_id, "expectedRevision": 2, "acknowledgeDeviceRelationships": True,
+        "edits": [{"kind": "RENAME", "entryId": directory["id"], "newName": "Renamed"}],
+    }
+    status, rename_job = http_request(
+        port, "POST", "/api/v1/image-filesystem-edits", rename_request,
+        {"Idempotency-Key": "raw-files-rename"},
+    )
+    assert status == 202, rename_job
+    renamed = wait_for_job(port, rename_job["data"]["jobId"], process)
+    assert renamed["state"] == "COMPLETED", renamed
+    assert renamed["result"]["revision"] == 3 and renamed["result"]["warnings"] == [], renamed
+    query = urlencode({"expectedRevision": 3, "entryId": directory["id"]})
+    status, entries = http_request(port, "GET", f"{url}?{query}")
+    assert status == 200 and entries["data"]["items"][0]["name"] == "Renamed", entries
+    query = urlencode({"expectedRevision": 3, "parentId": directory["id"]})
+    status, entries = http_request(port, "GET", f"{url}?{query}")
+    assert status == 200 and all(row["path"].startswith("/Renamed/") for row in entries["data"]["items"]), entries
+    request["expectedRevision"] = 3
     request["edits"] = [{"kind": "DELETE", "entryId": directory["id"], "recursive": False}]
     original = hashlib.sha256(copy.read_bytes()).hexdigest()
     status, submitted = http_request(
@@ -964,7 +983,7 @@ def exercise_raw_filesystem_jobs(
     assert status == 202, submitted
     deleted = wait_for_job(port, submitted["data"]["jobId"], process)
     assert deleted["state"] == "COMPLETED", deleted
-    assert deleted["result"]["revision"] == 3
+    assert deleted["result"]["revision"] == 4
     status, closed = http_request(port, "DELETE", f"/api/v1/images/{image_id}")
     assert status == 200, closed
 

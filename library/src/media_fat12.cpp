@@ -264,15 +264,22 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
         const auto metadata_sectors = static_cast<std::uint64_t>(geometry.reserved_sectors) +
                                       static_cast<std::uint64_t>(geometry.fat_count) * geometry.sectors_per_fat +
                                       root_sectors;
+        const bool ex5_removable = detail::clean_ascii(std::span{*boot}.subspan(3U, 8U)) == "YAMAHA??" &&
+                                   detail::clean_ascii(std::span{*boot}.subspan(54U, 8U)) == "FAT16";
+        const auto declared_bytes = static_cast<std::uint64_t>(geometry.total_sectors) * geometry.bytes_per_sector;
+        const bool ex5_capacity_mismatch = ex5_removable && geometry.bytes_per_sector == 512U &&
+                                           reader->size() % 512U == 0U && geometry.reserved_sectors == 1U &&
+                                           geometry.fat_count == 2U && geometry.root_entry_count == 512U &&
+                                           geometry.sectors_per_cluster >= 4U && geometry.sectors_per_cluster <= 64U &&
+                                           declared_bytes > reader->size() && declared_bytes - reader->size() == 512U;
         if (metadata_sectors >= geometry.total_sectors ||
-            static_cast<std::uint64_t>(geometry.total_sectors) * geometry.bytes_per_sector > reader->size()) {
+            metadata_sectors * geometry.bytes_per_sector > reader->size() ||
+            (declared_bytes > reader->size() && !ex5_capacity_mismatch)) {
             return std::unexpected{detail::media_error(ErrorCode::container_truncated,
                                                        "FAT geometry exceeds the input image", source_name)};
         }
         geometry.data_cluster_count =
             static_cast<std::uint32_t>((geometry.total_sectors - metadata_sectors) / geometry.sectors_per_cluster);
-        const bool ex5_removable = detail::clean_ascii(std::span{*boot}.subspan(3U, 8U)) == "YAMAHA??" &&
-                                   detail::clean_ascii(std::span{*boot}.subspan(54U, 8U)) == "FAT16";
         if (geometry.data_cluster_count == 0U || geometry.data_cluster_count > (ex5_removable ? 65525U : 65524U)) {
             return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                               "unsupported FAT variant: only FAT12 and FAT16 are accepted")};
@@ -283,6 +290,9 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
                                                            "FAT16 boot signature is invalid", source_name)};
             geometry.profile = ex5_removable ? FatProfile::ex5_removable : FatProfile::fat16;
         }
+        if (ex5_capacity_mismatch && geometry.profile != FatProfile::ex5_removable)
+            return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
+                                                       "EX5 capacity exception requires FAT16 geometry", source_name)};
         geometry.fat_offset = static_cast<std::uint64_t>(geometry.reserved_sectors) * geometry.bytes_per_sector;
         geometry.root_offset =
             static_cast<std::uint64_t>(geometry.reserved_sectors +
@@ -291,6 +301,9 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
         geometry.data_offset =
             geometry.root_offset + static_cast<std::uint64_t>(root_sectors) * geometry.bytes_per_sector;
     }
+    geometry.physical_size_bytes = reader->size();
+    geometry.backed_data_cluster_count = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+        geometry.data_cluster_count, (reader->size() - geometry.data_offset) / geometry.cluster_size()));
     const auto fat_size = static_cast<std::size_t>(geometry.sectors_per_fat) * geometry.bytes_per_sector;
     constexpr std::uint64_t fat12_entry_count = 4096U;
     constexpr std::uint64_t fat12_table_bytes = fat12_entry_count * 3U / 2U;
@@ -379,6 +392,38 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     result.geometry_ = geometry;
     result.files_ = std::move(files);
     result.directories_ = std::move(directories);
+    const auto declared_bytes = static_cast<std::uint64_t>(geometry.total_sectors) * geometry.bytes_per_sector;
+    if (declared_bytes > geometry.physical_size_bytes) {
+        const auto excluded = geometry.data_cluster_count - geometry.backed_data_cluster_count;
+        result.validation_issues_.push_back(
+            {"EX5_CAPACITY_EXCEEDS_IMAGE",
+             std::format("EX5 filesystem declares {} bytes, but the image contains {} bytes. Sector {} is absent; "
+                         "{} incomplete data cluster(s) are excluded from new allocation.",
+                         declared_bytes, geometry.physical_size_bytes,
+                         geometry.physical_size_bytes / geometry.bytes_per_sector, excluded),
+             "/", "Declared EX5 capacity exceeds physical storage by one sector",
+             "Keep a backup. Guarded edits do not correct the size mismatch."});
+        for (const auto &file : result.files_) {
+            if (const auto check = cancellation.check(); !check)
+                return std::unexpected{check.error()};
+            std::uint64_t remaining = file.size;
+            for (const auto cluster : file.clusters) {
+                const auto take = std::min<std::uint64_t>(remaining, geometry.cluster_size());
+                if (take == 0U)
+                    break;
+                const auto offset = fat_cluster_offset(geometry, cluster);
+                if (offset > geometry.physical_size_bytes || take > geometry.physical_size_bytes - offset) {
+                    result.validation_issues_.push_back(
+                        {"EX5_FILE_DATA_UNAVAILABLE",
+                         std::format("File '{}' requires bytes absent from the image", file.path), file.path,
+                         "File payload exceeds physical storage",
+                         "Complete export is unavailable; missing bytes are not synthesized."});
+                    break;
+                }
+                remaining -= take;
+            }
+        }
+    }
     if (geometry.profile != FatProfile::a_series_floppy)
         return result;
     auto catalog = detail::inspect_yamaha_floppy_catalog(result, cancellation);
@@ -427,8 +472,12 @@ Result<std::vector<std::byte>> FatImage::read_file_range(const FatFile &file, st
     while (remaining > 0U && cluster_index < file.clusters.size()) {
         const auto cluster = file.clusters[cluster_index];
         const auto take = std::min<std::size_t>(remaining, cluster_size - within_cluster);
-        const auto bytes =
-            detail::read_bytes(*reader_, fat_cluster_offset(geometry_, cluster) + within_cluster, take, cancellation);
+        const auto physical = fat_cluster_offset(geometry_, cluster) + within_cluster;
+        if (physical > reader_->size() || take > reader_->size() - physical)
+            return std::unexpected{detail::media_error(
+                ErrorCode::container_truncated,
+                std::format("FAT file '{}' requires bytes absent from the image", file.path), source_name_, physical)};
+        const auto bytes = detail::read_bytes(*reader_, physical, take, cancellation);
         if (!bytes)
             return std::unexpected{bytes.error()};
         result.insert(result.end(), bytes->begin(), bytes->end());

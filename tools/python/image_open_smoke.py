@@ -109,7 +109,7 @@ def check_image(
         if reject_invalid and invalid:
             raise RuntimeError(f"image validation failed: {summary['validation']}")
         validation_issues: list[dict[str, Any]] = []
-        if invalid:
+        if invalid or summary["validation"].get("warningCount", 0):
             issue_cursor: str | None = None
             issue_cursors: set[str] = set()
             while True:
@@ -126,6 +126,10 @@ def check_image(
                 if issue_cursor in issue_cursors or not issue_page["items"]:
                     raise RuntimeError("validation pagination did not progress")
                 issue_cursors.add(issue_cursor)
+        if not set(expected.get("warningCodes", [])) <= {
+            issue["code"] for issue in validation_issues
+        }:
+            raise RuntimeError("expected validation warnings are missing")
         parents: deque[str | None] = deque([None])
         seen: set[str] = set()
         names: set[str] = set()
@@ -150,6 +154,18 @@ def check_image(
                     if page[field] != expected[field]:
                         raise RuntimeError(
                             f"{field}: expected {expected[field]!r}, got {page[field]!r}"
+                        )
+                if "writable" in expected and parent is None:
+                    capabilities = page.get("rootCapabilities", [])
+                    if not capabilities or not all(
+                        all(
+                            item.get(action) is expected["writable"]
+                            for action in ("createDirectory", "putFile", "deleteEntry")
+                        )
+                        for item in capabilities
+                    ):
+                        raise RuntimeError(
+                            "filesystem root writable capabilities differ from expectations"
                         )
                 if total is not None and total != page["totalCount"]:
                     raise RuntimeError("filesystem page total changed")

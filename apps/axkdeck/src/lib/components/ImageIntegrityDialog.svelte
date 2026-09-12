@@ -25,6 +25,7 @@
         'SFS_EXTENT_BYTE_TOTAL_MISMATCH',
     ]);
     const allocationBlockers = $derived(issues.filter((issue) => allocationBlockerCodes.has(issue.code)));
+    const exCapacityMismatch = $derived(issues.some((issue) => issue.code === 'EX5_CAPACITY_EXCEEDS_IMAGE'));
 </script>
 
 <div class="dialog-backdrop dialog-backdrop-top" role="presentation">
@@ -75,8 +76,26 @@
                             <p>Preserve this image and continue from a known-good backup or a newly authored image.</p>
                         {/if}
                     </section>
-                {:else}
+                {:else if !exCapacityMismatch}
                     <p class="integrity-status">No blocking SFS allocation issue was found.</p>
+                {/if}
+                {#if exCapacityMismatch}
+                    <section class="capacity-warning" aria-label="Image size warning">
+                        <h3 class="dialog-warning">EX image size mismatch</h3>
+                        <p>
+                            The filesystem declares more storage than this image contains. This pattern is consistent
+                            with an EX formatting bug, but may also indicate a truncated image.
+                        </p>
+                        <p>
+                            Available data remains readable. Guarded writing remains available when allocation metadata
+                            is valid; operations requiring unavailable storage are rejected. Missing bytes are not
+                            filled in.
+                        </p>
+                        <p>
+                            Keep a backup. These safeguards do not repair the image: EX hardware may still attempt to
+                            write beyond its physical end.
+                        </p>
+                    </section>
                 {/if}
 
                 {#if issues.length > 0}
@@ -147,6 +166,8 @@
 
     .allocation-warning h3,
     .allocation-warning p,
+    .capacity-warning h3,
+    .capacity-warning p,
     .integrity-status,
     .integrity-error {
         margin: 0;
@@ -157,7 +178,8 @@
         color: var(--color-danger);
     }
 
-    .allocation-warning p {
+    .allocation-warning p,
+    .capacity-warning p {
         margin-top: 8px;
         line-height: 1.45;
     }

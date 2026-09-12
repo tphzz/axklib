@@ -2,10 +2,34 @@ import { describe, expect, it, vi } from 'vitest';
 import { JobController } from '../../jobs/actions';
 import { bindFilesystemMutations } from './filesMutations';
 import type { JobState } from '../../../lib/transport';
+import { AxklibApiError } from '../../../lib/httpErrors';
+import { FilesystemWriteRejected } from '../../../lib/filesystem';
 
 const job: JobState = { jobId: 1, kind: 'images.filesystem.edit', status: 'completed' };
 
 describe('Files mutation binding', () => {
+    it.each([400, 409, 408, 500])('classifies only definite pre-write rejection for HTTP %s', async (status) => {
+        const error = new AxklibApiError('failure', 'Failure', status);
+        const transport = {
+            startFilesystemEdits: vi.fn().mockRejectedValue(error),
+            jobStatus: vi.fn(),
+            cancelJob: vi.fn(),
+            waitForJob: vi.fn(),
+        };
+        const driver = bindFilesystemMutations(
+            {
+                transport,
+                jobs: new JobController(transport),
+                sessionId: () => 3,
+                invalidateSession: async () => {},
+                refreshSession: async () => {},
+            },
+            3,
+        );
+        const result = driver.execute(1, [{ kind: 'RENAME', entryId: 'file', newName: 'New' }], vi.fn());
+        if (status === 400 || status === 409) await expect(result).rejects.toBeInstanceOf(FilesystemWriteRejected);
+        else await expect(result).rejects.toBe(error);
+    });
     it('invalidates audition, uses the captured session and revision, and refreshes shared image state', async () => {
         let active = 3;
         const transport = {

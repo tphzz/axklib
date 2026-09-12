@@ -132,6 +132,29 @@ def test_image_validation_errors_are_not_a_successful_open() -> None:
     assert report["validationIssues"] == [{"code": "TEST_INVALID"}]
 
 
+def test_warning_only_image_reports_issues_and_requires_requested_write_capabilities() -> None:
+    class WarningClient(FakeClient):
+        def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+            status, document = super().request(method, path, body)
+            if path == "/jobs/job-1":
+                document["data"]["result"]["validation"]["warningCount"] = 1
+            elif path == "/images/image-1":
+                document["data"]["validation"]["warningCount"] = 1
+            elif "/filesystem?" in path:
+                document["data"]["rootCapabilities"] = [
+                    {"createDirectory": True, "putFile": True, "deleteEntry": True}
+                ]
+            return status, document
+
+    expected = {**profile(), "warningCodes": ["TEST_INVALID"], "writable": True}
+    report = check_image(WarningClient(), "disk.img", expected)
+    assert report["validationIssues"] == [{"code": "TEST_INVALID"}]
+    with pytest.raises(RuntimeError, match="warnings"):
+        check_image(FakeClient(), "disk.img", expected)
+    with pytest.raises(RuntimeError, match="writable"):
+        check_image(FakeClient(), "disk.img", {**profile(), "writable": True})
+
+
 def test_manifest_rejects_empty_matrix_and_duplicate_case_ids(tmp_path: Any) -> None:
     import json
 

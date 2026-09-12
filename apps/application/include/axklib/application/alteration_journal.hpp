@@ -68,7 +68,8 @@ class AlterationJournalStore {
     [[nodiscard]] Result<void> apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
                                      std::span<const AlterationJournalPatch> patches,
                                      const CancellationToken &cancellation = {},
-                                     const std::function<Result<void>()> &validate = {});
+                                     const std::function<Result<void>()> &validate = {},
+                                     const std::function<void()> &on_rollback_verified = {});
 
   private:
     std::filesystem::path directory_;

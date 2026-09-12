@@ -3,12 +3,14 @@ import type {
     FilesystemEntry,
     FilesystemMutationDriver,
     FilesystemRootCapabilities,
+    FilesystemEditResult,
 } from '../../lib/filesystem';
 import type { JobState } from '../../lib/transport';
+import { FilesystemWriteRejected } from '../../lib/filesystem';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 
 export interface FilesEditReview {
-    kind: 'create' | 'delete';
+    kind: 'create' | 'delete' | 'rename';
     revision: number;
     entries: FilesystemEntry[];
     capabilities: FilesystemRootCapabilities;
@@ -25,6 +27,10 @@ export function validFilesystemName(name: string, capabilities: FilesystemRootCa
 }
 
 export class FilesEditWorkflow {
+    constructor(
+        private readonly onRenamed: (review: FilesEditReview, name: string, revision: number) => void = () => undefined,
+        private readonly setStatus: (message: string) => void = () => undefined,
+    ) {}
     review = $state<FilesEditReview | null>(null);
     name = $state('');
     phase = $state<'ready' | 'running' | 'refreshing' | 'failed' | 'refresh-failed' | 'unconfirmed'>('ready');
@@ -34,6 +40,10 @@ export class FilesEditWorkflow {
     private driver: FilesystemMutationDriver | null = null;
     private disposed = false;
 
+    get canClose(): boolean {
+        return !this.busy && this.phase !== 'refresh-failed' && this.phase !== 'unconfirmed';
+    }
+
     get busy(): boolean {
         return this.phase === 'running' || this.phase === 'refreshing';
     }
@@ -41,16 +51,22 @@ export class FilesEditWorkflow {
         return (
             !!this.review &&
             !this.busy &&
+            (this.phase !== 'unconfirmed' || this.jobId !== null) &&
             (this.phase !== 'ready' ||
                 this.review.kind === 'delete' ||
-                validFilesystemName(this.name, this.review.capabilities))
+                (validFilesystemName(this.name, this.review.capabilities) &&
+                    (this.review.kind !== 'rename' || this.name !== this.review.entries[0].name)))
         );
     }
 
     open(review: FilesEditReview, driver: FilesystemMutationDriver): boolean {
         if (this.disposed || this.review || !review.entries.length || review.revision < 1) return false;
         const capability =
-            review.kind === 'create' ? review.capabilities.createDirectory : review.capabilities.deleteEntry;
+            review.kind === 'create'
+                ? review.capabilities.createDirectory
+                : review.kind === 'rename'
+                  ? review.capabilities.renameEntry
+                  : review.capabilities.deleteEntry;
         if (
             !capability ||
             review.entries.some(
@@ -58,11 +74,12 @@ export class FilesEditWorkflow {
                     entry.rootId !== review.capabilities.rootId ||
                     entry.filesystemMetadata ||
                     !!entry.issue ||
-                    (review.kind === 'delete' ? !entry.parentId : entry.kind === 'file'),
+                    (review.kind === 'create' ? entry.kind === 'file' : !entry.parentId) ||
+                    (review.kind === 'rename' && entry.attributes.includes('Read-only')),
             )
         )
             return false;
-        if (review.kind === 'create' && review.entries.length !== 1) return false;
+        if (review.kind !== 'delete' && review.entries.length !== 1) return false;
         this.review = {
             ...review,
             capabilities: { ...review.capabilities },
@@ -70,7 +87,7 @@ export class FilesEditWorkflow {
         };
         this.driver = driver;
         this.phase = 'ready';
-        this.name = '';
+        this.name = review.kind === 'rename' ? review.entries[0].name : '';
         this.message = 'Ready';
         this.jobId = null;
         this.cancelling = false;
@@ -78,7 +95,7 @@ export class FilesEditWorkflow {
     }
 
     close(): void {
-        if (!this.busy) this.review = null;
+        if (this.canClose) this.review = null;
     }
 
     async submit(): Promise<void> {
@@ -93,13 +110,15 @@ export class FilesEditWorkflow {
             const edits: FilesystemEdit[] =
                 review.kind === 'create'
                     ? [{ kind: 'CREATE_DIRECTORY', parentEntryId: review.entries[0].id, relativePath: [this.name] }]
-                    : review.entries
-                          .filter((entry) => !entry.ancestorIds.some((id) => selected.has(id)))
-                          .map((entry) => ({
-                              kind: 'DELETE',
-                              entryId: entry.id,
-                              recursive: entry.kind === 'directory',
-                          }));
+                    : review.kind === 'rename'
+                      ? [{ kind: 'RENAME', entryId: review.entries[0].id, newName: this.name }]
+                      : review.entries
+                            .filter((entry) => !entry.ancestorIds.some((id) => selected.has(id)))
+                            .map((entry) => ({
+                                kind: 'DELETE',
+                                entryId: entry.id,
+                                recursive: entry.kind === 'directory',
+                            }));
             await this.run(() => this.driver!.execute(review.revision, edits, this.update));
         }
     }
@@ -119,16 +138,23 @@ export class FilesEditWorkflow {
         try {
             const job = await operation();
             if (this.disposed) return;
-            if (job.status === 'completed') await this.refresh(true);
-            else {
+            if (job.status === 'completed') {
+                const result = job.result as FilesystemEditResult | undefined;
+                if (this.review?.kind === 'rename' && result?.revision)
+                    this.onRenamed(this.review, this.name, result.revision);
+                await this.refresh(true);
+            } else {
                 this.phase = 'failed';
                 this.message =
                     job.status === 'cancelled' ? 'Cancelled' : (job.error ?? 'The filesystem job did not complete.');
             }
         } catch (error) {
             if (this.disposed) return;
-            this.phase = 'unconfirmed';
-            this.message = `The write outcome is unconfirmed. ${userFacingMessage(error)}`;
+            this.phase = error instanceof FilesystemWriteRejected && this.jobId === null ? 'failed' : 'unconfirmed';
+            this.message =
+                this.phase === 'failed'
+                    ? userFacingMessage(error)
+                    : `The write outcome is unconfirmed${this.jobId === null ? '; no job reference was received. Do not repeat the operation' : ''}. ${userFacingMessage(error)}`;
         } finally {
             this.cancelling = false;
         }
@@ -139,7 +165,13 @@ export class FilesEditWorkflow {
         this.message = committed ? 'Changes saved. Refreshing' : 'Refreshing';
         try {
             await this.driver!.refresh();
-            if (!this.disposed) this.review = null;
+            if (!this.disposed) {
+                if (committed)
+                    this.setStatus(
+                        this.review?.kind === 'rename' ? `Renamed to ${this.name}` : 'Filesystem changes saved',
+                    );
+                this.review = null;
+            }
         } catch (error) {
             if (this.disposed) return;
             this.phase = committed ? 'refresh-failed' : 'failed';

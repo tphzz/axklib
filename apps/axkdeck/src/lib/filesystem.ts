@@ -59,6 +59,7 @@ export interface FilesystemRootCapabilities {
     createDirectory: boolean;
     putFile: boolean;
     deleteEntry: boolean;
+    renameEntry: boolean;
     maximumNameBytes: number;
     namePattern: string;
     nameHint: string;
@@ -75,7 +76,8 @@ export type FilesystemEdit =
           expectedSource: FilesystemInputSnapshot;
           conflict: 'SKIP' | 'REPLACE';
       }
-    | { kind: 'DELETE'; entryId: string; recursive: boolean };
+    | { kind: 'DELETE'; entryId: string; recursive: boolean }
+    | { kind: 'RENAME'; entryId: string; newName: string };
 
 export interface FilesystemTransport {
     startFilesystemImportInspection(
@@ -113,3 +115,6 @@ export interface FilesystemMutationDriver {
     cancel(jobId: number): Promise<void>;
     refresh(): Promise<void>;
 }
+
+// Drivers use this only when submission was definitively rejected before any write.
+export class FilesystemWriteRejected extends Error {}

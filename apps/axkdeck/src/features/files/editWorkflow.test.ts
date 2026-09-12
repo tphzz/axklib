@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FilesystemMutationDriver } from '../../lib/filesystem';
+import { FilesystemWriteRejected } from '../../lib/filesystem';
 import type { JobState } from '../../lib/transport';
 import { filesystemEntry, writableFilesRoot } from '../../lib/testing/filesystem';
 import { FilesEditWorkflow, validFilesystemName } from './editWorkflow.svelte';
@@ -19,6 +20,57 @@ function setup(kind: 'create' | 'delete' = 'create') {
 }
 
 describe('Files edits', () => {
+    it('allows dismissal after a definite submission rejection without inferring an uncertain outcome', async () => {
+        const { workflow, driver } = setup();
+        driver.execute.mockRejectedValueOnce(new FilesystemWriteRejected('Revision changed'));
+        await workflow.submit();
+        expect(workflow.phase).toBe('failed');
+        expect(workflow.canClose).toBe(true);
+        workflow.close();
+        expect(workflow.review).toBeNull();
+        expect(driver.refresh).not.toHaveBeenCalled();
+    });
+    it('requires one writable rename target and retains a committed rename through refresh recovery', async () => {
+        const { driver, workflow: unused } = setup();
+        unused.close();
+        const renamed = vi.fn();
+        const status = vi.fn();
+        const workflow = new FilesEditWorkflow(renamed, status);
+        const review = {
+            kind: 'rename' as const,
+            revision: 3,
+            entries: [filesystemEntry()],
+            capabilities: writableFilesRoot,
+        };
+        for (const entry of [
+            filesystemEntry({ parentId: null }),
+            filesystemEntry({ filesystemMetadata: true }),
+            filesystemEntry({ issue: 'Missing' }),
+            filesystemEntry({ attributes: ['Read-only'] }),
+        ])
+            expect(workflow.open({ ...review, entries: [entry] }, driver)).toBe(false);
+        expect(workflow.open({ ...review, entries: [filesystemEntry(), filesystemEntry()] }, driver)).toBe(false);
+        expect(workflow.open({ ...review, capabilities: { ...writableFilesRoot, renameEntry: false } }, driver)).toBe(
+            false,
+        );
+        expect(workflow.open(review, driver)).toBe(true);
+        expect(workflow.name).toBe('Documents');
+        expect(workflow.canSubmit).toBe(false);
+        workflow.name = 'Renamed';
+        driver.execute.mockResolvedValue({ ...completed, result: { imageId: 'image', revision: 4, warnings: [] } });
+        driver.refresh.mockRejectedValueOnce(new Error('offline'));
+        await workflow.submit();
+        expect(renamed).toHaveBeenCalledWith(review, 'Renamed', 4);
+        expect(workflow.canClose).toBe(false);
+        workflow.close();
+        expect(workflow.review).not.toBeNull();
+        await workflow.submit();
+        expect(driver.execute).toHaveBeenCalledOnce();
+        expect(renamed).toHaveBeenCalledOnce();
+        expect(status).toHaveBeenCalledWith('Renamed to Renamed');
+        expect(workflow.review).toBeNull();
+    });
+
     it('validates native naming rules in addition to path-component safety', () => {
         for (const name of ['', '.', '..', 'a/b', 'a\\b', 'a\0b', 'A'.repeat(24), '\u00e9', 'New\n', 'New\r\n'])
             expect(validFilesystemName(name, writableFilesRoot)).toBe(false);
@@ -60,14 +112,17 @@ describe('Files edits', () => {
         expect(driver.observe).toHaveBeenCalledWith(7, expect.any(Function));
         expect(workflow.review).toBeNull();
     });
-    it('refreshes without another submission when a response is lost before a job identity arrives', async () => {
+    it('cannot infer an outcome from refresh when no job identity arrives', async () => {
         const { workflow, driver } = setup();
         driver.execute.mockRejectedValueOnce(new Error('connection lost'));
         await workflow.submit();
         expect(workflow.message).toContain('unconfirmed');
         await workflow.submit();
         expect(driver.execute).toHaveBeenCalledOnce();
-        expect(driver.refresh).toHaveBeenCalledOnce();
+        expect(driver.refresh).not.toHaveBeenCalled();
+        expect(workflow.canSubmit).toBe(false);
+        workflow.close();
+        expect(workflow.review).not.toBeNull();
     });
     it('confirms recursive deletion and removes overlapping descendants from the submitted batch', async () => {
         const { workflow, driver } = setup('delete');

@@ -1,8 +1,6 @@
 #include "image_session_floppy_set.hpp"
 #include "image_sessions_internal.hpp"
 
-#include "content_digest.hpp"
-
 #include <charconv>
 #include <iterator>
 #include <limits>
@@ -111,7 +109,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     }
     std::shared_ptr<const RandomAccessReader> source_reader;
     std::function<Result<void>()> verify_source_unchanged;
-    std::string target_snapshot_id;
+    std::string source_revision;
     std::optional<MediaContainer> media;
     std::vector<ImageSourceRef> matched_companion_sources;
     std::optional<ImageFloppySetSummary> floppy_set;
@@ -119,10 +117,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         const auto file = implementation_->sandbox.open_file(path_reference);
         if (!file)
             return std::unexpected(file.error());
-        auto digest = detail::reader_sha256(*file->reader, cancellation);
-        if (!digest)
-            return std::unexpected(digest.error());
-        target_snapshot_id = std::move(*digest);
+        source_revision = file->revision;
         auto opened_media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
@@ -214,10 +209,6 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
                     session_error("image_source_changed", "object directory changed while it was opened", true));
         }
         auto snapshot_reader = std::make_shared<MemoryReader>(std::move(snapshot));
-        auto digest = detail::reader_sha256(*snapshot_reader, cancellation);
-        if (!digest)
-            return std::unexpected(digest.error());
-        target_snapshot_id = std::move(*digest);
         source_reader = std::move(snapshot_reader);
         verify_source_unchanged = []() -> Result<void> { return {}; };
         media.emplace(std::move(*directory));
@@ -276,7 +267,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     session->floppy_set = std::move(floppy_set);
     session->source_reader = std::move(source_reader);
     session->verify_source_unchanged = std::move(verify_source_unchanged);
-    session->target_snapshot_id = std::move(target_snapshot_id);
+    session->source_revision = std::move(source_revision);
     session->format = media_kind_name(media->kind());
     session->root_count = tree.roots.size();
     session->last_access = implementation_->clock();

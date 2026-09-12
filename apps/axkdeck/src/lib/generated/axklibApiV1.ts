@@ -2464,6 +2464,12 @@ export interface components {
         };
         ImageFilesystemEdit:
             | {
+                  entryId: string;
+                  /** @constant */
+                  kind: 'RENAME';
+                  newName: string;
+              }
+            | {
                   /** @constant */
                   kind: 'CREATE_DIRECTORY';
                   parentEntryId: string;
@@ -2613,6 +2619,7 @@ export interface components {
             nameHint: string;
             namePattern: string;
             putFile: boolean;
+            renameEntry: boolean;
             rootId: string;
             supportedImports: 'SU700_FLOPPY'[];
         };

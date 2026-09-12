@@ -74,6 +74,59 @@ class SfsFiles : public testing::Test {
     }
 };
 
+TEST_F(SfsFiles, RenamesEntriesInPlaceWithoutChangingIndexRecordsOrAllocation) {
+    const auto populated = folder / "populated.hds";
+    const std::vector<axk::FilesystemEdit> initial{
+        axk::CreateFilesystemDirectory{{"Documents"}},
+        axk::PutFilesystemFile{{"Documents", "payload.bin"}, data(8193)},
+    };
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, populated, axk::PartitionIndex{0}, initial));
+    const auto reader = axk::FileReader::open(populated).value();
+    const auto original = axk::open_image(populated).value();
+    const auto root = axk::locate_partition_root_record(original.partitions().front()).value();
+    const auto &root_record =
+        *std::ranges::find(original.partitions().front().records, root, &axk::IndexRecord::sfs_id);
+    const auto &directory = named(original, "Documents");
+    const std::vector<axk::FilesystemEdit> edits{
+        axk::RenameFilesystemEntry{{"Documents"}, "Renamed"},
+        axk::RenameFilesystemEntry{{"Renamed", "payload.bin"}, "short"},
+    };
+    const auto plan = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, edits);
+    ASSERT_TRUE(plan) << plan.error().message;
+    const auto changed = axk::open_image(plan->preview, {}).value();
+    EXPECT_EQ(named(changed, "Renamed").sfs_id, directory.sfs_id);
+    EXPECT_EQ(named(changed, "short").sfs_id, named(original, "payload.bin").sfs_id);
+    const auto in_directory = [&](std::uint64_t offset) {
+        for (const auto *record : {&root_record, &directory})
+            for (const auto &extent : record->extents) {
+                const auto &partition = original.partitions().front();
+                const auto begin =
+                    static_cast<std::uint64_t>(partition.start_sector) * original.superblock().sector_size_bytes +
+                    static_cast<std::uint64_t>(extent.cluster_offset) * partition.sectors_per_cluster *
+                        original.superblock().sector_size_bytes;
+                if (offset >= begin && offset < begin + extent.byte_count)
+                    return true;
+            }
+        return false;
+    };
+    std::vector<std::byte> before(static_cast<std::size_t>(reader->size()));
+    auto after = before;
+    ASSERT_TRUE(reader->read_exact_at(0U, before));
+    ASSERT_TRUE(plan->preview->read_exact_at(0U, after));
+    for (std::size_t i = 0; i < before.size(); ++i)
+        if (before[i] != after[i])
+            ASSERT_TRUE(in_directory(i)) << i;
+    EXPECT_EQ(*changed.read_record_data(axk::PartitionIndex{0}, named(changed, "short").sfs_id, 16384U),
+              std::vector<std::byte>(8193U, std::byte{0x5a}));
+    for (const auto &name : {"Renamed", "sfserrlog", "..", "a/b", "", "abcdefghijklmnopqrstuvwxyz"}) {
+        const std::vector<axk::FilesystemEdit> invalid{axk::RenameFilesystemEntry{{"Renamed"}, name}};
+        EXPECT_FALSE(axk::detail::prepare_sfs_file_edits(plan->preview, axk::PartitionIndex{0}, invalid)) << name;
+    }
+    const std::vector<axk::FilesystemEdit> collision{axk::CreateFilesystemDirectory{{"Taken"}},
+                                                     axk::RenameFilesystemEntry{{"Renamed"}, "Taken"}};
+    EXPECT_FALSE(axk::detail::prepare_sfs_file_edits(plan->preview, axk::PartitionIndex{0}, collision));
+}
+
 TEST_F(SfsFiles, CreatesEmptyDirectoriesAndExactRawFilesWithoutSamplerCategories) {
     const auto before = digest(source);
     const std::vector<axk::FilesystemEdit> edits{
@@ -326,7 +379,6 @@ TEST_F(SfsFiles, PreparesNonoverlappingReaderBackedPatchesWithoutWritingTheSourc
     const auto prepared = axk::detail::prepare_sfs_file_edits(*reader, axk::PartitionIndex{0}, edits);
     ASSERT_TRUE(prepared) << prepared.error().message;
     EXPECT_EQ(digest(source), before);
-    EXPECT_EQ(prepared->source_snapshot_id, axk::package_internal::hex_digest(before));
     EXPECT_EQ(prepared->image_size_bytes, (*reader)->size());
     std::uint64_t end{};
     ASSERT_FALSE(prepared->patches.empty());

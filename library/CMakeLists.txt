@@ -563,6 +563,7 @@ if(BUILD_TESTING)
     tests/media_fat12_test.cpp
     tests/su700_test.cpp
     tests/media_ex5_test.cpp
+    tests/media_ex5_capacity_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
     tests/media_floppy_catalog_test.cpp

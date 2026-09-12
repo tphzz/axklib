@@ -378,6 +378,19 @@ Result<void> State::finish() {
         static_cast<void>(id);
         if (auto checked = cancellation.check(); !checked)
             return checked;
+        // Name-only changes preserve directory allocation, index metadata and slack.
+        if (record.directory_renamed && !record.directory_changed && !record.deleted) {
+            auto contents = std::make_shared<MemoryReader>(record.directory);
+            std::uint64_t consumed{};
+            for (const auto &extent : record.info.extents) {
+                const auto count = std::min<std::uint64_t>(extent.byte_count, contents->size() - consumed);
+                if (count != 0U)
+                    patches.push_back({cluster_offset(extent.cluster_offset), contents, consumed, count});
+                consumed += count;
+            }
+            if (consumed != contents->size())
+                return std::unexpected(error("renamed directory exceeds its existing extents"));
+        }
         if (!record.changed)
             continue;
         if (record.directory_changed && !record.deleted)

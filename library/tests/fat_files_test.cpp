@@ -63,6 +63,96 @@ std::vector<std::byte> long_name_fixture() {
     return bytes;
 }
 
+TEST(FatFiles, RenamePreservesStorageAndMetadataAndRekeysDescendants) {
+    for (const auto &bytes : {plain_fixture(), plain_fixture(true), ex5_fixture(), ex5_capacity_fixture(false, true)}) {
+        const auto source = std::make_shared<axk::MemoryReader>(bytes);
+        const auto original = axk::FatImage::open(source).value();
+        const auto old = original.files().front();
+        const std::vector<axk::FilesystemEdit> edits{
+            axk::RenameFilesystemEntry{{"DEMOS"}, "RENAMED"},
+            axk::RenameFilesystemEntry{{"RENAMED", "DEMO1.S1A"}, "NEW.S1A"},
+        };
+        const auto plan = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits);
+        ASSERT_TRUE(plan) << plan.error().message;
+        const auto changed = axk::FatImage::open(plan->preview).value();
+        ASSERT_EQ(changed.files().size(), 1U);
+        const auto &file = changed.files().front();
+        EXPECT_EQ(file.path, "RENAMED/NEW.S1A");
+        EXPECT_EQ(file.directory_offset, old.directory_offset);
+        EXPECT_EQ(changed.read_file(file).value(), original.read_file(old).value());
+        const auto after = read(*plan->preview);
+        for (std::size_t i = 0; i < bytes.size(); ++i) {
+            if (bytes[i] == after[i])
+                continue;
+            EXPECT_TRUE((i >= old.directory_offset && i < old.directory_offset + 11U) ||
+                        (i >= original.directories().front().directory_offset &&
+                         i < original.directories().front().directory_offset + 11U))
+                << i;
+        }
+        for (const auto &name : {"RENAMED", "..", "a/b", "", "lower", "LONGNAMEX"}) {
+            const std::vector<axk::FilesystemEdit> invalid{axk::RenameFilesystemEntry{{"RENAMED"}, name}};
+            EXPECT_FALSE(axk::detail::prepare_fat_file_edits(plan->preview, axk::PartitionIndex{0}, invalid)) << name;
+        }
+    }
+}
+
+TEST(FatFiles, MetadataEditsDoNotScanUnrelatedImageData) {
+    class CountedReader final : public axk::RandomAccessReader {
+      public:
+        axk::MemoryReader source{plain_fixture(true)};
+        std::uint64_t trailing_bytes{};
+        mutable std::uint64_t bytes_read{};
+        std::uint64_t size() const noexcept override { return source.size() + trailing_bytes; }
+        axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override {
+            bytes_read += bytes.size();
+            std::ranges::fill(bytes, std::byte{});
+            if (offset >= source.size())
+                return {};
+            return source.read_exact_at(offset, bytes.first(static_cast<std::size_t>(
+                                                    std::min<std::uint64_t>(bytes.size(), source.size() - offset))));
+        }
+    };
+    for (const axk::FilesystemEdit &edit : std::vector<axk::FilesystemEdit>{
+             axk::CreateFilesystemDirectory{{"NEW"}}, axk::RenameFilesystemEntry{{"DEMOS"}, "RENAMED"},
+             axk::RemoveFilesystemEntry{{"DEMOS"}, true}}) {
+        auto source = std::make_shared<CountedReader>();
+        const auto prepared = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, std::span{&edit, 1U});
+        ASSERT_TRUE(prepared) << prepared.error().message;
+        EXPECT_LT(source->bytes_read, 256U * 1024U);
+        const auto small_reads = source->bytes_read;
+        source->trailing_bytes = 2ULL * 1024U * 1024U * 1024U;
+        source->bytes_read = 0U;
+        const auto large = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, std::span{&edit, 1U});
+        ASSERT_TRUE(large) << large.error().message;
+        EXPECT_EQ(source->bytes_read, small_reads);
+    }
+}
+
+TEST(FatFiles, RenameRetiresOnlyItsLongNameAndRejectsCollisionsAndReadOnlyEntries) {
+    auto bytes = long_name_fixture();
+    const auto source = std::make_shared<axk::MemoryReader>(bytes);
+    const std::vector<axk::FilesystemEdit> edits{axk::RenameFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, "NEW.S1A"}};
+    const auto plan = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits);
+    ASSERT_TRUE(plan) << plan.error().message;
+    const auto after = read(*plan->preview);
+    EXPECT_EQ(after[plain_data], std::byte{0xe5});
+    for (std::size_t i = 0; i < bytes.size(); ++i)
+        if (i != plain_data && !(i >= plain_data + 32U && i < plain_data + 43U))
+            ASSERT_EQ(bytes[i], after[i]) << i;
+    bytes[plain_data + 32U + 11U] |= std::byte{1};
+    EXPECT_FALSE(
+        axk::detail::prepare_fat_file_edits(std::make_shared<axk::MemoryReader>(bytes), axk::PartitionIndex{0}, edits));
+    const std::vector<axk::FilesystemEdit> collision{axk::PutFilesystemFile{{"DEMOS", "NEW.S1A"}, input(0)},
+                                                     edits.front()};
+    EXPECT_FALSE(axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, collision));
+    const std::vector<axk::FilesystemEdit> reuse{edits.front(),
+                                                 axk::PutFilesystemFile{{"DEMOS", "OTHER.S1A"}, input(0)},
+                                                 axk::RemoveFilesystemEntry{{"DEMOS", "NEW.S1A"}, false}};
+    const auto reused = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, reuse);
+    ASSERT_TRUE(reused) << reused.error().message;
+    EXPECT_EQ(axk::FatImage::open(reused->preview)->files().front().path, "DEMOS/OTHER.S1A");
+}
+
 TEST(FatFiles, PreparesEmptyDirectoriesAndStreamedFilesForAllVolumeProfiles) {
     for (const auto &bytes : {plain_fixture(), plain_fixture(true), ex5_fixture()}) {
         const auto source = std::make_shared<axk::MemoryReader>(bytes);

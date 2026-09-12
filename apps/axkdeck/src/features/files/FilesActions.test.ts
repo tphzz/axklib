@@ -52,7 +52,13 @@ async function setup(
                 filesystemName: 'Test filesystem',
                 deviceView: null,
                 rootCapabilities: [
-                    { ...writableFilesRoot, createDirectory: writable, putFile: writable, deleteEntry: writable },
+                    {
+                        ...writableFilesRoot,
+                        createDirectory: writable,
+                        putFile: writable,
+                        deleteEntry: writable,
+                        renameEntry: writable,
+                    },
                 ],
                 items,
                 totalCount: items.length,
@@ -92,6 +98,59 @@ async function setup(
 }
 
 describe('Files mutation controls', () => {
+    it('retains Refresh recovery when rename saved but listing failed', async () => {
+        const { view, driver, controller } = await setup();
+        await fireEvent.click(view.getAllByRole('row')[0]);
+        await fireEvent.click(view.getByRole('button', { name: 'Rename...' }));
+        await fireEvent.input(view.getByRole('textbox', { name: 'Name' }), { target: { value: 'Renamed' } });
+        vi.spyOn(controller, 'initialize').mockImplementationOnce(async () => {
+            controller.error = 'Listing failed';
+        });
+        await fireEvent.click(view.getByRole('button', { name: 'Rename' }));
+        await waitFor(() =>
+            expect(within(view.getByRole('dialog')).getByRole('alert').textContent).toContain(
+                'Changes saved; refresh failed',
+            ),
+        );
+        await fireEvent.keyDown(view.getByRole('dialog'), { key: 'Escape' });
+        expect(view.getByRole('dialog')).toBeTruthy();
+        await fireEvent.click(within(view.getByRole('dialog')).getByRole('button', { name: 'Refresh' }));
+        await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+        expect(driver.execute).toHaveBeenCalledOnce();
+    });
+
+    it('renames the selected directory through F2 and closes only after refresh', async () => {
+        const { view, driver } = await setup();
+        const row = view.getAllByRole('row')[0];
+        await fireEvent.click(row);
+        await fireEvent.keyDown(row, { key: 'F2' });
+        const input = (await view.findByRole('textbox', { name: 'Name' })) as HTMLInputElement;
+        expect(input.value).toBe('Documents');
+        await waitFor(() => expect(document.activeElement).toBe(input));
+        expect(input.selectionStart).toBe(0);
+        expect(input.selectionEnd).toBe(input.value.length);
+        const rename = view.getByRole('button', { name: 'Rename' }) as HTMLButtonElement;
+        expect(rename.disabled).toBe(true);
+        await fireEvent.input(input, { target: { value: 'Renamed' } });
+        let finish!: () => void;
+        driver.refresh.mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        await fireEvent.submit(input.closest('form')!);
+        await waitFor(() => expect(driver.refresh).toHaveBeenCalledOnce());
+        expect(view.queryByRole('dialog')).not.toBeNull();
+        expect(driver.execute).toHaveBeenCalledWith(
+            2,
+            [{ kind: 'RENAME', entryId: 'folder', newName: 'Renamed' }],
+            expect.any(Function),
+        );
+        finish();
+        await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+    });
+
     it('lets a specialized importer consume a drop on a root metadata file without raw insertion', async () => {
         const open = vi.fn().mockResolvedValue(true);
         const { view, imports, driver } = await setup(true, false, true, {
@@ -350,6 +409,7 @@ describe('Files mutation controls', () => {
         await fireEvent.contextMenu(view.getAllByRole('row')[1]);
         expect(view.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
             'New directory...',
+            'Rename…',
             'Delete…',
             'Import',
             'Export',
@@ -439,7 +499,7 @@ describe('Files mutation controls', () => {
         });
         await fireEvent.click(view.getByRole('button', { name: 'Create' }));
         await waitFor(() =>
-            expect((view.getByRole('button', { name: 'Creating' }) as HTMLButtonElement).disabled).toBe(true),
+            expect((view.getByRole('button', { name: 'Create' }) as HTMLButtonElement).disabled).toBe(true),
         );
         await fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
         expect(driver.cancel).toHaveBeenCalledWith(8);
@@ -450,39 +510,50 @@ describe('Files mutation controls', () => {
         await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
         expect(driver.execute).toHaveBeenCalledOnce();
     });
-    it.each(['create', 'delete'])('keeps %s footer actions at the shared height and margins', async (kind) => {
-        const styles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
-        const geometry = styles.match(/\.secondary-button,\s*\.primary-button,\s*\.danger-button\s*\{[^}]+\}/)?.[0];
-        const footer = styles.match(
-            /\.dialog-footer \.secondary-button,\s*\.dialog-footer \.primary-button,\s*\.dialog-footer \.danger-button\s*\{[^}]+\}/,
-        )?.[0];
-        expect(geometry).toBeDefined();
-        expect(footer).toBeDefined();
-        expect(footer).toContain('font-size: var(--dialog-body-font-size)');
-        const style = document.createElement('style');
-        style.textContent = `${geometry}\n${footer}`;
-        document.head.append(style);
-        try {
-            const { view } = await setup();
-            await fireEvent.click(view.getAllByRole('row')[0]);
-            await fireEvent.click(
-                view.getByRole('button', {
-                    name: kind === 'create' ? 'New directory...' : 'Delete selected entries...',
-                }),
-            );
-            const dialog = within(await view.findByRole('dialog'));
-            for (const label of ['Cancel', kind === 'create' ? 'Create' : 'Delete permanently']) {
-                const button = dialog.getByRole('button', { name: label });
-                expect(button.parentElement?.classList.contains('dialog-footer')).toBe(true);
-                const computed = getComputedStyle(button);
-                expect(computed.height).toBe('30px');
-                expect(computed.marginTop).toBe('0px');
-                expect(computed.marginBottom).toBe('0px');
+    it.each(['create', 'delete', 'rename'])(
+        'keeps %s footer actions at the shared height and margins',
+        async (kind) => {
+            const styles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
+            const geometry = styles.match(/\.secondary-button,\s*\.primary-button,\s*\.danger-button\s*\{[^}]+\}/)?.[0];
+            const footer = styles.match(
+                /\.dialog-footer \.secondary-button,\s*\.dialog-footer \.primary-button,\s*\.dialog-footer \.danger-button\s*\{[^}]+\}/,
+            )?.[0];
+            expect(geometry).toBeDefined();
+            expect(footer).toBeDefined();
+            expect(footer).toContain('font-size: var(--dialog-body-font-size)');
+            const style = document.createElement('style');
+            style.textContent = `${geometry}\n${footer}`;
+            document.head.append(style);
+            try {
+                const { view } = await setup();
+                await fireEvent.click(view.getAllByRole('row')[0]);
+                await fireEvent.click(
+                    view.getByRole('button', {
+                        name:
+                            kind === 'create'
+                                ? 'New directory...'
+                                : kind === 'rename'
+                                  ? 'Rename...'
+                                  : 'Delete selected entries...',
+                    }),
+                );
+                const dialog = within(await view.findByRole('dialog'));
+                for (const label of [
+                    'Cancel',
+                    kind === 'create' ? 'Create' : kind === 'rename' ? 'Rename' : 'Delete permanently',
+                ]) {
+                    const button = dialog.getByRole('button', { name: label });
+                    expect(button.closest('.dialog-footer')).not.toBeNull();
+                    const computed = getComputedStyle(button);
+                    expect(computed.height).toBe('30px');
+                    expect(computed.marginTop).toBe('0px');
+                    expect(computed.marginBottom).toBe('0px');
+                }
+            } finally {
+                style.remove();
             }
-        } finally {
-            style.remove();
-        }
-    });
+        },
+    );
     it('opens a compact create dialog, validates the name and submits to the selected file parent', async () => {
         const { controller, driver, view } = await setup();
         await fireEvent.click(view.getByRole('button', { name: 'Expand Documents' }));
@@ -515,6 +586,7 @@ describe('Files mutation controls', () => {
         await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
         expect(view.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
             'New directory...',
+            'Rename…',
             'Delete…',
         ]);
         await fireEvent.keyDown(view.getByRole('menu'), { key: 'End' });

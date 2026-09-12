@@ -97,6 +97,7 @@ class Builder {
                                                   true,
                                                   true,
                                                   true,
+                                                  true,
                                                   23U,
                                                   "^[ -~]{1,23}$",
                                                   "Use 1-23 printable ASCII characters."};
@@ -192,10 +193,18 @@ class Builder {
                               "root");
         index.entries[root].storage = std::format("{} bytes per sector; {} sectors per cluster",
                                                   fat.geometry().bytes_per_sector, fat.geometry().sectors_per_cluster);
+        const auto declared_bytes =
+            static_cast<std::uint64_t>(fat.geometry().total_sectors) * fat.geometry().bytes_per_sector;
+        if (declared_bytes > fat.geometry().physical_size_bytes)
+            index.entries[root].storage += std::format(
+                "; declared {} bytes; physical {} bytes; {} unavailable bytes; {} incomplete data cluster(s)",
+                declared_bytes, fat.geometry().physical_size_bytes, declared_bytes - fat.geometry().physical_size_bytes,
+                fat.geometry().data_cluster_count - fat.geometry().backed_data_cluster_count);
         if ((ex5 || fat16) && source && axk::detail::inspect_fat_file_edit_support(source, partition)) {
             index.edit_partitions.emplace(index.entries[root].id, partition);
             index.root_capabilities.back() = {
                 index.entries[root].id,
+                true,
                 true,
                 true,
                 true,

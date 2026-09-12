@@ -1,4 +1,6 @@
 import type { FilesystemMutationDriver } from '../../../lib/filesystem';
+import { FilesystemWriteRejected } from '../../../lib/filesystem';
+import { AxklibApiError } from '../../../lib/httpErrors';
 import type { ImageTransport } from '../../../lib/transport';
 import type { JobController } from '../../jobs/actions';
 
@@ -21,7 +23,18 @@ export function bindFilesystemMutations(dependencies: Dependencies, sessionId: n
                     active();
                     await dependencies.invalidateSession(sessionId);
                     active();
-                    return dependencies.transport.startFilesystemEdits(sessionId, revision, edits);
+                    try {
+                        return await dependencies.transport.startFilesystemEdits(sessionId, revision, edits);
+                    } catch (error) {
+                        if (
+                            error instanceof AxklibApiError &&
+                            error.status >= 400 &&
+                            error.status < 500 &&
+                            error.status !== 408
+                        )
+                            throw new FilesystemWriteRejected(error.message);
+                        throw error;
+                    }
                 },
                 update,
                 update,

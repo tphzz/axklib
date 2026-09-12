@@ -40,6 +40,7 @@
     let actions = $state<{
         openMenu(event: MouseEvent): void;
         deleteSelection(): void;
+        renameSelection(): void;
         importRoot(root: FilesystemEntry): Promise<void>;
         isBusy(): boolean;
         canDrop(target: FilesystemEntry | null): boolean;
@@ -233,6 +234,11 @@
             event.preventDefault();
             if (!controller.selection.length) controller.select(row.entry);
             actions?.deleteSelection();
+            return;
+        }
+        if (event.key === 'F2') {
+            event.preventDefault();
+            if (!actions?.isBusy()) actions?.renameSelection();
             return;
         }
         if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {

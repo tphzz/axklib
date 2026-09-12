@@ -82,6 +82,97 @@ function connectWorkflow(workflow: ImageSessionWorkflow, loadVolume = vi.fn(asyn
 }
 
 describe('ImageSessionWorkflow open progress', () => {
+    it.each(['resolve', 'reject'] as const)('ignores a stale integrity %s after a clean revision', async (outcome) => {
+        const image = opened(7);
+        image.format = 'ex5-disk';
+        image.validation.warningCount = 1;
+        let resolve!: (issues: []) => void;
+        let reject!: (error: Error) => void;
+        const pending = new Promise<[]>((yes, no) => {
+            resolve = yes;
+            reject = no;
+        });
+        const validationIssues = vi.fn(() => pending);
+        const transport = {
+            openImage: vi.fn(async () => image),
+            refreshImage: vi.fn(async () => ({ ...opened(7), revision: 2 })),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues,
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        const opening = workflow.open(location);
+        await vi.waitFor(() => expect(validationIssues).toHaveBeenCalledOnce());
+        await workflow.refresh();
+        if (outcome === 'resolve') resolve([]);
+        else reject(new Error('stale validation failure'));
+        await opening;
+        expect(workflow.integrityDialogOpen).toBe(false);
+        expect(workflow.integrityLoading).toBe(false);
+        expect(workflow.integrityError).toBe('');
+        expect(workflow.integrityIssues).toEqual([]);
+    });
+
+    it('still opens the integrity dialog for an SFS allocation blocker', async () => {
+        const image = opened(7);
+        image.validation.errorCount = 1;
+        image.validation.valid = false;
+        const transport = {
+            openImage: vi.fn(async () => image),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues: vi.fn(async () => [
+                {
+                    code: 'SFS_ALLOCATION_CROSS_LINK',
+                    severity: 'ERROR',
+                    message: 'Cross-linked allocation',
+                    samplerPath: '/',
+                    objectId: null,
+                },
+            ]),
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open(location);
+        expect(workflow.integrityDialogOpen).toBe(true);
+    });
+
+    it('shows EX warnings once, retaining them on refresh and reopening for a new issue', async () => {
+        const image = opened(7);
+        image.format = 'ex5-disk';
+        image.validation.warningCount = 1;
+        const issue = {
+            code: 'EX5_CAPACITY_EXCEEDS_IMAGE',
+            severity: 'WARNING' as const,
+            message: 'One sector is absent',
+            samplerPath: '/',
+            objectId: null,
+        };
+        const validationIssues = vi.fn(async () => [issue]);
+        const transport = {
+            openImage: vi.fn(async () => image),
+            refreshImage: vi.fn(async () => ({ ...image, revision: 2 })),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues,
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open(location);
+        expect(workflow.integrityDialogOpen).toBe(true);
+        workflow.integrityDialogOpen = false;
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(false);
+        expect(workflow.integrityIssues).toEqual([issue]);
+        validationIssues.mockResolvedValue([
+            issue,
+            { ...issue, code: 'EX5_FILE_DATA_UNAVAILABLE', samplerPath: 'TAIL.BIN', message: 'File data is absent' },
+        ]);
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(true);
+        workflow.integrityDialogOpen = false;
+        validationIssues.mockResolvedValue([issue]);
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(false);
+    });
     it('shows delayed progress and cancels an active server job', async () => {
         vi.useFakeTimers();
         try {

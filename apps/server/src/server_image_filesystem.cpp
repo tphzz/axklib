@@ -61,6 +61,7 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                                 {"createDirectory", root.create_directory},
                                 {"putFile", root.put_file},
                                 {"deleteEntry", root.delete_entry},
+                                {"renameEntry", root.rename_entry},
                                 {"maximumNameBytes", root.maximum_name_bytes},
                                 {"supportedImports", root.supported_imports},
                                 {"namePattern", root.name_pattern},

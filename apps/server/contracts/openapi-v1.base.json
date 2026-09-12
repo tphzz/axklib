@@ -762,12 +762,13 @@
       "ImageFilesystemRootCapabilities": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "maximumNameBytes", "namePattern", "nameHint", "supportedImports"],
+        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "maximumNameBytes", "namePattern", "nameHint", "supportedImports"],
         "properties": {
           "rootId": {"type": "string"},
           "createDirectory": {"type": "boolean"},
           "putFile": {"type": "boolean"},
           "deleteEntry": {"type": "boolean"},
+          "renameEntry": {"type": "boolean"},
           "maximumNameBytes": {"type": "integer", "minimum": 0},
           "supportedImports": {"type": "array", "items": {"type": "string", "enum": ["SU700_FLOPPY"]}, "uniqueItems": true},
           "namePattern": {"type": "string"},
@@ -4490,6 +4491,15 @@
       },
       "ImageFilesystemEdit": {
         "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "entryId", "newName"],
+            "properties": {
+              "kind": {"const": "RENAME"},
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "newName": {"type": "string", "minLength": 1, "maxLength": 255}
+            }
+          },
           {
             "type": "object", "additionalProperties": false,
             "required": ["kind", "parentEntryId", "relativePath"],
