@@ -1,26 +1,15 @@
 # Sampler Data Structures
 
-Yamaha A-series containers store sampler objects as payload files. axklib reads
-the container layer first, then decodes these shared object payloads in the same
-way for SFS hard-disk images, FAT12 floppy images, CD-ROM ISO images, standalone
-object files, read-only A3K volume archives, and explicit flat
-`AXK_OBJECT_DIRECTORY` sources.
+Yamaha A-series object files share a header across SFS hard disks, FAT12
+floppies, ISO9660 CD-ROMs and A3K volume archives. The container locates each
+file; the object payload defines its type and contents.
 
-```mermaid
-flowchart TD
-  container[Container reader] --> object[AxklibObject]
-  object --> header[Shared object header]
-  header --> smpl[SMPL Wave Data]
-  header --> sbnk[SBNK Sample]
-  header --> sbac[SBAC Sample Bank]
-  header --> prog[PROG program]
-  header --> sequ[SEQU sequence]
-  header --> prf3[PRF3 profile]
-  smpl --> rel[Relationship graph]
-  sbnk --> rel
-  sbac --> rel
-  prog --> rel
-```
+This page describes SMPL (Wave Data), SBNK (Sample), SBAC (Sample Bank) and
+PROG (Program). See [System Files](system-files.md) for SYSTEM/SYSTEM2 and
+[Sequence Data](sequences.md) for SEQU. Offsets are hexadecimal and relative
+to the object start unless a table specifies another base. Multi-byte numeric
+fields are big-endian unless stated otherwise. Descriptive field names below
+are labels for the byte layout, not an API or report schema.
 
 ## Shared Object Header
 
@@ -30,37 +19,36 @@ Supported current object payloads begin with:
 FSFSDEV3SPLX<type>
 ```
 
-Header fields used by axklib:
+Header layout:
 
 | Offset | Size | Type | Field | Meaning |
 | --- | ---: | --- | --- | --- |
 | `0x00` | 12 | ASCII | magic | `FSFSDEV3SPLX`. |
 | `0x0c` | 4 | ASCII | type | Object type tag. |
 | `0x10` | 4 | u32be | header_size | Object header size. For `SMPL` exact export, this is the stored waveform byte start. |
-| `0x14` | 4 | u32be | unknown_0x14 | Preserved raw layout selector. The object loader uses it to choose the object-body length field, but the complete value domain is not yet named. |
+| `0x14` | 4 | u32be | unknown | Preserved layout selector. The object loader uses it to choose the object-body length field, but the complete value domain is not yet named. |
 | `0x18` | 4 | u32be | record_size_or_header_used | Object-body read length when `0x14 < 4`; retained as an object-specific raw field. |
-| `0x1c` | 4 | u32be | payload_bytes_0x1c | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
-| `0x20` | 4 | u32be | payload_bytes_0x20 | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
-| `0x24` | 4 | u32be | payload_offset_0x24 | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
-| `0x28` | 2 | u16be | sample_rate_guess | `SMPL` sample-rate field. Empty for other types. |
-| `0x2a` | 2 | u16be | bytes_per_sample_guess | `SMPL` stored sample width. Empty for other types. |
-| `0x32` | 16 | ASCII | name_guess | Object header name, trimmed of trailing NUL and spaces. |
+| `0x1c` | 4 | u32be | payload_bytes | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
+| `0x20` | 4 | u32be | payload_bytes | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
+| `0x24` | 4 | u32be | payload_offset | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
+| `0x28` | 2 | u16be | sample_rate | `SMPL` sample-rate field. Empty for other types. |
+| `0x2a` | 2 | u16be | bytes_per_sample | `SMPL` stored sample width. Empty for other types. |
+| `0x32` | 16 | ASCII | name | Object header name, trimmed of trailing NUL and spaces. |
 
-The header parser requires at least `0x42` bytes. Invalid ASCII bytes in names
-are replaced with `?`. Empty or padded names are represented as empty strings by
-some helper functions and as fallback display names by user-facing renderers.
+The fields through the name occupy at least `0x42` bytes. Names may end in
+NUL bytes or ASCII spaces; invalid text bytes do not define another object type.
 
 ## Object Type Tags
 
-| Type | Public role |
+| Type | Role |
 | --- | --- |
-| `SMPL` | Wave Data storage object. Exact mono WAV export reads this level. |
+| `SMPL` | Wave Data storage object. Holds mono PCM and playback-window metadata. |
 | `SBNK` | Sampler-visible Sample object. Stores Sample parameters and links to Wave Data storage. |
-| `SBAC` | Sampler-visible Sample Bank object. User-facing trees render it as `B <name>`. |
+| `SBAC` | Sampler-visible Sample Bank object. Contains member Sample names. |
 | `PROG` | Program object, Program display name, effects, controller data, and assignment rows. |
 | `SEQU` | Sequence object. Current timeline events, timing, tempo, and MIDI conversion are decoded. |
-| `PRF3` | Profile/preference-style object. Currently surfaced as an object identity; type-specific fields are not public yet. |
-| other known tags | Recognized by low-level helpers, but not loaded as normal public objects unless a container reader explicitly supports them. |
+| `PRF3` | Profile/preference-style object. Includes partition-level SYSTEM/SYSTEM2; other inner layouts are unspecified here. |
+| other known tags | Other type-specific layouts are outside this specification. |
 
 ## Container Filename Versus Payload Identity
 
@@ -80,67 +68,40 @@ the embedded header supplies its sampler object name.
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
 big-endian length and offset fields in the object rather than inferring payload
 boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
-`SEQU` can be inventoried, transferred, renamed, and decoded through the current
-timeline profile. See [Sequence Data And MIDI Conversion](sequences.md).
-`PRF3` can be inventoried and transferred as a complete known-type payload, but
-its type-specific inner format is not part of the current public decoder
-contract.
-
-## AxklibObject Identity
-
-Every loaded object is represented as `AxklibObject`. The public identity has
-three parts:
-
-| Area | Fields | Meaning |
-| --- | --- | --- |
-| Container | `source_image`, `kind`, `scope_key` | Which input and container scope produced the object. |
-| Object reference | `object_key`, `partition_index`, `sfs_id`, `fat_file`, `payload_offset`, `payload_size` | Stable object key and physical placement hints. |
-| Sampler data | `object_type`, `name`, `payload`, `header`, `quality`, `metadata` | Decoded object identity, raw bytes, and container-specific metadata. |
-
-Container-specific placement metadata is documented in the format pages:
-
-| Container | Placement fields |
-| --- | --- |
-| SFS | partition index, SFS ID, payload offset, payload size, scope key. |
-| FAT12 floppy | FAT filename, root directory offset, first cluster, cluster count, file size, object offset. |
-| CD-ROM ISO | raw ISO path, group/volume labels, extent sector, data offset, file size, loader-quality fields. |
-| A3K archive | terminal-index path, absolute payload offset, payload size, synthetic partition index, and scope key. |
+`SEQU` contains a timeline; see [Sequence Data](sequences.md).
+`PRF3` includes SYSTEM/SYSTEM2 files, described in [System Files](system-files.md).
+Other PRF3 inner formats are unspecified.
 
 ## SMPL: Wave Data Object
 
-`SMPL` objects are the Wave Data storage level. Exact export writes one mono
-WAV per decoded `SMPL` object. Stereo rendering is a separate
-operation driven by `SBNK` relationships.
+`SMPL` objects store mono Wave Data. Stereo pairs are represented by SBNK
+member relationships rather than interleaved SMPL payloads.
 
-Audio decoding requires the complete PCM transfer-control byte at `0x84` to
-equal `0x30`. `validate_smpl_pcm_transfer_control(const CurrentSmpl&)` returns
-`audio_unsupported_format` for every other value, including extra-bit variants
-such as `0x31` and `0xb0`. The helper checks only this profile, not PCM bounds or
-sample width. Both full waveform decoding and streaming preview/audition apply
-it before converting PCM. Unsupported audio remains available for inventory,
-relationship resolution, and raw metadata inspection. Export paths retain
-their existing fail-or-skip policy; unsupported objects never produce PCM WAVs.
-This restriction is independent of the object-layout selector at `0x14`.
+The PCM layout described here requires transfer-control byte `0x84` to be
+exactly `0x30`. Extra-bit values such as `0x31` and `0xb0` do not establish
+the same PCM encoding. Other complete control-byte values have unspecified
+audio interpretation and must not be converted as this PCM profile.
+This byte is independent of the object-layout selector at `0x14`.
 
 Current compact metadata fields:
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x28` | 2 | u16be | sample_rate_guess |
-| `0x2a` | 2 | u16be | bytes_per_sample_guess |
-| `0x30` | `0x7c` | bytes | compact record, reported as `current_smpl_compact_record_hex` |
+| `0x28` | 2 | u16be | sample_rate |
+| `0x2a` | 2 | u16be | bytes_per_sample |
+| `0x30` | `0x7c` | bytes | compact record |
 | `0x54` | 16 | ASCII | embedded_container_name |
 | `0x74` | 4 | u32be | transient_name_hash_next_handle |
 | `0x78` | 4 | u32be | wave_data_reference_value |
-| `0x7c` | 2 | u16be | sample_rate_duplicate_0x07c |
+| `0x7c` | 2 | u16be | sample_rate_duplicate |
 | `0x7e` | 1 | u8 | root_key_midi_note |
 | `0x7f` | 1 | s8 | fine_tune_cents |
 | `0x84` | 1 | u8 | pcm_transfer_control |
-| `0x85` | 1 | u8 | loop_mode_0x085 |
-| `0x8e` | 4 | u32be | wave_start_frame_0x08e |
-| `0x92` | 4 | u32be | wave_length_frames_0x092 |
-| `0x96` | 4 | u32be | loop_start_frame_0x096 |
-| `0x9a` | 4 | u32be | loop_length_frames_0x09a |
+| `0x85` | 1 | u8 | loop_mode |
+| `0x8e` | 4 | u32be | wave_start_frame |
+| `0x92` | 4 | u32be | wave_length_frames |
+| `0x96` | 4 | u32be | loop_start_frame |
+| `0x9a` | 4 | u32be | loop_length_frames |
 | `0xaa` | 2 | u16be | transient_512_byte_block_counter |
 
 Derived loop values:
@@ -176,7 +137,7 @@ Preserve that byte as opaque on read. A Program's layout selector alone does
 not identify which model last saved its shared common record.
 
 Object ranges `0x43..0x49` and `0x6f..0x73` are non-semantic residue, not
-object fields. Canonical writers emit zero there. In particular, `0x6c..0x6f`
+object fields. Canonical new records use zero there. In particular, `0x6c..0x6f`
 must not be interpreted as a four-byte group identifier.
 
 The normalized object values at `0x7c`, `0x7e`, `0x7f`, `0x80`, `0x84`,
@@ -186,7 +147,7 @@ pair. The embedded source/container text at `0x54` is preserved by load and
 save normalization. Current SFS objects store the containing Volume name; it is
 source-dependent outside SFS and is not a second Wave Data identity. Reserved
 ranges `0x82..0x83`, `0x86..0x8d`, and `0x9e..0xa9` have no supported playback
-meaning; canonical writers emit zero there.
+meaning; canonical new records use zero there.
 
 The value at `0x74..0x77` is the transient name-hash collision-chain next
 handle. `0xaa..0xab` is a transient 512-byte transfer counter whose complete
@@ -196,18 +157,17 @@ Sample relationship resolution; it is not a persistent globally unique object
 identifier. Canonical authoring zero-initializes the residue ranges and the
 new-object hash-chain handle and transfer counter instead of reproducing
 captured runtime state. `0x84 & 0x30` selects one of four internal PCM transfer
-codes; canonical authoring emits `0x30`. Other complete control-byte values
-are unsupported for audio decoding and portable import, regardless of the
-masked selector. Individual common-state bits and the complete source/import
-descriptor schema are not exposed for authoring. Their preserved raw values do
-not imply support for editing them.
+codes; canonical authoring emits `0x30`. Other complete control-byte values have unspecified audio interpretation,
+regardless of the masked selector. Individual common-state bits and the complete
+source/import descriptor schema have no defined independent modification rules.
+Preserving their raw values does not establish that they can safely be edited.
 
 The shared object loader compares the raw field at `0x14` with `4`: values below
 `4` select the body length at `0x18`, while later layouts select `0x1c`; value
-`1` also invokes a post-load conversion callback. Axklib continues to preserve
-both raw fields because public names for every selector value are not defined.
+`1` also invokes a post-load conversion callback. The complete selector domain is unspecified; retain both fields unchanged
+when their layout is not being converted.
 
-Loop-mode display values currently surfaced by axklib:
+Loop-mode display values:
 
 | Raw | Label |
 | ---: | --- |
@@ -218,16 +178,12 @@ Loop-mode display values currently surfaced by axklib:
 | `4` | `One->` |
 | `5` | `One<-` |
 
-Fresh Wave Data authoring supports all six modes and defaults to forward
-one-shot (`4`). Wave start is zero and wave length is the logical source frame
-count. When both loop start and loop length are zero, modes `0`, `3`, `4`, and
-`5` use the full logical window. Modes `1` and `2` require an explicit nonempty
-loop. Every explicit window must end at or before the logical frame count;
-the exclusive endpoint may equal that count. The same policy applies to HDS,
-FAT12, and ISO authoring. There is no separate SMPL coarse-tune parameter;
-coarse tune belongs to the Sample parameter model.
+There is no separate SMPL coarse-tune field; coarse tuning belongs to SBNK.
+Wave and loop positions use frame coordinates. A repeating loop must have a
+nonzero length and fit inside its playback window; an exclusive endpoint can
+equal the window end. One-shot modes play through independently of key release.
 
-PCM export mapping:
+PCM byte representation:
 
 These mappings apply only to transfer control `0x30`:
 
@@ -237,36 +193,22 @@ These mappings apply only to transfer control `0x30`:
 | `1` | 8-bit PCM | Copied directly to WAV frames. |
 
 `header_size` is the start offset of waveform bytes inside a `SMPL` file.
-Complete objects use `payload_offset_0x24 == 0` and
-`payload_bytes_0x20 == payload_bytes_0x1c`. Yamaha multi-floppy saves can split
+Complete objects use `payload_offset == 0` and
+`payload_bytes == payload_bytes`. Yamaha multi-floppy saves can split
 one logical Wave Data object across several disk files. Those files repeat the
-same header, set `payload_bytes_0x20` to the local segment size, and set
-`payload_offset_0x24` to the segment's byte offset. Axklib assembles a complete,
-contiguous set when the shared parent object directory is opened. Opening one
-leaf does not scan its siblings: the leaf remains immediately available for
-inventory, and missing companion segments are reported only when an explicit
-preview, audition, or package export needs them. An application can then attach
-selected companion disk folders to that image session. Axklib admits exact
-continuation segments with a normalized Yamaha header identity, even when
-Yamaha changes the host filename between disks, plus a Wave Data object whose
-embedded name exactly satisfies an active but unresolved Sample member lane.
-Unrelated sibling objects remain outside the session.
-
-This segment interpretation is **Confirmed**. Independent multi-disk object
-sets join exactly to `payload_bytes_0x1c`, and the primary sampler load/save
-paths use `0x20` as the physical segment size and `0x24` as the logical payload
-offset. Axklib's multi-floppy writer uses only this exact contiguous form and
-validates byte-identical reassembly before publication.
+same header, set `payload_bytes` to the local segment size, and set
+`payload_offset` to the segment's byte offset. A complete logical waveform requires contiguous segments covering the byte
+count at `0x1c`. Segment identity comes from the repeated object metadata,
+not solely from host filenames, which may differ between disks. Missing or
+overlapping segments do not define complete PCM.
 
 Generated images may store a short compatibility tail after the logical waveform
 frames. In that case the complete logical byte count includes the tail, while
-`wave_length_frames_0x092` and `loop_length_frames_0x09a` describe the logical
+`wave_length_frames` and `loop_length_frames` describe the logical
 sample window.
 
-The decoder follows the declared stored width. It does not reinterpret a
-16-bit object as 8-bit audio based on a byte-pattern heuristic. Unrecognized or
-corrupted records remain unsupported rather than acquiring a compatibility
-decode path.
+The declared stored width determines PCM interpretation; a different numeric
+sample representation must not be inferred from payload appearance.
 
 ## SBNK: Sample Object
 
@@ -276,8 +218,7 @@ carry most Sample parameters.
 ### On-Disk Common Record
 
 Current `SBNK` and `SBAC` objects use the same normalized common-record
-mapping as current Wave Data. The verified load/save transforms classify the
-disk bytes as follows:
+mapping as current Wave Data. The stored fields are:
 
 | Offset | Size | Classification |
 | --- | ---: | --- |
@@ -285,22 +226,19 @@ disk bytes as follows:
 | `0x031` | 1 | packed lifecycle/dirty state; preserve the raw byte |
 | `0x032..0x041` | 16 | object name |
 | `0x042` | 1 | opaque-preserved common state transferred by the load/save transforms |
-| `0x043..0x049` | 7 | untransferred saver residue; canonical writers emit zero |
+| `0x043..0x049` | 7 | untransferred saver residue; canonical new records use zero |
 | `0x04a..0x053` | 10 | opaque-preserved common state |
 | `0x054..0x063` | 16 | source-dependent embedded container text |
 | `0x064..0x067` | 4 | opaque-preserved common state |
 | `0x068..0x06b` | 4 | alias of the transient handle at `0x074..0x077` |
 | `0x06c..0x06e` | 3 | alias of the body prefix at `0x078..0x07a` |
-| `0x06f..0x073` | 5 | untransferred saver residue; canonical writers emit zero |
+| `0x06f..0x073` | 5 | untransferred saver residue; canonical new records use zero |
 | `0x074..0x077` | 4 | transient name-hash collision-chain handle |
 
 The embedded text at `0x054` is not a 24-byte Sample instrument-name field:
 the surrounding bytes belong to distinct common-state and alias lanes. Exact
 alterations preserve opaque state, including `0x042`. The load/save transforms
-prove that byte is durable object state but do not expose its semantic role, so
-it remains an explicitly named raw field rather than an invented user-facing
-property. Fresh writers zero residue and new-object transient handles, then
-rebuild both aliases.
+retain that byte as durable object state. Its semantic role is unspecified. New objects use zero residue and transient handles, with both aliases rebuilt.
 
 ### Member Resolution Fields
 
@@ -317,36 +255,19 @@ rebuild both aliases.
 | `0x0c8` | 4 | u32be | linked Programs 065-096 bitmap |
 | `0x0cc` | 4 | u32be | linked Programs 097-128 bitmap |
 
-The A4000 resolves each active member by its 16-byte Wave Data name.
-After lookup it writes a runtime handle to `+0x098/+0x09c` and copies the
-resolved object's `SMPL+0x078` value into `+0x0a0/+0x0a4`. The latter fields
-are therefore cached metadata, not authoritative object identifiers. Real
-source media contains stale cached values that disagree with the local named
-target and still loads on hardware.
+The A4000 resolves each active member by its 16-byte Wave Data name, populates
+`0x098/0x09c` with runtime pointers and caches the resolved SMPL reference value
+at `0x0a0/0x0a4`. A persisted cached value can be stale. Neither cached value
+nor pointer is an authoritative disk identity.
 
-The object resolver dereferences normalized runtime `+0x60/+0x64` as
-member-object pointers; the direct SBNK body mapping
-places their serialized slots at `0x098/0x09c`. These are transient process
-state, not disk identities. Exact alterations preserve source bytes, while
-fresh writers emit zero and let name resolution populate live pointers.
-
-axklib treats a unique local member-name match as `Known`, whether or not its
-cache agrees. Duplicate local names remain `Tentative`; a cached-value-only
-match is diagnostic and never creates a resolved relationship. Mutation and
-package relocation refresh the cache from the selected named Wave Data object.
-For a placed Sample, a unique same-scope name whose Wave Data placement is
-unresolved remains `Tentative`: exact recovery metadata may retain that
-candidate, but it does not project the Sample or Wave Data into a logical
-volume. Standalone objects without a placement hierarchy can still resolve by
-one unique same-scope name.
+A unique local name identifies a member. Duplicate local names are ambiguous;
+a matching cached value alone does not resolve an otherwise missing member.
 
 The ordinary stereo layout uses the left and right member fields on one
 `SBNK`. Some source media instead stores stereo as two sibling `SBNK` objects
 under the same `SBAC` Sample Bank, with sampler-facing names ending in `-L` and `-R`.
-In that layout each sibling still uses its own left-member Wave Data name. axklib
-keeps both `SBNK` objects and both physical `SMPL` exports, then writes an
-additive rendered stereo WAV when the sibling names and links are known and
-compatible.
+Each sibling uses its own left-member Wave Data name. The two SBNK records
+remain distinct Samples even when they form a stereo pair.
 
 Program-link bitmap decoding:
 ```text
@@ -365,97 +286,77 @@ ends at `0x187`. Two current logical object extents occur in real media:
 - a `0x164`-byte object ends after parameter offset `0xbb`; and
 - a `0x188`-byte object includes the complete 224-byte parameter window.
 
-For `SBNK`, calculate this extent as `0x30 + payload_bytes_0x1c`.
+For `SBNK`, calculate this extent as `0x30 + payload_bytes`.
 Sampler-authored Samples commonly store zero in the generic `header_size` field,
-so `header_size + payload_bytes_0x1c` is not an SBNK size formula.
+so `header_size + payload_bytes` is not an SBNK size formula.
 
-The first 24 bytes at `0x0a8..0x0bf` contain six four-byte sample-controller
-records. Extended objects repeat the records at `0x164..0x17b`; all 1,537
-extended objects checked in two independent HDA images had identical copies.
-Short objects have no in-extent tail and retain the records at `0x0a8`. The decoder
-therefore uses `0x164` when the logical tail exists and `0x0a8` otherwise, and reports
-the physical source offset plus copy consistency. This precedence is
-hardware-backed: a controlled mismatch changed only the tail records, and the
-A4000 displayed those values rather than the unchanged prefix values. Fresh
-generation and explicit controller edits emit identical copies. Exact
-preservation paths retain and report an untouched mismatch.
+The first 24 bytes at `0x0a8..0x0bf` contain six four-byte controller records.
+Extended objects repeat these at `0x164..0x17b`. On A4000 the extended copy takes
+precedence when it is present; shorter objects use the prefix copy. Consistent
+controller updates must maintain both copies. Unrelated edits preserve a
+preexisting mismatch rather than choosing new values for it.
 
-Controller records use the confirmed Yamaha bounds: Device `0..126`, Function
-`0..36`, Type `0..3`, and signed Range `-63..+63`. A4000 behavior confirms the
-complete Device formatter, including special values `121..126`, and the raw
-Function order has an independent implementation-level confirmation matching
-the Yamaha Note 11 table. The public writer rejects controller records outside
-these bounds.
+Controller record domains are Device `0..126`, Function `0..36`, Type `0..3`,
+and signed Range `-63..+63`. Device values `121..126` are special selectors,
+not ordinary MIDI controller numbers.
 
-The tables below list the public field names currently exposed by the decoder.
-The maintained SBNK coverage contract additionally records, for every one of
-the 131 sampler-visible lanes, its physical offset, width, byte encoding,
-allowed raw values, packed mask where applicable, fresh single-member profile
-default, write policy, source basis, and verification level. Report generation fails if
-any visible lane lacks one of those properties. The same rows are projected
-through the verified SBAC split-layout transform, so a Sample Bank
-does not maintain a second, divergent parameter definition.
+The following tables give physical parameter offsets. The same parameter
+layout is split across the SBAC prefix and terminal block as described below.
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| `0x0d0` | u8 | sample_flags_0x0d0 |
-| `0x0d1` | u8 | mapout_flags_0x0d1 |
-| `0x0d2` | u8 | midi_receive_channel_0x0d2 |
-| `0x0d3` | u8 | pitch_bend_type_0x0d3 |
-| `0x0d4` | u8 | pitch_bend_range_0x0d4 |
-| `0x0d5` | u8 | coarse_tune_0x0d5 |
-| `0x0d6` | u8 | left_root_key_0x0d6 |
-| `0x0d7` | u8 | right_root_key_0x0d7 |
-| `0x0d8` | u16be | left_sample_rate_0x0d8 |
-| `0x0da` | u16be | right_sample_rate_0x0da |
-| `0x0dc` | s8 | left_fine_tune_cents_0x0dc |
-| `0x0dd` | s8 | right_fine_tune_cents_0x0dd |
-| `0x0de` | u16be | pitch_base_word_0x0de |
-| `0x0e0` | u16be | secondary_pitch_base_word_0x0e0 |
-| `0x0e2` | u8 | key_range_high_0x0e2 |
-| `0x0e3` | u8 | key_range_low_0x0e3 |
+| `0x0d0` | u8 | sample_flags |
+| `0x0d1` | u8 | mapout_flags |
+| `0x0d2` | u8 | midi_receive_channel |
+| `0x0d3` | u8 | pitch_bend_type |
+| `0x0d4` | u8 | pitch_bend_range |
+| `0x0d5` | u8 | coarse_tune |
+| `0x0d6` | u8 | left_root_key |
+| `0x0d7` | u8 | right_root_key |
+| `0x0d8` | u16be | left_sample_rate |
+| `0x0da` | u16be | right_sample_rate |
+| `0x0dc` | s8 | left_fine_tune_cents |
+| `0x0dd` | s8 | right_fine_tune_cents |
+| `0x0de` | u16be | pitch_base_word |
+| `0x0e0` | u16be | secondary_pitch_base_word |
+| `0x0e2` | u8 | key_range_high |
+| `0x0e3` | u8 | key_range_low |
 | `0x0e5` | u8 | loop mode |
-| `0x0e6` | u16be | loop_tempo_0x0e6 |
+| `0x0e6` | u16be | loop_tempo |
 
-Key-range values `0..127` are concrete MIDI key limits. The sampler also
-uses direction-specific sentinel bytes for the UI value `Orig`: raw `128` in
-`key_range_high_0x0e2` and raw `255` in `key_range_low_0x0e3`. axklib
-preserves those raw values and exposes a `resolved_key_range` projection in
-volume graphs. The projection resolves `Orig` to the member root key so export
-formats with only concrete MIDI limits can emit bounded zones. Fresh Sample
-authoring accepts the same direction-specific sentinel values and validates the
-effective range after resolving them to the authored root key. For a
-single-member Sample, an empty right member name means
-there is no active right member; the generated writer treats right-member fields
-as inactive compatibility fields rather than as a second playback region.
+Key-range values `0..127` are concrete MIDI limits. The `Orig` sentinel is
+raw `128` for the high limit at `0x0e2` and raw `255` for the low limit at
+`0x0e3`. It resolves to the member root key; compare effective endpoints after
+that substitution. An empty right-member name in a single-member Sample means
+the right lane is inactive, not a second playback region.
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| `0x0e8` | u32be | left_wave_start_address_0x0e8 |
-| `0x0ea` | u16be | left_wave_start_low16_0x0ea |
-| `0x0ec` | u32be | right_wave_start_address_0x0ec |
-| `0x0ee` | u16be | right_wave_start_low16_0x0ee |
-| `0x0f0` | u32be | left_wave_length_frames_0x0f0 |
-| `0x0f4` | u32be | right_wave_length_frames_0x0f4 |
-| `0x0f8` | u32be | left_loop_start_frame_0x0f8 |
-| `0x0fc` | u32be | right_loop_start_frame_0x0fc |
-| `0x100` | u32be | left_loop_length_frames_0x100 |
-| `0x104` | u32be | right_loop_length_frames_0x104 |
-| `0x108` | u8 | start_address_velocity_sensitivity_0x108 |
-| `0x109` | u8 | filter_type_0x109 |
-| `0x10a` | u8 | filter_cutoff_0x10a |
-| `0x10b` | u8 | filter_q_width_0x10b |
-| `0x10c` | u8 | filter_cutoff_key_scaling_break1_0x10c |
-| `0x10d` | u8 | filter_cutoff_key_scaling_break2_0x10d |
-| `0x10e` | u8 | filter_cutoff_key_scaling_level1_0x10e |
-| `0x10f` | u8 | filter_cutoff_key_scaling_level2_0x10f |
-| `0x110` | u8 | filter_cutoff_velocity_sensitivity_0x110 |
-| `0x111` | u8 | filter_q_width_velocity_sensitivity_0x111 |
-| `0x112` | u8 | expand_detune_0x112 |
-| `0x113` | u8 | expand_dephase_0x113 |
-| `0x114` | u8 | expand_width_0x114 |
-| `0x115` | u8 | random_pitch_0x115 |
-| `0x116` | u8 | sample_level_0x116 |
+| `0x0e8` | u32be | left_wave_start_address |
+| `0x0ea` | u16be | left_wave_start_low16 |
+| `0x0ec` | u32be | right_wave_start_address |
+| `0x0ee` | u16be | right_wave_start_low16 |
+| `0x0f0` | u32be | left_wave_length_frames |
+| `0x0f4` | u32be | right_wave_length_frames |
+| `0x0f8` | u32be | left_loop_start_frame |
+| `0x0fc` | u32be | right_loop_start_frame |
+| `0x100` | u32be | left_loop_length_frames |
+| `0x104` | u32be | right_loop_length_frames |
+| `0x108` | u8 | start_address_velocity_sensitivity |
+| `0x109` | u8 | filter_type |
+| `0x10a` | u8 | filter_cutoff |
+| `0x10b` | u8 | filter_q_width |
+| `0x10c` | u8 | filter_cutoff_key_scaling_break1 |
+| `0x10d` | u8 | filter_cutoff_key_scaling_break2 |
+| `0x10e` | u8 | filter_cutoff_key_scaling_level1 |
+| `0x10f` | u8 | filter_cutoff_key_scaling_level2 |
+| `0x110` | u8 | filter_cutoff_velocity_sensitivity |
+| `0x111` | u8 | filter_q_width_velocity_sensitivity |
+| `0x112` | u8 | expand_detune |
+| `0x113` | u8 | expand_dephase |
+| `0x114` | u8 | expand_width |
+| `0x115` | u8 | random_pitch |
+| `0x116` | u8 | sample_level |
 
 The member start, length, and loop fields are frame addresses in the linked
 physical Wave Data object. They define the Sample's playable window and can
@@ -464,154 +365,119 @@ a common example: several Samples have different start frames while referencing
 the same Wave Data. The full left/right wave-start words are decoded for this
 read path. Real images use nonzero upper halves, including shared stereo starts,
 so the words must not be reduced to their overlapping low-16 aliases.
-Template-backed serialization preserves the full words except for explicit
-supported updates. Fresh Sample authoring supports all loop modes `0..5`,
-defaults to the imported PCM span and accepts a bounded explicit `playback_window`,
-and serializes the requested loop window independently. Repeating modes `1` and `2` require a
-non-empty explicit loop window. The other modes accept either the complete
-linked Wave Data span or an explicit non-empty loop window. Sample
-preview and audition therefore:
+For Sample playback, resolve each active member to its SMPL, begin at the
+member's wave start, and use that member's wave length. Loop coordinates are
+absolute in the linked Wave Data; subtract the member start for window-relative
+playback. The SBNK loop mode governs Sample playback, independently of the SMPL
+selector. Do not clamp an invalid window to conceal an out-of-bounds reference.
 
-1. resolve each active member to one confirmed `SMPL`;
-2. read `wave_length_frames` beginning at `wave_start_frame`;
-3. normalize `loop_start_frame` relative to that member start; and
-4. use the `SBNK` loop mode rather than the physical Wave Data loop selector.
+Sample level is `0..127`. A4000 parameter domains include pitch-bend range
+`0..24`, filter type `0..16`, cutoff/Q velocity sensitivity `-63..63` plus
+`64..68` for `Rnd1..Rnd5`, and Portamento rate/time `1..127`. Member root key
+is `0..127` and fine tune is `-63..63`.
 
-Direct Wave Data preview remains physical and covers the stored PCM extent.
-Direct Wave Data audition uses its own `wave_start_frame` and
-`wave_length_frames` window, with its loop window rebased to that playback
-range. This keeps the preview useful for inspecting storage while playback
-matches the sampler's logical Wave Data window.
-Sample-owned preview returns one lane per active member, including each lane's
-role, source object identifier, and frame count. Invalid member windows are
-rejected instead of being clamped to the physical payload.
-
-Generated direct single-member `SBNK` objects have been hardware-tested with
-sample level values in the normal `0..127` range. The writer also carries a
-conservative current-format default set for fields that are not yet surfaced as
-public write inputs, including filter, envelope, LFO, output, portamento, and
-sample-control defaults for this direct single-member scope.
-
-Writer validation follows the A4000 parameter domains, including pitch-bend
-range `0..24`, filter type `0..16`, filter cutoff/Q velocity sensitivity
-`-63..63` plus raw `64..68` for `Rnd1..Rnd5`, and Sample Portamento rate/time
-`1..127`. Member root key is `0..127` and fine tune is `-63..63`. Fresh
-generation uses the documented profile defaults; template-backed edits preserve
-fields that were not explicitly changed, including opaque packed lanes.
-
-`sample_flags_0x0d0` is read-only topology state. Bit `0` records Sample Bank
+`sample_flags` is read-only topology state. Bit `0` records Sample Bank
 membership, bit `1` records mono topology, and bit `2` records expanded-mono
-topology. Fresh writers emit `0x02` for ordinary single-source mono and `0x00`
+topology. New objects use `0x02` for ordinary single-source mono and `0x00`
 for two-source stereo, then derive bit `2` for a single-source Sample whose
 Expand Detune or Expand Dephase is nonzero. Expand Detune accepts `-7..7`, and
 Expand Dephase and Width accept `-63..63`; true two-source stereo rejects
-nonzero detune or dephase. Graph alterations preserve topology bits while
-changing membership, except when an explicit semantic Sample Bank override
-updates expanded-mono state. Duplicate-source expanded objects remain
-template-preserved and have no fresh authoring form.
+nonzero detune or dephase. Membership and expanded-mono changes affect separate bits. Duplicate-source
+expanded objects require preservation of their existing topology; their
+independent construction rules are unspecified.
 
-`mapout_flags_0x0d1` is a packed byte, not one wholly semantic field. Bits
+`mapout_flags` is a packed byte, not one wholly semantic field. Bits
 `7..6` are EQ Type, bit `4` is Fixed Pitch, bit `2` is Key Crossfade, and bit
 `1` is Poly/Mono (`0=Poly`, `1=Mono`). Bit `0` is a derived cache: it is set
 exactly when Sample Portamento Type is `Pgm` (raw `1`) and clear for the other
-types. The writer refreshes that bit whenever it writes Portamento Type while
-preserving the other packed lanes. Bit `3` is a legacy-layout default selector:
+types. A Portamento Type change must refresh that bit while preserving other lanes. Bit `3` is a legacy-layout default selector:
 when an older object lacks the extended parameter
 tail, the bit initializes Velocity X-Fade High and Low to `5` rather than `0`.
 Current objects store both values directly, so bit `3` remains diagnostic and
-preserve-only. It is exposed as `legacy_velocity_xfade_default_5`. Bit `5` has
-no identified active consumer, is clear throughout observed current objects, and
-remains reserved/preserve-only. Fresh objects write zero for bits `5` and `3`;
+preserve-only. Bit `5` has
+unspecified meaning and must be preserved. Fresh objects write zero for bits `5` and `3`;
 template-based edits retain them.
 
-The Yamaha Sample Parameter table labels decimal offsets `0170..0179` as
-reserved. With the current `0x0a8` Sample Parameter base, those bytes map to
-`SBNK+0x152..0x15b`. They store five signed big-endian Q13 Sample EQ biquad
-coefficients in `b1`, `b2`, `b0`, `-a1`, `-a2` order. The coefficients are
-derived from EQ Type, Frequency, Gain, and Width and do not have independent
-controls. Fresh writers emit the neutral default vector. An explicit semantic
-EQ edit recomputes all five values; an unrelated template edit preserves the
-stored vector exactly.
-The other manual-reserved lanes remain raw-preserved. In particular,
-`0x13f..0x140` and `0x142` are transported only inside the four-byte group that
-contains AEG Sustain at `0x141`, and `0x14d..0x150` are copied into an internal
-synthesis cache without becoming user-facing parameters.
+`0x152..0x15b` store five signed big-endian Q13 Sample EQ biquad coefficients
+in `b1`, `b2`, `b0`, `-a1`, `-a2` order. They are derived from EQ Type,
+Frequency, Gain and Width, not independent controls. An EQ change requires a
+consistent complete vector; an unrelated edit must preserve it.
+Bytes `0x13f..0x140` and `0x142` travel with AEG Sustain at `0x141` but have
+no separate parameter meaning specified here. Bytes `0x14d..0x150` contain
+internal synthesis state without independent user controls. Preserve both ranges.
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| `0x117` | u8 | pan_0x117 |
-| `0x118` | u8 | velocity_low_limit_0x118 |
-| `0x119` | u8 | velocity_offset_0x119 |
-| `0x11a` | u8 | velocity_range_high_0x11a |
-| `0x11b` | u8 | velocity_range_low_0x11b |
-| `0x11c` | u8 | level_scaling_break1_0x11c |
-| `0x11d` | u8 | level_scaling_break2_0x11d |
-| `0x11e` | u8 | level_scaling_level1_0x11e |
-| `0x11f` | u8 | level_scaling_level2_0x11f |
-| `0x120` | u8 | velocity_sensitivity_0x120 |
-| `0x121` | u8 | alternate_group_0x121 |
-| `0x122` | u8 | sample_eq_frequency_0x122 |
-| `0x123` | u8 | sample_eq_gain_0x123 |
-| `0x124` | u8 | sample_eq_width_0x124 |
-| `0x125` | u8 | filter_cutoff_distance_0x125 |
-| `0x126` | u8 | feg_attack_rate_0x126 |
-| `0x127` | u8 | feg_decay_rate_0x127 |
-| `0x128` | u8 | feg_release_rate_0x128 |
-| `0x129` | u8 | feg_init_level_0x129 |
-| `0x12a` | u8 | feg_attack_level_0x12a |
-| `0x12b` | u8 | feg_sustain_level_0x12b |
-| `0x12c` | u8 | feg_release_level_0x12c |
-| `0x12d` | u8 | feg_rate_key_scaling_0x12d |
-| `0x12e` | u8 | feg_rate_velocity_sensitivity_0x12e |
-| `0x12f` | u8 | feg_attack_level_velocity_sensitivity_0x12f |
-| `0x130` | u8 | feg_level_velocity_sensitivity_0x130 |
-| `0x131` | u8 | peg_attack_rate_0x131 |
-| `0x132` | u8 | peg_decay_rate_0x132 |
-| `0x133` | u8 | peg_release_rate_0x133 |
-| `0x134` | u8 | peg_init_level_0x134 |
-| `0x135` | u8 | peg_attack_level_0x135 |
-| `0x136` | u8 | peg_sustain_level_0x136 |
-| `0x137` | u8 | peg_release_level_0x137 |
-| `0x138` | u8 | peg_rate_key_scaling_0x138 |
-| `0x139` | u8 | peg_rate_velocity_sensitivity_0x139 |
-| `0x13a` | u8 | peg_level_velocity_sensitivity_0x13a |
-| `0x13b` | u8 | peg_range_0x13b |
-| `0x13c` | u8 | aeg_attack_rate_0x13c |
-| `0x13d` | u8 | aeg_decay_rate_0x13d |
-| `0x13e` | u8 | aeg_release_rate_0x13e |
-| `0x141` | u8 | aeg_sustain_level_0x141 |
-| `0x143` | u8 | aeg_attack_mode_0x143 |
-| `0x144` | u8 | aeg_rate_key_scaling_0x144 |
-| `0x145` | u8 | aeg_rate_velocity_sensitivity_0x145 |
-| `0x146` | u8 | lfo_wave_0x146 |
-| `0x147` | u8 | lfo_speed_0x147 |
-| `0x148` | u8 | lfo_delay_time_0x148 |
-| `0x149` | u8 | lfo_flags_0x149 |
-| `0x14a` | u8 | lfo_cutoff_mod_depth_0x14a |
-| `0x14b` | u8 | lfo_pitch_mod_depth_0x14b |
-| `0x14c` | u8 | lfo_amp_mod_depth_0x14c |
-| `0x151` | s8 | filter_gain_0x151 |
+| `0x117` | u8 | pan |
+| `0x118` | u8 | velocity_low_limit |
+| `0x119` | u8 | velocity_offset |
+| `0x11a` | u8 | velocity_range_high |
+| `0x11b` | u8 | velocity_range_low |
+| `0x11c` | u8 | level_scaling_break1 |
+| `0x11d` | u8 | level_scaling_break2 |
+| `0x11e` | u8 | level_scaling_level1 |
+| `0x11f` | u8 | level_scaling_level2 |
+| `0x120` | u8 | velocity_sensitivity |
+| `0x121` | u8 | alternate_group |
+| `0x122` | u8 | sample_eq_frequency |
+| `0x123` | u8 | sample_eq_gain |
+| `0x124` | u8 | sample_eq_width |
+| `0x125` | u8 | filter_cutoff_distance |
+| `0x126` | u8 | feg_attack_rate |
+| `0x127` | u8 | feg_decay_rate |
+| `0x128` | u8 | feg_release_rate |
+| `0x129` | u8 | feg_init_level |
+| `0x12a` | u8 | feg_attack_level |
+| `0x12b` | u8 | feg_sustain_level |
+| `0x12c` | u8 | feg_release_level |
+| `0x12d` | u8 | feg_rate_key_scaling |
+| `0x12e` | u8 | feg_rate_velocity_sensitivity |
+| `0x12f` | u8 | feg_attack_level_velocity_sensitivity |
+| `0x130` | u8 | feg_level_velocity_sensitivity |
+| `0x131` | u8 | peg_attack_rate |
+| `0x132` | u8 | peg_decay_rate |
+| `0x133` | u8 | peg_release_rate |
+| `0x134` | u8 | peg_init_level |
+| `0x135` | u8 | peg_attack_level |
+| `0x136` | u8 | peg_sustain_level |
+| `0x137` | u8 | peg_release_level |
+| `0x138` | u8 | peg_rate_key_scaling |
+| `0x139` | u8 | peg_rate_velocity_sensitivity |
+| `0x13a` | u8 | peg_level_velocity_sensitivity |
+| `0x13b` | u8 | peg_range |
+| `0x13c` | u8 | aeg_attack_rate |
+| `0x13d` | u8 | aeg_decay_rate |
+| `0x13e` | u8 | aeg_release_rate |
+| `0x141` | u8 | aeg_sustain_level |
+| `0x143` | u8 | aeg_attack_mode |
+| `0x144` | u8 | aeg_rate_key_scaling |
+| `0x145` | u8 | aeg_rate_velocity_sensitivity |
+| `0x146` | u8 | lfo_wave |
+| `0x147` | u8 | lfo_speed |
+| `0x148` | u8 | lfo_delay_time |
+| `0x149` | u8 | lfo_flags |
+| `0x14a` | u8 | lfo_cutoff_mod_depth |
+| `0x14b` | u8 | lfo_pitch_mod_depth |
+| `0x14c` | u8 | lfo_amp_mod_depth |
+| `0x151` | s8 | filter_gain |
 | `0x152..0x15b` | 5 x s16be Q13 | sample_eq_biquad_coefficients (`b1`, `b2`, `b0`, `-a1`, `-a2`) |
-| `0x15c` | u32be | wave_end_address_0x15c (derived cache) |
-| `0x160` | u32be | loop_end_address_0x160 (derived cache) |
-| `0x17c` | u8 | velocity_xfade_high_0x17c |
-| `0x17d` | u8 | velocity_xfade_low_0x17d |
-| `0x17e` | u8 | output1_0x17e |
-| `0x17f` | u8 | output1_level_0x17f |
-| `0x180` | u8 | output2_0x180 |
-| `0x181` | u8 | output2_level_0x181 |
-| `0x182` | u8 | sample_portamento_type_0x182 |
-| `0x183` | u8 | sample_portamento_rate_0x183 |
-| `0x184` | u8 | sample_portamento_time_0x184 |
+| `0x15c` | u32be | wave_end_address (derived cache) |
+| `0x160` | u32be | loop_end_address (derived cache) |
+| `0x17c` | u8 | velocity_xfade_high |
+| `0x17d` | u8 | velocity_xfade_low |
+| `0x17e` | u8 | output1 |
+| `0x17f` | u8 | output1_level |
+| `0x180` | u8 | output2 |
+| `0x181` | u8 | output2_level |
+| `0x182` | u8 | sample_portamento_type |
+| `0x183` | u8 | sample_portamento_rate |
+| `0x184` | u8 | sample_portamento_time |
 
 `SBNK+0x15c` and `SBNK+0x160` are format-maintained 32-bit derived caches.
-The class-`0x10` parameter update path writes normalized runtime
-`+0x124 = +0xb0 + +0xb8` for wave end and
-`+0x128 = +0xc0 + +0xc8` for loop end. The direct SBNK body mapping places
-those runtime fields at disk `0x15c` and `0x160`. Arithmetic wraps modulo
-`2^32`, matching every checked current SBNK in the maintained HDA and floppy
-corpora. Writers recompute both caches from the serialized left wave/loop
-start and length fields; callers cannot supply them as independent values.
+Wave end is the serialized left wave start plus left wave length; loop end
+is the serialized left loop start plus left loop length. Both additions wrap
+modulo `2^32`. These caches must remain consistent with their source fields and
+are not independent parameters.
 
 Sample control records are six 4-byte records at:
 
@@ -638,7 +504,7 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 | Last `0x24` bytes, layout selector `0x14 >= 4` | 36 | bytes | Final part of the canonical Sample Parameter block. |
 
 The disk layout is not the flat Sample Bank Bulk layout used by the runtime.
-The verified loader transform reconstructs one canonical 224-byte Sample
+The loader transform reconstructs one canonical 224-byte Sample
 Parameter block from disk `0x078..0x133` followed by the terminal 36 bytes.
 The serializer applies the inverse transform. For legacy objects with layout
 selector `0x14 < 4`, no terminal block is stored and the loader supplies
@@ -677,18 +543,13 @@ clears the consumed bit, and marks the Sample Bank dirty. These words are
 therefore pending operation state, not durable per-bank value-enable settings.
 Only P2 `0..88` are actionable. The operation stops after `88`, and there are no
 parameter-table entries for `89..95`; those seven positions are reserved bitmap
-capacity and are reported separately when nonzero.
-Structured decoders expose them as `reserved_pending_parameter_numbers`.
+capacity; preserve them when nonzero.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
 
-Fresh current Sample Banks use the canonical nonzero Sample Parameter defaults,
-not an all-zero placeholder. The optional semantic parameter override set can
-change root key, key limits, level, fine tune, velocity limits, and expanded
-mono controls. Image creation and `insert_sbac` apply those values immediately
-to every member Sample and store the same current state in the Sample Bank, so
-the pending propagation words remain clear. Raw pending-state authoring is not
-exposed.
+Bank parameter values and pending propagation bits are separate: storing a
+value in the bank is not equivalent to applying it to every member. Clearing
+pending bits without applying their values discards the pending operation.
 
 The four linked-Program words use the same bit numbering as the Sample bitmap:
 bit zero of the first big-endian word is Program 001. Fresh image creation
@@ -712,36 +573,19 @@ resolver input. The effective member count is therefore the number of counted
 rows whose first name byte is nonzero. Blank counted rows remain inert and are
 not compacted during unrelated mutation.
 
-The transient pointer residue is retained for diagnostics and preserved on
-unchanged existing rows. Package import and every fresh or appended row write
-the hardware-proven zero form while preserving row order and resolved member
-name. Target matching uses exact name, object type, and local placement before
-it emits a resolved relationship. For directory-backed ISO
-objects, a counted slot whose Sample name occurs in several source volumes
-resolves to `Known` only when exactly one exact-placement Sample is in the
-Sample Bank's raw ISO volume. Recovered or otherwise non-exact placement stays
-below package-export quality, and multiple matches inside the same raw volume
-remain ambiguous. The package builder does not admit generic `Likely`
-relationships.
+The stored member pointer is transient, not a persistent link identity. Zero
+is a valid unresolved-pointer representation for a new row. Existing pointer
+bytes need not be rewritten for unrelated changes.
 
-The physical-layout contract labels all `332` bytes in the fixed
-`0x000..0x14b` prefix, all `20` bytes in one member-row template, all `224`
-bytes in the canonical Sample Parameter block, and all `36` bytes in the
-optional terminal tail. Both observed layouts therefore have zero unlabeled
-byte classes. Opaque and reserved fields remain explicit preservation
-contracts rather than guessed semantics.
+Member names resolve within the bank's local volume. Multiple exact-name
+candidates are ambiguous; a similarly named Sample in another volume does not
+supply the missing local member.
 
 ## PROG: Program Object
 
 `PROG` objects represent Program slots. The object header name is normally a
-three-digit slot ID. The displayed Program name is read from payload
-`0x078..0x07f`; if that field is empty, axklib displays `Pgm NNN` for slots
-1 through 128.
-
-The shared typed read/write groups, supported domains, and omission rules are
-documented in [Program Parameters](program-parameters.md). Raw blocks and rows
-remain available beside the semantic projection; an unavailable decoded leaf
-does not mean a stored zero or default.
+three-digit slot ID. The Program display name occupies `0x078..0x07f`.
+Its three-byte common prefix alias is stored at `0x6c..0x6e`.
 
 ### Program Common Fields
 
@@ -759,9 +603,9 @@ records, or `(logical_length - 0x120) / 0x38` for legacy records.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x068..0x077` | 16 | bytes | raw_0x068_0x077 |
-| `0x080` | 1 | u8 | program_flags_ad_source_effect_connection_lfo_sync_0x080 |
-| `0x081` | 1 | u8 | program_lfo_cycle_wave_initial_phase_0x081 |
+| `0x068..0x077` | 16 | bytes | raw |
+| `0x080` | 1 | u8 | program_flags_ad_source_effect_connection_lfo_sync |
+| `0x081` | 1 | u8 | program_lfo_cycle_wave_initial_phase |
 | `0x082..0x085` | 4 | 2 x u16be | Port-A controller-reset and note-toggle channel maps. |
 | `0x086` | 1 | s8 | A/D left Pan. |
 | `0x087..0x08a` | 4 | bytes | Legacy A/D output destinations and levels. |
@@ -769,11 +613,11 @@ records, or `(logical_length - 0x120) / 0x38` for legacy records.
 | `0x08c..0x08d` | 2 | bytes | Preserved common state, not writable parameters. |
 | `0x08e` | 1 | s8 | Transpose. |
 | `0x08f` | 1 | s8 | LFO reset channel selection. |
-| `0x090` | 1 | u8 | program_portamento_type_0x090 |
-| `0x091` | 1 | u8 | program_portamento_rate_0x091 |
-| `0x092` | 1 | u8 | program_portamento_time_0x092 |
-| `0x093` | 1 | u8 | sample_and_hold_speed_0x093 |
-| `0x094` | 1 | u8 | program_lfo_tempo_0x094 |
+| `0x090` | 1 | u8 | program_portamento_type |
+| `0x091` | 1 | u8 | program_portamento_rate |
+| `0x092` | 1 | u8 | program_portamento_time |
+| `0x093` | 1 | u8 | sample_and_hold_speed |
+| `0x094` | 1 | u8 | program_lfo_tempo |
 | `0x095` | 1 | s8 | LFO reset note selection. |
 | `0x096..0x097` | 2 | u16be | Stored assignment count. |
 | `0x110..0x11f` | 16 | 4 records | Legacy controller projection; authoritative only in legacy records. |
@@ -815,34 +659,20 @@ accepted display range.
 
 Legacy type decoding uses `+0x07`. Selector `1` maps stored types `47..51`
 to zero and subtracts five from types `52` and higher. Raw bytes are retained.
-Current ordinary type values are `0..96`; observed raw `97` is also readable
-and preservable. Read admission does not enforce an effect writer's
-value domains. Metadata distinguishes numeric values, control actions, and
-unused slots; nonnumeric slots do not invent a numeric display transform.
-Display status remains explicitly known or unknown. The typed parameter update
-operation resets all sixteen words on an actual type change, then applies
-explicit parameter values. Bypass and reasserting the same type preserve words.
-These write rules do not normalize an object during reading.
+Current ordinary type values are `0..96`; the complete semantics of raw `97`
+are not specified here. Preserve unknown types and their parameter words.
+Effect words may represent numeric values, actions or unused slots; a numeric
+scale is meaningful only for a numeric parameter. Changing an effect type
+reinitializes all sixteen words. Bypass and reselecting the same type do not
+reset those words.
 
 ### Program Assignment Rows
 
 Program assignment rows start at `0x120` and use a `0x38` byte stride.
 
-Only counted rows are decoded. Empty and unsupported counted rows retain their
-ordinals and raw bytes; unused capacity and terminal bytes never add graph
-edges. Explicit cleanup clears selected counted rows without changing the
-stored count, moving other rows, shrinking capacity, or rebuilding the tail.
-Rename and package relocation patch only their named fields, preserving opaque
-bytes and unresolved relationships. Program display-name rename also updates
-its three-byte common prefix alias at `0x6c..0x6e`.
-
-Fresh Programs accept `0..999` counted assignments. They allocate
-`max(8, count)` rows and the complete terminal block, so their length is
-`0x1d0 + max(8, count) * 0x38`. The writer initializes neutral common data,
-six effect blocks, both controller projections, A/D defaults, StepWave values,
-and empty-row defaults, then writes the requested identity and assignments.
-It writes the actual count and zero transient handles. These fresh defaults
-are not a repair template for existing Programs.
+Only counted rows are assignments. Unused capacity and the terminal block
+are not extra rows. Empty counted rows keep their ordinal positions. Clearing
+a row need not change the count, shift subsequent rows or shrink the file.
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
@@ -872,12 +702,9 @@ are not a repair template for existing Programs.
 | `+0x29` | 1 | s8 | filter_cutoff_offset |
 | `+0x2a` | 1 | s8 | filter_gain_offset |
 
-For named kind-`0x10` direct-SBNK and kind-`0x11` SBAC assignments, the 32-bit
-handle is opaque source-local state rather than a portable object identity.
-Package export declares it as a relocation, and package import writes the
-hardware-proven zero form while preserving the assignment ordinal, target name,
-kind, channel, and remaining row bytes. Empty rows and other assignment kinds
-are not covered by this relocation profile.
+Named kind-`0x10` and kind-`0x11` rows carry a source-local transient handle,
+not a portable object identity. Zero is valid for that handle when resolving
+a named assignment. No corresponding rule is specified for other row kinds.
 
 | Row offset | Size | Type | Field |
 | --- | ---: | --- | --- |
@@ -891,7 +718,7 @@ are not covered by this relocation profile.
 | `+0x34` | 1 | bits | Selection/isolation and unnamed state; preserve, not an authoring input. |
 | `+0x35..0x37` | 3 | bytes | Preserved opaque row suffix. |
 
-Assignment kind byte mapping currently used for read-side relationship matching:
+Assignment target kinds:
 
 | Kind byte | Target category |
 | ---: | --- |
@@ -908,108 +735,27 @@ Rch Assign display family:
 | `0x11..0x20` | `B01` through `B16` |
 | any other value | `unknown` |
 
-Direct sampler observation confirms these exact visible labels and their casing.
-The read-side relationship model retains the selector family, one-based channel
-number where applicable, and raw selector byte independently of the display
-projection.
+Output 2 at `+0x28` is independent of assignment enablement and receive-channel
+selection. A non-`0xff` Output 2 value does not disable the assignment.
 
-The source CD-ROM
-`Teklab - Frank Winkelmann Spitzensynth Encounters (Yamaha A3000).ISO`, volume
-`11 EC Demo A`, Program `001: EC DemoA`, provides a direct sampler check of the
-A-channel projection: Sample `Electro FX` stores selector `0x01` and loads as
-`Rch Assign=A02`; Sample `Sub Bass` stores selector `0x02` and loads as
-`Rch Assign=A03`. Direct sampler observation confirms both same-folder target
-assignments.
+Assignments use the complete stored 16-byte name, target type and local scope.
+Missing or ambiguous targets leave unresolved stored rows; they do not justify
+redirecting an assignment to a similar name or another volume. The complete
+device lookup behavior outside these cases is not specified.
 
-The byte at `+0x28` is the independent Output 2 parameter. It neither enables
-nor disables an assignment and must not affect Rch Assign decoding or target
-matching. The `Don Solaris CD7` source, volume `Analog Update`, Program
-`043: Polysix`, stores Sample Bank `VCO Pad` with selector `0xff` and Output 2
-value `0x07`. The sampler shows `VCO Pad`, `Solo=off`, and `Rch Assign =Smp`.
-This direct sampler observation confirms that a non-`0xff` Output 2 value is
-compatible with an effective stored assignment.
+For CD-ROM source loading, a named row can match an object in the same source
+folder even when its stored target type differs from the source object's type.
+This is a source-load case, not a general relaxation of ordinary assignment
+matching. The receive selector keeps the display mapping above.
 
-The `Don Solaris CD7` source provides direct checks that Program-local context
-must not replace exact assignment-name matching. Program slot `005` stores a
-Sample `Astro` row with selector `0xff`, and the sampler shows only `=Smp`. A
-separate stored `ASR10 MergeX   *` row has selector `0x00`, but no exact
-same-scope target with that full stored name. Program slot `002` similarly
-shows only Sample Bank `SQR2B` on hardware; its additional stored
-`SQR2           *` row has no exact local target. axklib preserves both missing
-rows as raw Program data and diagnostics, but neither row is an effective
-assignment, a dependency edge, or a sampler-visible Program child.
+### System Receive Context
 
-CD-ROM source-load rows are a distinct case. When a named source row matches a
-target object in the same ISO folder but the stored target type differs from
-the matched source object type, axklib keeps the row in
-`source-load-assignment` state. It still projects the stored `+0x15` selector with the same selector
-family: `0xff` is `=Smp`, `0x00..0x0f` are channels `A01` through `A16`, `0x10`
-is `Bch`, and `0x11..0x20` are `B01` through `B16`. The selector display
-therefore describes what the sampler applies when loading the source.
+Global receive settings and Single/Multi setup are not PROG fields. They are
+stored separately in [SYSTEM/SYSTEM2](system-files.md). In Multi mode the part's
+receive channel takes precedence over the Sample or Sample Bank Rch Assign
+setting inside its Program.
 
-Stored assignment-row state is separate from target matching:
-
-| State | Meaning |
-| --- | --- |
-| `decoded-row` | A row was decoded. |
-| `stored-assignment` | Named kind-`0x10` or kind-`0x11` assignment row stored in the Program. |
-| `source-load-assignment` | CD-ROM source-load row matched to a target object. |
-| `unknown` | State is not classified beyond diagnostics. |
-
-An effective Program assignment must have a `stored-assignment` or
-`source-load-assignment` state, a `Known` exact local target, and a concrete
-target object key. A missing or ambiguous target keeps the stored row available
-for byte-preserving package/export behavior without turning it into active
-content. This rule is **Strong**, based on the independent Don Solaris hardware
-observations above and exact image data; the raw row is known, while the
-sampler's complete target-lookup implementation remains to be traced.
-
-The sampler's system MIDI receive environment and A4000/A5000 Single/Multi
-setup are not fields of an individual `PROG` payload or data written by a
-normal Volume save. On SFS media, an explicit sampler System File save can
-place a model-specific partition-level file alongside all Volumes:
-
-| Path | Model and logical SFS record | Decoded context |
-| --- | --- | --- |
-| `\PRF3\SYSTEM` | A3000, `0x430` bytes: shared `0x30` current-record envelope plus `0x400` System body | Basic Receive Channel, Omni, Program Change Enable |
-| `\PRF3\SYSTEM2` | A4000/A5000, `0x1030` bytes: shared `0x30` current-record envelope plus `0x1000` System body | The same receive settings plus saved Program Mode and Multi Part Programs |
-
-The shared envelope begins with `FSFSDEV3SPLXPRF3` and is decoded by the same
-SFS current-record framework as ordinary sampler objects. Each model-specific
-body then has a `0x20` System header followed by the System Bulk parameter
-domain. The A3000 bulk is `0x348` bytes and its final `0x98` bytes remain
-unknown and preserved. The A4000/A5000 bulk occupies the remaining `0x0fe0`
-bytes.
-
-| System-body offset | Logical-record offset | `SYSTEM` | `SYSTEM2` |
-| ---: | ---: | --- | --- |
-| `0x00..0x03` | `0x30..0x33` | `21 52 05 31` | `DE AD FA CE` |
-| `0x0e` | `0x3e` | A3000 marker `0` | `0` A4000, `1` A5000 |
-| `0x34` | `0x64` | Basic Receive Channel `0..15` | Basic Receive Channel `0..15` or `0..31` |
-| `0x36` | `0x66` | bit 0 Omni; bit 1 Program Change | bit 0 Omni; bit 1 Program Change |
-| `0x5e` | `0x8e` | not interpreted | saved mode: `0` Single, `1` Multi |
-| `0x60..0x7f` | `0x90..0xaf` | not interpreted | direct Program numbers `1..128`, displayed as `001..128` |
-
-The A3000 `SYSTEM` file has no Program Mode or Multi Part table. The A4000 uses
-16 `SYSTEM2` parts on channels `01..16`; the A5000 uses 32 on `A01..A16` and
-`B01..B16`. The part matching Basic Receive Channel is the master part. In
-Multi, each part's channel is authoritative and the Sample or Sample Bank Rch
-Assign values inside its Program are ignored.
-
-The Yamaha MIDI data-format table uses a zero-based `0..127` representation for
-the corresponding transfer parameter. The saved SYSTEM2 file does not: direct
-sampler-authored files and sampler display establish that disk values are direct
-Program numbers `1..128`.
-
-Axklib reports `SYSTEM` and `SYSTEM2` independently and preserves their shared
-record envelopes and raw System-body sections. Axkdeck lets users switch
-between Single and Multi presentations
-without being forced by the saved mode. It displays both saved receive contexts
-when they coexist, but only an available `SYSTEM2` enables Multi rows. An
-A3000-only partition explicitly reports that `SYSTEM` cannot provide Program
-Mode or Multi assignments. CD-ROM, floppy, and `.a3k` sources have no
-partition-level System File entries, so Multi is never invented from a
-Volume's Programs.
+### Assignment Names And Duplicate Samples
 
 Assignment target matching preserves the complete 16-byte sampler name. An
 exact target whose stored name ends in `*` can be active and playable, so the
@@ -1021,65 +767,28 @@ In the sampler UI, `*` is not merely arbitrary punctuation: Yamaha's Duplicate
 command creates a Sample named from the original name plus `*`. The new Sample
 initially has the same parameters and shares the same Wave Data. The right-side
 `E` indicator is transient edited-but-not-saved state. Relationship matching
-still uses the exact stored target name; neither package closure nor validation
-infers unresolved, off, or duplicate state from the suffix alone.
+still uses the exact stored target name; the suffix alone does not encode
+unresolved, off, or duplicate state.
 
-Successive starred Sample families can keep identical decoded parameters and
-Known links to shared Wave Data, while paired Sample Bank/Sample families carry
-matching star generations. No additional raw Duplicate flag is part of the
-public contract. Starred objects use the same relationship and orphan rules as
-other exact object names.
-
-Normal `info` output shows effective Program children and CD-ROM source-load
-children that are suitable for user-facing display. CSV and JSON relationship
-reports keep all decoded rows and raw selector values.
-
-Portable-package closure retains every effective Known named kind-`0x10` and
-kind-`0x11` target regardless of its Output 2 value. For SFS media, a target
-remains Known when exactly one matching object is in the Program's volume, even
-when other volumes contain the same type and name. Multiple same-volume
-candidates, cross-volume-only matches, unresolved rows, and ambiguous rows
-remain diagnostic-only. Unresolved stored-assignment rows remain in the raw
-`PROG` payload and portable package identity, but do not create dependency
-edges.
-
-Relationship target matching is reported separately from stored-row state. Rows
-that are useful for diagnostics but should not become normal Program children use
-`diagnostic_category` values such as `program-link-bitmap`,
-`sbnk-member-cache`, or `stored-assignment-missing-target`.
+A `*` suffix alone therefore neither marks a missing target nor establishes
+an independent Duplicate flag. Apply the same exact-name rules to starred
+and unstarred objects.
 
 ## SEQU And PRF3
 
-`SEQU` and `PRF3` are loaded as supported object identities when their payloads
-use the shared header. Current public behavior preserves object name, type,
-placement metadata, raw payload bytes, and report identity fields. The current
-`SEQU` timeline, event model, package profile, and Standard MIDI File conversion
-are documented in [Sequence Data And MIDI Conversion](sequences.md). `PRF3`
-type-specific parameter sections are not currently exposed as public fields.
+SEQU contains sequence timing and events; see [Sequence Data](sequences.md).
+PRF3 includes the partition-level [System Files](system-files.md). Other PRF3
+inner layouts are unspecified; do not apply the SYSTEM layout based on the
+type tag alone.
 
-## Relationship Graph
+## Object Relationships
 
-The shared relationship graph connects decoded objects:
+Programs assign Samples or Sample Banks. Sample Banks contain Samples. A Sample
+references one or two Wave Data members. Names and scope, not captured runtime
+pointers, establish persistent relationships. Shared Wave Data does not merge
+the parameters or playback windows of the Samples referencing it.
 
-| Relationship | Meaning |
-| --- | --- |
-| `PROG_ASSIGNMENT_TO_SBAC` | Program assignment to a visible `B <Sample Bank>` parent. |
-| `PROG_ASSIGNMENT_TO_SBNK` | Program assignment directly to a Sample. |
-| `SBAC_SLOT_TO_SBNK` | Sample Bank-to-Sample member row. |
-| `SBNK_LEFT_MEMBER_TO_SMPL` | Left member Wave Data storage link. |
-| `SBNK_RIGHT_MEMBER_TO_SMPL` | Right member Wave Data storage link. |
-
-Relationship row fields are documented in [Report Schemas](report-schemas.md).
-
-## Exact Export Metadata
-
-Exact export keeps physical and rendered audio separate:
-
-| Output | Source level | Meaning |
-| --- | --- | --- |
-| `_samples/physical/*.wav` | `SMPL` | Exact mono Wave Data export. |
-| `_samples/rendered/*.wav` | linked `SBNK` pair | Interleaved stereo render when left/right members are compatible. |
-| optional selection graph JSON | objects and relationships | Scoped graph metadata for objects, relationships, WAV references, quality labels, and diagnostics. |
-
-The original `SMPL` objects remain represented even when a rendered stereo WAV is
-created.
+For software-facing representations see [Report Schemas](report-schemas.md),
+[Export Layout](names-and-paths.md#exact-export-layout), and the
+[Sample](sample-parameters.md) and [Program](program-parameters.md) authoring
+contracts.

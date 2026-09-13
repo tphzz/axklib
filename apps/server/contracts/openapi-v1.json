@@ -45,20 +45,21 @@
           "fileKind": {
             "const": "SYSTEM"
           },
-          "model": {
-            "const": "A3000"
-          },
           "omni": {
             "type": "boolean"
           },
           "programChangeEnabled": {
             "type": "boolean"
+          },
+          "storageRevision": {
+            "const": 0,
+            "type": "integer"
           }
         },
         "required": [
           "fileKind",
           "availability",
-          "model",
+          "storageRevision",
           "basicReceive",
           "omni",
           "programChangeEnabled"
@@ -77,12 +78,6 @@
           "fileKind": {
             "const": "SYSTEM2"
           },
-          "model": {
-            "enum": [
-              "A4000",
-              "A5000"
-            ]
-          },
           "omni": {
             "type": "boolean"
           },
@@ -91,7 +86,7 @@
               "$ref": "#/components/schemas/SystemProgramPart"
             },
             "maxItems": 32,
-            "minItems": 16,
+            "minItems": 32,
             "type": "array"
           },
           "programChangeEnabled": {
@@ -102,12 +97,19 @@
               "SINGLE",
               "MULTI"
             ]
+          },
+          "storageRevision": {
+            "enum": [
+              0,
+              1
+            ],
+            "type": "integer"
           }
         },
         "required": [
           "fileKind",
           "availability",
-          "model",
+          "storageRevision",
           "savedProgramMode",
           "basicReceive",
           "omni",

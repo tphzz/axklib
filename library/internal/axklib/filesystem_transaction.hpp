@@ -7,7 +7,9 @@
 #include <vector>
 
 #include "axklib/filesystem_edit.hpp"
+#include "axklib/sampler_model.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/system_file_parameters.hpp"
 
 namespace axk::detail {
 
@@ -34,6 +36,13 @@ normalize_filesystem_patches(const RandomAccessReader &source, std::span<const F
                              std::uint64_t offset, std::uint64_t size, const CancellationToken &cancellation);
 [[nodiscard]] std::shared_ptr<const RandomAccessReader>
 filesystem_preview(std::shared_ptr<const RandomAccessReader> source, std::vector<FilesystemWritePatch> patches);
+
+// Same immutable-reader contract as Files edits. This narrowly typed operation
+// never relaxes the raw Files protection for the PRF3 support subtree.
+[[nodiscard]] Result<PreparedFilesystemEdits> prepare_sfs_system_file(std::shared_ptr<const RandomAccessReader> source,
+                                                                      PartitionIndex partition,
+                                                                      const SystemFilePatch &patch, ASeriesModel model,
+                                                                      const CancellationToken &cancellation = {});
 
 // Patches are ordered, disjoint and confined to the selected partition.
 // Source and input readers must remain immutable until a caller freezes these

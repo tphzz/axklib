@@ -66,8 +66,10 @@ struct ModelRequirement {
 };
 
 AXK_API std::optional<EffectProfile> parse_effect_profile(std::string_view value) noexcept;
-// Numeric write domains and complete type-change vectors for current ordinary effects (0..96).
-AXK_API std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type) noexcept;
+// Numeric write domains and complete type-change vectors, including unused words.
+// A3000 supports ordinary types 0..54 and has distinct physical reset vectors.
+AXK_API std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type,
+                                                         EffectProfile profile = EffectProfile::a4000) noexcept;
 AXK_API bool effect_type_supported(std::uint16_t raw_type, EffectProfile profile = EffectProfile::a4000) noexcept;
 AXK_API std::optional<EffectTypeInfo> effect_type_info(std::uint16_t raw_type,
                                                        EffectProfile profile = EffectProfile::a4000) noexcept;

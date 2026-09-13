@@ -26,6 +26,36 @@ def test_unused_display_slots_are_not_exposed_as_writable_parameters() -> None:
             assert domain["kind"] == "unused", (row["raw_type"], row["parameter_number"])
 
 
+def test_emits_native_physical_reset_vectors_separately_from_current_defaults() -> None:
+    data = json.loads(DATA.read_text())
+    vectors = data["a3000_reset_words"]
+    assert len(vectors) == 55
+    assert all(len(words) == 16 for words in vectors)
+    assert vectors[1][15] == 0
+    assert vectors[54][15] == 35082
+    assert "a3000_effect_reset_words" in render(data)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "short", "negative", "overflow", "boolean", "domain"])
+def test_rejects_invalid_native_reset_vectors(mutation: str) -> None:
+    data = json.loads(DATA.read_text())
+    vectors = data["a3000_reset_words"]
+    if mutation == "missing":
+        vectors.pop()
+    elif mutation == "short":
+        vectors[1].pop()
+    elif mutation == "negative":
+        vectors[1][0] = -1
+    elif mutation == "overflow":
+        vectors[1][0] = 65536
+    elif mutation == "boolean":
+        vectors[1][0] = True
+    else:
+        vectors[1][1] = 0
+    with pytest.raises(ValueError):
+        render(data)
+
+
 @pytest.mark.parametrize("mutation", ["missing_word", "negative", "overflow", "bad_kind", "unknown", "duplicate"])
 def test_rejects_malformed_write_tables(mutation: str) -> None:
     data = json.loads(DATA.read_text())

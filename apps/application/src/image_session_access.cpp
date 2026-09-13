@@ -8,6 +8,9 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
     if (!session)
         return std::unexpected(session.error());
     auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->invalidated)
+        return std::unexpected(
+            session_error("image_session_invalidated", "image session requires recovery and reopening"));
     if ((*session)->revision != expected_revision)
         return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
     if ((*session)->mutating)
@@ -76,6 +79,9 @@ axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, 
     if (!session)
         return std::unexpected(session.error());
     auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->invalidated)
+        return std::unexpected(
+            session_error("image_session_invalidated", "image session requires recovery and reopening"));
     if ((*session)->revision != expected_revision)
         return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
     if (!filesystem_partition && (*session)->format != "sfs")
@@ -225,7 +231,7 @@ axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::s
 }
 
 void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, std::string_view owner_id,
-                                                   std::uint64_t expected_revision) noexcept {
+                                                   std::uint64_t expected_revision, bool invalidate_session) noexcept {
     std::shared_ptr<Implementation::Session> session;
     {
         const std::scoped_lock lock{implementation_->mutex};
@@ -236,6 +242,9 @@ void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, st
     }
     if (!session->mutating || !session->mutation_guard || session->revision != expected_revision)
         return;
+    session->invalidated = invalidate_session;
+    if (invalidate_session)
+        session->auditions.clear();
     session->mutating = false;
     session->path_lease.downgrade();
     session->mutation_guard.reset();

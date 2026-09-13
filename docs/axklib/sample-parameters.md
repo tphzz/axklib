@@ -1,23 +1,18 @@
 # Sample Parameter Authoring
 
-`SampleParameters` is the one public model for sampler-visible Sample (`SBNK`)
-parameters. The same model is used by:
+The `parameters` JSON object describes sampler-visible Sample (`SBNK`)
+settings. The same fields are accepted for fresh Samples, existing-Sample
+updates, existing-bank/member updates, and a fresh Sample Bank's
+`parameter_overrides` object.
 
-- `SampleSpec.parameters` when creating a Sample;
-- `UpdateSampleParametersOperation.parameters` when altering an existing Sample;
-- `UpdateSampleBankParametersOperation.parameters` for an existing bank and all members;
-- `SampleBankSpec.parameter_overrides` for the current Sample Bank (`SBAC`)
-  parameter state and immediate member-wide application; and
-- the corresponding `parameters` and `parameter_overrides` JSON objects.
-
-All fields are optional. An empty `SampleSpec.parameters` object selects the
-fresh Sample defaults below. An existing-Sample update or Sample Bank override
-must contain at least one field. Omitted fields in an existing object are
-preserved. Omitted fields in a fresh Sample receive the defaults below.
+All fields are optional. An empty fresh Sample `parameters` object selects the
+defaults below. An existing-Sample update or Sample Bank override must contain
+at least one field. Omitted fields in an existing object are preserved. Omitted
+fields in a fresh Sample receive the defaults below.
 
 ## General, MIDI, Pitch, And Loop
 
-| JSON / C++ field | Accepted value | Fresh default |
+| JSON field | Accepted value | Fresh default |
 | --- | --- | --- |
 | `fixed_pitch`, `key_crossfade`, `mono_mode` | Boolean | `false` |
 | `sample_eq_type` | `0..2` | `0` |
@@ -43,7 +38,7 @@ Numbered MIDI receive channels use zero-based storage: raw `0..15` displays as
 
 ## Playback Window
 
-`SampleSpec.playback_window` is separate from the shared parameter block because
+`playback_window` is separate from the shared parameter block because
 its bounds depend on backing PCM. Its JSON shape is
 `"playback_window": {"start_frame": 65536, "length_frames": 1000}` alongside
 `parameters`, not inside it. The positive-length absolute frame window must fit
@@ -60,7 +55,7 @@ and playback extents. Existing Sample retargeting preserves its existing window.
 
 ## Filter, Expansion, Level, And EQ
 
-| JSON / C++ field | Accepted value | Fresh default |
+| JSON field | Accepted value | Fresh default |
 | --- | --- | --- |
 | `filter_type` | `0..16` | `0` (bypass) |
 | `filter_cutoff` | `0..127` | `127` |
@@ -130,7 +125,7 @@ row set.
 
 ## LFO, Controllers, Outputs, And Portamento
 
-| JSON / C++ field | Accepted value | Fresh default |
+| JSON field | Accepted value | Fresh default |
 | --- | --- | --- |
 | `lfo.wave` | `0..3` | `1` |
 | `lfo.speed` | Display value `1..128`; storage uses value minus one | `40` |

@@ -1,13 +1,9 @@
 # Supported Media Profiles
 
-The native library exposes opened container variants through
-`axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
-floppies, standard FAT16 volumes and primary-MBR FAT16 disks, EX5 disks,
-ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
-`FSFSDEV3SPLX` object files, and AXK object directories. The individual
-`axk::FatImage`, `axk::IsoImage`, `axk::A3kArchive`, and
-`axk::StandaloneObject` types are available when an application already knows
-the container kind.
+axklib opens Yamaha SFS images, FAT12 floppies, standard FAT16 volumes and
+primary-MBR FAT16 disks, EX5 disks, ISO9660 CD-ROMs, A3K volume archives,
+standalone Yamaha objects and explicit object directories. The installed SDK
+entry point is documented in [C++ API](cpp-api.md).
 
 These readers implement specific supported Yamaha media profiles.
 They are not general-purpose FAT or ISO libraries. An image
@@ -26,8 +22,8 @@ fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
 
 ## EX5 disk profile
 
-The separate [EX5 Disk Images](ex5.md) profile provides read-only directory and
-raw-file access through `FatImage`. It uses EX5-specific recognition and size
+The separate [EX5 Disk Images](ex5.md) profile provides directory and raw-file access, with guarded
+filesystem edits on writable, structurally admitted images. It uses EX5-specific recognition and size
 fields, not generic FAT16 detection. Files remain opaque and are not projected
 into the A-series sampler-object catalog.
 
@@ -49,54 +45,16 @@ bounded, acyclic and non-overlapping. Directory and file entries retain their
 raw FAT attributes, including read-only, hidden, system and archive flags.
 Names use the DOS 8.3 identity; long-name rows are not interpreted.
 
-`open_media()` returns `MediaKind::fat16_disk`. A plain volume is backed by
-`FatImage` with `FatProfile::fat16`; an MBR disk is backed by `FatDiskImage`.
-Each `FatDiskPartition` retains its original 1-based primary slot, absolute
-byte offset, declared byte size and bounded `FatImage` volume. The Files view
-lists each partition independently. Files remain opaque: this profile does
-not decode device-specific payloads. Raw filesystem edits are described below.
+The Files view lists primary partitions independently. Files remain opaque;
+this profile does not decode device-specific sound or sequence payloads.
 
-### Internal edit preparation
+### Filesystem Editing
 
-FAT16 edit preparation is implemented for standard plain/primary-MBR volumes
-and the distinct EX5 hard-disk and removable profiles. This internal layer
-produces a validated, reader-backed preview and partition-bounded patches; it
-does not publish changes itself. The native application raw-files service can
-publish these patches through its shared alteration journal. FAT entry-ID jobs,
-ordered import review and Files workspace write controls use the same service
-as SFS. Roots advertise writes only after metadata admission succeeds; read-only
-sources and unsafe FAT metadata cannot enable the controls.
-Inputs must remain immutable until transaction publication freezes them.
-
-`inspect_fat_file_import()` reviews ordered directory/file entries without
-allocating imported data or changing the source. Existing directories merge;
-files default to Skip with explicit Replace. Type collisions, read-only
-replacement, invalid names and missing parents report conflicts. Earlier
-incoming entries participate in later decisions. This is not a free-space
-reservation; allocation and source identity are rechecked at execution.
-
-Preparation supports empty files/directories, directory merging, explicit file
-replacement and confirmed recursive deletion. New names require uppercase ASCII
-8.3 names without automatic aliases. Existing short-name identities, associated
-long-name records, attributes and timestamps are preserved on replacement; only
-the file's first cluster and size change. Matching long-name records are removed
-with a deleted short entry. Invalid long-name sequences, high cluster words,
-invalid self/parent links where present, or reserved/unclean FAT entries reject preparation;
-they are not repaired. Missing self/parent entries in existing directories are
-preserved, while newly created directories receive both entries.
-
-Read-only entries cannot be replaced or deleted, including within recursive
-deletion. Skip leaves them untouched. A directory's read-only flag is not a Unix
-permission model and does not prohibit creating children. Orphan allocations and
-bad clusters are not reclaimed. Fresh entries use directory/archive attributes
-and a deterministic 1980-01-01 midnight date, not imported host timestamps.
-Standard entry layout and date encoding follow the
-[Microsoft FAT specification](https://www.cs.fsu.edu/~cop4610t/assignments/project3/spec/fatspec.pdf).
-
-Preparation is bounded to 10,000 edits, 64 path components, 100,000 indexed
-entries including the root, 16 MiB per directory and 64 MiB aggregate directory
-data. File-data patch generation is capped at 250,000 records; contiguous runs
-share a patch. Input payloads are not copied into whole-image buffers.
+SFS, standard FAT16 and EX5 roots can expose raw file editing when their source
+is writable and allocation metadata is safe. See
+[Raw Filesystem Operations](write.md#raw-filesystem-operations) for names,
+conflicts, permissions and transaction guarantees. Read capability alone never
+implies writable device-specific objects.
 
 ## ISO9660 profile
 
@@ -184,7 +142,7 @@ This documentation is exact about structures that axklib reads or writes. A
 file being visible to the container reader does not imply that its inner format
 is decoded. The 257-record `YAMAHA.SYM` disk/file/category catalog is decoded
 and synthesized; other model-specific floppy system files remain opaque, as do
-type-specific fields in `PRF3`. The admitted current
+PRF3 layouts other than the documented [System Files](system-files.md). The admitted current
 `SEQU` timeline is documented in
 [Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
 recognized Yamaha object payloads; it does not silently claim support for
@@ -212,23 +170,10 @@ status, and basis:
 - `raw_identifier` identifies an ISO directory name such as `F001`.
 
 Content-derived fallbacks are display and export navigation aids only. They are
-not promoted to sampler metadata. `structured_object_paths()` sanitizes path
+not promoted to sampler metadata. Export path mapping sanitizes path
 components and adds raw volume identifiers when displayed labels collide.
 
-## Example
+## Further Reading
 
-```cpp
-#include <axklib/media.hpp>
-
-auto media = axk::open_media("library.iso");
-if (!media) {
-  throw std::runtime_error(axk::render_error(media.error()));
-}
-
-auto objects = media->objects();
-if (!objects) {
-  throw std::runtime_error(axk::render_error(objects.error()));
-}
-
-auto paths = axk::structured_object_paths(*objects);
-```
+Use [C++ API](cpp-api.md) for installed interfaces and
+[Typical Usage](typical-usage.md) for SDK and CLI examples.

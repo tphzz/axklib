@@ -79,11 +79,8 @@ axklib validate HD00_512_generated.hds --output-dir validation/hds
 
 ## Quick Empty HDS Profiles
 
-Applications that need an empty import target do not have to duplicate HDS
-geometry rules or synthesize a manifest. `hds_creation_profiles()` publishes
-the currently admitted capacities and partition counts, and
-`plan_hds_creation()` turns one of those selections into the same validated
-`HdsBuildManifest` used by the regular writer:
+The server offers the following empty HDS creation profiles. Each choice
+specifies the image capacity and available partition counts:
 
 | Profile ID | Image size | Default partitions | Available partitions |
 | --- | ---: | ---: | --- |
@@ -114,12 +111,9 @@ FAT12 floppy images or ISO9660 disc images.
 
 ## Quick Blank Floppy Profile
 
-Applications can create a genuinely blank, sampler-formatted floppy without a
-content manifest. `plan_floppy_creation()` returns the fixed 1,474,560-byte
-plan, and `write_formatted_floppy_image()` writes either the A5000-authored
-quick-format or full-format byte profile. Both outputs contain the blank Yamaha
-catalog and `A3000_SY.002` marker but no sampler objects. The serializer does
-not embed a template image.
+The server can create a blank, sampler-formatted 1,474,560-byte floppy without
+a content manifest. Its full-format profile contains the blank Yamaha catalog
+and `A3000_SY.002` marker but no sampler objects.
 
 `axklib-server` exposes the desktop profile through
 `POST /api/v1/floppy-build-plans`; applying the returned token with
@@ -341,7 +335,7 @@ volume emitted by the current writer; this places the group label in `F002` as
 required by the Yamaha menu catalog.
 
 The generated ISO tree and every filename are specified in
-[CD-ROM Images](cdrom.md#generated-iso-file-layout).
+[Generated ISO Metadata](#generated-iso-metadata).
 
 ## Create A Hand-Authored Floppy IMA
 
@@ -396,7 +390,7 @@ has not been verified on physical Yamaha hardware, so a parser-valid IMA is not
 yet a hardware-compatibility guarantee. Blank full-format images and SFS-volume
 conversion use separately bounded profiles described in the floppy format page.
 The exact FAT geometry and generated DOS 8.3 filenames are specified in
-[FAT12 Floppy Images](floppy.md#generated-floppy-file-layout).
+[Generated Floppy Names](#generated-floppy-names).
 
 ## Convert A Floppy To An ISO
 
@@ -449,11 +443,11 @@ byte-preserving Yamaha-object transfer, not a sector-level floppy clone.
 
 Transfer planning inventories object metadata and relationships before it
 loads payloads. For `selection: "roots"`, only the selected dependency closure
-is loaded. The C++ engine's `MediaBuildLimits` and the shared SDK's
-`media_build_limits` bound each object, all prepared payloads together, and the
+is loaded. The SDK's `media_build_limits` bounds each object, all prepared
+payloads together, and the
 completed output. Their defaults are 64 MiB per object and 737,280,000 bytes
 for both aggregate payloads and output. Supplying a limits object to
-`plan_media_build()` or `build_plan::from_manifest()` makes object and aggregate
+`build_plan::from_manifest()` makes object and aggregate
 payload admission part of planning; the output limit is checked against the ISO
 projection before the temporary file is resized. The same limits remain
 attached to an SDK plan during apply. Limits may be lowered for a constrained
@@ -851,11 +845,6 @@ for Sample (`SBNK`) objects, `sample_banks` for Sample Bank (`SBAC`) objects,
 `sample_bank`. Obsolete pre-release field meanings are rejected rather than
 translated.
 
-The C++ writer API follows the same terminology: `SampleSpec` models `SBNK`,
-`SampleBankSpec` models `SBAC`, and `VolumeSpec` exposes `samples` and
-`sample_banks`. No transitional C++ aliases are provided for superseded
-pre-release names.
-
 ## Publication And Validation Guarantees
 
 Both removable-media writers:
@@ -887,3 +876,275 @@ builds and validates a temporary sibling before atomically replacing the source
 path; `overwrite` must be omitted in this mode. `alter.inspect` provides a
 write-free advisory validation response. It does not issue a token or authorize
 a later apply request; `alter.hds` receives and revalidates the complete request.
+
+## Raw Filesystem Operations
+
+Files-mode editing supports admitted writable SFS, standard FAT16, and EX5
+HD/removable roots. It provides directory creation, file import, rename and
+deletion independently of A-series object editing. FAT12 and ISO roots remain
+read-only; creation of new images uses the separate profiles above.
+
+The destination is the selected directory, a selected file's parent, or the
+active root when selection is empty. Names must satisfy the root's advertised
+byte limit and naming rules. Reserved filesystem metadata and partition roots
+cannot be renamed or deleted. Entry attributes can prohibit a change even when
+the containing root is writable. Nonempty directory deletion requires explicit
+recursive confirmation.
+
+Import review resolves name conflicts before writing. Directory entries merge;
+file conflicts use an explicit Skip or Replace choice. Raw changes do not update
+sampler-object relationships. Renaming or deleting a file that a sampler object
+references can therefore leave that relationship unresolved.
+
+Each batch is bound to its reviewed image revision and input identities. It
+uses a journaled transaction with rollback on failure, then refreshes the
+session. Do not modify the same open image in another process. For EX5 media
+with an admitted declared-capacity mismatch, writes remain restricted to
+physically present, complete clusters; they do not extend the image or silently
+repair its geometry. See [EX5 Disk Images](ex5.md) for the boundary and
+[Server Files Operations](server.md#files-inside-an-image) for the HTTP contract.
+
+## System File Operations
+
+System Files are distinct from ordinary Sample and Program objects. Their
+stored regions and unknown fields are specified in [System Files](system-files.md).
+There is no public CLI, HTTP or installed SDK parameter editor or fresh System
+File authoring interface. General raw-file copying does not validate the
+semantic correctness of replacement System data. In particular, ordinary
+Sample/Program parameter updates must not be applied to embedded registered
+templates as though they were independent objects.
+
+## Generated Floppy Names
+
+Generated object files occupy the FAT root directory. The geometry follows
+the 1.44 MB profile in [FAT12 Floppy Images](floppy.md). Catalogs are written
+in deterministic root-directory order; rebuilding a valid existing catalog
+retains its disk-name record and regenerates the file/category records.
+
+Objects are sorted deterministically by object type, embedded name, and payload
+size. Object types sort as `SMPL`, `SBNK`, `SBAC`, `PROG`, `SEQU`, then `PRF3`.
+Each DOS filename is generated as follows:
+
+```text
+stem:
+  take the first 8 embedded-name byte positions
+  uppercase ASCII letters and preserve digits and underscore
+  replace every other byte position with underscore
+  pad a shorter name to 8 positions with underscore
+
+extension:
+  Yamaha catalog slot in the complete sorted object list
+  formatted as three decimal digits: 002, 003, ... 223
+```
+
+Object stems may repeat because the three-digit catalog-slot extension is unique.
+If a complete physical filename still collides with a retained root file, image
+creation fails rather than silently replacing it. The writer supports at most
+222 generated objects: the Yamaha file catalog reserves slots 0 and 1, while
+`A3000_SY.001` and `YAMAHA.SYM` occupy two of the 224 FAT root entries.
+
+For example, freshly authored Wave Data and a Sample both named
+`Authored Tone` are sorted as `SMPL` then `SBNK` and become:
+
+```text
+AUTHORED.002   FSFSDEV3SPLXSMPL...
+AUTHORED.003   FSFSDEV3SPLXSBNK...
+```
+
+The filename algorithm is a generated-container convention. Transferring an
+existing object preserves every object payload byte but generates new DOS
+filenames; it does not preserve the source directory entry or cluster chain.
+
+## Generated Floppy Boot Metadata
+
+The generated populated-media profile has these deterministic fields:
+
+| Offset | Size | Generated bytes/value |
+| --- | ---: | --- |
+| `0x00` | 3 | Boot jump `eb 58 90`. |
+| `0x03` | 8 | OEM name `WINIMAGE`. |
+| `0x24` | 1 | BIOS drive number `0x00`. |
+| `0x26` | 1 | Extended boot signature `0x29`. |
+| `0x27` | 4 | Volume serial `0x5c210b40`, u32le. |
+| `0x2b` | 11 | Eleven spaces. No root-directory volume-label entry is generated. |
+| `0x36` | 8 | Filesystem text `FAT12` padded with spaces; FAT type still comes from cluster count. |
+| `0x1fe` | 2 | Signature `55 aa`. |
+
+Populated-media root-directory entries use attribute `0x00`. Creation and
+modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
+dates are zero. This fixed metadata is a reproducibility convention, not a
+sampler-facing object field.
+
+## Multi-Floppy Transport
+
+The ZIP manifest carries the deterministic logical disk names and exact member
+order:
+
+```text
+manifest.json
+payloads/disk01.ima
+payloads/disk02.ima
+...
+```
+
+The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
+logical name, member path, fixed image size, image and `YAMAHA.SYM` SHA-256
+digests, exact member marker, and hardware-validation state. ZIP is a host
+transport container only: extract the `.ima` members and present them to the
+sampler in manifest order, beginning with disk 1.
+
+Before publication, the writer reopens every FAT12 member, compares its exact
+object payloads and catalog, reassembles every split Wave Data object byte for
+byte, reopens the ZIP, and checks its inspected size. More than 32 required
+images is a blocking conversion issue. The manifest records
+`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. The supported topology has
+loaded and auditioned through four members on an A5000 running system version
+1.50. Sampler save/reload validation remains pending.
+
+## Generated ISO Metadata
+
+Hand-authored `axklib create iso` manifests currently emit one group and one
+volume. The hardware-verified one-volume profile uses raw volume `F001`, so its
+group label is file `F002`.
+
+Partition conversion uses one generated group and one raw `Fnnn` volume per
+source SFS volume, in source order. It supports at most 998 source volumes,
+requires contiguous names `F001` through `Fnnn`, and writes the group label as
+`F(n+1)`. Directory extents and both path tables grow to as many whole sectors
+as the generated tree requires. One- and four-volume conversion profiles have
+loaded on hardware; the object-heavy multi-sector profile remains pending.
+
+The complete generated ordering is deterministic:
+
+| Sector / region | Generated content |
+| --- | --- |
+| `0..15` | Zero-filled ISO system area. |
+| `16` | One Primary Volume Descriptor. |
+| `17` | Volume Descriptor Set Terminator. |
+| `18...` | Little-endian Type-L path table, padded to complete 2048-byte sectors. |
+| following sectors | Big-endian Type-M path table, padded to complete 2048-byte sectors. |
+| following sectors | Root, group, volume, and populated category directory extents. |
+| following sectors | Group catalog, group label, category catalogs, then object payloads in deterministic tree order. |
+
+The writer uses 2048-byte logical blocks, one extent per file, one or more
+whole sectors per directory, and both-endian ISO9660 numeric fields. It sets the PVD System
+Identifier to:
+
+```text
+APPLE COMPUTER, INC., TYPE: 0002
+```
+
+The manifest `iso.volume_id` supplies the PVD Volume Identifier and Volume Set
+Identifier. Publisher, preparer, and application fields are `AXKLIB`.
+Descriptor timestamps are fixed to the reproducible 1970 value used by this
+profile. The writer emits no supplementary descriptor, Joliet tree, Rock Ridge
+records, Apple `AA` system-use bytes, multi-extent file, optional duplicate path
+tables, or boot catalog.
+
+The generated Primary Volume Descriptor uses these fixed or manifest-derived
+fields. Unlisted optional text fields remain space-filled or zero-filled:
+
+| PVD offset | Size | Generated value |
+| --- | ---: | --- |
+| `0x00` | 1 | Type `1`, Primary Volume Descriptor. |
+| `0x01` | 5 | `CD001`. |
+| `0x06` | 1 | Descriptor version `1`. |
+| `0x08` | 32 | System Identifier shown above, space-padded. |
+| `0x28` | 32 | `iso.volume_id`, space-padded. |
+| `0x50` | 8 | Total logical block count, both-endian u32. |
+| `0x78` | 4 | Volume Set Size `1`, both-endian u16. |
+| `0x7c` | 4 | Volume Sequence Number `1`, both-endian u16. |
+| `0x80` | 4 | Logical Block Size `2048`, both-endian u16. |
+| `0x84` | 8 | Path-table byte count, both-endian u32. |
+| `0x8c` | 4 | Type-L path-table sector `18`, u32le. |
+| `0x94` | 4 | Type-M path-table sector immediately following the padded Type-L table, u32be. |
+| `0x9c` | 34 | Root directory record. |
+| `0xbe` | 128 | Volume Set Identifier from `iso.volume_id`, space-padded. |
+| `0x13e`, `0x1be`, `0x23e` | 128 each | Publisher, preparer, and application identifiers: `AXKLIB`. |
+| `0x32d`, `0x33e`, `0x360` | 17 each | Fixed creation, modification, and effective timestamps. |
+| `0x371` | 1 | File structure version `1`. |
+
+The Type-L and Type-M path tables contain the same directory sequence in their
+respective byte order. Directory records contain `.` and `..` followed by
+children in deterministic insertion order. A record never crosses a logical
+sector boundary: the remaining bytes in that sector are zero-filled and the
+record begins in the next sector. Each directory extent is padded to a complete
+logical sector. Type-L and Type-M tables use the same deterministic directory
+order and each receives the number of whole sectors required by its byte size.
+The planner and serializer share this allocation result, so inspection reports
+the same projected image size that publication writes.
+
+Each generated path-table record has this shape; a zero pad byte follows an odd
+identifier length so the next record starts on an even boundary:
+
+| Record offset | Size | Contents |
+| --- | ---: | --- |
+| `0x00` | 1 | Directory identifier length. The root identifier is one byte `00`. |
+| `0x01` | 1 | Extended attribute record length `0`. |
+| `0x02` | 4 | Directory extent sector, little-endian in Type-L and big-endian in Type-M. |
+| `0x06` | 2 | One-based parent path-table record number in the table's byte order. Root uses `1`. |
+| `0x08` | variable | Directory identifier followed by optional zero padding. |
+
+Every generated directory record uses the fixed recording-time bytes
+`46 01 01 00 00 00 00`, representing `1970-01-01 00:00:00` with GMT offset
+zero. File unit and interleave sizes are zero, and the volume sequence number
+is one.
+
+Populated categories are chosen from each payload's decoded object type. Their
+objects are ordered deterministically by type, embedded name, and payload size;
+within each category they receive `F001`, `F002`, and so on. A category's
+`0000` records use the same order. Fresh authoring currently produces `SMPL`,
+`SBNK`, optional `SBAC`, and optional `PROG` objects. Transfer mode can retain
+clean existing `SEQU` and `PRF3` payloads as well.
+
+See [Create A Hand-Authored CD-ROM ISO](#create-a-hand-authored-cd-rom-iso)
+for the input manifest.
+
+## A-Series Formatted Layout
+
+Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
+The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+through eight equal partition slots. Given `N` partitions, `total_sectors` is
+`size_bytes / 512`, the slot span is
+`min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
+`3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
+must have at least 2045 partition sectors. Division remainder and capacity past
+the 1 GiB slot-span cap remain unused at the end of the image.
+
+The non-logical tail of an allocated extent is storage padding; it is not
+part of the file's logical contents.
+
+A complete formatted image contains the superblock, partition table, sector-2 metadata,
+partition headers, both complete allocation bitmap copies, directory index,
+and object payload extents. Fields with known formulas, such as
+partition slot placement, partition-header start/count words, partition-index
+words, leading formatter-transfer tokens, and dynamic header words, are
+generated explicitly.
+Partition headers are zero-initialized, and only the retained explicit fields
+are written. Former fixed nonzero tail bytes and the non-required residue range
+at `+0x1bc..+0x1e3` remain zero for generated images. Sector-2
+label-entry records and the `+0x30..+0x3e` range are deliberately zero-generated.
+
+
+### Compatibility Metadata
+
+The writer keeps compatibility metadata explicit and computes geometry-dependent
+values from small formulas. It does not copy broad binary templates.
+
+| Metadata area | Encoding |
+| --- | --- |
+| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields. |
+| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from base `ab432100` plus the bounded three-bit partition sequence. The base is not derived from disk geometry. |
+| Prior-token residue at sector `+0x09..+0x10` | Zero. |
+| Sector-2 range at `+0x30..+0x3e` | Zero. |
+| Former partition-header fixed tail bytes | Zero; retained tail words are written explicitly. |
+| Partition-header residue range at `+0x1bc..+0x1e3` | Zero. |
+| Partition-header `+0x14c` | Written as total image sectors for one or two partitions; for `N >= 3`, written as total image sectors minus `N - 2`. |
+| Partition-header `+0x194` | Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts. |
+
+These compatibility values describe the generated A-series layout, not a
+license to replace other existing values during unrelated changes. Preserve
+unknown native attributes and unexplained metadata.
+
+Raw file operations and their software safety guarantees are described in
+[Writer And Alteration](#raw-filesystem-operations).

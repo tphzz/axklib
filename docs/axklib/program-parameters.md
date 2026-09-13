@@ -1,8 +1,8 @@
 # Program Parameters
 
-`ProgramParameters` contains optional, writable Program-wide settings.
-`ProgramAssignmentParameters` contains optional Easy Edit settings for a fresh
-or existing assignment. Omission preserves a saved value in an update; explicit
+A Program's `parameters` JSON object contains optional, writable Program-wide
+settings. Each assignment's `parameters` object contains optional Easy Edit
+settings for a fresh or existing assignment. Omission preserves a saved value in an update; explicit
 zero, `false`, and `"inherit"` are values, not omissions. JSON rejects `null`,
 unknown properties, fractional numbers, overflowing integers, and noncanonical
 numbered keys such as `"01"`.
@@ -14,10 +14,8 @@ Legacy Programs remain readable and preservable but do not accept these
 parameter updates. A5000-specific writes have host regression coverage, not a
 claim of A5000 hardware validation.
 
-The native `ProgramSpec.parameters` member accepts Program-wide settings;
-`ProgramAssignmentSpec.parameters` accepts assignment settings. The same sparse
-JSON groups are used by build manifests, Program insertion and parameter updates.
-`ProgramSpec.model` defaults to A4000. Omitted fresh settings retain the neutral
+The same sparse JSON groups are used by build manifests, Program insertion
+and parameter updates. A fresh Program's `model` defaults to A4000. Omitted fresh settings retain the neutral
 template, including inherited assignment receive settings. Authoring profiles
 remain as specified in [Writer And Alteration](write.md).
 
@@ -45,9 +43,8 @@ those defaults. Unknown properties and obsolete receive-mode fields are rejected
 
 ## Decoded Metadata
 
-`CurrentProg.parameters` and each `ProgAssignment.parameters` use these same
-semantic groups. The CLI object JSON and application object-metadata response
-place them under `parameters`, retaining the canonical snake-case parameter
+The CLI object JSON and application object-metadata response use these same
+semantic groups for Programs and assignments under `parameters`, retaining the canonical snake-case parameter
 names and numbered maps even inside the application's camel-case envelope.
 Known inactive values are included. An omitted decoded leaf means its stored
 encoding is unavailable or unsupported, not zero, false, or an inferred default.
@@ -71,8 +68,7 @@ reject an otherwise readable object or change byte-preserving operations.
 
 ## Atomic Updates
 
-Use `UpdateProgramParametersOperation` in an alteration manifest, or
-`update_program_parameters` in the CLI's alteration JSON:
+Use `update_program_parameters` in the CLI's alteration JSON:
 
 ```json
 {
@@ -155,8 +151,8 @@ numbered `parameters` (physical slots 1..16). Destinations are 0..5; A5000
 effects 1..3 additionally allow 6..8.
 
 Ordinary types 0..96 have complete sixteen-word reset vectors and individual
-numeric write domains. `effect_write_info()` exposes these domains and the
-stored/action/unused classification. Parameter words are unsigned 16-bit values;
+numeric write domains. Slots are classified as stored parameters, actions, or
+unused words. Parameter words are unsigned 16-bit values;
 they are not universally limited to 127. Action and unused slots cannot be
 written independently. Imported type 97 is read/preserve-only, although its
 enable flag can be changed without changing its type or words.

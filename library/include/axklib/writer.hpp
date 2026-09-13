@@ -16,6 +16,7 @@
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sample_parameters.hpp"
 #include "axklib/sampler_model.hpp"
 
 namespace axk {
@@ -41,15 +42,6 @@ inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_wid
     sampler_output_sample_width_bits};
 inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
 
-enum class AudioSamplerLoopMode : std::uint8_t {
-    forward = 0,
-    forward_loop = 1,
-    forward_loop_release = 2,
-    reverse = 3,
-    forward_one_shot = 4,
-    reverse_one_shot = 5,
-};
-
 struct WaveDataParameters {
     std::optional<std::uint8_t> root_key;
     std::optional<std::int8_t> fine_tune_cents;
@@ -58,127 +50,6 @@ struct WaveDataParameters {
     std::optional<std::uint32_t> wave_length_frames;
     std::optional<std::uint32_t> loop_start_frame;
     std::optional<std::uint32_t> loop_length_frames;
-};
-
-struct SampleFilterEnvelopeParameters {
-    std::optional<std::uint8_t> attack_rate;
-    std::optional<std::uint8_t> decay_rate;
-    std::optional<std::uint8_t> release_rate;
-    std::optional<std::int8_t> init_level;
-    std::optional<std::int8_t> attack_level;
-    std::optional<std::int8_t> sustain_level;
-    std::optional<std::int8_t> release_level;
-    std::optional<std::int8_t> rate_key_scaling;
-    std::optional<std::int8_t> rate_velocity_sensitivity;
-    std::optional<std::int8_t> attack_level_velocity_sensitivity;
-    std::optional<std::int8_t> level_velocity_sensitivity;
-};
-
-struct SamplePitchEnvelopeParameters {
-    std::optional<std::uint8_t> attack_rate;
-    std::optional<std::uint8_t> decay_rate;
-    std::optional<std::uint8_t> release_rate;
-    std::optional<std::int8_t> init_level;
-    std::optional<std::int8_t> attack_level;
-    std::optional<std::int8_t> sustain_level;
-    std::optional<std::int8_t> release_level;
-    std::optional<std::int8_t> rate_key_scaling;
-    std::optional<std::int8_t> rate_velocity_sensitivity;
-    std::optional<std::int8_t> level_velocity_sensitivity;
-    std::optional<std::int8_t> range;
-};
-
-struct SampleAmplitudeEnvelopeParameters {
-    std::optional<std::uint8_t> attack_rate;
-    std::optional<std::uint8_t> decay_rate;
-    std::optional<std::uint8_t> release_rate;
-    std::optional<std::uint8_t> sustain_level;
-    std::optional<std::uint8_t> attack_mode;
-    std::optional<std::int8_t> rate_key_scaling;
-    std::optional<std::int8_t> rate_velocity_sensitivity;
-};
-
-struct SampleLfoParameters {
-    std::optional<std::uint8_t> wave;
-    std::optional<std::uint8_t> speed;
-    std::optional<std::uint8_t> delay_time;
-    std::optional<bool> key_on_sync;
-    std::optional<bool> cutoff_mod_phase_invert;
-    std::optional<bool> pitch_mod_phase_invert;
-    std::optional<std::uint8_t> cutoff_mod_depth;
-    std::optional<std::uint8_t> pitch_mod_depth;
-    std::optional<std::uint8_t> amp_mod_depth;
-};
-
-struct SampleControlParameters {
-    std::optional<std::uint8_t> device;
-    std::optional<std::uint8_t> function;
-    std::optional<std::uint8_t> type;
-    std::optional<std::int8_t> range;
-};
-
-struct SampleParameters {
-    std::optional<bool> fixed_pitch;
-    std::optional<bool> key_crossfade;
-    std::optional<bool> mono_mode;
-    std::optional<std::uint8_t> sample_eq_type;
-    std::optional<std::uint8_t> midi_receive_channel;
-    std::optional<std::uint8_t> pitch_bend_type;
-    std::optional<std::uint8_t> pitch_bend_range;
-    std::optional<std::int8_t> coarse_tune;
-    std::optional<std::uint8_t> root_key;
-    std::optional<std::int8_t> fine_tune_cents;
-    std::optional<std::uint8_t> key_low;
-    std::optional<std::uint8_t> key_high;
-    std::optional<AudioSamplerLoopMode> loop_mode;
-    std::optional<std::uint16_t> loop_tempo_hundredths;
-    std::optional<std::uint32_t> loop_start_frame;
-    std::optional<std::uint32_t> loop_length_frames;
-    std::optional<std::int8_t> wave_start_velocity_sensitivity;
-    std::optional<std::uint8_t> filter_type;
-    std::optional<std::uint8_t> filter_cutoff;
-    std::optional<std::uint8_t> filter_q_width;
-    std::optional<std::uint8_t> filter_scaling_break1;
-    std::optional<std::uint8_t> filter_scaling_break2;
-    std::optional<std::int8_t> filter_scaling_cutoff1;
-    std::optional<std::int8_t> filter_scaling_cutoff2;
-    std::optional<std::int8_t> filter_velocity_to_cutoff;
-    std::optional<std::int8_t> filter_velocity_to_q_width;
-    std::optional<std::int8_t> expand_detune;
-    std::optional<std::int8_t> expand_dephase;
-    std::optional<std::int8_t> expand_width;
-    std::optional<std::uint8_t> random_pitch;
-    std::optional<std::uint8_t> level;
-    std::optional<std::int8_t> pan;
-    std::optional<std::uint8_t> velocity_low_limit;
-    std::optional<std::int8_t> velocity_offset;
-    std::optional<std::uint8_t> velocity_high;
-    std::optional<std::uint8_t> velocity_low;
-    std::optional<std::uint8_t> level_scaling_break1;
-    std::optional<std::uint8_t> level_scaling_break2;
-    std::optional<std::uint8_t> level_scaling_level1;
-    std::optional<std::uint8_t> level_scaling_level2;
-    std::optional<std::int8_t> velocity_sensitivity;
-    std::optional<std::uint8_t> alternate_group;
-    std::optional<std::uint8_t> sample_eq_frequency;
-    std::optional<std::int8_t> sample_eq_gain_db;
-    std::optional<std::uint8_t> sample_eq_width_tenths;
-    std::optional<std::int8_t> filter_cutoff_distance;
-    SampleFilterEnvelopeParameters feg;
-    SamplePitchEnvelopeParameters peg;
-    SampleAmplitudeEnvelopeParameters aeg;
-    SampleLfoParameters lfo;
-    std::optional<std::int8_t> filter_gain;
-    std::array<SampleControlParameters, 6> controls;
-    std::optional<std::uint8_t> velocity_xfade_high;
-    std::optional<std::uint8_t> velocity_xfade_low;
-    std::optional<std::uint8_t> output1_destination;
-    std::optional<std::uint8_t> output1_level;
-    std::optional<std::uint8_t> output2_destination;
-    std::optional<std::uint8_t> output2_level;
-    std::optional<std::uint8_t> portamento_type;
-    std::optional<std::uint8_t> portamento_rate;
-    std::optional<std::uint8_t> portamento_time;
 };
 
 struct WaveformSpec {

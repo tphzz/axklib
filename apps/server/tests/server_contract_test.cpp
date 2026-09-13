@@ -285,6 +285,17 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
     EXPECT_EQ(files.at("items").at("$ref"), "#/components/schemas/SystemProgramContext");
     const auto &context = document.at("components").at("schemas").at("SystemProgramContext");
     ASSERT_EQ(context.at("oneOf").size(), 4U);
+    const auto &schemas = document.at("components").at("schemas");
+    const auto &system = schemas.at("A3000SystemProgramContextAvailable");
+    EXPECT_TRUE(std::ranges::contains(system.at("required"), "storageRevision"));
+    EXPECT_EQ(system.at("properties").at("storageRevision").at("const"), 0U);
+    EXPECT_FALSE(system.at("properties").contains("model"));
+    const auto &system2 = schemas.at("A4000A5000SystemProgramContextAvailable");
+    EXPECT_TRUE(std::ranges::contains(system2.at("required"), "storageRevision"));
+    EXPECT_EQ(system2.at("properties").at("storageRevision").at("enum"), nlohmann::json::array({0U, 1U}));
+    EXPECT_FALSE(system2.at("properties").contains("model"));
+    EXPECT_EQ(system2.at("properties").at("parts").at("minItems"), 32U);
+    EXPECT_EQ(system2.at("properties").at("parts").at("maxItems"), 32U);
 }
 
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {

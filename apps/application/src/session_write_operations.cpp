@@ -90,9 +90,10 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             std::string_view owner_id;
             std::uint64_t revision;
             bool &finished;
+            bool invalidate_session{};
             ~AbortGuard() {
                 if (!finished)
-                    images.abort_mutation(image_id, owner_id, revision);
+                    images.abort_mutation(image_id, owner_id, revision, invalidate_session);
             }
         } guard{images, image_id, context.owner_id, expected_revision, mutation_finished};
         diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
@@ -160,9 +161,11 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             prepared_commit.emplace(std::move(*validation));
             return {};
         };
+        guard.invalidate_session = true;
         if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation,
                                           validate_commit);
             !applied) {
+            guard.invalidate_session = !journals.storage_ready();
             return std::unexpected(applied.error());
         }
         if (!prepared_commit)

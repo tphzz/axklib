@@ -102,6 +102,12 @@ and concise hardware compatibility status. Small retained test fixtures may
 document their identity, hash, topology, and active test purpose. Runtime
 diagnostics describe the input contract and corrective action.
 
+Format pages specify stored bytes, encoding, relationships and modification
+constraints independently of a particular decoder. Unspecified meanings and
+preservation requirements remain explicit. API symbols, report field names,
+application workflows and generated-output conventions have separate contract
+pages. Only installed SDK interfaces are presented as public C++ APIs.
+
 ```mermaid
 flowchart TD
     accTitle: axklib architecture dependency flow

@@ -1644,11 +1644,11 @@
       "A3000SystemProgramContextAvailable": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fileKind", "availability", "model", "basicReceive", "omni", "programChangeEnabled"],
+        "required": ["fileKind", "availability", "storageRevision", "basicReceive", "omni", "programChangeEnabled"],
         "properties": {
           "fileKind": {"const": "SYSTEM"},
           "availability": {"const": "AVAILABLE"},
-          "model": {"const": "A3000"},
+          "storageRevision": {"type": "integer", "const": 0},
           "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
           "omni": {"type": "boolean"},
           "programChangeEnabled": {"type": "boolean"}
@@ -1657,16 +1657,16 @@
       "A4000A5000SystemProgramContextAvailable": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fileKind", "availability", "model", "savedProgramMode", "basicReceive", "omni", "programChangeEnabled", "parts"],
+        "required": ["fileKind", "availability", "storageRevision", "savedProgramMode", "basicReceive", "omni", "programChangeEnabled", "parts"],
         "properties": {
           "fileKind": {"const": "SYSTEM2"},
           "availability": {"const": "AVAILABLE"},
-          "model": {"enum": ["A4000", "A5000"]},
+          "storageRevision": {"type": "integer", "enum": [0, 1]},
           "savedProgramMode": {"enum": ["SINGLE", "MULTI"]},
           "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
           "omni": {"type": "boolean"},
           "programChangeEnabled": {"type": "boolean"},
-          "parts": {"type": "array", "minItems": 16, "maxItems": 32, "items": {"$ref": "#/components/schemas/SystemProgramPart"}}
+          "parts": {"type": "array", "minItems": 32, "maxItems": 32, "items": {"$ref": "#/components/schemas/SystemProgramPart"}}
         }
       },
       "SystemProgramContextNotPresent": {

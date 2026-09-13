@@ -295,7 +295,7 @@ crow::response ServerApplication::image_system_program_contexts_response(const c
         Json file{{"fileKind", system_program_context_file_name(context.file_kind)},
                   {"availability", system_program_context_availability_name(context.availability)}};
         if (context.availability == axk::app::SystemProgramContextAvailability::available) {
-            file["model"] = context.model;
+            file["storageRevision"] = context.storage_revision;
             file["basicReceive"] = {{"port", context.basic_receive->port},
                                     {"channel", context.basic_receive->channel},
                                     {"display", context.basic_receive->display}};

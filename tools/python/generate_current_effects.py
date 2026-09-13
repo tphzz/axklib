@@ -52,6 +52,21 @@ def render_write_types(value: object) -> list[str]:
     return out
 
 
+def render_native_reset_words(value: object, current_types: Any) -> list[str]:
+    if not isinstance(value, list) or len(value) != 55:
+        raise ValueError("native reset tables must cover all 55 ordinary types")
+    out = ["inline constexpr std::array<std::array<std::uint16_t, 16>, 55> a3000_effect_reset_words{"]
+    for raw, words in enumerate(value):
+        if not isinstance(words, list) or len(words) != 16 or any(type(word) is not int or not 0 <= word <= 65535 for word in words):
+            raise ValueError("native reset vector must contain exactly sixteen u16 words")
+        for word, parameter in zip(words, current_types[raw]["parameters"], strict=True):
+            if parameter["kind"] == "stored_value" and not parameter["minimum"] <= word <= parameter["maximum"]:
+                raise ValueError("native stored parameter default is outside its domain")
+        out.append("    std::array<std::uint16_t, 16>{" + ", ".join(map(str, words)) + "},")
+    out.extend(["};", ""])
+    return out
+
+
 def render(value: object) -> str:
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
@@ -60,6 +75,7 @@ def render(value: object) -> str:
         "enum_value_tables",
         "known_display_values",
         "write_types",
+        "a3000_reset_words",
     }:
         raise ValueError("effect data has unknown or missing top-level keys")
     if value["schema_version"] != "1.0":
@@ -172,6 +188,7 @@ def render(value: object) -> str:
         )
     out.extend(["};", ""])
     out.extend(render_write_types(value["write_types"]))
+    out.extend(render_native_reset_words(value["a3000_reset_words"], value["write_types"]))
     out.extend(["}  // namespace axk::generated", ""])
     return "\n".join(out)
 

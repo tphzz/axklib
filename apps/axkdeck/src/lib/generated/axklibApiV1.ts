@@ -1734,10 +1734,10 @@ export interface components {
             basicReceive: components['schemas']['SystemMidiAddress'];
             /** @constant */
             fileKind: 'SYSTEM';
-            /** @constant */
-            model: 'A3000';
             omni: boolean;
             programChangeEnabled: boolean;
+            /** @constant */
+            storageRevision: 0;
         };
         A4000A5000SystemProgramContextAvailable: {
             /** @constant */
@@ -1745,13 +1745,13 @@ export interface components {
             basicReceive: components['schemas']['SystemMidiAddress'];
             /** @constant */
             fileKind: 'SYSTEM2';
-            /** @enum {unknown} */
-            model: 'A4000' | 'A5000';
             omni: boolean;
             parts: components['schemas']['SystemProgramPart'][];
             programChangeEnabled: boolean;
             /** @enum {unknown} */
             savedProgramMode: 'SINGLE' | 'MULTI';
+            /** @enum {integer} */
+            storageRevision: 0 | 1;
         };
         AlterationAudioImportSummary: {
             clippedSamples: number;

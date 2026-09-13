@@ -38,12 +38,52 @@ TEST(Effects, NumericWriteMetadataCoversOrdinaryTypesAndHiddenDefaults) {
     EXPECT_EQ(distortion->reset_words[15], 35082);
 }
 
+TEST(Effects, NativeWriteMetadataRetainsItsDistinctPhysicalResetWords) {
+    std::size_t different_words = 0U;
+    std::size_t visible_parameters = 0U;
+    for (std::uint16_t type = 0; type < 55U; ++type) {
+        const auto native = axk::effect_write_info(type, axk::EffectProfile::a3000);
+        const auto current = axk::effect_write_info(type, axk::EffectProfile::a4000);
+        ASSERT_TRUE(native);
+        ASSERT_TRUE(current);
+        EXPECT_EQ(native->legacy_type, type);
+        for (std::size_t index = 0; index < 16U; ++index) {
+            const auto &domain = native->parameters[index];
+            EXPECT_EQ(domain.kind, current->parameters[index].kind);
+            EXPECT_EQ(domain.minimum, current->parameters[index].minimum);
+            EXPECT_EQ(domain.maximum, current->parameters[index].maximum);
+            if (domain.kind == axk::EffectParameterKind::stored_value) {
+                ++visible_parameters;
+                EXPECT_EQ(native->reset_words[index], current->reset_words[index]);
+                EXPECT_LE(domain.minimum, native->reset_words[index]);
+                EXPECT_GE(domain.maximum, native->reset_words[index]);
+            }
+            if (native->reset_words[index] != current->reset_words[index]) {
+                ++different_words;
+                EXPECT_EQ(domain.kind, axk::EffectParameterKind::unused);
+            }
+        }
+    }
+    EXPECT_EQ(visible_parameters, 593U);
+    EXPECT_EQ(different_words, 66U);
+    EXPECT_EQ(axk::effect_write_info(1, axk::EffectProfile::a3000)->reset_words[15], 0U);
+    EXPECT_EQ(axk::effect_write_info(54, axk::EffectProfile::a3000)->reset_words[15], 0x890aU);
+    EXPECT_FALSE(axk::effect_write_info(55, axk::EffectProfile::a3000));
+    EXPECT_FALSE(axk::effect_write_info(65535, axk::EffectProfile::a3000));
+    EXPECT_FALSE(axk::effect_write_info(0, static_cast<axk::EffectProfile>(255U)));
+    EXPECT_EQ(axk::effect_write_info(1, axk::EffectProfile::a5000)->reset_words,
+              axk::effect_write_info(1)->reset_words);
+}
+
 TEST(Effects, ExposesProfilesTypesParametersAndModelRequirements) {
     EXPECT_EQ(axk::parse_effect_profile("auto"), axk::EffectProfile::a4000);
     EXPECT_EQ(axk::parse_effect_profile("a3000"), axk::EffectProfile::a3000);
     EXPECT_FALSE(axk::parse_effect_profile("unknown"));
     EXPECT_TRUE(axk::effect_type_supported(53, axk::EffectProfile::a3000));
-    EXPECT_FALSE(axk::effect_type_supported(54, axk::EffectProfile::a3000));
+    EXPECT_TRUE(axk::effect_type_supported(54, axk::EffectProfile::a3000));
+    EXPECT_FALSE(axk::effect_type_supported(55, axk::EffectProfile::a3000));
+    EXPECT_TRUE(axk::effect_type_info(54, axk::EffectProfile::a3000));
+    EXPECT_TRUE(axk::effect_parameter_info(54, 15, axk::EffectProfile::a3000));
     EXPECT_TRUE(axk::effect_type_supported(97, axk::EffectProfile::a4000));
     const auto type = axk::effect_type_info(2);
     ASSERT_TRUE(type);

@@ -163,52 +163,71 @@ void project_left_ad_outputs(std::span<std::byte> bytes, std::size_t current) {
 } // namespace
 
 ProgramParameters decode_program_parameters(std::span<const std::byte> payload, const ProgLayout &layout) {
-    const ByteReader reader{payload.first(layout.logical_size)};
+    payload = payload.first(layout.logical_size);
+    const auto controls = layout.parameter_tail_offset ? *layout.parameter_tail_offset + 0x78U : 0x110U;
+    ProgramParameterBlocks blocks{payload.subspan<0x80U, 0x16U>(),
+                                  std::span<const std::byte, 0x10>{payload.subspan(controls, 0x10U)}, std::nullopt};
+    if (layout.parameter_tail_offset)
+        blocks.extended =
+            std::span<const std::byte, 0x28>{payload.subspan(*layout.parameter_tail_offset + 0x88U, 0x28U)};
+    return decode_program_parameter_blocks(blocks);
+}
+
+ProgramParameters decode_program_parameter_blocks(const ProgramParameterBlocks &blocks,
+                                                  ProgramParameterGeneration generation) {
+    const auto a3000 = generation == ProgramParameterGeneration::a3000;
+    const ByteReader reader{blocks.common};
     ProgramParameters result;
-    result.level = known(*reader.u8(0x8bU), 0, 127);
-    result.transpose = known(*reader.s8(0x8eU), -127, 127);
-    result.portamento.type = known(*reader.u8(0x90U), 0, 3);
-    result.portamento.rate = known(*reader.u8(0x91U), 1, 127);
-    result.portamento.time = known(*reader.u8(0x92U), 1, 127);
-    read_channels(reader, 0x82U, result.controller_reset.a);
-    read_channels(reader, 0x84U, result.note_toggle.a);
-    const auto flags = *reader.u8(0x80U);
-    const auto lfo = *reader.u8(0x81U);
-    result.lfo.sync = known(static_cast<std::uint8_t>(flags >> 6U), 0, 2);
+    result.level = known(*reader.u8(0x0bU), 0, 127);
+    result.transpose = known(*reader.s8(0x0eU), -127, 127);
+    result.portamento.type = known(*reader.u8(0x10U), 0, 3);
+    result.portamento.rate = known(*reader.u8(0x11U), 1, 127);
+    result.portamento.time = known(*reader.u8(0x12U), 1, 127);
+    read_channels(reader, 0x02U, result.controller_reset.a);
+    read_channels(reader, 0x04U, result.note_toggle.a);
+    const auto flags = *reader.u8(0x00U);
+    const auto lfo = *reader.u8(0x01U);
+    result.lfo.sync = known(static_cast<std::uint8_t>((flags >> 6U) & (a3000 ? 1U : 3U)), 0, a3000 ? 1 : 2);
     result.lfo.cycle = known(static_cast<std::uint8_t>(lfo & 7U), 0, 6);
-    result.lfo.wave = known(static_cast<std::uint8_t>((lfo >> 3U) & 7U), 0, 6);
+    result.lfo.wave = known(static_cast<std::uint8_t>((lfo >> 3U) & 7U), 0, a3000 ? 5 : 6);
     result.lfo.initial_phase = static_cast<std::uint8_t>(lfo >> 6U);
-    result.lfo.reset_channel = known(*reader.s8(0x8fU), -2, 32);
-    result.lfo.sample_hold_speed = known(*reader.u8(0x93U), 0, 127);
-    result.lfo.tempo = known(*reader.u8(0x94U), 25, 250);
-    result.lfo.reset_note = known(*reader.s8(0x95U), -1, 127);
+    result.lfo.reset_channel = known(*reader.s8(0x0fU), -2, a3000 ? 16 : 32);
+    result.lfo.sample_hold_speed = known(*reader.u8(0x13U), 0, 127);
+    result.lfo.tempo = known(*reader.u8(0x14U), 25, 250);
+    result.lfo.reset_note = known(*reader.s8(0x15U), -1, 127);
     result.ad.enabled = (flags & 1U) != 0U;
     result.ad.source = known(static_cast<std::uint8_t>((flags >> 1U) & 3U), 0, 2);
-    result.ad.left.pan = known(*reader.s8(0x86U), -63, 63);
-    result.effect_connections[0] = known(static_cast<std::uint8_t>((flags >> 3U) & 7U), 0, 4);
-    const auto controls = layout.parameter_tail_offset ? *layout.parameter_tail_offset + 0x78U : 0x110U;
-    for (std::size_t index = 0; index < result.controllers.size(); ++index) {
-        const auto offset = controls + index * 4U;
-        auto &controller = result.controllers[index];
-        controller.device = known(*reader.u8(offset), 0, 126);
-        controller.function = known(*reader.u8(offset + 1U), 0, layout.parameter_tail_offset ? 128 : 63);
-        controller.type = known(*reader.u8(offset + 2U), 0, 3);
-        controller.range = known(*reader.s8(offset + 3U), -63, 63);
+    result.ad.left.pan = known(*reader.s8(0x06U), -63, 63);
+    if (a3000) {
+        result.ad.left.output1.destination = known(*reader.u8(0x07U), 0, 4);
+        result.ad.left.output1.level = known(*reader.u8(0x08U), 0, 127);
+        result.ad.left.output2.destination = known(*reader.u8(0x09U), 0, 5);
+        result.ad.left.output2.level = known(*reader.u8(0x0aU), 0, 127);
     }
-    if (layout.parameter_tail_offset) {
-        const auto tail = *layout.parameter_tail_offset;
-        read_channels(reader, tail + 0x88U, result.controller_reset.b);
-        read_channels(reader, tail + 0x8aU, result.note_toggle.b);
-        read_ad_outputs(reader, tail + 0x8dU, result.ad.left);
-        read_ad_outputs(reader, tail + 0x92U, result.ad.right);
-        result.ad.right.pan = known(*reader.s8(tail + 0x91U), -63, 63);
-        result.effect_connections[1] = known(static_cast<std::uint8_t>(*reader.u8(tail + 0x8cU) & 7U), 0, 4);
-        const auto step = *reader.u8(tail + 0xa6U);
+    result.effect_connections[0] = known(static_cast<std::uint8_t>((flags >> 3U) & 7U), 0, 4);
+    const ByteReader controls{blocks.controllers};
+    for (std::size_t index = 0; index < result.controllers.size(); ++index) {
+        const auto offset = index * 4U;
+        auto &controller = result.controllers[index];
+        controller.device = known(*controls.u8(offset), 0, a3000 ? 125 : 126);
+        controller.function = known(*controls.u8(offset + 1U), 0, !a3000 && blocks.extended ? 128 : 63);
+        controller.type = known(*controls.u8(offset + 2U), 0, 3);
+        controller.range = known(*controls.s8(offset + 3U), -63, 63);
+    }
+    if (!a3000 && blocks.extended) {
+        const ByteReader extended{*blocks.extended};
+        read_channels(extended, 0x00U, result.controller_reset.b);
+        read_channels(extended, 0x02U, result.note_toggle.b);
+        read_ad_outputs(extended, 0x05U, result.ad.left);
+        read_ad_outputs(extended, 0x0aU, result.ad.right);
+        result.ad.right.pan = known(*extended.s8(0x09U), -63, 63);
+        result.effect_connections[1] = known(static_cast<std::uint8_t>(*extended.u8(0x04U) & 7U), 0, 4);
+        const auto step = *extended.u8(0x1eU);
         if ((step & 7U) < step_counts.size())
             result.step_wave.step_count = step_counts[step & 7U];
         result.step_wave.slope = static_cast<ProgramStepWaveSlope>((step >> 3U) & 3U);
         for (std::size_t index = 0; index < result.step_wave.values.size(); ++index)
-            result.step_wave.values[index] = known(*reader.u8(tail + 0x96U + index), 0, 127);
+            result.step_wave.values[index] = known(*extended.u8(0x0eU + index), 0, 127);
     }
     return result;
 }

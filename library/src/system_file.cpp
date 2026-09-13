@@ -15,7 +15,7 @@ constexpr std::size_t a3000_system_body_size = 0x400U;
 constexpr std::size_t system2_body_size = 0x1000U;
 constexpr std::size_t system_header_size = 0x20U;
 constexpr std::size_t a3000_system_bulk_size = 0x348U;
-constexpr std::size_t model_offset = 0x0eU;
+constexpr std::size_t storage_revision_offset = 0x0eU;
 constexpr std::size_t system_parameter_offset = system_header_size;
 constexpr std::size_t basic_receive_offset = system_parameter_offset + 20U;
 constexpr std::size_t receive_flags_offset = system_parameter_offset + 22U;
@@ -72,24 +72,22 @@ Result<DecodedSystemFile> decode_a3000_system(const CurrentRecordEnvelope &envel
     }
     if (!std::ranges::equal(payload.first(a3000_system_magic.size()), a3000_system_magic))
         return std::unexpected{malformed_system_file(kind, "SYSTEM has an invalid file signature")};
-    if (byte_value(payload, model_offset) != 0U)
-        return std::unexpected{malformed_system_file(kind, "SYSTEM has an unsupported sampler model marker")};
+    if (byte_value(payload, storage_revision_offset) != 0U)
+        return std::unexpected{malformed_system_file(kind, "SYSTEM has an unsupported storage revision")};
 
     const auto raw_basic_receive = byte_value(payload, basic_receive_offset);
-    if (raw_basic_receive >= 16U)
-        return std::unexpected{malformed_system_file(kind, "SYSTEM Basic Receive Channel is invalid")};
 
     const auto receive_flags = byte_value(payload, receive_flags_offset);
     DecodedSystemFile result;
     result.kind = kind;
-    result.model = ASeriesModel::a3000;
+    result.storage_revision = 0U;
     result.record_envelope = envelope;
     result.system_header_bytes = copy_bytes(payload, 0U, system_header_size);
     result.system_bulk_bytes = copy_bytes(payload, system_header_size, a3000_system_bulk_size);
     result.reserved_tail_bytes = copy_bytes(payload, system_header_size + a3000_system_bulk_size,
                                             a3000_system_body_size - system_header_size - a3000_system_bulk_size);
     result.context = A3000SystemContext{
-        .basic_receive = midi_address(raw_basic_receive),
+        .basic_receive = raw_basic_receive < 16U ? std::optional{midi_address(raw_basic_receive)} : std::nullopt,
         .omni = (receive_flags & 0x01U) != 0U,
         .program_change_enabled = (receive_flags & 0x02U) != 0U,
     };
@@ -105,34 +103,24 @@ Result<DecodedSystemFile> decode_system2(const CurrentRecordEnvelope &envelope, 
     if (!std::ranges::equal(payload.first(system2_magic.size()), system2_magic))
         return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an invalid file signature")};
 
-    ASeriesModel model{};
-    const auto raw_model = byte_value(payload, model_offset);
-    if (raw_model == 0U)
-        model = ASeriesModel::a4000;
-    else if (raw_model == 1U)
-        model = ASeriesModel::a5000;
-    else
-        return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an unsupported sampler model marker")};
+    const auto storage_revision = byte_value(payload, storage_revision_offset);
+    if (storage_revision > 1U)
+        return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an unsupported storage revision")};
 
-    ProgramMode mode{};
+    std::optional<ProgramMode> mode;
     const auto raw_mode = byte_value(payload, program_mode_offset);
     if (raw_mode == 0U)
         mode = ProgramMode::single;
     else if (raw_mode == 1U)
         mode = ProgramMode::multi;
-    else
-        return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an invalid saved Program Mode")};
 
     const auto raw_basic_receive = byte_value(payload, basic_receive_offset);
-    const auto part_count = model == ASeriesModel::a5000 ? 32U : 16U;
-    if (raw_basic_receive >= part_count) {
-        return std::unexpected{
-            malformed_system_file(kind, "SYSTEM2 Basic Receive Channel is invalid for the saved sampler model")};
-    }
+    constexpr auto part_count = 32U;
 
     A4000A5000SystemContext context;
     context.saved_program_mode = mode;
-    context.basic_receive = midi_address(raw_basic_receive);
+    if (raw_basic_receive < part_count)
+        context.basic_receive = midi_address(raw_basic_receive);
     const auto receive_flags = byte_value(payload, receive_flags_offset);
     context.omni = (receive_flags & 0x01U) != 0U;
     context.program_change_enabled = (receive_flags & 0x02U) != 0U;
@@ -140,19 +128,18 @@ Result<DecodedSystemFile> decode_system2(const CurrentRecordEnvelope &envelope, 
     for (std::size_t index = 0U; index < part_count; ++index) {
         const auto part_index = static_cast<std::uint8_t>(index);
         const auto raw_program = byte_value(payload, multi_part_offset + index);
-        if (raw_program == 0U || raw_program > 128U)
-            return std::unexpected{malformed_system_file(kind, "SYSTEM2 has an invalid Multi Part Program number")};
         context.parts.push_back({
             .part_number = static_cast<std::uint8_t>(index + 1U),
             .midi = midi_address(part_index),
-            .program_number = raw_program,
-            .master = part_index == raw_basic_receive,
+            .program_number =
+                raw_program >= 1U && raw_program <= 128U ? std::optional<std::uint16_t>{raw_program} : std::nullopt,
+            .master = context.basic_receive ? std::optional{part_index == raw_basic_receive} : std::nullopt,
         });
     }
 
     DecodedSystemFile result;
     result.kind = kind;
-    result.model = model;
+    result.storage_revision = storage_revision;
     result.record_envelope = envelope;
     result.system_header_bytes = copy_bytes(payload, 0U, system_header_size);
     result.system_bulk_bytes = copy_bytes(payload, system_header_size, system2_body_size - system_header_size);
@@ -216,6 +203,31 @@ Result<DecodedSystemFile> decode_system_file(SystemFileKind kind, std::span<cons
         return decode_system2(*envelope, body);
     }
     return std::unexpected{malformed_system_file(kind, "unsupported System File kind")};
+}
+
+Result<std::vector<std::byte>> encode_system_file(const DecodedSystemFile &file) {
+    if (file.kind != SystemFileKind::a3000_system && file.kind != SystemFileKind::a4000_a5000_system2)
+        return std::unexpected{malformed_system_file(file.kind, "unsupported System File kind")};
+    const auto native = file.kind == SystemFileKind::a3000_system;
+    const auto bulk_size = native ? a3000_system_bulk_size : system2_body_size - system_header_size;
+    const auto tail_size = native ? a3000_system_body_size - system_header_size - a3000_system_bulk_size : 0U;
+    if (file.system_header_bytes.size() != system_header_size || file.system_bulk_bytes.size() != bulk_size ||
+        file.reserved_tail_bytes.size() != tail_size)
+        return std::unexpected{malformed_system_file(file.kind, "System File retained sections have invalid sizes")};
+
+    std::vector<std::byte> bytes;
+    bytes.reserve(system_file_record_size(file.kind));
+    bytes.insert(bytes.end(), file.record_envelope.raw_bytes.begin(), file.record_envelope.raw_bytes.end());
+    bytes.insert(bytes.end(), file.system_header_bytes.begin(), file.system_header_bytes.end());
+    bytes.insert(bytes.end(), file.system_bulk_bytes.begin(), file.system_bulk_bytes.end());
+    bytes.insert(bytes.end(), file.reserved_tail_bytes.begin(), file.reserved_tail_bytes.end());
+    const auto decoded = decode_system_file(file.kind, bytes);
+    if (!decoded)
+        return std::unexpected{decoded.error()};
+    if (*decoded != file)
+        return std::unexpected{
+            malformed_system_file(file.kind, "System File metadata does not match its retained bytes")};
+    return bytes;
 }
 
 Result<std::optional<SfsId>> locate_system_file_record(const Partition &partition, SystemFileKind kind) {

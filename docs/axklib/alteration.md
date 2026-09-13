@@ -106,8 +106,8 @@ Sample bytes and all Wave Data bytes remain unchanged.
 ## Object deletion planning
 
 
-Interactive clients should use `inspect_object_deletion()` before deleting a
-Program, Sample Bank, Sample, or Wave Data object. The planner accepts exact
+Interactive clients review a deletion plan before deleting a Program, Sample
+Bank, Sample, or Wave Data object. The plan accepts exact
 catalog targets plus an explicit list of optional dependent objects to remove,
 with a combined limit of 1,024 selected inputs. Targets may span volumes and
 partitions. It returns:
@@ -134,35 +134,12 @@ available only for exact current-format objects classified as
 `known_unreferenced`. The apply path replans against the retained image revision
 before executing the typed manifest.
 
-## Native API
+## C++ SDK
 
-`AlterationManifest` stores `AlterationOperationData`, a `std::variant` with one
-public type per operation. `inspect_hds_alteration()` validates and executes the
-complete queue against an in-memory mutable snapshot without writing output.
-`alter_hds()` performs the alteration and requires an output path.
-
-```cpp
-auto manifest = axk::load_alteration_manifest("transaction.json");
-if (!manifest) {
-  return report(manifest.error());
-}
-
-auto inspection = axk::inspect_hds_alteration("source.hds", *manifest);
-if (!inspection) {
-  return report(inspection.error());
-}
-
-auto result = axk::alter_hds(
-    "source.hds", *manifest, std::filesystem::path{"result.hds"});
-if (!result) {
-  return report(result.error());
-}
-```
-
-Use an `operation_context` for cancellation and progress during long-running
-jobs. Cancellation before publication removes the temporary output. The SDK's
-stateless `alteration::inspect()` and `alteration::apply()` methods expose the
-same inspection and direct-apply operations through the C++17 facade.
+Use the SDK's image-bound transaction interface for inspected changes to an
+open image. See [C++ API](cpp-api.md) for preparation, application, progress,
+and cancellation. The CLI alteration manifest above is a separate public
+input contract; internal engine types are not an installed SDK interface.
 
 ## Publication guarantees
 

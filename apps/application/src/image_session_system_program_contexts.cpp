@@ -1,4 +1,5 @@
 #include "image_sessions_internal.hpp"
+#include "system_program_context.hpp"
 
 #include <algorithm>
 #include <array>
@@ -46,25 +47,35 @@ std::string part_label(const axk::SystemProgramPart &part, bool show_port) {
     return midi_address(part.midi, show_port).display;
 }
 
-ImageSystemProgramContext available(const axk::DecodedSystemFile &decoded) {
+} // namespace
+
+ImageSystemProgramContext image_sessions_internal::system_program_context(const axk::DecodedSystemFile &decoded) {
+    const auto invalid_context = [&] {
+        return unavailable(decoded.kind, SystemProgramContextAvailability::invalid,
+                           std::format("The partition's saved {} contains invalid routing values and was not used.",
+                                       file_name(decoded.kind)));
+    };
     ImageSystemProgramContext result;
     result.file_kind = context_file(decoded.kind);
     result.availability = SystemProgramContextAvailability::available;
-    const auto show_port = decoded.model == axk::ASeriesModel::a5000;
-    result.model = decoded.model == axk::ASeriesModel::a3000   ? "A3000"
-                   : decoded.model == axk::ASeriesModel::a4000 ? "A4000"
-                                                               : "A5000";
+    const auto show_port = decoded.kind == axk::SystemFileKind::a4000_a5000_system2;
+    result.storage_revision = decoded.storage_revision;
 
     if (const auto *context = std::get_if<axk::A3000SystemContext>(&decoded.context)) {
-        result.basic_receive = midi_address(context->basic_receive, false);
+        if (!context->basic_receive)
+            return invalid_context();
+        result.basic_receive = midi_address(*context->basic_receive, false);
         result.omni = context->omni;
         result.program_change_enabled = context->program_change_enabled;
         return result;
     }
 
     const auto &context = std::get<axk::A4000A5000SystemContext>(decoded.context);
+    if (!context.saved_program_mode || !context.basic_receive ||
+        std::ranges::any_of(context.parts, [](const auto &part) { return !part.program_number || !part.master; }))
+        return invalid_context();
     result.saved_program_mode = context.saved_program_mode == axk::ProgramMode::single ? "SINGLE" : "MULTI";
-    result.basic_receive = midi_address(context.basic_receive, show_port);
+    result.basic_receive = midi_address(*context.basic_receive, show_port);
     result.omni = context.omni;
     result.program_change_enabled = context.program_change_enabled;
     result.parts.reserve(context.parts.size());
@@ -72,13 +83,11 @@ ImageSystemProgramContext available(const axk::DecodedSystemFile &decoded) {
         result.parts.push_back({.part_number = part.part_number,
                                 .part_label = part_label(part, show_port),
                                 .midi = midi_address(part.midi, show_port),
-                                .program_number = part.program_number,
-                                .master = part.master});
+                                .program_number = *part.program_number,
+                                .master = *part.master});
     }
     return result;
 }
-
-} // namespace
 
 Result<ImageSystemProgramContexts> ImageSessionManager::system_program_contexts(std::string_view image_id,
                                                                                 std::string_view owner_id,
@@ -145,7 +154,7 @@ Result<ImageSystemProgramContexts> ImageSessionManager::system_program_contexts(
                 std::format("The partition's saved {} file is invalid and was not used.", file_name(kind))));
             continue;
         }
-        result.files.push_back(available(*decoded));
+        result.files.push_back(image_sessions_internal::system_program_context(*decoded));
     }
     return result;
 }

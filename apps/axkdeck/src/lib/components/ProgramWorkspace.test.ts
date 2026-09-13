@@ -48,7 +48,7 @@ function programWithDependencies(programNumber: number, name: string, sizeWithDe
 const system2 = {
     fileKind: 'SYSTEM2' as const,
     availability: 'AVAILABLE' as const,
-    model: 'A5000' as const,
+    storageRevision: 0 as const,
     savedProgramMode: 'SINGLE' as const,
     basicReceive: { port: 'A' as const, channel: 1, display: 'A01' },
     omni: false,
@@ -81,7 +81,7 @@ const system2 = {
 const a3000 = {
     fileKind: 'SYSTEM' as const,
     availability: 'AVAILABLE' as const,
-    model: 'A3000' as const,
+    storageRevision: 0 as const,
     basicReceive: { port: 'A' as const, channel: 16, display: '16' },
     omni: true,
     programChangeEnabled: false,
@@ -118,7 +118,7 @@ describe('ProgramWorkspace', () => {
         expect(single.getAttribute('aria-pressed')).toBe('true');
         expect(single.querySelector('[data-icon="program-single"]')).toBeTruthy();
         expect(multi.querySelector('[data-icon="program-multi"]')).toBeTruthy();
-        expect(screen.queryByText(/SYSTEM2 · A5000 · Basic Rch A01/)).toBeNull();
+        expect(screen.queryByText(/SYSTEM2 · A4000\/A5000 · Basic Rch A01/)).toBeNull();
 
         const details = screen.getByRole('button', { name: 'Saved System File details' });
         expect(details.getAttribute('aria-expanded')).toBe('false');
@@ -128,7 +128,7 @@ describe('ProgramWorkspace', () => {
         expect(details.getAttribute('aria-expanded')).toBe('true');
         expect(within(popover).getByText('SYSTEM')).toBeTruthy();
         expect(within(popover).getByText('SYSTEM2')).toBeTruthy();
-        expect(within(popover).getByText('A5000')).toBeTruthy();
+        expect(within(popover).getByText('A4000/A5000')).toBeTruthy();
         expect(within(popover).getByText('A01')).toBeTruthy();
         expect(within(popover).getByText('Single')).toBeTruthy();
         await fireEvent.mouseLeave(details.closest('.program-system-info')!);

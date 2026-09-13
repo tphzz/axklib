@@ -20,6 +20,7 @@
 
 #include "../../../library/tests/media_ex5_fixture.hpp"
 #include "axklib/application/filesystem_edit_operations.hpp"
+#include "axklib/application/system_file_operations.hpp"
 #include "content_digest.hpp"
 
 namespace {
@@ -103,6 +104,18 @@ class FatFilesystemEdits : public testing::TestWithParam<std::string> {
                                                 partition, edits(), cancellation, nullptr, {{}, validate});
     }
 };
+
+TEST_P(FatFilesystemEdits, RejectsSystemParameterEditsAndReleasesMutationAccess) {
+    const auto before = digest();
+    axk::app::AlterationJournalStore journals{root / "journals"};
+    const auto result = axk::app::apply_system_file(*sessions, journals, opened.image_id, "owner", opened.revision,
+                                                    partition, {}, axk::ASeriesModel::a4000);
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, "image_mutation_unsupported");
+    EXPECT_EQ(digest(), before);
+    const auto read = sessions->begin_read(opened.image_id, "owner", opened.revision);
+    EXPECT_TRUE(read);
+}
 
 TEST_P(FatFilesystemEdits, RenamesPopulatedDirectoriesThroughTheRegisteredJobWithoutChangingData) {
     const auto roots = sessions->filesystem(opened.image_id, "owner", opened.revision);

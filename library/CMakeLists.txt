@@ -167,6 +167,19 @@ add_library(
   src/sfs_geometry.cpp
   src/sfs_repair.cpp
   src/system_file.cpp
+  src/system_file_patch.cpp
+  src/sample_parameter_decode.cpp
+  src/system_registered_program.cpp
+  src/system_registered_sample.cpp
+  src/system_recording.cpp
+  src/system_global.cpp
+  src/system_global_write.cpp
+  src/system_favorites.cpp
+  src/system_panel.cpp
+  src/system_recording_write.cpp
+  src/system_recording_configuration_write.cpp
+  src/system_file_preparation.cpp
+  src/system_file_publication.cpp
   src/tx16w.cpp
   src/tx16w_a_series.cpp
   src/utf8.cpp
@@ -586,6 +599,14 @@ if(BUILD_TESTING)
     tests/sfs_geometry_test.cpp
     tests/sfs_write_codec_test.cpp
     tests/system_file_test.cpp
+    tests/system_recording_test.cpp
+    tests/system_global_test.cpp
+    tests/system_global_write_test.cpp
+    tests/system_favorites_test.cpp
+    tests/system_panel_test.cpp
+    tests/system_recording_write_test.cpp
+    tests/system_file_write_test.cpp
+    tests/sample_parameter_decode_test.cpp
     tests/tx16w_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp
@@ -636,6 +657,12 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_core_tests)
   axk_enable_coverage(axk_core_tests)
   gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)
+  add_executable(axk_core_reader_tests tests/core_reader_test.cpp)
+  target_link_libraries(axk_core_reader_tests PRIVATE axklib::core GTest::gtest_main)
+  axk_set_project_warnings(axk_core_reader_tests)
+  axk_enable_sanitizers(axk_core_reader_tests)
+  axk_enable_coverage(axk_core_reader_tests)
+  gtest_discover_tests(axk_core_reader_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_effect_dump tests/effect_dump.cpp)
   target_compile_features(axk_effect_dump PRIVATE cxx_std_23)
   target_link_libraries(axk_effect_dump PRIVATE axklib::core nlohmann_json::nlohmann_json)

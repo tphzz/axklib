@@ -160,16 +160,15 @@ allowing a retry or close. Cancellation arriving after atomic publication does
 not undo a completed export. Other directory-export dialogs do not yet expose
 this local-save cancellation control.
 
-The native `apply_filesystem_edits` application service also supports standard
-plain/primary-MBR FAT16 and the separate EX5 HD/removable profiles. This is raw
+Filesystem edit jobs also support standard plain/primary-MBR FAT16 and the
+separate EX5 HD/removable profiles. This is raw
 filesystem access, not sampler-object mutation. It uses the same exclusive path
 lease, reviewed session revision, streamed journal ranges, input revalidation,
 rollback and recovery as SFS. Successful commits refresh the session once;
 cancelled or rejected commits that roll back remain retryable at the original
 revision. A quarantined interrupted transaction must be recovered before opening
 a new session. FAT entry-ID jobs, import review and advertised write capabilities
-use this service. Native partition arguments
-use zero-based volume ordinals, not original one-based MBR slot numbers.
+use this transaction contract.
 
 Normal image opening, Files export and Files editing do not calculate a
 whole-image content hash. Before a Files write, native file identity, size and
@@ -317,8 +316,8 @@ Client-side folder drops use the separate bounded browser/native readers
 described above. Native OS directory-picker acceptance remains a separate check
 from this workspace-directory workflow.
 
-The native application service in `axklib/application/filesystem_export.hpp`
-provides raw export inspection and execution independently of object extraction.
+Raw file export inspection and execution operate independently of object
+extraction.
 It accepts owned image-session entry IDs and a reviewed revision. Selected
 directories include their descendants and empty directories; selecting an
 ancestor and its child exports that subtree once. Structural metadata is omitted

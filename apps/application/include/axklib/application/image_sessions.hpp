@@ -234,7 +234,7 @@ struct ImageSystemProgramPart {
 struct ImageSystemProgramContext {
     SystemProgramContextFile file_kind{SystemProgramContextFile::system};
     SystemProgramContextAvailability availability{SystemProgramContextAvailability::not_present};
-    std::string model;
+    std::uint8_t storage_revision{};
     std::optional<std::string> saved_program_mode;
     std::optional<ImageSystemMidiAddress> basic_receive;
     std::optional<bool> omni;
@@ -538,7 +538,9 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision,
                                                               const CancellationToken &cancellation = {});
-    void abort_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision) noexcept;
+    // Invalidate when source restoration or its refreshed access metadata is unverified.
+    void abort_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                        bool invalidate_session = false) noexcept;
     [[nodiscard]] Result<void> close(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImagePage<ImageContentItem>> content(std::string_view image_id, std::string_view owner_id,
                                                               std::size_t limit,

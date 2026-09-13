@@ -115,16 +115,21 @@ std::optional<EffectProfile> parse_effect_profile(std::string_view value) noexce
 }
 
 bool effect_type_supported(std::uint16_t raw_type, EffectProfile profile) noexcept {
-    return type_data(raw_type) != nullptr && (profile != EffectProfile::a3000 || raw_type < 54U);
+    return type_data(raw_type) != nullptr && (profile != EffectProfile::a3000 || raw_type <= 54U);
 }
 
-std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type) noexcept {
+std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type, EffectProfile profile) noexcept {
+    if (profile != EffectProfile::a3000 && profile != EffectProfile::a4000 && profile != EffectProfile::a5000)
+        return std::nullopt;
     if (raw_type >= generated::effect_write_types.size())
+        return std::nullopt;
+    if (profile == EffectProfile::a3000 && raw_type >= generated::a3000_effect_reset_words.size())
         return std::nullopt;
     const auto &data = generated::effect_write_types[raw_type];
     EffectWriteInfo result;
     result.legacy_type = data.legacy_type;
-    result.reset_words = data.reset_words;
+    result.reset_words =
+        profile == EffectProfile::a3000 ? generated::a3000_effect_reset_words[raw_type] : data.reset_words;
     for (std::size_t index = 0; index < result.parameters.size(); ++index) {
         const auto &domain = data.parameters[index];
         result.parameters[index] = {static_cast<EffectParameterKind>(domain.kind), domain.minimum, domain.maximum};

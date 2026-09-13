@@ -863,6 +863,29 @@ TEST_F(ImageSessionTest, MutationAdmissionUpgradesAndAbortRestoresTheSessionLeas
         reservations.try_acquire(axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::shared}));
 }
 
+TEST_F(ImageSessionTest, UncertainMutationInvalidatesAnUnchangedSourceUntilCloseAndReopen) {
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox_, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened);
+    auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    // No bytes or timestamps change: invalidation must not depend on source metadata.
+    sessions.abort_mutation(opened->image_id, "owner-a", opened->revision, true);
+    mutation->target.reset();
+    const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(read);
+    EXPECT_EQ(read.error().code, "image_session_invalidated");
+    const auto inspect = sessions.inspect(opened->image_id, "owner-a");
+    ASSERT_FALSE(inspect);
+    EXPECT_EQ(inspect.error().code, "image_session_invalidated");
+    EXPECT_FALSE(sessions.content(opened->image_id, "owner-a", 100U));
+    EXPECT_FALSE(sessions.begin_mutation(opened->image_id, "owner-a", opened->revision));
+    EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
+    EXPECT_TRUE(sessions.open({"workspace", "fixture.hds"}, "owner-a"));
+}
+
 TEST_F(ImageSessionTest, PagesDeterministicallyAndRejectsForeignOrInvalidCursors) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

@@ -315,7 +315,13 @@
                             <section class="program-system-info-file">
                                 <header>
                                     <strong>{context.fileKind}</strong>
-                                    <span>{context.availability === 'AVAILABLE' ? context.model : 'Invalid'}</span>
+                                    <span>
+                                        {context.availability !== 'AVAILABLE'
+                                            ? 'Invalid'
+                                            : context.fileKind === 'SYSTEM'
+                                              ? 'A3000'
+                                              : 'A4000/A5000'}
+                                    </span>
                                 </header>
                                 {#if context.availability === 'AVAILABLE'}
                                     <dl>

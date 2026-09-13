@@ -317,9 +317,11 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     prepared_commit.emplace(std::move(*validation));
                     return {};
                 };
+                mutation_guard.invalidate_on_abort(true);
                 if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches,
                                                   context.cancellation, validate_commit);
                     !applied) {
+                    mutation_guard.invalidate_on_abort(!journals.storage_ready());
                     return std::unexpected(applied.error());
                 }
                 if (!prepared_commit)

@@ -15,6 +15,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/filesystem.cpp src/filesystem_directory.cpp
                                    src/filesystem_directory_publication.cpp src/filesystem_entry_mutations.cpp
                                    src/filesystem_edit_operations.cpp
+                                   src/filesystem_session_mutation.cpp src/system_file_operations.cpp
                                    src/filesystem_export.cpp
                                    src/filesystem_export_plan.cpp
                                    src/filesystem_export_jobs.cpp
@@ -109,6 +110,8 @@ if(BUILD_TESTING)
                                        tests/filesystem_fat_edit_test.cpp
                                        tests/filesystem_inputs_test.cpp
                                        tests/su700_import_test.cpp
+                                       tests/system_program_context_test.cpp
+                                       tests/system_file_operations_test.cpp
                                        tests/filesystem_export_test.cpp
                                        tests/filesystem_export_profiles_test.cpp
                                        tests/midi_operations_test.cpp

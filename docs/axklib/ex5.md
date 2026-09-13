@@ -1,70 +1,54 @@
 # EX5 Disk Images
 
-The EX5 disk reader supports directory listing,
-DOS 8.3 file names, allocation chains, exact file bytes and bounded range reads.
-It does not decode EX5 sound or sequence payloads, generate EX5 images or repair
-allocation. This is not generic FAT16 geometry.
-The native application raw-files service can journal edits to existing EX5
-images; see [FAT edit preparation and publication](media.md#internal-edit-preparation).
-The Files workspace exposes those raw edits through its shared import review,
-directory creation and confirmed deletion workflows. Write capabilities depend
-on validated filesystem metadata and a writable source; no EX5 payload decoder
-or sampler-object repair is implied.
+EX5 hard disks and removable media use different FAT16-based layouts. Hard
+disks have an EX descriptor and a prefixed boot record; removable media has a
+boot record at byte zero. Neither shares the A-series SFS allocation layout.
+This page describes the containers, not EX5 sound or sequence payloads.
+Software capabilities are listed in [Media Profiles](media.md).
 
 ## Removable-media profile
 
 EX5 removable-media volumes with boot OEM `YAMAHA??` and type label `FAT16`
-are recognized separately as `FatProfile::ex5_removable`. They start at byte
+start at byte
 zero and use ordinary BPB sector-count fields, unlike the hard-disk geometry
 below. Their FAT chains retain the EX5 `0xffff`-only end marker.
 
-The admitted formatter boundary is 65,525 data clusters. This is one cluster
-beyond standard FAT16 classification; the supplied approximately 2 GiB MO
-image has 4,194,176 declared sectors, one reserved sector, two 256-sector
-FATs, a 512-entry root and 64 sectors per cluster. The reader retains strict
-table-size, source-range and chain checks. This narrow EX5 profile does not
-relax standard FAT16 or admit FAT32.
+The removable layout can declare 65,525 data clusters, one beyond ordinary
+FAT16 classification. For example, 4,194,176 sectors with one reserved sector,
+two 256-sector FATs, 512 root entries and 64 sectors per cluster produce this
+boundary. The FAT still must address every declared cluster. This EX-specific
+case does not turn a standard FAT16 volume into FAT32.
 
-Both EX5 profiles return `MediaKind::ex5_disk` and expose native FAT attributes.
-The removable reader uses DOS 8.3 identities and bounded
-raw file reads. Its recognition does not depend on the image filename or
-the editable volume label.
+Directories use DOS 8.3 identities and native FAT attributes. The image filename
+and editable volume label do not identify which layout is present.
 
 ### One-sector capacity mismatch
 
-A narrow removable-media exception permits a declared size exactly 512 bytes
-larger than a sector-aligned image. It requires the EX5 OEM/type markers, the
-valid FAT16 boot signature, 512-byte sectors, one reserved sector, two matching
-FATs, 512 root entries and 4 to 64 sectors per cluster. Other truncation, generic
-FAT volumes and the hard-disk profile remain subject to strict size checks.
-This exception does not establish that an image was never truncated.
+An EX removable volume can declare exactly one 512-byte sector beyond the
+physical image. The bounded case described here has sector-aligned storage,
+EX5 OEM/type markers, a valid FAT16 boot signature, 512-byte sectors, one
+reserved sector, two matching FATs, 512 root entries and 4..64 sectors per
+cluster. This shape alone cannot distinguish a formatter mismatch from a
+truncated file. Other short images require their own explanation.
 
-`EX5_CAPACITY_EXCEEDS_IMAGE` reports the declared and physical sizes, absent
-sector and number of incomplete clusters. The Files inspector retains these
-storage details. Axkdeck opens Image integrity automatically for this warning;
-dismissal does not hide it from later inspection or repeat it on every refresh.
-A newly reported unavailable file produces another warning.
-
-The reader preserves the declared geometry for chain validation. Boot records,
+Declared geometry still defines chain addresses. Boot records,
 both FATs, the root and all reachable directories must be completely readable;
 missing directory metadata still rejects the image. File ranges that physically
 exist remain readable, including logical payload ending before the missing
 sector in an incomplete cluster. A file whose logical bytes cross the image end
-is listed with `EX5_FILE_DATA_UNAVAILABLE`; complete export fails explicitly.
+has unavailable data and cannot be exported completely.
 Missing bytes are never synthesized.
 
-Guarded raw edits remain available on writable sources with valid allocation
-metadata. Allocation uses only complete, physically backed clusters. This also
-applies to directory growth and padded file writes. Transaction patches remain
-bounded by the original image length, with the existing cancellation and rollback
-contract. An incomplete final cluster cannot supply free space even if its FAT
+Safe allocation requires consistent metadata and complete, physically backed
+clusters. This also
+applies to directory growth and padded file writes. Writes must remain bounded by the physical image length. An incomplete final cluster cannot supply free space even if its FAT
 entry is free. When the absent sector lies only in unused tail space, no data
 cluster needs excluding.
 
-Opening or editing does not change the BPB, extend the file, or reserve the
-incomplete cluster in its FAT. This is guarded access, not repair: retain a
-backup, and do not assume subsequent EX hardware writes observe these software
-bounds.
+Excluding an incomplete cluster from a host-side allocation calculation does
+not change its on-disk FAT entry or repair the BPB. The sampler may still use
+the declared geometry. Subsequent device writes cannot be assumed to honor
+host-side access restrictions.
 
 ## Recognition
 
@@ -107,34 +91,13 @@ copies must agree and address every declared cluster. Generic FAT BPB precedence
 between the 16-bit and 32-bit total-sector fields does not apply.
 Trailing sectors outside the addressable data region are not file data.
 
-## Native Access
+## Directory And Chain Rules
 
-`open_media()` returns `MediaKind::ex5_disk` backed by `FatImage`, whose geometry
-has `FatProfile::ex5_disk`. `FatGeometry::total_sectors` is the normalized end
-of the addressable filesystem, measured from image sector zero; it is not the
-raw boot field at `0x20`. `boot_offset`, `fat_offset`, `root_offset`, and
-`data_offset` are absolute byte offsets.
-`physical_size_bytes` records the actual reader length, while
-`backed_data_cluster_count` counts complete physically present data clusters.
-`data_cluster_count` remains the declared chain-validation boundary.
+Names use the short directory identity. Long-name entries, deleted records and
+unreferenced allocation do not establish additional EX5 files. Overallocated
+chains can contain unused capacity; logical reads end at the directory entry's
+file size. Cycles, cross-links, out-of-range successors and chains shorter than
+the declared file size are inconsistencies.
 
-- `directories()` includes empty and nested directories, excluding dot entries.
-- `files()` lists regular files with their sizes, physical directory-entry
-  offsets and allocation chains.
-- `read_file()`, `read_file_prefix()` and `read_file_range()` read exact file
-  bytes across fragmented chains. Prefer bounded range reads for large files.
-- `build_content_tree()` exposes directories and files, not synthesized
-  A-series Programs, Samples or Wave Data. The sampler-object catalog is empty.
-
-The reader rejects cyclic or cross-linked reachable chains, insufficient file chains,
-out-of-range successors, duplicate names and unsafe path components.
-Names use the short directory identity; long-name entries are ignored. Deleted
-entries and unreferenced allocation are not recovered. Overallocated file chains
-are retained, while payload reads stop at the declared file size.
-
-Resource limits are 16 MiB per directory, 64 MiB of aggregate directory bytes,
-16,384 directories, 100,000 entries, 64 path components and 64 MiB of aggregate
-path metadata. These are reader resource limits, not EX5 authoring limits.
-
-EX5 disk access does not imply support for EX5 floppies, CD-ROM layouts,
-alternate sector sizes, or the EX5 file payload formats.
+Filesystem bytes and EX5 sound/sequence payloads are separate formats. The
+latter's inner structures are not specified by this page.

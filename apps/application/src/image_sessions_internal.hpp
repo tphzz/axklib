@@ -149,6 +149,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::size_t root_count{};
         std::uint64_t revision{1U};
         bool mutating{};
+        bool invalidated{};
         std::mutex access_mutex;
         std::optional<std::unique_lock<std::mutex>> mutation_guard;
         std::chrono::steady_clock::time_point last_access;
@@ -237,6 +238,9 @@ struct axk::app::ImageSessionManager::Implementation {
         }
         {
             const std::scoped_lock lock{result->access_mutex};
+            if (result->invalidated)
+                return std::unexpected(
+                    session_error("image_session_invalidated", "image session requires recovery and reopening"));
             result->last_access = clock();
         }
         return result;

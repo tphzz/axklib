@@ -54,27 +54,44 @@ Result<PublicationOutcome> write_sfs_file_edits(const std::filesystem::path &sou
                                                 const std::filesystem::path &destination, PartitionIndex partition,
                                                 std::span<const FilesystemEdit> edits,
                                                 const CancellationToken &cancellation, ProgressSink *progress) {
+    std::vector<std::shared_ptr<const RandomAccessReader>> inputs;
+    for (const auto &edit : edits) {
+        if (const auto *put = std::get_if<PutFilesystemFile>(&edit); put && put->contents)
+            inputs.push_back(put->contents);
+    }
+    return sfs_files::publish(
+        source_path, destination, partition, inputs,
+        [&](std::shared_ptr<const RandomAccessReader> source) {
+            return detail::prepare_sfs_file_edits(std::move(source), partition, edits, cancellation);
+        },
+        cancellation, progress);
+}
+
+Result<PublicationOutcome> sfs_files::publish(const std::filesystem::path &source_path,
+                                              const std::filesystem::path &destination, PartitionIndex partition,
+                                              std::span<const std::shared_ptr<const RandomAccessReader>> inputs,
+                                              const PrepareEdits &prepare, const CancellationToken &cancellation,
+                                              ProgressSink *progress) {
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     auto source = FileReader::open(source_path);
     if (!source)
         return std::unexpected{source.error()};
     std::map<std::shared_ptr<const RandomAccessReader>, package_internal::Sha256Digest> input_digests;
-    for (const auto &edit : edits) {
-        const auto *put = std::get_if<PutFilesystemFile>(&edit);
-        if (!put || !put->contents || input_digests.contains(put->contents))
+    for (const auto &input : inputs) {
+        if (!input || input_digests.contains(input))
             continue;
-        if (put->contents->size() > std::numeric_limits<std::uint32_t>::max())
+        if (input->size() > std::numeric_limits<std::uint32_t>::max())
             return std::unexpected{sfs_files::error("file input exceeds the SFS size field")};
-        auto digest = package_internal::sha256_reader(*put->contents, cancellation);
+        auto digest = package_internal::sha256_reader(*input, cancellation);
         if (!digest)
             return std::unexpected{digest.error()};
-        input_digests.emplace(put->contents, *digest);
+        input_digests.emplace(input, *digest);
     }
     const auto snapshot = package_internal::sha256_reader(**source, cancellation);
     if (!snapshot)
         return std::unexpected(snapshot.error());
-    auto prepared = detail::prepare_sfs_file_edits(*source, partition, edits, cancellation);
+    auto prepared = prepare(*source);
     if (!prepared)
         return std::unexpected{prepared.error()};
     auto publication = detail::TemporaryPublication::create(destination);

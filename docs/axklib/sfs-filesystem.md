@@ -1,7 +1,7 @@
 # SFS Filesystem
 
 Yamaha A-series hard-disk images use an SFS container for partitions, directories,
-object files, and allocation state. axklib reads this layer before it decodes the
+object files, and allocation state. File extents contain the
 sampler object payloads described in [Sampler Data Structures](sampler-data.md).
 
 SFS is the hard-disk container family used by `.hda`, `.hds`, and equivalent raw
@@ -11,20 +11,10 @@ layers are different.
 
 ## Specification Scope
 
-This page documents the SFS structures that the current axklib reader validates
-and the narrower profile emitted by the writer. It is not a claim that every
-reserved byte has a known meaning.
-
-| Area | Reader contract | Writer contract |
-| --- | --- | --- |
-| Disk geometry | Reads the bounded sector and cluster values stored in the image. | Emits 512-byte sectors, two sectors per cluster, and one to eight partition slots. |
-| Index and allocation | Reads direct and continuation extents, reconstructs allocation, and reports inconsistencies. | Computes the bitmap, index span, extents, and compatibility metadata from the requested image model. |
-| Directory tree | Reads reachable and structurally valid directory records while retaining diagnostics for malformed or unreachable records. | Emits partition, volume, category, and object entries for the supported authored object profile. |
-| Sampler objects | Passes supported payloads to the object decoders; see [Sampler Data Structures](sampler-data.md). | Emits only the object types and topologies listed under [Generated Image Writing](#generated-image-writing). |
-| Uninterpreted bytes | Retains or reports relevant raw values without assigning semantics. | Writes only the documented compatibility values and deliberately zeroes unsupported residue. |
-
-Applications should use the parser and writer APIs instead of treating this
-page as permission to synthesize fields whose meaning is still unspecified.
+This page describes disk structures and the A-series formatted layout. Fields
+with unspecified meaning must be preserved; their presence is not permission
+to assign new values. Software capabilities and editing guarantees are covered
+separately in [Media Profiles](media.md) and [Writer And Alteration](write.md).
 
 ```mermaid
 flowchart TD
@@ -41,9 +31,8 @@ flowchart TD
 
 ## Byte Order And Units
 
-SFS container numeric fields used by axklib are big-endian. Disk locations in the
-SFS headers are sector or cluster indexes; axklib converts them to byte offsets
-when reading an image.
+SFS container numeric fields are big-endian. Locations are sector or cluster
+indexes; multiply by the corresponding unit size to obtain byte offsets.
 
 Common units:
 
@@ -59,19 +48,18 @@ Common units:
 ## Disk Superblock
 
 An SFS disk image starts with a superblock. The second sector stores a duplicate
-copy. axklib uses the first copy for normal reads and reports duplicate/header
-problems through validation.
+copy. A disagreement is a structural inconsistency, not another filesystem.
 
 | Offset | Size | Type | Meaning |
 | --- | ---: | --- | --- |
 | `0x000` | 11 | ASCII | Disk signature `YAMAHA_dev3`. |
-| `0x00b` | 117 | bytes | Reserved area; the public reader does not interpret it. |
-| `0x080` | 28 | bytes | Disk mode/device metadata area; surfaced only as raw structure when inspected. |
+| `0x00b` | 117 | bytes | Reserved area; semantics unspecified. |
+| `0x080` | 28 | bytes | Disk mode/device metadata; individual meanings unspecified. |
 | `0x09c` | 4 | u32be | Sector size in bytes. |
 | `0x0a0` | 4 | u32be | Total sector count in the image. |
-| `0x0a4` | 4 | u32be | Reserved value; the public reader does not interpret it. |
+| `0x0a4` | 4 | u32be | Reserved value; semantics unspecified. |
 | `0x0a8` | 64 | table | Eight partition entries, each 8 bytes. |
-| `0x0e8` | 280 | bytes | Reserved area; the public reader does not interpret it. |
+| `0x0e8` | 280 | bytes | Reserved area; semantics unspecified. |
 
 Partition entry layout:
 
@@ -80,10 +68,8 @@ Partition entry layout:
 | `+0x00` | 4 | u32be | Partition start sector. |
 | `+0x04` | 4 | u32be | Partition sector count. |
 
-A valid active partition entry has both values non-zero. The reader treats an
-entry with either value non-zero as occupied so a half-populated entry is
-reported as invalid geometry instead of being silently ignored. Fresh generated
-images populate both values and the disk mode metadata area.
+A valid active partition entry has both values non-zero. Both zero means an
+unused entry; exactly one nonzero value is invalid geometry, not an unused slot.
 
 A-series hard-disk images also use sector 2, and for multiple partitions the
 sectors immediately before later partitions, as auxiliary formatter-transfer
@@ -92,7 +78,7 @@ sectors. Their leading eight bytes are deterministic transfer tokens from
 and the remaining token bits are compatibility values rather than disk geometry
 or persistent disk IDs. Generated images zero prior-token residue at
 `+0x09..+0x10`.
-axklib does not expose these sectors as part of the directory or object tree.
+These sectors are outside the directory and object tree.
 Older label-entry marker/name records in them are intentionally zero-generated;
 they are not required for hardware loading.
 
@@ -108,22 +94,19 @@ header cluster is padding, not additional header fields.
 | `0x000` | 11 | ASCII | Partition signature `YAMAHA_dev3`. |
 | `0x040` | 16 | ASCII | Partition name, space-padded. |
 | `0x080` | 4 | u32be | Sectors per cluster. |
-| `0x084` | 4 | u32be | Static or mode value; currently not interpreted by public APIs. |
-| `0x088` | 8 | bytes | Reserved bytes; currently not interpreted by public APIs. |
+| `0x084` | 4 | u32be | Static or mode value; semantics unspecified. |
+| `0x088` | 8 | bytes | Reserved bytes; semantics unspecified. |
 | `0x090` | 4 | u32be | Number of clusters in the partition. |
 | `0x094` | 4 | u32be | Active allocation bitmap cluster. Independent of cluster size. |
 | `0x098` | 4 | i32be | Bitmap copy 1 location; a negative value marks the copy unavailable. |
 | `0x09c` | 4 | i32be | Bitmap copy 2 location; a negative value marks the copy unavailable. |
-| `0x0a0` | 4 | u32be | Formatter capacity value. Fresh axklib images write `5012`; its exact packing semantics remain unresolved, and readers derive usable record capacity from the index geometry instead of trusting this field. |
+| `0x0a0` | 4 | u32be | Formatter capacity value. The standard generated profile uses `5012`; exact packing semantics are unspecified. Usable record capacity follows the index geometry. |
 | `0x0a4` | 4 | u32be | Cluster offset to the directory/file index. |
 | `0x0a8` | 4 | u32be | Directory/file index span in clusters. |
 
-For generated A-series images, the full primary and duplicate 1024-byte header
-clusters are part of the write contract. The writer starts with a zero-filled
-header, writes the explicit geometry and compatibility fields documented below,
-and publishes the same completed bytes twice. Former fixed tail bytes and the
-validated residue range at `+0x1bc..+0x1e3` remain zero. Do not omit the duplicate
-copy or the explicit compatibility fields.
+A-series partitions have matching primary and duplicate header clusters. With
+two sectors per cluster, each copy occupies 1024 bytes. Unknown header bytes
+are preserved on unrelated edits.
 
 Cluster offsets are partition-relative. Convert a cluster offset to an absolute
 byte offset with:
@@ -168,45 +151,22 @@ has 45,000 meaningful bytes and occupies 45,056 bytes in a 1024-byte-cluster
 partition. The first span ends where the second span begins
 in the current formatter geometry.
 
-Readers must retain and compare both complete copies. Validation independently
-reconstructs a third bitmap from all valid index-record extents, then compares
-each stored copy with that reconstruction:
-
-| Direction | Meaning |
-| --- | --- |
-| `marked_used_without_index_extent` | A stored copy marks a cluster used, but no valid index record owns it. |
-| `index_extent_marked_free` | A valid index record owns a cluster that is clear in that stored copy. |
+Each bitmap copy must be compared with the allocation described by index-record
+extents. A used bit without an owning extent, or an extent marked free, is an
+inconsistency. Directory reachability does not change extent ownership.
 
 The reserved metadata prefix is implicit in the partition geometry. It is not
 an index-record extent and is therefore not marked in the reconstructed bitmap.
-The allocation inspector still identifies those clusters as reserved so their
-role remains visible, but a clear stored bitmap bit in that prefix is not an
-`index_extent_marked_free` mismatch. Conversely, a set stored bitmap bit in the
-reserved prefix remains visible as allocated storage without an index claim.
+A clear bitmap bit in that reserved prefix does not make the metadata available
+for payload allocation. A set bit there does not create an index-record claim.
+Records left unreachable after deletion can still reference extents; their
+allocation disagreement must not be silently treated as consistent storage.
 
-Mismatch reports use inclusive cluster ranges so large gaps can be reviewed
-without listing every cluster.
-
-An index record can remain structurally parseable even when it is no longer
-reachable from the root directory. Destructive sampler save operations may
-leave such records behind while clearing some of their extent bits in the
-allocation bitmap. axklib still reports
-`index-extent-references-free-cluster` as an allocation error: directory
-unreachability explains why the sampler can ignore the remnant, but it does not
-make the record and bitmap agree. The validator does not silently discard or
-repair these records.
-
-Neither copy is a 512-byte preview. Free-space accounting uses the selected
-valid copy; invalid selection leaves free space unavailable. Generated images and alterations write the same
-complete, cluster-rounded bytes to both locations. Before publication, axklib
-reopens the independently written image and requires both stored copies to be
-identical and to agree with reconstructed extents. A mismatch, invalid extent,
-extent-total discrepancy, or cross-linked cluster makes the image read-only for
-mutation; browsing, validation, and export remain available. Unavailable bitmap
-copies also prohibit mutation. Raw reading supports other validated cluster
-sizes, including 4096-byte clusters. Creation and alteration remain limited to
-the supported A-series layout; reading a foreign device's files does not enable
-writing its objects or interpreting its audio.
+Both copies span the full cluster-rounded bitmap size, not a 512-byte preview.
+Free space depends on the selected valid copy. Invalid selection or an
+unavailable copy does not justify synthesizing allocation state. Before changing
+allocation, reconcile both copies, extent totals and ownership. Cluster sizes
+other than 1024 bytes, including 4096 bytes, occur in SFS images.
 
 ## Free Space
 
@@ -225,18 +185,6 @@ Allocation summaries use the same payload-only accounting. Consequently,
 where allocated and free clusters both exclude the reserved prefix. Free-run
 counts and the largest free run are likewise measured only in the payload
 region.
-
-Use the native function for the same calculation in applications:
-
-```cpp
-auto space = axk::calculate_sfs_free_space(1'048'575, 616, 65, 512);
-assert(space && space->sampler_visible_free_kib == 1'047'894);
-```
-
-`axklib validate` allocation summaries include `first_payload_cluster`,
-`reserved_cluster_count`, `sampler_free_cluster_count`, `sampler_free_bytes`,
-and `sampler_visible_free_kib`. Impossible geometry returns a typed error
-instead of negative capacity.
 
 ## Directory And File Index
 
@@ -280,20 +228,17 @@ allocatable_record_slots = total_record_slots - 3
 
 SFS IDs `0`, `1`, and `2` are reserved. The fresh-image profile has 358 index
 blocks, 5,012 total record slots, and 5,009 allocatable slots. Existing images
-are not assumed to use that profile: axklib derives their capacity from the
-partition header's index span and cluster geometry.
+need not use that profile: their capacity follows the partition header's
+index span and cluster geometry.
 
-Every inserted Yamaha object consumes one record slot unless package import can
-reuse an existing object. Creating a destination volume consumes six additional
+Each distinct Yamaha object consumes one record slot. Creating a destination volume consumes six additional
 scaffolding record slots. Consequently, a partition can have enough free payload
-clusters while having no free SFS record slots. Package planning reports both
-limits and rejects an import that would exceed either one.
+clusters while having no free SFS record slots. These are independent capacity limits.
 
 ## Index Record Layout
 
-axklib treats an index slot as a valid extent record when the structural fields
-form a readable object or directory payload. The record format used for data
-reads is:
+An index slot describes a file or directory through its logical byte count
+and extents:
 
 | Record offset | Size | Type | Meaning |
 | --- | ---: | --- | --- |
@@ -306,8 +251,8 @@ reads is:
 | `0x12` | 4 | u32be | First direct extent byte count for direct records. |
 | `0x3a` | 4 | u32be | Creation-time field; the A4000 profile uses the unavailable value `0xffffffff`. |
 | `0x3e` | 4 | u32be | Modification-time field; the A4000 profile uses the unavailable value `0xffffffff`. |
-| `0x42` | 4 | u32be | Native attribute/type word, exposed as `IndexRecord::attributes`. |
-| `0x46` | 2 | u16be | Filesystem link count, exposed as `IndexRecord::link_count`. |
+| `0x42` | 4 | u32be | Native attribute/type word. |
+| `0x46` | 2 | u16be | Filesystem link count. |
 
 These are native SFS attributes, not POSIX permissions. The `0x80000000`
 bit marks a live index record. `0x08000000` enables the normal file-write
@@ -316,8 +261,7 @@ allocation unit. The low bytes can contain the type tags `dir` (`0x646972`)
 or `lnk` (`0x6c6e6b`). Other bits remain unnamed and must be preserved.
 In particular, a directory without the write-enable bit is not equivalent
 to a user-locked directory: directory updates temporarily enable writing.
-The Files view exposes confirmed flags and the complete raw word without
-presenting them as editable Unix-style permissions.
+Unspecified attribute bits must not be translated into POSIX permissions.
 
 A live allocation-free empty file has zero extent count, cluster count and
 logical size, with the live bit set. It remains an addressable record and
@@ -340,8 +284,7 @@ The time fields above are not usable wall-clock dates in the A4000 profile.
 Do not interpret the unavailable sentinel as an epoch value or invent a clock
 encoding for other devices. Preserve existing raw values on unrelated edits.
 
-The data-size field is the number of logical bytes to return to the object or
-directory decoder. Allocated storage can be larger because cluster allocation is
+The data-size field is the logical byte length of the object or directory. Allocated storage can be larger because cluster allocation is
 rounded up to full clusters.
 
 ## Direct Extents
@@ -366,8 +309,8 @@ for each direct extent in order:
     remaining -= read_size
 ```
 
-If the assembled byte count differs from `total_data_size`, validation reports a
-logical read mismatch.
+The extents must supply `total_data_size` logical bytes; a shorter assembled
+payload is incomplete.
 
 ## Continuation Extents
 
@@ -395,9 +338,8 @@ while list_cluster != 0 and remaining_triplets > 0:
     list_cluster = next_list_cluster
 ```
 
-The reader stops on loops, out-of-range list clusters, impossible triplet counts,
-or when the requested extent count is consumed. Warnings are carried into
-validation and report outputs.
+List traversal ends after the declared extent count. Loops, out-of-range list
+clusters, and impossible triplet counts make the chain invalid.
 
 ## Directory Payload Entries
 
@@ -412,26 +354,18 @@ an SFS ID in the same partition.
 | `0x08` | variable | ASCII | Entry name bytes, NUL-terminated or padded. |
 
 Special names `.` and `..` are directory navigation entries. Other entries are
-matched to index records by `link_id`. axklib classifies the target as a
-directory or an object file by the target index record and payload.
+matched to index records by `link_id`. The target index record specifies whether the entry is a directory or file.
 
 ### Deleted directory rows
 
-**Strong:** sampler-authored deletion can retain a 32-byte directory row while
-replacing the link ID's high nibble with `0xF`. axklib treats these rows as
-deleted directory slots (tombstones), retains their raw link value and name for
-inspection, and does not resolve their low bits as a live SFS ID. A valid
-tombstone therefore does not appear in the catalog, participate in directory
-traversal, reserve a name, or produce a missing-target validation finding.
+Deletion can retain a 32-byte row with the link ID's high nibble replaced by
+`0xF`. Such a row is a tombstone: its remaining link bits do not identify a live
+SFS record. Retain its bytes when not reusing the slot. A non-`0xF` row remains
+live, and a missing target is a dangling link.
 
-A non-`0xF` directory row remains live. If its target SFS record is missing,
-validation reports `SFS_DIRECTORY_ENTRY_TARGET_MISSING`; mutation is blocked
-because the intended object cannot be recovered safely. The formatter-owned
-partition-root support names `sfserrlog` and `sfserram` are exempt: formatter
-images can retain these reserved entries without a normal target SFS record.
-The exemption applies only at the partition root. This distinction keeps
-sampler-retained deletion history and formatter metadata separate from genuine
-dangling directory links.
+Partition-root support names `sfserrlog` and `sfserram` can exist without normal
+target records. This exception is specific to root metadata names, not arbitrary
+missing files or identically named entries below the root.
 
 ## Object Payload Resolution
 
@@ -441,314 +375,24 @@ SFS object loading follows this path:
 directory entry -> link_id -> index record -> extents -> payload bytes
 ```
 
-A supported current sampler object payload starts with `FSFSDEV3SPLX`. The object type tag
-is read by the sampler-data decoder at payload offset `0x0c..0x0f`; the display
-name is read from the object header name field. SFS placement metadata remains
-attached to the object:
+A sampler object payload begins with `FSFSDEV3SPLX`; its type is at
+`0x0c..0x0f`. Ordinary A-series directory placement is
+`partition / volume / category / object`, with categories such as PROG, SBAC,
+SBNK, SMPL and SEQU. SFS itself can also store non-sampler files. See
+[Sampler Data Structures](sampler-data.md) for object contents.
 
-| Metadata | Meaning |
-| --- | --- |
-| `partition_index` | Partition entry index from the disk superblock. |
-| `sfs_id` | Index-record ID that supplied the payload. |
-| `payload_offset` | Absolute byte offset of the first payload byte. |
-| `payload_size` | Logical payload byte count from the index record. |
-| `scope_key` | Source image plus partition scope. |
-| `object_key` | Stable key such as `p0:sfs23`. |
+## Structural Consistency
 
-## User-Facing Tree Mapping
+Check signatures, duplicate headers, both allocation copies, complete extent
+lists, logical byte totals, directory links and reference counts independently.
+A readable file does not establish consistency of the whole partition. A
+malformed sampler payload does not by itself change the surrounding SFS layout.
 
-axklib builds the user-facing tree from SFS directory placement:
+## Generated Images
 
-```text
-partition -> volume -> category -> object
-```
-
-Current category directories use object type codes such as `PROG`, `SBNK`,
-`SBAC`, `SMPL`, and `SEQU`. The normal tree renders these as Programs,
-Sample Banks/Samples (SBAC/SBNK), Wave Data (SMPL), and Sequences. `SBAC` is
-rendered as the visible `B <name>` Sample Bank level; its `SBNK` children are
-Samples.
-
-See [Name, Path, And Export Mapping](names-and-paths.md) for display labels,
-duplicate names, default Program slots, and export directory rules.
-
-## Validation
-
-SFS validation covers both container structure and sampler object relationships.
-Container checks include:
-
-| Check | Failure shape |
-| --- | --- |
-| Superblock/header identity | Unsupported or malformed SFS image. |
-| Duplicate headers | Header copy differs or cannot be read. |
-| Allocation bitmaps | Stored copies differ, either copy disagrees with reconstructed extents, or clusters have multiple owners. |
-| Index records | Invalid extent count, impossible extent size, malformed continuation list. |
-| Directory entries | Blank names, zero live link ID, missing live target (`SFS_DIRECTORY_ENTRY_TARGET_MISSING`), mismatched target type. Valid `0xF` tombstones are retained but are not findings. |
-| Payload reads | Logical byte count mismatch or unsupported object payload. |
-
-Relationship and sampler-data validation is reported separately so a caller can
-distinguish a broken filesystem from a readable filesystem that contains broken
-sampler object links.
-
-Allocation-integrity failures use stable validation codes:
-
-| Code | Meaning |
-| --- | --- |
-| `SFS_ALLOCATION_BITMAP_COPIES_DIFFER` | The complete first and second copies are not byte-identical. |
-| `SFS_ALLOCATION_MISMATCH` | At least one stored copy disagrees with reconstructed index extents, or an index record has another invalid or internally inconsistent extent condition. |
-| `SFS_ALLOCATION_CROSS_LINK` | At least one cluster is claimed by multiple reserved, data, or continuation owners. |
-| `SFS_EXTENT_BYTE_TOTAL_MISMATCH` | A record's extent byte counts do not sum to its logical data size. |
-
-All four conditions are errors and make the image unsafe for mutation. They do
-not prevent bounded inventory, validation, or export from still-readable
-objects.
-
-### Allocation Inspection
-
-axkdeck exposes a read-only **Visualize partition allocation...** action on the
-context menu of an SFS partition. The action opens a separate, revision-pinned
-window with partition statistics and a cluster map. Hovering a cell reports its
-partition-relative cluster plus absolute sector and byte position, SFS record,
-extent, object type, object name, category, and volume when those identities are
-known. The complete run-length encoded map can also be exported as JSON for
-automated inspection.
-
-The view deliberately presents three different allocation layers instead of
-collapsing them into one inferred state:
-
-- the first allocation bitmap;
-- the second allocation bitmap copy; and
-- implicit reserved-metadata ownership plus index-record continuation and data
-  extents. Only continuation and data extents contribute to the reconstructed
-  allocation bitmap.
-
-Clusters where those layers disagree are highlighted separately from normal
-reserved, continuation, directory, SFS support-file, sampler-object, unknown
-record-data, and free clusters. Directory entry names are projected onto their
-linked records when no sampler object identity exists. This identifies the
-formatter-authored `sfserram` extent as SFS support data and the root record as
-directory data; neither is an unknown sampler object. A bitmap-copy mismatch, an
-allocated cluster without a reconstructed index owner, an index extent or
-continuation claim on a payload cluster marked free, or multiple claims remains
-a diagnostic anomaly. The reserved prefix is not reported as claimed-but-free
-merely because it is implicit rather than bitmap-allocated. The inspector does
-not repair or reinterpret any genuine mismatch. If the image revision changes
-after the window opens, its request is rejected so the visualization cannot
-silently mix metadata from two image states.
-
-Extent byte-total mismatch has a narrow copy-only repair when it is the only
-allocation inconsistency anywhere in the image. Overreported layouts are
-normalized by shortening the last used extent and dropping wholly trailing
-extents. An underreported layout is accepted only when one extent's allocated
-capacity can contain the complete logical payload; underreported multi-extent
-layouts are ambiguous and rejected. Every eligible record is repaired in the
-same transaction, both allocation copies are updated, and the output is reopened
-to prove allocation safety and exact logical-payload preservation. The source
-image is never replaced. No other allocation condition is guessed or repaired.
-
-## Generated Image Writing
-
-The fresh-image writer APIs create HDS/SFS images from a small typed model. The
-current writer creates a new hard-disk image, partitions,
-volumes, current-format `SMPL` Wave Data objects, direct single-member `SBNK`
-Sample objects, equal-format two-member stereo `SBNK` Sample objects, and one
-explicitly bounded one-to-three-member `SBAC` / Program profile. These APIs do
-not require a template container image. Existing-image changes use the separate
-transactional alteration APIs described in [Writer And Alteration](write.md).
-
-Current Wave Data uses the shared [SMPL contract](sampler-data.md#smpl-wave-data-object):
-PCM transfer control `0x30`, explicit six-mode loop policy, and logical versus
-physical frame counts. Metadata remains inspectable when a different transfer
-control prevents audio decoding, preview, or audition.
-
-The first writer scope is intentionally narrow:
-
-- image size is capped at `2_147_483_648` bytes;
-- each generated partition is capped at `1_073_741_824` bytes;
-- audio input may use any libsndfile-supported container and subtype, but must
-  be mono for ordinary waveform import or stereo for one-call stereo-bank
-  import; sources are converted to signed 16-bit PCM and unsupported rates are
-  resampled with the soxr VHQ profile;
-- generated sampler objects are current `FSFSDEV3SPLX` `SMPL` and `SBNK` records;
-- generated `SBNK` objects link either one Wave Data member or a confirmed
-  left/right pair by authoritative member name and write matching cached
-  reference values;
-- generated disk headers include the bounded superblock compatibility block,
-  initialized sector-2 disk metadata, full primary and duplicate partition-header
-  sectors for the supported hard-disk metadata profile, and complete matching
-  first and second allocation bitmap copies;
-- generated directory records include the standard root system entries, directory-entry metadata tails, scaled bitmap/index geometry, and volume category directories used by A-series hard-disk images;
-- generated current `SMPL` object payloads use a `0x200` object header with compact waveform metadata at the current metadata offset and waveform data beginning after that header; generated storage includes the logical WAV frames plus a short compatibility tail while logical frame fields remain based on the input WAV;
-- generated current Sample (`SBNK`) object payloads use the current single-member
-  object span, populated default parameter/control block, and header fields for
-  a normal Sample that references one Wave Data (`SMPL`) object;
-- generated two-member stereo `SBNK` objects reference two physical mono SMPL
-  objects. The members must have matching 16-bit width, sample rate, and logical
-  frame count. One interleaved source can be split into those physical members
-  during import; extraction may render them as interleaved stereo again;
-- generated `SBNK` objects include the five derived signed Q13 Sample EQ biquad
-  coefficients at `SBNK+0x152..0x15b`. Fresh objects use the neutral default
-  vector; explicit EQ edits recompute the complete vector, while unrelated
-  template edits preserve it.
-- the initial SBAC/PROG profile uses the general supported image geometry. A
-  partition may contain multiple independently configured volumes. Each volume
-  may contain multiple groups of one through three mono children, with one
-  matching Program and direct mono control per group. Programs `001..128` assign their group to
-  receive channel `1` and their direct control to channel `2`.
-  Runtime handles, unused bank state, unused Program effect/controller blocks,
-  and unused Program tail state are zero; only the direct SBNK receives the
-  corresponding Program relationship bitmap.
-
-Treat this subsection as the fresh-image contract; use the alteration APIs for
-transactional insertion, deletion, rename, and repair of existing images. Use
-`axklib info`, `axklib validate`, and `axklib extract wav file` on generated
-images before testing them on hardware.
-
-Hardware loading has shown that sector 2, per-partition metadata sectors, and
-full partition-header sectors are part of the loadable generated-image contract.
-Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
-The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
-through eight equal partition slots. Given `N` partitions, `total_sectors` is
-`size_bytes / 512`, the slot span is
-`min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
-`3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
-must have at least 2045 partition sectors. Division remainder and capacity past
-the 1 GiB slot-span cap remain unused at the end of the image.
-
-That geometry and metadata algorithm has loaded successfully across one through
-eight partition indexes, smaller and capped slot spans, a division remainder,
-the 1 MiB minimum, and the 2 GiB maximum. Generated images with multiple
-volumes, multiple current `SMPL` objects, direct single-member `SBNK` objects,
-and isolated object-count growth have also loaded successfully. The tested
-generated SBNK root key, key range, and sample level fields are sampler-visible.
-Copying non-logical allocated-cluster tail bytes was not required. axklib treats
-those tail bytes as storage padding unless a later compatibility case proves
-otherwise.
-
-The writer constructs the superblock, partition table, sector-2 metadata,
-partition headers, both complete allocation bitmap copies, directory index,
-and object payload extents from the typed image model. Fields with known formulas, such as
-partition slot placement, partition-header start/count words, partition-index
-words, leading formatter-transfer tokens, and dynamic header words, are
-generated explicitly.
-Partition headers are zero-initialized, and only the retained explicit fields
-are written. Former fixed nonzero tail bytes and the non-required residue range
-at `+0x1bc..+0x1e3` remain zero for generated images. Sector-2
-label-entry records and the `+0x30..+0x3e` range are deliberately zero-generated.
-
-
-### Writer Compatibility Metadata
-
-The writer keeps compatibility metadata explicit and computes geometry-dependent
-values from small formulas. It does not copy broad binary templates.
-
-| Metadata area | Public contract |
-| --- | --- |
-| Superblock formatter-residue block at `+0x80..+0x9b` | Preserved as one fixed compatibility block. The writer does not interpret its seven words as geometry fields. |
-| Leading formatter-transfer token at sector `+0x00..+0x07` | Rendered as eight lowercase hexadecimal digits from base `ab432100` plus the bounded three-bit partition sequence. The base is not derived from disk geometry. |
-| Prior-token residue at sector `+0x09..+0x10` | Zero. |
-| Sector-2 range at `+0x30..+0x3e` | Zero. |
-| Former partition-header fixed tail bytes | Zero; retained tail words are written explicitly. |
-| Partition-header residue range at `+0x1bc..+0x1e3` | Zero. |
-| Partition-header `+0x14c` | Written as total image sectors for one or two partitions; for `N >= 3`, written as total image sectors minus `N - 2`. |
-| Partition-header `+0x194` | Written as zero for layouts with three or more partitions; otherwise uses the count marker required by one- and two-partition layouts. |
-
-These fields are part of the compatibility envelope for generated images.
-Applications should use the typed writer or JSON manifest rather than
-constructing them manually.
-
-## Raw File Editing
-
-`axklib/filesystem_edit.hpp` provides `write_sfs_file_edits` for raw operations
-within one existing SFS partition. It publishes a new destination image and
-refuses an existing destination, including the source path. The native
-application service and `images.filesystem.edit` job provide journaled in-place
-SFS edits. The Files workspace supports empty directory creation, confirmed
-batch file/recursive-directory deletion, batch Add files, and raw file/directory
-export through the existing workspace or desktop destination pickers. Add files
-reviews source snapshots, editable destination names and per-file Skip/Replace
-choices before one atomic submission. Import from disk adds recursive workspace
-directory contents through the same review, including empty directories and
-directory merging. The source folder itself is not added as a wrapper; symlinks
-and special files are excluded. The same workspace controls support admitted
-[FAT16 roots](media.md#internal-edit-preparation), using their native name and
-attribute constraints. Native drag/drop remains unfinished.
-
-- `CreateFilesystemDirectory` creates an empty directory containing only `.`
-  and `..`. An existing directory is merged; an existing file is a conflict.
-- `PutFilesystemFile` takes an immutable `RandomAccessReader`. Existing files
-  default to Skip; Replace must be explicit. A directory/file collision fails.
-  Replacing one of several names for a file preserves the other names' data.
-- `RemoveFilesystemEntry` removes a file or empty directory. Removing a
-  nonempty directory requires explicit recursive confirmation.
-
-Paths are component vectors relative to the selected partition root. New names
-use 1 to 23 printable ASCII bytes, without slash, backslash, `.` or `..` path
-components. Root/support records and support-directory descendants are protected,
-including access through another name. Filesystem links and allocation must be
-consistent before editing; sampler-object relationships are neither required
-nor repaired. A raw edit can therefore make a sampler assignment unresolved.
-
-Input files and source images must remain immutable while the operation runs;
-applications must coordinate path leases and session revisions. Content hashes
-are rechecked before publication. Image/file copying uses bounded 1-MiB chunks;
-directory buffers are loaded only when needed. The output is reopened and
-validated before atomic create-only publication. Cancellation, failed input
-reads, allocation exhaustion and changed input content discard the candidate.
-Untouched payloads and index records are preserved; edits update the necessary
-directory, extent, reference-count and bitmap fields. Unknown native attributes
-remain preserved rather than being translated into POSIX permissions.
-
-The shared planner first validates a read-only candidate and produces sorted,
-non-overlapping reader-backed patches. Separate-output publication and native
-session edits use this same plan. No complete candidate image or imported file
-needs to be buffered in memory.
-
-`axklib/filesystem_import.hpp` provides `inspect_sfs_file_import` for ordered
-path/type review before supplying file readers. It uses the writer's path rules,
-metadata protection and filesystem admission. Per-row decisions distinguish new
-directories, merged directories, new files, skipped files, replacement files and
-blocking conflicts. It tracks preceding incoming entries and directory aliases
-so their collisions follow the same Skip/Replace behavior as execution. Replacing
-one name of a multiply linked file leaves its other names unchanged. Reviews
-accept up to 10,000 entries and bound cached path/directory entries to 250,000;
-exceeding the cache limit fails the complete review. No imported payloads are
-read, no image bytes change and no disk space is reserved. A successful path
-review does not establish that the subsequent batch fits available allocation.
-
-At the application layer, `apply_filesystem_edits` requires the owning session,
-its expected revision and an exclusive path lease. Its Files admission is
-separate from sampler-object geometry rules. Original and replacement ranges
-are frozen in the normal alteration journal before modifying the source. A
-successful commit refreshes the session and increments its revision. A confirmed
-rollback is checked against the original image hash and refreshes native file
-access metadata without changing the session revision or logical identities.
-Input changes, cancellation and rejected plans remain failures, not partial
-successes.
-
-`ImageSessionManager::resolve_filesystem_edits` resolves opaque Files entry IDs
-against the owning session and expected revision. Create/import destinations
-use path-component vectors relative to an existing directory; delete requests
-identify an existing entry. The resolver uses stored ancestry and a structured
-partition map, not parsed IDs or display paths. A batch must stay within one
-partition. The executor rechecks the revision when acquiring mutation access.
-Directory aliases receive distinct traversal identities; clients must revalidate
-the selected path when refreshing after a revision change.
-
-The job accepts sandbox `FileRef` or completed `UploadRef` inputs and requires
-explicit acknowledgement that raw changes may break sampler relationships.
-Each `PUT_FILE` also requires the exact `expectedSource` snapshot returned by
-the cancellable `filesystem.inputs.inspect` job: source revision, size and
-SHA-256. Inputs are checked before mutation and within journal commit validation;
-changed content or host-file identity requires inspection and review again.
-Snapshots do not pin files or keep uploads alive between review and execution.
-Source-file reservations and upload leases last for the operation. The job is
-an execution primitive, not a persisted review plan or a GUI mutation command.
-
-Host regressions cover empty files, directory growth, fragmented continuation
-extents, alias replacement, native attributes, protected metadata, collisions,
-streaming failures, cancellation, partition isolation and sampler-authored
-payload preservation. These checks are not hardware or release certification.
+The generated A-series geometry and compatibility fields are specified in
+[Writer And Alteration](write.md#a-series-formatted-layout). They do not define
+valid defaults for arbitrary existing SFS media.
 
 ## Minimal Read Walkthrough
 
@@ -762,7 +406,6 @@ A minimal SFS reader performs these steps:
 5. Walk 72-byte index records using the 14-record-per-block mapping.
 6. Read directory payloads and match entry `link_id` values to SFS IDs.
 7. For each object file entry, read extents and return logical payload bytes.
-8. Pass `FSFSDEV3SPLX` payloads to the sampler-data decoder.
-9. Attach SFS placement metadata to every decoded object.
-10. Compare both allocation copies with each other and with extents reconstructed
+8. Interpret `FSFSDEV3SPLX` payloads using their own type-specific layouts.
+9. Compare both allocation copies with each other and with extents reconstructed
     from the index before allowing any mutation.

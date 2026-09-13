@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -59,5 +61,12 @@ struct State {
                                  const CancellationToken &cancellation);
 void bytes_patch(State &state, std::uint64_t offset, std::vector<std::byte> bytes);
 [[nodiscard]] Result<void> validate(const Container &container, PartitionIndex partition);
+
+using PrepareEdits = std::function<Result<detail::PreparedFilesystemEdits>(std::shared_ptr<const RandomAccessReader>)>;
+[[nodiscard]] Result<PublicationOutcome> publish(const std::filesystem::path &source,
+                                                 const std::filesystem::path &destination, PartitionIndex partition,
+                                                 std::span<const std::shared_ptr<const RandomAccessReader>> inputs,
+                                                 const PrepareEdits &prepare, const CancellationToken &cancellation,
+                                                 ProgressSink *progress);
 
 } // namespace axk::sfs_files

@@ -16,6 +16,44 @@
 
 namespace {
 
+TEST(ImageSessionContract, SystemContextsRequireStorageRevisionAndAllStoredParts) {
+    const axk::server::OpenApiValidator validator;
+    nlohmann::json parts = nlohmann::json::array();
+    for (int index = 0; index < 32; ++index) {
+        const std::string port = index < 16 ? "A" : "B";
+        const auto channel = index % 16 + 1;
+        const auto label = port + (channel < 10 ? "0" : "") + std::to_string(channel);
+        parts.push_back({{"partNumber", index + 1},
+                         {"partLabel", label},
+                         {"midi", {{"port", port}, {"channel", channel}, {"display", label}}},
+                         {"programNumber", index + 1},
+                         {"master", index == 31}});
+    }
+    nlohmann::json context{{"fileKind", "SYSTEM2"},
+                           {"availability", "AVAILABLE"},
+                           {"storageRevision", 0},
+                           {"savedProgramMode", "MULTI"},
+                           {"basicReceive", {{"port", "B"}, {"channel", 16}, {"display", "B16"}}},
+                           {"omni", false},
+                           {"programChangeEnabled", true},
+                           {"parts", parts}};
+    for (const auto revision : std::array{0, 1}) {
+        context["storageRevision"] = revision;
+        EXPECT_TRUE(validator.validate("SystemProgramContext", context)) << context.dump();
+    }
+    context["storageRevision"] = 2;
+    EXPECT_FALSE(validator.validate("SystemProgramContext", context));
+    context["storageRevision"] = 0;
+    context["model"] = "A4000";
+    EXPECT_FALSE(validator.validate("SystemProgramContext", context));
+    context.erase("model");
+    context["parts"].erase(context["parts"].begin() + 16, context["parts"].end());
+    EXPECT_FALSE(validator.validate("SystemProgramContext", context));
+    context["parts"] = parts;
+    context.erase("storageRevision");
+    EXPECT_FALSE(validator.validate("SystemProgramContext", context));
+}
+
 TEST(ImageSessionContract, AcceptsEverySerializedFloppyMarker) {
     const axk::server::OpenApiValidator validator;
     axk::app::ImageSessionSummary summary;

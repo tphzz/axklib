@@ -7,6 +7,10 @@ every in-repository producer, consumer, test, and summary together.
 
 | Subject | Authoritative current specification |
 | --- | --- |
+| Stored sampler object bytes and relationships | [Sampler Data Structures](sampler-data.md) |
+| SYSTEM/SYSTEM2 configuration layout and unspecified state | [System Files](system-files.md) |
+| Native Sequence timeline | [Sequence Data](sequences.md) |
+| Sequence transfer and MIDI conversion | [Sequence Transfer And MIDI Conversion](sequence-midi.md) |
 | Writer admission, mandatory planning, and source preservation | [Writer And Alteration](write.md) |
 | SFS allocation copies and integrity validation | [SFS Filesystem](sfs-filesystem.md) |
 | Read-only A3K archive envelope and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
