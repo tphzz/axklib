@@ -262,6 +262,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
                                                                       "images.alter.partitions",
                                                                       "images.alter.objects",
                                                                       "images.package.import",
+                                                                      "images.floppy.import",
                                                                       "images.deletion.orphans.inspect",
                                                                       "images.programs.generate.inspect",
                                                                       "images.programs.generate",

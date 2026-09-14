@@ -5,6 +5,7 @@ export type PickerParentDialog =
     | 'audio-import'
     | 'companion-disks'
     | 'package-import'
+    | 'floppy-import'
     | 'package-export'
     | 'volume-package-export'
     | 'filesystem-export'

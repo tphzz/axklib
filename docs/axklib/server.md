@@ -743,6 +743,25 @@ preview. Edited names are submitted as indexed overrides in a replacement plan.
 Applying the accepted token creates the complete set in one journaled image
 mutation and one session revision; any failure rolls back every volume.
 
+Writable A-series SFS sessions also advertise `images.floppy.import`. Submit
+one FAT floppy or up to 32 companion images to `images.floppy_import.inspect`
+using admitted `DISK_IMAGE` uploads or workspace file references. The completed
+job identifies A-series, SU700, TX16W or unrelated content. A-series results
+include an owner-scoped inspection token, disk-set completeness, selectable
+objects, required dependencies, and excluded configuration or auxiliary files.
+Incomplete sets cannot be imported; unrelated disks cannot form a batch.
+
+Call `images.floppy_import.plan` with the inspection token, selected object
+keys, destination, image ID and expected revision. It uses the same conflicts,
+Program slot placement and opaque Sequence decisions as package import, without
+requiring an intermediate archive. Apply its token with `images.floppy_import`;
+the existing transaction publishes the complete selection in one revision.
+Source changes, expired inspections and stale destination revisions are rejected.
+Release unused inspections with `images.floppy_import.release` and unused plans
+with `images.package_import.release`. Inspections expire after 15 minutes;
+each source is limited to 4 MiB and retained inspections have a shared 512 MiB
+reservation budget. SYSTEM and SYSTEM2 files are not imported as sampler objects.
+
 SFS and ISO9660 sessions additionally advertise
 `images.volume_package_export` on partition-like content nodes. First call
 `images.volume_package_export.inspect` with the image ID, expected revision,

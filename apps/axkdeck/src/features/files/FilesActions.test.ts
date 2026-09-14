@@ -98,6 +98,22 @@ async function setup(
 }
 
 describe('Files mutation controls', () => {
+    it('does not turn semantic image import into permission to write raw files', async () => {
+        const open = vi.fn().mockResolvedValue(false);
+        const { view, imports, controller } = await setup(false, false, true, {
+            label: 'Import floppy...',
+            enabled: true,
+            busy: false,
+            open,
+        });
+        await fireEvent.drop(view.getByRole('treegrid'), {
+            dataTransfer: { types: ['Files'], items: [], files: [new File(['x'], 'ordinary.dat')] },
+        });
+        await waitFor(() => expect(open).toHaveBeenCalledOnce());
+        await waitFor(() => expect(controller.error).toContain('Raw file import is not available'));
+        expect(imports!.upload).not.toHaveBeenCalled();
+        expect(view.queryByRole('dialog')).toBeNull();
+    });
     it('retains Refresh recovery when rename saved but listing failed', async () => {
         const { view, driver, controller } = await setup();
         await fireEvent.click(view.getAllByRole('row')[0]);

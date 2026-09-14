@@ -26,6 +26,8 @@
 #include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/catalog.hpp"
+#include "axklib/io.hpp"
 #include "axklib/package.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/writer.hpp"
@@ -391,6 +393,21 @@ class PackageOperationsTest : public testing::Test {
         return found == read->volume_scopes_by_id.end() ? std::string{} : found->first;
     }
 
+    void write_floppy() {
+        const auto path = root_ / "mixed-roots.hds";
+        auto reader = axk::FileReader::open(path);
+        ASSERT_TRUE(reader);
+        const auto media = axk::open_media(path);
+        ASSERT_TRUE(media);
+        const auto catalog = axk::build_object_catalog(*media);
+        ASSERT_TRUE(catalog);
+        ASSERT_FALSE(catalog->objects.empty());
+        axk::MediaConversionRequest request;
+        request.volume_directory_id = catalog->objects.front().placement->volume_directory.value;
+        auto written = axk::write_media_conversion(*reader, path, request, root_ / "source.img");
+        ASSERT_TRUE(written) << written.error().message;
+    }
+
     std::filesystem::path root_;
     std::unique_ptr<axk::app::Sandbox> sandbox_;
     std::unique_ptr<axk::app::UploadStore> uploads_;
@@ -597,6 +614,82 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_EQ(refreshed->revision, 2U);
     EXPECT_GT(refreshed->object_count, opened->object_count);
+}
+
+TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVolumeAtomically) {
+    write_floppy();
+    const nlohmann::json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    const auto inspected = registry_.invoke("images.floppy_import.inspect", {{"sources", {source}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("format"), "A_SERIES");
+    EXPECT_TRUE(inspected->at("complete").get<bool>());
+    EXPECT_TRUE(inspected->at("nextRequiredIndex").is_null());
+    const auto token = inspected->at("inspectionToken").get<std::string>();
+    auto stranger = context();
+    stranger.owner_id = "stranger";
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.release", {{"inspectionToken", token}}, stranger));
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    const auto &objects = inspected->at("objects");
+    const auto sample = std::ranges::find_if(
+        objects, [](const auto &entry) { return entry.at("objectType") == "SBNK" && entry.at("name") == "Direct"; });
+    ASSERT_NE(sample, objects.end());
+    const nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"inspectionToken", token},
+        {"selectedObjectKeys", {sample->at("objectKey")}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "From floppy"}}}};
+    const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_TRUE(plan->at("valid").get<bool>()) << *plan;
+    EXPECT_EQ(plan->at("actions").size(), 2U);
+    EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
+    auto invalid = request;
+    invalid["selectedObjectKeys"] = nlohmann::json::array();
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", invalid, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, stranger));
+    EXPECT_TRUE(registry_.invoke("images.floppy_import.release", {{"inspectionToken", token}}, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+    const auto applied = registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_EQ(applied->at("revision"), 2U);
+    EXPECT_TRUE(applied->at("applied").get<bool>());
+    EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+    const auto refreshed = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(refreshed);
+    EXPECT_EQ(refreshed->object_count, 2U);
+    EXPECT_FALSE(volume_content_id(*refreshed, "From floppy").empty());
+}
+
+TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWriting) {
+    write_floppy();
+    const auto before = read_bytes(root_ / "target.hds");
+    const nlohmann::json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    const auto inspected = registry_.invoke("images.floppy_import.inspect", {{"sources", {source}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    const auto &objects = inspected->at("objects");
+    const auto wave = std::ranges::find_if(objects, [](const auto &entry) { return entry.at("objectType") == "SMPL"; });
+    ASSERT_NE(wave, objects.end());
+    const nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"inspectionToken", inspected->at("inspectionToken")},
+        {"selectedObjectKeys", {wave->at("objectKey")}},
+        {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
+    const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    {
+        std::fstream stream{root_ / "source.img", std::ios::binary | std::ios::in | std::ios::out};
+        ASSERT_TRUE(stream);
+        stream.put('X');
+    }
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+    EXPECT_EQ(read_bytes(root_ / "target.hds"), before);
+    EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
 }
 
 TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomicallyFromPlacementHints) {

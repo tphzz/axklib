@@ -55,6 +55,7 @@ export type ImageTreeAction =
     | 'inspect-allocation'
     | 'repair-placement'
     | 'import-packages'
+    | 'import-floppy'
     | 'export-package'
     | 'export-volume-packages'
     | 'export-volume-floppies'

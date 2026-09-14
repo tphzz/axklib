@@ -393,6 +393,7 @@
     >
         {#if activeSubmenu === 'import'}
             <button type="button" role="menuitem" onclick={() => choose('import-packages')}>Import packages…</button>
+            <button type="button" role="menuitem" onclick={() => choose('import-floppy')}>Import floppy…</button>
         {:else if activeSubmenu === 'export'}
             {#if item.kind === 'partition'}
                 {#if volumePackageExportEnabled}

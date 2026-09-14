@@ -20,6 +20,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/floppy_import.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -506,6 +507,24 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     EXPECT_EQ(incomplete->status(), axk::FloppySetStatus::incomplete);
     EXPECT_EQ(incomplete->next_required_index(), 2U);
 
+    const auto partial_import = axk::FloppyImportSource::open({members.front()});
+    ASSERT_TRUE(partial_import) << partial_import.error().message;
+    EXPECT_FALSE(partial_import->inspection().complete);
+    EXPECT_EQ(partial_import->inspection().next_required_index, 2U);
+    EXPECT_FALSE(partial_import->prepare(std::array{std::string{"anything"}}));
+    const auto last_only = axk::FloppyImportSource::open({members.back()});
+    ASSERT_TRUE(last_only) << last_only.error().message;
+    EXPECT_FALSE(last_only->inspection().complete);
+    EXPECT_EQ(last_only->inspection().next_required_index, 1U);
+    EXPECT_FALSE(axk::FloppyImportSource::open({members.front(), members.front()}));
+    auto reversed_members = members;
+    std::ranges::reverse(reversed_members);
+    const auto import_source = axk::FloppyImportSource::open(std::move(reversed_members));
+    ASSERT_TRUE(import_source) << import_source.error().message;
+    ASSERT_EQ(import_source->inspection().objects.size(), 5U);
+    EXPECT_TRUE(import_source->inspection().complete);
+    EXPECT_EQ(import_source->inspection().members.front().index, 1U);
+
     const auto complete = axk::FloppyDiskSet::open(std::move(members), "loose set");
     ASSERT_TRUE(complete) << complete.error().message;
     EXPECT_EQ(complete->status(), axk::FloppySetStatus::complete);
@@ -513,6 +532,27 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     const auto complete_objects = complete->objects();
     ASSERT_TRUE(complete_objects) << complete_objects.error().message;
     ASSERT_EQ(complete_objects->size(), 5U);
+    const axk::MediaContainer import_media{*complete};
+    for (const auto &object : import_source->inspection().objects) {
+        EXPECT_TRUE(object.exclusion_reason.empty()) << object.name << ": " << object.exclusion_reason;
+        const auto direct = import_source->prepare(std::array{object.key});
+        ASSERT_TRUE(direct) << direct.error().message;
+        axk::PackageRootSelector root;
+        root.object_key = object.key;
+        root.kind = direct->roots.front().kind;
+        const auto archived = axk::build_portable_package(import_media, std::array{root});
+        ASSERT_TRUE(archived) << archived.error().message;
+        EXPECT_EQ(direct->package_id, archived->package.package_id);
+        EXPECT_EQ(direct->nodes, archived->package.nodes);
+        EXPECT_EQ(direct->relationships, archived->package.relationships);
+        if (object.type == axk::ObjectType::smpl) {
+            EXPECT_EQ(direct->nodes.size(), 1U);
+            EXPECT_TRUE(object.required_object_keys.empty());
+        } else {
+            EXPECT_GT(direct->nodes.size(), 1U);
+            EXPECT_FALSE(object.required_object_keys.empty());
+        }
+    }
     const auto source_objects = source_media->objects();
     ASSERT_TRUE(source_objects) << source_objects.error().message;
     const auto source_wave = std::ranges::find_if(*source_objects, [](const axk::MediaObject &object) {

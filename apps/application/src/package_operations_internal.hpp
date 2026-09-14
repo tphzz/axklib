@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,6 +42,7 @@ struct VerifiedPackageSet {
     std::vector<PackageInput> inputs;
     std::vector<axk::PortablePackage> packages;
     std::uint64_t retained_payload_bytes{};
+    std::function<Result<void>(const CancellationToken &)> verify_sources{};
 };
 
 struct SessionPackagePlanRecord {

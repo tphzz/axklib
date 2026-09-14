@@ -2079,7 +2079,7 @@ describe('App panel layout', () => {
         window.dispatchEvent(mixedDrop);
         const unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
         expect(
-            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
+            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and floppy images separately.'),
         ).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();

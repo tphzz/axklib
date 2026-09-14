@@ -285,6 +285,28 @@ files, not a populated authored-volume image. Empty ISO9660 creation is not
 offered; use the ISO authoring or conversion workflows when object content is
 available.
 
+### Import A-series floppy images
+
+Drop an A3000/A4000/A5000 `.img` or `.ima` onto a writable A-series image,
+or choose **Import > Import floppy** on a partition or volume. This works in
+Device and Files modes without exporting a portable package first. Files mode
+uses the selected directory's corresponding volume, a selected file's parent,
+or the active partition when nothing is selected.
+
+Choose one ordinary floppy or the companion images of one disk set, up to
+32 members. Content inspection distinguishes A-series, SU700 and TX16W disks;
+unrelated disks cannot be combined. Add any missing companions before continuing.
+Select the objects to import; required dependencies remain included and locked.
+SYSTEM/SYSTEM2 and auxiliary files are shown as excluded, not imported.
+
+Choose **Existing** or **New** for the destination volume, then **Review**.
+Resolve naming or Program slot conflicts using the same controls as package
+import and choose **Import**. The complete selection is applied atomically.
+Clean completion closes the dialog after cleanup and workspace refresh; a
+refresh failure offers **Refresh**, not another write. An uncertain outcome
+offers **Check status** only when the server job identity is available.
+Explicit **Add files** in Files mode remains a raw-file operation where supported.
+
 ### Import and export portable packages
 
 Right-click a volume in the image sidebar to import or export an axklib

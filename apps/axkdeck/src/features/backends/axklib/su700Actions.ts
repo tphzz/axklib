@@ -2,13 +2,17 @@ import type { FilesystemImportActions } from '../../../lib/filesystemImport';
 import type { Su700Request } from '../../../lib/su700Import';
 import type { JobState, ImageTransport } from '../../../lib/transport';
 import type { JobController } from '../../jobs/actions';
+import type { FloppyImportWorkflow } from '../../import/floppyWorkflow.svelte';
 
 export interface Su700ImportActions {
     run(request: Su700Request, update: (job: JobState) => void): Promise<JobState>;
     observe(jobId: number, update: (job: JobState) => void): Promise<JobState>;
     cancel(jobId: number): Promise<void>;
 }
-export type AxklibFilesystemImports = FilesystemImportActions & { su700?: Su700ImportActions };
+export type AxklibFilesystemImports = FilesystemImportActions & {
+    su700?: Su700ImportActions;
+    floppy?: FloppyImportWorkflow;
+};
 
 export function bindSu700Imports(
     dependencies: {

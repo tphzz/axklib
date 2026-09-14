@@ -1,5 +1,6 @@
 #include "axklib/application/operation_registry.hpp"
 #include "operation_registry_filesystem.hpp"
+#include "operation_registry_floppy.hpp"
 
 #include <algorithm>
 #include <array>
@@ -666,6 +667,10 @@ axk::app::OperationRegistry axk::app::make_operation_registry() {
             std::terminate();
     }
     for (const auto &descriptor : filesystem_descriptors()) {
+        if (!registry.declare(descriptor))
+            std::terminate();
+    }
+    for (const auto &descriptor : floppy_import_descriptors()) {
         if (!registry.declare(descriptor))
             std::terminate();
     }

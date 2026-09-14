@@ -209,7 +209,7 @@
             !exportBlocked &&
             !!driver &&
             !!imports?.supportsClientUploads &&
-            !!controller.capabilitiesFor(target.rootId)?.putFile
+            (!!controller.capabilitiesFor(target.rootId)?.putFile || !!imageImport?.enabled)
         );
     }
 
@@ -226,7 +226,7 @@
             resolving = true;
             try {
                 const entries = await read(new AbortController().signal, () => undefined);
-                if (!unchanged() || (await boundImageImport.open(entries))) return;
+                if (!unchanged() || (await boundImageImport.open(entries, target))) return;
                 if (!unchanged()) return;
                 read = async () => entries;
             } catch (error) {
@@ -244,6 +244,10 @@
         }
         if (!unchanged()) return;
         const capabilities = current.capabilitiesFor(target.rootId)!;
+        if (!capabilities?.putFile) {
+            current.error = 'Raw file import is not available for this filesystem.';
+            return;
+        }
         if (importer.open(revision, target, capabilities, boundImports, boundDriver))
             await importer.chooseDropped(read);
     }
@@ -337,7 +341,13 @@
             ? () => void openDestination('directory-import')
             : undefined}
         additionalImports={imageImport?.enabled && !imageImport.busy && !exportBlocked
-            ? [{ label: imageImport.label, action: () => void imageImport?.open() }]
+            ? [
+                  {
+                      label: imageImport.label,
+                      action: () =>
+                          void imageImport?.open(undefined, controller.selected ?? controller.root ?? undefined),
+                  },
+              ]
             : []}
         ondelete={canDelete ? deleteSelection : undefined}
         onrename={canRename ? renameSelection : undefined}

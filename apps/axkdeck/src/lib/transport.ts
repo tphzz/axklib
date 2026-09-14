@@ -1,6 +1,9 @@
 import type { DiskTreeItem } from './types';
+import type { HardDiskCreationProfile, HardDiskCreationProfileId } from './hardDiskCreation';
+export type * from './hardDiskCreation';
 import type { FilesystemTransport } from './filesystem';
 import type { Su700Transport } from './su700Import';
+import type { FloppyTransport } from './floppyImport';
 import type {
     DirectoryListing,
     DirectoryLocation,
@@ -316,21 +319,6 @@ export interface PlanSummary {
     planToken?: string;
 }
 
-export type HardDiskCreationProfileId = 'FLOPPY_SCALE' | 'CD_R_650' | 'CD_R_700' | 'HDS_1_GIB' | 'HDS_2_GIB';
-
-export interface HardDiskCreationPartitionOption {
-    partitionCount: number;
-    partitionSizeBytes: number;
-    unusedTailBytes: number;
-}
-
-export interface HardDiskCreationProfile {
-    profileId: HardDiskCreationProfileId;
-    sizeBytes: number;
-    defaultPartitionCount: number;
-    partitionOptions: HardDiskCreationPartitionOption[];
-}
-
 export interface JobState {
     jobId: number;
     kind: string;
@@ -474,7 +462,8 @@ export interface ImageOpenOptions {
     onUpdate?: (job: JobState) => void;
 }
 
-export interface ImageTransport extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport {
+export interface ImageTransport
+    extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport, FloppyTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;

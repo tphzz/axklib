@@ -36,6 +36,7 @@ interface AppDialogState {
     connectionSettings: unknown;
     mutation: MutationDialogState;
     packageImport: RequestDialogState;
+    floppyImport?: RequestDialogState;
     packageBatchImport: RequestDialogState;
     exports: ExportDialogState;
     volumePackages: RequestDialogState;
@@ -60,6 +61,7 @@ export function hasOpenAppDialog(state: AppDialogState): boolean {
         state.mutation.objectRenameRequest,
         state.mutation.sampleBankAssignmentRequest,
         state.packageImport.request,
+        state.floppyImport?.request,
         state.packageBatchImport.request,
         state.exports.packageRequest,
         state.volumePackages.request,

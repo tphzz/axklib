@@ -17,8 +17,7 @@
     import { VolumeFloppyExportWorkflow } from '../../../features/export/volumeFloppyWorkflow.svelte';
     import { AudioImportWorkflow } from '../../../features/import/audioWorkflow.svelte';
     import { MediaDropWorkflow } from '../../../features/import/mediaDropWorkflow.svelte';
-    import { PackageImportWorkflow } from '../../../features/import/packageWorkflow.svelte';
-    import { PackageBatchImportWorkflow } from '../../../features/import/packageBatchWorkflow.svelte';
+    import { createObjectImports } from '../../../features/import/createObjectImports';
     import { PackagePickerHistory } from '../../../features/import/packagePickerHistory';
     import { SequenceImportWorkflow } from '../../../features/import/sequenceWorkflow.svelte';
     import { Tx16wImportWorkflow } from '../../../features/import/tx16wWorkflow.svelte';
@@ -85,6 +84,7 @@
         sessionId: () => imageSessionWorkflow.sessionId,
         invalidateSession: (id) => auditionWorkflow.invalidateSession(id),
         refreshSession: () => imageSessionWorkflow.refresh(),
+        floppy: () => floppyImportWorkflow,
     });
     const exportWorkflow = new ExportWorkflow({
         transport,
@@ -165,7 +165,7 @@
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });
-    const packageImportWorkflow = new PackageImportWorkflow({
+    const { packageImportWorkflow, packageBatchImportWorkflow, floppyImportWorkflow } = createObjectImports({
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -178,19 +178,21 @@
         mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
         selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         sourceItems: () => imageSessionWorkflow.sourceItems,
-    });
-    const packageBatchImportWorkflow = new PackageBatchImportWorkflow({
-        transport,
-        jobs: jobController,
-        picker: pickerController,
-        pickerHistory: packagePickerHistory,
-        isDesktop,
-        sessionId: () => imageSessionWorkflow.sessionId,
-        invalidateSession: (sessionId) => auditionWorkflow.invalidateSession(sessionId),
-        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
-        setStatus: (status) => imageSessionWorkflow.setStatus(status),
-        mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
-        sourceItems: () => imageSessionWorkflow.sourceItems,
+        otherFormat: async (format, sources, target) => {
+            if (format === 'TX16W')
+                await tx16wImportWorkflow.requestDroppedFiles(
+                    sources,
+                    target?.kind === 'volume' && target.partitionIndex !== undefined
+                        ? { partitionIndex: target.partitionIndex, volumeName: target.name }
+                        : null,
+                );
+            else
+                imageSessionWorkflow.setStatus(
+                    format === 'SU700'
+                        ? 'Import SU700 floppies into a SU700 hard disk in Files mode.'
+                        : 'No supported sampler floppy contents were found.',
+                );
+        },
     });
     const deletionWorkflow = new DeletionWorkflow({
         transport,
@@ -307,6 +309,7 @@
         sequenceImport: sequenceImportWorkflow,
         tx16wImport: tx16wImportWorkflow,
         packageImport: packageImportWorkflow,
+        floppyImport: floppyImportWorkflow,
         packageBatchImport: packageBatchImportWorkflow,
         sessionId: () => imageSessionWorkflow.sessionId,
         imageFormat: () => imageSessionWorkflow.imageFormat,
@@ -320,6 +323,7 @@
         mutation: mutationWorkflow,
         directComputer: directComputerWorkflow,
         packageBatchImport: packageBatchImportWorkflow,
+        floppyImport: floppyImportWorkflow,
         exports: exportWorkflow,
         volumePackages: volumePackageExportWorkflow,
         volumeFloppies: volumeFloppyExportWorkflow,
@@ -336,6 +340,7 @@
         volumeFloppies: volumeFloppyExportWorkflow,
         mediaExports: mediaExportWorkflow,
         packageImport: packageImportWorkflow,
+        floppyImport: floppyImportWorkflow,
         deletion: deletionWorkflow,
         programGeneration: programGenerationWorkflow,
         extentRepairs: extentLayoutRepairWorkflow,
@@ -358,6 +363,7 @@
         programAssignmentCleanupWorkflow.dispose();
         pickerController.dispose();
         void packageImportWorkflow.dispose();
+        void floppyImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
         void tx16wImportWorkflow.close();
         void jobController.dispose();
@@ -386,6 +392,7 @@
             connectionSettings,
             mutation: mutationWorkflow,
             packageImport: packageImportWorkflow,
+            floppyImport: floppyImportWorkflow,
             packageBatchImport: packageBatchImportWorkflow,
             exports: exportWorkflow,
             volumePackages: volumePackageExportWorkflow,
@@ -669,6 +676,7 @@
             closeConnectionSettings={() => (connectionSettings = null)}
             mutation={mutationWorkflow}
             packageImport={packageImportWorkflow}
+            floppyImport={floppyImportWorkflow}
             packageBatchImport={packageBatchImportWorkflow}
             exports={exportWorkflow}
             volumePackages={volumePackageExportWorkflow}

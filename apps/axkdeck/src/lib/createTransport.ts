@@ -38,6 +38,18 @@ import type {
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    startFloppyInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    releaseFloppyInspection(): Promise<void> {
+        return this.unavailable();
+    }
+    planFloppyImport(): Promise<ImageSessionPackageImportPlan> {
+        return this.unavailable();
+    }
+    startFloppyImport(): Promise<JobState> {
+        return this.unavailable();
+    }
     startSu700Import(): Promise<JobState> {
         return Promise.reject(new Error('No server connection'));
     }

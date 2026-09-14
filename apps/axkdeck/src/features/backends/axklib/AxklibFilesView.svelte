@@ -3,6 +3,7 @@
     import FilesView from '../../files/FilesView.svelte';
     import Su700ImportDialog from './Su700ImportDialog.svelte';
     import { Su700Workflow } from './su700Workflow.svelte';
+    import { openASeriesFloppy } from './floppyFilesImport';
     import type { AxklibFilesystemImports } from './su700Actions';
     import type { FilesController } from '../../files/controller.svelte';
     import type { FilesystemEntry, FilesystemMutationDriver } from '../../../lib/filesystem';
@@ -44,22 +45,41 @@
             : null,
     );
     const imageImport = $derived(
-        workflow
+        imports?.floppy?.available
             ? {
-                  label: 'Import SU700 floppy...',
-                  enabled: workflow.enabled,
-                  busy: workflow.opened,
-                  open: workflow.open.bind(workflow),
+                  label: 'Import floppy...',
+                  enabled: true,
+                  busy: !!imports.floppy.request,
+                  open: (
+                      entries?: import('../../../lib/filesystemImport').ClientFilesystemImportEntry[],
+                      target?: FilesystemEntry,
+                  ) => openASeriesFloppy(imports!.floppy!, controller, entries, target),
               }
-            : undefined,
+            : workflow
+              ? {
+                    label: 'Import SU700 floppy...',
+                    enabled: workflow.enabled,
+                    busy: workflow.opened,
+                    open: workflow.open.bind(workflow),
+                }
+              : undefined,
     );
     export function isBusy() {
-        return !!workflow?.opened || (view?.isBusy() ?? false);
+        return !!workflow?.opened || !!imports?.floppy?.request || (view?.isBusy() ?? false);
     }
     export function importRoot(root: FilesystemEntry) {
         view?.importRoot(root);
     }
     export function importCommands(root: FilesystemEntry) {
+        if (imports?.floppy?.available && !imports.floppy.request && !exportBlocked)
+            return [
+                {
+                    label: 'Import floppy...',
+                    action: async () => {
+                        await openASeriesFloppy(imports!.floppy!, controller, undefined, root);
+                    },
+                },
+            ];
         if (
             !workflow?.enabled ||
             workflow.opened ||

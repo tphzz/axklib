@@ -25,6 +25,7 @@ import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflo
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
+import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
 import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
@@ -53,6 +54,7 @@ interface SessionCollaborators {
     volumeFloppies: VolumeFloppyExportWorkflow;
     mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
+    floppyImport?: FloppyImportWorkflow;
     deletion: DeletionWorkflow;
     programGeneration: ProgramGenerationWorkflow;
     extentRepairs: ExtentLayoutRepairWorkflow;
@@ -640,6 +642,7 @@ export class ImageSessionWorkflow {
         collaborators.extentRepairs.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
+        await collaborators.floppyImport?.dispose();
         await this.controller.close();
         collaborators.clearExportSelection();
         this.companionSources = [];

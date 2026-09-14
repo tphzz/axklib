@@ -77,7 +77,7 @@ import {
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
-import { HttpImageSessionReads } from './httpImageSessionReads';
+import { HttpPackageTransport } from './httpPackageTransport';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
 import { HttpJobController } from './httpJobController';
@@ -95,25 +95,23 @@ import {
     volumeMutationOperation,
 } from './httpTransportWire';
 type HttpImageTransportConnection = AxklibApiConnection & { mode: Exclude<ConnectionMode, 'unavailable'> };
-export class HttpImageTransport extends HttpImageSessionReads implements ImageTransport {
+export class HttpImageTransport extends HttpPackageTransport implements ImageTransport {
     readonly storageMode = 'server' as const;
     readonly connectionMode: Exclude<ConnectionMode, 'unavailable'>;
     readonly supportsClientUploads = true;
     private readonly client: AxklibHttpApiClient;
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
-    private readonly packages: HttpPackageOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
 
     constructor(connection: HttpImageTransportConnection) {
         const client = new AxklibHttpApiClient(connection);
         const jobs = new HttpJobController(client);
         const imageSessions = new HttpImageSessions(client, jobs);
-        super(imageSessions);
+        super(imageSessions, new HttpPackageOperations(client, jobs, imageSessions));
         this.client = client;
         this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
-        this.packages = new HttpPackageOperations(this.client, this.jobs, this.imageSessions);
         this.connectionMode = connection.mode;
     }
     sandboxRoots(): Promise<SandboxRoot[]> {
@@ -249,31 +247,6 @@ export class HttpImageTransport extends HttpImageSessionReads implements ImageTr
     }
     startPackageImport(planToken: string): Promise<JobState> {
         return this.packages.startImport(planToken);
-    }
-    planImagePackageImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        destination: ImageSessionPackageImportDestination,
-        renames: PackageRename[] = [],
-        programSlotAssignments: PackageProgramSlotAssignment[] = [],
-        replacePlanToken?: string,
-        opaqueSequenceDecisions: PackageOpaqueSequenceDecision[] = [],
-    ): Promise<ImageSessionPackageImportPlan> {
-        return this.packages.planImageImport(
-            sessionId,
-            sources,
-            destination,
-            renames,
-            programSlotAssignments,
-            replacePlanToken,
-            opaqueSequenceDecisions,
-        );
-    }
-    releaseImagePackageImportPlan(planToken: string): Promise<void> {
-        return this.packages.releaseImageImportPlan(planToken);
-    }
-    startImagePackageImport(planToken: string): Promise<JobState> {
-        return this.packages.startImageImport(planToken);
     }
     startImagePackageExport(
         sessionId: number,

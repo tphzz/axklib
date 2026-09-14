@@ -26,6 +26,8 @@
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
     import ExportProgressDialog from '../../lib/components/ExportProgressDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import FloppyImportDialog from '../../lib/components/FloppyImportDialog.svelte';
+    import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
@@ -77,6 +79,7 @@
         closeConnectionSettings: () => void;
         mutation: MutationWorkflow;
         packageImport: PackageImportWorkflow;
+        floppyImport: FloppyImportWorkflow;
         packageBatchImport: PackageBatchImportWorkflow;
         exports: ExportWorkflow;
         volumePackages: VolumePackageExportWorkflow;
@@ -115,6 +118,7 @@
         closeConnectionSettings,
         mutation,
         packageImport,
+        floppyImport,
         packageBatchImport,
         exports,
         volumePackages,
@@ -247,6 +251,9 @@
         onsubmit={(target) => void mutation.submitSampleBankAssignment(target)}
     />
 {/if}
+{#if floppyImport.request && pickerRequest?.parentDialog !== 'floppy-import'}<FloppyImportDialog
+        workflow={floppyImport}
+    />{/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}
     <PackageImportDialog
         completion={packageImport.completion}
@@ -582,13 +589,13 @@
         {#if mediaDrop.dragKind === 'mixed'}
             <strong>Drop one media type at a time</strong>
             <span>Use one media type per drop</span>
-        {:else if mediaDrop.dragKind === 'tx16w'}
+        {:else if mediaDrop.dragKind === 'floppy'}
             <strong
                 >{mediaDrop.dragTarget
-                    ? `Import TX16W disk set into ${mediaDrop.dragTarget.volumeName}`
-                    : 'Choose a target volume after dropping'}</strong
+                    ? `Import floppy into ${mediaDrop.dragTarget.volumeName}`
+                    : 'Import floppy images'}</strong
             >
-            <span>One or more TX16W Yamaha-format disk images (.img, .ima)</span>
+            <span>Floppy image or companion disk set (.img, .ima)</span>
         {:else if mediaDrop.dragKind === 'midi'}
             <strong
                 >{mediaDrop.dragTarget

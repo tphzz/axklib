@@ -2,6 +2,7 @@ import type { FilesystemImportEntry } from './filesystem';
 import type { InputFileLocation } from './storageLocations';
 import type { JobState } from './transport';
 import type { ClientUploadSource } from './clientUploadSource';
+import type { FilesystemEntry } from './filesystem';
 
 export type FilesystemImportSourceEntry =
     | { relativePath: string[]; directory: true }
@@ -20,7 +21,7 @@ export interface FilesystemImageImporter {
     label: string;
     enabled: boolean;
     busy: boolean;
-    open(entries?: ClientFilesystemImportEntry[]): Promise<boolean>;
+    open(entries?: ClientFilesystemImportEntry[], target?: FilesystemEntry): Promise<boolean>;
 }
 
 export interface FilesystemImportDriver {

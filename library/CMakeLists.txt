@@ -128,6 +128,7 @@ add_library(
   src/package.cpp
   src/package_archive.cpp
   src/package_build.cpp
+  src/floppy_import.cpp
   src/package_import.cpp
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
@@ -596,6 +597,8 @@ if(BUILD_TESTING)
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
     tests/package_test.cpp
+    tests/package_graph_test.cpp
+    tests/floppy_import_test.cpp
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp
