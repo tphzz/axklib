@@ -13,6 +13,7 @@
 #include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
+#include "axklib/sample_parameter_codec.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
@@ -164,10 +165,6 @@ Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, cons
 Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample_bank,
                                                     const std::map<std::string, SampleSpec> &samples,
                                                     const std::vector<std::uint8_t> &linked_programs = {});
-bool has_sample_parameter_values(const SampleParameters &parameters);
-Result<void> validate_sample_parameters(const SampleParameters &parameters);
-Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &parameters);
-void merge_sample_parameters(SampleParameters &destination, const SampleParameters &source);
 std::uint16_t sample_pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate);
 SampleSpec apply_sample_bank_parameter_overrides(const SampleSpec &sample, const SampleParameters &overrides);
 Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &parameters);

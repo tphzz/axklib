@@ -21,12 +21,6 @@ template <typename T> std::optional<T> known(T value, int minimum, int maximum) 
                                                                                   : std::optional<T>{value};
 }
 
-bool empty(const ProgramEffectParameters &value) {
-    return !value.enabled && !value.input_level && !value.output_level && !value.pan && !value.width &&
-           !value.destination && !value.type &&
-           std::ranges::none_of(value.parameters, [](const auto &word) { return word.has_value(); });
-}
-
 template <typename T> void put(std::span<std::byte> bytes, std::size_t offset, const std::optional<T> &value) {
     if (value)
         bytes[offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
@@ -35,6 +29,11 @@ template <typename T> void put(std::span<std::byte> bytes, std::size_t offset, c
 Error invalid(const char *message) { return make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, message); }
 
 } // namespace
+
+bool has_program_effect_parameter_values(const ProgramEffectParameters &value) {
+    return value.enabled || value.input_level || value.output_level || value.pan || value.width || value.destination ||
+           value.type || std::ranges::any_of(value.parameters, [](const auto &word) { return word.has_value(); });
+}
 
 ProgramEffectParameters decode_program_effect_parameters(const ProgEffectBlock &effect, std::size_t slot,
                                                          ProgramParameterGeneration generation) {
@@ -66,9 +65,9 @@ Result<void> apply_effect_parameter_block(std::span<std::byte, 40> block, const 
     const auto native = model == ASeriesModel::a3000;
     const auto recording = kind == EffectBlockKind::recording;
     if ((model != ASeriesModel::a3000 && model != ASeriesModel::a4000 && model != ASeriesModel::a5000) ||
-        (native && !recording) || slot >= (recording || model != ASeriesModel::a5000 ? 3U : 6U))
+        (native && kind == EffectBlockKind::program) || slot >= (recording || model != ASeriesModel::a5000 ? 3U : 6U))
         return std::unexpected{invalid("Effect block is not supported for the target model")};
-    if (empty(value))
+    if (!has_program_effect_parameter_values(value))
         return {};
     if (outside(value.input_level, 0, 127) || outside(value.output_level, 0, 127) || outside(value.pan, -63, 63) ||
         outside(value.width, -126, 0) ||
@@ -95,7 +94,7 @@ Result<void> apply_effect_parameter_block(std::span<std::byte, 40> block, const 
             if (auto written = writer.write_be16(8U + index * 2U, info->reset_words[index]); !written)
                 return written;
         }
-        if (!recording && slot < 3U)
+        if (!native && !recording && slot < 3U)
             block[7] = static_cast<std::byte>(info->legacy_type);
     }
     put(block, 0, value.enabled);
@@ -119,7 +118,7 @@ Result<void> apply_program_effect_parameters(std::span<std::byte> bytes, const P
                                              ProgramParameterWriteMode mode) {
     for (std::size_t slot = 0; slot < parameters.effects.size(); ++slot) {
         const auto &value = parameters.effects[slot];
-        if (empty(value))
+        if (!has_program_effect_parameter_values(value))
             continue;
         if (model != ASeriesModel::a5000 && slot >= 3U)
             return std::unexpected{invalid("Effects 4..6 require an A5000 target model")};

@@ -169,13 +169,19 @@ add_library(
   src/system_file.cpp
   src/system_file_patch.cpp
   src/sample_parameter_decode.cpp
+  src/sample_parameter_codec.cpp
   src/system_registered_program.cpp
   src/system_registered_sample.cpp
   src/system_recording.cpp
   src/system_global.cpp
   src/system_global_write.cpp
+  src/system_remix.cpp
   src/system_favorites.cpp
   src/system_panel.cpp
+  src/system_mlan.cpp
+  src/system_midi.cpp
+  src/system_disk.cpp
+  src/system_playback.cpp
   src/system_recording_write.cpp
   src/system_recording_configuration_write.cpp
   src/system_file_preparation.cpp
@@ -287,7 +293,6 @@ add_library(
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
   src/prog_write_codec.cpp
-  src/sample_parameter_codec.cpp
   src/sample_parameter_json.cpp
   src/program_parameter_json.cpp
   src/program_assignment_parameter_json.cpp
@@ -604,7 +609,14 @@ if(BUILD_TESTING)
     tests/system_global_write_test.cpp
     tests/system_favorites_test.cpp
     tests/system_panel_test.cpp
+    tests/system_mlan_test.cpp
+    tests/system_midi_test.cpp
+    tests/system_disk_test.cpp
+    tests/system_playback_test.cpp
+    tests/system_remix_write_test.cpp
     tests/system_recording_write_test.cpp
+    tests/system_registered_program_write_test.cpp
+    tests/system_registered_sample_write_test.cpp
     tests/system_file_write_test.cpp
     tests/sample_parameter_decode_test.cpp
     tests/tx16w_test.cpp

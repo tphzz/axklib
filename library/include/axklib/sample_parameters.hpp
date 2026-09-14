@@ -12,6 +12,9 @@
 
 namespace axk {
 
+inline constexpr std::uint8_t sampler_original_key_high_limit = 0x80U;
+inline constexpr std::uint8_t sampler_original_key_low_limit = 0xffU;
+
 enum class AudioSamplerLoopMode : std::uint8_t {
     forward = 0,
     forward_loop = 1,
@@ -131,6 +134,8 @@ struct SampleParameters {
     SampleLfoParameters lfo;
     std::optional<std::int8_t> filter_gain;
     std::array<SampleControlParameters, 6> controls;
+    // A3000 switch; current layouts store independent low/high crossfade widths.
+    std::optional<bool> velocity_crossfade;
     std::optional<std::uint8_t> velocity_xfade_high;
     std::optional<std::uint8_t> velocity_xfade_low;
     std::optional<std::uint8_t> output1_destination;

@@ -1027,7 +1027,8 @@ TEST(AudioImport, SerializesTheSharedWritableSampleParameterModel) {
     }};
     for (std::size_t index = 0; index < controls.size(); ++index) {
         for (std::size_t field = 0; field < controls[index].size(); ++field) {
-            EXPECT_EQ((*payload)[0xa8U + index * 4U + field], static_cast<std::byte>(controls[index][field]));
+            EXPECT_EQ((*payload)[0xa8U + index * 4U + field],
+                      field == 1U ? std::byte{0} : static_cast<std::byte>(controls[index][field]));
             EXPECT_EQ((*payload)[0x164U + index * 4U + field], static_cast<std::byte>(controls[index][field]));
         }
     }
@@ -1474,8 +1475,10 @@ TEST(HdsWriter, SerializesSharedParametersIntoSampleBankState) {
     EXPECT_EQ((*payload)[0x117U], std::byte{87});
     EXPECT_EQ((*payload)[0x121U], std::byte{0xf7});
     EXPECT_EQ((*payload)[0x8cU], std::byte{126});
+    EXPECT_EQ((*payload)[0x8dU], std::byte{0});
     EXPECT_EQ((*payload)[0x8fU], std::byte{0xc1});
     EXPECT_EQ((*payload)[0x200U], std::byte{126});
+    EXPECT_EQ((*payload)[0x201U], std::byte{36});
     EXPECT_EQ((*payload)[0x203U], std::byte{0xc1});
     EXPECT_EQ((*payload)[0x204U], std::byte{96});
     EXPECT_EQ((*payload)[0x206U], std::byte{12});

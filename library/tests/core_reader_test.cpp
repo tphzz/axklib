@@ -19,5 +19,11 @@ TEST(CoreReader, SystemRegisteredParametersDoNotRequireTheAudioLibrary) {
         EXPECT_EQ(sample->parameters.level, 91);
         EXPECT_TRUE(axk::decode_system_registered_program(file));
         EXPECT_TRUE(axk::decode_system_recording(file));
+        EXPECT_FALSE(axk::decode_system_playback(file));
+        EXPECT_FALSE(
+            axk::patch_system_playback(file, {}, native ? axk::ASeriesModel::a3000 : axk::ASeriesModel::a4000));
+        // Rejection still links the complete patch adapter and shared codec.
+        EXPECT_FALSE(axk::patch_system_registered_sample(file, {},
+                                                         native ? axk::ASeriesModel::a3000 : axk::ASeriesModel::a4000));
     }
 }

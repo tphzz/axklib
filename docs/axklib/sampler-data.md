@@ -293,8 +293,11 @@ so `header_size + payload_bytes` is not an SBNK size formula.
 The first 24 bytes at `0x0a8..0x0bf` contain six four-byte controller records.
 Extended objects repeat these at `0x164..0x17b`. On A4000 the extended copy takes
 precedence when it is present; shorter objects use the prefix copy. Consistent
-controller updates must maintain both copies. Unrelated edits preserve a
-preexisting mismatch rather than choosing new values for it.
+controller updates copy the complete changed extended record to the prefix,
+but prefix Function values above `21` become `0`; the extended Function retains
+its full value. Device, Type and Range copy unchanged. Unrelated edits and
+no-op patches preserve a preexisting mismatch. Short objects have no extended
+copy to project and retain their single controller record array.
 
 Controller record domains are Device `0..126`, Function `0..36`, Type `0..3`,
 and signed Range `-63..+63`. Device values `121..126` are special selectors,

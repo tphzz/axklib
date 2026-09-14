@@ -15,13 +15,25 @@ namespace axk::detail {
 
 enum class ProgramParameterWriteMode { patch, fresh };
 enum class ProgramParameterGeneration { a3000, current };
-enum class EffectBlockKind { program, recording };
+enum class EffectBlockKind { program, recording, registered_program };
 
 struct ProgramParameterBlocks {
     std::span<const std::byte, 0x16> common;
     std::span<const std::byte, 0x10> controllers;
     std::optional<std::span<const std::byte, 0x28>> extended;
 };
+
+struct MutableProgramParameterBlocks {
+    std::span<std::byte, 0x16> common;
+    std::span<std::byte, 0x10> controllers;
+    std::optional<std::span<std::byte, 0x10>> legacy_controllers;
+    std::optional<std::span<std::byte, 0x28>> extended;
+};
+
+// Validates scalar groups before changing blocks. Effects are applied separately.
+Result<void> apply_program_parameter_blocks(const MutableProgramParameterBlocks &blocks,
+                                            const ProgramParameters &parameters, ASeriesModel model);
+bool has_program_effect_parameter_values(const ProgramEffectParameters &parameters);
 
 bool has_program_parameter_values(const ProgramParameters &parameters);
 bool has_program_assignment_parameter_values(const ProgramAssignmentParameters &parameters);

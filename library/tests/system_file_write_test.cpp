@@ -36,7 +36,7 @@ class SystemFileWrite : public testing::Test {
         std::error_code ignored;
         std::filesystem::remove_all(folder, ignored);
     }
-    static std::vector<std::byte> payload(bool native) {
+    static std::vector<std::byte> payload(bool native, std::uint8_t revision = 0) {
         const auto size = native ? 0x400U : 0x1000U;
         std::vector<std::byte> bytes(size + 0x30U, std::byte{0xa5});
         axk::ByteWriter writer{bytes};
@@ -46,7 +46,7 @@ class SystemFileWrite : public testing::Test {
         EXPECT_TRUE(writer.write_be32(0x18, 0x36));
         EXPECT_TRUE(writer.write_be32(0x1c, size + 8U));
         EXPECT_TRUE(writer.write_be32(0x30, native ? 0x21520531U : 0xdeadfaceU));
-        bytes[0x3e] = std::byte{};
+        bytes[0x3e] = static_cast<std::byte>(revision);
         return bytes;
     }
     static std::vector<std::byte> read(const std::filesystem::path &path) {
@@ -61,14 +61,14 @@ class SystemFileWrite : public testing::Test {
             paths.insert(entry.path());
         return paths;
     }
-    std::filesystem::path fixture(bool native, bool with_alias = false) {
+    std::filesystem::path fixture(bool native, bool with_alias = false, std::uint8_t revision = 0) {
         const auto blank = folder / "blank.hds";
         const auto source = folder / "source.hds";
         EXPECT_TRUE(axk::write_hds_image({"1.0", 8U * 1024U * 1024U, {{"Test", {}}}}, blank));
         std::vector<axk::FilesystemEdit> edits{
             axk::CreateFilesystemDirectory{{"META"}},
             axk::PutFilesystemFile{{"META", native ? "SYSTEM" : "SYSTEM2"},
-                                   std::make_shared<axk::MemoryReader>(payload(native))},
+                                   std::make_shared<axk::MemoryReader>(payload(native, revision))},
         };
         if (with_alias)
             edits.emplace_back(
@@ -94,6 +94,43 @@ class SystemFileWrite : public testing::Test {
         return source;
     }
 };
+
+TEST_F(SystemFileWrite, MlanEditsPublishOnlyRequestedRoutingBytesAndRejectInvalidCombinedWrites) {
+    const auto source = fixture(false, false, 1);
+    const auto original = read(source);
+    std::size_t offset{};
+    {
+        const auto image = axk::open_image(source).value();
+        const auto &partition = image.partitions().front();
+        const auto id =
+            axk::locate_system_file_record(partition, axk::SystemFileKind::a4000_a5000_system2).value().value();
+        const auto &record = *std::ranges::find(partition.records, id, &axk::IndexRecord::sfs_id);
+        offset = static_cast<std::size_t>(partition.start_sector) * image.superblock().sector_size_bytes +
+                 static_cast<std::size_t>(record.extents.front().cluster_offset) * partition.sectors_per_cluster *
+                     image.superblock().sector_size_bytes;
+    }
+    for (const auto model : {axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
+        const auto output = folder / (model == axk::ASeriesModel::a4000 ? "a4000.hds" : "a5000.hds");
+        axk::SystemFilePatch patch;
+        patch.mlan.midi_input =
+            model == axk::ASeriesModel::a4000 ? axk::SystemMlanMidiInput::mlan_a : axk::SystemMlanMidiInput::mlan_b;
+        patch.mlan.audio_input = axk::SystemMlanAudioInput::mlan;
+        auto invalid = patch;
+        invalid.global.master_fine_tune = 7;
+        invalid.mlan.audio_input = static_cast<axk::SystemMlanAudioInput>(2);
+        const auto paths = retained_paths();
+        EXPECT_FALSE(axk::write_system_file(source, output, axk::PartitionIndex{0}, invalid, model));
+        EXPECT_EQ(retained_paths(), paths);
+        EXPECT_EQ(read(source), original);
+        auto expected = original;
+        expected[offset + 0x694U] = model == axk::ASeriesModel::a4000 ? std::byte{1} : std::byte{2};
+        expected[offset + 0x695U] = std::byte{1};
+        const auto result = axk::write_system_file(source, output, axk::PartitionIndex{0}, patch, model);
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(read(output), expected);
+        EXPECT_EQ(read(source), original);
+    }
+}
 
 TEST_F(SystemFileWrite, PublishesOnlyChangedPayloadBytesAndLeavesAllocationAndSourceUnchanged) {
     for (const auto model : {axk::ASeriesModel::a3000, axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
@@ -142,6 +179,9 @@ TEST_F(SystemFileWrite, PublishesOnlyChangedPayloadBytesAndLeavesAllocationAndSo
         patches.recording.configuration.key_high = 128;
         patches.recording.configuration.original_key = 64;
         patches.recording.configuration.click_tempo_hundredths = 12345;
+        patches.registered_program.level = 42;
+        patches.registered_sample.level = 43;
+        patches.registered_sample.output1_destination = 1;
         auto expected = original;
         {
             const auto image = axk::open_image(source).value();
@@ -155,6 +195,10 @@ TEST_F(SystemFileWrite, PublishesOnlyChangedPayloadBytesAndLeavesAllocationAndSo
                     image.superblock().sector_size_bytes;
             expected[static_cast<std::size_t>(offset) + 0x50U + (native ? 0x110U : 0x320U) + 80U + 1U] = std::byte{77};
             const auto configuration = static_cast<std::size_t>(offset) + 0x50U + (native ? 0x188U : 0x398U);
+            expected[static_cast<std::size_t>(offset) + 0x50U + (native ? 0x31fU : 0x617U)] = std::byte{42};
+            const auto sample = static_cast<std::size_t>(offset) + 0x50U + (native ? 0x1c8U : 0x3ecU);
+            expected[sample + 0x6eU] = std::byte{43};
+            expected[sample + (native ? 0xa5U : 0xd6U)] = std::byte{1};
             expected[static_cast<std::size_t>(offset) + 0x60U] = std::byte{251};
             expected[static_cast<std::size_t>(offset) + 0x64U] = std::byte{15};
             expected[static_cast<std::size_t>(offset) + 0x84U] = native ? std::byte{0x43} : std::byte{0x47};

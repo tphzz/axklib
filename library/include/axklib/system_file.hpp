@@ -15,10 +15,14 @@
 #include "axklib/sample_parameters.hpp"
 #include "axklib/sampler_model.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/system_disk_parameters.hpp"
 #include "axklib/system_favorites_parameters.hpp"
 #include "axklib/system_file_parameters.hpp"
 #include "axklib/system_global_parameters.hpp"
+#include "axklib/system_midi_parameters.hpp"
+#include "axklib/system_mlan_parameters.hpp"
 #include "axklib/system_panel_parameters.hpp"
+#include "axklib/system_playback_parameters.hpp"
 #include "axklib/system_recording_parameters.hpp"
 
 namespace axk {
@@ -90,9 +94,21 @@ AXK_API Result<std::vector<std::byte>> encode_system_file(const DecodedSystemFil
 // A3000's single A/D route is represented by ad.left; ad.right is absent.
 AXK_API Result<ProgramParameters> decode_system_registered_program(const DecodedSystemFile &file);
 
+// Edits retained registration defaults, not the active Program or its assignments.
+AXK_API Result<DecodedSystemFile> patch_system_registered_program(const DecodedSystemFile &file,
+                                                                  const ProgramParameters &patch, ASeriesModel model);
+
 // Reads the saved registered Sample parameter block without applying it to any
 // Sample or inferring member activity from its stored parameter lanes.
 AXK_API Result<DecodedSampleParameters> decode_system_registered_sample(const DecodedSystemFile &file);
+
+// Patch retained template parameters without constructing a Sample or inferring
+// active Wave Data lanes. Explicit loop intervals are bounded by the retained
+// primary wave window and mirrored with their end cache; Length Lock is not an
+// interval-patch option. Pitch and expansion edits requiring context are rejected.
+// Unrelated bytes and invalid unrequested fields are preserved.
+AXK_API Result<DecodedSystemFile> patch_system_registered_sample(const DecodedSystemFile &file,
+                                                                 const SampleParameters &patch, ASeriesModel model);
 
 // Reads stored recording settings and three effects without applying live
 // input/key-range dependencies or normalizing invalid values. Raw bytes remain.
@@ -103,6 +119,14 @@ AXK_API Result<DecodedSystemRecording> decode_system_recording(const DecodedSyst
 // selections use their own domains and have no registered recipe lanes.
 AXK_API Result<DecodedSystemGlobal> decode_system_global(const DecodedSystemFile &file);
 
+// Replaces selected SYSTEM2 recipes atomically, without applying them to audio.
+// Requires a matching current model; an empty patch span is a no-op on SYSTEM.
+// Each replacement follows SystemRegisteredRemixPatch's bounded step contract.
+// Duplicate/out-of-range slots and unsupported steps are rejected. No disk I/O.
+AXK_API Result<DecodedSystemFile> patch_system_registered_remix(const DecodedSystemFile &file,
+                                                                std::span<const SystemRegisteredRemixPatch> patches,
+                                                                ASeriesModel model);
+
 // Reads all ordinary effect favorites and retains the complete raw region.
 // Does not apply page-entry normalization or interpret dormant rows as effects.
 AXK_API Result<DecodedSystemFavorites> decode_system_favorites(const DecodedSystemFile &file);
@@ -111,6 +135,45 @@ AXK_API Result<DecodedSystemFavorites> decode_system_favorites(const DecodedSyst
 // all 64 bytes without device-load normalization. Does not execute commands or
 // provide defaults for fresh files. Generation-specific projections may be absent.
 AXK_API Result<DecodedSystemPanel> decode_system_panel(const DecodedSystemFile &file);
+
+// Reads revision-1 SYSTEM2 routing without model inference or load normalization.
+// Other generations/revisions are unsupported; retained bytes remain in the file.
+AXK_API Result<DecodedSystemMlan> decode_system_mlan(const DecodedSystemFile &file);
+
+// Reads saved MIDI preferences without normalization or hardware-model inference.
+AXK_API Result<DecodedSystemMidi> decode_system_midi(const DecodedSystemFile &file);
+
+// Reads saved disk preferences and the seed accumulator without normalization.
+AXK_API Result<DecodedSystemDisk> decode_system_disk(const DecodedSystemFile &file);
+
+// Reads both SYSTEM2 revisions without model inference or load normalization.
+// Native SYSTEM has neither of these saved regions and is unsupported.
+AXK_API Result<DecodedSystemPlayback> decode_system_playback(const DecodedSystemFile &file);
+
+// Changes only the requested sequence-port and digital-output bytes. A matching
+// explicit model is required; port B is A5000-only. Empty native patches are
+// no-ops, but nonempty patches require SYSTEM2. No live hardware operation.
+AXK_API Result<DecodedSystemFile> patch_system_playback(const DecodedSystemFile &file,
+                                                        const SystemPlaybackParameters &patch, ASeriesModel model);
+
+// Requires a matching model. SCSI ID/mount edits clear the final own-ID bit;
+// explicitly mounting that ID is rejected. For retained invalid IDs, mount
+// edits use the low three bits, as System Load does, without rewriting the ID.
+// Top Partition edits are independent; seeds, upper mount bits and all other
+// bytes are preserved. Empty patches do not normalize anything. No live I/O.
+AXK_API Result<DecodedSystemFile> patch_system_disk(const DecodedSystemFile &file, const SystemDiskParameters &patch,
+                                                    ASeriesModel model);
+
+// Changes only requested MIDI preferences. Requires a matching explicit model;
+// port B is A5000-only, and SYSTEM has no saved SysEx receive-port field.
+AXK_API Result<DecodedSystemFile> patch_system_midi(const DecodedSystemFile &file, const SystemMidiParameters &patch,
+                                                    ASeriesModel model);
+
+// Edits only requested routing bytes, preserving interface initialization state.
+// Nonempty patches require revision-1 SYSTEM2 and a matching current model.
+// A4000 rejects mlan_b. Does not initialize or establish availability of hardware.
+AXK_API Result<DecodedSystemFile> patch_system_mlan(const DecodedSystemFile &file, const SystemMlanParameters &patch,
+                                                    ASeriesModel model);
 
 // Changes only requested panel preferences in an independent retained record.
 // Requires a matching explicit model and consistent framing/context. EndType
@@ -158,7 +221,7 @@ AXK_API Result<DecodedSystemFile> patch_system_recording_effects(const DecodedSy
 AXK_API Result<DecodedSystemFile> patch_system_recording(const DecodedSystemFile &file,
                                                          const SystemRecordingPatch &patch, ASeriesModel model);
 
-// Validates global, recording, favorites and panel groups as one independent copy.
+// Validates all requested parameter groups as one independent copy.
 // An invalid request returns no changed record and never mutates the input.
 AXK_API Result<DecodedSystemFile> patch_system_file(const DecodedSystemFile &file, const SystemFilePatch &patch,
                                                     ASeriesModel model);

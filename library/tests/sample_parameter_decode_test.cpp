@@ -133,7 +133,7 @@ TEST(SampleParameterDecode, UsesCanonicalControllersAndGenerationSpecificOutputs
             EXPECT_EQ(axk::decode_sample_parameter_block(bytes, generation)->controller_copies_match, true);
         } else {
             EXPECT_FALSE(decoded->controller_copies_match);
-            EXPECT_FALSE(decoded->parameters.portamento_type);
+            EXPECT_EQ(decoded->parameters.portamento_type, std::to_integer<std::uint8_t>(bytes[0x29]) & 1U);
             EXPECT_FALSE(decoded->parameters.portamento_rate);
             EXPECT_FALSE(decoded->parameters.portamento_time);
             EXPECT_FALSE(decoded->parameters.velocity_xfade_high);
@@ -344,6 +344,13 @@ TEST(SampleParameterDecode, PackedFlagsAreIndependentOfUnownedBits) {
             EXPECT_EQ(p.fixed_pitch, (raw & 0x10U) != 0U);
             EXPECT_EQ(p.key_crossfade, (raw & 4U) != 0U);
             EXPECT_EQ(p.mono_mode, (raw & 2U) != 0U);
+            if (generation == axk::SampleParameterGeneration::a3000) {
+                EXPECT_EQ(p.portamento_type, raw & 1U);
+                EXPECT_EQ(p.velocity_crossfade, (raw & 8U) != 0U);
+            } else {
+                EXPECT_FALSE(p.velocity_crossfade);
+                EXPECT_EQ(p.portamento_type, std::to_integer<std::uint8_t>(bytes[0xda]));
+            }
             EXPECT_EQ(p.lfo.key_on_sync, (raw & 1U) != 0U);
             EXPECT_EQ(p.lfo.cutoff_mod_phase_invert, (raw & 2U) != 0U);
             EXPECT_EQ(p.lfo.pitch_mod_phase_invert, (raw & 4U) != 0U);

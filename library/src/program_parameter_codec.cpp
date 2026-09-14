@@ -51,18 +51,19 @@ bool any_channel(const std::array<std::optional<bool>, 16> &values) {
 }
 
 Result<void> validate(const ProgramParameters &value, ASeriesModel model) {
-    if (model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
+    if (model != ASeriesModel::a3000 && model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Program parameter writes require an A4000 or A5000 target model")};
+                                          "Program parameter target model is unsupported")};
+    const auto native = model == ASeriesModel::a3000;
     const auto extended = model == ASeriesModel::a5000;
     const auto &lfo = value.lfo;
     const auto &portamento = value.portamento;
     if (outside(value.level, 0, 127) || outside(value.transpose, -127, 127) || outside(portamento.type, 0, 3) ||
         outside(portamento.rate, 1, 127) || outside(portamento.time, 1, 127) || outside(lfo.cycle, 0, 6) ||
-        outside(lfo.sync, 0, extended ? 2 : 1) || outside(lfo.wave, 0, 6) || outside(lfo.initial_phase, 0, 3) ||
-        outside(lfo.tempo, 25, 250) || outside(lfo.reset_channel, -2, extended ? 32 : 16) ||
-        outside(lfo.reset_note, -1, 127) || outside(lfo.sample_hold_speed, 0, 127) ||
-        outside(value.step_wave.slope, 0, 3) ||
+        outside(lfo.sync, 0, extended ? 2 : 1) || outside(lfo.wave, 0, native ? 5 : 6) ||
+        outside(lfo.initial_phase, 0, 3) || outside(lfo.tempo, 25, 250) ||
+        outside(lfo.reset_channel, -2, extended ? 32 : 16) || outside(lfo.reset_note, -1, 127) ||
+        outside(lfo.sample_hold_speed, 0, 127) || outside(value.step_wave.slope, 0, 3) ||
         (value.step_wave.step_count &&
          std::ranges::find(step_counts, *value.step_wave.step_count) == step_counts.end()) ||
         std::ranges::any_of(value.step_wave.values, [](const auto &step) { return outside(step, 0, 127); })) {
@@ -72,19 +73,36 @@ Result<void> validate(const ProgramParameters &value, ASeriesModel model) {
     if (!extended && (any_channel(value.controller_reset.b) || any_channel(value.note_toggle.b)))
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "Program MIDI port B parameters require an A5000 target model")};
+    if (native && (value.step_wave.step_count || value.step_wave.slope ||
+                   std::ranges::any_of(value.step_wave.values, [](const auto &step) { return step.has_value(); }) ||
+                   value.ad.right.pan || value.ad.right.output1.destination || value.ad.right.output1.level ||
+                   value.ad.right.output2.destination || value.ad.right.output2.level))
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "A3000 registered Programs have no StepWave or independent right A/D route")};
     if (outside(value.ad.source, 0, 2) || outside(value.effect_connections[0], 0, 4) ||
         outside(value.effect_connections[1], 0, 4) || (!extended && value.effect_connections[1]))
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "Program A/D source or effect connection is not supported for the model")};
     for (const auto *channel : {&value.ad.left, &value.ad.right}) {
-        if (outside(channel->pan, -63, 63) || outside(channel->output1.destination, 0, extended ? 12 : 9) ||
-            outside(channel->output2.destination, 0, extended ? 12 : 9) || outside(channel->output1.level, 0, 127) ||
-            outside(channel->output2.level, 0, 127))
+        if (outside(channel->pan, -63, 63) ||
+            outside(channel->output1.destination, 0,
+                    native     ? 4
+                    : extended ? 12
+                               : 9) ||
+            outside(channel->output2.destination, 0,
+                    native     ? 5
+                    : extended ? 12
+                               : 9) ||
+            outside(channel->output1.level, 0, 127) || outside(channel->output2.level, 0, 127))
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "Program A/D parameter is outside its supported domain")};
     }
     for (const auto &controller : value.controllers) {
-        if (outside(controller.device, 0, 126) || outside(controller.function, 0, extended ? 128 : 71) ||
+        if (outside(controller.device, 0, native ? 125 : 126) ||
+            outside(controller.function, 0,
+                    native     ? 63
+                    : extended ? 128
+                               : 71) ||
             outside(controller.type, 0, 3) || outside(controller.range, -63, 63))
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "Program controller parameter is outside its supported domain")};
@@ -139,24 +157,24 @@ void read_ad_outputs(const ByteReader &reader, std::size_t offset, ProgramAdChan
     value.output2.level = known(*reader.u8(offset + 3U), 0, 127);
 }
 
-void project_left_ad_outputs(std::span<std::byte> bytes, std::size_t current) {
-    const auto output1 = std::to_integer<unsigned>(bytes[current]);
-    const auto output2 = std::to_integer<unsigned>(bytes[current + 2U]);
-    bytes[0x87U] = bytes[0x89U] = std::byte{};
+void project_left_ad_outputs(std::span<std::byte> common, std::span<const std::byte, 4> current) {
+    const auto output1 = std::to_integer<unsigned>(current[0]);
+    const auto output2 = std::to_integer<unsigned>(current[2]);
+    common[0x07U] = common[0x09U] = std::byte{};
     // Output 1 wins a shared legacy bucket. Unmatched legacy levels stay intact.
     if (output2 >= 1U && output2 <= 5U) {
-        bytes[0x89U] = bytes[current + 2U];
-        bytes[0x8aU] = bytes[current + 3U];
+        common[0x09U] = current[2];
+        common[0x0aU] = current[3];
     } else if (output2 >= 6U && output2 <= 9U) {
-        bytes[0x87U] = static_cast<std::byte>(output2 - 5U);
-        bytes[0x88U] = bytes[current + 3U];
+        common[0x07U] = static_cast<std::byte>(output2 - 5U);
+        common[0x08U] = current[3];
     }
     if (output1 >= 1U && output1 <= 4U) {
-        bytes[0x87U] = bytes[current];
-        bytes[0x88U] = bytes[current + 1U];
+        common[0x07U] = current[0];
+        common[0x08U] = current[1];
     } else if (output1 >= 5U && output1 <= 9U) {
-        bytes[0x89U] = static_cast<std::byte>(output1 - 4U);
-        bytes[0x8aU] = bytes[current + 1U];
+        common[0x09U] = static_cast<std::byte>(output1 - 4U);
+        common[0x0aU] = current[1];
     }
 }
 
@@ -232,6 +250,76 @@ ProgramParameters decode_program_parameter_blocks(const ProgramParameterBlocks &
     return result;
 }
 
+Result<void> apply_program_parameter_blocks(const MutableProgramParameterBlocks &blocks, const ProgramParameters &value,
+                                            ASeriesModel model) {
+    const bool native = model == ASeriesModel::a3000;
+    if (native ? (blocks.extended || blocks.legacy_controllers) : (!blocks.extended || !blocks.legacy_controllers))
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Program parameter blocks do not match the target model")};
+    if (auto valid = validate(value, model); !valid)
+        return valid;
+    const auto common = blocks.common;
+    put_bits(common, 0x00U, 1U, 0U, value.ad.enabled);
+    put_bits(common, 0x00U, 6U, 1U, value.ad.source);
+    put_bits(common, 0x00U, 0x38U, 3U, value.effect_connections[0]);
+    put(common, 0x06U, value.ad.left.pan);
+    if (native)
+        write_ad_outputs(common, 0x07U, value.ad.left);
+    for (std::size_t index = 0; index < value.controllers.size(); ++index) {
+        const auto current = blocks.controllers.subspan(index * 4U, 4U);
+        std::array<std::byte, 4> original;
+        std::ranges::copy(current, original.begin());
+        const auto &controller = value.controllers[index];
+        put(current, 0, controller.device);
+        put(current, 1, controller.function);
+        put(current, 2, controller.type);
+        put(current, 3, controller.range);
+        if (blocks.legacy_controllers && !std::ranges::equal(current, original)) {
+            const auto legacy = blocks.legacy_controllers->subspan(index * 4U, 4U);
+            std::ranges::copy(current, legacy.begin());
+            if (std::to_integer<unsigned>(legacy[1]) > 63U)
+                legacy[1] = std::byte{};
+        }
+    }
+    put(common, 0x0bU, value.level);
+    put(common, 0x0eU, value.transpose);
+    put(common, 0x10U, value.portamento.type);
+    put(common, 0x11U, value.portamento.rate);
+    put(common, 0x12U, value.portamento.time);
+    put_channels(common, 0x02U, value.controller_reset.a);
+    put_channels(common, 0x04U, value.note_toggle.a);
+    put_bits(common, 0x00U, native ? 0x40U : 0xc0U, 6U, value.lfo.sync);
+    put_bits(common, 0x01U, 0x07U, 0U, value.lfo.cycle);
+    put_bits(common, 0x01U, 0x38U, 3U, value.lfo.wave);
+    put_bits(common, 0x01U, 0xc0U, 6U, value.lfo.initial_phase);
+    put(common, 0x0fU, value.lfo.reset_channel);
+    put(common, 0x13U, value.lfo.sample_hold_speed);
+    put(common, 0x14U, value.lfo.tempo);
+    put(common, 0x15U, value.lfo.reset_note);
+    if (blocks.extended) {
+        const auto extended = *blocks.extended;
+        std::array<std::byte, 4> original;
+        std::ranges::copy(extended.subspan<5, 4>(), original.begin());
+        write_ad_outputs(extended, 0x05U, value.ad.left);
+        write_ad_outputs(extended, 0x0aU, value.ad.right);
+        put(extended, 0x09U, value.ad.right.pan);
+        if (!std::ranges::equal(extended.subspan<5, 4>(), original))
+            project_left_ad_outputs(common, extended.subspan<5, 4>());
+        put_bits(extended, 0x04U, 7U, 0U, value.effect_connections[1]);
+        put_channels(extended, 0x00U, value.controller_reset.b);
+        put_channels(extended, 0x02U, value.note_toggle.b);
+        if (value.step_wave.step_count) {
+            const auto found = std::ranges::find(step_counts, *value.step_wave.step_count);
+            put_bits(extended, 0x1eU, 7U, 0U,
+                     std::optional<std::uint8_t>{static_cast<std::uint8_t>(found - step_counts.begin())});
+        }
+        put_bits(extended, 0x1eU, 0x18U, 3U, value.step_wave.slope);
+        for (std::size_t index = 0; index < value.step_wave.values.size(); ++index)
+            put(extended, 0x0eU + index, value.step_wave.values[index]);
+    }
+    return {};
+}
+
 Result<void> apply_program_parameters(std::vector<std::byte> &payload, const ProgramParameters &value,
                                       ASeriesModel model, ProgramParameterWriteMode mode) {
     const auto decoded = decode_object(payload);
@@ -241,60 +329,14 @@ Result<void> apply_program_parameters(std::vector<std::byte> &payload, const Pro
     if (!program || !program->layout.parameter_tail_offset)
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Program parameter writes require the current Program layout")};
-    if (auto valid = validate(value, model); !valid)
-        return valid;
     const auto tail = *program->layout.parameter_tail_offset;
     auto bytes = payload;
-    put_bits(bytes, 0x80U, 1U, 0U, value.ad.enabled);
-    put_bits(bytes, 0x80U, 6U, 1U, value.ad.source);
-    put_bits(bytes, 0x80U, 0x38U, 3U, value.effect_connections[0]);
-    put_bits(bytes, tail + 0x8cU, 7U, 0U, value.effect_connections[1]);
-    put(bytes, 0x86U, value.ad.left.pan);
-    put(bytes, tail + 0x91U, value.ad.right.pan);
-    write_ad_outputs(bytes, tail + 0x8dU, value.ad.left);
-    write_ad_outputs(bytes, tail + 0x92U, value.ad.right);
-    if (!std::ranges::equal(std::span{bytes}.subspan(tail + 0x8dU, 4U), std::span{payload}.subspan(tail + 0x8dU, 4U)))
-        project_left_ad_outputs(bytes, tail + 0x8dU);
-    for (std::size_t index = 0; index < value.controllers.size(); ++index) {
-        const auto current = tail + 0x78U + index * 4U;
-        const auto legacy = 0x110U + index * 4U;
-        const auto &controller = value.controllers[index];
-        put(bytes, current, controller.device);
-        put(bytes, current + 1U, controller.function);
-        put(bytes, current + 2U, controller.type);
-        put(bytes, current + 3U, controller.range);
-        if (!std::ranges::equal(std::span{bytes}.subspan(current, 4U), std::span{payload}.subspan(current, 4U))) {
-            std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(current), 4U,
-                        bytes.begin() + static_cast<std::ptrdiff_t>(legacy));
-            if (std::to_integer<unsigned>(bytes[legacy + 1U]) > 63U)
-                bytes[legacy + 1U] = std::byte{};
-        }
-    }
-    put(bytes, 0x8bU, value.level);
-    put(bytes, 0x8eU, value.transpose);
-    put(bytes, 0x90U, value.portamento.type);
-    put(bytes, 0x91U, value.portamento.rate);
-    put(bytes, 0x92U, value.portamento.time);
-    put_channels(bytes, 0x82U, value.controller_reset.a);
-    put_channels(bytes, 0x84U, value.note_toggle.a);
-    put_channels(bytes, tail + 0x88U, value.controller_reset.b);
-    put_channels(bytes, tail + 0x8aU, value.note_toggle.b);
-    put_bits(bytes, 0x80U, 0xc0U, 6U, value.lfo.sync);
-    put_bits(bytes, 0x81U, 0x07U, 0U, value.lfo.cycle);
-    put_bits(bytes, 0x81U, 0x38U, 3U, value.lfo.wave);
-    put_bits(bytes, 0x81U, 0xc0U, 6U, value.lfo.initial_phase);
-    put(bytes, 0x8fU, value.lfo.reset_channel);
-    put(bytes, 0x93U, value.lfo.sample_hold_speed);
-    put(bytes, 0x94U, value.lfo.tempo);
-    put(bytes, 0x95U, value.lfo.reset_note);
-    if (value.step_wave.step_count) {
-        const auto found = std::ranges::find(step_counts, *value.step_wave.step_count);
-        put_bits(bytes, tail + 0xa6U, 7U, 0U,
-                 std::optional<std::uint8_t>{static_cast<std::uint8_t>(found - step_counts.begin())});
-    }
-    put_bits(bytes, tail + 0xa6U, 0x18U, 3U, value.step_wave.slope);
-    for (std::size_t index = 0; index < value.step_wave.values.size(); ++index)
-        put(bytes, tail + 0x96U + index, value.step_wave.values[index]);
+    const auto span = std::span{bytes};
+    const MutableProgramParameterBlocks blocks{span.subspan<0x80U, 0x16U>(), span.subspan(tail + 0x78U).first<0x10U>(),
+                                               span.subspan<0x110U, 0x10U>(),
+                                               span.subspan(tail + 0x88U).first<0x28U>()};
+    if (auto fields = apply_program_parameter_blocks(blocks, value, model); !fields)
+        return fields;
     if (auto effects = apply_program_effect_parameters(bytes, program->layout, value, model, mode); !effects)
         return effects;
     payload = std::move(bytes);

@@ -48,7 +48,8 @@ struct SystemGlobalParameters {
     std::optional<bool> play_and_load;
 
     // Stored selections: SYSTEM type 0..4 / variation 0..3;
-    // SYSTEM2 type 0..9 / variation 0..7. Targeted writes support preset types 0..4.
+    // SYSTEM2 type 0..9 / variation 0..7. Writes support presets 0..4 and
+    // SYSTEM2 User1..User3 (5..7) only with a supported stored recipe.
     std::optional<std::uint8_t> remix_type_selection;
     std::optional<std::uint8_t> remix_variation_selection;
 

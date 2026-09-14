@@ -1,3 +1,4 @@
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -201,6 +202,59 @@ TEST_F(SampleParameterEditValidation, ScalingAndVelocityEditsStillValidateUnchan
     expect_rejected_without_changes(edit);
 }
 
+TEST_F(SampleParameterEditValidation, ControllerEditsProjectCompleteRecordsWithBoundedLegacyFunctions) {
+    const auto original = payload;
+    for (std::size_t slot = 0; slot < 6U; ++slot) {
+        for (std::uint8_t function = 0; function <= 36U; ++function) {
+            for (std::size_t field = 0; field < 4U; ++field) {
+                SCOPED_TRACE(slot);
+                SCOPED_TRACE(function);
+                SCOPED_TRACE(field);
+                payload = original;
+                const auto prefix = 0xa8U + 4U * slot;
+                const auto tail = 0x164U + 4U * slot;
+                const std::array canonical{std::byte{74}, static_cast<std::byte>(function), std::byte{1},
+                                           std::byte{20}};
+                for (std::size_t byte = 0; byte < 4U; ++byte) {
+                    payload[prefix + byte] = std::byte{9};
+                    payload[tail + byte] = canonical[byte];
+                }
+                auto expected = payload;
+                axk::SampleParameters edit;
+                auto &control = edit.controls[slot];
+                if (field == 0U)
+                    control.device = 71U;
+                if (field == 1U)
+                    control.function = static_cast<std::uint8_t>((function + 1U) % 37U);
+                if (field == 2U)
+                    control.type = 3U;
+                if (field == 3U)
+                    control.range = -20;
+                expected[tail + field] = field == 0U   ? std::byte{71}
+                                         : field == 1U ? static_cast<std::byte>(*control.function)
+                                         : field == 2U ? std::byte{3}
+                                                       : std::byte{236};
+                for (std::size_t byte = 0; byte < 4U; ++byte)
+                    expected[prefix + byte] = expected[tail + byte];
+                if (std::to_integer<unsigned>(expected[prefix + 1U]) > 21U)
+                    expected[prefix + 1U] = std::byte{0};
+                ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, edit));
+                EXPECT_EQ(payload, expected);
+            }
+        }
+    }
+}
+
+TEST_F(SampleParameterEditValidation, NoopControllerEditsPreserveUnequalLegacyRecords) {
+    payload[0xa8U] = std::byte{9};
+    const auto original = payload;
+    axk::SampleParameters edit;
+    edit.controls[0].device = std::to_integer<std::uint8_t>(payload[0x164U]);
+    ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, edit));
+    EXPECT_EQ(payload, original);
+    expect_level_only_change();
+}
+
 TEST_F(SampleParameterEditValidation, ShortLayoutEditsAllSixCompatibilityControllersWithoutGrowingTheObject) {
     use_short_parameter_layout();
     ASSERT_FALSE(HasFatalFailure());
@@ -209,7 +263,7 @@ TEST_F(SampleParameterEditValidation, ShortLayoutEditsAllSixCompatibilityControl
     for (std::size_t index = 0; index < edits.controls.size(); ++index) {
         auto &control = edits.controls[index];
         control.device = static_cast<std::uint8_t>(10U + index);
-        control.function = static_cast<std::uint8_t>(1U + index);
+        control.function = static_cast<std::uint8_t>(31U + index);
         control.type = 3U;
         control.range = static_cast<std::int8_t>(static_cast<int>(index) - 5);
         const auto offset = 0xa8U + index * 4U;

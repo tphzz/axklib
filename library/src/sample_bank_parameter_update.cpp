@@ -118,7 +118,10 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     const auto stored_parameter_bytes = std::min(complete_parameter_bytes, payload.size() - parameter_offset);
     std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_offset), stored_parameter_bytes,
                 parameters.begin());
-    if (auto applied = apply_sample_parameters_to_block(parameters, overrides); !applied)
+    if (auto applied = apply_sample_parameters_to_block(
+            parameters, overrides,
+            has_complete_parameters ? SampleParameterLayout::current : SampleParameterLayout::current_prefix_only);
+        !applied)
         return std::unexpected{invalid(applied.error().message)};
     ByteWriter writer{parameters};
     if (overrides.root_key) {

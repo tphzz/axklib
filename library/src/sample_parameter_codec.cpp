@@ -1,4 +1,4 @@
-#include "axklib/writer_internal.hpp"
+#include "axklib/sample_parameter_codec.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 
 #include "axklib/bytes.hpp"
 
@@ -71,8 +72,8 @@ std::int16_t quantize_sample_eq_coefficient(double value) {
                                                 static_cast<std::int32_t>(std::numeric_limits<std::int16_t>::max())));
 }
 
-Result<void> refresh_sample_eq_coefficients(std::span<std::byte> block) {
-    const auto type = static_cast<std::uint8_t>(std::to_integer<std::uint8_t>(block[0x29U]) >> 6U);
+Result<void> refresh_sample_eq_coefficients(std::span<std::byte> block, bool native) {
+    const auto type = native ? 0U : std::to_integer<std::uint8_t>(block[0x29U]) >> 6U;
     const auto frequency = std::to_integer<std::uint8_t>(block[0x7aU]);
     auto gain = static_cast<int>(std::to_integer<std::uint8_t>(block[0x7bU])) - 64;
     const auto width = std::to_integer<std::uint8_t>(block[0x7cU]);
@@ -271,13 +272,21 @@ bool has_sample_parameter_values(const SampleParameters &value) {
            AXK_SET(alternate_group) || AXK_SET(sample_eq_frequency) || AXK_SET(sample_eq_gain_db) ||
            AXK_SET(sample_eq_width_tenths) || AXK_SET(filter_cutoff_distance) || envelope_set(value.feg) ||
            envelope_set(value.peg) || envelope_set(value.aeg) || lfo_set || AXK_SET(filter_gain) || controls_set ||
-           AXK_SET(velocity_xfade_high) || AXK_SET(velocity_xfade_low) || AXK_SET(output1_destination) ||
-           AXK_SET(output1_level) || AXK_SET(output2_destination) || AXK_SET(output2_level) ||
-           AXK_SET(portamento_type) || AXK_SET(portamento_rate) || AXK_SET(portamento_time);
+           AXK_SET(velocity_crossfade) || AXK_SET(velocity_xfade_high) || AXK_SET(velocity_xfade_low) ||
+           AXK_SET(output1_destination) || AXK_SET(output1_level) || AXK_SET(output2_destination) ||
+           AXK_SET(output2_level) || AXK_SET(portamento_type) || AXK_SET(portamento_rate) || AXK_SET(portamento_time);
 #undef AXK_SET
 }
 
-Result<void> validate_sample_parameters(const SampleParameters &value) {
+Result<void> validate_sample_parameters(const SampleParameters &value, SampleParameterGeneration generation) {
+    if (generation != SampleParameterGeneration::a3000 && generation != SampleParameterGeneration::current)
+        return std::unexpected{invalid("Sample parameter generation is unsupported")};
+    const bool native = generation == SampleParameterGeneration::a3000;
+    if (native && (value.sample_eq_type || value.velocity_xfade_high || value.velocity_xfade_low ||
+                   value.portamento_rate || value.portamento_time))
+        return std::unexpected{invalid("Sample parameter is not available in the A3000 layout")};
+    if (!native && value.velocity_crossfade)
+        return std::unexpected{invalid("Velocity crossfade switch is available only in the A3000 layout")};
     const auto root_key = value.root_key.value_or(60U);
     const auto key_low = value.key_low.value_or(0U);
     const auto key_high = value.key_high.value_or(127U);
@@ -286,8 +295,8 @@ Result<void> validate_sample_parameters(const SampleParameters &value) {
     const auto effective_low = key_low == sampler_original_key_low_limit ? root_key : key_low;
     const auto effective_high = key_high == sampler_original_key_high_limit ? root_key : key_high;
     if (outside(value.sample_eq_type, 0, 2) || outside(value.midi_receive_channel, 0, 16) ||
-        outside(value.pitch_bend_type, 0, 12) || outside(value.pitch_bend_range, 0, 24) ||
-        outside(value.coarse_tune, -64, 63) || outside(value.root_key, 0, 127) ||
+        outside(value.pitch_bend_type, 0, native ? 13 : 12) || outside(value.pitch_bend_range, 0, 24) ||
+        outside(value.coarse_tune, native ? -127 : -64, native ? 127 : 63) || outside(value.root_key, 0, 127) ||
         outside(value.fine_tune_cents, -63, 63) || (key_low > 127U && key_low != sampler_original_key_low_limit) ||
         key_high > sampler_original_key_high_limit || effective_high < effective_low ||
         (value.loop_mode && static_cast<std::uint8_t>(*value.loop_mode) >
@@ -311,29 +320,38 @@ Result<void> validate_sample_parameters(const SampleParameters &value) {
         outside(value.sample_eq_frequency, 4, 58) || outside(value.sample_eq_gain_db, -12, 12) ||
         outside(value.sample_eq_width_tenths, 10, 120) || outside(value.filter_cutoff_distance, -63, 63) ||
         invalid_envelope(value.feg) || invalid_envelope(value.peg) || invalid_envelope(value.aeg) ||
-        outside(value.lfo.wave, 0, 3) || outside(value.lfo.speed, 1, 128) || outside(value.lfo.delay_time, 0, 127) ||
+        outside(value.aeg.attack_mode, 0, native ? 1 : 2) || outside(value.lfo.wave, 0, 3) ||
+        outside(value.lfo.speed, 1, 128) || outside(value.lfo.delay_time, 0, 127) ||
         outside(value.lfo.cutoff_mod_depth, 0, 127) || outside(value.lfo.pitch_mod_depth, 0, 127) ||
         outside(value.lfo.amp_mod_depth, 0, 127) || outside(value.filter_gain, -31, 31) ||
         outside(value.velocity_xfade_high, 0, 127) || outside(value.velocity_xfade_low, 0, 127) ||
-        outside(value.output1_destination, 0, 12) || outside(value.output1_level, 0, 127) ||
-        outside(value.output2_destination, 0, 12) || outside(value.output2_level, 0, 127) ||
-        outside(value.portamento_type, 0, 5) || outside(value.portamento_rate, 1, 127) ||
+        outside(value.output1_destination, 0, native ? 4 : 12) || outside(value.output1_level, 0, 127) ||
+        outside(value.output2_destination, 0, native ? 5 : 12) || outside(value.output2_level, 0, 127) ||
+        outside(value.portamento_type, 0, native ? 1 : 5) || outside(value.portamento_rate, 1, 127) ||
         outside(value.portamento_time, 1, 127)) {
         return std::unexpected{invalid("Sample parameters are outside their supported ranges")};
     }
     for (const auto &control : value.controls) {
-        if (outside(control.device, 0, 126) || outside(control.function, 0, 36) || outside(control.type, 0, 3) ||
-            outside(control.range, -63, 63)) {
+        if (outside(control.device, 0, native ? 125 : 126) || outside(control.function, 0, native ? 21 : 36) ||
+            outside(control.type, 0, 3) || outside(control.range, -63, 63)) {
             return std::unexpected{invalid("Sample controller parameters are outside their supported ranges")};
         }
     }
     return {};
 }
 
-Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &value) {
-    if (block.size() < sample_parameter_block_size)
+Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &value,
+                                              SampleParameterLayout layout) {
+    if (layout != SampleParameterLayout::current && layout != SampleParameterLayout::current_prefix_only &&
+        layout != SampleParameterLayout::a3000)
+        return std::unexpected{invalid("Sample parameter layout is unsupported")};
+    const bool native = layout == SampleParameterLayout::a3000;
+    const bool has_controller_tail = layout == SampleParameterLayout::current;
+    if (block.size() < (native ? 0xbcU : sample_parameter_block_size))
         return std::unexpected{invalid("Sample parameter block is truncated")};
-    if (auto valid = validate_sample_parameters(value); !valid)
+    if (auto valid = validate_sample_parameters(value, native ? SampleParameterGeneration::a3000
+                                                              : SampleParameterGeneration::current);
+        !valid)
         return valid;
 
     const auto changes_sample_eq =
@@ -401,7 +419,7 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
         block[0x7bU] = static_cast<std::byte>(static_cast<std::uint8_t>(*value.sample_eq_gain_db + 64));
     put_u8(block, 0x7cU, value.sample_eq_width_tenths);
     if (changes_sample_eq) {
-        if (auto refreshed = refresh_sample_eq_coefficients(block); !refreshed)
+        if (auto refreshed = refresh_sample_eq_coefficients(block, native); !refreshed)
             return refreshed;
     }
     put_s8(block, 0x7dU, value.filter_cutoff_distance);
@@ -449,14 +467,29 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
     put_s8(block, 0xa9U, value.filter_gain);
 
     for (std::size_t index = 0; index < value.controls.size(); ++index) {
-        const auto put_control = [&](std::size_t offset) {
-            put_u8(block, offset, value.controls[index].device);
-            put_u8(block, offset + 1U, value.controls[index].function);
-            put_u8(block, offset + 2U, value.controls[index].type);
-            put_s8(block, offset + 3U, value.controls[index].range);
-        };
-        put_control(index * 4U);
-        put_control(0xbcU + index * 4U);
+        const auto offset = index * 4U + (has_controller_tail ? 0xbcU : 0U);
+        const std::array before{block[offset], block[offset + 1U], block[offset + 2U], block[offset + 3U]};
+        put_u8(block, offset, value.controls[index].device);
+        put_u8(block, offset + 1U, value.controls[index].function);
+        put_u8(block, offset + 2U, value.controls[index].type);
+        put_s8(block, offset + 3U, value.controls[index].range);
+        const auto record = block.subspan(offset, 4U);
+        if (has_controller_tail && !std::ranges::equal(before, record)) {
+            const auto prefix = block.subspan(index * 4U, 4U);
+            std::ranges::copy(record, prefix.begin());
+            if (std::to_integer<std::uint8_t>(prefix[1]) > 21U)
+                prefix[1] = std::byte{0};
+        }
+    }
+    if (native) {
+        set_masked_bit(mapout, 0x08U, value.velocity_crossfade);
+        if (value.portamento_type)
+            set_masked_bit(mapout, 0x01U, *value.portamento_type == 1U);
+        put_u8(block, 0xa5U, value.output1_destination);
+        put_u8(block, 0xa6U, value.output1_level);
+        put_u8(block, 0xa7U, value.output2_destination);
+        put_u8(block, 0xa8U, value.output2_level);
+        return {};
     }
     put_u8(block, 0xd4U, value.velocity_xfade_high);
     put_u8(block, 0xd5U, value.velocity_xfade_low);
@@ -542,6 +575,7 @@ void merge_sample_parameters(SampleParameters &destination, const SampleParamete
         merge_optional(destination.controls[index].type, source.controls[index].type);
         merge_optional(destination.controls[index].range, source.controls[index].range);
     }
+    AXK_MERGE(velocity_crossfade);
     AXK_MERGE(velocity_xfade_high);
     AXK_MERGE(velocity_xfade_low);
     AXK_MERGE(output1_destination);

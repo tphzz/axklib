@@ -153,7 +153,10 @@ Result<DecodedSampleParameters> decode_sample_parameter_block(std::span<const st
     p.output1_level = known(*r.u8(outputs + 1U), 0, 127);
     p.output2_destination = known(*r.u8(outputs + 2U), 0, native ? 5 : 12);
     p.output2_level = known(*r.u8(outputs + 3U), 0, 127);
-    if (!native) {
+    if (native) {
+        p.portamento_type = static_cast<std::uint8_t>(result.mapout_flags & 1U);
+        p.velocity_crossfade = (result.mapout_flags & 8U) != 0U;
+    } else {
         result.controller_copies_match = std::ranges::equal(bytes.first(0x18), bytes.subspan(0xbc, 0x18));
         p.velocity_xfade_high = known(*r.u8(0xd4), 0, 127);
         p.velocity_xfade_low = known(*r.u8(0xd5), 0, 127);

@@ -38,6 +38,12 @@ class SystemFileOperations : public testing::Test {
         EXPECT_TRUE(writer.write_be32(0x1c, native ? 0x408U : 0x1008U));
         EXPECT_TRUE(writer.write_be32(0x30, native ? 0x21520531U : 0xdeadfaceU));
         bytes[0x3e] = std::byte{};
+        const auto sample = 0x50U + (native ? 0x1c8U : 0x3ecU);
+        EXPECT_TRUE(writer.write_be32(sample + 0x40, 100));
+        EXPECT_TRUE(writer.write_be32(sample + 0x48, 600));
+        EXPECT_TRUE(writer.write_be32(sample + 0xb4, 700));
+        EXPECT_TRUE(writer.write_be32(sample + 0x50, 200));
+        EXPECT_TRUE(writer.write_be32(sample + 0x58, 300));
         return bytes;
     }
     void SetUp() override {
@@ -116,6 +122,241 @@ class SystemFileOperations : public testing::Test {
         return patches;
     }
 };
+
+TEST_F(SystemFileOperations, MlanCombinedEditsRollbackAndRefreshWithoutChangingInitializationState) {
+    const auto model = axk::ASeriesModel::a5000;
+    const auto record_offset = global_offset(model) - 0x60U;
+    {
+        std::fstream stream{image_path(), std::ios::binary | std::ios::in | std::ios::out};
+        stream.seekp(static_cast<std::streamoff>(record_offset + 0x3eU));
+        stream.put('\x01');
+        ASSERT_TRUE(stream);
+    }
+    axk::app::ImageSessionManager sessions{
+        *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    for (const auto target : {axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
+        const auto original = bytes();
+        auto expected = original;
+        expected[record_offset + 0x60U] = std::byte{7};
+        expected[record_offset + 0x694U] = target == axk::ASeriesModel::a4000 ? std::byte{1} : std::byte{2};
+        expected[record_offset + 0x695U] = std::byte{1};
+        axk::SystemFilePatch patch;
+        patch.global.master_fine_tune = 7;
+        patch.mlan.midi_input =
+            target == axk::ASeriesModel::a4000 ? axk::SystemMlanMidiInput::mlan_a : axk::SystemMlanMidiInput::mlan_b;
+        patch.mlan.audio_input = axk::SystemMlanAudioInput::mlan;
+        axk::CancellationSource cancellation;
+        bool all_written{};
+        axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view phase, std::size_t) {
+                                                      if (phase == "after-patch" && bytes() == expected) {
+                                                          all_written = true;
+                                                          cancellation.cancel();
+                                                      }
+                                                      return false;
+                                                  }};
+        auto invalid = patch;
+        invalid.mlan.audio_input = static_cast<axk::SystemMlanAudioInput>(2);
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, target));
+        EXPECT_FALSE(all_written);
+        EXPECT_EQ(bytes(), original);
+        const auto cancelled =
+            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                        axk::PartitionIndex{0}, patch, target, cancellation.token());
+        ASSERT_FALSE(cancelled);
+        EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+        EXPECT_TRUE(all_written);
+        EXPECT_EQ(bytes(), original);
+        EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+        const auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner",
+                                                         opened->revision, axk::PartitionIndex{0}, patch, target);
+        ASSERT_TRUE(updated) << updated.error().message;
+        EXPECT_EQ(updated->revision, opened->revision + 1U);
+        EXPECT_EQ(bytes(), expected);
+        const auto read = sessions.begin_read(updated->image_id, "owner", updated->revision);
+        ASSERT_TRUE(read);
+        std::array<std::byte, 16> block{};
+        ASSERT_TRUE(read->reader->read_exact_at(record_offset + 0x694U, block));
+        for (std::size_t i = 0; i < block.size(); ++i)
+            EXPECT_EQ(block[i], expected[record_offset + 0x694U + i]);
+        opened = updated;
+    }
+}
+
+TEST_F(SystemFileOperations, RevisionZeroMlanRequestDoesNotCommitOtherRequestedGroups) {
+    axk::app::ImageSessionManager sessions{
+        *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    bool journal_started{};
+    axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
+                                                  journal_started = true;
+                                                  return false;
+                                              }};
+    auto patch = edits();
+    patch.mlan.midi_input = axk::SystemMlanMidiInput::midi;
+    const auto original = bytes();
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                             axk::PartitionIndex{0}, patch, axk::ASeriesModel::a5000));
+    EXPECT_FALSE(journal_started);
+    EXPECT_EQ(bytes(), original);
+    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+}
+
+TEST_F(SystemFileOperations, RegisteredTemplateEditsRollbackAtomicallyAndRefreshForEveryModel) {
+    axk::app::ImageSessionManager sessions{
+        *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    for (auto model : {axk::ASeriesModel::a3000, axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
+        const auto original = bytes();
+        auto expected = original;
+        const bool native = model == axk::ASeriesModel::a3000;
+        const auto bulk = global_offset(model) - 0x10U;
+        const auto common = bulk + (native ? 0x314U : 0x60cU);
+        const auto effect = bulk + (native ? 0x284U : 0x4ccU);
+        const auto sample = bulk + (native ? 0x1c8U : 0x3ecU);
+        const auto midi = bulk + (native ? 0x1b8U : 0x3dcU);
+        const auto disk = bulk + (native ? 0x40U : 0x1d0U);
+        axk::SystemFilePatch patch;
+        patch.global.master_fine_tune = 7;
+        patch.disk.scsi_id = 6;
+        patch.disk.scsi_mounts[2] = true;
+        patch.disk.top_partition = 98;
+        expected[disk] = std::byte{6};
+        expected[disk + (native ? 8U : 12U)] = std::byte{97};
+        const axk::ByteReader original_reader{original};
+        const auto mask = native ? original_reader.u8(disk + 1U).value() : original_reader.be32(disk + 4U).value();
+        axk::ByteWriter disk_writer{expected};
+        if (native)
+            ASSERT_TRUE(disk_writer.write_u8(disk + 1U, static_cast<std::uint8_t>((mask | 4U) & ~0x40U)));
+        else {
+            patch.disk.ide_mounts[1] = false;
+            ASSERT_TRUE(disk_writer.write_be32(disk + 4U, (mask | 4U) & ~0x240U));
+        }
+        patch.midi.bulk_protect = true;
+        patch.midi.aftertouch_disabled = false;
+        patch.midi.control_change_disabled = true;
+        patch.midi.pitch_bend_disabled = false;
+        patch.midi.device_number = 16;
+        expected[midi + 2U] = std::byte{1};
+        expected[midi + 3U] = std::byte{};
+        expected[midi + 4U] = std::byte{1};
+        expected[midi + 5U] = std::byte{};
+        expected[midi + 7U] = std::byte{16};
+        if (!native) {
+            patch.midi.sysex_receive_port =
+                model == axk::ASeriesModel::a5000 ? axk::SystemSysexReceivePort::b : axk::SystemSysexReceivePort::a;
+            expected[midi + 8U] = static_cast<std::byte>(*patch.midi.sysex_receive_port);
+            patch.playback.sequence_midi_port = model == axk::ASeriesModel::a5000 ? axk::MidiPort::b : axk::MidiPort::a;
+            patch.playback.digital_output_bits = axk::SystemDigitalOutputBits::bits24;
+            expected[bulk + 0x62cU] = model == axk::ASeriesModel::a5000 ? std::byte{} : std::byte{1};
+            expected[bulk + 0x63cU] = std::byte{1};
+        }
+        patch.registered_program.level = native ? 31 : model == axk::ASeriesModel::a4000 ? 32 : 33;
+        patch.registered_program.effects[0].enabled = false;
+        patch.registered_sample.level = 43;
+        patch.registered_sample.output1_destination = 1;
+        patch.registered_sample.loop_start_frame = 250;
+        patch.registered_sample.loop_length_frames = 200;
+        axk::ByteWriter expected_writer{expected};
+        ASSERT_TRUE(expected_writer.write_be32(sample + 0x50, 250));
+        ASSERT_TRUE(expected_writer.write_be32(sample + 0x54, 250));
+        ASSERT_TRUE(expected_writer.write_be32(sample + 0x58, 200));
+        ASSERT_TRUE(expected_writer.write_be32(sample + 0x5c, 200));
+        ASSERT_TRUE(expected_writer.write_be32(sample + 0xb8, 450));
+        expected[global_offset(model)] = std::byte{7};
+        expected[common + 0x0bU] = static_cast<std::byte>(*patch.registered_program.level);
+        expected[effect] = std::byte{};
+        expected[sample + 0x6eU] = std::byte{43};
+        expected[sample + (native ? 0xa5U : 0xd6U)] = std::byte{1};
+        if (native) {
+            patch.registered_sample.portamento_type = 1;
+            patch.registered_sample.velocity_crossfade = true;
+            expected[sample + 0x29U] |= std::byte{9};
+        } else {
+            patch.registered_remix.push_back({0, std::vector<axk::SystemRemixStep>(8)});
+            patch.global.remix_type_selection = 5;
+            patch.global.remix_variation_selection = 0;
+            expected[global_offset(model) + 0x24U] = std::byte{0x50};
+            for (std::size_t i = 0; i < 24U; ++i) {
+                expected[global_offset(model) + 0x50U + i] = i < 8U ? std::byte{1} : std::byte{};
+                expected[global_offset(model) + 0xc8U + i] = std::byte{};
+                expected[global_offset(model) + 0x140U + i] = std::byte{};
+            }
+        }
+        axk::CancellationSource cancellation;
+        bool started{}, all_written{};
+        axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view phase, std::size_t) {
+                                                      started = true;
+                                                      if (phase == "after-patch" && bytes() == expected) {
+                                                          all_written = true;
+                                                          cancellation.cancel();
+                                                      }
+                                                      return false;
+                                                  }};
+        auto invalid = patch;
+        invalid.disk.scsi_mounts[6] = true;
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        invalid = patch;
+        invalid.midi.device_number = 18;
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        invalid = patch;
+        invalid.playback.digital_output_bits = static_cast<axk::SystemDigitalOutputBits>(16);
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        invalid = patch;
+        invalid.registered_program.effects[1].input_level = 128;
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        invalid = patch;
+        invalid.registered_sample.loop_start_frame = 701;
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        invalid = patch;
+        invalid.registered_sample.root_key = 60;
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(started);
+        EXPECT_EQ(bytes(), original);
+        if (!native) {
+            invalid = patch;
+            invalid.registered_remix[0].steps[0].processing = static_cast<axk::SystemRemixProcessing>(35);
+            EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                     axk::PartitionIndex{0}, invalid, model));
+            EXPECT_FALSE(started);
+            EXPECT_EQ(bytes(), original);
+        }
+        const auto cancelled =
+            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                        axk::PartitionIndex{0}, patch, model, cancellation.token());
+        ASSERT_FALSE(cancelled);
+        EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+        EXPECT_TRUE(all_written);
+        EXPECT_EQ(bytes(), original);
+        EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+        auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
+                                                   axk::PartitionIndex{0}, patch, model);
+        ASSERT_TRUE(updated) << updated.error().message;
+        EXPECT_EQ(updated->revision, opened->revision + 1U);
+        EXPECT_EQ(bytes(), expected);
+        opened = updated;
+    }
+}
 
 TEST_F(SystemFileOperations, CommitsOnlyOwnedBytesAndRefreshesTheSessionForEveryModel) {
     axk::app::ImageSessionManager sessions{

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "system_global_fields.hpp"
+#include "system_remix_internal.hpp"
 
 namespace axk {
 namespace {
@@ -82,8 +83,9 @@ Result<void> apply_remix(std::span<std::byte> bytes, const SystemGlobalParameter
     if (!p.remix_type_selection && !p.remix_variation_selection)
         return {};
     const auto maximum_variation = bytes.size() == 0x2eU ? 3U : 7U;
-    if (p.remix_type_selection && *p.remix_type_selection > 4U)
-        return std::unexpected{invalid("Remix type is not an authorable preset selection")};
+    const auto maximum_type = bytes.size() == 0x2eU ? 4U : 7U;
+    if (p.remix_type_selection && *p.remix_type_selection > maximum_type)
+        return std::unexpected{invalid("Remix type is unavailable or would be normalized on load")};
     if (p.remix_variation_selection && *p.remix_variation_selection > maximum_variation)
         return std::unexpected{invalid("Remix variation is out of range")};
     auto &selection = bytes[0x24];
@@ -92,8 +94,10 @@ Result<void> apply_remix(std::span<std::byte> bytes, const SystemGlobalParameter
     if (p.remix_variation_selection)
         selection = (selection & std::byte{0xf0}) | static_cast<std::byte>(*p.remix_variation_selection);
     const auto raw = std::to_integer<unsigned>(selection);
-    if ((raw >> 4U) > 4U || (raw & 15U) > maximum_variation)
-        return std::unexpected{invalid("Remix selection requires a preset type and valid variation; supply both")};
+    if ((raw >> 4U) > maximum_type || (raw & 15U) > maximum_variation)
+        return std::unexpected{invalid("Remix selection requires a load-stable type and valid variation; supply both")};
+    if ((raw >> 4U) >= 5U)
+        return detail::validate_system_remix_selection(bytes, static_cast<std::uint8_t>((raw >> 4U) - 5U));
     return {};
 }
 
