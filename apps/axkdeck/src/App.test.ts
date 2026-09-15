@@ -512,7 +512,7 @@ describe('App panel layout', () => {
             await chooseNestedImage();
             await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
-            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample' }), { detail: 1 });
 
             await waitFor(() => {
                 expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
@@ -527,7 +527,7 @@ describe('App panel layout', () => {
                 expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(1);
             });
 
-            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left Wave Data' }), {
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left' }), {
                 detail: 1,
             });
 

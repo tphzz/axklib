@@ -173,6 +173,7 @@ export interface InspectorRelationshipItem {
     objectId?: string;
     name: string;
     detail: string;
+    detailTitle?: string;
     navigable: boolean;
 }
 

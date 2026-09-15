@@ -25,13 +25,17 @@
                                     type="button"
                                     onclick={(event) => onnavigate?.(item.objectId!, event.detail === 0)}
                                 >
-                                    <strong>{item.name}</strong>
-                                    <span>{item.detail}</span>
+                                    <strong title={item.name}>{item.name}</strong>
+                                    {#if item.detail}
+                                        <span title={item.detailTitle}>{item.detail}</span>
+                                    {/if}
                                 </button>
                             {:else}
                                 <div class="inspector-relationship-unresolved" title="Not resolvable">
-                                    <strong>{item.name}</strong>
-                                    <span>{item.detail}</span>
+                                    <strong title={item.name}>{item.name}</strong>
+                                    {#if item.detail}
+                                        <span title={item.detailTitle}>{item.detail}</span>
+                                    {/if}
                                 </div>
                             {/if}
                         </li>

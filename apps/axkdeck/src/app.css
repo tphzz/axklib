@@ -3558,10 +3558,10 @@ input:focus-visible {
   width: 100%;
   min-width: 0;
   min-height: var(--density-metadata-row);
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) fit-content(45%);
   align-items: baseline;
   gap: 6px;
-  padding: 2px;
+  padding: 2px 0;
   color: var(--color-text);
   border: 0;
   background: transparent;
@@ -3587,12 +3587,12 @@ input:focus-visible {
 }
 
 .inspector-relationship-group span {
-  max-width: 45%;
-  overflow: hidden;
+  min-width: 0;
+  justify-self: end;
+  overflow-wrap: anywhere;
   color: var(--color-text-muted);
   font-size: 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: right;
 }
 
 .inspector-relationship-unresolved {
