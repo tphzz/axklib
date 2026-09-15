@@ -25,6 +25,7 @@ architecture matrix.
 | --- | --- | --- |
 | CLI11 | Native command-line argument parsing | BSD-3-Clause |
 | hash-library v8 | CLI pooled-export SHA-1 compatibility identifiers | Zlib |
+| ICU | Unicode-aware natural filename ordering in application storage browsers | ICU |
 | nlohmann/json | Versioned JSON manifests and reports | MIT |
 | FatFs | FAT12 image authoring | BSD-1-Clause |
 | libsndfile | WAV, AIFF, and FLAC decoding | LGPL-2.1-or-later |

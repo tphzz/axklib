@@ -256,7 +256,7 @@ def test_server_sbom_includes_crow_without_cli_or_test_dependencies(
     )
     assert generate_sbom.main() == 0
     names = {item["name"] for item in json.loads(output.read_text())["packages"]}
-    assert {"axklib", "asio", "crow", "hash-library", "libsndfile", "soxr"} <= names
+    assert {"axklib", "asio", "crow", "hash-library", "icu", "libsndfile", "soxr"} <= names
     assert names.isdisjoint({"cli11", "gtest"})
     crow = next(
         item for item in json.loads(output.read_text())["packages"] if item["name"] == "crow"
@@ -270,6 +270,16 @@ def test_server_sbom_includes_crow_without_cli_or_test_dependencies(
     assert asio["licenseDeclared"] == "BSL-1.0"
     assert "source SHA512: c270425953d84c5f" in crow["comment"]
     assert "source SHA512: 9374ff97bd4af7b5" in asio["comment"]
+
+
+def test_icu_is_only_a_dependency_of_application_profiles() -> None:
+    root = Path(__file__).resolve().parents[3]
+    for profile in ("cli", "server", "workspace"):
+        packages = generate_sbom.vcpkg_packages(root, profile)
+        icu = next(item for item in packages if item["name"] == "icu")
+        assert icu["licenseDeclared"] == "ICU"
+    sdk_names = {item["name"] for item in generate_sbom.vcpkg_packages(root, "sdk")}
+    assert "icu" not in sdk_names
 
 
 def test_desktop_sbom_uses_the_shared_monorepo_version(

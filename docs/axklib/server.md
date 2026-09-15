@@ -969,6 +969,16 @@ matches the bounded contract, otherwise the server generates one. Collection
 pages use a bounded `limit` and an opaque cursor. Clients must not parse or
 construct cursor values.
 
+Storage directory listings put directories before files and use English Unicode
+natural ordering: case and accent differences are ignored for the primary
+comparison, numeric sequences sort by value, and punctuation remains significant.
+Original UTF-8 names break ties, so distinct spellings are never merged. Names
+and paths are returned unchanged. The workspace-folder browser uses the same
+name ordering. Ordering does not depend on the server or client OS locale.
+Pagination uses this complete ordering; clients retain the returned order rather
+than sorting individual pages. Cursors are navigation markers, not directory
+snapshots, and directory changes between requests may change the available entries.
+
 `images.preview` accepts either a Wave Data (`SMPL`) or Sample (`SBNK`) object
 identifier. A Wave Data preview returns one `MONO` lane over its physical PCM
 extent. A Sample preview applies its member start and length fields and returns

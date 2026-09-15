@@ -5,6 +5,7 @@ get_filename_component(AXK_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." A
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
+find_package(ICU REQUIRED COMPONENTS i18n uc)
 
 add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_journal_io.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp
@@ -12,7 +13,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/file_info_operations.cpp src/file_inventory_operations.cpp
                                    src/file_operations.cpp src/file_operations_support.cpp
                                    src/file_relationship_operations.cpp
-                                   src/filesystem.cpp src/filesystem_directory.cpp
+                                   src/filesystem.cpp src/filesystem_directory.cpp src/natural_name_order.cpp
                                    src/filesystem_directory_publication.cpp src/filesystem_entry_mutations.cpp
                                    src/filesystem_edit_operations.cpp
                                    src/filesystem_session_mutation.cpp src/system_file_operations.cpp
@@ -74,7 +75,7 @@ target_include_directories(
 target_link_libraries(
   axk_application
   PUBLIC axklib::audio nlohmann_json::nlohmann_json
-  PRIVATE OpenSSL::Crypto unofficial::hash-library
+  PRIVATE OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
 )
 if(WIN32)
   target_compile_definitions(axk_application PRIVATE _WIN32_WINNT=0x0A00)
@@ -108,7 +109,7 @@ if(BUILD_TESTING)
                                        tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
-                                       tests/filesystem_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
+                                       tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
                                        tests/filesystem_edit_operations_test.cpp
                                        tests/filesystem_fat_edit_test.cpp
                                        tests/filesystem_inputs_test.cpp

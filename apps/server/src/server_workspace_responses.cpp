@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "authentication.hpp"
+#include "axklib/application/natural_name_order.hpp"
 #include "axklib/server/job_json.hpp"
 #include "axklib/server/telemetry.hpp"
 #include "axklib/utf8.hpp"
@@ -200,7 +201,14 @@ crow::response ServerApplication::host_directory_listing_response(const crow::re
         path = std::filesystem::canonical(path, error);
         if (error)
             return error_response(422, {"invalid_host_directory", "host directory is inaccessible"}, id);
-        std::vector<std::filesystem::path> directories;
+        auto order = app::NaturalNameOrder::create();
+        if (!order)
+            return error_response(500, order.error(), id);
+        struct Directory {
+            std::filesystem::path path;
+            app::NaturalNameKey key;
+        };
+        std::vector<Directory> directories;
         for (std::filesystem::directory_iterator
                  iterator{path, std::filesystem::directory_options::skip_permission_denied, error},
              end;
@@ -209,19 +217,22 @@ crow::response ServerApplication::host_directory_listing_response(const crow::re
             const auto entry_status = iterator->symlink_status(entry_error);
             if (!entry_error && !std::filesystem::is_symlink(entry_status) &&
                 std::filesystem::is_directory(entry_status)) {
-                directories.push_back(iterator->path());
+                auto key = order->key(axk::text::path_to_utf8(iterator->path().filename()));
+                if (!key)
+                    return error_response(500, key.error(), id);
+                directories.push_back({iterator->path(), std::move(*key)});
             }
         }
         if (error)
             return error_response(422, {"invalid_host_directory", "host directory cannot be listed"}, id);
-        std::ranges::sort(directories, {}, [](const auto &entry) { return axk::text::path_to_utf8(entry.filename()); });
+        std::ranges::sort(directories, {}, &Directory::key);
         if (first > directories.size())
             return error_response(400, {"invalid_cursor", "directory cursor is outside the listing"}, id);
         Json entries = Json::array();
         const auto end = first + std::min(limit, directories.size() - first);
         for (auto index = first; index < end; ++index) {
-            entries.push_back({{"name", axk::text::path_to_utf8(directories[index].filename())},
-                               {"path", axk::text::path_to_utf8(directories[index])}});
+            entries.push_back({{"name", directories[index].key.original},
+                               {"path", axk::text::path_to_utf8(directories[index].path)}});
         }
         return json_response(200,
                              {{"data",

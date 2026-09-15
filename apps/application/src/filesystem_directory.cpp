@@ -1,5 +1,9 @@
 #include "filesystem_internal.hpp"
 
+#include <utility>
+
+#include "axklib/application/natural_name_order.hpp"
+
 axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::metadata(std::string_view root_id,
                                                                       std::string_view relative_path) const {
     const auto root = find_root(root_id);
@@ -49,15 +53,28 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
     if (!directory)
         return std::unexpected(directory.error());
 
-    std::optional<std::string> after_key;
+    auto order = NaturalNameOrder::create();
+    if (!order)
+        return std::unexpected(order.error());
+    using SortKey = std::pair<bool, NaturalNameKey>;
+    std::optional<SortKey> after_key;
     if (cursor) {
         auto decoded = decode_cursor(*cursor, reference.relative_path);
         if (!decoded)
             return std::unexpected(decoded.error());
-        after_key = std::move(*decoded);
+        auto name_key = order->key(std::string_view{*decoded}.substr(2U));
+        if (!name_key)
+            return std::unexpected(name_key.error());
+        after_key = SortKey{(*decoded)[0] == '1', std::move(*name_key)};
     }
 
     DirectoryListing result{.directory = reference, .entries = {}, .truncated = false, .next_cursor = std::nullopt};
+    struct Candidate {
+        DirectoryEntry entry;
+        SortKey key;
+    };
+    std::vector<Candidate> candidates;
+    candidates.reserve(limit + 1U);
     const auto collect = [&](const NativeDirectoryEntry &discovered) -> Result<bool> {
         const auto entry_relative = reference.relative_path.empty()
                                         ? discovered.utf8_name
@@ -66,15 +83,19 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
                              .relative_path = entry_relative,
                              .kind = discovered.kind,
                              .size = discovered.size};
-        const auto key = entry_key(entry);
+        auto name_key = order->key(entry.name);
+        if (!name_key)
+            return std::unexpected(name_key.error());
+        SortKey key{entry.kind == DirectoryEntryKind::file, std::move(*name_key)};
         if (after_key && key <= *after_key)
             return true;
-        const auto position = std::ranges::lower_bound(
-            result.entries, entry,
-            [](const DirectoryEntry &left, const DirectoryEntry &right) { return entry_key(left) < entry_key(right); });
-        result.entries.insert(position, std::move(entry));
-        if (result.entries.size() > limit + 1U)
-            result.entries.pop_back();
+        const auto position = std::ranges::lower_bound(candidates, key, {}, &Candidate::key);
+        if (candidates.size() == limit + 1U && position == candidates.end())
+            return true;
+        const auto offset = position - candidates.begin();
+        if (candidates.size() == limit + 1U)
+            candidates.pop_back();
+        candidates.insert(candidates.begin() + offset, Candidate{std::move(entry), std::move(key)});
         return true;
     };
 #if defined(_WIN32)
@@ -84,11 +105,14 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
 #endif
     if (!visited)
         return std::unexpected(visited.error());
-    if (result.entries.size() > limit) {
-        result.entries.pop_back();
+    if (candidates.size() > limit) {
+        candidates.pop_back();
         result.truncated = true;
-        result.next_cursor = encode_cursor(entry_key(result.entries.back()));
+        result.next_cursor = encode_cursor(entry_key(candidates.back().entry));
     }
+    result.entries.reserve(candidates.size());
+    for (auto &candidate : candidates)
+        result.entries.push_back(std::move(candidate.entry));
     return result;
 }
 

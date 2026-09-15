@@ -193,6 +193,8 @@ axk::app::Result<std::string> decode_cursor(std::string_view value, std::string_
     }
     if (decoded.size() < 3U || (decoded[0] != '0' && decoded[0] != '1') || decoded[1] != '\0')
         return std::unexpected(reference_error("directory cursor is invalid", relative_path));
+    if (!entry_name_from_utf8(std::string_view{decoded}.substr(2U)))
+        return std::unexpected(reference_error("directory cursor is invalid", relative_path));
     return decoded;
 }
 

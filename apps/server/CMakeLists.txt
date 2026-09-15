@@ -313,7 +313,7 @@ endif()
 install(TARGETS axklib_server RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT server)
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT server)
-foreach(package crow asio hash-library openssl nlohmann-json libsndfile soxr utfcpp
+foreach(package crow asio hash-library icu openssl nlohmann-json libsndfile soxr utfcpp
                 libflac libogg libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

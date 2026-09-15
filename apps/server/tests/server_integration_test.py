@@ -1169,6 +1169,49 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 200
             assert host_listing["data"]["path"] == root_path.resolve().as_posix()
+            ordered_directory = root_path / "natural-order"
+            ordered_directory.mkdir()
+            directory_names = ["ACE", "industrialkit", "norddrms", "ROKTON", "Virus"]
+            file_names = ["disk1.hds", "Disk02.hds", "disk2.hds", "Disk10.hds"]
+            for name in reversed(directory_names):
+                (ordered_directory / name).mkdir()
+            for name in reversed(file_names):
+                (ordered_directory / name).write_bytes(b"image")
+            for endpoint, body, expected_names in [
+                (
+                    "/api/v1/host-directories/list",
+                    {"path": str(ordered_directory)},
+                    directory_names,
+                ),
+                (
+                    "/api/v1/files/list",
+                    {
+                        "directory": {
+                            "rootId": "workspace",
+                            "relativePath": "natural-order",
+                        }
+                    },
+                    directory_names + file_names,
+                ),
+            ]:
+                received_names: list[str] = []
+                cursor = None
+                while True:
+                    page_request = {**body, "limit": 2}
+                    if cursor is not None:
+                        page_request["cursor"] = cursor
+                    status, listing_page = http_request(
+                        port, "POST", endpoint, page_request
+                    )
+                    assert status == 200, listing_page
+                    received_names.extend(
+                        row["name"] for row in listing_page["data"]["entries"]
+                    )
+                    assert len(received_names) <= len(expected_names)
+                    cursor = listing_page["data"]["nextCursor"]
+                    if cursor is None:
+                        break
+                assert received_names == expected_names
             secondary_workspace = external_path / "secondary-workspace"
             secondary_workspace.mkdir()
             status, misspelled_workspace = http_request(

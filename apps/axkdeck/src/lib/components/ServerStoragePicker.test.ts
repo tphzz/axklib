@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ImageTransport } from '../transport';
 import ServerStoragePicker from './ServerStoragePicker.svelte';
+import { storagePickerDirectory, storagePickerFixture, storagePickerNames } from '../../test/storagePickerFixture';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
@@ -72,6 +73,48 @@ function activeOption(list: HTMLElement): HTMLElement {
 }
 
 describe('ServerStoragePicker', () => {
+    it.each([false, true])(
+        'preserves natural server order and selection across pages (remembered: %s)',
+        async (remembered) => {
+            render(ServerStoragePicker, {
+                props: {
+                    transport: storagePickerFixture(),
+                    mode: 'file',
+                    title: 'Open image',
+                    extensions: ['hds'],
+                    multiple: true,
+                    initialDirectory: storagePickerDirectory,
+                    initialFile: remembered
+                        ? { ...storagePickerDirectory, relativePath: 'Drum Kits/Disk10.hds' }
+                        : undefined,
+                    onselect: vi.fn(),
+                    oncancel: vi.fn(),
+                },
+            });
+            if (!remembered) {
+                const selected = await screen.findByRole('option', { name: /disk2\.hds/ });
+                await fireEvent.click(selected);
+                await fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+                await screen.findByRole('option', { name: /Disk10\.hds/ });
+                expect(selected.getAttribute('aria-selected')).toBe('true');
+            } else {
+                await screen.findByRole('option', { name: /Disk10\.hds/ });
+            }
+            const list = screen.getByRole('listbox', { name: 'Storage entries' });
+            const names = within(list)
+                .getAllByRole('option')
+                .map((option) => option.querySelector('strong')?.textContent);
+            expect(names).toEqual(storagePickerNames);
+            expect(activeOption(list).textContent).toContain(remembered ? 'Disk10.hds' : 'disk2.hds');
+            await fireEvent.keyDown(list, { key: 'Home' });
+            expect(activeOption(list).textContent).toContain('ACE-FR2L');
+            await fireEvent.keyDown(list, { key: 'ArrowDown' });
+            expect(activeOption(list).textContent).toContain('ACE-tone');
+            await fireEvent.keyDown(list, { key: 'End' });
+            expect(activeOption(list).textContent).toContain('Disk10.hds');
+        },
+    );
+
     it('uses the task title without exposing server-filesystem terminology', async () => {
         render(ServerStoragePicker, {
             props: {
