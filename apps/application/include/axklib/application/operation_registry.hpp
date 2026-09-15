@@ -59,21 +59,21 @@ class OperationRegistry {
     Result<void> bind_path_accesses(std::string_view operation_id, PathAccessResolver resolver);
 
     template <typename Request, typename Response, typename Callable>
-    Result<void> bind_typed(std::string_view operation_id, Callable handler) {
-        return bind(operation_id,
-                    [handler = std::move(handler)](const Json &input, const OperationContext &context) -> Result<Json> {
-                        try {
-                            const auto request = input.template get<Request>();
-                            auto response = std::invoke(handler, request, context);
-                            if (!response)
-                                return std::unexpected(response.error());
-                            Json output = *response;
-                            return output;
-                        } catch (const nlohmann::json::exception &) {
-                            return std::unexpected(
-                                Error{"invalid_request", "request does not match the operation schema"});
-                        }
-                    });
+    Result<void> bind_typed(std::string_view operation_id, Callable callable) {
+        return bind(
+            operation_id,
+            [handler = std::move(callable)](const Json &input, const OperationContext &context) -> Result<Json> {
+                try {
+                    const auto request = input.template get<Request>();
+                    auto response = std::invoke(handler, request, context);
+                    if (!response)
+                        return std::unexpected(response.error());
+                    Json output = *response;
+                    return output;
+                } catch (const nlohmann::json::exception &) {
+                    return std::unexpected(Error{"invalid_request", "request does not match the operation schema"});
+                }
+            });
     }
 
     [[nodiscard]] Result<Json> invoke(std::string_view operation_id, const Json &input,

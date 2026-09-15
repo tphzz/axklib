@@ -136,24 +136,25 @@ axk::app::Result<axk::app::SandboxFile> axk::app::Sandbox::open_file(const FileR
     auto reader = std::make_shared<NativeFileReader>(std::move(handle), size, reference.relative_path);
 #endif
     const auto expected = *identity;
-    auto verify = [reader, expected, parent = std::move(*parent), name = relative->filename(),
+    auto verify = [reader, expected, retained_parent = std::move(*parent), name = relative->filename(),
                    path = reference.relative_path]() -> Result<void> {
         if (auto checked = reader->verify_unchanged(expected); !checked)
             return checked;
 #if defined(_WIN32)
         auto current =
-            open_relative(parent.get(), name, FILE_READ_ATTRIBUTES, FILE_OPEN, FILE_NON_DIRECTORY_FILE, path);
+            open_relative(retained_parent.get(), name, FILE_READ_ATTRIBUTES, FILE_OPEN, FILE_NON_DIRECTORY_FILE, path);
         if (!current)
             return std::unexpected(current.error());
-        auto identity = native_identity(current->get(), path);
+        auto current_identity = native_identity(current->get(), path);
 #else
-        auto descriptor = ::openat(*parent, name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-        if (descriptor < 0)
+        auto current_descriptor =
+            ::openat(*retained_parent, name.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+        if (current_descriptor < 0)
             return std::unexpected(reference_error("image source path changed", path));
-        auto current = descriptor_handle(descriptor);
-        auto identity = native_identity(*current, path);
+        auto current = descriptor_handle(current_descriptor);
+        auto current_identity = native_identity(*current, path);
 #endif
-        if (!identity || !same_file_revision(*identity, expected))
+        if (!current_identity || !same_file_revision(*current_identity, expected))
             return std::unexpected(reference_error("image source path changed", path));
         return {};
     };

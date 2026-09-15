@@ -83,6 +83,14 @@ configuration, using `x64-linux-axk` or `arm64-linux-axk` for both the native
 project and target dependencies. This matches Linux CI's compiler major version;
 macOS uses Apple Clang. Local validation does not replace the platform builds.
 
+Local and workflow Clang builds share the project-target warning policy in
+`library/cmake/AxkWarnings.cmake`, including `-Wshadow` and
+`-Wshadow-uncaptured-local`. These catch variable shadowing, including inside
+lambdas that do not capture the hidden local. Warnings remain errors by default;
+the policy applies to maintained code and tests, not dependency targets.
+Constructor parameters that simply initialize equally named fields are allowed.
+MSVC retains `/W4 /WX`; the compilers' diagnostic coverage is not identical.
+
 On Debian 13, the compiler and tools can be installed alongside Clang 19:
 
 ```bash

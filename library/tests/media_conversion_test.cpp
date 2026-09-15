@@ -537,10 +537,10 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
         EXPECT_TRUE(object.exclusion_reason.empty()) << object.name << ": " << object.exclusion_reason;
         const auto direct = import_source->prepare(std::array{object.key});
         ASSERT_TRUE(direct) << direct.error().message;
-        axk::PackageRootSelector root;
-        root.object_key = object.key;
-        root.kind = direct->roots.front().kind;
-        const auto archived = axk::build_portable_package(import_media, std::array{root});
+        axk::PackageRootSelector package_root;
+        package_root.object_key = object.key;
+        package_root.kind = direct->roots.front().kind;
+        const auto archived = axk::build_portable_package(import_media, std::array{package_root});
         ASSERT_TRUE(archived) << archived.error().message;
         EXPECT_EQ(direct->package_id, archived->package.package_id);
         EXPECT_EQ(direct->nodes, archived->package.nodes);

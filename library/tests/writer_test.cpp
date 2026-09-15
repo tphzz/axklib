@@ -206,10 +206,10 @@ TEST(HdsManifest, ParsesAllNestedSampleParameterGroupsAndRejectsNonContractField
     EXPECT_EQ(parameters.output2_destination, 9U);
     EXPECT_EQ(parameters.portamento_rate, 37U);
 
-    const auto manifest_with_parameters = [](std::string_view parameters) {
+    const auto manifest_with_parameters = [](std::string_view parameters_json) {
         return std::format(
             R"json({{"schema_version":"1.0","size_bytes":1048576,"partitions":[{{"name":"P1","volumes":[{{"name":"V1","waveforms":[{{"id":"wave","name":"Wave","path":"wave.wav","root_key":60}}],"samples":[{{"name":"Sample","waveform_id":"wave","parameters":{}}}]}}]}}]}})json",
-            parameters);
+            parameters_json);
     };
     for (const auto invalid : {R"json({"feg":{"range":12}})json", R"json({"peg":{"attack_mode":1}})json",
                                R"json({"aeg":{"init_level":1}})json", R"json({"feg":{}})json",
