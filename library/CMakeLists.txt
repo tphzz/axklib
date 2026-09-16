@@ -569,6 +569,7 @@ if(BUILD_TESTING)
     tests/alteration_test.cpp
     tests/program_parameter_alteration_test.cpp
     tests/audio_import_test.cpp
+    tests/audio_import_contract_test.cpp
     tests/audio_test.cpp
     tests/wav_stream_test.cpp
     tests/audio_export_wav_source_test.cpp

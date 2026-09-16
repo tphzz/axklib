@@ -174,8 +174,7 @@
                         disabled={controlsDisabled}
                         onmode={(mode) => workflow.setMode(mode)}
                         onvolume={(index, name) => workflow.setDestination('existing', index, name)}
-                        onpartition={(index) =>
-                            workflow.setDestination(r.mode, index, r.mode === 'existing' ? '' : r.volumeName)}
+                        onpartition={(index) => workflow.setPartition(index)}
                         onname={(name) => workflow.setDestination(r.mode, r.partitionIndex, name)}
                     />
                     <div class="floppy-review">

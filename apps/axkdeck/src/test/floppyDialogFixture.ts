@@ -3,8 +3,9 @@ import { PickerController } from '../features/dialogs/picker';
 import type { ImageTransport, ImageSessionPackageImportPlan } from '../lib/transport';
 import type { JobController } from '../features/jobs/actions';
 import type { DiskTreeItem } from '../lib/types';
+import { serverDirectoryLocation } from '../lib/storageLocations';
 
-export function floppyDialogFixture(count = 250, directSource = false) {
+export function floppyDialogFixture(count = 250, directSource = false, folder?: string) {
     const partition: DiskTreeItem = {
         id: 'p0',
         name: 'Partition 1',
@@ -38,10 +39,16 @@ export function floppyDialogFixture(count = 250, directSource = false) {
         releaseFloppyInspection: async () => {},
         releaseImagePackageImportPlan: async () => {},
         planFloppyImport: async () => plan,
+        startFloppyInspection: async () => ({
+            jobId: 1,
+            kind: 'images.floppy_import.inspect',
+            status: 'completed',
+            result: inspection,
+        }),
     } as unknown as ImageTransport;
     const workflow = new FloppyImportWorkflow({
         transport,
-        jobs: {} as JobController,
+        jobs: { run: (start: () => Promise<unknown>) => start() } as unknown as JobController,
         picker: new PickerController(() => {}),
         isDesktop: directSource,
         sessionId: () => 1,
@@ -55,12 +62,12 @@ export function floppyDialogFixture(count = 250, directSource = false) {
     workflow.open(partition);
     const request = workflow.request!;
     request.status = 'ready';
-    request.volumeName = 'New volume';
+    if (!folder) workflow.setDestination('create', 0, 'New volume');
     request.inspection = {
         format: 'A_SERIES',
         inspectionToken: 'inspection',
         complete: true,
-        label: 'Sampler floppy',
+        label: folder ? '' : 'Sampler floppy',
         nextRequiredIndex: null,
         members: [{ index: 1, label: 'Sampler floppy' }],
         excludedFiles: [{ memberName: 'test.img', path: 'SYSTEM2.002', sizeBytes: 1024 }],
@@ -92,5 +99,10 @@ export function floppyDialogFixture(count = 250, directSource = false) {
     ];
     request.plan = plan;
     request.dirty = false;
+    const inspection = request.inspection;
+    if (folder) {
+        request.members = [];
+        void workflow.add([serverDirectoryLocation({ rootId: 'yamaha', relativePath: folder }, `Yamaha/${folder}`)]);
+    }
     return workflow;
 }

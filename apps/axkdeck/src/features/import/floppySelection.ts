@@ -20,12 +20,18 @@ export function floppySelection(objects: readonly FloppyObject[], selected: read
     return { included, required };
 }
 
-export function floppyVolumeName(label: string, filename: string): string {
+export function floppyVolumeName(label: string, sourcePath: string, kind: 'file' | 'directory'): string {
     const clean = (value: string) =>
         value
             .replace(/[^\x20-\x7e]/g, '')
             .trim()
             .slice(0, 16)
             .trim();
-    return clean(label) || clean(filename.replace(/\.(img|ima)$/i, '')) || 'Imported';
+    const basename =
+        sourcePath
+            .replace(/[\\/]+$/, '')
+            .split(/[\\/]/)
+            .pop() ?? '';
+    const fallback = kind === 'file' ? basename.replace(/\.(img|ima)$/i, '') : basename;
+    return clean(label) || clean(fallback) || 'Imported';
 }

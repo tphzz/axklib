@@ -31,6 +31,8 @@ export interface FloppyRequest {
     mode: ImportDestinationMode;
     partitionIndex: number | null;
     volumeName: string;
+    newVolumeName: string;
+    newVolumeNameEdited: boolean;
     status: 'choosing' | 'loading' | 'planning' | 'ready' | 'applying';
     error: string;
     plan: ImageSessionPackageImportPlan | null;
@@ -87,6 +89,8 @@ export class FloppyImportWorkflow {
             mode: initial?.mode ?? 'create',
             partitionIndex: initial?.partitionIndex ?? this.destinations().partitions[0]?.partitionIndex ?? null,
             volumeName: initial?.volumeName ?? '',
+            newVolumeName: '',
+            newVolumeNameEdited: false,
             status: 'choosing',
             error: '',
             plan: null,
@@ -161,16 +165,38 @@ export class FloppyImportWorkflow {
         r.mode = mode;
         r.partitionIndex = partitionIndex;
         r.volumeName = volumeName.slice(0, 16);
+        if (mode === 'create') {
+            r.newVolumeName = r.volumeName;
+            r.newVolumeNameEdited = true;
+        }
+        this.invalidate();
+    }
+    setPartition(partitionIndex: number | null): void {
+        const r = this.request;
+        if (!r || this.busy || this.completion.locked) return;
+        r.partitionIndex = partitionIndex;
+        if (r.mode === 'existing') r.volumeName = '';
         this.invalidate();
     }
     setMode(mode: ImportDestinationMode): void {
         const r = this.request;
-        if (!r) return;
-        this.setDestination(
-            mode,
-            r.partitionIndex,
-            mode === 'existing' ? '' : floppyVolumeName(r.inspection?.label ?? '', r.members[0]?.name ?? ''),
-        );
+        if (!r || this.busy || this.completion.locked || r.mode === mode) return;
+        r.mode = mode;
+        r.volumeName = mode === 'existing' ? '' : r.newVolumeName;
+        this.invalidate();
+    }
+    private suggestVolumeName(r: FloppyRequest): void {
+        if (r.newVolumeNameEdited) return;
+        const source = r.members[0]?.source;
+        const path = source
+            ? isLocation(source)
+                ? source.reference.relativePath || source.displayName
+                : source.name
+            : '';
+        r.newVolumeName = source
+            ? floppyVolumeName(r.inspection?.label ?? '', path, isDirectory(source) ? 'directory' : 'file')
+            : '';
+        if (r.mode === 'create') r.volumeName = r.newVolumeName;
     }
     toggle(key: string, checked: boolean): void {
         const r = this.request;
@@ -388,6 +414,7 @@ export class FloppyImportWorkflow {
                 .catch(() => undefined);
         if (this.request !== r) return;
         r.inspection = null;
+        this.suggestVolumeName(r);
         r.selected = [];
         if (!r.members.length) {
             r.status = 'choosing';
@@ -444,8 +471,7 @@ export class FloppyImportWorkflow {
             }
             r.inspection = inspection;
             r.selected = inspection.objects.filter((o) => !o.exclusionReason).map((o) => o.objectKey);
-            if (r.mode === 'create' && !r.volumeName.trim())
-                r.volumeName = floppyVolumeName(inspection.label, r.members[0].name);
+            this.suggestVolumeName(r);
             r.status = 'ready';
         } catch (error) {
             if (current()) {

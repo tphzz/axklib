@@ -115,6 +115,73 @@ function setup(value = inspection, isDesktop = false, connectionMode: ImageTrans
     return { workflow, transport, refresh, otherFormat, picker };
 }
 describe('floppy import', () => {
+    it('suggests the first selected folder basename instead of its display path', async () => {
+        const { workflow } = setup({ ...inspection, label: '   ' });
+        const folder = serverDirectoryLocation(
+            { rootId: 'workspace', relativePath: 'Drum Kits/norddrms/disk1/' },
+            'Yamaha/axk/floppy/unpacked/Drum Kits/norddrms/disk1',
+        );
+        await workflow.requestDroppedFiles([folder], partition);
+        expect(workflow.request?.volumeName).toBe('disk1');
+        expect(workflow.request?.members[0].name).toBe(folder.displayName);
+    });
+    it('updates automatic suggestions when the first selected image changes', async () => {
+        const { workflow } = setup({ ...inspection, label: '' });
+        const first = serverFileLocation({ rootId: 'workspace', relativePath: 'images/second.IMG' });
+        const second = serverFileLocation({ rootId: 'workspace', relativePath: 'images/first.ima' });
+        await workflow.requestDroppedFiles([first, second], partition);
+        expect(workflow.request?.volumeName).toBe('second');
+        await workflow.remove(workflow.request!.members[0].id);
+        expect(workflow.request?.volumeName).toBe('first');
+    });
+    it.each(['Custom', '', 'disk'])(
+        'preserves edited new-volume draft %j across companions and modes',
+        async (name) => {
+            const { workflow } = setup({ ...inspection, label: '' });
+            await workflow.requestDroppedFiles([source], partition);
+            workflow.setDestination('create', 0, name);
+            workflow.setMode('existing');
+            workflow.setDestination('existing', 0, 'Existing');
+            await workflow.add([serverFileLocation({ rootId: 'workspace', relativePath: 'disk2.img' })]);
+            workflow.setMode('create');
+            expect(workflow.request?.volumeName).toBe(name);
+            await workflow.remove(workflow.request!.members[0].id);
+            expect(workflow.request?.volumeName).toBe(name);
+            await workflow.close();
+            await workflow.requestDroppedFiles([source], partition);
+            expect(workflow.request?.volumeName).toBe('disk');
+        },
+    );
+    it('keeps partition changes automatic and adopts a subsequently available stored name', async () => {
+        const { workflow, transport } = setup({ ...inspection, label: '', complete: false });
+        await workflow.requestDroppedFiles([source], partition);
+        workflow.setPartition(1);
+        transport.startFloppyInspection.mockResolvedValue({
+            jobId: 1,
+            kind: 'images.floppy_import.inspect',
+            status: 'completed',
+            result: inspection,
+        });
+        await workflow.add([serverFileLocation({ rootId: 'workspace', relativePath: 'disk2.img' })]);
+        expect(workflow.request).toMatchObject({ volumeName: 'Source', partitionIndex: 1 });
+    });
+    it('uses client filenames and maintains suggestions while Existing is selected', async () => {
+        const { workflow } = setup({ ...inspection, label: '' });
+        await workflow.requestDroppedFiles(
+            [
+                {
+                    name: ['C:', 'images', 'Client.IMA'].join('\\'),
+                    size: 512,
+                    type: 'application/octet-stream',
+                    readChunk: vi.fn(),
+                },
+            ],
+            volume,
+        );
+        expect(workflow.request?.volumeName).toBe('Existing');
+        workflow.setMode('create');
+        expect(workflow.request?.volumeName).toBe('Client');
+    });
     it('inspects a folder without uploading it and rejects mixed representations', async () => {
         const { workflow, picker, transport } = setup(inspection, true, 'local');
         const folder = serverDirectoryLocation({ rootId: 'workspace', relativePath: 'norddrms' });
@@ -288,7 +355,7 @@ describe('floppy import', () => {
             o.objectKey === 'wave' ? { ...o, requiredObjectKeys: ['sample'] } : o,
         );
         expect(floppySelection(objects, ['sample']).included.size).toBe(2);
-        expect(floppyVolumeName('', 'long floppy filename.img')).toBe('long floppy file');
-        expect(floppyVolumeName(' VALID ', 'fallback.img')).toBe('VALID');
+        expect(floppyVolumeName('', 'long floppy filename.img', 'file')).toBe('long floppy file');
+        expect(floppyVolumeName(' VALID ', 'fallback.img', 'file')).toBe('VALID');
     });
 });

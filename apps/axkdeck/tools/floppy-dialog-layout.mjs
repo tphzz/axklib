@@ -107,12 +107,37 @@ try {
         await page.screenshot({ path: resolve(output, `packages-${viewport.width}x${viewport.height}.png`) });
         assert.deepEqual(errors, []);
         await page.goto(`${base}/tools/layout-fixtures/floppy-import.html?direct`);
-        await page.getByRole('button', { name: 'Add floppy images', exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Add disks...', exact: true }).waitFor();
         assert.equal(await page.getByRole('button', { name: 'Computer', exact: true }).count(), 0);
         assert.equal(await page.locator('.import-source-choice').count(), 0);
         assert.deepEqual((await geometry()).footer, before.footer);
         await page.screenshot({ path: resolve(output, `direct-${viewport.width}x${viewport.height}.png`) });
         assert.deepEqual(errors, []);
+        for (const folder of [
+            'axk/floppy/unpacked/Drum Kits/norddrms',
+            'axk/floppy/unpacked/Drum Kits/norddrms/disk1',
+        ]) {
+            await page.goto(
+                `${base}/tools/layout-fixtures/floppy-import.html?direct&folder=${encodeURIComponent(folder)}`,
+            );
+            const input = page.getByRole('textbox', { name: 'New volume name' });
+            const expected = folder.split('/').pop();
+            await page.waitForFunction(
+                (value) => document.querySelector('[aria-label="New volume name"]')?.value === value,
+                expected,
+            );
+            assert.equal(await input.inputValue(), expected);
+            await page.locator('.floppy-members').getByText(`Yamaha/${folder}`, { exact: true }).waitFor();
+            for (const draft of ['Custom name', '']) {
+                await input.fill(draft);
+                await page.getByRole('button', { name: 'Existing', exact: true }).click();
+                await page.getByRole('button', { name: 'New', exact: true }).click();
+                assert.equal(await input.inputValue(), draft);
+            }
+            await input.fill(expected);
+            await page.screenshot({ path: resolve(output, `folder-${expected}-${viewport.width}.png`) });
+            assert.deepEqual(errors, []);
+        }
         results.push({ viewport, ...before });
         await page.close();
     }
