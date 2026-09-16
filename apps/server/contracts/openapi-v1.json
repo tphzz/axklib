@@ -122,6 +122,7 @@
         "additionalProperties": false,
         "properties": {
           "clippedSamples": {
+            "description": "Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded.",
             "minimum": 0,
             "type": "integer"
           },

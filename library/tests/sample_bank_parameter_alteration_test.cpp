@@ -223,6 +223,43 @@ TEST_F(SampleBankParameterAlteration, InvalidMergedRangeInSecondMemberPreservesS
     EXPECT_FALSE(std::filesystem::exists(absent));
 }
 
+TEST_F(SampleBankParameterAlteration, PartialOriginalKeyRangeUsesBankAndMemberStateWithinBatch) {
+    auto first = bank_update({{"root_key", 40}});
+    first["id"] = "root";
+    const auto original = read_bytes(source);
+    for (const auto high : {50, 35}) {
+        const auto parsed = axk::parse_alteration_manifest(
+            Json{{"schema_version", "1.0"},
+                 {"operations", Json::array({first, bank_update({{"key_low", 255}, {"key_high", high}})})}}
+                .dump());
+        ASSERT_TRUE(parsed) << parsed.error().message;
+        const auto destination = root / (std::to_string(high) + ".hds");
+        const auto applied = axk::alter_hds(source, *parsed, destination);
+        EXPECT_EQ(read_bytes(source), original);
+        if (high == 35) {
+            EXPECT_FALSE(applied);
+            EXPECT_FALSE(std::filesystem::exists(destination));
+            continue;
+        }
+        ASSERT_TRUE(applied) << applied.error().message;
+        const auto image = axk::open_image(destination);
+        ASSERT_TRUE(image);
+        const auto catalog = axk::build_object_catalog(*image);
+        ASSERT_TRUE(catalog);
+        for (const auto &object : catalog->objects) {
+            const bool bank = object.object.header.type == axk::ObjectType::sbac;
+            const bool member =
+                object.object.header.type == axk::ObjectType::sbnk && object.object.header.name != "Direct";
+            if (bank || member) {
+                const auto base = bank ? 0x78U : 0xa8U;
+                EXPECT_EQ(object.raw_payload[base + 0x2eU], std::byte{40});
+                EXPECT_EQ(object.raw_payload[base + 0x3bU], std::byte{255});
+                EXPECT_EQ(object.raw_payload[base + 0x3aU], std::byte{50});
+            }
+        }
+    }
+}
+
 TEST_F(SampleBankParameterAlteration, RejectsPendingPropagationWithoutDiscardingStateOrPublishingChanges) {
     patch_bank(0x137U, '\x01');
     const auto parsed = parse_bank_update(bank_update());

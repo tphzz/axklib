@@ -183,6 +183,13 @@ dither policy. See
 [Sampler Data Structures](sampler-data.md) for the generated object fields and
 stored PCM representation.
 
+Audio conversion reports the number of individual channel values outside the
+normalized full-scale interval `[-1, 1]` after resampling and before dither.
+Full-scale endpoints, PCM16 rounding, and saturation caused only by dither do
+not count as overload. Conversion preserves gain; it does not normalize or
+attenuate the source automatically. Resampling can produce over-range values
+even when all original source values are within full scale.
+
 Names written into Yamaha object and menu fields must be ASCII and at most 16
 bytes. Manifest IDs such as waveform `id` are manifest-local references and do
 not become sampler-facing names.

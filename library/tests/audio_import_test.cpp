@@ -324,6 +324,20 @@ TEST(Pcm16Quantizer, RoundsClipsAndRejectsNonFiniteInput) {
     EXPECT_FALSE(detail::quantize_pcm16(invalid, false));
 }
 
+TEST(Pcm16Quantizer, FullScaleEndpointsAreQuantizationNotOverload) {
+    const std::array input{-1.0, 1.0, 8'388'607.0 / 8'388'608.0, 32'767.25 / 32'768.0, -1.25, 1.25};
+    for (const bool dither : {false, true}) {
+        const auto quantized = detail::quantize_pcm16(input, dither);
+        ASSERT_TRUE(quantized);
+        EXPECT_EQ(quantized->clipped_samples, 2U);
+        EXPECT_EQ(quantized->samples.front(), -32'768);
+        EXPECT_EQ(quantized->samples[1], 32'767);
+        EXPECT_EQ(quantized->samples[2], 32'767);
+        EXPECT_EQ(quantized->samples[4], -32'768);
+        EXPECT_EQ(quantized->samples[5], 32'767);
+    }
+}
+
 TEST(Pcm16Quantizer, IsRepeatableAndKeepsTpdfWithinOneQuantizationStep) {
     const std::array<double, 4096> silence{};
     const auto first = detail::quantize_pcm16(silence, true);

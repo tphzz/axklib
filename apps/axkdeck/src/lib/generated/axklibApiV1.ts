@@ -1818,6 +1818,7 @@ export interface components {
             storageRevision: 0 | 1;
         };
         AlterationAudioImportSummary: {
+            /** @description Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded. */
             clippedSamples: number;
             ditherAlgorithm: string;
             outputFrames: number;

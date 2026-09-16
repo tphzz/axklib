@@ -106,6 +106,57 @@ function destinationProps(volumeName: string, partitionIndex = 0) {
 }
 
 describe('AudioImportDialog', () => {
+    it('does not revalidate imported names after refresh when new warnings retain the dialog', async () => {
+        const imageTransport = transport();
+        imageTransport.inspectAudio = vi.fn().mockResolvedValue(sourceInfo({ channels: 1 }));
+        imageTransport.waitForJob = vi.fn().mockResolvedValue({
+            jobId: 1,
+            status: 'completed',
+            result: { kind: 'ALTERATION', warnings: [{ message: 'Conversion warning' }], operations: [] },
+        });
+        const completion = new ImportCompletion(imageTransport, new JobController(imageTransport));
+        const oncancel = vi.fn();
+        const start = vi.fn().mockResolvedValue({ jobId: 1, kind: 'alter', status: 'queued' });
+        const props = {
+            transport: imageTransport,
+            files: [serverFileLocation({ rootId: 'workspace', relativePath: 'Fresh.wav' }, 'Fresh.wav')],
+            ...destinationProps('Import'),
+            completion,
+            existingSampleNames: [] as string[],
+            existingWaveformNames: [] as string[],
+            existingSampleBankNames: [] as string[],
+            oncommit: vi.fn(() =>
+                completion.run(start, async () => {
+                    await rendered.rerender({
+                        ...props,
+                        existingSampleNames: ['Fresh'],
+                        existingWaveformNames: ['Fresh'],
+                        existingSampleBankNames: ['New Bank'],
+                    });
+                }),
+            ),
+            oncancel,
+        };
+        const rendered = render(AudioImportDialog, { props });
+        await screen.findAllByDisplayValue('Fresh');
+        await fireEvent.change(screen.getByLabelText('Import mode'), { target: { value: 'SAMPLE_BANK' } });
+        await fireEvent.input(screen.getByLabelText('Sample Bank name'), { target: { value: 'New Bank' } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+        await screen.findByRole('button', { name: 'Done' });
+        expect(screen.queryByText(/name already exists/)).toBeNull();
+        expect(screen.getByText('Imported', { exact: true })).toBeTruthy();
+        expect(screen.queryByText(/^Fits/)).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Remove Fresh.wav' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
+        expect(oncancel).not.toHaveBeenCalled();
+        await waitFor(() =>
+            expect((screen.getByRole('button', { name: 'Done' }) as HTMLButtonElement).disabled).toBe(false),
+        );
+        await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
+        expect(start).toHaveBeenCalledOnce();
+    });
+
     it('retains completion warnings with Done and never offers another import', async () => {
         const imageTransport = transport();
         imageTransport.waitForJob = vi.fn().mockResolvedValue({

@@ -96,20 +96,10 @@ Result<DecodedSystemFile> patch_system_registered_sample(const DecodedSystemFile
             block, requested, native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::current);
         !valid)
         return std::unexpected{valid.error()};
-    // Dependency validation used the actual retained root. The scalar codec's
-    // standalone default root is irrelevant to key-only template edits.
-    auto key_low = requested.key_low;
-    auto key_high = requested.key_high;
-    requested.key_low.reset();
-    requested.key_high.reset();
     if (const auto written = detail::apply_sample_parameters_to_block(
             block, requested, native ? detail::SampleParameterLayout::a3000 : detail::SampleParameterLayout::current);
         !written)
         return std::unexpected{written.error()};
-    if (key_low)
-        block[0x3bU] = static_cast<std::byte>(*key_low);
-    if (key_high)
-        block[0x3aU] = static_cast<std::byte>(*key_high);
     if (requested.loop_start_frame) {
         ByteWriter writer{block};
         if (auto written = writer.write_be32(0x54, *requested.loop_start_frame); !written)

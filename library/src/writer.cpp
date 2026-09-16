@@ -12,6 +12,7 @@
 
 #include "axklib/file_publication.hpp"
 #include "axklib/program_spec_json.hpp"
+#include "axklib/sample_parameter_codec.hpp"
 #include "axklib/sample_parameter_json.hpp"
 #include "axklib/sfs.hpp"
 
@@ -212,6 +213,8 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
         if (!parameters)
             return std::unexpected{parameters.error()};
         result.parameters = std::move(*parameters);
+        if (auto valid = detail::validate_sample_parameters(result.parameters); !valid)
+            return std::unexpected{valid.error()};
     }
     if ((result.right_waveform_id || result.interleaved_audio_path) &&
         (result.parameters.expand_detune.value_or(0) != 0 || result.parameters.expand_dephase.value_or(0) != 0)) {

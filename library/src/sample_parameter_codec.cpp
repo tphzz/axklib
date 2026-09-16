@@ -278,7 +278,7 @@ bool has_sample_parameter_values(const SampleParameters &value) {
 #undef AXK_SET
 }
 
-Result<void> validate_sample_parameters(const SampleParameters &value, SampleParameterGeneration generation) {
+Result<void> validate_sample_parameter_fields(const SampleParameters &value, SampleParameterGeneration generation) {
     if (generation != SampleParameterGeneration::a3000 && generation != SampleParameterGeneration::current)
         return std::unexpected{invalid("Sample parameter generation is unsupported")};
     const bool native = generation == SampleParameterGeneration::a3000;
@@ -287,34 +287,32 @@ Result<void> validate_sample_parameters(const SampleParameters &value, SamplePar
         return std::unexpected{invalid("Sample parameter is not available in the A3000 layout")};
     if (!native && value.velocity_crossfade)
         return std::unexpected{invalid("Velocity crossfade switch is available only in the A3000 layout")};
-    const auto root_key = value.root_key.value_or(60U);
     const auto key_low = value.key_low.value_or(0U);
     const auto key_high = value.key_high.value_or(127U);
-    const auto velocity_low = value.velocity_low.value_or(0U);
-    const auto velocity_high = value.velocity_high.value_or(127U);
-    const auto effective_low = key_low == sampler_original_key_low_limit ? root_key : key_low;
-    const auto effective_high = key_high == sampler_original_key_high_limit ? root_key : key_high;
+    const auto effective_low = key_low == sampler_original_key_low_limit ? value.root_key : value.key_low;
+    const auto effective_high = key_high == sampler_original_key_high_limit ? value.root_key : value.key_high;
+    const auto inverted = [](const auto &low, const auto &high) { return low && high && *low > *high; };
     if (outside(value.sample_eq_type, 0, 2) || outside(value.midi_receive_channel, 0, 16) ||
         outside(value.pitch_bend_type, 0, native ? 13 : 12) || outside(value.pitch_bend_range, 0, 24) ||
         outside(value.coarse_tune, native ? -127 : -64, native ? 127 : 63) || outside(value.root_key, 0, 127) ||
         outside(value.fine_tune_cents, -63, 63) || (key_low > 127U && key_low != sampler_original_key_low_limit) ||
-        key_high > sampler_original_key_high_limit || effective_high < effective_low ||
+        key_high > sampler_original_key_high_limit || inverted(effective_low, effective_high) ||
         (value.loop_mode && static_cast<std::uint8_t>(*value.loop_mode) >
                                 static_cast<std::uint8_t>(AudioSamplerLoopMode::reverse_one_shot)) ||
         outside(value.loop_tempo_hundredths, 8000, 15999) || outside(value.wave_start_velocity_sensitivity, -63, 63) ||
         outside(value.filter_type, 0, 16) || outside(value.filter_cutoff, 0, 127) ||
         outside(value.filter_q_width, 0, 31) || outside(value.filter_scaling_break1, 0, 127) ||
         outside(value.filter_scaling_break2, 0, 127) ||
-        value.filter_scaling_break1.value_or(0U) > value.filter_scaling_break2.value_or(127U) ||
+        inverted(value.filter_scaling_break1, value.filter_scaling_break2) ||
         outside(value.filter_scaling_cutoff1, -127, 127) || outside(value.filter_scaling_cutoff2, -127, 127) ||
         outside(value.filter_velocity_to_cutoff, -63, 68) || outside(value.filter_velocity_to_q_width, -63, 68) ||
         outside(value.expand_detune, -7, 7) || outside(value.expand_dephase, -63, 63) ||
         outside(value.expand_width, -63, 63) || outside(value.random_pitch, 0, 63) || outside(value.level, 0, 127) ||
         outside(value.pan, -64, 63) || outside(value.velocity_low_limit, 0, 127) ||
         outside(value.velocity_offset, -127, 127) || outside(value.velocity_low, 0, 127) ||
-        outside(value.velocity_high, 0, 127) || velocity_high < velocity_low ||
+        outside(value.velocity_high, 0, 127) || inverted(value.velocity_low, value.velocity_high) ||
         outside(value.level_scaling_break1, 0, 127) || outside(value.level_scaling_break2, 0, 127) ||
-        value.level_scaling_break1.value_or(0U) > value.level_scaling_break2.value_or(127U) ||
+        inverted(value.level_scaling_break1, value.level_scaling_break2) ||
         outside(value.level_scaling_level1, 0, 127) || outside(value.level_scaling_level2, 0, 127) ||
         outside(value.velocity_sensitivity, -127, 127) || outside(value.alternate_group, 0, 16) ||
         outside(value.sample_eq_frequency, 4, 58) || outside(value.sample_eq_gain_db, -12, 12) ||
@@ -340,6 +338,20 @@ Result<void> validate_sample_parameters(const SampleParameters &value, SamplePar
     return {};
 }
 
+Result<void> validate_sample_parameters(const SampleParameters &value, SampleParameterGeneration generation) {
+    auto effective = value;
+    effective.root_key = value.root_key.value_or(60U);
+    effective.key_low = value.key_low.value_or(0U);
+    effective.key_high = value.key_high.value_or(127U);
+    effective.velocity_low = value.velocity_low.value_or(0U);
+    effective.velocity_high = value.velocity_high.value_or(127U);
+    effective.filter_scaling_break1 = value.filter_scaling_break1.value_or(0U);
+    effective.filter_scaling_break2 = value.filter_scaling_break2.value_or(127U);
+    effective.level_scaling_break1 = value.level_scaling_break1.value_or(0U);
+    effective.level_scaling_break2 = value.level_scaling_break2.value_or(127U);
+    return validate_sample_parameter_fields(effective, generation);
+}
+
 Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &value,
                                               SampleParameterLayout layout) {
     if (layout != SampleParameterLayout::current && layout != SampleParameterLayout::current_prefix_only &&
@@ -349,8 +361,25 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
     const bool has_controller_tail = layout == SampleParameterLayout::current;
     if (block.size() < (native ? 0xbcU : sample_parameter_block_size))
         return std::unexpected{invalid("Sample parameter block is truncated")};
-    if (auto valid = validate_sample_parameters(value, native ? SampleParameterGeneration::a3000
-                                                              : SampleParameterGeneration::current);
+    auto effective = value;
+    const auto pair = [&](auto &low, auto &high, std::size_t low_offset, std::size_t high_offset) {
+        if (low || high) {
+            low = low.value_or(std::to_integer<std::uint8_t>(block[low_offset]));
+            high = high.value_or(std::to_integer<std::uint8_t>(block[high_offset]));
+        }
+    };
+    if (value.root_key || value.key_low || value.key_high) {
+        effective.key_low = value.key_low.value_or(std::to_integer<std::uint8_t>(block[0x3bU]));
+        effective.key_high = value.key_high.value_or(std::to_integer<std::uint8_t>(block[0x3aU]));
+        if (effective.key_low == sampler_original_key_low_limit ||
+            effective.key_high == sampler_original_key_high_limit)
+            effective.root_key = value.root_key.value_or(std::to_integer<std::uint8_t>(block[0x2eU]));
+    }
+    pair(effective.velocity_low, effective.velocity_high, 0x73U, 0x72U);
+    pair(effective.filter_scaling_break1, effective.filter_scaling_break2, 0x64U, 0x65U);
+    pair(effective.level_scaling_break1, effective.level_scaling_break2, 0x74U, 0x75U);
+    if (auto valid = validate_sample_parameter_fields(effective, native ? SampleParameterGeneration::a3000
+                                                                        : SampleParameterGeneration::current);
         !valid)
         return valid;
 

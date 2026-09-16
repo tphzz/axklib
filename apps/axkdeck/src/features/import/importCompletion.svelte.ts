@@ -144,7 +144,10 @@ function alterationWarnings(value: unknown, reviewed: readonly string[]): string
         .filter((message) => !reviewed.includes(message));
     for (const operation of result.operations ?? []) {
         const clipped = operation.audioImport?.clippedSamples ?? 0;
-        if (clipped > 0) warnings.push(`${operation.objectName}: ${clipped} clipped sample${clipped === 1 ? '' : 's'}`);
+        if (clipped > 0)
+            warnings.push(
+                `${operation.objectName}: ${clipped} audio sample value${clipped === 1 ? '' : 's'} exceeded full scale during conversion`,
+            );
     }
     return [...new Set(warnings)];
 }

@@ -227,6 +227,9 @@ TEST(SampleParameterDecode, RegisteredSampleUsesCorrectBulkOffsetsWithoutMutatio
 TEST(SampleParameterDecode, ReadsEveryAuthoredCommonLeafAtItsStoredOffset) {
     const auto check = [](const axk::SampleParameters &edit, auto read, std::size_t offset, std::uint8_t raw) {
         auto bytes = block(axk::SampleParameterGeneration::current);
+        // Keep retained partners valid while checking individual leaf encodings.
+        for (const auto upper : {0x65U, 0x72U, 0x75U})
+            bytes[upper] = std::byte{127};
         ASSERT_TRUE(axk::detail::apply_sample_parameters_to_block(bytes, edit));
         EXPECT_EQ(std::to_integer<std::uint8_t>(bytes[offset]), raw);
         const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);

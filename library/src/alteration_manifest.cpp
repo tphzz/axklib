@@ -114,7 +114,7 @@ Result<void> validate_direct_sample(const SampleSpec &sample) {
 }
 
 Result<void> validate_sample_bank_parameter_overrides(const SampleParameters &overrides) {
-    return detail::validate_sample_parameters(overrides);
+    return detail::validate_sample_parameter_fields(overrides);
 }
 
 Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
@@ -337,13 +337,13 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         return valid;
                     if (!detail::has_sample_parameter_values(operation.parameters))
                         return std::unexpected{manifest_error("parameters must contain at least one parameter")};
-                    return detail::validate_sample_parameters(operation.parameters);
+                    return detail::validate_sample_parameter_fields(operation.parameters);
                 } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {
                     if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
                         return valid;
                     if (!detail::has_sample_parameter_values(operation.parameters))
                         return std::unexpected{manifest_error("parameters must contain at least one parameter")};
-                    return detail::validate_sample_parameters(operation.parameters);
+                    return detail::validate_sample_parameter_fields(operation.parameters);
                 } else if constexpr (std::same_as<T, ReplaceProgramAssignmentsOperation>) {
                     return detail::validate_program_assignment_replacement(operation);
                 } else if constexpr (std::same_as<T, RetargetSampleWaveDataOperation>) {

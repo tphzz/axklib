@@ -16,7 +16,10 @@ describe('ImportCompletion', () => {
         const transport = { waitForJob: vi.fn().mockResolvedValue({ ...completed, result }), cancelJob: vi.fn() };
         const state = new ImportCompletion(transport, new JobController(transport));
         const finish = vi.fn(async () => {
-            expect(state.warnings).toEqual(['New warning', 'Bass: 2 clipped samples']);
+            expect(state.warnings).toEqual([
+                'New warning',
+                'Bass: 2 audio sample values exceeded full scale during conversion',
+            ]);
         });
         expect(await state.run(async () => completed, finish, vi.fn(), ['Converted to PCM16'])).toBe(false);
         expect(state.phase).toBe('warnings');

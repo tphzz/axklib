@@ -376,7 +376,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
             !parsed)
             return std::unexpected{parsed.error()};
     }
-    if (auto valid = validate_sample_parameters(result); !valid) {
+    if (auto valid = validate_sample_parameter_fields(result); !valid) {
         return std::unexpected{
             invalid(error_code, error_category, std::string{context} + " contains an unsupported parameter value")};
     }

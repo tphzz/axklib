@@ -207,6 +207,7 @@ struct ImportedAudio {
     // Empty for exact PCM16 imports and exact PCM8 expansion; otherwise
     // identifies the reproducible policy used.
     std::string dither_algorithm;
+    // Channel values outside normalized [-1, 1] after resampling, before dither.
     std::uint64_t clipped_samples{};
 };
 

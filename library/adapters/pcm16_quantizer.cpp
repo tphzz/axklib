@@ -57,7 +57,8 @@ Result<QuantizedPcm16> quantize_pcm16(std::span<const double> samples, bool dith
     result.samples.reserve(samples.size());
     for (const auto sample : samples) {
         auto scaled = sample * 32'768.0;
-        if (scaled < -32'768.0 || scaled > 32'767.0)
+        // Endpoint quantization and dither saturation are not signal overload.
+        if (sample < -1.0 || sample > 1.0)
             ++result.clipped_samples;
         if (dither)
             scaled += first.unit_double() - second.unit_double();

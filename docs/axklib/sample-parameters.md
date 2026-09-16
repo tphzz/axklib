@@ -49,7 +49,8 @@ into an existing image defaults to the current Wave Data playback window.
 An explicit window updates both stored start/length lanes and derived endpoints,
 without trimming or changing PCM. Explicit loop coordinates remain absolute and
 must lie inside the selected playback window. Nonrepeating modes default an
-omitted loop to that window; repeating modes still require an explicit loop.
+omitted loop, or an explicit zero start and zero length, to that window;
+repeating modes still require an explicit non-empty loop.
 This is not a bank-wide override: different members can have different sources
 and playback extents. Existing Sample retargeting preserves its existing window.
 

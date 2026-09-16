@@ -91,8 +91,18 @@
     let stagingPromise: Promise<void> = Promise.resolve();
     const abortController = new AbortController();
     const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
-    const validationErrors = $derived.by(() => (committing ? rows.map(() => '') : validateRows(rows)));
-    const sampleBankError = $derived.by(() => validateSampleBank());
+    const validationLocked = $derived(committing || completion.locked);
+    const validationErrors = $derived.by(() => (validationLocked ? rows.map(() => '') : validateRows(rows)));
+    const sampleBankError = $derived.by(() => (validationLocked ? '' : validateSampleBank()));
+    const completionStatus = $derived(
+        completion.phase === 'warnings' || completion.phase === 'completed'
+            ? 'Imported'
+            : completion.phase === 'refresh-failed'
+              ? 'Imported; refresh pending'
+              : completion.phase === 'unconfirmed'
+                ? 'Outcome unconfirmed'
+                : '',
+    );
     const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
@@ -544,7 +554,8 @@
                         {validationErrors}
                         capabilities={audioImportCapabilities}
                         {busy}
-                        {committing}
+                        committing={validationLocked}
+                        {completionStatus}
                         grouped={importMode === 'SAMPLE_BANK'}
                         audition={auditionState}
                         onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}

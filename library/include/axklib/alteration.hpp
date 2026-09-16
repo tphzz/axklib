@@ -284,6 +284,7 @@ struct AudioImportSummary {
     bool sample_width_converted{};
     bool split_stereo{};
     std::string dither_algorithm;
+    // Channel values outside normalized [-1, 1] after resampling, before dither.
     std::uint64_t clipped_samples{};
 };
 

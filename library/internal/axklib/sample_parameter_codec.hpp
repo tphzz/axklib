@@ -11,6 +11,11 @@ namespace axk::detail {
 enum class SampleParameterLayout : std::uint8_t { current, current_prefix_only, a3000 };
 
 bool has_sample_parameter_values(const SampleParameters &parameters);
+// Validate only supplied values and dependencies that are fully specified.
+Result<void>
+validate_sample_parameter_fields(const SampleParameters &parameters,
+                                 SampleParameterGeneration generation = SampleParameterGeneration::current);
+// Validate fresh authoring parameters with the creation defaults applied.
 Result<void> validate_sample_parameters(const SampleParameters &parameters,
                                         SampleParameterGeneration generation = SampleParameterGeneration::current);
 // Native blocks contain 188 bytes. Current workspaces contain 224 bytes;

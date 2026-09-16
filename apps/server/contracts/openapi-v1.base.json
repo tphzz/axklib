@@ -4249,7 +4249,7 @@
           "sampleWidthConverted": {"type": "boolean"},
           "ditherAlgorithm": {"type": "string"},
           "splitStereo": {"type": "boolean"},
-          "clippedSamples": {"type": "integer", "minimum": 0}
+          "clippedSamples": {"type": "integer", "minimum": 0, "description": "Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded."}
         }
       },
       "AlterationOperationReport": {

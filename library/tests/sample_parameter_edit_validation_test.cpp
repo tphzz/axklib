@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include "axklib/audio_export_wav_source.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/object.hpp"
 #include "axklib/writer.hpp"
@@ -22,6 +23,16 @@ TEST(SampleParameterEditBounds, VelocityEndpointsMustBeSevenBitValues) {
     value.velocity_high = 255U;
     value.velocity_low = 128U;
     EXPECT_FALSE(axk::detail::validate_sample_parameters(value));
+}
+
+TEST(SampleParameterEditBounds, FreshAuthoringUsesDefaultRootForOriginalKeyLimits) {
+    axk::SampleSpec sample;
+    sample.name = "Fresh";
+    sample.parameters.key_low = 255U;
+    sample.parameters.key_high = 50U;
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 0x100U, 44'100U, 64U}));
+    sample.parameters.root_key = 40U;
+    EXPECT_TRUE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 0x100U, 44'100U, 64U}));
 }
 
 class SampleParameterEditValidation : public testing::Test {
@@ -112,6 +123,61 @@ TEST_F(SampleParameterEditValidation, LevelEditPreservesOriginalKeySentinelWithI
     payload[0xe2U] = std::byte{50};
 
     expect_level_only_change();
+}
+
+TEST_F(SampleParameterEditValidation, PartialOriginalKeyRangeUsesTheStoredRoot) {
+    axk::SampleParameters root;
+    root.root_key = 40U;
+    ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, root));
+    axk::SampleParameters range;
+    range.key_low = 255U;
+    range.key_high = 50U;
+    const auto updated = axk::detail::apply_sample_parameters_to_payload(payload, range);
+    ASSERT_TRUE(updated) << updated.error().message;
+    EXPECT_EQ(payload[0xd6U], std::byte{40});
+    EXPECT_EQ(payload[0xe2U], std::byte{50});
+    EXPECT_EQ(payload[0xe3U], std::byte{255});
+}
+
+TEST(SampleParameterAuthoring, ExplicitZeroLoopsPreserveNormalizedWindows) {
+    for (const bool stereo : {false, true}) {
+        for (const bool offset : {false, true}) {
+            axk::SampleSpec sample;
+            sample.name = "Window";
+            sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_one_shot;
+            sample.parameters.loop_start_frame = 0U;
+            sample.parameters.loop_length_frames = 0U;
+            if (offset)
+                sample.playback_window = axk::SamplePlaybackWindow{10U, 20U};
+            const axk::detail::PreparedWaveformMember left{"Left", 0x100U, 44'100U, 64U};
+            const axk::detail::PreparedWaveformMember right{"Right", 0x200U, 44'100U, 64U};
+            const auto prepared =
+                axk::detail::prepare_sbnk_payload(sample, left, stereo ? std::optional{right} : std::nullopt);
+            ASSERT_TRUE(prepared) << prepared.error().message;
+            const auto decoded = axk::decode_object(*prepared);
+            ASSERT_TRUE(decoded);
+            const auto &value = std::get<axk::CurrentSbnk>(decoded->payload);
+            EXPECT_EQ(value.left.loop_start_frame, offset ? 10U : 0U);
+            EXPECT_EQ(value.left.loop_length_frames, offset ? 20U : 64U);
+            EXPECT_EQ(*axk::ByteReader{*prepared}.be32(0x160U), offset ? 30U : 64U);
+            if (stereo) {
+                ASSERT_TRUE(value.right);
+                EXPECT_EQ(value.right->loop_start_frame, value.left.loop_start_frame);
+                EXPECT_EQ(value.right->loop_length_frames, value.left.loop_length_frames);
+                axk::SampleExport logical;
+                logical.decoded = value;
+                logical.key_high = 127U;
+                axk::PhysicalWaveformExport physical;
+                physical.waveform.format = {1U, 2U, 44'100U};
+                physical.waveform.frame_count = 64U;
+                physical.waveform.pcm.resize(128U);
+                const auto exported = axk::audio_export_detail::stereo_sample_wav_source(logical, physical, physical);
+                EXPECT_TRUE(exported.sampler.smpl);
+                EXPECT_TRUE(exported.sampler.inst);
+                EXPECT_TRUE(exported.warnings.empty());
+            }
+        }
+    }
 }
 
 TEST_F(SampleParameterEditValidation, KeyAndRootEditsStillValidateOriginalKeySentinelDependencies) {

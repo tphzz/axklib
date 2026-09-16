@@ -382,7 +382,11 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     result[0x181] = std::byte{127};
     result[0x183] = std::byte{90};
     result[0x184] = std::byte{90};
-    if (auto applied = detail::apply_sample_parameters_to_block(std::span{result}.subspan(0xa8U), sample.parameters);
+    auto normalized_parameters = sample.parameters;
+    normalized_parameters.loop_start_frame = left_loop->start;
+    normalized_parameters.loop_length_frames = left_loop->length;
+    if (auto applied =
+            detail::apply_sample_parameters_to_block(std::span{result}.subspan(0xa8U), normalized_parameters);
         !applied) {
         return std::unexpected{applied.error()};
     }

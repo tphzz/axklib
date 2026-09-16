@@ -60,9 +60,11 @@ transaction without publishing a partial change.
 
 `update_sbnk_parameters` applies a non-empty partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.
-Fields omitted from the update and unrelated opaque bytes are preserved. The
-same validator and byte encoder are used for fresh Samples and existing-object
-updates; derived caches are recomputed from changed source values. Sample Bank
+Fields omitted from the update and unrelated opaque bytes are preserved.
+Dependent values are validated against the existing object, not fresh-object
+defaults. For example, a key limit of `=Orig` uses that Sample's current root
+key when the update omits `root_key`. Derived caches are recomputed from changed
+source values. Sample Bank
 `parameter_overrides` uses this model too, prepares every member update before
 mutation, and leaves the bank's pending-propagation bits clear.
 
