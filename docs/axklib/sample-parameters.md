@@ -69,7 +69,7 @@ and playback extents. Existing Sample retargeting preserves its existing window.
 | `expand_dephase`, `expand_width` | `-63..63` | `0`, `63` |
 | `random_pitch` | `0..63` | `0` |
 | `level` | `0..127` | `100` |
-| `pan` | `-64..63` | `0` (center) |
+| `pan` | `-63..63`, or `-64` for random pan (`Rnd`) | `0` (center) |
 | `velocity_low_limit` | `0..127` | `0` |
 | `velocity_offset` | `-127..127` | `0` |
 | `velocity_low`, `velocity_high` | `0..127`; low must not exceed high | `0`, `127` |
@@ -140,6 +140,11 @@ row set.
 | `portamento_type` | `0..5` | `0` (off) |
 | `portamento_rate`, `portamento_time` | `1..127` | `90`, `90` |
 
+Output destinations use the lane-specific
+[stored destination mappings](sampler-data.md#current-sample-output-destinations).
+In particular, Ef1 is Output 1 value `2` but Output 2 value `7`; values `10..12`
+refer to A5000 effects.
+
 Controllers are represented by a `controls` object whose keys are the strings
 `"1"` through `"6"`. Each present controller object must contain at least one
 of these fields:
@@ -183,8 +188,8 @@ The following object state is deliberately not public authoring input:
 | State | Policy |
 | --- | --- |
 | Sample Bank membership, mono/stereo, and expanded topology flags | Derived from graph membership and active Wave Data topology. |
-| Per-member sample rate and Wave Data length | Derived from each referenced Wave Data object. |
-| Full per-member wave-start addresses | Read-only for existing objects; fresh supported profiles use zero. |
+| Per-member sample rate | Derived from each referenced Wave Data object. |
+| Full per-member wave-start addresses and playback lengths | Derived from `playback_window` and its source-dependent defaults when creating or inserting a Sample; nonzero starts are supported. Existing parameter updates and retargeting preserve the stored window. |
 | Pitch, loop-end, Program-portamento, and other playback caches | Recomputed when their public source values change. |
 | Linked Program bitmaps and Sample Bank pending-propagation state | Derived from relationships; pending bits are clear after immediate application. |
 | Reserved bytes and opaque packed-bit lanes | Canonical defaults in fresh objects and byte-preserved in existing objects. |

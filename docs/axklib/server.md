@@ -245,10 +245,8 @@ refresh or compatibility path for requests without a snapshot. Upload expiry
 or deletion requires acquiring and inspecting the input again.
 Repeated references to one input share a retained reader and one verification
 before planning and one during commit; conflicting reviewed snapshots are
-rejected. The native application service hashes unreviewed readers before and
-after use by default. Callers may explicitly supply an already-reviewed reader
-and its commit verifier instead, but cannot omit that verifier. SU700 imports
-verify the complete backing floppy, not each derived file range separately.
+rejected. SU700 imports verify the complete backing floppy, not each derived
+file range separately.
 
 ### SU700 Floppy Import
 
@@ -598,21 +596,10 @@ mode directly to an untrusted network.
 
 ## Operations And Jobs
 
-`GET /api/v1/system/capabilities` is the runtime operation catalogue. Domain
-routes, execution mode, request schema, result schema, and shared-route variant
-come from the same application registry used to validate the CLI command
-catalogue. This keeps the Crow adapter independent of individual domain
-operation IDs.
-
-The server is intentionally a generic transport adapter. A maintained domain
-operation is added to the application registry, implemented in the
-transport-neutral application layer, and exposed automatically through the
-registry dispatcher and generated OpenAPI document. It must not add a Crow
-route or handler. `bind_application_operations(...)` is the single composition
-point for stateful operation families, so the server does not know which
-application modules implement them. The build includes an architecture check
-that rejects hard-coded domain operation IDs, individual application binders,
-alternate HTTP frameworks, and Crow includes outside `apps/server`.
+`GET /api/v1/system/capabilities` is the runtime operation catalogue. It exposes
+domain routes, execution modes, request and result schemas, and shared-route
+variants. Use this response and the [OpenAPI reference](openapi.md) to discover
+the operations available from the running server.
 
 Short bounded reads return directly. Scans, extraction, package writes, image
 creation, and alteration return a job resource. Use REST to inspect or cancel a

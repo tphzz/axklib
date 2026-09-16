@@ -62,6 +62,7 @@ fat_offset       = reserved_sectors * bytes_per_sector
 root_offset      = (reserved_sectors + fat_count * sectors_per_fat) * bytes_per_sector
 data_offset      = root_offset + root_dir_sectors * bytes_per_sector
 cluster_size     = bytes_per_sector * sectors_per_cluster
+data_cluster_count = (total_sectors - data_offset // bytes_per_sector) // sectors_per_cluster
 ```
 
 For the common 1.44 MB layout, `data_offset` is `0x4200`.
@@ -78,7 +79,7 @@ The Yamaha blank-media profile has these boot fields:
 Both blank formats contain `YAMAHA.SYM` at cluster 2 with size 9,766 and a
 zero-length `A3000_SY.002`. Their blank root label entry has attribute `0x28`
 for quick format and `0x08` for full format. Full format additionally stores
-write time `0x2000` and initializes unused bytes after catalog offset `0x6826`
+write time `0x2000` and initializes unused bytes from image offset `0x6826`
 to `0xe5`; quick format leaves them zero.
 
 Generated populated-media boot metadata is specified separately in
@@ -101,15 +102,27 @@ value      = pair >> 4          if n is odd
 value      = pair & 0x0fff      if n is even
 ```
 
-Cluster-chain traversal starts at the root directory entry's first cluster and
-continues while:
+For a nonempty file or subdirectory, cluster-chain traversal starts at the
+directory entry's first cluster. Each
+data-cluster number must satisfy both the FAT12 marker boundary and the
+data-area bounds derived from the boot geometry:
 
 ```text
-2 <= cluster < 0xff8
+2 <= cluster < 0xff0
+cluster - 2 < data_cluster_count
 ```
 
-Values `0xff8..0xfff` terminate a chain. A repeated cluster makes the chain cyclic
-and invalid.
+The next FAT entry distinguishes a data-cluster link from an end or error:
+
+| Value | Meaning |
+| --- | --- |
+| `0x000` | Free cluster; invalid within an allocated chain. |
+| `0x001`, `0xff0..0xff6` | Reserved; invalid as data-cluster links. |
+| `0xff7` | Bad-cluster marker; invalid within a file or directory chain. |
+| `0xff8..0xfff` | End of chain. |
+
+A repeated cluster makes the chain cyclic and invalid. An end marker before
+the chain supplies the declared file length is also invalid.
 
 ## Root Directory Entries
 
@@ -225,10 +238,15 @@ A FAT file read is:
 ```text
 remaining = file_size
 for cluster in cluster_chain:
+    if remaining == 0:
+        break
     offset = data_offset + (cluster - 2) * cluster_size
-    append image[offset : offset + min(cluster_size, remaining)]
-    remaining -= cluster_size
-return first file_size bytes
+    read_size = min(cluster_size, remaining)
+    require offset + read_size <= image_size
+    append image[offset : offset + read_size]
+    remaining -= read_size
+require remaining == 0
+return assembled bytes
 ```
 
 The first byte of a Yamaha object payload is normally the first byte of the FAT

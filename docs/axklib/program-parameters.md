@@ -11,8 +11,8 @@ These writes require the current Program layout (selector 4) and an explicit
 A4000 or A5000 target model. The model selects writable domains; it does not
 convert the Program or remove untouched settings belonging to another model.
 Legacy Programs remain readable and preservable but do not accept these
-parameter updates. A5000-specific writes have host regression coverage, not a
-claim of A5000 hardware validation.
+parameter updates. Model-specific compatibility is bounded as described under
+[Validation Limits](#validation-limits).
 
 The same sparse JSON groups are used by build manifests, Program insertion
 and parameter updates. A fresh Program's `model` defaults to A4000. Omitted fresh settings retain the neutral
@@ -198,7 +198,13 @@ complete effect initialization, guarded updates, and byte preservation through
 HDS, FAT12, ISO9660 and portable Program transfers. Existing sampler checks
 cover representative count/tail, effect-update and bank-aware Easy Edit behavior;
 they do not constitute an on-device test of every writable parameter combination.
-A5000-only settings have host validation, not an A5000 hardware confirmation.
+On A5000 system software 1.50, hardware compatibility covers the Effect 1-to-Effect 4
+Hall route, Effect 4 Dry/Wet and Pan controller modulation, Effect 4 bypass,
+Program-local edits, MIDI IN-A/IN-B receive isolation, and save/reload persistence.
+This does not establish every Effect 5/6 routing topology, every DSP algorithm,
+or every freshly authored parameter combination. Sample output destinations
+must be selected for the correct output lane; Output 1 value `2` selects Ef1,
+whereas value `7` selects AssgnOut3&4.
 
 Legacy layouts, raw effect type 97, unused/action effect words and runtime-only
 fields remain preservation-only. Parameter support does not relax the entry

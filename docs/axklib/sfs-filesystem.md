@@ -3,6 +3,8 @@
 Yamaha A-series hard-disk images use an SFS container for partitions, directories,
 object files, and allocation state. File extents contain the
 sampler object payloads described in [Sampler Data Structures](sampler-data.md).
+SU700 hard disks also use SFS, with a different file organization and payloads
+described in [SU700 Files](su700.md).
 
 SFS is the hard-disk container family used by `.hda`, `.hds`, and equivalent raw
 hard-disk images. It is not FAT12 and it is not ISO9660. FAT12 floppies and
@@ -357,9 +359,12 @@ Direct read algorithm:
 remaining = record.total_data_size
 for each direct extent in order:
     capacity = extent.cluster_count * sectors_per_cluster * sector_size
-    read_size = min(extent.byte_count, capacity, remaining)
-    append bytes from cluster_absolute_offset(extent.cluster_offset)
+    require the extent's cluster range to lie inside the partition
+    require 0 < extent.byte_count <= capacity
+    read_size = min(extent.byte_count, remaining)
+    append read_size bytes from cluster_absolute_offset(extent.cluster_offset)
     remaining -= read_size
+require remaining == 0
 ```
 
 The extents must supply `total_data_size` logical bytes; a shorter assembled
@@ -383,12 +388,19 @@ Continuation read algorithm:
 ```text
 list_cluster = record.first_cluster
 remaining_triplets = record.extent_count
+seen = empty set
+max_triplets = (cluster_bytes - 0x0c) // 12
 while list_cluster != 0 and remaining_triplets > 0:
+    require list_cluster to lie inside the partition and not in seen
+    add list_cluster to seen
     read one cluster at list_cluster
     read triplet_count and next_list_cluster
-    append triplets at +0x0c
-    mark list_cluster allocated
+    require 1 <= triplet_count <= min(max_triplets, remaining_triplets)
+    append triplet_count validated extent triplets from +0x0c
+    account for list_cluster as allocated metadata
+    remaining_triplets -= triplet_count
     list_cluster = next_list_cluster
+require remaining_triplets == 0
 ```
 
 List traversal ends after the declared extent count. Loops, out-of-range list
@@ -456,7 +468,8 @@ A minimal SFS reader performs these steps:
 3. For each active partition, read the partition header and cluster geometry.
 4. Read both complete allocation bitmap copies and the directory/file index
    region.
-5. Walk 72-byte index records using the 14-record-per-block mapping.
+5. Walk 72-byte index records using `records_per_block = cluster_bytes // 72`
+   and the block/slot mapping above; skip each block's trailing bytes.
 6. Read directory payloads and match entry `link_id` values to SFS IDs.
 7. For each object file entry, read extents and return logical payload bytes.
 8. Interpret `FSFSDEV3SPLX` payloads using their own type-specific layouts.

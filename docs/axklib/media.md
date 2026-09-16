@@ -2,8 +2,9 @@
 
 axklib opens Yamaha SFS images, FAT12 floppies, standard FAT16 volumes and
 primary-MBR FAT16 disks, EX5 disks, ISO9660 CD-ROMs, A3K volume archives,
-standalone Yamaha objects and explicit object directories. The installed SDK
-entry point is documented in [C++ API](cpp-api.md).
+SU700 SFS disks and FAT12 floppies, standalone Yamaha objects and explicit
+object directories. The installed SDK entry point is documented in
+[C++ API](cpp-api.md).
 
 These readers implement specific supported Yamaha media profiles.
 They are not general-purpose FAT or ISO libraries. An image
@@ -19,6 +20,26 @@ file sizes. Directory entries use their DOS 8.3 identity; long-filename entries
 are ignored. FAT32, exFAT, filesystem repair, and in-place filesystem
 mutation are unsupported. `axklib create floppy` separately creates the narrow
 fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
+
+## SU700 profile
+
+SU700 hard disks open through SFS and floppies through FAT12. Files navigation
+and raw file export preserve `SONGCONT.DAT`, `.SSP` samples, `.SSQ` songs and
+other files. These payloads are not A-series sampler objects: opening the
+filesystem does not enable A-series Device navigation, Sample parameter editing,
+audio decoding, or portable A-series package conversion for them.
+
+The [SU700 floppy import](server.md#su700-floppy-import) operation copies a
+complete flat floppy into a new named volume on an existing writable SU700 SFS
+root. It places songs in `SUSQ`, samples in `SUSP`, and the control file at the
+volume root, preserving file payloads and stored basenames. Inspection checks
+references and payload framing; it does not validate every song event or DSP
+parameter. Import does not merge existing volumes, reconstruct divided disk
+sets, or create a new SU700 disk image.
+
+See [SU700 Files](su700.md) for the stored structures and unresolved meanings.
+Filesystem editing remains subject to the allocation and source-write checks
+below, independently of device-specific payload semantics.
 
 ## EX5 disk profile
 
@@ -133,27 +154,30 @@ Inventory loads only object prefixes and metadata needed by the catalog. Wave
 Data payloads remain lazy until preview, audition, audio/SFZ export, or package
 export needs them. A whole archive can be exported directly as one `.axkvol`,
 but archive creation, repacking, alteration, repair, package import, and media
-conversion are unsupported. See [A3K Volume Archives](a3k-archive.md) for
-the bounded byte contract and support status.
+conversion are unsupported. [A3K Volume Archives](a3k-archive.md) links to the
+external format reference; the support boundaries above describe axklib.
 
 ## Format Documentation Map
 
 The public format pages divide the byte contracts by layer:
 
-| Layer or file class | Exact public contract |
+| Layer or file class | Documentation |
 | --- | --- |
+| SFS partition geometry, allocation, index records and directory entries | [SFS Filesystem](sfs-filesystem.md) |
 | FAT12 boot sector, FAT entries, directory entries, DOS 8.3 names, and generated root filenames | [FAT12 Floppy Images](floppy.md) |
 | EX5 disk descriptor, FAT16 geometry, directories and raw file reads | [EX5 Disk Images](ex5.md) |
+| SU700 control table, native sample chunks and song framing | [SU700 Files](su700.md) |
 | ISO descriptors, both path tables, directory records, raw folder names, `0000` catalogs, group-label files, and generated `Fnnn` names | [CD-ROM Images](cdrom.md) |
-| A3K header, payload area, terminal index, and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
+| A3K archive format (external reference) | [A3K Volume Archives](a3k-archive.md); axklib behavior is described under [A3K Archive Profile](#a3k-archive-profile) |
 | Complete `FSFSDEV3SPLX<type>` files and decoded `SMPL`, `SBNK`, `SBAC`, and `PROG` fields | [Sampler Data Structures](sampler-data.md) |
 | Fresh floppy, fresh ISO, and floppy-object-to-ISO manifests | [Writer And Alteration](write.md) |
 | Sampler-facing labels, duplicate disambiguation, and export filenames | [Name, Path, And Export Mapping](names-and-paths.md) |
 
-This documentation is exact about structures that axklib reads or writes. A
-file being visible to the container reader does not imply that its inner format
-is decoded. The 257-record `YAMAHA.SYM` disk/file/category catalog is decoded
-and synthesized; other model-specific floppy system files remain opaque, as do
+Format pages specify established encodings and explicitly identify remaining
+unknowns. A file being visible to the container reader does not imply that its
+inner format is decoded or writable. The 257-record `YAMAHA.SYM`
+disk/file/category catalog is decoded and synthesized; other model-specific
+floppy system files remain opaque, as do
 PRF3 layouts other than the documented [System Files](system-files.md). The admitted current
 `SEQU` timeline is documented in
 [Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
@@ -173,8 +197,8 @@ object directories through one session API.
 
 ## CD menu labels
 
-`MediaObject::group_label` and `MediaObject::volume_label` retain a value,
-status, and basis:
+CD group and volume labels retain a value, status, and basis in inventory
+output:
 
 - `confirmed` identifies a decoded Yamaha CD menu label.
 - `navigation_aid` identifies a content-derived fallback chosen from the first

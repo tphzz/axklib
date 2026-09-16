@@ -89,6 +89,9 @@ nav:
       - SFS Filesystem: axklib/sfs-filesystem.md
       - FAT12 Floppy Images: axklib/floppy.md
       - EX5 Disk Images: axklib/ex5.md
+      - SU700 Files: axklib/su700.md
+      - SU700 Song And Track Records: axklib/su700-song.md
+      - SU700 Effects Records: axklib/su700-effects.md
       - CD-ROM Images: axklib/cdrom.md
       - Sampler Data Structures: axklib/sampler-data.md
       - System Files: axklib/system-files.md

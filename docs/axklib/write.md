@@ -643,6 +643,7 @@ Direct and stereo Sample fields:
 | `left_waveform_name`, `right_waveform_name` | Optional names for generated interleaved members. |
 | `target_sample_rate` | Optional conversion target for interleaved input. |
 | `parameters` | Optional shared typed [Sample parameter object](sample-parameters.md). Omitted fields receive fresh canonical defaults. |
+| `playback_window` | Optional `{ "start_frame": ..., "length_frames": ... }` in absolute source frames, separate from `parameters`. The positive-length window must fit every source and end at or before frame `16777216`; see [Playback Window](sample-parameters.md#playback-window) for defaults and loop constraints. |
 
 Direct stereo members must have equal sample rate and logical frame count.
 Interleaved input is split into two physical mono objects and inherently meets
@@ -865,7 +866,7 @@ ISO sectors are written directly to the reserved temporary file in bounded
 chunks. Reopen validation inventories metadata first and hashes retained files
 and object payloads one at a time. The writer therefore does not allocate a
 second output-sized image buffer; prepared payload memory and output size are
-still independently bounded by `MediaBuildLimits`.
+still subject to independent memory and output-size limits.
 
 This proves deterministic container construction and exact object retention
 within axklib. It does not replace physical sampler testing for a new object

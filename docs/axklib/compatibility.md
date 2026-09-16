@@ -33,8 +33,8 @@ formatting may gain additional context.
 
 The canonical object terminology is Sample (`SBNK`) and Sample Bank (`SBAC`).
 Writer and alteration manifest schema `1.0`, object JSON schema `1.0`, and
-`axklib.volume_graph.v1` use that terminology directly. `SampleSpec` models
-`SBNK`; `SampleBankSpec` models `SBAC`; and package roots use `sample`,
+`axklib.volume_graph.v1` use that terminology directly. Authored Samples
+represent `SBNK`, Sample Banks represent `SBAC`, and package roots use `sample`,
 `sample-bank`, and `wave-data`. Obsolete pre-release names are rejected and
 have no compatibility aliases or migration readers.
 

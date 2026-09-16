@@ -29,7 +29,7 @@ Header layout:
 | `0x14` | 4 | u32be | unknown | Preserved layout selector. The object loader uses it to choose the object-body length field, but the complete value domain is not yet named. |
 | `0x18` | 4 | u32be | record_size_or_header_used | Object-body read length when `0x14 < 4`; retained as an object-specific raw field. |
 | `0x1c` | 4 | u32be | payload_bytes | Object payload byte-count field. For `SMPL`, this is the complete logical Wave Data byte count. |
-| `0x20` | 4 | u32be | payload_bytes | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
+| `0x20` | 4 | u32be | segment_bytes | For `SMPL`, the Wave Data bytes physically stored in this file segment. |
 | `0x24` | 4 | u32be | payload_offset | For `SMPL`, this file segment's byte offset in the complete logical Wave Data. |
 | `0x28` | 2 | u16be | sample_rate | `SMPL` sample-rate field. Empty for other types. |
 | `0x2a` | 2 | u16be | bytes_per_sample | `SMPL` stored sample width. Empty for other types. |
@@ -46,7 +46,7 @@ NUL bytes or ASCII spaces; invalid text bytes do not define another object type.
 | `SBNK` | Sampler-visible Sample object. Stores Sample parameters and links to Wave Data storage. |
 | `SBAC` | Sampler-visible Sample Bank object. Contains member Sample names. |
 | `PROG` | Program object, Program display name, effects, controller data, and assignment rows. |
-| `SEQU` | Sequence object. Current timeline events, timing, tempo, and MIDI conversion are decoded. |
+| `SEQU` | Sequence object containing timeline events, timing and tempo. |
 | `PRF3` | Profile/preference-style object. Includes partition-level SYSTEM/SYSTEM2; other inner layouts are unspecified here. |
 | other known tags | Other type-specific layouts are outside this specification. |
 
@@ -180,6 +180,9 @@ Loop-mode display values:
 | `5` | `One<-` |
 
 There is no separate SMPL coarse-tune field; coarse tuning belongs to SBNK.
+Modes `0` and `3` are nonrepeating forward and reverse playback, respectively;
+the arrows do not indicate a loop. Modes `1` and `2` repeat, and modes `4` and
+`5` are forward and reverse one-shot playback.
 Wave and loop positions use frame coordinates. A repeating loop must have a
 nonzero length and fit inside its playback window; an exclusive endpoint can
 equal the window end. One-shot modes play through independently of key release.
@@ -195,13 +198,17 @@ These mappings apply only to transfer control `0x30`:
 
 `header_size` is the start offset of waveform bytes inside a `SMPL` file.
 Complete objects use `payload_offset == 0` and
-`payload_bytes == payload_bytes`. Yamaha multi-floppy saves can split
+`segment_bytes == payload_bytes`. Yamaha multi-floppy saves can split
 one logical Wave Data object across several disk files. Those files repeat the
-same header, set `payload_bytes` to the local segment size, and set
+same header, retain the total logical length in `payload_bytes`, set
+`segment_bytes` to the local segment size, and set
 `payload_offset` to the segment's byte offset. A complete logical waveform requires contiguous segments covering the byte
 count at `0x1c`. Segment identity comes from the repeated object metadata,
 not solely from host filenames, which may differ between disks. Missing or
 overlapping segments do not define complete PCM.
+Each segment must satisfy `payload_offset + segment_bytes <= payload_bytes`,
+and its physical file must contain at least `header_size + segment_bytes`
+bytes. Check these additions without integer overflow before reading audio.
 
 Generated images may store a short compatibility tail after the logical waveform
 frames. In that case the complete logical byte count includes the tail, while
@@ -334,7 +341,7 @@ layout is split across the SBAC prefix and terminal block as described below.
 | `0x0d2` | u8 | midi_receive_channel |
 | `0x0d3` | u8 | pitch_bend_type |
 | `0x0d4` | u8 | pitch_bend_range |
-| `0x0d5` | u8 | coarse_tune |
+| `0x0d5` | s8 | coarse_tune |
 | `0x0d6` | u8 | left_root_key |
 | `0x0d7` | u8 | right_root_key |
 | `0x0d8` | u16be | left_sample_rate |
@@ -366,19 +373,19 @@ the right lane is inactive, not a second playback region.
 | `0x0fc` | u32be | right_loop_start_frame |
 | `0x100` | u32be | left_loop_length_frames |
 | `0x104` | u32be | right_loop_length_frames |
-| `0x108` | u8 | start_address_velocity_sensitivity |
+| `0x108` | s8 | start_address_velocity_sensitivity |
 | `0x109` | u8 | filter_type |
 | `0x10a` | u8 | filter_cutoff |
 | `0x10b` | u8 | filter_q_width |
 | `0x10c` | u8 | filter_cutoff_key_scaling_break1 |
 | `0x10d` | u8 | filter_cutoff_key_scaling_break2 |
-| `0x10e` | u8 | filter_cutoff_key_scaling_level1 |
-| `0x10f` | u8 | filter_cutoff_key_scaling_level2 |
-| `0x110` | u8 | filter_cutoff_velocity_sensitivity |
-| `0x111` | u8 | filter_q_width_velocity_sensitivity |
-| `0x112` | u8 | expand_detune |
-| `0x113` | u8 | expand_dephase |
-| `0x114` | u8 | expand_width |
+| `0x10e` | s8 | filter_cutoff_key_scaling_level1 |
+| `0x10f` | s8 | filter_cutoff_key_scaling_level2 |
+| `0x110` | s8 | filter_cutoff_velocity_sensitivity |
+| `0x111` | s8 | filter_q_width_velocity_sensitivity |
+| `0x112` | s8 | expand_detune |
+| `0x113` | s8 | expand_dephase |
+| `0x114` | s8 | expand_width |
 | `0x115` | u8 | random_pitch |
 | `0x116` | u8 | sample_level |
 
@@ -432,50 +439,50 @@ internal synthesis state without independent user controls. Preserve both ranges
 
 | Offset | Type | Field |
 | --- | --- | --- |
-| `0x117` | u8 | pan |
+| `0x117` | s8 | pan |
 | `0x118` | u8 | velocity_low_limit |
-| `0x119` | u8 | velocity_offset |
+| `0x119` | s8 | velocity_offset |
 | `0x11a` | u8 | velocity_range_high |
 | `0x11b` | u8 | velocity_range_low |
 | `0x11c` | u8 | level_scaling_break1 |
 | `0x11d` | u8 | level_scaling_break2 |
 | `0x11e` | u8 | level_scaling_level1 |
 | `0x11f` | u8 | level_scaling_level2 |
-| `0x120` | u8 | velocity_sensitivity |
+| `0x120` | s8 | velocity_sensitivity |
 | `0x121` | u8 | alternate_group |
 | `0x122` | u8 | sample_eq_frequency |
 | `0x123` | u8 | sample_eq_gain |
 | `0x124` | u8 | sample_eq_width |
-| `0x125` | u8 | filter_cutoff_distance |
+| `0x125` | s8 | filter_cutoff_distance |
 | `0x126` | u8 | feg_attack_rate |
 | `0x127` | u8 | feg_decay_rate |
 | `0x128` | u8 | feg_release_rate |
-| `0x129` | u8 | feg_init_level |
-| `0x12a` | u8 | feg_attack_level |
-| `0x12b` | u8 | feg_sustain_level |
-| `0x12c` | u8 | feg_release_level |
-| `0x12d` | u8 | feg_rate_key_scaling |
-| `0x12e` | u8 | feg_rate_velocity_sensitivity |
-| `0x12f` | u8 | feg_attack_level_velocity_sensitivity |
-| `0x130` | u8 | feg_level_velocity_sensitivity |
+| `0x129` | s8 | feg_init_level |
+| `0x12a` | s8 | feg_attack_level |
+| `0x12b` | s8 | feg_sustain_level |
+| `0x12c` | s8 | feg_release_level |
+| `0x12d` | s8 | feg_rate_key_scaling |
+| `0x12e` | s8 | feg_rate_velocity_sensitivity |
+| `0x12f` | s8 | feg_attack_level_velocity_sensitivity |
+| `0x130` | s8 | feg_level_velocity_sensitivity |
 | `0x131` | u8 | peg_attack_rate |
 | `0x132` | u8 | peg_decay_rate |
 | `0x133` | u8 | peg_release_rate |
-| `0x134` | u8 | peg_init_level |
-| `0x135` | u8 | peg_attack_level |
-| `0x136` | u8 | peg_sustain_level |
-| `0x137` | u8 | peg_release_level |
-| `0x138` | u8 | peg_rate_key_scaling |
-| `0x139` | u8 | peg_rate_velocity_sensitivity |
-| `0x13a` | u8 | peg_level_velocity_sensitivity |
-| `0x13b` | u8 | peg_range |
+| `0x134` | s8 | peg_init_level |
+| `0x135` | s8 | peg_attack_level |
+| `0x136` | s8 | peg_sustain_level |
+| `0x137` | s8 | peg_release_level |
+| `0x138` | s8 | peg_rate_key_scaling |
+| `0x139` | s8 | peg_rate_velocity_sensitivity |
+| `0x13a` | s8 | peg_level_velocity_sensitivity |
+| `0x13b` | s8 | peg_range |
 | `0x13c` | u8 | aeg_attack_rate |
 | `0x13d` | u8 | aeg_decay_rate |
 | `0x13e` | u8 | aeg_release_rate |
 | `0x141` | u8 | aeg_sustain_level |
 | `0x143` | u8 | aeg_attack_mode |
-| `0x144` | u8 | aeg_rate_key_scaling |
-| `0x145` | u8 | aeg_rate_velocity_sensitivity |
+| `0x144` | s8 | aeg_rate_key_scaling |
+| `0x145` | s8 | aeg_rate_velocity_sensitivity |
 | `0x146` | u8 | lfo_wave |
 | `0x147` | u8 | lfo_speed |
 | `0x148` | u8 | lfo_delay_time |
@@ -496,6 +503,54 @@ internal synthesis state without independent user controls. Preserve both ranges
 | `0x182` | u8 | sample_portamento_type |
 | `0x183` | u8 | sample_portamento_rate |
 | `0x184` | u8 | sample_portamento_time |
+
+Signed byte fields use two's-complement encoding: for example, `0xff` is
+`-1`, not `255`. A4000 coarse tune is `-64..63` semitones. Pan uses `-63..63`
+with `0` at center and `-64` for random pan (`Rnd`); velocity offset and
+sensitivity are `-127..127`.
+FEG/PEG levels are signed, whereas their rates and AEG sustain are unsigned.
+The storage width does not imply that every representable value is valid.
+
+Several unsigned fields use an encoding rather than the displayed value:
+
+| Field | Encoding |
+| --- | --- |
+| `sample_eq_gain` | Stored `52..76` means `-12..+12` dB: subtract `64`. |
+| `sample_eq_frequency` | Selection `4..58`, not hertz; selection `30` means `630 Hz`. |
+| `sample_eq_width` | Tenths, `10..120` for displayed width `1.0..12.0`. |
+| `mapout_flags[7:6]` | EQ Type: `0=Peak/Dip`, `1=LoShelv`, `2=HiShelv`; value `3` is unspecified. |
+| `lfo_speed` | Stored `0..127` means displayed speed `1..128`: add `1`. |
+| `loop_tempo` | Hundredths of BPM, `8000..15999` for `80.00..159.99` BPM. |
+| `midi_receive_channel` | `0..15` means channels `01..16`; `16` means Basic Receive Channel (`Bch`). |
+
+In `lfo_flags` at `0x149`, bit `0` enables key-on synchronization, bit `1`
+inverts cutoff-modulation phase, and bit `2` inverts pitch-modulation phase.
+Bits `3..7` have unspecified meaning; preserve them on unrelated edits.
+
+### Current Sample Output Destinations
+
+Output 1 at `0x17e` and Output 2 at `0x180` use different numeric mappings:
+
+| Stored value | Output 1 | Output 2 |
+| ---: | --- | --- |
+| `0` | Off | Off |
+| `1` | StereoOut | AssgnOut L&R |
+| `2` | Ef1 | AssgnOut 1&2 |
+| `3` | Ef2 | AssgnOut 3&4 |
+| `4` | Ef3 | AssgnOut 5&6 |
+| `5` | AssgnOut L&R | DIG&OPT |
+| `6` | AssgnOut 1&2 | StereoOut |
+| `7` | AssgnOut 3&4 | Ef1 |
+| `8` | AssgnOut 5&6 | Ef2 |
+| `9` | DIG&OPT | Ef3 |
+| `10` | Ef4 (A5000) | Ef4 (A5000) |
+| `11` | Ef5 (A5000) | Ef5 (A5000) |
+| `12` | Ef6 (A5000) | Ef6 (A5000) |
+
+Assigned and digital outputs depend on the installed output hardware. These
+are current-layout mappings, not the older A3000 output enums.
+
+### Derived Endpoints And Controllers
 
 `SBNK+0x15c` and `SBNK+0x160` are format-maintained 32-bit derived caches.
 Wave end is the serialized left wave start plus left wave length; loop end
@@ -576,10 +631,11 @@ value in the bank is not equivalent to applying it to every member. Clearing
 pending bits without applying their values discards the pending operation.
 
 The four linked-Program words use the same bit numbering as the Sample bitmap:
-bit zero of the first big-endian word is Program 001. Fresh image creation
-derives them from Program-to-Sample-Bank assignments. Program insertion and
-deletion update both the Program row and the target Sample Bank bitmap in one
-transaction. Unrelated exact mutation preserves the words.
+bit zero of the first big-endian word is Program 001. They represent
+Program-to-Sample-Bank assignments. A consistent assignment change updates
+both the Program row and the target Sample Bank bitmap; unrelated edits
+preserve the words. Software transaction guarantees are described in
+[Writer And Alteration](write.md).
 
 SBAC slot row layout, stride `0x14`:
 
@@ -654,6 +710,23 @@ records, or `(logical_length - 0x120) / 0x38` for legacy records.
 | `tail + 0x96..0xa5` | 16 | u8 values | StepWave values. |
 | `tail + 0xa6` | 1 | packed u8 | Step count selector in bits 2..0; slope in bits 4..3; upper bits preserved. |
 | `tail + 0xa7..0xaf` | 9 | bytes | Preserved opaque terminal bytes. |
+
+Current Program packed fields use these bit lanes (bit `0` is least significant):
+
+| Byte | Bits | Meaning |
+| --- | --- | --- |
+| `0x080` | `0` | A/D input enabled. |
+| `0x080` | `2..1` | A/D source selector, `0..2`. |
+| `0x080` | `5..3` | Effect 1..3 connection selector, `0..4`. |
+| `0x080` | `7..6` | LFO synchronization selector, `0..1` on A4000 and `0..2` on A5000. |
+| `0x081` | `2..0` | LFO cycle selector, `0..6`. |
+| `0x081` | `5..3` | LFO waveform selector, `0..6`. |
+| `0x081` | `7..6` | LFO initial-phase selector, `0..3`. |
+| `tail + 0xa6` | `2..0` | Step count: selectors `0..6` mean `2, 3, 4, 6, 8, 12, 16` steps. |
+| `tail + 0xa6` | `4..3` | Slope: `0=none`, `1=rising`, `2=falling`, `3=both`. |
+
+Only the selected lane changes when updating one packed setting. Unspecified
+bits and out-of-domain selector encodings must not be silently normalized.
 
 Program controller records are 4-byte rows: `device_u8`, `function_u8`,
 `type_u8`, and signed `range_s8`.
@@ -761,6 +834,13 @@ Rch Assign display family:
 
 Output 2 at `+0x28` is independent of assignment enablement and receive-channel
 selection. A non-`0xff` Output 2 value does not disable the assignment.
+
+The packed byte at row `+0x23` stores Portamento in bits `1..0`, Mono in
+bits `3..2`, and Key Crossfade in bits `5..4`. Each two-bit lane encodes
+`0=off`, `1=on`, `3=inherit`; value `2` is unspecified. Preserve bits `7..6`
+and any untouched lane. Current output replacements use the
+[Sample output destination mappings](#current-sample-output-destinations),
+with signed `-1` (`0xff`) additionally meaning inherit.
 
 Assignments use the complete stored 16-byte name, target type and local scope.
 Missing or ambiguous targets leave unresolved stored rows; they do not justify
