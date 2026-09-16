@@ -19,7 +19,7 @@
     import Icon from './Icon.svelte';
     import StoragePickerFooter from './StoragePickerFooter.svelte';
 
-    type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
+    import type { PickerMode } from '../../features/dialogs/picker';
     interface Props {
         transport: ImageTransport;
         mode: PickerMode;
@@ -124,7 +124,11 @@
     });
 
     function entryIsVisible(entry: SandboxEntry): boolean {
-        return storageEntryIsVisible(entry, mode === 'file' || mode === 'media-source', normalizedExtensions);
+        return storageEntryIsVisible(
+            entry,
+            mode === 'file' || mode === 'media-source' || mode === 'floppy-source',
+            normalizedExtensions,
+        );
     }
 
     function rootIsDisabled(root: SandboxRoot): boolean {

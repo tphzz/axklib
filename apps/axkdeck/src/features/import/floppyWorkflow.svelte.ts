@@ -1,6 +1,6 @@
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
-import type { ClientUploadLocation, FileLocation, InputFileLocation } from '../../lib/storageLocations';
-import type { FloppyInspection } from '../../lib/floppyImport';
+import type { ClientUploadLocation, FileLocation, DirectoryLocation } from '../../lib/storageLocations';
+import type { FloppyInspection, FloppyInputLocation } from '../../lib/floppyImport';
 import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
@@ -15,12 +15,12 @@ import {
 import { ImportCompletion } from './importCompletion.svelte';
 import { floppySelection, floppyVolumeName } from './floppySelection';
 
-export type FloppySource = ClientUploadSource | FileLocation;
+export type FloppySource = ClientUploadSource | FileLocation | DirectoryLocation;
 interface Member {
     id: number;
     source: FloppySource;
     name: string;
-    input: InputFileLocation | null;
+    input: FloppyInputLocation | null;
     upload: ClientUploadLocation | null;
 }
 export interface FloppyRequest {
@@ -42,7 +42,7 @@ export interface FloppyRequest {
 type Dependencies = PackageImportDependencies & {
     otherFormat: (
         format: FloppyInspection['format'],
-        sources: FloppySource[],
+        sources: (ClientUploadSource | FileLocation)[],
         target: DiskTreeItem | null,
     ) => Promise<void>;
 };
@@ -110,10 +110,11 @@ export class FloppyImportWorkflow {
         const request = this.request;
         if (!request || this.busy || this.completion.locked) return;
         try {
-            const files = await this.dependencies.picker.chooseFiles('Choose floppy images', ['img', 'ima'], {
+            const selection = await this.dependencies.picker.chooseFloppySources({
                 parentDialog: 'floppy-import',
             });
             if (this.request !== request) return;
+            const files = Array.isArray(selection) ? selection : selection ? [selection] : null;
             if (files?.length) await this.add(files);
             else if (closeOnCancel && !request.members.length) await this.close();
         } catch (error) {
@@ -123,8 +124,16 @@ export class FloppyImportWorkflow {
     async add(files: FloppySource[]): Promise<void> {
         const r = this.request;
         if (!r || this.busy || this.completion.locked || !files.length) return;
-        if (r.members.length + files.length > 32 || files.some((file) => !/\.(img|ima)$/i.test(sourceName(file)))) {
-            r.error = 'Choose one floppy or up to 32 companion .img/.ima images.';
+        if (
+            r.members.length + files.length > 32 ||
+            files.some((file) => !isDirectory(file) && !/\.(img|ima)$/i.test(sourceName(file)))
+        ) {
+            r.error = 'Choose floppy .img/.ima images or unpacked disk folders (up to 32 sources).';
+            return;
+        }
+        const sources = [...r.members.map((member) => member.source), ...files];
+        if (sources.some(isDirectory) && sources.some((source) => !isDirectory(source))) {
+            r.error = 'Choose either disk images or unpacked disk folders.';
             return;
         }
         r.members.push(
@@ -423,7 +432,11 @@ export class FloppyImportWorkflow {
             if (job.status !== 'completed' || !inspection)
                 throw new Error(job.error ?? 'Floppy inspection did not complete.');
             if (inspection.format !== 'A_SERIES') {
-                const sources = r.members.map((m) => m.source),
+                if (r.members.some((member) => isDirectory(member.source)))
+                    throw new Error('Folder import supports unpacked A-series floppy disks.');
+                const sources = r.members
+                        .map((m) => m.source)
+                        .filter((source): source is ClientUploadSource | FileLocation => !isDirectory(source)),
                     target = r.target;
                 await this.close();
                 await this.dependencies.otherFormat(inspection.format, sources, target);
@@ -447,8 +460,11 @@ export class FloppyImportWorkflow {
         }
     }
 }
-function isLocation(source: FloppySource): source is FileLocation {
-    return 'kind' in source && source.kind === 'server-file';
+function isDirectory(source: FloppySource): source is DirectoryLocation {
+    return 'kind' in source && source.kind === 'server-directory';
+}
+function isLocation(source: FloppySource): source is FileLocation | DirectoryLocation {
+    return 'kind' in source && (source.kind === 'server-file' || source.kind === 'server-directory');
 }
 function sourceName(source: FloppySource) {
     return isLocation(source) ? source.displayName : source.name;

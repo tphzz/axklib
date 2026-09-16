@@ -2101,7 +2101,7 @@
         "properties": {
           "sources": {
             "items": {
-              "$ref": "#/components/schemas/FilesystemFileInput"
+              "$ref": "#/components/schemas/FloppyImportSource"
             },
             "maxItems": 32,
             "minItems": 1,
@@ -2164,6 +2164,25 @@
           "exclusionReason"
         ],
         "type": "object"
+      },
+      "FloppyImportSource": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/FilesystemFileInput"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "directoryRef": {
+                "$ref": "#/components/schemas/DirectoryRef"
+              }
+            },
+            "required": [
+              "directoryRef"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "HardDiskCreationPartitionOption": {
         "additionalProperties": false,

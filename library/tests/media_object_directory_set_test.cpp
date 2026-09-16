@@ -1,6 +1,8 @@
+#include <array>
 #include <format>
 #include <utility>
 
+#include "axklib/floppy_import.hpp"
 #include "axklib/writer_internal.hpp"
 #include "media_test_fixtures.hpp"
 
@@ -87,6 +89,34 @@ TEST(ObjectDirectorySet, SharesCatalogValidationAndAssemblyWithRawFloppies) {
     ASSERT_EQ(objects->size(), complete->stored_objects().size());
     for (std::size_t index = 0U; index < objects->size(); ++index)
         EXPECT_EQ((*objects)[index].raw_payload, complete->stored_objects()[index].raw_payload);
+}
+
+TEST(ObjectDirectorySet, ImportAssemblesUnorderedFoldersAndRequiresEveryCompanion) {
+    const axk::FloppyImportDirectory one{"disk1", unpack(catalog_member(1U, false))};
+    const axk::FloppyImportDirectory two{"disk2", unpack(catalog_member(2U, true))};
+    const auto partial = axk::FloppyImportSource::open_directories({one});
+    ASSERT_TRUE(partial) << partial.error().message;
+    EXPECT_FALSE(partial->inspection().complete);
+    EXPECT_EQ(partial->inspection().next_required_index, 2U);
+    EXPECT_FALSE(partial->prepare({}));
+    const auto later = axk::FloppyImportSource::open_directories({two});
+    ASSERT_TRUE(later) << later.error().message;
+    EXPECT_EQ(later->inspection().next_required_index, 1U);
+    const auto complete = axk::FloppyImportSource::open_directories({two, one});
+    ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_TRUE(complete->inspection().complete);
+    ASSERT_EQ(complete->inspection().objects.size(), 1U);
+    const auto prepared = complete->prepare(std::array{complete->inspection().objects.front().key});
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    EXPECT_EQ(prepared->nodes.front().raw_payload, smpl_object());
+    EXPECT_FALSE(axk::FloppyImportSource::open_directories({one, one}));
+    EXPECT_FALSE(
+        axk::FloppyImportSource::open_directories({one, {"wrong", unpack(catalog_member(2U, true, "OTHER SET    "))}}));
+    auto broken = one;
+    for (auto &entry : broken.entries)
+        if (entry.name == "YAMAHA.SYM")
+            entry.reader = std::make_shared<axk::MemoryReader>(std::vector<std::byte>{std::byte{0xff}});
+    EXPECT_FALSE(axk::FloppyImportSource::open_directories({broken}));
 }
 
 TEST(ObjectDirectorySet, RejectsMissingDuplicateWrongSetAndInvalidWaveRanges) {

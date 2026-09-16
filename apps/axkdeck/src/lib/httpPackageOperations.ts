@@ -1,5 +1,5 @@
 import type { components } from './generated/axklibApiV1';
-import type { FloppyPlanRequest } from './floppyImport';
+import type { FloppyPlanRequest, FloppyInputLocation } from './floppyImport';
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { HttpImageSessions } from './httpImageSessions';
 import type { HttpJobController } from './httpJobController';
@@ -31,9 +31,11 @@ import type {
 } from './transport';
 
 export class HttpPackageOperations {
-    async startFloppyInspection(sources: InputFileLocation[]): Promise<JobState> {
+    async startFloppyInspection(sources: FloppyInputLocation[]): Promise<JobState> {
         const job = await this.client.invoke<never>('images.floppy_import.inspect', {
-            sources: sources.map(serverInput),
+            sources: sources.map((source) =>
+                source.kind === 'server-directory' ? { directoryRef: source.reference } : serverInput(source),
+            ),
         });
         if (!this.jobs.isJob(job)) throw new Error('Floppy inspection did not return a job');
         return this.jobs.map(job);

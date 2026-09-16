@@ -4354,6 +4354,17 @@
           "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
         }
       },
+      "FloppyImportSource": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/FilesystemFileInput"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["directoryRef"],
+            "properties": {"directoryRef": {"$ref": "#/components/schemas/DirectoryRef"}}
+          }
+        ]
+      },
       "FloppyImportInspectionRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -4365,7 +4376,7 @@
             "type": "array",
             "maxItems": 32,
             "items": {
-              "$ref": "#/components/schemas/FilesystemFileInput"
+              "$ref": "#/components/schemas/FloppyImportSource"
             },
             "minItems": 1
           }

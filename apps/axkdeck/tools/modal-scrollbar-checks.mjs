@@ -117,12 +117,12 @@ export async function checkModalScrollbars({ folders = false } = {}) {
     const finalPicker = document.querySelector('.storage-picker');
     const firstRow = finalPicker.querySelector('.storage-picker-row').getBoundingClientRect();
     const paneRight = Math.round(panes[0].getBoundingClientRect().right);
-    const pixelProbe = {
+    const pixelMeasurement = {
         left: paneRight - 14,
         right: paneRight - 2,
         y: Math.ceil(firstRow.bottom) + 2,
         referenceX: paneRight - 28,
         color: getComputedStyle(finalPicker).backgroundColor.match(/\d+/g).slice(0, 3).map(Number),
     };
-    return { folders, panes: before, foregroundScroll, pixelProbe, userAgent: navigator.userAgent };
+    return { folders, panes: before, foregroundScroll, pixelMeasurement, userAgent: navigator.userAgent };
 }

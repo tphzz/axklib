@@ -19,7 +19,7 @@ export class HttpPackageTransport extends HttpImageSessionReads {
     ) {
         super(sessions);
     }
-    startFloppyInspection(sources: InputFileLocation[]): Promise<JobState> {
+    startFloppyInspection(sources: import('./floppyImport').FloppyInputLocation[]): Promise<JobState> {
         return this.packages.startFloppyInspection(sources);
     }
     releaseFloppyInspection(token: string): Promise<void> {

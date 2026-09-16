@@ -51,7 +51,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/package_operations_support.cpp src/session_package_import_plan.cpp
                                    src/session_package_operations.cpp
                                    src/session_import_plan.cpp
-                                   src/floppy_import_operations.cpp
+                                   src/floppy_import_operations.cpp src/floppy_import_directories.cpp
                                    src/operation_registry_floppy.cpp
                                    src/package_plan_store.cpp src/path_reservations.cpp
                                    src/private_storage.cpp src/relationship_diagnostic.cpp

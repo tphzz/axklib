@@ -169,6 +169,82 @@ Result<FloppyImportSource> FloppyImportSource::open(std::vector<FatImage> member
 
 const FloppyImportInspection &FloppyImportSource::inspection() const noexcept { return inspection_; }
 
+Result<FloppyImportSource> FloppyImportSource::open_directories(std::vector<FloppyImportDirectory> sources,
+                                                                const CancellationToken &cancellation) {
+    if (sources.empty() || sources.size() > FloppyDiskSet::maximum_members)
+        return std::unexpected(invalid("Choose one folder or a set of at most 32 disk folders."));
+    FloppyImportInspection inspection;
+    std::vector<AxkObjectDirectory> members;
+    std::size_t entries{};
+    std::uint64_t bytes{};
+    for (auto &source : sources) {
+        for (const auto &entry : source.entries) {
+            if (!entry.reader || ++entries > AxkObjectDirectory::maximum_entries ||
+                entry.reader->size() > AxkObjectDirectory::maximum_payload_bytes - bytes)
+                return std::unexpected(invalid("The disk folders exceed the entry or payload limit."));
+            bytes += entry.reader->size();
+        }
+        auto member = AxkObjectDirectory::open(source.entries, source.name, cancellation);
+        if (!member)
+            return std::unexpected(member.error());
+        if (std::ranges::any_of(member->validation_issues(),
+                                [](const auto &issue) { return issue.code == "FLOPPY_CATALOG_INVALID"; }))
+            return std::unexpected(invalid("The folder has an invalid Yamaha floppy catalog."));
+        const auto &identity = member->disk_identity();
+        if (!identity.trusted_for_disk_set &&
+            (identity.marker == FloppySetMarker::continuation || identity.marker == FloppySetMarker::final ||
+             identity.marker == FloppySetMarker::invalid || identity.index > 1U))
+            return std::unexpected(invalid("This folder has unsupported or inconsistent disk-set metadata."));
+        for (const auto &entry : source.entries) {
+            if (std::ranges::find(member->stored_objects(), entry.name, &MediaObject::logical_path) ==
+                member->stored_objects().end())
+                inspection.excluded_files.push_back({source.name, entry.name, entry.reader->size()});
+        }
+        inspection.members.push_back(identity);
+        members.push_back(std::move(*member));
+    }
+    std::ranges::sort(members, {}, [](const auto &member) { return member.disk_identity().index; });
+    std::ranges::sort(inspection.members, {}, &FloppyDiskIdentity::index);
+    const auto &first = members.front().disk_identity();
+    inspection.label = first.trusted_for_disk_set ? first.set_name : first.label;
+    inspection.complete = true;
+    if (first.trusted_for_disk_set) {
+        std::set<std::uint16_t> indices;
+        for (std::size_t index = 0; index < members.size(); ++index) {
+            const auto &identity = members[index].disk_identity();
+            if (!identity.trusted_for_disk_set || identity.set_name != first.set_name ||
+                !indices.insert(identity.index).second ||
+                (index + 1U < members.size() && identity.marker != FloppySetMarker::continuation))
+                return std::unexpected(invalid("Choose folders from one disk set with unique disk numbers."));
+        }
+        std::uint16_t next = 1U;
+        while (indices.contains(next))
+            ++next;
+        inspection.complete =
+            next == members.size() + 1U && members.back().disk_identity().marker == FloppySetMarker::final;
+        if (!inspection.complete) {
+            inspection.next_required_index = next;
+            return FloppyImportSource{MediaKind::axk_object_directory, {}, std::move(inspection)};
+        }
+        auto assembled = AxkObjectDirectory::open_members(std::move(members), {}, cancellation);
+        if (!assembled)
+            return std::unexpected(assembled.error());
+        members = {};
+        members.push_back(std::move(*assembled));
+    } else if (members.size() != 1U) {
+        return std::unexpected(invalid("Multiple unpacked disks require matching Yamaha disk-set catalogs."));
+    }
+    MediaContainer media{std::move(members.front())};
+    const auto issues = media.validation_issues();
+    inspection.issues.assign(issues.begin(), issues.end());
+    auto catalog = build_object_catalog(media, AxkObjectDirectory::maximum_payload_bytes, cancellation);
+    if (!catalog)
+        return std::unexpected(catalog.error());
+    if (auto inspected = inspect_objects(inspection, *catalog, cancellation); !inspected)
+        return std::unexpected(inspected.error());
+    return FloppyImportSource{media.kind(), std::move(*catalog), std::move(inspection)};
+}
+
 Result<PortablePackage> FloppyImportSource::prepare(std::span<const std::string> selected_object_keys,
                                                     const CancellationToken &cancellation) const {
     if (const auto checked = cancellation.check(); !checked)

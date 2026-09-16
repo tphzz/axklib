@@ -73,6 +73,52 @@ function activeOption(list: HTMLElement): HTMLElement {
 }
 
 describe('ServerStoragePicker', () => {
+    it('offers current-folder selection and image multi-selection in the same floppy picker', async () => {
+        const backend = transport();
+        vi.mocked(backend.sandboxDirectory).mockImplementation(async (directory) => ({
+            directory,
+            entries: [
+                { name: 'disk1', relativePath: 'disk1', kind: 'DIRECTORY', size: null },
+                { name: 'disk.img', relativePath: 'disk.img', kind: 'FILE', size: 100 },
+                { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 10 },
+            ],
+            truncated: false,
+            nextCursor: null,
+        }));
+        const onselect = vi.fn(),
+            onselectmany = vi.fn();
+        const view = render(ServerStoragePicker, {
+            props: {
+                transport: backend,
+                mode: 'floppy-source',
+                title: 'Choose floppy source',
+                extensions: ['img', 'ima'],
+                multiple: true,
+                initialDirectory: { rootId: 'workspace', relativePath: '' },
+                onselect,
+                onselectmany,
+                oncancel: vi.fn(),
+            },
+        });
+        await view.findByRole('option', { name: /disk.img/ });
+        expect(view.queryByRole('option', { name: /notes.txt/ })).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Select current folder' }));
+        expect(onselect).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: 'server-directory', reference: { rootId: 'workspace', relativePath: '' } }),
+        );
+        await fireEvent.click(view.getByRole('option', { name: /disk.img/ }));
+        expect(view.queryByRole('button', { name: 'Select current folder' })).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Select 1 file' }));
+        expect(onselectmany).toHaveBeenCalledWith([expect.objectContaining({ kind: 'server-file' })]);
+        await fireEvent.click(view.getByRole('option', { name: /disk.img/ }));
+        await fireEvent.click(view.getByRole('option', { name: /disk1/ }));
+        await waitFor(() =>
+            expect(backend.sandboxDirectory).toHaveBeenLastCalledWith(
+                expect.objectContaining({ relativePath: 'disk1' }),
+            ),
+        );
+        expect(view.getByRole('button', { name: 'Select current folder' })).toBeTruthy();
+    });
     it.each([false, true])(
         'preserves natural server order and selection across pages (remembered: %s)',
         async (remembered) => {

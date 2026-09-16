@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 import { floppySelection, floppyVolumeName } from './floppySelection';
 import type { FloppyInspection } from '../../lib/floppyImport';
-import { clientUploadLocation, serverFileLocation } from '../../lib/storageLocations';
+import { clientUploadLocation, serverFileLocation, serverDirectoryLocation } from '../../lib/storageLocations';
 import type { ImageSessionPackageImportPlan, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { PickerController } from '../dialogs/picker';
@@ -115,11 +115,25 @@ function setup(value = inspection, isDesktop = false, connectionMode: ImageTrans
     return { workflow, transport, refresh, otherFormat, picker };
 }
 describe('floppy import', () => {
+    it('inspects a folder without uploading it and rejects mixed representations', async () => {
+        const { workflow, picker, transport } = setup(inspection, true, 'local');
+        const folder = serverDirectoryLocation({ rootId: 'workspace', relativePath: 'norddrms' });
+        vi.spyOn(picker, 'chooseFloppySources').mockResolvedValue(folder);
+        await workflow.chooseFiles(partition);
+        expect(transport.startFloppyInspection).toHaveBeenCalledWith([folder]);
+        expect(transport.uploadClientFile).not.toHaveBeenCalled();
+        await workflow.add([source]);
+        expect(workflow.request?.error).toContain('either disk images or unpacked disk folders');
+        expect(workflow.request?.members).toHaveLength(1);
+        await workflow.review();
+        await workflow.apply();
+        expect(workflow.request).toBeNull();
+    });
     it('opens the storage picker directly for the bundled server and preserves the target', async () => {
         const { workflow, picker } = setup(inspection, true, 'local');
-        const choose = vi.spyOn(picker, 'chooseFiles').mockResolvedValue([source]);
+        const choose = vi.spyOn(picker, 'chooseFloppySources').mockResolvedValue([source]);
         await workflow.chooseFiles(volume);
-        expect(choose).toHaveBeenCalledWith('Choose floppy images', ['img', 'ima'], {
+        expect(choose).toHaveBeenCalledWith({
             parentDialog: 'floppy-import',
         });
         expect(workflow.request).toMatchObject({ volumeName: 'Existing', mode: 'existing' });
@@ -127,21 +141,21 @@ describe('floppy import', () => {
     });
     it('closes an empty direct import when its picker is cancelled', async () => {
         const { workflow, picker } = setup(inspection, true, 'local');
-        vi.spyOn(picker, 'chooseFiles').mockResolvedValue(null);
+        vi.spyOn(picker, 'chooseFloppySources').mockResolvedValue(null);
         await workflow.chooseFiles(volume);
         expect(workflow.request).toBeNull();
     });
     it('preserves selected disks when adding a companion is cancelled', async () => {
         const { workflow, picker } = setup(inspection, true, 'local');
         await workflow.requestDroppedFiles([source], volume);
-        vi.spyOn(picker, 'chooseFiles').mockResolvedValue(null);
+        vi.spyOn(picker, 'chooseFloppySources').mockResolvedValue(null);
         await workflow.chooseWorkspace();
         expect(workflow.request?.members).toHaveLength(1);
         expect(workflow.request?.inspection?.complete).toBe(true);
     });
     it('retains direct routing after picker failure', async () => {
         const { workflow, picker } = setup(inspection, true, 'local');
-        vi.spyOn(picker, 'chooseFiles').mockRejectedValue(new Error('Picker failed'));
+        vi.spyOn(picker, 'chooseFloppySources').mockRejectedValue(new Error('Picker failed'));
         await workflow.chooseFiles(volume);
         expect(workflow.request?.error).toBe('Picker failed');
         expect(workflow.directSource).toBe(true);
@@ -149,7 +163,7 @@ describe('floppy import', () => {
     it('discards a picker result after the request is replaced', async () => {
         const { workflow, picker, transport } = setup(inspection, true, 'local');
         let finish!: (files: (typeof source)[]) => void;
-        vi.spyOn(picker, 'chooseFiles').mockReturnValue(new Promise((resolve) => (finish = resolve)));
+        vi.spyOn(picker, 'chooseFloppySources').mockReturnValue(new Promise((resolve) => (finish = resolve)));
         const choosing = workflow.chooseFiles(volume);
         await workflow.close();
         workflow.open(partition);
@@ -164,7 +178,7 @@ describe('floppy import', () => {
         [false, 'local'],
     ] as const)('keeps source choices for desktop=%s connection=%s', async (desktop, mode) => {
         const { workflow, picker } = setup(inspection, desktop, mode);
-        const choose = vi.spyOn(picker, 'chooseFiles');
+        const choose = vi.spyOn(picker, 'chooseFloppySources');
         await workflow.chooseFiles(volume);
         expect(choose).not.toHaveBeenCalled();
         expect(workflow.request?.status).toBe('choosing');

@@ -285,7 +285,7 @@ files, not a populated authored-volume image. Empty ISO9660 creation is not
 offered; use the ISO authoring or conversion workflows when object content is
 available.
 
-### Import A-series floppy images
+### Import A-series floppy images and folders
 
 Drop an A3000/A4000/A5000 `.img` or `.ima` onto a writable A-series image,
 or choose **Import > Import floppy** on a partition or volume. This works in
@@ -298,6 +298,16 @@ Choose one ordinary floppy or the companion images of one disk set, up to
 unrelated disks cannot be combined. Add any missing companions before continuing.
 Select the objects to import; required dependencies remain included and locked.
 SYSTEM/SYSTEM2 and auxiliary files are shown as excluded, not imported.
+
+The storage picker also accepts unpacked A-series disks: navigate into a disk
+folder and choose **Select current folder**, or select the parent folder of one
+companion set. Parent-folder recognition uses Yamaha catalogs and disk numbers,
+not folder names. Missing disks keep import disabled; use **Add disks...** to
+provide companions. Multiple unrelated sets, duplicate disk numbers, and mixed
+image-file/folder selections are rejected. Folder sources must be in a configured
+server storage location; client uploads still accept image files only. When using
+the bundled desktop server, the storage picker opens directly without a
+local/remote choice. Source folders remain unchanged.
 
 Choose **Existing** or **New** for the destination volume, then **Review**.
 Resolve naming or Program slot conflicts using the same controls as package

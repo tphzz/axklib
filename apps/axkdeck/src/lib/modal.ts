@@ -14,12 +14,12 @@ let activeModalCount = 0;
 
 function retainScrollbarMode(): () => void {
     if (activeModalCount === 0) {
-        const probe = document.createElement('div');
-        probe.className = 'modal-scrollbar-probe';
-        document.body.append(probe);
+        const measurement = document.createElement('div');
+        measurement.className = 'modal-scrollbar-measurement';
+        document.body.append(measurement);
         // Remove GTK's painted thumb outline only when even a stable gutter consumes no space.
-        const overlays = probe.offsetWidth > 0 && probe.offsetWidth === probe.clientWidth;
-        probe.remove();
+        const overlays = measurement.offsetWidth > 0 && measurement.offsetWidth === measurement.clientWidth;
+        measurement.remove();
         document.documentElement.classList.toggle('modal-overlay-scrollbars', overlays);
     }
     activeModalCount += 1;

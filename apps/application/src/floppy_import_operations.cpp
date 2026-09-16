@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -18,6 +19,7 @@
 #include "axklib/tx16w.hpp"
 #include "content_digest.hpp"
 #include "filesystem_inputs.hpp"
+#include "floppy_import_directories.hpp"
 #include "session_import_plan.hpp"
 
 namespace axk::app {
@@ -48,7 +50,10 @@ std::string_view object_type_name(ObjectType type) {
 struct Sources {
     std::vector<filesystem_inputs::OpenedInput> inputs;
     std::vector<Json> snapshots;
+    std::function<Result<void>(const CancellationToken &)> verify_directories;
     Result<void> verify(const CancellationToken &cancellation) const {
+        if (verify_directories)
+            return verify_directories(cancellation);
         for (std::size_t i = 0; i < inputs.size(); ++i)
             if (auto checked = inputs[i].verify(snapshots[i], cancellation); !checked)
                 return checked;
@@ -120,8 +125,15 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
     const auto &sources = request.at("sources");
     if (!sources.is_array() || sources.empty() || sources.size() > FloppyDiskSet::maximum_members)
         return std::unexpected(Error{"invalid_request", "Choose one disk or up to 32 companion disks."});
+    if (std::ranges::any_of(sources, [](const auto &source) { return !source.is_object() || source.size() != 1U; }))
+        return std::unexpected(Error{"invalid_request", "Choose exactly one file, upload or directory per source."});
     // Reserve before reading payloads, including catalog and snapshot working copies.
-    const auto reservation = static_cast<std::uint64_t>(sources.size()) * maximum_disk_bytes * 3U;
+    const bool directories = sources.front().contains("directoryRef");
+    if (std::ranges::any_of(
+            sources, [directories](const auto &source) { return source.contains("directoryRef") != directories; }))
+        return std::unexpected(Error{"floppy_sources_mixed", "Choose either disk images or unpacked disk folders."});
+    const auto reservation = directories ? AxkObjectDirectory::maximum_payload_bytes * 3U
+                                         : static_cast<std::uint64_t>(sources.size()) * maximum_disk_bytes * 3U;
     {
         std::lock_guard lock{state->mutex};
         state->cleanup();
@@ -138,9 +150,20 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
     }
     const Admission admission{state, reservation};
     auto retained_sources = std::make_shared<Sources>();
+    std::optional<FloppyImportSource> inspected_source;
+    if (directories) {
+        auto loaded = open_floppy_directories(sources, context, sandbox, uploads);
+        if (!loaded)
+            return std::unexpected(loaded.error());
+        auto opened = FloppyImportSource::open_directories(std::move(loaded->members), context.cancellation);
+        if (!opened)
+            return std::unexpected(core_error(opened.error()));
+        inspected_source.emplace(std::move(*opened));
+        retained_sources->verify_directories = std::move(loaded->verify);
+    }
     std::vector<FatImage> members;
     std::set<std::string> formats;
-    for (const auto &source : sources) {
+    for (const auto &source : directories ? Json::array() : sources) {
         auto input = filesystem_inputs::open(source, context.owner_id, sandbox, uploads);
         if (!input)
             return std::unexpected(input.error());
@@ -204,9 +227,9 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
     }
     if (const auto checked = context.cancellation.check(); !checked)
         return std::unexpected(core_error(checked.error()));
-    if (formats.size() != 1U)
+    if (!directories && formats.size() != 1U)
         return std::unexpected(Error{"floppy_formats_mixed", "Choose disks from one sampler and one disk set."});
-    if (*formats.begin() != "A_SERIES") {
+    if (!directories && *formats.begin() != "A_SERIES") {
         return Json{{"format", *formats.begin()},
                     {"inspectionToken", nullptr},
                     {"complete", false},
@@ -217,15 +240,18 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
                     {"excludedFiles", Json::array()},
                     {"issues", Json::array()}};
     }
-    auto source = FloppyImportSource::open(std::move(members), context.cancellation);
-    if (!source)
-        return std::unexpected(core_error(source.error()));
+    if (!directories) {
+        auto opened = FloppyImportSource::open(std::move(members), context.cancellation);
+        if (!opened)
+            return std::unexpected(core_error(opened.error()));
+        inspected_source.emplace(std::move(*opened));
+    }
     auto token = secure_random_hex(24U);
     if (!token)
         return std::unexpected(token.error());
-    auto result = describe(source->inspection(), *token);
+    auto result = describe(inspected_source->inspection(), *token);
     auto record = std::make_shared<Inspection>(Inspection{context.owner_id, Clock::now() + std::chrono::minutes{15},
-                                                          reservation, std::move(*source), retained_sources});
+                                                          reservation, std::move(*inspected_source), retained_sources});
     {
         std::lock_guard lock{state->mutex};
         if (!state->inspections.emplace(*token, std::move(record)).second)
@@ -306,9 +332,9 @@ Result<void> bind_floppy_import_operations(OperationRegistry &registry, const Sa
             try {
                 std::vector<PathAccess> paths;
                 for (const auto &source : request.at("sources")) {
-                    if (!source.contains("fileRef"))
+                    if (!source.contains("fileRef") && !source.contains("directoryRef"))
                         continue;
-                    const auto &ref = source.at("fileRef");
+                    const auto &ref = source.at(source.contains("directoryRef") ? "directoryRef" : "fileRef");
                     paths.push_back({{ref.at("rootId").get<std::string>(), ref.at("relativePath").get<std::string>()},
                                      PathAccessMode::shared});
                 }

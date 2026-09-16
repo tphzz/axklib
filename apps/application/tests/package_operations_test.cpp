@@ -27,6 +27,7 @@
 #include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/io.hpp"
 #include "axklib/package.hpp"
 #include "axklib/sequence.hpp"
@@ -408,6 +409,49 @@ class PackageOperationsTest : public testing::Test {
         ASSERT_TRUE(written) << written.error().message;
     }
 
+    void unpack_floppy(bool disk_set = false) {
+        if (!std::filesystem::exists(root_ / "source.img"))
+            write_floppy();
+        auto reader = axk::FileReader::open(root_ / "source.img");
+        ASSERT_TRUE(reader);
+        const auto fat = axk::FatImage::open(*reader);
+        ASSERT_TRUE(fat) << fat.error().message;
+        ASSERT_TRUE(fat->yamaha_catalog());
+        const auto count = disk_set ? 2U : 1U;
+        for (unsigned disk = 1U; disk <= count; ++disk) {
+            const auto folder = root_ / "unpacked" / (disk_set ? std::format("part{}", 3U - disk) : "disk");
+            std::filesystem::create_directories(folder);
+            std::vector<axk::YamahaFloppyCatalogEntry> catalog_entries;
+            for (const auto &file : fat->files()) {
+                if (disk_set) {
+                    const auto slot = axk::detail::yamaha_floppy_filename_slot(file.path);
+                    if (!slot || (*slot % 2U) + 1U != disk)
+                        continue;
+                    const auto entry =
+                        std::ranges::find(fat->yamaha_catalog()->files, *slot, &axk::YamahaFloppyCatalogEntry::slot);
+                    if (entry == fat->yamaha_catalog()->files.end() || entry->logical_path.ends_with(".SYM"))
+                        continue;
+                    catalog_entries.push_back(*entry);
+                }
+                const auto bytes = fat->read_file(file);
+                ASSERT_TRUE(bytes);
+                std::ofstream out{folder / file.path, std::ios::binary};
+                out.write(reinterpret_cast<const char *>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+                ASSERT_TRUE(out);
+            }
+            if (disk_set) {
+                catalog_entries.push_back({223U, disk == count ? "\\A3000E.SYM" : "\\A3000F.SYM"});
+                const auto catalog = axk::detail::encode_yamaha_floppy_catalog(
+                    std::format("{:<14}{:02}", "IMPORT SET", disk), catalog_entries, fat->yamaha_catalog()->categories);
+                ASSERT_TRUE(catalog) << catalog.error().message;
+                std::ofstream out{folder / "YAMAHA.SYM", std::ios::binary};
+                out.write(reinterpret_cast<const char *>(catalog->data()),
+                          static_cast<std::streamsize>(catalog->size()));
+                std::ofstream marker{folder / (disk == count ? "A3000E_S.223" : "A3000F_S.223"), std::ios::binary};
+            }
+        }
+    }
+
     std::filesystem::path root_;
     std::unique_ptr<axk::app::Sandbox> sandbox_;
     std::unique_ptr<axk::app::UploadStore> uploads_;
@@ -690,6 +734,102 @@ TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWr
     EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
     EXPECT_EQ(read_bytes(root_ / "target.hds"), before);
     EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjects) {
+    unpack_floppy(true);
+    const auto inspected = registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked"}}}}}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->at("complete").get<bool>());
+    EXPECT_EQ(inspected->at("members").size(), 2U);
+    const auto raw = registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}}}}}, context());
+    ASSERT_TRUE(raw) << raw.error().message;
+    EXPECT_EQ(inspected->at("objects").size(), raw->at("objects").size());
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    nlohmann::json keys = nlohmann::json::array();
+    for (const auto &object : inspected->at("objects")) {
+        EXPECT_EQ(object.at("exclusionReason"), "");
+        keys.push_back(object.at("objectKey"));
+    }
+    const auto plan = registry_.invoke(
+        "images.floppy_import.plan",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"inspectionToken", inspected->at("inspectionToken")},
+         {"selectedObjectKeys", keys},
+         {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Folder set"}}}},
+        context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->at("valid").get<bool>()) << *plan;
+    const auto applied = registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(applied->at("applied").get<bool>());
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyDetectsAddedRemovedAndChangedFilesBeforeWriting) {
+    unpack_floppy();
+    const auto before = read_bytes(root_ / "target.hds");
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    for (const auto mutation : {"add", "remove", "change"}) {
+        SCOPED_TRACE(mutation);
+        std::filesystem::remove_all(root_ / "unpacked");
+        unpack_floppy();
+        const auto inspected = registry_.invoke(
+            "images.floppy_import.inspect",
+            {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked/disk"}}}}}}},
+            context());
+        ASSERT_TRUE(inspected) << inspected.error().message;
+        const auto &objects = inspected->at("objects");
+        const auto wave =
+            std::ranges::find_if(objects, [](const auto &entry) { return entry.at("objectType") == "SMPL"; });
+        ASSERT_NE(wave, objects.end());
+        const nlohmann::json request{
+            {"imageId", opened->image_id},
+            {"expectedRevision", opened->revision},
+            {"inspectionToken", inspected->at("inspectionToken")},
+            {"selectedObjectKeys", {wave->at("objectKey")}},
+            {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
+        const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+        ASSERT_TRUE(plan) << plan.error().message;
+        if (std::string_view{mutation} == "remove")
+            std::filesystem::remove(root_ / "unpacked/disk/YAMAHA.SYM");
+        else {
+            std::ofstream changed{root_ / "unpacked/disk" /
+                                      (std::string_view{mutation} == "add" ? "added.txt" : "YAMAHA.SYM"),
+                                  std::ios::binary};
+            changed.put('X');
+        }
+        EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+        EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+        EXPECT_EQ(read_bytes(root_ / "target.hds"), before);
+    }
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyRejectsAmbiguousAndUnsafeSourceSelections) {
+    unpack_floppy(true);
+    const nlohmann::json parent{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked"}}}};
+    const nlohmann::json leaf{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked/part2"}}}};
+    const nlohmann::json file{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    for (const auto &sources : {nlohmann::json::array({parent, file}), nlohmann::json::array({leaf, leaf}),
+                                nlohmann::json::array({parent, leaf})})
+        EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", sources}}, context()));
+    EXPECT_FALSE(registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "../outside"}}}}}}}, context()));
+    auto cancelled = context();
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    cancelled.cancellation = cancellation.token();
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", {parent}}}, cancelled));
+    std::filesystem::copy(root_ / "unpacked/part2", root_ / "unpacked/duplicate",
+                          std::filesystem::copy_options::recursive);
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", {parent}}}, context()));
 }
 
 TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomicallyFromPlacementHints) {

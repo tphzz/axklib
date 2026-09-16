@@ -53,7 +53,7 @@
 }
 
 /* Keep background gutters stable while preventing native overlay scrollbar bleed-through. */
-.modal-scrollbar-probe {
+.modal-scrollbar-measurement {
   position: fixed;
   width: 100px;
   height: 100px;

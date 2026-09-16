@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { PickerMode } from '../../features/dialogs/picker';
     let {
         mode,
         hasDirectory,
@@ -15,7 +16,7 @@
         onfiles,
         oncancel,
     }: {
-        mode: 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
+        mode: PickerMode;
         hasDirectory: boolean;
         hasMore: boolean;
         multiple: boolean;
@@ -54,6 +55,10 @@
             {:else if mode === 'media-source'}
                 <button class="primary-button" type="button" disabled={loading || opening} onclick={onmedia}
                     >{opening ? 'Opening' : 'Open current folder'}</button
+                >
+            {:else if mode === 'floppy-source' && selectedCount === 0}
+                <button class="primary-button" type="button" disabled={loading || opening} onclick={ondirectory}
+                    >Select current folder</button
                 >
             {:else if multiple}
                 <button class="primary-button" type="button" disabled={selectedCount === 0} onclick={onfiles}

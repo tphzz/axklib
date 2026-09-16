@@ -61,7 +61,7 @@ def main():
             surface = widget.get_snapshot_finish(task)
             surface.write_to_png(str(args.output / "webview.png"))
             if result["status"] == "passed":
-                probe = result["pixelProbe"]
+                measurement = result["pixelMeasurement"]
                 surface.flush()
                 data = surface.get_data()
 
@@ -71,13 +71,13 @@ def main():
                     )[0]
                     return [(value >> shift) & 255 for shift in (16, 8, 0)]
 
-                for y in range(probe["y"], probe["y"] + 8):
-                    if rgb(probe["referenceX"], y) != probe["color"]:
+                for y in range(measurement["y"], measurement["y"] + 8):
+                    if rgb(measurement["referenceX"], y) != measurement["color"]:
                         raise AssertionError(
                             "Dialog is blank or pixel reference is not its opaque background"
                         )
-                    for x in range(probe["left"], probe["right"]):
-                        if rgb(x, y) != probe["color"]:
+                    for x in range(measurement["left"], measurement["right"]):
+                        if rgb(x, y) != measurement["color"]:
                             raise AssertionError(
                                 f"Background scrollbar bleeds through dialog at {x}, {y}"
                             )

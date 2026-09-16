@@ -100,7 +100,7 @@ describe('modal', () => {
 
     it('preserves scrollbar geometry in inert modal backgrounds', () => {
         expect(appStyles).toMatch(/\*\s*\{[^}]*scrollbar-width:\s*thin;[^}]*\}/);
-        expect(appStyles).toMatch(/\.modal-scrollbar-probe\s*\{[^}]*scrollbar-gutter:\s*stable;/);
+        expect(appStyles).toMatch(/\.modal-scrollbar-measurement\s*\{[^}]*scrollbar-gutter:\s*stable;/);
         expect(appStyles).not.toMatch(/^:is\(\[inert\], \[inert\] \*\)\s*\{[^}]*scrollbar-width:\s*none;[^}]*\}/m);
         expect(appStyles).not.toMatch(
             /^:is\(\[inert\], \[inert\] \*\)::-webkit-scrollbar\s*\{[^}]*display:\s*none;[^}]*\}/m,
@@ -122,7 +122,7 @@ describe('modal', () => {
             expect(document.documentElement.classList.contains('modal-overlay-scrollbars')).toBe(gutter === 0);
             first.destroy();
             expect(document.documentElement.classList.contains('modal-overlay-scrollbars')).toBe(false);
-            expect(document.querySelector('.modal-scrollbar-probe')).toBeNull();
+            expect(document.querySelector('.modal-scrollbar-measurement')).toBeNull();
         } finally {
             parent.remove();
             child.remove();

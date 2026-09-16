@@ -1,6 +1,6 @@
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 
-export type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
+export type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source' | 'floppy-source';
 export type PickerParentDialog =
     | 'audio-import'
     | 'companion-disks'
@@ -71,6 +71,20 @@ export class PickerController {
                 ...navigation,
             },
             (selection) => (Array.isArray(selection) ? selection : null),
+        );
+    }
+
+    chooseFloppySources(navigation: PickerNavigation = {}): Promise<FileLocation[] | DirectoryLocation | null> {
+        return this.begin(
+            {
+                mode: 'floppy-source',
+                title: 'Choose floppy source',
+                extensions: ['img', 'ima'],
+                suggestedName: '',
+                multiple: true,
+                ...navigation,
+            },
+            (selection) => (Array.isArray(selection) || selection?.kind === 'server-directory' ? selection : null),
         );
     }
 

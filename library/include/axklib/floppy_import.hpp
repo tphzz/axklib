@@ -37,11 +37,18 @@ struct FloppyImportInspection {
     std::vector<MediaValidationIssue> issues;
 };
 
+struct FloppyImportDirectory {
+    std::string name;
+    std::vector<AxkObjectDirectoryEntry> entries;
+};
+
 // One ordinary disk or one catalog-identified set, never unrelated disks combined.
 class AXK_API FloppyImportSource {
   public:
     [[nodiscard]] static Result<FloppyImportSource> open(std::vector<FatImage> members,
                                                          const CancellationToken &cancellation = {});
+    [[nodiscard]] static Result<FloppyImportSource> open_directories(std::vector<FloppyImportDirectory> sources,
+                                                                     const CancellationToken &cancellation = {});
     [[nodiscard]] const FloppyImportInspection &inspection() const noexcept;
     [[nodiscard]] Result<PortablePackage> prepare(std::span<const std::string> selected_object_keys,
                                                   const CancellationToken &cancellation = {}) const;

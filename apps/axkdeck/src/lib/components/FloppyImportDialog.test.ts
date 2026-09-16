@@ -60,7 +60,7 @@ describe('Floppy import dialog', () => {
         expect(view.queryByText('Storage location')).toBeNull();
         expect(view.queryByText('This computer')).toBeNull();
         expect(view.getByRole('alert').textContent).toBe('Picker failed');
-        await fireEvent.click(view.getByRole('button', { name: 'Choose floppy images' }));
+        await fireEvent.click(view.getByRole('button', { name: 'Choose floppy source' }));
         expect(choose).toHaveBeenCalledWith(true);
     });
     it('offers one direct companion action after source selection', async () => {
@@ -69,7 +69,7 @@ describe('Floppy import dialog', () => {
         const view = render(FloppyImportDialog, { workflow });
         expect(view.queryByRole('button', { name: 'Workspace' })).toBeNull();
         expect(view.queryByRole('button', { name: 'Computer' })).toBeNull();
-        await fireEvent.click(view.getByRole('button', { name: 'Add floppy images' }));
+        await fireEvent.click(view.getByRole('button', { name: 'Add disks...' }));
         expect(choose).toHaveBeenCalledWith();
     });
     it('keeps all footer actions visible but disabled during preparation and writing', async () => {

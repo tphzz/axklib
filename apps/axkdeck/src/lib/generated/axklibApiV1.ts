@@ -2266,7 +2266,7 @@ export interface components {
             inspectionToken: string;
         };
         FloppyImportInspectionRequest: {
-            sources: components['schemas']['FilesystemFileInput'][];
+            sources: components['schemas']['FloppyImportSource'][];
         };
         FloppyImportObject: {
             displayName: string;
@@ -2278,6 +2278,11 @@ export interface components {
             requiredObjectKeys: string[];
             sizeBytes: number;
         };
+        FloppyImportSource:
+            | components['schemas']['FilesystemFileInput']
+            | {
+                  directoryRef: components['schemas']['DirectoryRef'];
+              };
         HardDiskCreationPartitionOption: {
             partitionCount: number;
             partitionSizeBytes: number;

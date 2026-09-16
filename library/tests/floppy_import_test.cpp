@@ -142,3 +142,22 @@ TEST(FloppyImportTest, RejectsCrosslinkedLogicalPayload) {
     const auto opened = source(std::move(bytes));
     ASSERT_FALSE(opened);
 }
+
+TEST(FloppyImportTest, UnpackedDirectoryUsesTheSamePayloadAndSelectionRules) {
+    axk::FloppyImportDirectory directory{
+        "disk",
+        {{"SMPTEST.001", std::make_shared<axk::MemoryReader>(smpl_object())},
+         {"SYSTEM2.002", std::make_shared<axk::MemoryReader>(std::vector<std::byte>{std::byte{0}})}}};
+    const auto opened = axk::FloppyImportSource::open_directories({directory});
+    ASSERT_TRUE(opened) << opened.error().message;
+    EXPECT_TRUE(opened->inspection().complete);
+    ASSERT_EQ(opened->inspection().objects.size(), 1U);
+    ASSERT_EQ(opened->inspection().excluded_files.size(), 1U);
+    EXPECT_EQ(opened->inspection().excluded_files.front().path, "SYSTEM2.002");
+    const auto prepared = opened->prepare(std::array{opened->inspection().objects.front().key});
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    ASSERT_EQ(prepared->nodes.size(), 1U);
+    EXPECT_EQ(prepared->nodes.front().raw_payload, smpl_object());
+    EXPECT_FALSE(axk::FloppyImportSource::open_directories({directory, directory}));
+    EXPECT_FALSE(axk::FloppyImportSource::open_directories({}));
+}

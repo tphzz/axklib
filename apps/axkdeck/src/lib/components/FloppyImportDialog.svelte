@@ -38,11 +38,11 @@
         workflow.completion.message ||
             r?.error ||
             (r?.status === 'loading'
-                ? 'Inspecting floppy images'
+                ? 'Inspecting floppy source'
                 : r?.status === 'planning'
                   ? 'Reviewing import'
                   : !r?.members.length
-                    ? 'Choose floppy images'
+                    ? 'Choose floppy source'
                     : r.inspection && !r.inspection.complete
                       ? `Add companion disk ${r.inspection.nextRequiredIndex ?? ''}`
                       : ready
@@ -112,13 +112,13 @@
                 {#if !r.members.length}
                     {#if workflow.directSource}
                         <button class="secondary-button" onclick={() => void workflow.chooseWorkspace(true)}
-                            ><Icon name="folder" size={13} />Choose floppy images</button
+                            ><Icon name="folder" size={13} />Choose floppy source</button
                         >
                     {:else}<ImportSourceChoice
                             label="Floppy sources"
-                            heading="Choose floppy images"
+                            heading="Choose floppy source"
                             description="A-series floppy or companion disk set"
-                            workspaceDetail="Select floppy images from a configured workspace"
+                            workspaceDetail="Select floppy images or unpacked disk folders"
                             computerDetail="Select local floppy images"
                             computerAvailable={true}
                             onchooseworkspace={() => void workflow.chooseWorkspace()}
@@ -128,20 +128,22 @@
                 {:else}
                     <div class="floppy-source-toolbar">
                         <div class="floppy-summary">
-                            <strong>{r.inspection?.label || r.members[0]?.name || 'Floppy images'}</strong>
+                            <strong>{r.inspection?.label || r.members[0]?.name || 'Floppy source'}</strong>
                             <small
                                 >{selection.included.size} of {r.inspection?.objects.length ?? 0} objects selected · {r
-                                    .members.length}
-                                {r.members.length === 1 ? 'disk' : 'disks'} · {formatStoredSize(bytes)}</small
+                                    .inspection?.members.length || r.members.length}
+                                {(r.inspection?.members.length || r.members.length) === 1 ? 'disk' : 'disks'} · {formatStoredSize(
+                                    bytes,
+                                )}</small
                             >
                         </div>
                         <button
                             class="secondary-button"
                             disabled={controlsDisabled}
-                            title="Add floppy images from a storage location"
+                            title="Add floppy images or unpacked disk folders from a storage location"
                             onclick={() => void workflow.chooseWorkspace()}
                             ><Icon name="folder" size={13} />{workflow.directSource
-                                ? 'Add floppy images'
+                                ? 'Add disks...'
                                 : 'Workspace'}</button
                         >
                         {#if !workflow.directSource}<button

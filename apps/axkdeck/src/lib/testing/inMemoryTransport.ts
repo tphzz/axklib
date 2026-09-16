@@ -135,7 +135,7 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
-    startFloppyInspection(sources: import('../storageLocations').InputFileLocation[]): Promise<JobState> {
+    startFloppyInspection(sources: import('../floppyImport').FloppyInputLocation[]): Promise<JobState> {
         return this.invoke('startFloppyInspection', [sources]);
     }
     releaseFloppyInspection(token: string): Promise<void> {
