@@ -35,6 +35,18 @@ const autocompleteComponents = readdirSync(componentDirectory)
     .filter((path) => source(path).includes('dialog-autocomplete-list'));
 
 describe('dialog visual contract', () => {
+    it('uses shared modal background handling in every modal, including feature dialogs', () => {
+        const components = readdirSync(resolve(process.cwd(), 'src'), { recursive: true })
+            .map(String)
+            .filter((path) => path.endsWith('.svelte'))
+            .map((path) => `src/${path}`);
+        const modals = components.flatMap((path) =>
+            [...source(path).matchAll(/<[^>]+aria-modal="true"[^>]*>/gs)].map(([tag]) => ({ path, tag })),
+        );
+        expect(modals.length).toBeGreaterThan(30);
+        for (const { path, tag } of modals) expect(tag, path).toContain('use:modal');
+    });
+
     it('defines one compact typography scale for dialog content', () => {
         expect(appStyles).toMatch(/--dialog-title-font-size:\s*13px/);
         expect(appStyles).toMatch(/--dialog-body-font-size:\s*11px/);

@@ -10,6 +10,25 @@ interface InertState {
 }
 
 const inertStates = new WeakMap<HTMLElement, InertState>();
+let activeModalCount = 0;
+
+function retainScrollbarMode(): () => void {
+    if (activeModalCount === 0) {
+        const probe = document.createElement('div');
+        probe.className = 'modal-scrollbar-probe';
+        document.body.append(probe);
+        // Remove GTK's painted thumb outline only when even a stable gutter consumes no space.
+        const overlays = probe.offsetWidth > 0 && probe.offsetWidth === probe.clientWidth;
+        probe.remove();
+        document.documentElement.classList.toggle('modal-overlay-scrollbars', overlays);
+    }
+    activeModalCount += 1;
+    return () => {
+        activeModalCount -= 1;
+        if (activeModalCount === 0) document.documentElement.classList.remove('modal-overlay-scrollbars');
+    };
+}
+
 const focusableSelector =
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), ' +
     'a[href], [tabindex]:not([tabindex="-1"])';
@@ -64,6 +83,7 @@ function focusInitialElement(element: HTMLElement): void {
 export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     let options = initialOptions;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const releaseScrollbarMode = retainScrollbarMode();
     const background = backgroundElements(node);
     background.forEach(retainInert);
     if (!node.hasAttribute('tabindex')) node.tabIndex = -1;
@@ -128,6 +148,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             node.removeEventListener('input', markInteraction);
             observer.disconnect();
             background.forEach(releaseInert);
+            releaseScrollbarMode();
             if (previousFocus?.isConnected) previousFocus.focus();
         },
     };

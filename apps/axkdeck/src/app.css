@@ -52,6 +52,42 @@
   scrollbar-color: #55585a transparent;
 }
 
+/* Keep background gutters stable while preventing native overlay scrollbar bleed-through. */
+.modal-scrollbar-probe {
+  position: fixed;
+  width: 100px;
+  height: 100px;
+  padding: 0;
+  border: 0;
+  overflow: scroll;
+  scrollbar-gutter: stable;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.modal-overlay-scrollbars :is([inert], [inert] *) {
+  scrollbar-width: none;
+}
+
+.modal-overlay-scrollbars :is([inert], [inert] *)::-webkit-scrollbar {
+  display: none;
+}
+
+:is([inert], [inert] *) {
+  scrollbar-color: transparent transparent;
+}
+
+:is([inert], [inert] *)::-webkit-scrollbar-thumb,
+:is([inert], [inert] *)::-webkit-scrollbar-track,
+:is([inert], [inert] *)::-webkit-scrollbar-track-piece,
+:is([inert], [inert] *)::-webkit-scrollbar-button,
+:is([inert], [inert] *)::-webkit-scrollbar-corner {
+  visibility: hidden;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 html,
 body,
 #app {
