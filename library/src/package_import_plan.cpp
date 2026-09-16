@@ -326,10 +326,18 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             return conflict.code == "SFS_RECORD_CAPACITY_EXHAUSTED" && conflict.partition_index &&
                    *conflict.partition_index == destination.partition_index;
         });
+        // A blocked review may retain partial reservations, but it cannot be applied.
+        const auto cluster_capacity_exhausted = std::ranges::any_of(plan.conflicts, [&](const auto &conflict) {
+            return conflict.code == "SFS_CLUSTER_EXHAUSTED" && conflict.partition_index &&
+                   *conflict.partition_index == destination.partition_index &&
+                   conflict.volume_name == destination.volume_name && conflict.node_id.empty();
+        });
         const auto valid_creation =
             !destination.create ||
             (plan.target_kind == MediaKind::sfs && destination.infrastructure_sfs_ids.size() == 6U &&
-             destination.infrastructure_clusters == 12U &&
+             (destination.infrastructure_clusters == 12U ||
+              (cluster_capacity_exhausted && destination.infrastructure_clusters < 12U &&
+               destination.infrastructure_clusters % 2U == 0U)) &&
              (destination.root_directory_growth_bytes == 0U || destination.root_directory_growth_bytes == 32U)) ||
             (plan.target_kind == MediaKind::sfs && !has_infrastructure && record_capacity_exhausted) ||
             (plan.target_kind == MediaKind::iso9660 && !has_infrastructure);

@@ -214,6 +214,9 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                             std::format("partition has {} free cluster(s), but destination volume scaffolding needs "
                                         "at least 2 more cluster(s)",
                                         remaining_clusters(capacity->second)));
+                        auto &conflict = plan.conflicts.back();
+                        conflict.partition_index = planned.partition_index;
+                        conflict.volume_name = planned.volume_name;
                     }
                     auto &reusable = reusable_root_entries[key.first];
                     if (reusable != 0U) {

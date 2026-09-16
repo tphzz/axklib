@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { importCapacityGroups, isImportSpaceConflict } from '../importCapacity';
+    import ImportCapacityIssues from './ImportCapacityIssues.svelte';
     import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
     import { tick } from 'svelte';
     import type { BatchPackageItem, PackageBatchDestinationStrategy } from '../../features/import/packageBatchTypes';
@@ -163,6 +165,7 @@
     const visibleConflicts = $derived(
         displayPlan?.conflicts.filter(
             (conflict) =>
+                !isImportSpaceConflict(conflict) &&
                 conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
                 conflict.code !== 'SFS_RECORD_CAPACITY_EXHAUSTED' &&
                 !(
@@ -172,10 +175,12 @@
                 ),
         ) ?? [],
     );
+    const capacityGroups = $derived(importCapacityGroups(displayPlan?.conflicts ?? [], partitionOptions));
     const showResults = $derived(
         Boolean(error) ||
             (Boolean(displayPlan) &&
-                (visibleConflicts.length > 0 ||
+                (capacityGroups.length > 0 ||
+                    visibleConflicts.length > 0 ||
                     actionableRenameNodes.size > 0 ||
                     (displayPlan?.opaqueSequences.length ?? 0) > 0 ||
                     (displayPlan?.programSlotPlacements.length ?? 0) > 0)),
@@ -306,6 +311,7 @@
 
                     {#if showResults}
                         <section class="batch-results" aria-label="Import results" bind:this={batchResults}>
+                            <ImportCapacityIssues groups={capacityGroups} />
                             {#if displayPlan?.opaqueSequences.length}
                                 <section class="batch-sequence-decisions" aria-label="Sequence decisions">
                                     {#each displayPlan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}

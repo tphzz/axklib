@@ -3,8 +3,53 @@ import { fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import FloppyImportDialog from './FloppyImportDialog.svelte';
 import { floppyDialogFixture } from '../../test/floppyDialogFixture';
+import { capacityConflict } from '../../test/importCapacityFixture';
 
 describe('Floppy import dialog', () => {
+    it('replaces incomplete totals with capacity summaries until a successful review', async () => {
+        const workflow = floppyDialogFixture(5);
+        const validPlan = workflow.request!.plan!;
+        validPlan.allocation = [
+            {
+                partitionIndex: 0,
+                groupName: '',
+                volumeName: 'Target',
+                rawGroup: '',
+                rawVolume: '',
+                insertedObjectCount: 5,
+                reusedObjectCount: 0,
+                blockedObjectCount: 0,
+                payloadClusters: 5,
+                payloadSectors: 0,
+                continuationClusters: 0,
+                directoryGrowthBytes: 0,
+                directoryGrowthClusters: 0,
+                directoryContinuationClusters: 0,
+                infrastructureClusters: 0,
+                additionalAllocatedBytes: 5120,
+                remainingObjectIds: 10,
+                remainingClusters: 100,
+                projectedImageSectors: 0,
+                projectedImageSizeBytes: 0,
+            },
+        ];
+        workflow.request!.plan = {
+            ...validPlan,
+            valid: false,
+            conflicts: Array.from({ length: 63 }, (_, i) => capacityConflict(0, `wave-${i}`)),
+        };
+        const view = render(FloppyImportDialog, { workflow });
+        expect(view.getAllByText('Not enough space on Partition 1')).toHaveLength(1);
+        expect(view.queryByText('Insert')).toBeNull();
+        expect(view.queryByText('Reuse')).toBeNull();
+        expect(view.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
+        workflow.request!.plan = validPlan;
+        await tick();
+        expect(view.queryByText(/Not enough space/)).toBeNull();
+        expect(view.getByText('Insert')).toBeTruthy();
+        expect(view.getByText('Reuse')).toBeTruthy();
+        expect(view.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(false);
+    });
     it('keeps direct source recovery free of the local/remote chooser', async () => {
         const workflow = floppyDialogFixture(5, true);
         workflow.request!.members = [];

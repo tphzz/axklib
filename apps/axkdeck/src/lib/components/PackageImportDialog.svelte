@@ -273,6 +273,7 @@
                         </section>
 
                         <ImportPlanReview
+                            partitions={partitionOptions}
                             {plan}
                             {busy}
                             {targetName}

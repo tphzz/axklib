@@ -1,8 +1,12 @@
 <script lang="ts">
     import { formatStoredSize } from '../formatBytes';
     import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../transport';
+    import type { ImportPartitionOption } from '../../features/import/packageDestinations';
+    import { importCapacityGroups, isImportSpaceConflict } from '../importCapacity';
+    import ImportCapacityIssues from './ImportCapacityIssues.svelte';
     let {
         plan,
+        partitions = [],
         busy,
         targetName,
         renames,
@@ -14,6 +18,7 @@
         onopaquesequenceaction,
     }: {
         plan: ImageSessionPackageImportPlan | null;
+        partitions?: ImportPartitionOption[];
         busy: boolean;
         targetName: string;
         renames: Record<string, string>;
@@ -24,6 +29,7 @@
         onprogramstart: (id: string, slot: number) => void;
         onopaquesequenceaction: (id: string, action: PackageOpaqueSequenceDecision['action']) => void;
     } = $props();
+    const capacityGroups = $derived(importCapacityGroups(plan?.conflicts ?? [], partitions));
     const renameConflictCodes = new Set([
         'SFS_NAME_CONFLICT',
         'SFS_TARGET_NAME_AMBIGUOUS',
@@ -76,6 +82,7 @@
                 (plan?.conflicts ?? [])
                     .filter(
                         (conflict) =>
+                            !isImportSpaceConflict(conflict) &&
                             conflict.code !== 'OPAQUE_SEQUENCE_DECISION_REQUIRED' &&
                             !(placementNodeIds.has(conflict.nodeId) && conflict.code === 'SFS_NAME_CONFLICT') &&
                             !(
@@ -149,22 +156,25 @@
         {#if busy}<small>Checking…</small>{/if}
     </div>
     {#if plan}
-        <dl class="package-plan-summary">
-            <div>
-                <dt>Insert</dt>
-                <dd>{insertedObjects}</dd>
-            </div>
-            <div>
-                <dt>Reuse</dt>
-                <dd>{reusedObjects}</dd>
-            </div>
-            {#if plan.valid}
+        <ImportCapacityIssues groups={capacityGroups} />
+        {#if !capacityGroups.length}
+            <dl class="package-plan-summary">
                 <div>
-                    <dt>Image space</dt>
-                    <dd>{formatStoredSize(allocatedBytes)}</dd>
+                    <dt>Insert</dt>
+                    <dd>{insertedObjects}</dd>
                 </div>
-            {/if}
-        </dl>
+                <div>
+                    <dt>Reuse</dt>
+                    <dd>{reusedObjects}</dd>
+                </div>
+                {#if plan.valid}
+                    <div>
+                        <dt>Image space</dt>
+                        <dd>{formatStoredSize(allocatedBytes)}</dd>
+                    </div>
+                {/if}
+            </dl>
+        {/if}
         {#if plan.opaqueSequences.length > 0}
             <div class="opaque-sequence-choices" aria-label="Undecodable Sequences">
                 {#each plan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}

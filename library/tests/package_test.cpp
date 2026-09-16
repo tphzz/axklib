@@ -7,6 +7,7 @@
 #include <future>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <vector>
@@ -2866,6 +2867,7 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     const auto sfs_capacity_conflict = std::ranges::find_if(
         plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; });
     ASSERT_NE(sfs_capacity_conflict, plan->conflicts.end());
+    EXPECT_EQ(sfs_capacity_conflict->partition_index, std::optional<std::uint8_t>{0U});
     EXPECT_NE(sfs_capacity_conflict->message.find("free cluster(s)"), std::string::npos);
     EXPECT_NE(sfs_capacity_conflict->message.find("Wave Data"), std::string::npos);
     EXPECT_NE(sfs_capacity_conflict->message.find("needs at least"), std::string::npos);
@@ -2882,6 +2884,53 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     EXPECT_FALSE(fat_plan->valid());
     EXPECT_TRUE(std::ranges::any_of(fat_plan->conflicts,
                                     [](const auto &conflict) { return conflict.code == "FAT12_CLUSTER_EXHAUSTED"; }));
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportPlanner, ScaffoldingCapacityConflictsIdentifyTheirPartition) {
+    const auto output_root = publication_root("axklib-package-scaffolding-capacity");
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    const auto target_path = output_root / "target.hds";
+    axk::HdsBuildManifest manifest{"1.0", 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1", {}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
+    const auto built = fat_smpl_package();
+    ASSERT_TRUE(built) << built.error().message;
+    const std::vector packages(128U, built->package);
+    axk::PackageImportRequest request;
+    for (std::size_t index = 0U; index < packages.size(); ++index) {
+        auto target = destination(index, std::format("Volume{}", index));
+        target.create_destination = true;
+        request.root_destinations.push_back(std::move(target));
+    }
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_FALSE(plan->valid());
+    bool scaffolding_failure{};
+    for (const auto &conflict : plan->conflicts) {
+        if (conflict.code != "SFS_CLUSTER_EXHAUSTED")
+            continue;
+        EXPECT_EQ(conflict.partition_index, std::optional<std::uint8_t>{0U});
+        if (conflict.message.find("scaffolding") != std::string::npos) {
+            scaffolding_failure = true;
+            EXPECT_FALSE(conflict.volume_name.empty());
+        }
+    }
+    EXPECT_TRUE(scaffolding_failure);
+    EXPECT_TRUE(axk::verify_package_import_plan(*plan));
+    auto mismatched = *plan;
+    for (auto &conflict : mismatched.conflicts) {
+        if (conflict.code == "SFS_CLUSTER_EXHAUSTED")
+            conflict.partition_index = 1U;
+    }
+    const auto verified = axk::verify_package_import_plan(mismatched);
+    ASSERT_FALSE(verified);
+    EXPECT_EQ(verified.error().message, "package import plan contains an invalid destination action");
+    const auto output_path = output_root / "blocked.hds";
+    EXPECT_FALSE(axk::apply_package_import(target_path, packages, *plan, output_path, false));
+    EXPECT_FALSE(std::filesystem::exists(output_path));
     std::filesystem::remove_all(output_root, error);
 }
 

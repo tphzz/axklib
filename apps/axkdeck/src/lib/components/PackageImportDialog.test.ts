@@ -649,7 +649,10 @@ describe('PackageImportDialog', () => {
             },
         });
 
-        expect(screen.getByText('1 issue prevents import')).toBeTruthy();
+        expect(screen.getByText('Not enough space on PARTITION 1')).toBeTruthy();
+        expect(screen.queryByText('Insert')).toBeNull();
+        expect(screen.queryByText('Reuse')).toBeNull();
+        expect(screen.getByText('Technical details').closest('details')?.open).toBe(false);
         expect(
             screen.getByText('The destination has 8 free clusters, but this Wave Data needs at least 50 clusters'),
         ).toBeTruthy();

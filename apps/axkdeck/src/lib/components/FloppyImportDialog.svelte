@@ -238,6 +238,7 @@
                         </section>
                         {#if showResults}<div class="floppy-results" aria-label="Import results" bind:this={results}>
                                 <ImportPlanReview
+                                    partitions={destinations.partitions}
                                     plan={r.plan}
                                     busy={r.status === 'planning'}
                                     targetName={r.volumeName || 'new volume'}

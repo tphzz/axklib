@@ -6,6 +6,7 @@ import { serverFileLocation } from '../storageLocations';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
 import type { BatchPackageItem } from '../../features/import/packageBatchTypes';
 import PackageBatchImportDialog from './PackageBatchImportDialog.svelte';
+import { capacityConflict } from '../../test/importCapacityFixture';
 import { ImportCompletion } from '../../features/import/importCompletion.svelte';
 import { JobController } from '../../features/jobs/actions';
 
@@ -223,6 +224,19 @@ function planWithRenameConflicts(): ImageSessionPackageImportPlan {
 }
 
 describe('PackageBatchImportDialog', () => {
+    it('summarizes space failures while keeping unrelated blockers visible', () => {
+        const blocked = structuredClone(plan);
+        blocked.valid = false;
+        blocked.conflicts = Array.from({ length: 63 }, (_, index) => capacityConflict(0, `wave-${index}`));
+        blocked.conflicts.push({ ...capacityConflict(0), code: 'UNKNOWN', message: 'Other blocker' });
+        render(PackageBatchImportDialog, { ...props(), plan: blocked });
+        expect(screen.getAllByText('Not enough space on Partition 1')).toHaveLength(1);
+        expect(screen.queryByText(/63 issues/)).toBeNull();
+        expect(screen.getByText('Other blocker')).toBeTruthy();
+        expect(screen.getByText('Technical details').closest('details')?.open).toBe(false);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByText('SFS record capacity')).toBeTruthy();
+    });
     beforeEach(() => vi.clearAllMocks());
 
     it('previews every destination and its object counts before one batch import', async () => {
