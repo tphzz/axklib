@@ -116,6 +116,8 @@ add_library(
   src/media_fat12_catalog.cpp
   src/media_floppy_catalog.cpp
   src/media_floppy_set_reader.cpp
+  src/media_floppy_assembly.cpp
+  src/media_object_directory_set.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
   src/media_yamaha.cpp
@@ -580,6 +582,7 @@ if(BUILD_TESTING)
     tests/hardening_test.cpp
     tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
+    tests/media_object_directory_set_test.cpp
     tests/su700_test.cpp
     tests/media_ex5_test.cpp
     tests/media_ex5_capacity_test.cpp

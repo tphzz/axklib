@@ -196,6 +196,8 @@ std::span<const MediaValidationIssue> MediaContainer::validation_issues() const 
         return iso->validation_issues();
     if (const auto *archive = variant_ptr<A3kArchive>(storage_))
         return archive->validation_issues();
+    if (const auto *directory = variant_ptr<AxkObjectDirectory>(storage_))
+        return directory->validation_issues();
     return {};
 }
 

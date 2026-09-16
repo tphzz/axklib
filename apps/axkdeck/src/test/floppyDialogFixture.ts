@@ -4,7 +4,7 @@ import type { ImageTransport, ImageSessionPackageImportPlan } from '../lib/trans
 import type { JobController } from '../features/jobs/actions';
 import type { DiskTreeItem } from '../lib/types';
 
-export function floppyDialogFixture(count = 250) {
+export function floppyDialogFixture(count = 250, directSource = false) {
     const partition: DiskTreeItem = {
         id: 'p0',
         name: 'Partition 1',
@@ -34,6 +34,7 @@ export function floppyDialogFixture(count = 250) {
         packages: [],
     };
     const transport = {
+        connectionMode: directSource ? 'local' : 'remote',
         releaseFloppyInspection: async () => {},
         releaseImagePackageImportPlan: async () => {},
         planFloppyImport: async () => plan,
@@ -42,7 +43,7 @@ export function floppyDialogFixture(count = 250) {
         transport,
         jobs: {} as JobController,
         picker: new PickerController(() => {}),
-        isDesktop: false,
+        isDesktop: directSource,
         sessionId: () => 1,
         sourceItems: () => [partition],
         mutationsAvailable: () => true,

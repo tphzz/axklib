@@ -1,3 +1,4 @@
+#include "image_session_directory.hpp"
 #include "image_session_floppy_set.hpp"
 #include "image_sessions_internal.hpp"
 
@@ -143,86 +144,17 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             verify_source_unchanged = file->verify_unchanged;
         }
     } else {
-        const DirectoryRef directory_reference{source.root_id, source.relative_path};
-        auto tree = implementation_->sandbox.open_tree(
-            directory_reference, {.maximum_entries = AxkObjectDirectory::maximum_entries,
-                                  .maximum_total_file_bytes = AxkObjectDirectory::maximum_payload_bytes,
-                                  .maximum_depth = AxkObjectDirectory::maximum_depth,
-                                  .maximum_path_bytes = 64U * 1024U});
-        if (!tree)
-            return std::unexpected(tree.error());
-        std::vector<AxkObjectDirectoryEntry> entries;
-        std::vector<std::function<Result<void>()>> verifiers;
-        entries.reserve(tree->entries().size());
-        verifiers.reserve(tree->entries().size());
-        for (std::size_t index = 0U; index < tree->entries().size(); ++index) {
-            const auto &entry = tree->entries()[index];
-            if (entry.kind != SandboxTreeEntryKind::file)
-                continue;
-            auto opened = tree->open_file(index);
-            if (!opened)
-                return std::unexpected(opened.error());
-            entries.push_back({entry.relative_path, opened->reader});
-            verifiers.push_back(std::move(opened->verify_unchanged));
-        }
-        auto directory = AxkObjectDirectory::open(entries, source.relative_path, cancellation);
-        if (!directory)
-            return std::unexpected(core_error(directory.error(), source));
-        auto companions = append_required_companion_wave_data(implementation_->sandbox, source, *directory,
-                                                              companion_sources, entries, verifiers);
-        if (!companions)
-            return std::unexpected(companions.error());
-        matched_companion_sources = companions->sources;
-        if (!companions->files.empty()) {
-            directory = AxkObjectDirectory::open(std::move(entries), source.relative_path, cancellation);
-            if (!directory)
-                return std::unexpected(core_error(directory.error(), source));
-            if (implementation_->path_reservations != nullptr) {
-                std::vector<PathAccess> accesses;
-                accesses.reserve(companions->files.size());
-                std::ranges::transform(companions->files, std::back_inserter(accesses), [](const FileRef &reference) {
-                    return PathAccess{reference, PathAccessMode::shared};
-                });
-                auto acquired = implementation_->path_reservations->try_acquire(accesses);
-                if (!acquired)
-                    return std::unexpected(acquired.error());
-                companion_path_lease = std::move(*acquired);
-            }
-        }
-        std::vector<std::byte> snapshot;
-        for (const auto &object : directory->stored_objects()) {
-            const auto append_text = [&](std::string_view value) {
-                std::ranges::transform(value, std::back_inserter(snapshot),
-                                       [](char ch) { return static_cast<std::byte>(ch); });
-                snapshot.push_back(std::byte{0});
-            };
-            append_text(object.logical_path);
-            const auto payload_size = static_cast<std::uint64_t>(object.raw_payload.size());
-            for (std::size_t byte = 0U; byte < sizeof(payload_size); ++byte) {
-                snapshot.push_back(static_cast<std::byte>((payload_size >> (byte * 8U)) & 0xffU));
-            }
-            snapshot.insert(snapshot.end(), object.raw_payload.begin(), object.raw_payload.end());
-        }
-        for (const auto &verify : verifiers) {
-            if (const auto unchanged = verify(); !unchanged)
-                return std::unexpected(
-                    session_error("image_source_changed", "object directory changed while it was opened", true));
-        }
-        auto snapshot_reader = std::make_shared<MemoryReader>(std::move(snapshot));
-        source_reader = std::move(snapshot_reader);
-        verify_source_unchanged = []() -> Result<void> { return {}; };
-        media.emplace(std::move(*directory));
-        floppy_set = ImageFloppySetSummary{.status = ImageFloppySetStatus::recovery,
-                                           .set_label = source.relative_path,
-                                           .members = {},
-                                           .next_required_index = std::nullopt};
-        floppy_set->members.reserve(matched_companion_sources.size() + 1U);
-        floppy_set->members.push_back({.index = 1U, .label = source.relative_path, .marker = "NONE"});
-        for (std::size_t index = 0U; index < matched_companion_sources.size(); ++index) {
-            floppy_set->members.push_back({.index = static_cast<std::uint16_t>(index + 2U),
-                                           .label = matched_companion_sources[index].relative_path,
-                                           .marker = "NONE"});
-        }
+        auto opened_directory = image_sessions_internal::open_directory_source(
+            implementation_->sandbox, source, companion_sources, implementation_->path_reservations, cancellation);
+        if (!opened_directory)
+            return std::unexpected(opened_directory.error());
+        source_reader = std::move(opened_directory->snapshot);
+        auto &opened = opened_directory->opened;
+        media.emplace(std::move(opened.media));
+        matched_companion_sources = std::move(opened.companion_sources);
+        floppy_set = std::move(opened.summary);
+        verify_source_unchanged = std::move(opened.verify_unchanged);
+        companion_path_lease = std::move(opened.companion_path_lease);
     }
     if (auto reported =
             report_image_open_progress(progress, cancellation, ProgressPhase::reading, 1U, "Reading image metadata");
@@ -595,9 +527,11 @@ axk::app::ImageSessionManager::attach_companions(std::string_view image_id, std:
             return std::unexpected(
                 session_error("image_mutation_in_progress", "image session is being modified", true));
         const auto directory_recovery = (*session)->format == "axk-object-directory" &&
-                                        (*session)->source.kind == ImageSourceKind::axk_object_directory;
-        const auto incomplete_floppy = (*session)->source.kind == ImageSourceKind::file && (*session)->floppy_set &&
-                                       (*session)->floppy_set->status == ImageFloppySetStatus::incomplete;
+                                        (*session)->source.kind == ImageSourceKind::axk_object_directory &&
+                                        (*session)->floppy_set &&
+                                        (*session)->floppy_set->status == ImageFloppySetStatus::recovery;
+        const auto incomplete_floppy =
+            (*session)->floppy_set && (*session)->floppy_set->status == ImageFloppySetStatus::incomplete;
         if (!directory_recovery && !incomplete_floppy) {
             return std::unexpected(
                 session_error("companion_sources_unsupported",
@@ -615,14 +549,12 @@ axk::app::ImageSessionManager::attach_companions(std::string_view image_id, std:
             return std::unexpected(session_error(
                 "invalid_companion_sources", "immediate sibling search does not accept explicit companion sources"));
         if (format == "axk-object-directory") {
-            auto siblings = immediate_sibling_directories(implementation_->sandbox, source);
+            auto siblings = image_sessions_internal::sibling_directory_sources(
+                implementation_->sandbox, source, current_floppy_set ? current_floppy_set->set_label : "",
+                current_floppy_set && current_floppy_set->status != ImageFloppySetStatus::recovery, cancellation);
             if (!siblings)
                 return std::unexpected(siblings.error());
-            candidates.reserve(siblings->size());
-            std::ranges::transform(*siblings, std::back_inserter(candidates), [](const DirectoryRef &directory) {
-                return ImageSourceRef{directory.root_id, directory.relative_path,
-                                      ImageSourceKind::axk_object_directory};
-            });
+            candidates = std::move(*siblings);
         } else {
             auto siblings = immediate_sibling_floppy_sources(implementation_->sandbox, source,
                                                              current_floppy_set->set_label, cancellation);

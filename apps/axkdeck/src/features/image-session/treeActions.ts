@@ -62,7 +62,7 @@ export function createImageTreeActionHandler(dependencies: ImageTreeActionDepend
         }
         if (action === 'import-floppy') {
             if (!imageSession.packageImportAvailable || (item.kind !== 'partition' && item.kind !== 'volume')) return;
-            dependencies.floppyImport?.open(item);
+            void dependencies.floppyImport?.chooseFiles(item);
             return;
         }
         if (action === 'import-packages') {

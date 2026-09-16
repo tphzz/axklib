@@ -106,6 +106,13 @@ try {
         );
         await page.screenshot({ path: resolve(output, `packages-${viewport.width}x${viewport.height}.png`) });
         assert.deepEqual(errors, []);
+        await page.goto(`${base}/tools/layout-fixtures/floppy-import.html?direct`);
+        await page.getByRole('button', { name: 'Add floppy images', exact: true }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Computer', exact: true }).count(), 0);
+        assert.equal(await page.locator('.import-source-choice').count(), 0);
+        assert.deepEqual((await geometry()).footer, before.footer);
+        await page.screenshot({ path: resolve(output, `direct-${viewport.width}x${viewport.height}.png`) });
+        assert.deepEqual(errors, []);
         results.push({ viewport, ...before });
         await page.close();
     }

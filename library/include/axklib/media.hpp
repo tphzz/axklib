@@ -361,8 +361,8 @@ class AXK_API StandaloneObject {
 };
 
 // Read-only snapshot of one directory of Yamaha object files or a bounded
-// one-level set of such directories. Filesystem and FAT metadata are
-// intentionally not reconstructed.
+// one-level set of such directories. Retained Yamaha catalogs identify disk
+// members; missing filesystem and FAT metadata are not reconstructed.
 class AXK_API AxkObjectDirectory {
   public:
     static constexpr std::size_t maximum_leaf_entries = 224U;
@@ -380,6 +380,13 @@ class AXK_API AxkObjectDirectory {
     [[nodiscard]] static Result<AxkObjectDirectory> open(const std::filesystem::path &path,
                                                          const CancellationToken &cancellation = {});
 
+    [[nodiscard]] static Result<AxkObjectDirectory> open_members(std::vector<AxkObjectDirectory> members,
+                                                                 std::string source_name = {},
+                                                                 const CancellationToken &cancellation = {});
+    [[nodiscard]] const FloppyDiskIdentity &disk_identity() const noexcept;
+    [[nodiscard]] std::span<const FloppyDiskIdentity> disk_members() const noexcept;
+    [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
+
     [[nodiscard]] const std::string &source_name() const noexcept;
     [[nodiscard]] const std::vector<MediaObject> &stored_objects() const noexcept;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode = MediaObjectReadMode::complete,
@@ -388,6 +395,12 @@ class AXK_API AxkObjectDirectory {
   private:
     std::string source_name_;
     std::vector<MediaObject> objects_;
+    std::optional<YamahaFloppyCatalog> catalog_;
+    FloppyDiskIdentity disk_identity_;
+    std::vector<FloppyDiskIdentity> disk_members_;
+    std::vector<MediaValidationIssue> validation_issues_;
+    std::uint64_t source_bytes_{};
+    std::size_t source_entry_count_{};
 };
 
 using MediaStorage = std::variant<Container, FatImage, FatDiskImage, FloppyDiskSet, IsoImage, A3kArchive,

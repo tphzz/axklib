@@ -18,6 +18,7 @@
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/media.hpp"
 #include "axklib/writer.hpp"
 
@@ -487,6 +488,105 @@ TEST_F(ImageSessionTest, OpensReadOnlyA3kArchiveWithBrowseAndAuditionCapabilitie
     const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
+}
+
+TEST_F(ImageSessionTest, OpensCatalogedFoldersAsAnOrderedSetAndAttachesAllLaterObjects) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source);
+    const auto objects = source->objects(axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(objects);
+    const auto wave = std::ranges::find_if(
+        *objects, [](const auto &object) { return object.decoded.header.type == axk::ObjectType::smpl; });
+    ASSERT_NE(wave, objects->end());
+    const auto header_size = wave->decoded.header.header_size;
+    const auto total = wave->decoded.header.payload_bytes_0x1c;
+    ASSERT_GT(total, 4U);
+    for (std::uint16_t index = 1U; index <= 3U; ++index) {
+        const auto folder = root_ / "catalog-set" / std::format("disk{}", index);
+        std::filesystem::create_directories(folder);
+        std::vector<axk::YamahaFloppyCatalogEntry> entries{{1U, index == 3U ? "\\A3000E.SYM" : "\\A3000F.SYM"}};
+        write_object_file(folder / "MARKER__.001", {});
+        const auto start = (total / 3U) * static_cast<std::uint32_t>(index - 1U);
+        const auto count = index == 3U ? total - start : total / 3U;
+        std::vector<std::byte> segment(wave->raw_payload.begin(), wave->raw_payload.begin() + header_size);
+        segment.insert(segment.end(), wave->raw_payload.begin() + header_size + start,
+                       wave->raw_payload.begin() + header_size + start + count);
+        write_be32(segment, 0x20U, count);
+        write_be32(segment, 0x24U, start);
+        write_object_file(folder / "WAVE____.002", segment);
+        entries.push_back({2U, std::format(R"(\SMPL\WAVE            {:02})", index)});
+        if (index == 3U) {
+            for (const auto &object : *objects) {
+                if (object.key == wave->key)
+                    continue;
+                const auto slot = static_cast<std::uint16_t>(entries.size() + 1U);
+                write_object_file(folder / std::format("OBJECT__.{:03}", slot), object.raw_payload);
+                entries.push_back({slot, "\\" + object.decoded.header.raw_type + "\\" + object.decoded.header.name});
+            }
+        }
+        const std::vector<std::string> categories{"\\OTHERS", "\\SMPL", "\\SBNK", "\\SBAC", "\\PROG", "\\SEQU"};
+        const auto catalog =
+            axk::detail::encode_yamaha_floppy_catalog(std::format("CATALOG SET   {:02}", index), entries, categories);
+        ASSERT_TRUE(catalog) << catalog.error().message;
+        write_object_file(folder / "YAMAHA.SYM", *catalog);
+    }
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened =
+        sessions.open({"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_TRUE(opened->floppy_set);
+    EXPECT_EQ(opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_EQ(opened->floppy_set->next_required_index, 2U);
+    const auto attach = [&](const axk::app::ImageSessionSummary &summary, std::string path) {
+        return sessions.attach_companions(
+            summary.image_id, "owner-a", summary.revision,
+            {axk::app::CompanionSelectionKind::sources,
+             {{"workspace", std::move(path), axk::app::ImageSourceKind::axk_object_directory}}});
+    };
+    const auto skipped = attach(*opened, "catalog-set/disk3");
+    ASSERT_FALSE(skipped);
+    EXPECT_EQ(sessions.inspect(opened->image_id, "owner-a")->revision, opened->revision);
+    const auto second = attach(*opened, "catalog-set/disk2");
+    ASSERT_TRUE(second) << second.error().message;
+    EXPECT_EQ(second->floppy_set->next_required_index, 3U);
+    const auto complete = attach(*second, "catalog-set/disk3");
+    ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_EQ(complete->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    EXPECT_FALSE(complete->floppy_set->next_required_index);
+    EXPECT_EQ(complete->floppy_set->members.size(), 3U);
+    {
+        const auto read = sessions.begin_read(complete->image_id, "owner-a", complete->revision);
+        ASSERT_TRUE(read);
+        const auto all = read->media->objects(axk::MediaObjectReadMode::complete);
+        ASSERT_TRUE(all);
+        EXPECT_EQ(all->size(), objects->size());
+        for (const auto &object : *all) {
+            const auto original = std::ranges::find_if(*objects, [&](const auto &candidate) {
+                return candidate.decoded.header.type == object.decoded.header.type &&
+                       candidate.decoded.header.name == object.decoded.header.name;
+            });
+            ASSERT_NE(original, objects->end());
+            EXPECT_EQ(object.raw_payload, original->raw_payload);
+        }
+    }
+    EXPECT_FALSE(attach(*complete, "catalog-set/disk2"));
+    const auto later =
+        sessions.open({"workspace", "catalog-set/disk3", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(later);
+    EXPECT_EQ(later->floppy_set->next_required_index, 1U);
+    const auto nearby = sessions.attach_companions(later->image_id, "owner-a", later->revision,
+                                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    ASSERT_TRUE(nearby) << nearby.error().message;
+    EXPECT_EQ(nearby->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    std::filesystem::copy(root_ / "catalog-set/disk2", root_ / "catalog-set/duplicate",
+                          std::filesystem::copy_options::recursive);
+    const auto ambiguous =
+        sessions.open({"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    ASSERT_TRUE(ambiguous);
+    const auto rejected = sessions.attach_companions(ambiguous->image_id, "owner-a", ambiguous->revision,
+                                                     {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, "companion_ambiguous");
 }
 
 TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest) {

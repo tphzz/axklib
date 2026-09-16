@@ -85,6 +85,8 @@ def worker_case(server: Path, source: Path, case: dict[str, Any], output: Path, 
                 maximum_requests=8192,
                 traversal_seconds=90,
                 reject_invalid=False,
+                source_kind=case.get("sourceKind", "FILE"),
+                companion_steps=case.get("companionSteps"),
             ),
             status="passed",
         )
@@ -160,7 +162,9 @@ def main() -> int:
             row["source"] = str(source)
             if not source.is_relative_to(root):
                 row.update(status="failed", reason="source escapes corpus root")
-            elif not source.is_file():
+            elif not (
+                source.is_file() if case.get("sourceKind", "FILE") == "FILE" else source.is_dir()
+            ):
                 row["reason"] = "corpus file is missing"
             else:
                 row["sourceBytes"] = source.stat().st_size

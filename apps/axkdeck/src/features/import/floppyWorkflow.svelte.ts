@@ -4,6 +4,7 @@ import type { FloppyInspection } from '../../lib/floppyImport';
 import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { shouldUseDirectComputerFileOperations } from '../../lib/fileOperationRouting';
 import type { PackageImportDependencies } from './packageWorkflowTypes';
 import {
     collectImportDestinations,
@@ -62,6 +63,12 @@ export class FloppyImportWorkflow {
     get available() {
         return this.dependencies.mutationsAvailable?.() ?? false;
     }
+    get directSource() {
+        return shouldUseDirectComputerFileOperations(
+            this.dependencies.isDesktop,
+            this.dependencies.transport.connectionMode,
+        );
+    }
     destinations() {
         return collectImportDestinations(this.dependencies.sourceItems?.() ?? []);
     }
@@ -94,13 +101,24 @@ export class FloppyImportWorkflow {
         this.open(target);
         await this.add(files);
     }
-    async chooseWorkspace(): Promise<void> {
+    async chooseFiles(target: DiskTreeItem | null = null): Promise<void> {
+        if (this.request || !this.available) return;
+        this.open(target);
+        if (this.directSource) await this.chooseWorkspace(true);
+    }
+    async chooseWorkspace(closeOnCancel = false): Promise<void> {
         const request = this.request;
         if (!request || this.busy || this.completion.locked) return;
-        const files = await this.dependencies.picker.chooseFiles('Choose floppy images', ['img', 'ima'], {
-            parentDialog: 'floppy-import',
-        });
-        if (files && this.request === request) await this.add(files);
+        try {
+            const files = await this.dependencies.picker.chooseFiles('Choose floppy images', ['img', 'ima'], {
+                parentDialog: 'floppy-import',
+            });
+            if (this.request !== request) return;
+            if (files?.length) await this.add(files);
+            else if (closeOnCancel && !request.members.length) await this.close();
+        } catch (error) {
+            if (this.request === request) request.error = userFacingMessage(error);
+        }
     }
     async add(files: FloppySource[]): Promise<void> {
         const r = this.request;

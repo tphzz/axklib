@@ -77,8 +77,9 @@ const partition: DiskTreeItem = {
     childCount: 1,
     children: [volume],
 };
-function setup(value = inspection) {
+function setup(value = inspection, isDesktop = false, connectionMode: ImageTransport['connectionMode'] = 'remote') {
     const transport = {
+        connectionMode,
         startFloppyInspection: vi
             .fn()
             .mockResolvedValue({ jobId: 1, kind: 'images.floppy_import.inspect', status: 'completed', result: value }),
@@ -97,11 +98,12 @@ function setup(value = inspection) {
     };
     const refresh = vi.fn().mockResolvedValue(undefined),
         otherFormat = vi.fn().mockResolvedValue(undefined);
+    const picker = new PickerController(() => undefined);
     const workflow = new FloppyImportWorkflow({
         transport: transport as unknown as ImageTransport,
         jobs: { run: (start: () => Promise<unknown>) => start() } as unknown as JobController,
-        picker: new PickerController(() => undefined),
-        isDesktop: false,
+        picker,
+        isDesktop,
         sessionId: () => 1,
         sourceItems: () => [partition],
         mutationsAvailable: () => true,
@@ -110,9 +112,63 @@ function setup(value = inspection) {
         setStatus: vi.fn(),
         otherFormat,
     });
-    return { workflow, transport, refresh, otherFormat };
+    return { workflow, transport, refresh, otherFormat, picker };
 }
 describe('floppy import', () => {
+    it('opens the storage picker directly for the bundled server and preserves the target', async () => {
+        const { workflow, picker } = setup(inspection, true, 'local');
+        const choose = vi.spyOn(picker, 'chooseFiles').mockResolvedValue([source]);
+        await workflow.chooseFiles(volume);
+        expect(choose).toHaveBeenCalledWith('Choose floppy images', ['img', 'ima'], {
+            parentDialog: 'floppy-import',
+        });
+        expect(workflow.request).toMatchObject({ volumeName: 'Existing', mode: 'existing' });
+        expect(workflow.request?.inspection?.complete).toBe(true);
+    });
+    it('closes an empty direct import when its picker is cancelled', async () => {
+        const { workflow, picker } = setup(inspection, true, 'local');
+        vi.spyOn(picker, 'chooseFiles').mockResolvedValue(null);
+        await workflow.chooseFiles(volume);
+        expect(workflow.request).toBeNull();
+    });
+    it('preserves selected disks when adding a companion is cancelled', async () => {
+        const { workflow, picker } = setup(inspection, true, 'local');
+        await workflow.requestDroppedFiles([source], volume);
+        vi.spyOn(picker, 'chooseFiles').mockResolvedValue(null);
+        await workflow.chooseWorkspace();
+        expect(workflow.request?.members).toHaveLength(1);
+        expect(workflow.request?.inspection?.complete).toBe(true);
+    });
+    it('retains direct routing after picker failure', async () => {
+        const { workflow, picker } = setup(inspection, true, 'local');
+        vi.spyOn(picker, 'chooseFiles').mockRejectedValue(new Error('Picker failed'));
+        await workflow.chooseFiles(volume);
+        expect(workflow.request?.error).toBe('Picker failed');
+        expect(workflow.directSource).toBe(true);
+    });
+    it('discards a picker result after the request is replaced', async () => {
+        const { workflow, picker, transport } = setup(inspection, true, 'local');
+        let finish!: (files: (typeof source)[]) => void;
+        vi.spyOn(picker, 'chooseFiles').mockReturnValue(new Promise((resolve) => (finish = resolve)));
+        const choosing = workflow.chooseFiles(volume);
+        await workflow.close();
+        workflow.open(partition);
+        finish([source]);
+        await choosing;
+        expect(workflow.request?.members).toHaveLength(0);
+        expect(workflow.request?.mode).toBe('create');
+        expect(transport.startFloppyInspection).not.toHaveBeenCalled();
+    });
+    it.each([
+        [true, 'remote'],
+        [false, 'local'],
+    ] as const)('keeps source choices for desktop=%s connection=%s', async (desktop, mode) => {
+        const { workflow, picker } = setup(inspection, desktop, mode);
+        const choose = vi.spyOn(picker, 'chooseFiles');
+        await workflow.chooseFiles(volume);
+        expect(choose).not.toHaveBeenCalled();
+        expect(workflow.request?.status).toBe('choosing');
+    });
     it('selects supported roots and locks their dependencies; configuration stays excluded', async () => {
         const { workflow } = setup();
         await workflow.requestDroppedFiles([source], volume);

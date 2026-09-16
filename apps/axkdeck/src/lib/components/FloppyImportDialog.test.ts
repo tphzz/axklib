@@ -1,10 +1,32 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import FloppyImportDialog from './FloppyImportDialog.svelte';
 import { floppyDialogFixture } from '../../test/floppyDialogFixture';
 
 describe('Floppy import dialog', () => {
+    it('keeps direct source recovery free of the local/remote chooser', async () => {
+        const workflow = floppyDialogFixture(5, true);
+        workflow.request!.members = [];
+        workflow.request!.inspection = null;
+        workflow.request!.error = 'Picker failed';
+        const choose = vi.spyOn(workflow, 'chooseWorkspace').mockResolvedValue();
+        const view = render(FloppyImportDialog, { workflow });
+        expect(view.queryByText('Storage location')).toBeNull();
+        expect(view.queryByText('This computer')).toBeNull();
+        expect(view.getByRole('alert').textContent).toBe('Picker failed');
+        await fireEvent.click(view.getByRole('button', { name: 'Choose floppy images' }));
+        expect(choose).toHaveBeenCalledWith(true);
+    });
+    it('offers one direct companion action after source selection', async () => {
+        const workflow = floppyDialogFixture(5, true);
+        const choose = vi.spyOn(workflow, 'chooseWorkspace').mockResolvedValue();
+        const view = render(FloppyImportDialog, { workflow });
+        expect(view.queryByRole('button', { name: 'Workspace' })).toBeNull();
+        expect(view.queryByRole('button', { name: 'Computer' })).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Add floppy images' }));
+        expect(choose).toHaveBeenCalledWith();
+    });
     it('keeps all footer actions visible but disabled during preparation and writing', async () => {
         const workflow = floppyDialogFixture(5);
         workflow.request!.status = 'applying';

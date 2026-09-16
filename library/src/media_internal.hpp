@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -28,11 +29,21 @@ struct MediaDecode {
     std::optional<Error> issue;
 };
 
-struct FatCatalogInspection {
+struct FloppyCatalogInspection {
     std::optional<YamahaFloppyCatalog> catalog;
     FloppyDiskIdentity identity;
     std::vector<MediaValidationIssue> issues;
 };
+
+struct FloppyCatalogFile {
+    std::string path;
+    std::uint64_t size{};
+};
+
+using FloppyPrefixReader = std::function<Result<std::vector<std::byte>>(std::size_t, std::size_t)>;
+
+[[nodiscard]] FloppyCatalogInspection inspect_yamaha_floppy_catalog(std::span<const FloppyCatalogFile> files,
+                                                                    const FloppyPrefixReader &read_prefix);
 
 [[nodiscard]] Error media_error(ErrorCode code, std::string message, std::string_view source = {},
                                 std::optional<std::uint64_t> offset = std::nullopt);
@@ -48,8 +59,8 @@ struct FatCatalogInspection {
 [[nodiscard]] bool unsafe_component(std::string_view value);
 [[nodiscard]] Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size);
 [[nodiscard]] std::string object_category(ObjectType type);
-[[nodiscard]] FatCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image,
-                                                                 const CancellationToken &cancellation);
+[[nodiscard]] FloppyCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image,
+                                                                    const CancellationToken &cancellation);
 
 [[nodiscard]] Result<IsoMenuLabels> read_yamaha_iso_menu_labels(const IsoImage &image,
                                                                 const CancellationToken &cancellation);

@@ -11,6 +11,18 @@ const volume = (id: string, partitionIndex: number): DiskTreeItem => ({
 });
 
 describe('image tree action routing', () => {
+    it('routes floppy import through source selection instead of directly opening its chooser', () => {
+        const target = volume('target', 0);
+        const chooseFiles = vi.fn();
+        const open = vi.fn();
+        const handler = createImageTreeActionHandler({
+            imageSession: { packageImportAvailable: true },
+            floppyImport: { chooseFiles, open },
+        } as never);
+        handler(target, 'import-floppy');
+        expect(chooseFiles).toHaveBeenCalledWith(target);
+        expect(open).not.toHaveBeenCalled();
+    });
     it('deletes the complete selection when the context target is one of its volumes', () => {
         const first = volume('first', 0);
         const second = volume('second', 1);

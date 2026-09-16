@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from image_open_smoke import check_image, load_manifest, result_code
+from image_open_smoke import check_image, load_manifest, result_code, source_signature
 
 
 class FakeClient:
@@ -184,3 +184,85 @@ def test_extended_manifest_requires_explicit_larger_bound(tmp_path: Any) -> None
 def test_request_bound_is_configurable_but_never_truncates() -> None:
     with pytest.raises(RuntimeError, match="limit"):
         check_image(FakeClient(), "disk.img", profile(), maximum_requests=1)
+
+
+def test_directory_companions_require_each_completed_session_state() -> None:
+    class DirectoryClient(FakeClient):
+        revision = 1
+
+        def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
+            if path == "/images" and method == "POST":
+                assert body["source"] == {
+                    "kind": "AXK_OBJECT_DIRECTORY",
+                    "directory": {"rootId": "corpus", "relativePath": "disk1"},
+                }
+                return 202, {"data": {"jobId": "job-1"}}
+            if path.endswith("/companions"):
+                assert body["expectedRevision"] == self.revision
+                assert (
+                    body["selection"]["sources"][0]["directory"]["relativePath"]
+                    == f"disk{self.revision + 1}"
+                )
+                self.revision += 1
+                path = "/images/image-1"
+            if path == "/images/image-1?":
+                path = "/images/image-1"
+            status, document = super().request(method, path, body)
+            if path in {"/jobs/job-1", "/images/image-1"}:
+                summary = document["data"]["result"] if path == "/jobs/job-1" else document["data"]
+                summary.update(
+                    format="axk-object-directory",
+                    revision=self.revision,
+                    floppySet={
+                        "status": "COMPLETE" if self.revision == 3 else "INCOMPLETE",
+                        "nextRequiredIndex": None if self.revision == 3 else self.revision + 1,
+                    },
+                )
+            if "/filesystem?" in path:
+                document["data"].update(
+                    available=False,
+                    filesystemName="",
+                    items=[],
+                    totalCount=0,
+                    revision=self.revision,
+                )
+            return status, document
+
+    client = DirectoryClient()
+    report = check_image(
+        client,
+        "disk1",
+        {
+            **profile(),
+            "format": "axk-object-directory",
+            "filesystemName": "",
+            "filesystemAvailable": False,
+            "minimumFiles": 0,
+        },
+        source_kind="AXK_OBJECT_DIRECTORY",
+        companion_steps=[
+            {"path": "disk2", "beforeNextIndex": 2, "nextRequiredIndex": 3, "status": "INCOMPLETE"},
+            {
+                "path": "disk3",
+                "beforeNextIndex": 3,
+                "nextRequiredIndex": None,
+                "status": "COMPLETE",
+            },
+        ],
+    )
+    assert len(report["companionSteps"]) == 2
+    assert report["floppySet"]["status"] == "COMPLETE"
+    assert report["deviceNodes"] == 2
+
+
+def test_directory_signatures_cover_file_contents_and_reject_links(tmp_path: Any) -> None:
+    folder = tmp_path / "disk1"
+    folder.mkdir()
+    member = folder / "YAMAHA.SYM"
+    member.write_bytes(b"catalog")
+    before = source_signature(folder)
+    member.write_bytes(b"changed")
+    assert source_signature(folder) != before
+    (folder / "link").symlink_to(member)
+    with pytest.raises(RuntimeError, match="symlink"):
+        source_signature(folder)

@@ -110,16 +110,21 @@
                     }}
                 />
                 {#if !r.members.length}
-                    <ImportSourceChoice
-                        label="Floppy sources"
-                        heading="Choose floppy images"
-                        description="A-series floppy or companion disk set"
-                        workspaceDetail="Select floppy images from a configured workspace"
-                        computerDetail="Select local floppy images"
-                        computerAvailable={true}
-                        onchooseworkspace={() => void workflow.chooseWorkspace()}
-                        onchooselocal={() => input?.click()}
-                    />
+                    {#if workflow.directSource}
+                        <button class="secondary-button" onclick={() => void workflow.chooseWorkspace(true)}
+                            ><Icon name="folder" size={13} />Choose floppy images</button
+                        >
+                    {:else}<ImportSourceChoice
+                            label="Floppy sources"
+                            heading="Choose floppy images"
+                            description="A-series floppy or companion disk set"
+                            workspaceDetail="Select floppy images from a configured workspace"
+                            computerDetail="Select local floppy images"
+                            computerAvailable={true}
+                            onchooseworkspace={() => void workflow.chooseWorkspace()}
+                            onchooselocal={() => input?.click()}
+                        />{/if}
+                    {#if r.error}<p class="dialog-error" role="alert">{r.error}</p>{/if}
                 {:else}
                     <div class="floppy-source-toolbar">
                         <div class="floppy-summary">
@@ -135,14 +140,16 @@
                             disabled={controlsDisabled}
                             title="Add floppy images from a storage location"
                             onclick={() => void workflow.chooseWorkspace()}
-                            ><Icon name="folder" size={13} />Workspace</button
+                            ><Icon name="folder" size={13} />{workflow.directSource
+                                ? 'Add floppy images'
+                                : 'Workspace'}</button
                         >
-                        <button
-                            class="secondary-button"
-                            disabled={controlsDisabled}
-                            title="Add floppy images from this computer"
-                            onclick={() => input?.click()}><Icon name="upload" size={13} />Computer</button
-                        >
+                        {#if !workflow.directSource}<button
+                                class="secondary-button"
+                                disabled={controlsDisabled}
+                                title="Add floppy images from this computer"
+                                onclick={() => input?.click()}><Icon name="upload" size={13} />Computer</button
+                            >{/if}
                     </div>
                     <div class="floppy-members" aria-label="Source disks">
                         {#each r.members as member (member.id)}<div>

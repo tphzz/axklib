@@ -335,7 +335,14 @@ export class ImageSessionWorkflow {
             '',
             {
                 parentDialog: 'companion-disks',
-                initialDirectory: this.lastCompanionDirectory,
+                initialDirectory:
+                    this.lastCompanionDirectory ??
+                    (this.location
+                        ? {
+                              rootId: this.location.reference.rootId,
+                              relativePath: this.location.reference.relativePath.replace(/\/?[^/]+\/?$/, ''),
+                          }
+                        : null),
                 ondirectorychange: (directory) => (this.lastCompanionDirectory = directory),
                 requireWritableDirectory: false,
             },
@@ -382,7 +389,8 @@ export class ImageSessionWorkflow {
             if (this.sessionId !== sessionId || this.companionRequest?.requestId !== request.requestId) return;
             this.companionRequest = null;
             await this.applyOpenedImage(opened, preferred);
-            if (request.retry) await this.retryCompanionAction(request.retry);
+            if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(request.retry);
+            else if (request.retry) await this.retryCompanionAction(request.retry);
         } catch (error) {
             if (
                 this.sessionId === sessionId &&
@@ -525,7 +533,7 @@ export class ImageSessionWorkflow {
             sources: [...this.companionSources],
             retry,
             sourceKind: this.location.kind === 'server-file' ? 'file' : 'directory',
-            setLabel: this.floppySet?.setLabel || this.location.displayName,
+            setLabel: this.floppySet?.setLabel.trim() || this.location.displayName,
             nextRequiredIndex: this.floppySet?.nextRequiredIndex ?? null,
             busy: false,
             error: '',

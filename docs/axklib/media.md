@@ -78,15 +78,27 @@ An `AXK_OBJECT_DIRECTORY` is either one flat host directory whose regular files
 contain `FSFSDEV3SPLX` Yamaha objects, or a bounded parent containing one level
 of such leaf directories. Object recognition, decoding, catalog construction,
 relationship resolution, preview, audition, and package export use the same
-object layer as image-backed media. Unrecognized regular support files are
-ignored.
+object layer as image-backed media. `YAMAHA.SYM` and its zero-length marker
+files are validated when present. Other regular support files are ignored.
 
 The session presents the admitted objects as one synthetic `Object directory`
 volume. That scope can be exported as a `.axkvol` package, but its name and
 partition index are navigation metadata; they do not recover an original
 floppy volume label or partition layout.
 
-The parent form supports Yamaha multi-floppy object sets. A split `SMPL` file
+For a flat folder retaining a valid Yamaha catalog and disk-set marker, opening
+reports `INCOMPLETE` immediately when more members are needed. Selected companion
+folders must form one contiguous, same-label disk sequence beginning at disk 1.
+Attachment admits every cataloged sampler object, including Programs, Samples,
+Sample Banks, and sequences on later disks. Split Wave Data uses the same
+assembly rules as raw floppy images. A final marker reports `COMPLETE` only
+after the sequence and waveform coverage validate. Explicit nearby search
+examines at most 31 immediate sibling folders and rejects duplicate disk indices.
+Folder names are not used as disk identities. Canceling the companion dialog
+leaves the partial session available for browsing.
+
+Without a usable catalog, the parent form supports recovery of Yamaha
+multi-floppy object sets. A split `SMPL` file
 declares its complete logical Wave Data byte count, its local segment size, and
 its segment offset. Axklib groups matching headers and assembles only complete,
 contiguous, byte-identical segment sets. A flat leaf opens without inspecting
@@ -104,7 +116,7 @@ The profile is intentionally read-only and bounded to 224 entries per leaf,
 1,024 total entries, 16 MiB of aggregate file data, and one nested directory
 level. Links, deeper nesting, case-insensitive duplicate paths, unsafe names,
 and directories without a recognized object are rejected. The directory does
-not recover FAT allocation, DOS directory order, deleted entries, volume labels,
+not recover FAT allocation, DOS directory order, deleted entries, FAT volume labels,
 or any other missing container metadata. Higher collection directories remain
 navigation scopes rather than media sessions.
 

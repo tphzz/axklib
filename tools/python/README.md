@@ -11,6 +11,12 @@ Files enumeration and supported Device navigation. Run it with `--server`,
 Each manifest case names `id`, `root`, relative `path` and `expected`
 (`format`, `filesystemName`, `deviceView`, `minimumFiles`; optionally `names`
 and `metadata`). A null path requires `unavailableReason` and reports a gap.
+`sourceKind` selects `FILE` (the default) or `AXK_OBJECT_DIRECTORY`. Optional
+`companionSteps` list sibling names with `beforeNextIndex`, `status`, and
+`nextRequiredIndex` assertions for incremental attachment. Directory profiles
+use `filesystemAvailable: false`; `objectCount` and typed `objects` expectations
+can verify later-member contents. Directory source files are fingerprinted
+before and after the read-only run within the directory profile's bounds.
 Exit codes are 0 for complete success, 1 for failures and 2 for missing coverage.
 It is read-only and does not establish release readiness.
 

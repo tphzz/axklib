@@ -22,10 +22,14 @@ supply nonzero sector, cluster and FAT sizes with all regions inside the image.
 FAT12 is distinct from the SFS container even when files share Yamaha object
 headers. FAT16, FAT32 and exFAT are different layouts.
 
-An extracted object directory is not a floppy image: FAT allocation, labels,
+An extracted object directory is not a floppy image: FAT allocation, FAT labels,
 directory order, deleted entries and support files cannot be reconstructed
 from object payloads alone. Multi-disk Wave Data uses the segment fields in
 [SMPL](sampler-data.md#smpl-wave-data-object).
+If the original `YAMAHA.SYM`, numeric filename extensions, and zero-length
+marker files are retained, the catalog still supplies the disk-set label,
+member index, logical object paths, and continuation/final marker. It does
+not supply the missing FAT layout.
 
 For software support, creation and import workflows see
 [Media Profiles](media.md) and [Writer And Alteration](write.md).

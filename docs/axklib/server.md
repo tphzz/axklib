@@ -636,16 +636,30 @@ package import are not. An incomplete leaf can be inventoried, but split Wave
 Data cannot be previewed, auditioned, or exported as a complete package until
 its companion folders are attached.
 
-When an explicit operation encounters missing split Wave Data,
-`POST /api/v1/images/{imageId}/companion-directories` attaches either a selected
-list of `DirectoryRef` values or the explicitly requested immediate siblings.
-The server checks only those directories and admits exact continuation segments
+`POST /api/v1/images/{imageId}/companions` accepts `expectedRevision` and a
+`selection`: `SOURCES` with a list of `ImageSourceRef` values, or
+`IMMEDIATE_SIBLINGS` for an explicit nearby search. Directory sources use
+`AXK_OBJECT_DIRECTORY`; raw floppy members use `FILE`.
+Cataloged folders expose `floppySet` with the required disk index at open time.
+Attachment validates the same-label, contiguous member sequence and admits all
+cataloged objects from later members, not only waveform continuations. An
+incomplete attachment remains `INCOMPLETE`; playback and export retries wait
+for `COMPLETE`. A wrong, ambiguous, or invalid attachment leaves the current
+session unchanged. No sibling search runs automatically.
+
+Catalog-less or invalid-catalog folders retain `RECOVERY` behavior. When an
+explicit operation needs more Wave Data, the server checks only the requested
+directories and admits exact continuation segments
 with normalized Yamaha header identities, even when Yamaha changes the host
 filename between disks, plus Wave Data objects whose embedded names exactly
 satisfy active unresolved Sample member lanes. The image ID and object IDs
 remain stable, while the session revision advances. Attachments are retained
 only for the lifetime of that image session; the source folders and their files
 are never merged or modified.
+
+Axkdeck selects companion sources directly through the server storage picker,
+including on localhost. No local/remote source chooser is inserted. The picker
+starts beside the opened source unless a previous companion location is retained.
 
 `POST /api/v1/files/list` performs only a bounded directory listing. A media
 picker navigates directories without media inspection and inspects the current

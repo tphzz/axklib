@@ -48,6 +48,22 @@ def load_manifest(path: Path, *, maximum_cases: int = 16) -> list[dict[str, Any]
         relative = Path(case["path"])
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("case path must stay inside its corpus root")
+        if case.get("sourceKind", "FILE") not in {"FILE", "AXK_OBJECT_DIRECTORY"}:
+            raise ValueError("unsupported image source kind")
+        steps = case.get("companionSteps", [])
+        if not isinstance(steps, list) or len(steps) > 31:
+            raise ValueError("companion steps must contain at most 31 members")
+        for step in steps:
+            if not isinstance(step, dict) or not isinstance(step.get("path"), str):
+                raise ValueError("companion step requires a sibling path")
+            if (
+                not step["path"]
+                or Path(step["path"]).name != step["path"]
+                or step["path"] in {".", ".."}
+            ):
+                raise ValueError("companion path must be a sibling name")
+            if not {"beforeNextIndex", "nextRequiredIndex", "status"} <= step.keys():
+                raise ValueError("companion step requires explicit disk-set expectations")
         expected = case.get("expected")
         if (
             not isinstance(expected, dict)
@@ -68,6 +84,8 @@ def check_image(
     maximum_requests: int = 256,
     traversal_seconds: int = 30,
     reject_invalid: bool = True,
+    source_kind: str = "FILE",
+    companion_steps: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     submitted = require_status(
         client.request(
@@ -75,8 +93,11 @@ def check_image(
             "/images",
             {
                 "source": {
-                    "kind": "FILE",
-                    "file": {"rootId": "corpus", "relativePath": relative_path},
+                    "kind": source_kind,
+                    "file" if source_kind == "FILE" else "directory": {
+                        "rootId": "corpus",
+                        "relativePath": relative_path,
+                    },
                 }
             },
         ),
@@ -103,6 +124,45 @@ def check_image(
         current = require_status(client.request("GET", image_path), 200, "image summary")["data"]
         if current != summary:
             raise RuntimeError("completed job and current image summary differ")
+        attached: list[dict[str, Any]] = []
+        for step in companion_steps or []:
+            if summary.get("floppySet", {}).get("nextRequiredIndex") != step["beforeNextIndex"]:
+                raise RuntimeError("initial/partial disk-set requirement differs")
+            requests += 1
+            if requests > maximum_requests or time.monotonic() > deadline:
+                raise RuntimeError("companion attachment request/time limit exceeded")
+            summary = require_status(
+                client.request(
+                    "POST",
+                    f"{image_path}/companions",
+                    {
+                        "expectedRevision": summary["revision"],
+                        "selection": {
+                            "kind": "SOURCES",
+                            "sources": [
+                                {
+                                    "kind": source_kind,
+                                    "file" if source_kind == "FILE" else "directory": {
+                                        "rootId": "corpus",
+                                        "relativePath": step["path"],
+                                    },
+                                }
+                            ],
+                        },
+                    },
+                ),
+                200,
+                "companion attachment",
+            )["data"]
+            if get("", {}) != summary:
+                raise RuntimeError("attached and current image summaries differ")
+            state = summary.get("floppySet", {})
+            if (
+                state.get("status") != step["status"]
+                or state.get("nextRequiredIndex") != step["nextRequiredIndex"]
+            ):
+                raise RuntimeError("attached disk-set status differs")
+            attached.append({"path": step["path"], "floppySet": state})
         if summary["format"] != expected["format"]:
             raise RuntimeError(f"format: expected {expected['format']}, got {summary['format']}")
         invalid = not summary["validation"]["valid"] or summary["validation"]["errorCount"]
@@ -148,13 +208,20 @@ def check_image(
                 if parent is not None:
                     query["parentId"] = parent
                 page = get("/filesystem", query)
-                if not page["available"] or page["revision"] != summary["revision"]:
+                if (
+                    page["available"] != expected.get("filesystemAvailable", True)
+                    or page["revision"] != summary["revision"]
+                ):
                     raise RuntimeError("filesystem unavailable or revision changed")
                 for field in ("filesystemName", "deviceView"):
                     if page[field] != expected[field]:
                         raise RuntimeError(
                             f"{field}: expected {expected[field]!r}, got {page[field]!r}"
                         )
+                if not page["available"]:
+                    if page["items"] or page["totalCount"]:
+                        raise RuntimeError("unavailable filesystem exposes entries")
+                    break
                 if "writable" in expected and parent is None:
                     capabilities = page.get("rootCapabilities", [])
                     if not capabilities or not all(
@@ -230,6 +297,28 @@ def check_image(
             device_nodes = len(device_seen)
             if not device_nodes or summary["objectCount"] == 0:
                 raise RuntimeError("expected nonempty Device view")
+        if "objectCount" in expected and summary["objectCount"] != expected["objectCount"]:
+            raise RuntimeError(f"object count differs: {summary['objectCount']}")
+        if expected.get("objects"):
+            found_objects: set[tuple[str, str]] = set()
+            object_cursor: str | None = None
+            object_cursors: set[str] = set()
+            while True:
+                query = {"limit": 200}
+                if object_cursor is not None:
+                    query["cursor"] = object_cursor
+                page = get("/objects", query)
+                found_objects.update((item["type"], item["name"]) for item in page["items"])
+                if len(found_objects) > maximum_entries:
+                    raise RuntimeError("object limit exceeded")
+                object_cursor = page["nextCursor"]
+                if object_cursor is None:
+                    break
+                if object_cursor in object_cursors or not page["items"]:
+                    raise RuntimeError("object pagination did not progress")
+                object_cursors.add(object_cursor)
+            if not {(item["type"], item["name"]) for item in expected["objects"]} <= found_objects:
+                raise RuntimeError("expected companion objects are missing")
         return {
             "format": summary["format"],
             "filesystemName": expected["filesystemName"],
@@ -239,11 +328,43 @@ def check_image(
             "deviceNodes": device_nodes,
             "requests": requests,
             "floppySet": summary.get("floppySet"),
+            "companionSteps": attached,
             "validation": summary.get("validation"),
             "validationIssues": validation_issues,
         }
     finally:
         require_status(client.request("DELETE", image_path), 200, "image close")
+
+
+def source_signature(source: Path) -> list[tuple[str, int, int, str]]:
+    if source.is_file():
+        stat = source.stat()
+        return [(str(source), stat.st_size, stat.st_mtime_ns, "")]
+    result: list[tuple[str, int, int, str]] = []
+    pending = [(source, 0)]
+    entries = 0
+    size = 0
+    while pending:
+        directory, depth = pending.pop()
+        for item in directory.iterdir():
+            entries += 1
+            if entries > 1024 or depth > 2 or item.is_symlink():
+                raise RuntimeError(
+                    "directory source exceeds traversal limits or contains a symlink"
+                )
+            if item.is_dir():
+                pending.append((item, depth + 1))
+                continue
+            stat = item.stat()
+            size += stat.st_size
+            if size > 16 * 1024 * 1024 or not item.is_file():
+                raise RuntimeError(
+                    "directory source exceeds payload limits or contains a special file"
+                )
+            with item.open("rb") as handle:
+                digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            result.append((str(item), stat.st_size, stat.st_mtime_ns, digest))
+    return sorted(result)
 
 
 def run_case(
@@ -256,8 +377,15 @@ def run_case(
     maximum_requests: int = 256,
     traversal_seconds: int = 30,
     reject_invalid: bool = True,
+    source_kind: str = "FILE",
+    companion_steps: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    before = source.stat()
+    sources = [source, *(source.parent / step["path"] for step in companion_steps or [])]
+    if any(
+        item.is_symlink() or item.resolve().parent != source.parent.resolve() for item in sources
+    ):
+        raise RuntimeError("source and companions must stay in their corpus directory")
+    before = [source_signature(item) for item in sources]
     with (
         tempfile.TemporaryDirectory(prefix="axklib-image-open-") as temporary,
         log.open("wb") as output,
@@ -317,12 +445,14 @@ def run_case(
                 maximum_requests=maximum_requests,
                 traversal_seconds=traversal_seconds,
                 reject_invalid=reject_invalid,
+                source_kind=source_kind,
+                companion_steps=companion_steps,
             )
             require_status(client.request("POST", "/system/shutdown"), 202, "server shutdown")
             process.wait(timeout=5)
             if process.returncode != 0:
                 raise RuntimeError(f"server exited with {process.returncode}")
-            return result
+            return {**result, "sourceSignatures": before}
         finally:
             if process.poll() is None:
                 process.terminate()
@@ -331,8 +461,8 @@ def run_case(
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=3)
-            after = source.stat()
-            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            after = [source_signature(item) for item in sources]
+            if before != after:
                 raise RuntimeError(
                     "source size or modification time changed during read-only smoke"
                 )
@@ -376,14 +506,26 @@ def main() -> int:
             row["source"] = str(source)
             if not source.is_relative_to(corpus):
                 row.update(status="failed", reason="source escapes corpus root")
-            elif not source.is_file():
-                row["reason"] = "corpus file is missing"
+            elif not (
+                source.is_file() if case.get("sourceKind", "FILE") == "FILE" else source.is_dir()
+            ):
+                row["reason"] = "corpus source is missing"
             else:
                 log = args.output / f"{index + 1:02d}-server.log"
                 row["log"] = str(log)
                 row["sourceBytes"] = source.stat().st_size
                 try:
-                    row.update(run_case(server, source, case["expected"], log), status="passed")
+                    row.update(
+                        run_case(
+                            server,
+                            source,
+                            case["expected"],
+                            log,
+                            source_kind=case.get("sourceKind", "FILE"),
+                            companion_steps=case.get("companionSteps"),
+                        ),
+                        status="passed",
+                    )
                 except (
                     RuntimeError,
                     OSError,

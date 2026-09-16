@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AxklibApiError } from '../../lib/httpErrors';
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, OpenedImage } from '../../lib/transport';
-import type { PickerController } from '../dialogs/picker';
+import { PickerController } from '../dialogs/picker';
 import { ImageSessionWorkflow } from './workflow.svelte';
 
 const location: ImageLocation = {
@@ -347,5 +347,95 @@ describe('ImageSessionWorkflow volume selection', () => {
         workflow.selectTreeSource(volumeC, 'toggle', visible);
         expect(workflow.importDestinationSource()).toMatchObject({ id: 'none', kind: 'disk' });
         await workflow.dispose();
+    });
+});
+
+describe('ImageSessionWorkflow companion folders', () => {
+    const folder: ImageLocation = {
+        kind: 'axk-object-directory',
+        reference: { rootId: 'root', relativePath: 'set/disk1' },
+        displayName: 'disk1',
+    };
+    const disk2: ImageLocation = { ...folder, reference: { rootId: 'root', relativePath: 'set/disk2' } };
+    function diskSet(next: number | null): OpenedImage {
+        return {
+            ...opened(7),
+            format: 'axk-object-directory',
+            floppySet: {
+                status: next === null ? 'COMPLETE' : 'INCOMPLETE',
+                setLabel: '              ',
+                nextRequiredIndex: next,
+                members: [],
+            },
+        };
+    }
+
+    it.each(['local', 'remote'])(
+        'opens the server folder picker directly for a %s connection',
+        async (connectionMode) => {
+            const onPicker = vi.fn();
+            const picker = new PickerController(onPicker);
+            const workflow = new ImageSessionWorkflow(
+                {
+                    storageMode: 'server',
+                    connectionMode,
+                    openImage: vi.fn(async () => diskSet(2)),
+                } as unknown as ImageTransport,
+                picker,
+            );
+            connectWorkflow(workflow);
+            await workflow.open(folder);
+            expect(workflow.companionRequest).toMatchObject({
+                sourceKind: 'directory',
+                nextRequiredIndex: 2,
+                setLabel: 'disk1',
+            });
+            const adding = workflow.addCompanionDiskSource();
+            expect(onPicker).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    mode: 'directory',
+                    parentDialog: 'companion-disks',
+                    requireWritableDirectory: false,
+                    initialDirectory: { rootId: 'root', relativePath: 'set' },
+                }),
+            );
+            picker.finish({ ...disk2, kind: 'server-directory' });
+            await adding;
+            expect(workflow.companionRequest?.sources).toEqual([disk2]);
+            workflow.cancelCompanionDisks();
+            expect(workflow.companionRequest).toBeNull();
+            expect(workflow.sessionId).toBe(7);
+        },
+    );
+
+    it('waits for the final member before retrying and preserves the partial session on failure', async () => {
+        const playObject = vi.fn();
+        const attachCompanions = vi
+            .fn()
+            .mockResolvedValueOnce(diskSet(3))
+            .mockRejectedValueOnce(new Error('Wrong disk set'))
+            .mockResolvedValueOnce(diskSet(null));
+        const workflow = new ImageSessionWorkflow(
+            { openImage: vi.fn(async () => diskSet(2)), attachCompanions } as unknown as ImageTransport,
+            {} as PickerController,
+        );
+        workflow.connect({
+            catalog: { activeVolumeId: '', loadVolume: vi.fn(), clear: vi.fn() },
+            audition: { invalidateSession: vi.fn(), playObject },
+            mutation: { setCapabilities: vi.fn() },
+            clearExportSelection: vi.fn(),
+        } as never);
+        await workflow.open(folder);
+        workflow.requestCompanionDisks({ kind: 'audition', objectId: 'wave-1' });
+        const selection = { kind: 'sources', sources: [disk2] } as const;
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(workflow.companionRequest?.nextRequiredIndex).toBe(3);
+        expect(playObject).not.toHaveBeenCalled();
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(workflow.companionRequest?.error).toBe('Wrong disk set');
+        expect(workflow.sessionId).toBe(7);
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(playObject).toHaveBeenCalledExactlyOnceWith('wave-1');
+        expect(workflow.companionRequest).toBeNull();
     });
 });
