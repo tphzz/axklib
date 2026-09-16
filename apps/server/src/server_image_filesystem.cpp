@@ -34,6 +34,13 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
         return error_response(status_for_error(page.error(), 400), page.error(), id);
     Json items = Json::array();
     for (const auto &entry : page->items) {
+        Json attributes = Json::array();
+        for (const auto &attribute : entry.attributes)
+            attributes.push_back({{"code", attribute.code},
+                                  {"label", attribute.label},
+                                  {"value", attribute.value},
+                                  {"description", attribute.description},
+                                  {"summary", attribute.summary}});
         items.push_back({{"id", entry.id},
                          {"parentId", entry.parent_id ? Json(*entry.parent_id) : Json{}},
                          {"rootId", entry.root_id},
@@ -52,7 +59,7 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                          {"storage", entry.storage},
                          {"filesystemMetadata", entry.filesystem_metadata},
                          {"rawAttributes", entry.raw_attributes},
-                         {"attributes", entry.attributes},
+                         {"attributes", std::move(attributes)},
                          {"issue", entry.issue}});
     }
     Json capabilities = Json::array();

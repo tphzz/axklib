@@ -75,7 +75,8 @@ export class FilesEditWorkflow {
                     entry.filesystemMetadata ||
                     !!entry.issue ||
                     (review.kind === 'create' ? entry.kind === 'file' : !entry.parentId) ||
-                    (review.kind === 'rename' && entry.attributes.includes('Read-only')),
+                    (review.kind === 'rename' &&
+                        entry.attributes.some((attribute) => attribute.code === 'fat.read-only')),
             )
         )
             return false;

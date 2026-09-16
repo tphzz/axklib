@@ -434,8 +434,14 @@
                 <span
                     role="gridcell"
                     class="file-attributes"
-                    title={[row.entry.rawAttributes, ...row.entry.attributes].filter(Boolean).join('; ')}
-                    >{row.entry.attributes.join(', ') || '-'}</span
+                    title={row.entry.attributes
+                        .map((attribute) => attribute.summary)
+                        .filter(Boolean)
+                        .join('; ')}
+                    >{row.entry.attributes
+                        .map((attribute) => attribute.summary)
+                        .filter(Boolean)
+                        .join(', ') || '-'}</span
                 >
                 <span role="gridcell"
                     >{row.entry.sizeBytes === null ? '-' : `${row.entry.sizeBytes.toLocaleString()} B`}</span

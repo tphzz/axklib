@@ -38,8 +38,30 @@ use `offset`, `limit` and `totalCount`; the normal server page limit applies.
 
 Entries contain exact stored names, a root-relative path, parent/ancestor IDs,
 kind, optional logical file size, direct child count and storage details.
-`rawAttributes` retains the native SFS or FAT attribute value; `attributes`
-lists confirmed native flags without translating them into POSIX permissions.
+`rawAttributes` retains the native SFS or FAT attribute value. Each item in
+`attributes` contains a stable `code`, a display `label` and `value`, an optional
+explanation in `description` (empty when unnecessary), and compact display text
+in `summary`. An empty `summary` restricts an attribute to Storage details.
+Unresolved meanings are omitted from this list; the raw value remains intact.
+Clients must not derive permissions from display labels or translate SFS flags
+into POSIX permissions. The `fat.read-only` code identifies the FAT read-only
+flag independently of its label.
+
+In axkdeck, Files rows and inspector Properties show SFS **File write flag:
+Enabled/Disabled**, or the FAT **Read-only**, **Hidden**, **System** and
+**Archive** flags. The SFS flag applies to ordinary data writes and extension;
+it does not determine rename/deletion permission or overall image editability.
+Directories have no write-permission summary: their write flag is temporarily
+enabled during directory updates. The collapsed **Storage details** section
+holds the raw value, record state, native record type where defined, allocation
+policy, large allocation unit in clusters and bytes, filesystem reference count,
+and **Temporary directory write flag**. Attribute labels provide contextual
+help on hover, keyboard focus or click, explaining their values and limits
+without adding explanation rows. Escape or an outside click dismisses the help.
+Attributes shown in Properties are not repeated under Storage details.
+The reference count is not a child count. None of
+these presentation fields changes the server's write-admission checks.
+
 `filesystemMetadata` identifies reserved SFS support entries. Those entries
 remain visible and selectable even when their empty reserved index target is
 absent from the payload-bearing inventory, without an unresolved-target warning.

@@ -100,7 +100,7 @@
                     (entry.kind === 'file' || entry.kind === 'directory') &&
                     !entry.filesystemMetadata &&
                     !entry.issue &&
-                    !entry.attributes.includes('Read-only'),
+                    !entry.attributes.some((attribute) => attribute.code === 'fat.read-only'),
             ),
     );
     const canImport = $derived(

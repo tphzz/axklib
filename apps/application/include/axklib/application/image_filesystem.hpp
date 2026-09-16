@@ -12,6 +12,15 @@
 
 namespace axk::app {
 
+struct ImageFilesystemAttribute {
+    std::string code;
+    std::string label;
+    std::string value;
+    std::string description;
+    // Empty summaries keep technical attributes in Storage details only.
+    std::string summary;
+};
+
 struct ImageFilesystemEntry {
     std::string id;
     std::optional<std::string> parent_id;
@@ -29,7 +38,7 @@ struct ImageFilesystemEntry {
     std::string issue;
     bool filesystem_metadata{};
     std::string raw_attributes;
-    std::vector<std::string> attributes;
+    std::vector<ImageFilesystemAttribute> attributes;
 };
 
 struct ImageFilesystemQuery {

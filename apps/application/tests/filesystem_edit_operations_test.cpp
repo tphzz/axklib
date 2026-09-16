@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/filesystem_edit_operations.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/writer.hpp"
 #include "content_digest.hpp"
 
@@ -83,11 +85,16 @@ TEST_F(FilesystemEditOperations, CommitsRawFilesAndRefreshesTheSessionRevision) 
     ASSERT_TRUE(files) << files.error().message;
     ASSERT_EQ(files->items.size(), 1U);
     EXPECT_EQ(files->items.front().size_bytes, 10001U);
+    EXPECT_EQ(files->items.front().raw_attributes, "SFS 0x9E000000");
+    ASSERT_FALSE(files->items.front().attributes.empty());
+    EXPECT_EQ(files->items.front().attributes.front().code, "sfs.file-write");
+    EXPECT_EQ(files->items.front().attributes.front().summary, "File write flag: Enabled");
     const auto image = axk::open_image(root / "workspace/image.hds");
     ASSERT_TRUE(image);
     const auto &records = image->partitions().front().records;
     const auto file = std::ranges::find(records, 10001U, &axk::IndexRecord::data_size);
     ASSERT_NE(file, records.end());
+    EXPECT_EQ(file->attributes, 0x9e000000U);
     const auto bytes = image->read_record_data(axk::PartitionIndex{0}, file->sfs_id, 10001U);
     ASSERT_TRUE(bytes);
     EXPECT_EQ(*bytes, std::vector<std::byte>(10001U, std::byte{0x57}));
@@ -97,6 +104,50 @@ TEST_F(FilesystemEditOperations, CommitsRawFilesAndRefreshesTheSessionRevision) 
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
     EXPECT_EQ(digest(), before);
+}
+
+TEST_F(FilesystemEditOperations, RejectedLargeAllocationLeavesBytesAndSessionRevisionUnchanged) {
+    const auto path = root / "workspace/large.hds";
+    const auto empty = std::make_shared<axk::MemoryReader>(std::vector<std::byte>{});
+    const std::vector<axk::FilesystemEdit> create{axk::PutFilesystemFile{{"large"}, empty}};
+    ASSERT_TRUE(axk::write_sfs_file_edits(root / "workspace/image.hds", path, axk::PartitionIndex{0}, create));
+    const auto original = axk::open_image(path).value();
+    const auto &partition = original.partitions().front();
+    const auto file = std::ranges::find(partition.records, 0x9e000000U, &axk::IndexRecord::attributes);
+    ASSERT_NE(file, partition.records.end());
+    {
+        std::fstream stream{path, std::ios::binary | std::ios::in | std::ios::out};
+        ASSERT_TRUE(stream);
+        std::array<std::byte, 4> word{};
+        ASSERT_TRUE(axk::ByteWriter{word}.write_be32(0U, 0xbe000000U));
+        stream.seekp(static_cast<std::streamoff>(file->record_offset.value + 0x42U));
+        stream.write(reinterpret_cast<const char *>(word.data()), 4);
+        word.fill(std::byte{});
+        for (const auto offset : {0U, 1024U}) {
+            stream.seekp(static_cast<std::streamoff>(partition.start_sector) * 512 + offset + 0x84);
+            stream.write(reinterpret_cast<const char *>(word.data()), 4);
+        }
+        ASSERT_TRUE(stream);
+    }
+    const auto before = axk::app::detail::file_sha256(path).value();
+    axk::app::ImageSessionManager sessions{
+        *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({"workspace", "large.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    axk::app::AlterationJournalStore journals{root / "journals"};
+    const std::vector<axk::FilesystemEdit> replace{
+        axk::CreateFilesystemDirectory{{"Not committed"}},
+        axk::PutFilesystemFile{{"large"}, std::make_shared<MutableFileInput>(), axk::FileConflict::replace}};
+    const auto rejected = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+                                                           opened->revision, axk::PartitionIndex{0}, replace);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(axk::app::detail::file_sha256(path).value(), before);
+    ASSERT_TRUE(sessions.filesystem(opened->image_id, "owner", opened->revision));
+    const std::vector<axk::FilesystemEdit> rename{axk::RenameFilesystemEntry{{"large"}, "renamed"}};
+    const auto updated = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+                                                          opened->revision, axk::PartitionIndex{0}, rename);
+    ASSERT_TRUE(updated) << updated.error().message;
+    EXPECT_EQ(updated->revision, opened->revision + 1U);
 }
 
 TEST_F(FilesystemEditOperations, ReleasesMutationAccessAfterRejectedPlansAndCancellation) {

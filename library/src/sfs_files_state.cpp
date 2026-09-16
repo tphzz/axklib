@@ -179,24 +179,28 @@ void mark(std::span<std::byte> bitmap, std::uint32_t cluster, bool value) {
 }
 } // namespace
 
-Result<std::vector<Extent>> State::allocate(std::uint32_t bytes) {
+Result<std::vector<Extent>> State::allocate(std::uint32_t bytes, std::uint32_t attributes) {
     std::vector<Extent> result;
     if (bytes == 0U)
         return result;
-    const auto wanted =
-        std::max<std::uint64_t>(2U, (static_cast<std::uint64_t>(bytes) + cluster_bytes - 1U) / cluster_bytes);
+    const bool large = (attributes & 0x20000000U) != 0U;
+    const auto unit = large ? partition.large_allocation_unit_clusters : 1U;
+    if (unit == 0U)
+        return std::unexpected{error("large-unit allocation requires a nonzero partition allocation unit")};
+    const auto required = (static_cast<std::uint64_t>(bytes) + cluster_bytes - 1U) / cluster_bytes;
+    const auto wanted = large ? ((required + unit - 1U) / unit) * unit : std::max<std::uint64_t>(2U, required);
     if (wanted > std::numeric_limits<std::uint16_t>::max())
         return std::unexpected{error("file exceeds the SFS record cluster-count field")};
     const auto first_payload = partition.directory_index_cluster + partition.directory_index_span_clusters;
     // Reserved metadata is excluded independently of the stored allocation bits.
-    const auto selected =
-        detail::select_sfs_payload_clusters(first_payload, partition.cluster_count, static_cast<std::uint32_t>(wanted),
-                                            [&](std::uint32_t cluster) { return used(bitmap, cluster); });
+    const auto selected = detail::select_sfs_payload_clusters(
+        first_payload, partition.cluster_count, static_cast<std::uint32_t>(wanted),
+        [&](std::uint32_t cluster) { return used(bitmap, cluster); }, unit);
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     if (!selected)
-        return std::unexpected{error("filesystem has insufficient free clusters")};
-    if (bytes <= cluster_bytes && selected->at(1U) != selected->front() + 1U)
+        return std::unexpected{error("filesystem has insufficient free clusters for the required allocation unit")};
+    if (!large && bytes <= cluster_bytes && selected->at(1U) != selected->front() + 1U)
         return std::unexpected{error("minimum file allocation requires a contiguous extent")};
     auto remaining_bytes = bytes;
     for (std::size_t i = 0; i < selected->size();) {
@@ -211,6 +215,9 @@ Result<std::vector<Extent>> State::allocate(std::uint32_t bytes) {
         result.push_back({start, count, extent_bytes});
         remaining_bytes -= extent_bytes;
     }
+    for (const auto &extent : result)
+        if (extent.cluster_offset % unit != 0U || extent.cluster_count % unit != 0U)
+            return std::unexpected{error("payload extent violates the SFS allocation unit")};
     for (const auto cluster : *selected)
         mark(bitmap, cluster, true);
     return result;
@@ -253,7 +260,7 @@ Result<Record *> State::create(bool directory) {
         record.info.record_offset =
             ByteOffset{cluster_offset(partition.directory_index_cluster + id / (cluster_bytes / 72U)) +
                        (id % (cluster_bytes / 72U)) * 72U};
-        record.info.attributes = directory ? 0x94646972U : 0x94000000U;
+        record.info.attributes = directory ? 0x94646972U : 0x9e000000U;
         record.info.link_count = directory ? 2U : 1U;
         record.info.payload_kind = directory ? PayloadKind::directory : PayloadKind::unknown;
         record.changed = true;
@@ -273,7 +280,7 @@ Result<void> State::replace_payload(Record &record, std::shared_ptr<const Random
         return std::unexpected{error("file input is absent or exceeds the SFS size field")};
     if (auto released = release(record); !released)
         return released;
-    auto extents = allocate(static_cast<std::uint32_t>(contents->size()));
+    auto extents = allocate(static_cast<std::uint32_t>(contents->size()), record.info.attributes);
     if (!extents)
         return std::unexpected{extents.error()};
     record.info.extents = std::move(*extents);

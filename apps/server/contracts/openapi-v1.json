@@ -3390,6 +3390,36 @@
         ],
         "type": "object"
       },
+      "ImageFilesystemAttribute": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Stable native attribute identity, independent of display text.",
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "summary": {
+            "description": "Compact display text. Empty for storage-only attributes.",
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "value",
+          "description",
+          "summary"
+        ],
+        "type": "object"
+      },
       "ImageFilesystemEdit": {
         "oneOf": [
           {
@@ -3566,7 +3596,7 @@
           },
           "attributes": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ImageFilesystemAttribute"
             },
             "type": "array"
           },

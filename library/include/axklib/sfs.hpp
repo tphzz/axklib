@@ -162,6 +162,7 @@ struct Partition {
     std::uint32_t sector_count{};
     std::uint32_t cluster_count{};
     std::uint32_t sectors_per_cluster{};
+    std::uint32_t large_allocation_unit_clusters{};
     std::uint32_t active_bitmap_cluster{};
     std::uint32_t bitmap_copy1_cluster{};
     std::uint32_t bitmap_copy2_cluster{};

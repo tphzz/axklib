@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "../../../library/tests/media_test_fixtures.hpp"
+#include "../src/image_filesystem_attributes.hpp"
 #include "../src/image_filesystem_internal.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/bytes.hpp"
@@ -94,7 +96,11 @@ TEST_F(ImageFilesystemTest, ReservedRootEntriesDoNotReportDanglingFileWarnings) 
     EXPECT_TRUE(log->filesystem_metadata);
     EXPECT_EQ(log->size_bytes, 0U);
     EXPECT_EQ(log->raw_attributes, "SFS 0x94000000");
-    EXPECT_NE(log->storage.find("link count 1"), std::string::npos);
+    const auto references =
+        std::ranges::find(log->attributes, "sfs.references", &axk::app::ImageFilesystemAttribute::code);
+    ASSERT_NE(references, log->attributes.end());
+    EXPECT_EQ(references->value, "1");
+    EXPECT_TRUE(references->summary.empty());
 }
 
 TEST_F(ImageFilesystemTest, ResolvesFilesystemEditsFromEntryIdentityAndStoredAncestry) {
@@ -147,6 +153,93 @@ TEST_F(ImageFilesystemTest, RejectsInvalidFilesystemTargetsBeforeMutation) {
 }
 } // namespace
 
+TEST(ImageFilesystemAttributes, DecodesOnlyNamedSfsFieldsWithoutInventingPermissions) {
+    axk::Partition partition{};
+    partition.sectors_per_cluster = 2U;
+    partition.large_allocation_unit_clusters = 8U;
+    for (const auto bits :
+         {0x94000000U, 0x9e000000U, 0xbe000000U, 0xfe000000U, 0x94646972U, 0x9e646972U, 0x946c6e6bU, 0x94000001U}) {
+        SCOPED_TRACE(bits);
+        axk::app::ImageFilesystemEntry entry;
+        axk::IndexRecord record{};
+        record.attributes = bits;
+        record.link_count = 7U;
+        axk::app::detail::describe_sfs_attributes(entry, record, partition, 512U);
+        EXPECT_EQ(entry.raw_attributes, std::format("SFS 0x{:08X}", bits));
+        const auto find = [&](const char *code) {
+            return std::ranges::find(entry.attributes, code, &axk::app::ImageFilesystemAttribute::code);
+        };
+        const auto type = bits & 0x01ffffffU;
+        const bool ordinary = type == 0U;
+        const bool directory = type == 0x00646972U;
+        EXPECT_EQ(find("sfs.file-write") != entry.attributes.end(), ordinary);
+        EXPECT_EQ(find("sfs.directory-write") != entry.attributes.end(), directory);
+        EXPECT_EQ(find("sfs.record-type") != entry.attributes.end(), ordinary || directory);
+        if (directory) {
+            EXPECT_EQ(find("sfs.directory-write")->label, "Temporary directory write flag");
+            EXPECT_NE(find("sfs.directory-write")->description.find("Enabled:"), std::string::npos);
+            EXPECT_NE(find("sfs.directory-write")->description.find("Disabled:"), std::string::npos);
+        }
+        EXPECT_NE(find("sfs.record-state")->description.find("Live:"), std::string::npos);
+        EXPECT_NE(find("sfs.record-state")->description.find("Inactive:"), std::string::npos);
+        ASSERT_NE(find("sfs.references"), entry.attributes.end());
+        EXPECT_EQ(find("sfs.references")->value, "7");
+        EXPECT_EQ(
+            std::ranges::count_if(entry.attributes, [](const auto &attribute) { return !attribute.summary.empty(); }),
+            ordinary ? 1 : 0);
+        if (ordinary)
+            EXPECT_EQ(find("sfs.file-write")->value, (bits & 0x08000000U) != 0U ? "Enabled" : "Disabled");
+        if ((bits & 0x20000000U) != 0U) {
+            ASSERT_NE(find("sfs.allocation-unit"), entry.attributes.end());
+            EXPECT_EQ(find("sfs.allocation-unit")->value, "8 clusters (8192 B)");
+        } else {
+            EXPECT_EQ(find("sfs.allocation-unit"), entry.attributes.end());
+        }
+        for (const auto &attribute : entry.attributes) {
+            EXPECT_FALSE(attribute.description.empty());
+            EXPECT_NE(attribute.label, "Read-only");
+            EXPECT_EQ(attribute.label.find("Unknown"), std::string::npos);
+            EXPECT_EQ(attribute.label.find("Unresolved"), std::string::npos);
+            if (attribute.code == "sfs.file-write" || attribute.code == "sfs.directory-write" ||
+                attribute.code == "sfs.record-state" || attribute.code == "sfs.record-type" ||
+                attribute.code == "sfs.allocation")
+                EXPECT_NE(attribute.description.find("\n\n"), std::string::npos) << attribute.code;
+        }
+    }
+}
+
+TEST(ImageFilesystemAttributes, UnresolvedSfsBitsDoNotChangeDescriptions) {
+    axk::app::ImageFilesystemEntry base, changed;
+    axk::IndexRecord record{};
+    record.attributes = 0x88000000U;
+    axk::app::detail::describe_sfs_attributes(base, record, {}, 512U);
+    record.attributes |= 0x56000000U;
+    axk::app::detail::describe_sfs_attributes(changed, record, {}, 512U);
+    ASSERT_EQ(base.attributes.size(), changed.attributes.size());
+    for (std::size_t i = 0; i < base.attributes.size(); ++i) {
+        EXPECT_EQ(base.attributes[i].code, changed.attributes[i].code);
+        EXPECT_EQ(base.attributes[i].value, changed.attributes[i].value);
+        EXPECT_EQ(base.attributes[i].summary, changed.attributes[i].summary);
+    }
+}
+
+TEST(ImageFilesystemAttributes, FatFlagsHaveStableCodesAndOnlyRecognizedSummaries) {
+    axk::app::ImageFilesystemEntry entry;
+    axk::app::detail::describe_fat_attributes(entry, 0xffU);
+    ASSERT_EQ(entry.attributes.size(), 4U);
+    EXPECT_EQ(entry.attributes[0].code, "fat.read-only");
+    EXPECT_EQ(entry.attributes[1].summary, "Hidden");
+    EXPECT_EQ(entry.attributes[2].summary, "System");
+    EXPECT_EQ(entry.attributes[3].summary, "Archive");
+    for (const auto &attribute : entry.attributes) {
+        EXPECT_NE(attribute.description.find("Yes:"), std::string::npos);
+        EXPECT_NE(attribute.description.find("\n\nWhen clear"), std::string::npos);
+    }
+    EXPECT_NE(entry.attributes[3].description.find("changed since backup"), std::string::npos);
+    axk::app::detail::describe_fat_attributes(entry, 0x10U);
+    EXPECT_TRUE(entry.attributes.empty());
+}
+
 TEST(ImageFilesystemIndex, PreservesFatNamesAndNestedDirectoriesWithoutDeviceInterpretation) {
     auto bytes = nested_fat_fixture();
     std::fill_n(bytes.begin() + 5U * 512U, 16U, std::byte{0x31});
@@ -164,7 +257,9 @@ TEST(ImageFilesystemIndex, PreservesFatNamesAndNestedDirectoriesWithoutDeviceInt
     EXPECT_EQ(file.ancestor_ids.size(), 2U);
     EXPECT_FALSE(file.object_id);
     EXPECT_EQ(file.raw_attributes, "FAT 0x20");
-    EXPECT_EQ(file.attributes, (std::vector<std::string>{"Archive"}));
+    ASSERT_EQ(file.attributes.size(), 1U);
+    EXPECT_EQ(file.attributes.front().code, "fat.archive");
+    EXPECT_EQ(file.attributes.front().summary, "Archive");
     EXPECT_EQ(index->entries[1].raw_attributes, "FAT 0x10");
     ASSERT_EQ(index->root_capabilities.size(), 1U);
     EXPECT_EQ(index->root_capabilities.front().root_id, index->entries.front().id);
@@ -206,7 +301,8 @@ TEST(ImageFilesystemIndex, EmptyAuthoredSfsRetainsDeviceAuthoringDespiteSupportF
         EXPECT_TRUE(index->available);
         EXPECT_EQ(index->device_view, "a-series");
         EXPECT_EQ(index->entries.front().raw_attributes, "SFS 0x94646972");
-        EXPECT_TRUE(index->entries.front().attributes.empty());
+        EXPECT_TRUE(std::ranges::all_of(index->entries.front().attributes,
+                                        [](const auto &attribute) { return attribute.summary.empty(); }));
     }
 }
 

@@ -34,6 +34,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/image_session_access.cpp src/image_session_allocation_map.cpp src/image_session_audition.cpp
                                    src/image_allocation_map.cpp
                                    src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
+                                   src/image_filesystem_attributes.cpp
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
                                    src/image_session_program_generation.cpp

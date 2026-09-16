@@ -16,6 +16,21 @@
 
 namespace {
 
+TEST(ImageSessionContract, FilesystemAttributesRequireStructuredPresentationAndStableIdentity) {
+    const axk::server::OpenApiValidator validator;
+    nlohmann::json attribute{{"code", "sfs.file-write"},
+                             {"label", "File write flag"},
+                             {"value", "Enabled"},
+                             {"description", "Ordinary data writes only."},
+                             {"summary", "File write flag: Enabled"}};
+    EXPECT_TRUE(validator.validate("ImageFilesystemAttribute", attribute));
+    attribute["summary"] = "";
+    EXPECT_TRUE(validator.validate("ImageFilesystemAttribute", attribute));
+    attribute.erase("code");
+    EXPECT_FALSE(validator.validate("ImageFilesystemAttribute", attribute));
+    EXPECT_FALSE(validator.validate("ImageFilesystemAttribute", "Write enabled"));
+}
+
 TEST(ImageSessionContract, SystemContextsRequireStorageRevisionAndAllStoredParts) {
     const axk::server::OpenApiValidator validator;
     nlohmann::json parts = nlohmann::json::array();

@@ -2564,6 +2564,15 @@ export interface components {
             data: components['schemas']['ImageContentPage'];
             meta: components['schemas']['ResponseMeta'];
         };
+        ImageFilesystemAttribute: {
+            /** @description Stable native attribute identity, independent of display text. */
+            code: string;
+            description: string;
+            label: string;
+            /** @description Compact display text. Empty for storage-only attributes. */
+            summary: string;
+            value: string;
+        };
         ImageFilesystemEdit:
             | {
                   entryId: string;
@@ -2610,7 +2619,7 @@ export interface components {
         };
         ImageFilesystemEntry: {
             ancestorIds: string[];
-            attributes: string[];
+            attributes: components['schemas']['ImageFilesystemAttribute'][];
             childCount: number;
             contentScopeId: string | null;
             filesystemMetadata: boolean;

@@ -94,7 +94,7 @@ header cluster is padding, not additional header fields.
 | `0x000` | 11 | ASCII | Partition signature `YAMAHA_dev3`. |
 | `0x040` | 16 | ASCII | Partition name, space-padded. |
 | `0x080` | 4 | u32be | Sectors per cluster. |
-| `0x084` | 4 | u32be | Static or mode value; semantics unspecified. |
+| `0x084` | 4 | u32be | Large allocation unit, in clusters, for records with attribute `0x20000000`. |
 | `0x088` | 8 | bytes | Reserved bytes; semantics unspecified. |
 | `0x090` | 4 | u32be | Number of clusters in the partition. |
 | `0x094` | 4 | u32be | Active allocation bitmap cluster. Independent of cluster size. |
@@ -254,14 +254,67 @@ and extents:
 | `0x42` | 4 | u32be | Native attribute/type word. |
 | `0x46` | 2 | u16be | Filesystem link count. |
 
-These are native SFS attributes, not POSIX permissions. The `0x80000000`
-bit marks a live index record. `0x08000000` enables the normal file-write
-path. `0x20000000` selects partition-unit allocation instead of the smaller
-allocation unit. The low bytes can contain the type tags `dir` (`0x646972`)
-or `lnk` (`0x6c6e6b`). Other bits remain unnamed and must be preserved.
-In particular, a directory without the write-enable bit is not equivalent
-to a user-locked directory: directory updates temporarily enable writing.
-Unspecified attribute bits must not be translated into POSIX permissions.
+These are native SFS attributes, not POSIX permissions. The upper seven bits
+form a flag field (`0xfe000000`); the lower 25 bits form a separate type/value
+field (`0x01ffffff`). Changing one portion must preserve the other.
+
+| Mask | Meaning and modification constraints |
+| --- | --- |
+| `0x80000000` | Live index record. Set during creation, cleared on final release. |
+| `0x40000000` | Meaning unspecified; preserve. |
+| `0x20000000` | Use the partition's large allocation unit for payload extents. |
+| `0x10000000` | Meaning unspecified; preserve. |
+| `0x08000000` | Enables the ordinary file-write/extension path. A writable open handle and writable partition are also required. |
+| `0x04000000` | Meaning unspecified; preserve. |
+| `0x02000000` | Set together with `0x08000000` during directory updates and cleared with it afterward. Its independent meaning is unspecified; preserve on unrelated file edits. |
+
+Ordinary files use type/value zero. Directory and link tags are `0x00646972`
+(`dir`) and `0x006c6e6b` (`lnk`). The latter must not be assumed to denote a
+POSIX symbolic link with a pathname payload. Normal A4000 and SU700 path
+lookup opens the final entry's own record; intermediate path components must
+be directories. It does not substitute a pathname stored in a `lnk` payload.
+The intended payload representation of `lnk` remains unspecified. The link
+count is separate from this tag: multiple directory references do not by
+themselves require `lnk`. Other type/value encodings remain unspecified.
+
+A3000 V2 and SU700 ordinary-file selection omits `lnk`-tagged records.
+A filesystem directory entry is therefore not necessarily a selectable
+sampler object. This listing behavior does not define the link's payload
+or make it safe to replace the tag with the ordinary-file value.
+
+Unlinking a non-directory entry decrements its record's link count. While
+more than one reference remains, its type/value is retained. When the count
+becomes one, the lower 25 bits are cleared to zero and all upper flags are
+preserved. This transition applies to non-directory types generally, not only
+`lnk`; it does not rewrite the surviving payload. A count of zero permits
+final release of the record and its payload allocations.
+
+With `0x20000000` set, payload extent allocation starts on a multiple of the
+partition-header `+0x084` unit, measured from the partition's cluster origin.
+Allocated extent lengths are multiples of that unit. Logical byte lengths
+need not fill that capacity. Without the flag, ordinary growth uses a minimum
+of two clusters. Continuation records are separate metadata allocations;
+they do not acquire the payload's large-unit requirement. Preserve both the
+flag and the corresponding allocation geometry when replacing or resizing data.
+Clearing the flag is not a substitute for respecting the stored policy.
+
+Common combinations include `0x94000000` for support records,
+`0x94646972` for directories, `0x9e000000` for ordinary writable files, and
+`0xbe000000` for writable files using large-unit allocation. These are
+combinations, not indivisible permission codes: `0x9e000000` adds
+`0x0a000000` to `0x94000000`, and `0xbe000000` adds `0x20000000`.
+
+SU700 native SFS saves select large-unit allocation for newly created files
+in the `SAMP` and `SUSP` category directories. This is a creation default,
+not a file-extension rule or an instruction to change existing attributes
+when a file is reopened. Ordinary and large-unit files retain the same extent
+and logical-length representation; their allocation policies differ.
+
+A directory without the write-enable bit is not equivalent to a user-locked
+directory: directory updates temporarily enable writing. The bit is not a
+general delete or rename permission, nor does it by itself guarantee that a
+mutation is safe. Unspecified bits must not be translated into read, execute,
+hidden, system, owner or group permissions.
 
 A live allocation-free empty file has zero extent count, cluster count and
 logical size, with the live bit set. It remains an addressable record and

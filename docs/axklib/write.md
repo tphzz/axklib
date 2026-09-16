@@ -884,6 +884,25 @@ HD/removable roots. It provides directory creation, file import, rename and
 deletion independently of A-series object editing. FAT12 and ISO roots remain
 read-only; creation of new images uses the separate profiles above.
 
+SFS replacement preserves existing attributes. Files and directories carrying
+`0x20000000` receive payload extents aligned to the partition's large allocation
+unit, with capacities rounded to whole units. Fragmented allocation uses only
+completely free units; extent-list metadata uses ordinary clusters. Empty files
+have no payload allocation. Nonempty large-unit allocation is rejected if the
+unit is zero, the rounded cluster count exceeds the record's 16-bit field, or
+insufficient eligible space remains. Rejection does not publish partial edits.
+Reading and operations that do not allocate a large-unit payload remain available.
+
+Fresh ordinary raw files use `0x9e000000`, enabling the sampler's ordinary
+file-write path. Directories and reserved support records retain their distinct
+defaults. Existing file attributes are not automatically corrected or normalized.
+This also applies to new files imported from SU700 floppies: the importer does
+not currently select the SU700 native sample-category large-allocation default.
+This is an allocation-policy difference, not a change to imported file bytes.
+See [Native SFS Attributes](sfs-filesystem.md#index-record-layout) for the stored
+rules; write enable alone does not guarantee that every on-device operation is
+allowed.
+
 The destination is the selected directory, a selected file's parent, or the
 active root when selection is empty. Names must satisfy the root's advertised
 byte limit and naming rules. Reserved filesystem metadata and partition roots

@@ -659,6 +659,18 @@
       "bearerAuth": {"type": "http", "scheme": "bearer"}
     },
     "schemas": {
+      "ImageFilesystemAttribute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "label", "value", "description", "summary"],
+        "properties": {
+          "code": {"type": "string", "description": "Stable native attribute identity, independent of display text."},
+          "label": {"type": "string"},
+          "value": {"type": "string"},
+          "description": {"type": "string"},
+          "summary": {"type": "string", "description": "Compact display text. Empty for storage-only attributes."}
+        }
+      },
       "ImageFilesystemEntry": {
         "type": "object",
         "additionalProperties": false,
@@ -755,7 +767,7 @@
           },
           "attributes": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "$ref": "#/components/schemas/ImageFilesystemAttribute" }
           }
         }
       },

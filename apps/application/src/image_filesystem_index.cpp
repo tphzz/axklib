@@ -1,3 +1,4 @@
+#include "image_filesystem_attributes.hpp"
 #include "image_filesystem_internal.hpp"
 
 #include <algorithm>
@@ -30,27 +31,11 @@ class Builder {
     bool exceeded{};
     std::size_t metadata_bytes{};
 
-    void sfs_attributes(std::size_t position, const IndexRecord &record) {
-        auto &entry = index.entries[position];
-        entry.raw_attributes = std::format("SFS 0x{:08X}", record.attributes);
-        if ((record.attributes & 0x08000000U) != 0U)
-            entry.attributes.emplace_back("Write enabled");
-        if ((record.attributes & 0x20000000U) != 0U)
-            entry.attributes.emplace_back("Partition allocation unit");
-        entry.storage += std::format("; link count {}", record.link_count);
-    }
-
-    void fat_attributes(std::size_t position, std::uint8_t bits) {
-        auto &entry = index.entries[position];
-        entry.raw_attributes = std::format("FAT 0x{:02X}", bits);
-        if ((bits & 0x01U) != 0U)
-            entry.attributes.emplace_back("Read-only");
-        if ((bits & 0x02U) != 0U)
-            entry.attributes.emplace_back("Hidden");
-        if ((bits & 0x04U) != 0U)
-            entry.attributes.emplace_back("System");
-        if ((bits & 0x20U) != 0U)
-            entry.attributes.emplace_back("Archive");
+    void account_attributes(std::size_t position) {
+        for (const auto &attribute : index.entries[position].attributes)
+            metadata_bytes += sizeof(ImageFilesystemAttribute) + attribute.code.size() + attribute.label.size() +
+                              attribute.value.size() + attribute.description.size() + attribute.summary.size();
+        exceeded = exceeded || metadata_bytes > maximum_metadata_bytes;
     }
 
     std::size_t add(std::string id, std::string name, std::string kind, std::optional<std::size_t> parent = {}) {
@@ -117,7 +102,9 @@ class Builder {
             const auto found = records.find(root_record->value);
             if (found == records.end())
                 continue;
-            sfs_attributes(root, *found->second);
+            describe_sfs_attributes(index.entries[root], *found->second, partition,
+                                    container.superblock().sector_size_bytes);
+            account_attributes(root);
             struct Pending {
                 std::size_t parent;
                 const IndexRecord *record;
@@ -151,7 +138,8 @@ class Builder {
                     }
                     entry.storage = std::format("Record {}; {} extents; {} allocated bytes", record->sfs_id.value,
                                                 record->extents.size(), record->extent_byte_count_total);
-                    sfs_attributes(position, *record);
+                    describe_sfs_attributes(entry, *record, partition, container.superblock().sector_size_bytes);
+                    account_attributes(position);
                     if (!directory) {
                         entry.size_bytes = record->data_size;
                         index.files.emplace(entry.id, SfsFilesystemFile{partition.index, record->sfs_id});
@@ -225,7 +213,8 @@ class Builder {
                                       "directory", parent->second);
             directories.emplace(directory.path, position);
             index.entries[position].storage = std::format("{} clusters", directory.clusters.size());
-            fat_attributes(position, directory.attributes);
+            describe_fat_attributes(index.entries[position], directory.attributes);
+            account_attributes(position);
         }
         for (std::size_t ordinal = 0U; ordinal < fat.files().size(); ++ordinal) {
             const auto &file = fat.files()[ordinal];
@@ -240,7 +229,8 @@ class Builder {
             index.files.emplace(index.entries[position].id, FatFilesystemFile{member, ordinal});
             index.entries[position].storage =
                 std::format("First cluster {}; {} clusters", file.first_cluster, file.clusters.size());
-            fat_attributes(position, file.attributes);
+            describe_fat_attributes(index.entries[position], file.attributes);
+            account_attributes(position);
             if (map_objects)
                 object(position, offset_objects[file.first_data_offset]);
         }

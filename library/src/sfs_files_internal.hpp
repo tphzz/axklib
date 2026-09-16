@@ -45,7 +45,7 @@ struct State {
     [[nodiscard]] std::uint64_t cluster_offset(std::uint32_t cluster) const;
     [[nodiscard]] Result<void> load_directory(Record &record);
     [[nodiscard]] Result<void> replace_payload(Record &record, std::shared_ptr<const RandomAccessReader> contents);
-    [[nodiscard]] Result<std::vector<Extent>> allocate(std::uint32_t bytes);
+    [[nodiscard]] Result<std::vector<Extent>> allocate(std::uint32_t bytes, std::uint32_t attributes);
     [[nodiscard]] Result<void> release(Record &record);
     [[nodiscard]] Result<void> change_links(Record &record, int delta);
     [[nodiscard]] Result<void> encode(Record &record);

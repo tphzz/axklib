@@ -39,14 +39,37 @@ describe('Files edits', () => {
         const review = {
             kind: 'rename' as const,
             revision: 3,
-            entries: [filesystemEntry()],
+            entries: [
+                filesystemEntry({
+                    kind: 'file',
+                    attributes: [
+                        {
+                            code: 'sfs.file-write',
+                            label: 'File write flag',
+                            value: 'Disabled',
+                            summary: 'File write flag: Disabled',
+                            description: '',
+                        },
+                    ],
+                }),
+            ],
             capabilities: writableFilesRoot,
         };
         for (const entry of [
             filesystemEntry({ parentId: null }),
             filesystemEntry({ filesystemMetadata: true }),
             filesystemEntry({ issue: 'Missing' }),
-            filesystemEntry({ attributes: ['Read-only'] }),
+            filesystemEntry({
+                attributes: [
+                    {
+                        code: 'fat.read-only',
+                        label: 'Localized label',
+                        value: 'Yes',
+                        description: '',
+                        summary: 'Localized label',
+                    },
+                ],
+            }),
         ])
             expect(workflow.open({ ...review, entries: [entry] }, driver)).toBe(false);
         expect(workflow.open({ ...review, entries: [filesystemEntry(), filesystemEntry()] }, driver)).toBe(false);

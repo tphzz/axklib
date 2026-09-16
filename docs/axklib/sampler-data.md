@@ -90,6 +90,7 @@ Current compact metadata fields:
 | `0x28` | 2 | u16be | sample_rate |
 | `0x2a` | 2 | u16be | bytes_per_sample |
 | `0x30` | `0x7c` | bytes | compact record |
+| `0x42` | 1 | u8 | shared common protection state; see [Copy Protection](#copy-protection) for its scope |
 | `0x54` | 16 | ASCII | embedded_container_name |
 | `0x74` | 4 | u32be | transient_name_hash_next_handle |
 | `0x78` | 4 | u32be | wave_data_reference_value |
@@ -225,7 +226,7 @@ mapping as current Wave Data. The stored fields are:
 | `0x030` | 1 | object class (`0x10` for SBNK, `0x11` for SBAC) |
 | `0x031` | 1 | packed lifecycle/dirty state; preserve the raw byte |
 | `0x032..0x041` | 16 | object name |
-| `0x042` | 1 | opaque-preserved common state transferred by the load/save transforms |
+| `0x042` | 1 | copy-protection state on A4000/A5000; preserve the raw byte |
 | `0x043..0x049` | 7 | untransferred saver residue; canonical new records use zero |
 | `0x04a..0x053` | 10 | opaque-preserved common state |
 | `0x054..0x063` | 16 | source-dependent embedded container text |
@@ -237,8 +238,28 @@ mapping as current Wave Data. The stored fields are:
 
 The embedded text at `0x054` is not a 24-byte Sample instrument-name field:
 the surrounding bytes belong to distinct common-state and alias lanes. Exact
-alterations preserve opaque state, including `0x042`. The load/save transforms
-retain that byte as durable object state. Its semantic role is unspecified. New objects use zero residue and transient handles, with both aliases rebuilt.
+alterations preserve unrelated common state, including protection byte `0x042`.
+New objects use zero residue and transient handles, with both aliases rebuilt.
+
+### Copy Protection
+
+On A4000/A5000, byte `0x42` is retained in the shared common record as
+copy-protection state. For Samples and Sample Banks, value `0x01` prevents
+the selected object from being exported to computer audio formats. The
+audio-CD writing operation also rejects a Sample whose byte is `0x01`.
+These operations report that the Samples are copy protected.
+
+The protection test compares the complete byte with `0x01`; this is not a
+bitmask. Value `0x00` does not trigger this protection check. Other values
+have unspecified meaning and must be preserved, not normalized to a Boolean.
+Unrelated edits must preserve the protection state. This field is separate
+from SFS filesystem attributes and does not establish a general prohibition
+on playback, native-format saving, renaming or deletion.
+
+Wave Data has the same common-record byte, but a separate protection effect
+for a standalone `SMPL` object is unspecified. The A3000 common-record copy
+ends at `0x41`; it does not transfer `0x42`. A4000/A5000 protection semantics
+must therefore not be assumed for A3000 merely from the byte's presence.
 
 ### Member Resolution Fields
 

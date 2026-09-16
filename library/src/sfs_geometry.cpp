@@ -42,6 +42,7 @@ Result<detail::SfsAllocationBitmapLayout> read_partition_geometry(const RandomAc
         return std::unexpected{fail("partition contains incomplete or zero SFS geometry", 0x80U)};
     partition.name = *name;
     partition.sectors_per_cluster = *sectors_per_cluster;
+    partition.large_allocation_unit_clusters = reader.be32(0x84).value();
     partition.cluster_count = *cluster_count;
     partition.active_bitmap_cluster = *active;
     partition.directory_index_cluster = *index_cluster;

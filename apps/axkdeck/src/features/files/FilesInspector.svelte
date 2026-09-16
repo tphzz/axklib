@@ -1,5 +1,6 @@
 <script lang="ts">
     import InspectorModeFooter from '../../lib/components/InspectorModeFooter.svelte';
+    import AttributeHelp from '../../lib/components/AttributeHelp.svelte';
     import type { FilesystemEntry } from '../../lib/filesystem';
     let {
         entry,
@@ -55,20 +56,50 @@
                                 <dt>Interpretation</dt>
                                 <dd>{interpretationLabel || entry.interpretation}</dd>
                             </div>{/if}
-                        {#if entry.rawAttributes}<div>
-                                <dt>Native attributes</dt>
-                                <dd>{entry.rawAttributes}</dd>
-                            </div>{/if}
-                        {#if entry.attributes.length}<div>
-                                <dt>Flags</dt>
-                                <dd class="file-path">{entry.attributes.join(', ')}</dd>
-                            </div>{/if}
+                        {#each entry.attributes.filter((attribute) => attribute.summary) as attribute (attribute.code)}
+                            <div>
+                                <dt>
+                                    <AttributeHelp
+                                        label={attribute.label}
+                                        description={attribute.description}
+                                        contextKey={entry.id}
+                                    />
+                                </dt>
+                                <dd class="file-path">{attribute.value}</dd>
+                            </div>
+                        {/each}
                     </dl>
                 </section>
                 {#if entry.issue}<p class="entry-issue" role="status">{entry.issue}</p>{/if}
-                {#if entry.storage}<details class="inspector-section">
+                {#if entry.storage || entry.rawAttributes || entry.attributes.length}<details class="inspector-section">
                         <summary>Storage details</summary>
-                        <p class="storage-details">{entry.storage}</p>
+                        <dl class="metadata-list">
+                            {#if entry.rawAttributes}
+                                <div>
+                                    <dt>
+                                        <AttributeHelp
+                                            label="Native attributes"
+                                            contextKey={entry.id}
+                                            description="Filesystem-specific technical storage information. The hexadecimal value contains the stored attribute and type encoding."
+                                        />
+                                    </dt>
+                                    <dd class="file-path">{entry.rawAttributes}</dd>
+                                </div>
+                            {/if}
+                            {#each entry.attributes.filter((attribute) => !attribute.summary) as attribute (attribute.code)}
+                                <div>
+                                    <dt>
+                                        <AttributeHelp
+                                            label={attribute.label}
+                                            description={attribute.description}
+                                            contextKey={entry.id}
+                                        />
+                                    </dt>
+                                    <dd class="file-path">{attribute.value}</dd>
+                                </div>
+                            {/each}
+                        </dl>
+                        {#if entry.storage}<p class="storage-details">{entry.storage}</p>{/if}
                     </details>{/if}
             </div>
         {:else}<p class="empty-copy">No entry selected</p>{/if}

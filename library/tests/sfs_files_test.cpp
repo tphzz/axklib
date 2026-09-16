@@ -3,11 +3,13 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,8 +26,23 @@
 #include "axklib/package_archive.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
+#include "sfs_cluster_allocation.hpp"
 
 namespace {
+std::optional<std::string> external_sfs_image() {
+#if defined(_WIN32)
+    char *raw = nullptr;
+    std::size_t size{};
+    if (_dupenv_s(&raw, &size, "AXK_TEST_SFS_IMAGE") != 0 || raw == nullptr)
+        return std::nullopt;
+    const std::unique_ptr<char, decltype(&std::free)> value{raw, &std::free};
+    return *value == '\0' ? std::nullopt : std::optional<std::string>{value.get()};
+#else
+    const auto *value = std::getenv("AXK_TEST_SFS_IMAGE");
+    return value == nullptr || *value == '\0' ? std::nullopt : std::optional<std::string>{value};
+#endif
+}
+
 class SfsFiles : public testing::Test {
   protected:
     std::filesystem::path folder;
@@ -72,7 +89,91 @@ class SfsFiles : public testing::Test {
         stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         ASSERT_TRUE(stream);
     }
+    static void promote_large(const std::filesystem::path &path, std::string_view name, std::uint32_t unit) {
+        const auto image = axk::open_image(path).value();
+        const auto &partition = image.partitions().front();
+        const auto &record = named(image, name);
+        ASSERT_TRUE(record.continuation_clusters.empty());
+        const auto payload = image.read_record_data(partition.index, record.sfs_id, 65536U).value();
+        const auto cluster_bytes = partition.sectors_per_cluster * image.superblock().sector_size_bytes;
+        const auto base = static_cast<std::uint64_t>(partition.start_sector) * image.superblock().sector_size_bytes;
+        const auto reader = axk::FileReader::open(path).value();
+        std::vector<std::byte> bytes(static_cast<std::size_t>(reader->size()));
+        ASSERT_TRUE(reader->read_exact_at(0U, bytes));
+        axk::ByteWriter writer{bytes};
+        ASSERT_TRUE(writer.write_be32(base + 0x84U, unit));
+        ASSERT_TRUE(writer.write_be32(base + cluster_bytes + 0x84U, unit));
+        const auto mark = [&](std::uint32_t cluster, bool allocated) {
+            for (const auto bitmap : {partition.bitmap_copy1_cluster, partition.bitmap_copy2_cluster}) {
+                auto &byte = bytes[base + static_cast<std::uint64_t>(bitmap) * cluster_bytes + cluster / 8U];
+                const auto mask = static_cast<std::byte>(0x80U >> (cluster % 8U));
+                byte = allocated ? byte | mask : byte & ~mask;
+            }
+        };
+        for (const auto &extent : record.extents)
+            for (std::uint32_t offset = 0; offset < extent.cluster_count; ++offset)
+                mark(extent.cluster_offset + offset, false);
+        const auto count = payload.empty() ? 0U : ((record.data_size - 1U) / (unit * cluster_bytes) + 1U) * unit;
+        auto start = partition.directory_index_cluster + partition.directory_index_span_clusters;
+        start = ((start + unit - 1U) / unit) * unit;
+        for (; count != 0U && start + count <= partition.cluster_count; start += unit) {
+            bool free = true;
+            for (std::uint32_t offset = 0; offset < count; ++offset) {
+                const auto cluster = start + offset;
+                const auto byte =
+                    bytes[base + static_cast<std::uint64_t>(partition.bitmap_copy1_cluster) * cluster_bytes +
+                          cluster / 8U];
+                free = free && (byte & static_cast<std::byte>(0x80U >> (cluster % 8U))) == std::byte{};
+            }
+            if (free)
+                break;
+        }
+        ASSERT_LE(start + count, partition.cluster_count);
+        for (std::uint32_t offset = 0; offset < count; ++offset)
+            mark(start + offset, true);
+        const auto index = record.record_offset.value;
+        std::fill_n(bytes.begin() + static_cast<std::ptrdiff_t>(index + 0x0aU), 48U, std::byte{});
+        ASSERT_TRUE(writer.write_be16(index, count == 0U ? 0U : 1U));
+        ASSERT_TRUE(writer.write_be16(index + 4U, static_cast<std::uint16_t>(count)));
+        ASSERT_TRUE(writer.write_be32(index + 0x42U, record.attributes | 0x20000000U));
+        if (count != 0U) {
+            ASSERT_TRUE(writer.write_be32(index + 0x0aU, start));
+            ASSERT_TRUE(writer.write_be32(index + 0x0eU, count));
+            ASSERT_TRUE(writer.write_be32(index + 0x12U, record.data_size));
+            std::copy(payload.begin(), payload.end(),
+                      bytes.begin() +
+                          static_cast<std::ptrdiff_t>(base + static_cast<std::uint64_t>(start) * cluster_bytes));
+        }
+        patch(path, 0U, bytes);
+        EXPECT_TRUE(axk::allocation_is_safe_for_mutation(axk::open_image(path)->partitions().front().allocation));
+    }
 };
+
+TEST(SfsClusterAllocation, SelectsWholeUnitsAndPreservesOrdinarySelection) {
+    const auto available = [](std::uint32_t cluster) { return cluster == 9U || cluster == 20U; };
+    EXPECT_EQ(axk::detail::select_sfs_payload_clusters(6U, 31U, 8U, available, 4U),
+              (std::vector<std::uint32_t>{12U, 13U, 14U, 15U, 16U, 17U, 18U, 19U}));
+    const auto fragmented = [](std::uint32_t cluster) { return cluster >= 12U && cluster < 16U; };
+    EXPECT_EQ(axk::detail::select_sfs_payload_clusters(6U, 23U, 8U, fragmented, 4U),
+              (std::vector<std::uint32_t>{8U, 9U, 10U, 11U, 16U, 17U, 18U, 19U}));
+    EXPECT_EQ(axk::detail::select_sfs_payload_clusters(6U, 23U, 8U, fragmented),
+              (std::vector<std::uint32_t>{6U, 7U, 8U, 9U, 10U, 11U, 16U, 17U}));
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(6U, 23U, 12U, fragmented, 4U));
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(
+        8U, 16U, 4U, [](std::uint32_t cluster) { return cluster == 9U || cluster == 13U; }, 4U));
+}
+
+TEST(SfsClusterAllocation, RejectsInvalidUnitsCountsAndOverflowingBounds) {
+    const auto unused = [](std::uint32_t) { return false; };
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(0U, 20U, 1U, unused, 0U));
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(0U, 20U, 5U, unused, 4U));
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(20U, 10U, 4U, unused, 4U));
+    constexpr auto end = std::numeric_limits<std::uint32_t>::max();
+    EXPECT_FALSE(axk::detail::select_sfs_payload_clusters(end - 2U, end, 4U, unused, 4U));
+    EXPECT_EQ(axk::detail::select_sfs_payload_clusters(end - 7U, end, 4U, unused, 4U),
+              (std::vector<std::uint32_t>{end - 7U, end - 6U, end - 5U, end - 4U}));
+    EXPECT_EQ(axk::detail::select_sfs_payload_clusters(0U, 20U, 0U, unused, 4U), std::vector<std::uint32_t>{});
+}
 
 TEST_F(SfsFiles, RenamesEntriesInPlaceWithoutChangingIndexRecordsOrAllocation) {
     const auto populated = folder / "populated.hds";
@@ -151,6 +252,8 @@ TEST_F(SfsFiles, CreatesEmptyDirectoriesAndExactRawFilesWithoutSamplerCategories
     const auto &directory =
         *std::ranges::find(partition.records, axk::SfsId{entry->raw_link_id.value}, &axk::IndexRecord::sfs_id);
     EXPECT_EQ(directory.link_count, 2U);
+    EXPECT_EQ(directory.attributes, 0x94646972U);
+    EXPECT_EQ(named(*image, "sfserram").attributes, 0x94000000U);
     ASSERT_EQ(directory.directory_entries.size(), 4U);
     for (const auto &[name, size] :
          std::vector<std::pair<std::string, std::size_t>>{{"empty.bin", 0}, {"payload.bin", 8193}}) {
@@ -160,11 +263,63 @@ TEST_F(SfsFiles, CreatesEmptyDirectoriesAndExactRawFilesWithoutSamplerCategories
         const auto &record = *std::ranges::find(partition.records, id, &axk::IndexRecord::sfs_id);
         EXPECT_EQ(record.data_size, size);
         EXPECT_EQ(record.link_count, 1U);
+        EXPECT_EQ(record.attributes, 0x9e000000U);
         const auto bytes = image->read_record_data(partition.index, id, 16384U);
         ASSERT_TRUE(bytes);
         EXPECT_EQ(*bytes, std::vector<std::byte>(size, std::byte{0x5a}));
         if (size == 0) {
             EXPECT_TRUE(record.extents.empty());
+        }
+    }
+}
+
+TEST_F(SfsFiles, ReplacesLargeUnitFilesWithAlignedCapacityAndPreservedFlags) {
+    for (const auto unit : {1U, 4U, 200U}) {
+        SCOPED_TRACE(unit);
+        auto current = folder / std::format("large-{}.hds", unit);
+        const std::vector<axk::FilesystemEdit> initial{
+            axk::PutFilesystemFile{{"large"}, data(0)},
+            axk::PutFilesystemFile{{"untouched"}, data(1234)},
+        };
+        ASSERT_TRUE(axk::write_sfs_file_edits(source, current, axk::PartitionIndex{0}, initial));
+        const auto original = axk::open_image(current).value();
+        const auto &partition = original.partitions().front();
+        const auto cluster_bytes = partition.sectors_per_cluster * original.superblock().sector_size_bytes;
+        const auto start = static_cast<std::uint64_t>(partition.start_sector) * original.superblock().sector_size_bytes;
+        std::array<std::byte, 4> word{};
+        ASSERT_TRUE(axk::ByteWriter{word}.write_be32(0U, unit));
+        patch(current, start + 0x84U, word);
+        patch(current, start + cluster_bytes + 0x84U, word);
+        ASSERT_TRUE(axk::ByteWriter{word}.write_be32(0U, 0xfe000000U));
+        patch(current, named(original, "large").record_offset.value + 0x42U, word);
+        std::size_t step{};
+        for (const auto size : {1U, unit * cluster_bytes + 1U, 123U, 0U}) {
+            const auto before = digest(current);
+            const auto output = folder / std::format("large-{}-{}.hds", unit, step++);
+            const std::vector<axk::FilesystemEdit> edits{
+                axk::PutFilesystemFile{{"large"}, data(size), axk::FileConflict::replace},
+            };
+            const auto written = axk::write_sfs_file_edits(current, output, axk::PartitionIndex{0}, edits);
+            ASSERT_TRUE(written) << written.error().message;
+            EXPECT_EQ(digest(current), before);
+            const auto image = axk::open_image(output).value();
+            EXPECT_EQ(image.partitions().front().large_allocation_unit_clusters, unit);
+            const auto &record = named(image, "large");
+            EXPECT_EQ(record.attributes, 0xfe000000U);
+            EXPECT_EQ(record.data_size, size);
+            const auto expected_clusters = size == 0U ? 0U : ((size - 1U) / (unit * cluster_bytes) + 1U) * unit;
+            EXPECT_EQ(record.cluster_count, expected_clusters);
+            for (const auto &extent : record.extents) {
+                EXPECT_EQ(extent.cluster_offset % unit, 0U);
+                EXPECT_EQ(extent.cluster_count % unit, 0U);
+            }
+            EXPECT_TRUE(axk::allocation_is_safe_for_mutation(image.partitions().front().allocation));
+            EXPECT_EQ(*image.read_record_data(axk::PartitionIndex{0}, record.sfs_id, 1024U * 1024U),
+                      std::vector<std::byte>(size, std::byte{0x5a}));
+            EXPECT_EQ(named(image, "untouched").record_offset, named(original, "untouched").record_offset);
+            EXPECT_EQ(*image.read_record_data(axk::PartitionIndex{0}, named(image, "untouched").sfs_id, 1234U),
+                      std::vector<std::byte>(1234U, std::byte{0x5a}));
+            current = output;
         }
     }
 }
@@ -504,6 +659,7 @@ TEST_F(SfsFiles, PreservesAliasDataAndNativeAttributesWhenReplacingOneName) {
     const std::vector<axk::FilesystemEdit> initial{axk::PutFilesystemFile{{"first"}, data(4096)},
                                                    axk::PutFilesystemFile{{"second"}, data(0)}};
     ASSERT_TRUE(axk::write_sfs_file_edits(source, aliases, axk::PartitionIndex{0}, initial));
+    ASSERT_NO_FATAL_FAILURE(promote_large(aliases, "first", 4U));
     std::uint64_t first_index{};
     std::uint64_t second_index{};
     std::uint64_t second_link{};
@@ -529,7 +685,7 @@ TEST_F(SfsFiles, PreservesAliasDataAndNativeAttributesWhenReplacingOneName) {
     patch(aliases, second_index, unused);
     const std::array<std::byte, 2> links{std::byte{}, std::byte{2}};
     patch(aliases, first_index + 0x46U, links);
-    const std::array<std::byte, 4> attributes{std::byte{0xd4}, std::byte{}, std::byte{}, std::byte{}};
+    const std::array<std::byte, 4> attributes{std::byte{0xf4}, std::byte{}, std::byte{}, std::byte{}};
     patch(aliases, first_index + 0x42U, attributes);
     const auto before = digest(aliases);
     {
@@ -561,14 +717,245 @@ TEST_F(SfsFiles, PreservesAliasDataAndNativeAttributesWhenReplacingOneName) {
     const auto &first = named(*image, "first");
     const auto &second = named(*image, "second");
     EXPECT_NE(first.sfs_id, second.sfs_id);
-    EXPECT_EQ(first.attributes, 0xd4000000U);
-    EXPECT_EQ(second.attributes, 0xd4000000U);
+    EXPECT_EQ(first.attributes, 0xf4000000U);
+    EXPECT_EQ(second.attributes, 0xf4000000U);
+    EXPECT_EQ(first.cluster_count, 4U);
+    EXPECT_EQ(second.cluster_count, 4U);
+    EXPECT_EQ(first.extents.front().cluster_offset % 4U, 0U);
+    EXPECT_EQ(second.extents.front().cluster_offset % 4U, 0U);
     EXPECT_EQ(first.link_count, 1U);
     EXPECT_EQ(second.link_count, 1U);
     EXPECT_EQ(*image->read_record_data(axk::PartitionIndex{0}, first.sfs_id, 4096U),
               std::vector<std::byte>(12, std::byte{0x12}));
     EXPECT_EQ(*image->read_record_data(axk::PartitionIndex{0}, second.sfs_id, 4096U),
               std::vector<std::byte>(4096, std::byte{0x5a}));
+}
+
+TEST_F(SfsFiles, ClearsNonDirectoryTypeOnlyWhenUnlinkLeavesOneReference) {
+    for (const auto low_type : {0x006c6e6bU, 0x00123456U}) {
+        SCOPED_TRACE(std::format("low type {:08x}", low_type));
+        const auto aliases = folder / std::format("aliases-{:08x}.hds", low_type);
+        const std::vector<axk::FilesystemEdit> initial{axk::PutFilesystemFile{{"first"}, data(64)},
+                                                       axk::PutFilesystemFile{{"second"}, data(0)},
+                                                       axk::PutFilesystemFile{{"third"}, data(0)}};
+        ASSERT_TRUE(axk::write_sfs_file_edits(source, aliases, axk::PartitionIndex{0}, initial));
+        axk::SfsId first_id;
+        std::uint64_t first_index{};
+        std::uint32_t payload_cluster{};
+        std::array<std::uint64_t, 2> discarded_indexes{};
+        std::array<std::uint64_t, 2> alias_links{};
+        {
+            const auto image = axk::open_image(aliases);
+            ASSERT_TRUE(image);
+            const auto &record = named(*image, "first");
+            first_id = record.sfs_id;
+            first_index = record.record_offset.value;
+            ASSERT_EQ(record.extents.size(), 1U);
+            payload_cluster = record.extents.front().cluster_offset;
+            const auto &partition = image->partitions().front();
+            const auto root_id = axk::locate_partition_root_record(partition).value();
+            const auto &directory = *std::ranges::find(partition.records, root_id, &axk::IndexRecord::sfs_id);
+            const auto sector_bytes = image->superblock().sector_size_bytes;
+            const auto cluster_bytes = partition.sectors_per_cluster * sector_bytes;
+            const std::array<std::string_view, 2> names{"second", "third"};
+            for (std::size_t i = 0; i < names.size(); ++i) {
+                const auto &unused_record = named(*image, names[i]);
+                ASSERT_TRUE(unused_record.extents.empty());
+                discarded_indexes[i] = unused_record.record_offset.value;
+                const auto entry = std::ranges::find(directory.directory_entries, names[i], &axk::DirectoryEntry::name);
+                ASSERT_NE(entry, directory.directory_entries.end());
+                alias_links[i] = static_cast<std::uint64_t>(partition.start_sector) * sector_bytes +
+                                 static_cast<std::uint64_t>(directory.extents.front().cluster_offset) * cluster_bytes +
+                                 entry->payload_relative_offset + 4U;
+            }
+        }
+        // Form three names for one payload without allocating data for the discarded records.
+        std::array<std::byte, 4> link{};
+        ASSERT_TRUE(axk::ByteWriter{link}.write_be32(0U, first_id.value));
+        const std::array<std::byte, 72> unused{};
+        for (std::size_t i = 0; i < alias_links.size(); ++i) {
+            ASSERT_NO_FATAL_FAILURE(patch(aliases, alias_links[i], link));
+            ASSERT_NO_FATAL_FAILURE(patch(aliases, discarded_indexes[i], unused));
+        }
+        const std::array<std::byte, 2> links{std::byte{}, std::byte{3}};
+        ASSERT_NO_FATAL_FAILURE(patch(aliases, first_index + 0x46U, links));
+        constexpr std::uint32_t upper_flags = 0xde000000U;
+        std::array<std::byte, 4> attributes{};
+        ASSERT_TRUE(axk::ByteWriter{attributes}.write_be32(0U, upper_flags | low_type));
+        ASSERT_NO_FATAL_FAILURE(patch(aliases, first_index + 0x42U, attributes));
+
+        auto input = aliases;
+        const std::array<std::string, 2> removed_names{"first", "second"};
+        for (std::size_t step = 0; step < removed_names.size(); ++step) {
+            const auto before = digest(input);
+            const auto output = folder / std::format("unlink-{:08x}-{}.hds", low_type, step);
+            const std::vector<axk::FilesystemEdit> edits{axk::RemoveFilesystemEntry{{removed_names[step]}, false}};
+            const auto result = axk::write_sfs_file_edits(input, output, axk::PartitionIndex{0}, edits);
+            ASSERT_TRUE(result) << result.error().message;
+            EXPECT_EQ(digest(input), before);
+            {
+                const auto image = axk::open_image(output);
+                ASSERT_TRUE(image);
+                const auto &survivor = named(*image, "third");
+                EXPECT_EQ(survivor.sfs_id, first_id);
+                EXPECT_EQ(survivor.record_offset.value, first_index);
+                EXPECT_EQ(survivor.link_count, 2U - step);
+                EXPECT_EQ(survivor.attributes, upper_flags | (step == 0U ? low_type : 0U));
+                ASSERT_EQ(survivor.extents.size(), 1U);
+                EXPECT_EQ(survivor.extents.front().cluster_offset, payload_cluster);
+                const auto payload = image->read_record_data(axk::PartitionIndex{0}, first_id, 4096U);
+                ASSERT_TRUE(payload);
+                EXPECT_EQ(*payload, std::vector<std::byte>(64, std::byte{0x5a}));
+                if (step == 0U)
+                    EXPECT_EQ(named(*image, "second").sfs_id, first_id);
+                const auto &partition = image->partitions().front();
+                const auto root_id = axk::locate_partition_root_record(partition).value();
+                const auto &directory = *std::ranges::find(partition.records, root_id, &axk::IndexRecord::sfs_id);
+                for (std::size_t removed = 0; removed <= step; ++removed)
+                    EXPECT_FALSE(std::ranges::any_of(directory.directory_entries, [&](const auto &entry) {
+                        return entry.name == removed_names[removed] &&
+                               axk::directory_entry_state(entry.raw_link_id) == axk::DirectoryEntryState::live;
+                    }));
+            }
+            input = output;
+        }
+    }
+}
+
+TEST_F(SfsFiles, RewritesLargeDirectoriesWithAlignedCapacityAndKeepsRenameInPlace) {
+    const auto initial = folder / "large-directory.hds";
+    const std::vector<axk::FilesystemEdit> create{axk::CreateFilesystemDirectory{{"Directory"}}};
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, initial, axk::PartitionIndex{0}, create));
+    ASSERT_NO_FATAL_FAILURE(promote_large(initial, "Directory", 4U));
+    const auto original = axk::open_image(initial).value();
+    const auto reader = axk::FileReader::open(initial).value();
+    const std::vector<axk::FilesystemEdit> rename{axk::RenameFilesystemEntry{{"Directory"}, "Renamed"}};
+    const auto renamed = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, rename);
+    ASSERT_TRUE(renamed) << renamed.error().message;
+    const auto rename_image = axk::open_image(renamed->preview, {}).value();
+    EXPECT_EQ(named(rename_image, "Renamed").extents.front().cluster_offset,
+              named(original, "Directory").extents.front().cluster_offset);
+    std::vector<axk::FilesystemEdit> additions;
+    for (unsigned index = 0; index < 150U; ++index)
+        additions.push_back(axk::PutFilesystemFile{{"Renamed", std::format("file{}", index)}, data(0)});
+    const auto grown = axk::detail::prepare_sfs_file_edits(renamed->preview, axk::PartitionIndex{0}, additions);
+    ASSERT_TRUE(grown) << grown.error().message;
+    const auto grown_image = axk::open_image(grown->preview, {}).value();
+    const auto &directory = named(grown_image, "Renamed");
+    EXPECT_EQ(directory.attributes, 0xb4646972U);
+    EXPECT_GT(directory.data_size, 4096U);
+    EXPECT_EQ(directory.cluster_count, 8U);
+    EXPECT_EQ(directory.directory_entries.size(), 152U);
+    for (const auto &extent : directory.extents) {
+        EXPECT_EQ(extent.cluster_offset % 4U, 0U);
+        EXPECT_EQ(extent.cluster_count % 4U, 0U);
+    }
+    const std::vector<axk::FilesystemEdit> remove{axk::RemoveFilesystemEntry{{"Renamed"}, true}};
+    const auto removed = axk::detail::prepare_sfs_file_edits(grown->preview, axk::PartitionIndex{0}, remove);
+    ASSERT_TRUE(removed) << removed.error().message;
+    EXPECT_TRUE(
+        axk::allocation_is_safe_for_mutation(axk::open_image(removed->preview, {})->partitions().front().allocation));
+}
+
+TEST_F(SfsFiles, AllocatesFragmentedWholeUnitsAndOrdinaryContinuationMetadata) {
+    const auto initial = folder / "large-fragments.hds";
+    std::vector<axk::FilesystemEdit> create{axk::PutFilesystemFile{{"target"}, data(0)}};
+    for (unsigned index = 0; index < 14U; ++index)
+        create.push_back(axk::PutFilesystemFile{{std::format("block{}", index)}, data(1)});
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, initial, axk::PartitionIndex{0}, create));
+    ASSERT_NO_FATAL_FAILURE(promote_large(initial, "target", 4U));
+    for (unsigned index = 0; index < 14U; ++index)
+        ASSERT_NO_FATAL_FAILURE(promote_large(initial, std::format("block{}", index), 4U));
+    const auto image = axk::open_image(initial).value();
+    const auto free = image.partitions().front().allocation.free_space->free_cluster_count;
+    std::vector<std::pair<std::uint32_t, std::string>> blocks;
+    for (unsigned index = 0; index < 14U; ++index) {
+        const auto name = std::format("block{}", index);
+        blocks.emplace_back(named(image, name).extents.front().cluster_offset, name);
+    }
+    std::ranges::sort(blocks);
+    const std::vector<axk::FilesystemEdit> fill{axk::PutFilesystemFile{{"filler"}, data((free - 4U) * 1024U)}};
+    const auto reader = axk::FileReader::open(initial).value();
+    const auto packed = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, fill);
+    ASSERT_TRUE(packed) << packed.error().message;
+    std::vector<axk::FilesystemEdit> edit;
+    for (std::size_t index = 0; index < blocks.size(); index += 2U)
+        edit.push_back(axk::RemoveFilesystemEntry{{blocks[index].second}, false});
+    edit.push_back(axk::PutFilesystemFile{{"target"}, data(20U * 1024U), axk::FileConflict::replace});
+    const auto changed = axk::detail::prepare_sfs_file_edits(packed->preview, axk::PartitionIndex{0}, edit);
+    ASSERT_TRUE(changed) << changed.error().message;
+    const auto output = axk::open_image(changed->preview, {}).value();
+    const auto &record = named(output, "target");
+    EXPECT_GT(record.extents.size(), 4U);
+    EXPECT_EQ(record.cluster_count, 20U);
+    ASSERT_EQ(record.continuation_clusters.size(), 1U);
+    for (const auto &extent : record.extents) {
+        EXPECT_EQ(extent.cluster_offset % 4U, 0U);
+        EXPECT_EQ(extent.cluster_count % 4U, 0U);
+    }
+    EXPECT_EQ(*output.read_record_data(axk::PartitionIndex{0}, record.sfs_id, 32768U),
+              std::vector<std::byte>(20U * 1024U, std::byte{0x5a}));
+    EXPECT_TRUE(axk::allocation_is_safe_for_mutation(output.partitions().front().allocation));
+}
+
+TEST_F(SfsFiles, RejectsUnusableLargeUnitsWithoutBlockingReadsRenameOrEmptyReplacement) {
+    for (const auto unit : {0U, 65536U, std::numeric_limits<std::uint32_t>::max()}) {
+        SCOPED_TRACE(unit);
+        const auto initial = folder / std::format("unit-{}.hds", unit);
+        const std::vector<axk::FilesystemEdit> create{axk::PutFilesystemFile{{"target"}, data(0)}};
+        ASSERT_TRUE(axk::write_sfs_file_edits(source, initial, axk::PartitionIndex{0}, create));
+        ASSERT_NO_FATAL_FAILURE(promote_large(initial, "target", 4U));
+        const auto image = axk::open_image(initial).value();
+        const auto base = static_cast<std::uint64_t>(image.partitions().front().start_sector) * 512U;
+        std::array<std::byte, 4> word{};
+        ASSERT_TRUE(axk::ByteWriter{word}.write_be32(0U, unit));
+        patch(initial, base + 0x84U, word);
+        patch(initial, base + 1024U + 0x84U, word);
+        const auto before = digest(initial);
+        ASSERT_TRUE(axk::open_image(initial));
+        const std::vector<axk::FilesystemEdit> replace{
+            axk::CreateFilesystemDirectory{{"Not committed"}},
+            axk::PutFilesystemFile{{"target"}, data(1U), axk::FileConflict::replace}};
+        const auto output = folder / std::format("invalid-{}.hds", unit);
+        EXPECT_FALSE(axk::write_sfs_file_edits(initial, output, axk::PartitionIndex{0}, replace));
+        EXPECT_FALSE(std::filesystem::exists(output));
+        EXPECT_EQ(digest(initial), before);
+        const std::vector<axk::FilesystemEdit> harmless{
+            axk::PutFilesystemFile{{"target"}, data(0U), axk::FileConflict::replace},
+            axk::RenameFilesystemEntry{{"target"}, "renamed"}, axk::RemoveFilesystemEntry{{"renamed"}, false}};
+        const auto reader = axk::FileReader::open(initial).value();
+        const auto prepared = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, harmless);
+        ASSERT_TRUE(prepared) << prepared.error().message;
+        EXPECT_EQ(digest(initial), before);
+    }
+}
+
+TEST_F(SfsFiles, RejectsPartialUnitSpaceWithoutPublishingEarlierBatchEdits) {
+    const auto initial = folder / "partial-units.hds";
+    std::vector<axk::FilesystemEdit> create{axk::PutFilesystemFile{{"target"}, data(0)}};
+    for (unsigned index = 0; index < 14U; ++index)
+        create.push_back(axk::PutFilesystemFile{{std::format("block{}", index)}, data(1)});
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, initial, axk::PartitionIndex{0}, create));
+    ASSERT_NO_FATAL_FAILURE(promote_large(initial, "target", 4U));
+    const auto free = axk::open_image(initial)->partitions().front().allocation.free_space->free_cluster_count;
+    const std::vector<axk::FilesystemEdit> fill{axk::PutFilesystemFile{{"filler"}, data((free - 2U) * 1024U)}};
+    const auto packed = folder / "partial-packed.hds";
+    ASSERT_TRUE(axk::write_sfs_file_edits(initial, packed, axk::PartitionIndex{0}, fill));
+    const auto before = digest(packed);
+    const auto reader = axk::FileReader::open(packed).value();
+    std::vector<axk::FilesystemEdit> edit;
+    for (unsigned index = 0; index < 14U; index += 2U)
+        edit.push_back(axk::RemoveFilesystemEntry{{std::format("block{}", index)}, false});
+    const auto freed = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, edit);
+    ASSERT_TRUE(freed) << freed.error().message;
+    EXPECT_GE(axk::open_image(freed->preview, {})->partitions().front().allocation.free_space->free_cluster_count, 4U);
+    edit.push_back(axk::PutFilesystemFile{{"target"}, data(1), axk::FileConflict::replace});
+    const auto output = folder / "no-whole-unit.hds";
+    const auto rejected = axk::write_sfs_file_edits(packed, output, axk::PartitionIndex{0}, edit);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("insufficient free clusters"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_EQ(digest(packed), before);
 }
 
 class GeneratedFile final : public axk::RandomAccessReader {
@@ -590,6 +977,22 @@ class GeneratedFile final : public axk::RandomAccessReader {
         return {};
     }
 };
+
+TEST_F(SfsFiles, RejectsRoundedClusterCountOverflowBeforeReadingPayload) {
+    const auto initial = folder / "overflow.hds";
+    const std::vector<axk::FilesystemEdit> create{axk::PutFilesystemFile{{"large"}, data(0)}};
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, initial, axk::PartitionIndex{0}, create));
+    ASSERT_NO_FATAL_FAILURE(promote_large(initial, "large", 200U));
+    const auto payload = std::make_shared<GeneratedFile>();
+    payload->length = 65500U * 1024U;
+    const auto reader = axk::FileReader::open(initial).value();
+    const std::vector<axk::FilesystemEdit> replace{
+        axk::PutFilesystemFile{{"large"}, payload, axk::FileConflict::replace}};
+    const auto rejected = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, replace);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("cluster-count"), std::string::npos);
+    EXPECT_EQ(payload->passes, 0U);
+}
 
 TEST_F(SfsFiles, StreamsLargeFilesAndDiscardsFailedOrStaleInputPublications) {
     const auto before = digest(source);
@@ -701,6 +1104,79 @@ TEST_F(SfsFiles, PreservesSamplerAuthoredObjectPayloadsAndUntouchedIndexBytes) {
         EXPECT_EQ(original_index, changed_index);
     }
     EXPECT_EQ(digest(fixture), before);
+}
+
+TEST_F(SfsFiles, ReplacesSamplerAuthoredLargePayloadsWithoutChangingOtherRecords) {
+    const auto fixtures = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored";
+    std::vector<std::filesystem::path> sources{fixtures / "HD00_512_single_sbnk_authored.hds",
+                                               fixtures / "HD00_512_multi_sbnk_authored.hds"};
+    if (const auto external = external_sfs_image()) {
+        sources.emplace_back(*external);
+        RecordProperty("external_image", *external);
+    }
+    unsigned image_number{};
+    for (const auto &input : sources) {
+        SCOPED_TRACE(input.string());
+        const auto before = digest(input);
+        const auto original = axk::open_image(input).value();
+        const auto &partition = original.partitions().front();
+        const auto root_id = axk::locate_partition_root_record(partition).value();
+        std::vector<axk::FilesystemEdit> replacements;
+        for (const auto &record : partition.records) {
+            if ((record.attributes & 0x20000000U) == 0U || record.data_size == 0U)
+                continue;
+            ASSERT_NE(record.payload_kind, axk::PayloadKind::directory);
+            axk::FilesystemPath path;
+            auto owner = record.sfs_id;
+            for (std::size_t depth = 0; owner != root_id && depth < partition.records.size(); ++depth) {
+                bool found = false;
+                for (const auto &directory : partition.records) {
+                    const auto entry = std::ranges::find_if(directory.directory_entries, [&](const auto &candidate) {
+                        return candidate.state == axk::DirectoryEntryState::live && candidate.name != "." &&
+                               candidate.name != ".." && candidate.raw_link_id.value == owner.value;
+                    });
+                    if (entry == directory.directory_entries.end())
+                        continue;
+                    path.insert(path.begin(), entry->name);
+                    owner = directory.sfs_id;
+                    found = true;
+                    break;
+                }
+                ASSERT_TRUE(found);
+            }
+            ASSERT_EQ(owner, root_id);
+            const auto payload = original.read_record_data(partition.index, record.sfs_id, 16U * 1024U * 1024U).value();
+            replacements.push_back(
+                axk::PutFilesystemFile{path, std::make_shared<axk::MemoryReader>(payload), axk::FileConflict::replace});
+        }
+        ASSERT_FALSE(replacements.empty());
+        const auto output = folder / std::format("large-source-{}.hds", image_number++);
+        const auto written = axk::write_sfs_file_edits(input, output, partition.index, replacements);
+        ASSERT_TRUE(written) << written.error().message;
+        EXPECT_EQ(digest(input), before);
+        const auto changed = axk::open_image(output).value();
+        const auto input_reader = axk::FileReader::open(input).value();
+        const auto output_reader = axk::FileReader::open(output).value();
+        EXPECT_TRUE(axk::allocation_is_safe_for_mutation(changed.partitions().front().allocation));
+        for (const auto &record : partition.records) {
+            const auto &current =
+                *std::ranges::find(changed.partitions().front().records, record.sfs_id, &axk::IndexRecord::sfs_id);
+            EXPECT_EQ(current.attributes, record.attributes);
+            EXPECT_EQ(*original.read_record_data(partition.index, record.sfs_id, 16U * 1024U * 1024U),
+                      *changed.read_record_data(partition.index, current.sfs_id, 16U * 1024U * 1024U));
+            if ((record.attributes & 0x20000000U) != 0U) {
+                for (const auto &extent : current.extents) {
+                    EXPECT_EQ(extent.cluster_offset % partition.large_allocation_unit_clusters, 0U);
+                    EXPECT_EQ(extent.cluster_count % partition.large_allocation_unit_clusters, 0U);
+                }
+            } else {
+                std::array<std::byte, 72> old_index{}, new_index{};
+                ASSERT_TRUE(input_reader->read_exact_at(record.record_offset.value, old_index));
+                ASSERT_TRUE(output_reader->read_exact_at(current.record_offset.value, new_index));
+                EXPECT_EQ(old_index, new_index);
+            }
+        }
+    }
 }
 
 TEST_F(SfsFiles, KeepsEveryByteOutsideTheSelectedPartitionUnchanged) {

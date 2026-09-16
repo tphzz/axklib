@@ -36,6 +36,17 @@ describe('FilesView native metadata', () => {
             kind: 'file',
             filesystemMetadata: true,
             childCount: 0,
+            rawAttributes: 'SFS 0x94000000',
+            attributes: [
+                {
+                    code: 'sfs.file-write',
+                    label: 'File write flag',
+                    value: 'Disabled',
+                    summary: 'File write flag: Disabled',
+                    description: '',
+                },
+                { code: 'sfs.references', label: 'Filesystem references', value: '1', summary: '', description: '' },
+            ],
         };
         const access: FilesystemAccess = {
             inspect: async (query) => ({
@@ -55,6 +66,9 @@ describe('FilesView native metadata', () => {
         expect(row.classList.contains('filesystem-metadata')).toBe(true);
         expect(view.getByText('Metadata')).toBeTruthy();
         expect(view.getByText('Attributes')).toBeTruthy();
+        expect(view.getByText('File write flag: Disabled')).toBeTruthy();
+        expect(view.queryByText('Filesystem references')).toBeNull();
+        expect(view.queryByTitle(/0x/)).toBeNull();
         expect(view.getByRole('treegrid').contains(view.getByText('Attributes'))).toBe(true);
         expect(row.querySelectorAll('[role="gridcell"]').length).toBe(4);
         await fireEvent.click(row);

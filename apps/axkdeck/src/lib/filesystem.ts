@@ -13,6 +13,14 @@ export type FilesystemImportEntry = components['schemas']['FilesystemImportEntry
 export type FilesystemImportInspection = components['schemas']['ImageFilesystemImportInspectionResult'];
 export type FilesystemEditResult = components['schemas']['ImageFilesystemEditResult'];
 
+export interface FilesystemAttribute {
+    code: string;
+    label: string;
+    value: string;
+    description: string;
+    summary: string;
+}
+
 export interface FilesystemEntry {
     id: string;
     parentId: string | null;
@@ -30,7 +38,7 @@ export interface FilesystemEntry {
     issue: string;
     filesystemMetadata: boolean;
     rawAttributes: string;
-    attributes: string[];
+    attributes: FilesystemAttribute[];
 }
 
 export interface FilesystemQuery {
