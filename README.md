@@ -24,7 +24,19 @@ archives. Inspect relationships and audition Samples in their volume context.
 including EX5 and SU700 media. On A-series images, navigate between an object
 and its corresponding file through the inspector.
 
-<img width="1802" height="1156" alt="axkdeck A-series Device view with sampler media navigation and object inspection" src="https://github.com/user-attachments/assets/dba48def-6e9a-46e2-97b6-49e96cc3676a" />
+
+<p align="center">
+<img width="24%" alt="wave_data" src="https://github.com/user-attachments/assets/930cb33c-7ebe-4744-8cd6-6375856f7915" />
+<img width="24%" alt="samples" src="https://github.com/user-attachments/assets/9812b577-c530-4fcc-b320-6bd7764c60ff" />
+<img width="24%" alt="sample_banks" src="https://github.com/user-attachments/assets/98ef1290-f7c1-41d1-a6a6-cda5abe45eea" />
+<img width="24%" alt="programs" src="https://github.com/user-attachments/assets/2dcbd887-dd10-43f4-b5c6-bf3c141dc433" />
+<br/>
+<img width="24%" alt="import_packages" src="https://github.com/user-attachments/assets/250f0b05-fbeb-4f26-b24b-301a5f9b6f4a" />
+<img width="24%" alt="import_floppy" src="https://github.com/user-attachments/assets/8f14499c-7be7-4fae-b88a-dc835f52507b" />
+<img width="24%" alt="import_audio" src="https://github.com/user-attachments/assets/6a14699c-da72-477e-91fa-7278e3c5b315" />
+<img width="24%" alt="files" src="https://github.com/user-attachments/assets/6e54d238-9040-4686-93cc-ca1d44ec85bc" />
+</p>
+
 
 *A-series media in axkdeck's Device view.*
 
