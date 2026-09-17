@@ -3,8 +3,8 @@ import type {
     FilesystemImportInspection,
     FilesystemInputInspection,
     FilesystemInputSnapshot,
+    FilesystemEditSource,
 } from '../../lib/filesystem';
-import type { InputFileLocation } from '../../lib/storageLocations';
 import type { JobState } from '../../lib/transport';
 import type { FilesystemImportSourceEntry } from '../../lib/filesystemImport';
 
@@ -15,7 +15,7 @@ export type FilesImportRow = {
     decision: FilesystemImportInspection['entries'][number] | null;
 } & (
     | { directory: true; source: null; snapshot: null }
-    | { directory: false; source: InputFileLocation; snapshot: FilesystemInputSnapshot | null }
+    | { directory: false; source: FilesystemEditSource; snapshot: FilesystemInputSnapshot | null }
 );
 
 export function sourceRows(entries: FilesystemImportSourceEntry[]): FilesImportRow[] {
@@ -43,7 +43,7 @@ export function importPaths(rows: FilesImportRow[]): string[][] {
     return paths;
 }
 
-export function fileSources(rows: FilesImportRow[]): InputFileLocation[] {
+export function fileSources(rows: FilesImportRow[]): FilesystemEditSource[] {
     return rows.flatMap((row) => (row.directory ? [] : [row.source]));
 }
 
@@ -64,7 +64,8 @@ export function inspectedSources(job: JobState, rows: FilesImportRow[]): FilesIm
         const matches =
             row.source.kind === 'client-upload'
                 ? 'uploadRef' in source && source.uploadRef.uploadId === row.source.reference.uploadId
-                : 'fileRef' in source &&
+                : row.source.kind === 'server-file' &&
+                  'fileRef' in source &&
                   source.fileRef.rootId === row.source.reference.rootId &&
                   source.fileRef.relativePath === row.source.reference.relativePath;
         if (

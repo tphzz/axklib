@@ -45,6 +45,7 @@ import type {
 } from './transport';
 import { randomIdempotencyKey, serverInput } from './httpTransportWire';
 import { startSu700Import } from './httpSu700Import';
+import { inspectFilesystemInputs, inspectFilesystemImage, filesystemEditWire } from './httpFilesystemInputs';
 import type { Su700Request } from './su700Import';
 import type { DiskTreeItem } from './types';
 import type { FilesystemEdit, FilesystemPage, FilesystemQuery, FilesystemImportEntry } from './filesystem';
@@ -77,10 +78,13 @@ export class HttpImageSessions {
         return this.jobs.map(job);
     }
     async startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
-        if (!inputs.length || inputs.length > 10000) throw new Error('Choose between 1 and 10000 import inputs');
-        const job = await this.client.invoke<never>('filesystem.inputs.inspect', { inputs: inputs.map(serverInput) });
-        if (!this.jobs.isJob(job)) throw new Error('filesystem.inputs.inspect did not return a job');
-        return this.jobs.map(job);
+        return inspectFilesystemInputs(this.client, this.jobs, inputs);
+    }
+    async startFilesystemImageInspection(source: InputFileLocation): Promise<JobState> {
+        return inspectFilesystemImage(this.client, this.jobs, source);
+    }
+    async releaseFilesystemImageInspection(inspectionToken: string): Promise<void> {
+        await this.client.invoke('filesystem.images.release', { inspectionToken });
     }
     async inspectFilesystemExport(
         sessionId: number,
@@ -151,9 +155,7 @@ export class HttpImageSessions {
                 // Entry identities belong to the reviewed revision, not the latest heartbeat.
                 expectedRevision,
                 acknowledgeDeviceRelationships: true,
-                edits: edits.map((edit) =>
-                    edit.kind === 'PUT_FILE' ? { ...edit, source: serverInput(edit.source) } : edit,
-                ),
+                edits: edits.map(filesystemEditWire),
             },
             { idempotencyKey: randomIdempotencyKey() },
         );

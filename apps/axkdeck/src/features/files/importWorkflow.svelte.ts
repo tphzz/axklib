@@ -287,6 +287,12 @@ export class FilesImportWorkflow {
         }
     }
 
+    setPreparedRows(rows: FilesImportRow[]): void {
+        if (!this.editable) return;
+        this.rows = rows;
+        this.invalidate();
+    }
+
     rename(index: number, name: string): void {
         if (!this.editable || !this.rows[index]) return;
         this.rows[index].name = normalizeFilesystemName(name, this.capabilities!);

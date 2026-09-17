@@ -1,8 +1,30 @@
 #include "operation_registry_filesystem.hpp"
 
 namespace axk::app {
-const std::array<OperationDescriptor, 7U> &filesystem_descriptors() {
-    static const std::array descriptors{OperationDescriptor{"images.su700.import.inspect",
+const std::array<OperationDescriptor, 9U> &filesystem_descriptors() {
+    static const std::array descriptors{OperationDescriptor{"filesystem.images.inspect",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/filesystem-image-inspections",
+                                                            ExecutionMode::job,
+                                                            {},
+                                                            "FilesystemImageInspectionRequest",
+                                                            "FilesystemImageInspection",
+                                                            OperationClass::read,
+                                                            false,
+                                                            false},
+                                        OperationDescriptor{"filesystem.images.release",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/filesystem-image-inspections/release",
+                                                            ExecutionMode::request,
+                                                            {},
+                                                            "FilesystemImageReleaseRequest",
+                                                            "FilesystemImageReleaseResult",
+                                                            OperationClass::read,
+                                                            false,
+                                                            false},
+                                        OperationDescriptor{"images.su700.import.inspect",
                                                             {},
                                                             HttpMethod::post,
                                                             "/api/v1/su700-import-inspections",

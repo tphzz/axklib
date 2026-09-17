@@ -39,6 +39,12 @@ export class HttpImageSessionReads {
     startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
         return this.imageSessions.startFilesystemInputInspection(inputs);
     }
+    startFilesystemImageInspection(source: InputFileLocation): Promise<JobState> {
+        return this.imageSessions.startFilesystemImageInspection(source);
+    }
+    releaseFilesystemImageInspection(token: string): Promise<void> {
+        return this.imageSessions.releaseFilesystemImageInspection(token);
+    }
     inspectFilesystemExport(
         sessionId: number,
         expectedRevision: number,

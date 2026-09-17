@@ -461,6 +461,12 @@ export class FloppyImportWorkflow {
             if (inspection.format !== 'A_SERIES') {
                 if (r.members.some((member) => isDirectory(member.source)))
                     throw new Error('Folder import supports unpacked A-series floppy disks.');
+                if (inspection.format !== 'TX16W')
+                    throw new Error(
+                        inspection.format === 'SU700'
+                            ? 'Import SU700 floppies into a SU700 hard disk in Files mode.'
+                            : 'No supported A-series sampler contents were found. To copy files from a FAT floppy, open the destination FAT image in Files mode and drop the floppy there.',
+                    );
                 const sources = r.members
                         .map((m) => m.source)
                         .filter((source): source is ClientUploadSource | FileLocation => !isDirectory(source)),

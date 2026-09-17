@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/su700_import_operations.hpp"
+#include "filesystem_image_inputs.hpp"
 #include "filesystem_inputs.hpp"
 
 namespace axk::app {
@@ -29,9 +30,13 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
         return bound;
     if (registry.is_implemented("images.filesystem.edit"))
         return {};
+    auto image_inputs = std::make_shared<FilesystemImageInputs>(sandbox, uploads);
+    if (auto registered = bind_filesystem_image_inputs(registry, image_inputs); !registered)
+        return registered;
     auto bound = registry.bind(
         "images.filesystem.edit",
-        [&sandbox, &uploads, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+        [&sandbox, &uploads, &images, &journals, image_inputs](const Json &input,
+                                                               const OperationContext &context) -> Result<Json> {
             try {
                 if (!input.at("acknowledgeDeviceRelationships").get<bool>())
                     return std::unexpected(
@@ -46,6 +51,7 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                     return std::unexpected(Error{"invalid_request", "Choose between 1 and 10000 filesystem changes"});
                 std::vector<std::pair<filesystem_inputs::OpenedInput, Json>> inputs;
                 std::map<std::string, std::size_t> input_indices;
+                std::map<std::string, FilesystemImageLease> image_leases;
                 std::vector<ImageFilesystemEdit> requests;
                 for (const auto &row : rows) {
                     if (auto checked = context.cancellation.check(); !checked)
@@ -71,8 +77,26 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                             const auto key = row.at("source").dump();
                             auto found = input_indices.find(key);
                             if (found == input_indices.end()) {
-                                auto file =
-                                    filesystem_inputs::open(row.at("source"), context.owner_id, sandbox, uploads);
+                                const auto &source = row.at("source");
+                                auto open_source = [&]() -> Result<filesystem_inputs::OpenedInput> {
+                                    if (!source.contains("imageEntryRef"))
+                                        return filesystem_inputs::open(source, context.owner_id, sandbox, uploads);
+                                    if (source.size() != 1U)
+                                        return std::unexpected(
+                                            Error{"invalid_request", "Choose exactly one import source"});
+                                    const auto &ref = source.at("imageEntryRef");
+                                    const auto token = ref.at("inspectionToken").get<std::string>();
+                                    if (!image_leases.contains(token)) {
+                                        auto lease = image_inputs->lease(token, context.owner_id);
+                                        if (!lease)
+                                            return std::unexpected(lease.error());
+                                        if (auto verified = lease->verify(context.cancellation); !verified)
+                                            return std::unexpected(verified.error());
+                                        image_leases.emplace(token, std::move(*lease));
+                                    }
+                                    return image_leases.at(token).open(ref.at("entryId").get<std::string>());
+                                };
+                                auto file = open_source();
                                 if (!file)
                                     return std::unexpected(file.error());
                                 if (auto checked = file->verify(expected, context.cancellation); !checked)
@@ -94,6 +118,11 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                 if (!resolved)
                     return std::unexpected(resolved.error());
                 const auto validate_inputs = [&]() -> Result<void> {
+                    for (const auto &[token, lease] : image_leases) {
+                        static_cast<void>(token);
+                        if (auto checked = lease.verify(context.cancellation); !checked)
+                            return checked;
+                    }
                     for (const auto &[file, expected] : inputs) {
                         if (auto checked = file.verify(expected, context.cancellation); !checked)
                             return checked;

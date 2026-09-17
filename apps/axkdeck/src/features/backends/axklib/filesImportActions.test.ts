@@ -11,6 +11,8 @@ function setup() {
     const transport = {
         supportsClientUploads: true,
         startFilesystemInputInspection: vi.fn(),
+        startFilesystemImageInspection: vi.fn(),
+        releaseFilesystemImageInspection: vi.fn().mockResolvedValue(undefined),
         startFilesystemImportInspection: vi.fn(),
         waitForJob: vi.fn(),
         jobStatus: vi.fn(),

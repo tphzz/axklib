@@ -92,8 +92,8 @@ The request supplies `imageId`, `expectedRevision`,
 `acknowledgeDeviceRelationships: true` and an ordered `edits` array:
 
 - `CREATE_DIRECTORY`: `parentEntryId` and a `relativePath` component array.
-- `PUT_FILE`: the same destination, `source` containing exactly one `fileRef`
-  or `uploadRef`, a required `expectedSource` snapshot from input inspection,
+- `PUT_FILE`: the same destination, `source` containing exactly one `fileRef`,
+  `uploadRef` or retained `imageEntryRef`, a required `expectedSource` snapshot from input inspection,
   and optional `conflict` (`SKIP` by default or `REPLACE`).
 - `DELETE`: `entryId` and explicit `recursive`. Nonempty directories require
   `recursive: true`; partition roots and structural metadata remain protected.
@@ -252,6 +252,50 @@ Repeated references to one input share a retained reader and one verification
 before planning and one during commit; conflicting reviewed snapshots are
 rejected. SU700 imports verify the complete backing floppy, not each derived
 file range separately.
+
+### Floppy Files And Contents
+
+Writable FAT16 roots, including EX5 HD and removable media, advertise
+`FAT_FLOPPY_CONTENTS` in `supportedImports`. Dropping only `.ima` or `.img`
+files into their Files view opens **File / Contents**, initially **Contents**.
+File copies the original image bytes; Contents copies selected filesystem
+entries directly into the drop target, preserving their relative hierarchy
+without adding an image-name directory. A file-row drop uses its parent.
+Mixed drops containing ordinary files or host directories retain raw Files import.
+
+The dialog accepts up to 32 images of 4 MiB each. Each source has its own
+selection tree, including recursive directory selection and Select All.
+Names are normalized to uppercase and checked against FAT 8.3 limits.
+Same-path directories merge; selected files from different images with the
+same destination must be renamed or deselected. Existing destination files
+default to Skip, with explicit Replace available. Mode changes preserve edits
+but invalidate Review. Unreadable Contents remain visible as errors while
+File mode remains available. Clean completion preserves Files expansion and
+scroll state and closes after cleanup and refresh.
+
+`POST /api/v1/filesystem-image-inspections` starts the read-only
+`filesystem.images.inspect` job with `source: {fileRef: ...}` or
+`source: {uploadRef: ...}`. It enumerates bounded FAT image contents without
+sampler-object conversion, including auxiliary and configuration files.
+Results contain `inspectionToken` and `entries`, each with `entryId`,
+`relativePath`, `directory` and `snapshot` (null for directories).
+Each inspection accepts at most 8,192 entries and 4 MiB of aggregate file data.
+
+For each selected file, submit
+`source: {imageEntryRef: {inspectionToken, entryId}}` and its exact snapshot
+as `expectedSource` through the ordinary Files edit job. These references are
+valid only for Files edits, not general input or upload APIs. Readers retain
+immutable contained bytes and verify the original image identity and content
+before mutation and during commit validation. Host files remain read-only;
+uploads retain their owner-scoped leases.
+
+Inspection handles belong to their authenticated owner and expire after
+15 minutes. `POST /api/v1/filesystem-image-inspections/release` accepts
+`{inspectionToken}` and idempotently releases an unused handle. Active writers
+retain their readers through completion even after handle release or expiry.
+The service admits at most 32 pending or retained inspections, including
+released handles still held by writers. Expired or changed sources require a
+new inspection; existing transaction, revision and rollback rules still apply.
 
 ### SU700 Floppy Import
 

@@ -199,7 +199,7 @@ class Builder {
                                               R"(^[A-Z0-9!#$%&'()@^_`{}~-]{1,8}(\.[A-Z0-9!#$%&'()@^_`{}~-]{1,3})?$)",
                                               "Use 1-8 ASCII characters plus an optional 1-3 character extension. "
                                               "Letters are uppercased automatically.",
-                                              {},
+                                              {"FAT_FLOPPY_CONTENTS"},
                                               "FAT_8_3_UPPERCASE"};
         }
         std::map<std::string, std::size_t> directories{{"", root}};

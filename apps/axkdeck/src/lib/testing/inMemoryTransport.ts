@@ -193,6 +193,12 @@ export class InMemoryImageTransport implements ImageTransport {
     startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
         return this.invoke('startFilesystemInputInspection', [inputs]);
     }
+    startFilesystemImageInspection(source: InputFileLocation): Promise<JobState> {
+        return this.invoke('startFilesystemImageInspection', [source]);
+    }
+    releaseFilesystemImageInspection(token: string): Promise<void> {
+        return this.invoke('releaseFilesystemImageInspection', [token]);
+    }
     startSu700Import(request: import('../su700Import').Su700Request): Promise<JobState> {
         return this.invoke('startSu700Import', [request]);
     }

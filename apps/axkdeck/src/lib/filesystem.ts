@@ -75,13 +75,23 @@ export interface FilesystemRootCapabilities {
     supportedImports: string[];
 }
 
+export type FilesystemEditSource =
+    | InputFileLocation
+    | {
+          kind: 'image-entry';
+          displayName: string;
+          reference: { inspectionToken: string; entryId: string };
+      };
+
+export type FilesystemImageInspection = components['schemas']['FilesystemImageInspection'];
+
 export type FilesystemEdit =
     | { kind: 'CREATE_DIRECTORY'; parentEntryId: string; relativePath: string[] }
     | {
           kind: 'PUT_FILE';
           parentEntryId: string;
           relativePath: string[];
-          source: InputFileLocation;
+          source: FilesystemEditSource;
           expectedSource: FilesystemInputSnapshot;
           conflict: 'SKIP' | 'REPLACE';
       }
@@ -96,6 +106,8 @@ export interface FilesystemTransport {
         entries: FilesystemImportEntry[],
     ): Promise<JobState>;
     startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState>;
+    startFilesystemImageInspection(source: InputFileLocation): Promise<JobState>;
+    releaseFilesystemImageInspection(inspectionToken: string): Promise<void>;
     filesystem(sessionId: number, query?: FilesystemQuery): Promise<FilesystemPage>;
     startFilesystemEdits(sessionId: number, expectedRevision: number, edits: FilesystemEdit[]): Promise<JobState>;
     inspectFilesystemExport(

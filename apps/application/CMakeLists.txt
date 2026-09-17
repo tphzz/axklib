@@ -26,6 +26,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/su700_import_roots.cpp
                                    src/su700_import_operations.cpp src/image_su700_import.cpp
                                    src/filesystem_inputs.cpp
+                                   src/filesystem_image_inputs.cpp
                                    src/image_filesystem_import.cpp
                                    src/filesystem_import_inspection.cpp
                                    src/filesystem_file_publication.cpp src/filesystem_native.cpp
@@ -115,6 +116,7 @@ if(BUILD_TESTING)
                                        tests/filesystem_edit_operations_test.cpp
                                        tests/filesystem_fat_edit_test.cpp
                                        tests/filesystem_inputs_test.cpp
+                                       tests/filesystem_image_inputs_test.cpp
                                        tests/su700_import_test.cpp
                                        tests/system_program_context_test.cpp
                                        tests/system_file_operations_test.cpp

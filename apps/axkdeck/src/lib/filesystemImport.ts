@@ -1,4 +1,4 @@
-import type { FilesystemImportEntry } from './filesystem';
+import type { FilesystemImportEntry, FilesystemEditSource } from './filesystem';
 import type { InputFileLocation } from './storageLocations';
 import type { JobState } from './transport';
 import type { ClientUploadSource } from './clientUploadSource';
@@ -37,6 +37,10 @@ export interface FilesystemImportDriver {
 }
 
 export interface FilesystemImportActions extends FilesystemImportDriver {
+    images?: {
+        inspect(source: InputFileLocation, update: (job: JobState) => void): Promise<JobState>;
+        release(inspectionToken: string): Promise<void>;
+    };
     supportsClientUploads: boolean;
     chooseFiles(title?: string): Promise<InputFileLocation[] | null>;
     chooseDirectory(
@@ -48,5 +52,5 @@ export interface FilesystemImportActions extends FilesystemImportDriver {
         signal: AbortSignal,
         progress: (message: string) => void,
     ): Promise<InputFileLocation[]>;
-    release(inputs: InputFileLocation[]): Promise<void>;
+    release(inputs: FilesystemEditSource[]): Promise<void>;
 }

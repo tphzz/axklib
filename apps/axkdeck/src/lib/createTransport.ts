@@ -59,6 +59,12 @@ class UnavailableTransport implements ImageTransport {
     startFilesystemInputInspection(): Promise<JobState> {
         return this.unavailable();
     }
+    startFilesystemImageInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    releaseFilesystemImageInspection(): Promise<void> {
+        return this.unavailable();
+    }
     inspectFilesystemExport(): Promise<FilesystemExportInspection> {
         return this.unavailable();
     }

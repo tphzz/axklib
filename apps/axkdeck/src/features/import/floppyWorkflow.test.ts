@@ -320,6 +320,17 @@ describe('floppy import', () => {
         expect(other.otherFormat).toHaveBeenCalledWith('TX16W', [source], volume);
         expect(other.workflow.request).toBeNull();
     });
+    it.each(['UNKNOWN', 'SU700'] as const)('keeps an unsupported %s drop open with an explanation', async (format) => {
+        const { workflow, otherFormat, transport } = setup({ ...inspection, format, inspectionToken: null });
+        await workflow.requestDroppedFiles([source], volume);
+        expect(workflow.request?.status).toBe('ready');
+        expect(workflow.request?.error).toContain(format === 'SU700' ? 'SU700 hard disk' : 'A-series');
+        expect(otherFormat).not.toHaveBeenCalled();
+        await workflow.review();
+        expect(transport.planFloppyImport).not.toHaveBeenCalled();
+        await workflow.close();
+        expect(workflow.request).toBeNull();
+    });
     it('invalidates a reviewed plan after destination or selection edits', async () => {
         const { workflow, transport } = setup();
         await workflow.requestDroppedFiles([source], volume);

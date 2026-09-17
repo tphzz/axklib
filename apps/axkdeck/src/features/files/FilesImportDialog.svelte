@@ -1,5 +1,6 @@
 <script lang="ts">
     import FilesystemNameField from './FilesystemNameField.svelte';
+    import FilesImportFooter from './FilesImportFooter.svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportSourceChoice from '../../lib/components/ImportSourceChoice.svelte';
@@ -18,7 +19,6 @@
     const pageCount = $derived(Math.max(1, Math.ceil(workflow.rows.length / 100)));
     const paths = $derived(importPaths(workflow.rows));
     const hierarchy = $derived(workflow.rows.some((row) => row.directory));
-    const failed = $derived(['failed', 'unconfirmed', 'refresh-failed', 'write-failed'].includes(workflow.phase));
     $effect(() => {
         if (page >= pageCount) page = pageCount - 1;
     });
@@ -218,49 +218,7 @@
                         {#each workflow.warnings as warning}<p>{warning}</p>{/each}
                     </div>{/if}
             </div>
-            <footer class="dialog-footer">
-                <span
-                    class="dialog-footer-status"
-                    class:dialog-error={failed}
-                    role={failed ? 'alert' : 'status'}
-                    title={workflow.message}>{workflow.message}</span
-                >
-                <button
-                    class="secondary-button"
-                    type="button"
-                    data-dialog-initial-focus="caret"
-                    disabled={!workflow.canDismiss}
-                    onclick={dismiss}
-                >
-                    {workflow.phase === 'warnings'
-                        ? 'Done'
-                        : workflow.busy || ['choosing', 'ready', 'dirty', 'unconfirmed'].includes(workflow.phase)
-                          ? 'Cancel'
-                          : 'Close'}</button
-                >
-                {#if ['unconfirmed', 'checking', 'refresh-failed', 'refreshing', 'write-failed'].includes(workflow.phase)}
-                    <button
-                        class="primary-button"
-                        type="button"
-                        disabled={workflow.busy || (workflow.phase === 'unconfirmed' && workflow.jobId === null)}
-                        onclick={() => void workflow.submit()}
-                        >{['unconfirmed', 'checking'].includes(workflow.phase) ? 'Check status' : 'Refresh'}</button
-                    >
-                {:else if workflow.phase !== 'warnings'}
-                    <button
-                        class="secondary-button"
-                        type="button"
-                        disabled={!workflow.canInspect}
-                        onclick={() => void workflow.inspect()}>Review</button
-                    >
-                    <button
-                        class="primary-button"
-                        type="button"
-                        disabled={!workflow.canSubmit}
-                        onclick={() => void workflow.submit()}>Import</button
-                    >
-                {/if}
-            </footer>
+            <FilesImportFooter {workflow} {dismiss} />
         </div>
     </div>
 {/if}

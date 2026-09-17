@@ -11,7 +11,7 @@ namespace {
 TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 70U);
+    EXPECT_EQ(entries.size(), 72U);
 
     std::set<std::string> ids;
     std::set<std::string> cli_commands;

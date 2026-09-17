@@ -4,5 +4,5 @@
 #include <array>
 
 namespace axk::app {
-const std::array<OperationDescriptor, 7U> &filesystem_descriptors();
+const std::array<OperationDescriptor, 9U> &filesystem_descriptors();
 }

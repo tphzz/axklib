@@ -24,7 +24,8 @@ bool session_operation(std::string_view id) {
            id == "images.media_conversion.inspect" || id == "images.media_conversion" ||
            id == "images.extent_layout.repair" || id == "images.filesystem.edit" ||
            id == "images.filesystem.export.inspect" || id == "images.filesystem.export" ||
-           id == "filesystem.inputs.inspect" || id == "images.filesystem.import.inspect" ||
+           id == "filesystem.inputs.inspect" || id == "filesystem.images.inspect" ||
+           id == "filesystem.images.release" || id == "images.filesystem.import.inspect" ||
            id == "images.su700.import.inspect" || id == "images.su700.import";
 }
 

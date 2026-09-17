@@ -22,6 +22,48 @@ function setup() {
 }
 
 describe('Files HTTP binding', () => {
+    it('inspects and releases floppy sources and maps contained files only at the edit boundary', async () => {
+        const { client, sessions } = setup();
+        const invoke = vi.spyOn(client, 'invoke').mockResolvedValue({
+            jobId: 'inspection',
+            operationId: 'filesystem.images.inspect',
+            state: 'QUEUED',
+            latestSequence: 0,
+            progress: null,
+            result: null,
+            error: null,
+        });
+        const source = clientUploadLocation({ uploadId: 'disk' }, 'FILE', 'disk.ima');
+        await sessions.startFilesystemImageInspection(source);
+        expect(invoke).toHaveBeenCalledWith('filesystem.images.inspect', {
+            source: { uploadRef: { uploadId: 'disk' } },
+        });
+        const reference = { inspectionToken: 'a'.repeat(64), entryId: 'f1' };
+        await sessions.startFilesystemEdits(1, 6, [
+            {
+                kind: 'PUT_FILE',
+                parentEntryId: 'folder',
+                relativePath: ['SONG.S1A'],
+                source: { kind: 'image-entry', displayName: 'SONG.S1A', reference },
+                expectedSource: { revision: 'content', sizeBytes: 3, sha256: 'b'.repeat(64) },
+                conflict: 'SKIP',
+            },
+        ]);
+        expect(invoke).toHaveBeenLastCalledWith(
+            'images.filesystem.edit',
+            expect.objectContaining({
+                expectedRevision: 6,
+                edits: [expect.objectContaining({ source: { imageEntryRef: reference } })],
+            }),
+            { idempotencyKey: expect.any(String) },
+        );
+        invoke.mockResolvedValue({});
+        await sessions.releaseFilesystemImageInspection(reference.inspectionToken);
+        expect(invoke).toHaveBeenLastCalledWith('filesystem.images.release', {
+            inspectionToken: reference.inspectionToken,
+        });
+        await expect(sessions.startFilesystemImageInspection(source)).rejects.toThrow('did not return a job');
+    });
     it('binds SU700 inspection and execution to the reviewed session and a stable write identity', async () => {
         const { client, sessions } = setup();
         const invoke = vi.spyOn(client, 'invoke').mockResolvedValue({

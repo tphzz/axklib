@@ -16,6 +16,44 @@
 
 namespace {
 
+TEST(ImageSessionContract, FilesystemRootAcceptsFatFloppyContentsCapability) {
+    const axk::server::OpenApiValidator validator;
+    const nlohmann::json capability{{"rootId", "fat-0"},
+                                    {"createDirectory", true},
+                                    {"putFile", true},
+                                    {"deleteEntry", true},
+                                    {"renameEntry", true},
+                                    {"maximumNameBytes", 12},
+                                    {"namePolicy", "FAT_8_3_UPPERCASE"},
+                                    {"namePattern", ""},
+                                    {"nameHint", ""},
+                                    {"supportedImports", {"FAT_FLOPPY_CONTENTS"}}};
+    EXPECT_TRUE(validator.validate("ImageFilesystemRootCapabilities", capability));
+}
+
+TEST(ImageSessionContract, InspectedImageEntriesAreRestrictedToFilesystemEditInputs) {
+    const axk::server::OpenApiValidator validator;
+    using Json = nlohmann::json;
+    const Json reference{{"imageEntryRef", {{"inspectionToken", std::string(64U, 'a')}, {"entryId", "f1"}}}};
+    EXPECT_TRUE(validator.validate("FilesystemEditInput", reference));
+    EXPECT_FALSE(validator.validate("FilesystemFileInput", reference));
+    EXPECT_FALSE(validator.validate("FilesystemImageInspectionRequest", {{"source", reference}}));
+    auto mixed = reference;
+    mixed["fileRef"] = {{"rootId", "root"}, {"relativePath", "disk.ima"}};
+    EXPECT_FALSE(validator.validate("FilesystemEditInput", mixed));
+    auto invalid = reference;
+    invalid["imageEntryRef"]["inspectionToken"] = "guess";
+    EXPECT_FALSE(validator.validate("FilesystemEditInput", invalid));
+    const Json snapshot{{"revision", "inspection:f1"}, {"sizeBytes", 5}, {"sha256", std::string(64U, 'b')}};
+    const Json result{
+        {"inspectionToken", std::string(64U, 'a')},
+        {"entries",
+         Json::array(
+             {{{"entryId", "f1"}, {"relativePath", {"SONG.S1A"}}, {"directory", false}, {"snapshot", snapshot}}})}};
+    EXPECT_TRUE(validator.validate("FilesystemImageInspection", result));
+    EXPECT_TRUE(validator.validate("FilesystemImageReleaseRequest", {{"inspectionToken", std::string(64U, 'a')}}));
+}
+
 TEST(ImageSessionContract, FilesystemAttributesRequireStructuredPresentationAndStableIdentity) {
     const axk::server::OpenApiValidator validator;
     nlohmann::json attribute{{"code", "sfs.file-write"},

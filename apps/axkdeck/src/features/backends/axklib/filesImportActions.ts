@@ -1,4 +1,5 @@
 import type { FilesystemImportActions } from '../../../lib/filesystemImport';
+import type { FilesystemEditSource, FilesystemImageInspection } from '../../../lib/filesystem';
 import type { DirectoryRef, InputFileLocation } from '../../../lib/storageLocations';
 import type { ImageTransport } from '../../../lib/transport';
 import type { PickerController } from '../../dialogs/picker';
@@ -8,7 +9,12 @@ import { readFilesystemImportTree } from './filesImportTree';
 type Dependencies = Parameters<typeof bindFilesystemImports>[0] & {
     transport: Pick<
         ImageTransport,
-        'supportsClientUploads' | 'uploadClientFile' | 'releaseClientUpload' | 'sandboxDirectory'
+        | 'supportsClientUploads'
+        | 'uploadClientFile'
+        | 'releaseClientUpload'
+        | 'sandboxDirectory'
+        | 'startFilesystemImageInspection'
+        | 'releaseFilesystemImageInspection'
     >;
     picker: PickerController;
 };
@@ -18,13 +24,34 @@ export function bindFilesystemImportActions(dependencies: Dependencies, sessionI
     const active = (): void => {
         if (dependencies.sessionId() !== sessionId) throw new Error('The reviewed image is no longer open.');
     };
-    const release = async (sources: InputFileLocation[]): Promise<void> => {
+    const release = async (sources: FilesystemEditSource[]): Promise<void> => {
+        for (const token of new Set(
+            sources.flatMap((source) => (source.kind === 'image-entry' ? [source.reference.inspectionToken] : [])),
+        ))
+            await dependencies.transport.releaseFilesystemImageInspection(token);
         for (const source of sources)
             if (source.kind === 'client-upload')
                 await dependencies.transport.releaseClientUpload(source).catch(() => undefined);
     };
     return {
         ...bindFilesystemImports(dependencies, sessionId),
+        images: {
+            inspect: async (source, update) => {
+                active();
+                const job = await dependencies.jobs.run(
+                    () => dependencies.transport.startFilesystemImageInspection(source),
+                    update,
+                    update,
+                );
+                if (dependencies.sessionId() !== sessionId) {
+                    const token = (job.result as FilesystemImageInspection | undefined)?.inspectionToken;
+                    if (token) await dependencies.transport.releaseFilesystemImageInspection(token);
+                    active();
+                }
+                return job;
+            },
+            release: (token) => dependencies.transport.releaseFilesystemImageInspection(token),
+        },
         supportsClientUploads: dependencies.transport.supportsClientUploads,
         chooseDirectory: async (signal, progress) => {
             active();

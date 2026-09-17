@@ -19,6 +19,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../../../library/tests/media_ex5_fixture.hpp"
+#include "../../../library/tests/media_test_fixtures.hpp"
 #include "axklib/application/filesystem_edit_operations.hpp"
 #include "axklib/application/system_file_operations.hpp"
 #include "content_digest.hpp"
@@ -115,6 +116,82 @@ TEST_P(FatFilesystemEdits, RejectsSystemParameterEditsAndReleasesMutationAccess)
     EXPECT_EQ(digest(), before);
     const auto read = sessions->begin_read(opened.image_id, "owner", opened.revision);
     EXPECT_TRUE(read);
+}
+
+TEST_P(FatFilesystemEdits, ImportsSelectedFloppyContentsAndTheRawImageWithoutChangingTheSource) {
+    using Json = nlohmann::json;
+    const auto floppy = nested_fat_fixture();
+    {
+        std::ofstream output{root / "workspace/disk.ima", std::ios::binary};
+        output.write(reinterpret_cast<const char *>(floppy.data()), static_cast<std::streamsize>(floppy.size()));
+        ASSERT_TRUE(output);
+    }
+    const auto original_digest = axk::app::detail::file_sha256(root / "workspace/disk.ima").value();
+    axk::app::AlterationJournalStore journals{root / "journals"};
+    axk::app::UploadStore uploads{root / "uploads", 4194304U, 4194304U, 8U, 1024U, std::chrono::minutes{5}};
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_filesystem_edit_operations(registry, *sandbox, uploads, *sessions, journals));
+    const axk::app::OperationContext context{
+        .owner_id = "owner", .request_id = "import", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    const Json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "disk.ima"}}}};
+    const auto inspection = registry.invoke("filesystem.images.inspect", {{"source", source}}, context);
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    ASSERT_EQ(inspection->at("entries").size(), 2U);
+    const auto roots = sessions->filesystem(opened.image_id, "owner", opened.revision);
+    ASSERT_TRUE(roots);
+    const auto destination = roots->items.back().id;
+    Json operations = Json::array();
+    for (const auto &entry : inspection->at("entries")) {
+        Json operation{{"parentEntryId", destination}, {"relativePath", entry.at("relativePath")}};
+        if (entry.at("directory").get<bool>())
+            operation["kind"] = "CREATE_DIRECTORY";
+        else {
+            operation["kind"] = "PUT_FILE";
+            operation["source"] = {
+                {"imageEntryRef",
+                 {{"inspectionToken", inspection->at("inspectionToken")}, {"entryId", entry.at("entryId")}}}};
+            operation["expectedSource"] = entry.at("snapshot");
+        }
+        operations.push_back(std::move(operation));
+    }
+    const auto input = registry.invoke("filesystem.inputs.inspect", {{"inputs", Json::array({source})}}, context);
+    ASSERT_TRUE(input);
+    operations.push_back({{"kind", "PUT_FILE"},
+                          {"parentEntryId", destination},
+                          {"relativePath", {"disk.ima"}},
+                          {"source", source},
+                          {"expectedSource", input->at("inputs")[0].at("snapshot")}});
+    Json request{{"imageId", opened.image_id},
+                 {"expectedRevision", opened.revision},
+                 {"acknowledgeDeviceRelationships", true},
+                 {"edits", operations}};
+    auto wrong_owner = context;
+    wrong_owner.owner_id = "other";
+    const auto before = digest();
+    EXPECT_FALSE(registry.invoke("images.filesystem.edit", request, wrong_owner));
+    auto invalid = request;
+    invalid["edits"][1]["expectedSource"]["sha256"] = std::string(64U, '0');
+    EXPECT_FALSE(registry.invoke("images.filesystem.edit", invalid, context));
+    EXPECT_EQ(digest(), before);
+    const auto committed = registry.invoke("images.filesystem.edit", request, context);
+    ASSERT_TRUE(committed) << committed.error().message;
+    EXPECT_EQ(committed->at("revision"), opened.revision + 1U);
+    EXPECT_TRUE(committed->at("warnings").empty());
+    EXPECT_EQ(axk::app::detail::file_sha256(root / "workspace/disk.ima").value(), original_digest);
+    const auto read = sessions->begin_read(opened.image_id, "owner", opened.revision + 1U);
+    ASSERT_TRUE(read);
+    const auto *fat = std::get_if<axk::FatImage>(&read->media->storage());
+    if (const auto *disk = std::get_if<axk::FatDiskImage>(&read->media->storage()))
+        fat = &disk->partitions().at(1U).volume;
+    ASSERT_NE(fat, nullptr);
+    const auto copied = std::ranges::find(fat->files(), "OBJECTS/SMPTEST.004", &axk::FatFile::path);
+    ASSERT_NE(copied, fat->files().end());
+    EXPECT_EQ(fat->read_file(*copied).value(), smpl_object());
+    const auto raw = std::ranges::find(fat->files(), "DISK.IMA", &axk::FatFile::path);
+    ASSERT_NE(raw, fat->files().end());
+    EXPECT_EQ(fat->read_file(*raw).value(), floppy);
+    EXPECT_TRUE(registry.invoke("filesystem.images.release", {{"inspectionToken", inspection->at("inspectionToken")}},
+                                context));
 }
 
 TEST_P(FatFilesystemEdits, RenamesPopulatedDirectoriesThroughTheRegisteredJobWithoutChangingData) {

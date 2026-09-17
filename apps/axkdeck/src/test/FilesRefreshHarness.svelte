@@ -35,12 +35,14 @@
     let revision = 1;
     let writes = $state(0);
     let status = $state('');
+    const floppyMode = new URLSearchParams(location.search).has('floppy');
     const capabilities = {
         ...writableFilesRoot,
         namePolicy: 'FAT_8_3_UPPERCASE' as const,
         maximumNameBytes: 12,
         namePattern: '^[A-Z0-9]{1,8}(\\.[A-Z0-9]{1,3})?$',
         nameHint: 'Use an 8.3 filename.',
+        supportedImports: floppyMode ? ['FAT_FLOPPY_CONTENTS'] : [],
     };
     const access: FilesystemAccess = {
         inspect: async (query = {}) => {
@@ -98,6 +100,21 @@
     };
     const source = serverFileLocation({ rootId: 'host', relativePath: 'tone.bin' });
     const imports: FilesystemImportActions = {
+        images: {
+            inspect: async () => ({
+                ...completed,
+                result: {
+                    inspectionToken: 'b'.repeat(64),
+                    entries: Array.from({ length: 250 }, (_, index) => ({
+                        entryId: `f${index}`,
+                        relativePath: [`F${String(index).padStart(3, '0')}.S1A`],
+                        directory: false,
+                        snapshot: { revision: 'content', sizeBytes: 4, sha256: 'b'.repeat(64) },
+                    })),
+                },
+            }),
+            release: async () => {},
+        },
         supportsClientUploads: true,
         chooseFiles: async () => [source],
         chooseDirectory: async () => null,

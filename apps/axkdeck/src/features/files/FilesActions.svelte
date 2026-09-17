@@ -13,6 +13,8 @@
     } from '../../lib/filesystemImport';
     import { FilesImportWorkflow } from './importWorkflow.svelte';
     import FilesImportDialog from './FilesImportDialog.svelte';
+    import { FilesImageImportWorkflow, isFilesystemImageDrop } from './imageImportWorkflow.svelte';
+    import FilesImageImportDialog from './FilesImageImportDialog.svelte';
     let {
         controller,
         driver,
@@ -45,6 +47,8 @@
     );
     let toolbar: HTMLDivElement;
     const importer = new FilesImportWorkflow((message) => setStatus(message));
+    const imageFiles = new FilesImageImportWorkflow((message) => setStatus(message));
+    const importing = $derived(!!importer.target || !!imageFiles.importer.target);
     let resolving = $state(false);
     let menu = $state<{ left: number; top: number } | null>(null);
     const createTarget = $derived(controller.selection[0] ?? controller.root);
@@ -61,7 +65,7 @@
         !!onexport &&
             !exportBlocked &&
             !workflow.review &&
-            !importer.target &&
+            !importing &&
             controller.revision > 0 &&
             exportTargets.length > 0 &&
             exportTargets.every((entry) => !entry.filesystemMetadata && !entry.issue),
@@ -71,7 +75,7 @@
             !!controller.capabilities?.createDirectory &&
             !resolving &&
             !workflow.review &&
-            !importer.target &&
+            !importing &&
             !exportBlocked &&
             controller.selection.length <= 1 &&
             destinationAvailable,
@@ -80,7 +84,7 @@
         !!driver &&
             !!controller.capabilities?.deleteEntry &&
             !workflow.review &&
-            !importer.target &&
+            !importing &&
             !exportBlocked &&
             controller.selection.length > 0 &&
             controller.selection.every((entry) => !!entry.parentId && !entry.filesystemMetadata && !entry.issue),
@@ -90,7 +94,7 @@
             !!controller.capabilities?.renameEntry &&
             !resolving &&
             !workflow.review &&
-            !importer.target &&
+            !importing &&
             !imageImport?.busy &&
             !exportBlocked &&
             controller.selection.length === 1 &&
@@ -109,7 +113,7 @@
             !!controller.capabilities?.putFile &&
             !resolving &&
             !workflow.review &&
-            !importer.target &&
+            !importing &&
             !exportBlocked &&
             controller.selection.length <= 1 &&
             destinationAvailable,
@@ -117,6 +121,7 @@
     onDestroy(() => {
         workflow.dispose();
         importer.dispose();
+        imageFiles.dispose();
     });
 
     async function openDestination(kind: 'create' | 'import' | 'directory-import'): Promise<void> {
@@ -196,14 +201,17 @@
     }
 
     export function isBusy(): boolean {
-        return resolving || !!workflow.review || !!importer.target || !!imageImport?.busy;
+        return (
+            resolving || !!workflow.review || !!importer.target || !!imageFiles.importer.target || !!imageImport?.busy
+        );
     }
 
     export function canDrop(target: FilesystemEntry | null): boolean {
         return (
             !!target &&
             target.rootId === controller.rootId &&
-            ((target.kind !== 'file' && !target.filesystemMetadata && !target.issue) || !!imageImport?.enabled) &&
+            ((!target.filesystemMetadata && !target.issue && (target.kind !== 'file' || !!target.parentId)) ||
+                !!imageImport?.enabled) &&
             !controller.busy &&
             !isBusy() &&
             !exportBlocked &&
@@ -222,11 +230,33 @@
         const boundImageImport = imageImport;
         const unchanged = () => controller === current && current.revision === revision;
         menu = null;
-        if (boundImageImport?.enabled) {
+        const fatImages =
+            !!boundImports.images &&
+            !!current.capabilitiesFor(target.rootId)?.supportedImports.includes('FAT_FLOPPY_CONTENTS');
+        if (boundImageImport?.enabled || fatImages) {
             resolving = true;
             try {
                 const entries = await read(new AbortController().signal, () => undefined);
-                if (!unchanged() || (await boundImageImport.open(entries, target))) return;
+                if (!unchanged()) return;
+                if (fatImages && isFilesystemImageDrop(entries)) {
+                    const destination =
+                        target.kind === 'file'
+                            ? target.parentId === current.rootId
+                                ? current.root
+                                : await current.lookup({ entryId: target.parentId! })
+                            : target;
+                    if (destination && unchanged())
+                        await imageFiles.open(
+                            revision,
+                            destination,
+                            current.capabilitiesFor(target.rootId)!,
+                            boundImports,
+                            boundDriver,
+                            entries,
+                        );
+                    return;
+                }
+                if (boundImageImport?.enabled && (await boundImageImport.open(entries, target))) return;
                 if (!unchanged()) return;
                 read = async () => entries;
             } catch (error) {
@@ -357,6 +387,7 @@
 {/if}
 {#if workflow.review}<FilesEditDialog {workflow} />{/if}
 <FilesImportDialog workflow={importer} />
+<FilesImageImportDialog workflow={imageFiles} />
 
 <style>
     .files-selection-count {
