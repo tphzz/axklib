@@ -58,9 +58,7 @@ std::vector<axk::ReportRow> allocation_extent_rows(const std::filesystem::path &
 std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path &path,
                                                      std::span<const axk::Partition> partitions);
 std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &path, const axk::Container &container,
-                                                   const axk::ObjectCatalog &catalog,
-                                                   std::vector<axk::ReportRow> &issue_rows,
-                                                   std::vector<axk::ReportRow> &validation_issues);
+                                                   const axk::ObjectCatalog &catalog);
 std::vector<axk::ReportRow> validate_media_details(const ValidationSource &source, bool include_object_checks = true);
 std::vector<axk::ReportRow> validate_export_directory(const SandboxTree &tree);
 

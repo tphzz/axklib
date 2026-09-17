@@ -7,6 +7,7 @@
 #include <ranges>
 #include <span>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -64,8 +65,7 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     EXPECT_TRUE(volume.sample_banks.front().member_sample_keys.empty());
     EXPECT_FALSE(volume.sample_banks.front().relationship_sample_keys.empty());
     EXPECT_TRUE(std::ranges::all_of(volume.samples, [](const auto &sample) {
-        return sample.members.size() == 1U && !sample.rendered_wav_path && !sample.parameter_contexts.empty() &&
-               sample.parameter_contexts.front().object_key == sample.object_key;
+        return sample.members.size() == 1U && !sample.rendered_wav_path && !sample.decoded.numeric_fields.empty();
     }));
     EXPECT_TRUE(std::ranges::all_of(volume.waveforms, [](const auto &waveform) {
         return waveform.user_facing_aliases.size() == 1U &&
@@ -87,6 +87,23 @@ TEST(AudioExport, BuildsExactVolumeOwnershipAndWritesEveryPhysicalWaveform) {
     EXPECT_EQ(sfz->written_files.size(), 8U);
     EXPECT_FALSE(std::filesystem::is_regular_file(output / volume.relative_root / "B New SmpBank.sfz"));
     std::filesystem::remove_all(output, error);
+}
+
+TEST(AudioExport, ContainerExportPropagatesUnsupportedTransferControl) {
+    const auto container = axk::open_image(fixture());
+    ASSERT_TRUE(container);
+    auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog);
+    const auto item = std::ranges::find_if(
+        catalog->objects, [](const auto &object) { return object.object.header.type == axk::ObjectType::smpl; });
+    ASSERT_NE(item, catalog->objects.end());
+    std::get<axk::CurrentSmpl>(item->object.payload).pcm_transfer_control.value = 0x10U;
+    const auto waveform = axk::decode_waveform(*container, *item);
+    ASSERT_FALSE(waveform);
+    EXPECT_EQ(waveform.error().code, axk::ErrorCode::audio_unsupported_format);
+    const auto plan = axk::build_export_plan(*container, *catalog, axk::build_relationship_graph(*catalog));
+    ASSERT_FALSE(plan);
+    EXPECT_EQ(plan.error().code, axk::ErrorCode::audio_unsupported_format);
 }
 
 TEST(AudioExport, WritesMissingAndAmbiguousWaveDataIntoExplicitUnresolvedScope) {

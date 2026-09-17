@@ -33,4 +33,31 @@ describe('Waveform', () => {
         unmount();
         expect(disconnect).toHaveBeenCalledOnce();
     });
+
+    it('positions the Wave window and loop boundaries against the stored-frame timeline', () => {
+        const { container } = render(Waveform, {
+            props: {
+                values: [],
+                timeline: {
+                    sampleRate: 1_000,
+                    storedFrameCount: 1_000,
+                    playbackStartFrame: 100,
+                    playbackLengthFrames: 800,
+                    loopStartFrame: 250,
+                    loopLengthFrames: 500,
+                    displayDurationSeconds: 1,
+                },
+            },
+        });
+        const frame = container.querySelector('.waveform-frame');
+        const waveBoundaries = container.querySelectorAll('.waveform-window-boundary');
+        const loopBoundaries = container.querySelectorAll('.waveform-loop-boundary');
+
+        expect(frame?.getAttribute('data-window-start-ratio')).toBe('0.1');
+        expect(frame?.getAttribute('data-window-end-ratio')).toBe('0.9');
+        expect(waveBoundaries[0]?.getAttribute('style')).toContain('10%');
+        expect(waveBoundaries[1]?.getAttribute('style')).toContain('90%');
+        expect(loopBoundaries[0]?.getAttribute('style')).toContain('25%');
+        expect(loopBoundaries[1]?.getAttribute('style')).toContain('75%');
+    });
 });

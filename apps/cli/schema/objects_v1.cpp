@@ -6,6 +6,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/program_parameter_json.hpp"
+
 namespace axk::cli::schema::objects_v1 {
 namespace {
 
@@ -32,20 +34,42 @@ OrderedJson member_json(const CurrentSbnkMember &member) {
             {"loop_length_frames", member.loop_length_frames}};
 }
 
+OrderedJson common_json(const CurrentObjectCommonRecord &common) {
+    return {{"object_class", common.object_class.value},
+            {"state", common.state.value},
+            {"name", common.name.value},
+            {"state_0x42", common.state_0x42.value},
+            {"saver_residue_0x43_0x49_hex", hex(common.saver_residue_0x43_0x49.value)},
+            {"raw_common_state_0x4a_0x53_hex", hex(common.raw_common_state_0x4a_0x53.value)},
+            {"embedded_container_name", common.embedded_container_name.value},
+            {"raw_common_state_0x64_0x67_hex", hex(common.raw_common_state_0x64_0x67.value)},
+            {"transient_name_hash_alias", common.transient_name_hash_alias.value},
+            {"body_prefix_alias_0x6c_0x6e_hex", hex(common.body_prefix_alias.value)},
+            {"saver_residue_0x6f_0x73_hex", hex(common.saver_residue_0x6f_0x73.value)},
+            {"transient_name_hash_next_handle", common.transient_name_hash_next_handle.value},
+            {"transient_name_hash_alias_matches", common.transient_name_hash_alias_matches},
+            {"body_prefix_alias_matches", common.body_prefix_alias_matches}};
+}
+
 OrderedJson decoded_json(const DecodedObject &object) {
     if (const auto *wave_data = std::get_if<CurrentSmpl>(&object.payload)) {
         return {{"kind", "SMPL"},
                 {"sample_rate", wave_data->sample_rate.value},
                 {"stored_sample_width_bytes", wave_data->stored_sample_width_bytes.value},
-                {"source_wave_name", wave_data->source_wave_name.value},
-                {"group_id", wave_data->group_id.value},
+                {"embedded_container_name", wave_data->embedded_container_name.value},
+                {"transient_name_hash_next_handle", wave_data->transient_name_hash_next_handle.value},
+                {"pcm_transfer_control", wave_data->pcm_transfer_control.value},
+                {"pcm_transfer_format_selector", wave_data->pcm_transfer_format_selector},
+                {"transient_512_byte_block_counter", wave_data->transient_512_byte_block_counter.value},
                 {"wave_data_reference_value", wave_data->wave_data_reference_value.value},
                 {"duplicate_sample_rate", wave_data->duplicate_sample_rate.value},
                 {"root_key", wave_data->root_key.value},
                 {"fine_tune_cents", wave_data->fine_tune_cents.value},
                 {"loop_mode", wave_data->loop_mode.value},
                 {"loop_mode_label", wave_data->loop_mode_label},
+                {"wave_start_frame", wave_data->wave_start_frame.value},
                 {"wave_length_frames", wave_data->wave_length_frames.value},
+                {"wave_end_frame_exclusive", wave_data->wave_end_frame_exclusive},
                 {"loop_start_frame", wave_data->loop_start_frame.value},
                 {"loop_length_frames", wave_data->loop_length_frames.value},
                 {"loop_end_frame_inclusive", wave_data->loop_end_frame_inclusive},
@@ -65,9 +89,12 @@ OrderedJson decoded_json(const DecodedObject &object) {
             controls.push_back({control.device, control.function, control.type, control.range});
         return {{"kind", "SBNK"},
                 {"sample_name", sample->sample_name},
-                {"instrument_name", sample->instrument_name},
+                {"common", common_json(sample->common)},
                 {"right_slot_present", sample->right_slot_present},
                 {"right_link_role", sample->right_link_role},
+                {"uses_program_portamento", sample->uses_program_portamento},
+                {"mono_mode", sample->mono_mode},
+                {"legacy_velocity_xfade_default_5", sample->legacy_velocity_xfade_default_5},
                 {"loop_mode", sample->loop_mode},
                 {"loop_mode_label", sample->loop_mode_label},
                 {"left", member_json(sample->left)},
@@ -76,21 +103,36 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"linked_program_bitmap_words", sample->linked_program_bitmap_words},
                 {"linked_program_numbers", sample->linked_program_numbers},
                 {"numeric_fields", std::move(fields)},
+                {"control_record_storage_offset", sample->control_record_storage_offset},
+                {"control_record_tail_copy_present", sample->control_record_tail_copy_present},
+                {"control_record_copies_match", sample->control_record_copies_match
+                                                    ? OrderedJson(*sample->control_record_copies_match)
+                                                    : OrderedJson(nullptr)},
                 {"control_records", std::move(controls)},
                 {"raw_parameter_window_hex", hex(sample->raw_parameter_window)}};
     }
     if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.payload)) {
         auto slots = OrderedJson::array();
         for (const auto &slot : sample_bank->slots)
-            slots.push_back({{"name", slot.name}, {"raw_handle", slot.raw_handle}, {"offset", slot.offset}});
+            slots.push_back({{"name", slot.name},
+                             {"active", slot.active},
+                             {"transient_member_pointer", slot.transient_member_pointer},
+                             {"offset", slot.offset}});
         return {{"kind", "SBAC"},
+                {"common", common_json(sample_bank->common)},
+                {"storage_layout", sample_bank->storage_layout == SbacStorageLayout::current_split_parameter_tail
+                                       ? "current-split-parameter-tail"
+                                       : "legacy-without-parameter-tail"},
+                {"parameter_tail_offset", sample_bank->parameter_tail_offset
+                                              ? OrderedJson(*sample_bank->parameter_tail_offset)
+                                              : OrderedJson(nullptr)},
                 {"raw_sample_parameter_block_hex", hex(sample_bank->raw_sample_parameter_block)},
-                {"value_enable_words", sample_bank->value_enable_words},
-                {"enabled_parameter_numbers", sample_bank->enabled_parameter_numbers},
-                {"enabled_numbers_outside_table", sample_bank->enabled_numbers_outside_table},
-                {"bulk_assigned_sample_count", sample_bank->bulk_assigned_sample_count},
-                {"active_slot_count", sample_bank->active_slot_count},
-                {"maximum_slot_count", sample_bank->maximum_slot_count},
+                {"pending_parameter_propagation_words", sample_bank->pending_parameter_propagation_words},
+                {"pending_parameter_numbers", sample_bank->pending_parameter_numbers},
+                {"reserved_pending_parameter_numbers", sample_bank->reserved_pending_parameter_numbers},
+                {"stored_member_count", sample_bank->stored_member_count},
+                {"effective_member_count", sample_bank->effective_member_count},
+                {"maximum_member_count", sample_bank->maximum_member_count},
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<CurrentProg>(&object.payload)) {
@@ -99,23 +141,33 @@ OrderedJson decoded_json(const DecodedObject &object) {
             assignments.push_back({{"name", row.name},
                                    {"raw_handle", row.raw_handle},
                                    {"kind", row.kind},
-                                   {"flags", row.flags},
-                                   {"level_offset", row.level_offset},
-                                   {"velocity_sensitivity", row.velocity_sensitivity},
-                                   {"pan_offset", row.pan_offset},
-                                   {"key_limit_high", row.key_limit_high},
-                                   {"key_limit_low", row.key_limit_low},
-                                   {"velocity_limit_high", row.velocity_limit_high},
-                                   {"velocity_limit_low", row.velocity_limit_low},
+                                   {"raw_receive_selector", row.raw_receive_selector},
+                                   {"parameters", detail::program_assignment_parameters_json(row.parameters)},
                                    {"raw_row_hex", hex(row.raw_row)}});
         }
         auto effects = OrderedJson::array();
         for (const auto &block : program->effect_blocks)
-            effects.push_back(hex(block));
+            effects.push_back({{"raw_block_hex", hex(block.raw_bytes)},
+                               {"type", block.type},
+                               {"parameter_values", block.parameter_values}});
+        const auto &layout = program->layout;
         return {{"kind", "PROG"},
-                {"raw_control_block_hex", hex(program->raw_control_block)},
-                {"raw_control_tail_copy_hex", hex(program->raw_control_tail_copy)},
-                {"effect_blocks_hex", std::move(effects)},
+                {"common", common_json(program->common)},
+                {"program_name", program->program_name},
+                {"storage_layout",
+                 layout.parameter_tail_offset ? "current-split-parameter-tail" : "legacy-without-parameter-tail"},
+                {"layout_version", layout.version},
+                {"logical_size", layout.logical_size},
+                {"stored_assignment_count", layout.stored_assignment_count},
+                {"assignment_capacity", layout.assignment_capacity},
+                {"parameter_tail_offset",
+                 layout.parameter_tail_offset ? OrderedJson(*layout.parameter_tail_offset) : OrderedJson(nullptr)},
+                {"parameters", detail::program_parameters_json(program->parameters)},
+                {"raw_common_parameter_block_hex", hex(program->raw_common_parameter_block)},
+                {"raw_extended_parameter_block_hex", hex(program->raw_extended_parameter_block)},
+                {"raw_canonical_control_block_hex", hex(program->raw_canonical_control_block)},
+                {"raw_legacy_control_block_hex", hex(program->raw_legacy_control_block)},
+                {"effect_blocks", std::move(effects)},
                 {"assignments", std::move(assignments)}};
     }
     if (const auto *sequence = std::get_if<CurrentSequence>(&object.payload)) {

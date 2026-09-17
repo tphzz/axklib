@@ -138,7 +138,67 @@ describe('Tx16wImportWorkflow', () => {
         expect(workflow.request?.members.map((member) => member.sourceName)).toEqual(['library.ima', 'library_2.ima']);
     });
 
-    it('refreshes and closes after a submitted job cannot confirm its result', async () => {
+    it('retains the dialog until upload cleanup finishes', async () => {
+        let release!: () => void;
+        const upload = clientUploadLocation({ uploadId: 'cleanup' }, 'DISK_IMAGE', 'library.ima');
+        const releaseClientUpload = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    release = resolve;
+                }),
+        );
+        const workflow = createWorkflow(
+            {
+                uploadClientFile: vi.fn().mockResolvedValue(upload),
+                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
+                startTx16wDiskSetImport: vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' }),
+                releaseClientUpload,
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([diskSource]);
+        const pending = workflow.commit();
+        await vi.waitFor(() => expect(releaseClientUpload).toHaveBeenCalled());
+        expect(workflow.request).not.toBeNull();
+        release();
+        await pending;
+        expect(workflow.request).toBeNull();
+    });
+
+    it('clears a selected target without retaining a stale import destination', async () => {
+        const inspectTx16wDiskSet = vi.fn().mockResolvedValue(inspection());
+        const workflow = createWorkflow({ inspectTx16wDiskSet }, sourceTree()[0].children![0]);
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'workspace', relativePath: 'library.img' })]);
+        await workflow.selectTarget(null);
+        expect(workflow.request?.target).toBeNull();
+        expect(workflow.request?.inspection).toBeNull();
+        expect(workflow.request?.status).toBe('waiting-target');
+        expect(inspectTx16wDiskSet).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers a committed refresh failure without another TX16W mutation', async () => {
+        const startTx16wDiskSetImport = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
+        const refreshSession = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValue(undefined);
+        const workflow = createWorkflow(
+            {
+                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
+                startTx16wDiskSetImport,
+            },
+            sourceTree()[0].children![0],
+            { refreshSession },
+        );
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'workspace', relativePath: 'library.img' })]);
+        await workflow.commit();
+        expect(workflow.completion.phase).toBe('refresh-failed');
+        expect(workflow.request).not.toBeNull();
+        await workflow.commit();
+        await workflow.recoverCompletion();
+        expect(workflow.request).toBeNull();
+        expect(startTx16wDiskSetImport).toHaveBeenCalledTimes(1);
+        expect(refreshSession).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains an unconfirmed job for status recovery without resubmitting', async () => {
         const upload = clientUploadLocation({ uploadId: 'upload-3' }, 'DISK_IMAGE', 'library.ima');
         const refreshSession = vi.fn().mockResolvedValue(undefined);
         const workflow = createWorkflow(
@@ -161,8 +221,10 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.requestDroppedFiles([diskSource]);
         await workflow.commit();
 
-        expect(refreshSession).toHaveBeenCalledWith(target);
-        expect(workflow.request).toBeNull();
+        expect(refreshSession).not.toHaveBeenCalled();
+        expect(workflow.request).not.toBeNull();
+        expect(workflow.completion.phase).toBe('unconfirmed');
+        expect(workflow.completion.canCheck).toBe(true);
     });
 
     it('exposes every nested volume as a target without introducing A-series data into the parser model', () => {
@@ -170,6 +232,7 @@ describe('Tx16wImportWorkflow', () => {
             {
                 key: '0:Imported',
                 label: 'Samples · Imported',
+                partitionName: 'Samples',
                 target,
             },
         ]);

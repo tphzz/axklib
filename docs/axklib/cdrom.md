@@ -1,14 +1,13 @@
 # CD-ROM Images
 
-axklib can inspect Yamaha A-series CD-ROM ISO images. These images use ISO9660
+Yamaha A-series CD-ROM images use ISO9660
 for the outer container and often add a sampler menu layer above the folders that
 hold Yamaha object files. The object payloads use the shared format described in
 [Sampler Data Structures](sampler-data.md).
 
 CD-ROM volumes are source-load content and do not carry the SFS
-partition-level `PRF3/SYSTEM` or `PRF3/SYSTEM2` operating context. Axklib
-therefore returns no System File entries for ISO sessions and never derives
-A4000/A5000 Multi Part assignments from the Programs present on a disc.
+partition-level `PRF3/SYSTEM` or `PRF3/SYSTEM2` operating context. Programs on
+a disc do not define the global Single/Multi receive environment.
 
 ```mermaid
 flowchart TD
@@ -19,32 +18,19 @@ flowchart TD
   raw --> obj[Object files]
   menu --> labels[Sampler-facing group and volume labels]
   obj --> payload[FSFSDEV3SPLX payload]
-  labels --> tree[Info and export tree]
+  labels --> tree[Sampler disk menu]
   payload --> tree
 ```
 
-## ISO9660 Reader
+## ISO9660 Container
 
-The low-level ISO reader expects a Primary Volume Descriptor at sector 16. ISO
+The primary directory profile uses a Primary Volume Descriptor at sector 16. ISO
 sectors are 2048 bytes.
 
-This is the primary-directory profile used by supported Yamaha
-A-series CD-ROMs, not a general ISO implementation. Multi-extent files are
-rejected. Joliet names, Rock Ridge system-use extensions, alternate descriptor
-trees are not interpreted. A hybrid disc can still open through
-its valid primary ISO9660 tree; extension-only names and metadata remain outside
-the supported contract.
-
-Fresh ISO creation uses a deterministic narrow writer for the same primary-tree
-profile. The writer emits deterministic path
-tables, sector-aligned directory extents, Yamaha group/volume menu records, and
-single-extent object files. Directory records and path tables may occupy
-multiple sectors; files remain single-extent. It reopens the image with the
-production reader before publishing it. Hardware compatibility covers the
-minimal mono `SMPL -> SBNK` profile, a complete Program using both direct Sample
-and Sample Bank assignments with shared Wave Data, and byte-preserving
-whole-floppy object transfer. This is narrower than every tree or object
-topology the reader can parse.
+This page describes the primary ISO9660 directory tree with single-extent
+files. Joliet, Rock Ridge, alternate descriptor trees and multi-extent files
+have additional rules outside this specification. Directory records and path
+tables can span several sectors; that does not imply multi-extent file storage.
 
 | Field | Rule |
 | --- | --- |
@@ -54,8 +40,8 @@ topology the reader can parse.
 | Root directory record | starts at PVD offset `156` |
 
 Directory records carry both little-endian and big-endian copies of their
-numeric fields. axklib requires those copies to agree. It strips `;version`
-suffixes and trailing dots from ISO names before building logical paths.
+numeric fields; both copies must agree. `;version` suffixes and trailing dots
+are ISO identifier syntax rather than part of the Yamaha object name.
 
 Directory record fields used by this profile:
 
@@ -128,169 +114,55 @@ name.
 
 Input images may encode ISO file identifiers as `0000;1` or `F001;1`. The
 reader strips the `;version` suffix and a trailing dot when constructing logical
-paths. The generated writer emits identifiers without `;1`.
+paths. The version suffix is distinct from the Yamaha object name.
 
-axklib keeps both raw and sampler-facing identities:
+## Primary Volume Descriptor And Path Tables
 
-| Identity | Purpose |
-| --- | --- |
-| Raw ISO path | Stable technical trace in CSV/JSON reports. |
-| Sampler-facing label | Normal display name in `info` and structured exports. |
+The PVD records the volume size, directory root and locations of both path
+tables. A valid directory record never crosses a 2048-byte sector boundary;
+unused bytes at that boundary are zero. Type-L and Type-M path tables describe
+the same directory sequence in little-endian and big-endian order respectively.
 
-For one object, axklib records:
-
-| Metadata | Meaning |
-| --- | --- |
-| `iso_raw_group` | First path component in the raw ISO tree. |
-| `iso_raw_volume` | Second path component, often `Fnnn`. |
-| `iso_group_label` | Decoded sampler-facing group label when available. |
-| `iso_volume_label` | Decoded sampler-facing volume label when available. |
-| `iso_extent_sector` | ISO extent sector for the file. |
-| `iso_data_offset` | Absolute byte offset, `extent_sector * 2048`. |
-| `iso_file_size` | File size from the ISO directory record. |
-| `iso_recovery_quality` | Loader-quality classification for the object row. |
-
-## Generated ISO File Layout
-
-Hand-authored `axklib create iso` manifests currently emit one group and one
-volume. The hardware-verified one-volume profile uses raw volume `F001`, so its
-group label is file `F002`.
-
-Partition conversion uses one generated group and one raw `Fnnn` volume per
-source SFS volume, in source order. It supports at most 998 source volumes,
-requires contiguous names `F001` through `Fnnn`, and writes the group label as
-`F(n+1)`. Directory extents and both path tables grow to as many whole sectors
-as the generated tree requires. One- and four-volume conversion profiles have
-loaded on hardware; the object-heavy multi-sector profile remains pending.
-
-The complete generated ordering is deterministic:
-
-| Sector / region | Generated content |
-| --- | --- |
-| `0..15` | Zero-filled ISO system area. |
-| `16` | One Primary Volume Descriptor. |
-| `17` | Volume Descriptor Set Terminator. |
-| `18...` | Little-endian Type-L path table, padded to complete 2048-byte sectors. |
-| following sectors | Big-endian Type-M path table, padded to complete 2048-byte sectors. |
-| following sectors | Root, group, volume, and populated category directory extents. |
-| following sectors | Group catalog, group label, category catalogs, then object payloads in deterministic tree order. |
-
-The writer uses 2048-byte logical blocks, one extent per file, one or more
-whole sectors per directory, and both-endian ISO9660 numeric fields. It sets the PVD System
-Identifier to:
-
-```text
-APPLE COMPUTER, INC., TYPE: 0002
-```
-
-The manifest `iso.volume_id` supplies the PVD Volume Identifier and Volume Set
-Identifier. Publisher, preparer, and application fields are `AXKLIB`.
-Descriptor timestamps are fixed to the reproducible 1970 value used by this
-profile. The writer emits no supplementary descriptor, Joliet tree, Rock Ridge
-records, Apple `AA` system-use bytes, multi-extent file, optional duplicate path
-tables, or boot catalog.
-
-The generated Primary Volume Descriptor uses these fixed or manifest-derived
-fields. Unlisted optional text fields remain space-filled or zero-filled:
-
-| PVD offset | Size | Generated value |
+| PVD offset | Size | Meaning |
 | --- | ---: | --- |
-| `0x00` | 1 | Type `1`, Primary Volume Descriptor. |
-| `0x01` | 5 | `CD001`. |
-| `0x06` | 1 | Descriptor version `1`. |
-| `0x08` | 32 | System Identifier shown above, space-padded. |
-| `0x28` | 32 | `iso.volume_id`, space-padded. |
-| `0x50` | 8 | Total logical block count, both-endian u32. |
-| `0x78` | 4 | Volume Set Size `1`, both-endian u16. |
-| `0x7c` | 4 | Volume Sequence Number `1`, both-endian u16. |
-| `0x80` | 4 | Logical Block Size `2048`, both-endian u16. |
-| `0x84` | 8 | Path-table byte count, both-endian u32. |
-| `0x8c` | 4 | Type-L path-table sector `18`, u32le. |
-| `0x94` | 4 | Type-M path-table sector immediately following the padded Type-L table, u32be. |
-| `0x9c` | 34 | Root directory record. |
-| `0xbe` | 128 | Volume Set Identifier from `iso.volume_id`, space-padded. |
-| `0x13e`, `0x1be`, `0x23e` | 128 each | Publisher, preparer, and application identifiers: `AXKLIB`. |
-| `0x32d`, `0x33e`, `0x360` | 17 each | Fixed creation, modification, and effective timestamps. |
-| `0x371` | 1 | File structure version `1`. |
+| `0x00`, `0x01`, `0x06` | 1, 5, 1 | Descriptor type 1, `CD001`, version 1 |
+| `0x08`, `0x28` | 32 each | System identifier and Volume identifier |
+| `0x50` | 8 | Logical block count, both-endian u32 |
+| `0x78`, `0x7c`, `0x80` | 4 each | Volume-set size, volume sequence, block size; both-endian u16 |
+| `0x84` | 8 | Path-table byte count, both-endian u32 |
+| `0x8c`, `0x94` | 4 each | Type-L table sector u32le, Type-M table sector u32be |
+| `0x9c` | 34 | Root directory record |
+| `0xbe` | 128 | Volume-set identifier |
+| `0x13e`, `0x1be`, `0x23e` | 128 each | Publisher, preparer and application identifiers |
+| `0x32d`, `0x33e`, `0x360` | 17 each | Creation, modification and effective timestamps |
+| `0x371` | 1 | File structure version 1 |
 
-The Type-L and Type-M path tables contain the same directory sequence in their
-respective byte order. Directory records contain `.` and `..` followed by
-children in deterministic insertion order. A record never crosses a logical
-sector boundary: the remaining bytes in that sector are zero-filled and the
-record begins in the next sector. Each directory extent is padded to a complete
-logical sector. Type-L and Type-M tables use the same deterministic directory
-order and each receives the number of whole sectors required by its byte size.
-The planner and serializer share this allocation result, so inspection reports
-the same projected image size that publication writes.
+Each path-table entry contains identifier length (u8), extended-attribute length
+(u8), extent sector (u32), one-based parent entry number (u16), then identifier
+bytes. An odd identifier length has one zero pad byte. Numeric byte order is
+that of its table. The root identifier is `00` and its parent number is 1.
 
-Each generated path-table record has this shape; a zero pad byte follows an odd
-identifier length so the next record starts on an even boundary:
+Generated image conventions are documented under
+[ISO Authoring](write.md#create-a-hand-authored-cd-rom-iso).
 
-| Record offset | Size | Contents |
-| --- | ---: | --- |
-| `0x00` | 1 | Directory identifier length. The root identifier is one byte `00`. |
-| `0x01` | 1 | Extended attribute record length `0`. |
-| `0x02` | 4 | Directory extent sector, little-endian in Type-L and big-endian in Type-M. |
-| `0x06` | 2 | One-based parent path-table record number in the table's byte order. Root uses `1`. |
-| `0x08` | variable | Directory identifier followed by optional zero padding. |
+## Object Files
 
-Every generated directory record uses the fixed recording-time bytes
-`46 01 01 00 00 00 00`, representing `1970-01-01 00:00:00` with GMT offset
-zero. File unit and interleave sizes are zero, and the volume sequence number
-is one.
-
-Populated categories are chosen from each payload's decoded object type. Their
-objects are ordered deterministically by type, embedded name, and payload size;
-within each category they receive `F001`, `F002`, and so on. A category's
-`0000` records use the same order. Fresh authoring currently produces `SMPL`,
-`SBNK`, optional `SBAC`, and optional `PROG` objects. Transfer mode can retain
-clean existing `SEQU` and `PRF3` payloads as well.
-
-The exact manifest and commands are in
-[Create A Hand-Authored CD-ROM ISO](write.md#create-a-hand-authored-cd-rom-iso).
-
-## Object Discovery
-
-A clean ISO object row comes from an ISO9660 file entry whose bytes start with:
-
-```text
-FSFSDEV3SPLX<type>
-```
-
-The loader reads the exact file span from the ISO directory entry and accepts the
-normal object type tags listed in [Sampler Data Structures](sampler-data.md).
-
-The object key is based on the source image name and logical ISO path. The scope
-key is the source image plus ISO scope.
-
-## Loader-Quality Classes
-
-CD-ROM images can contain unusual or partially readable object spans. axklib
-keeps a loader-quality field so downstream reports can keep clean ISO traversal
-separate from weaker rows.
-
-| Value | Meaning |
-| --- | --- |
-| `clean-iso9660-object` | Object came from a normal ISO9660 directory entry. |
-| `raw-scan-recovered-object` | Object came from a fallback scan path after directory traversal was incomplete. |
-| `nonstandard-iso-object` | Object came from a nonstandard reader path. |
-| `impossible-internal-capacity` | Object span has internal counts that exceed its recovered capacity. |
-| `raw-scan-impossible-internal-capacity` | Same capacity problem on a fallback scan row. |
-
-Normal user-facing trees prefer clean and authoritative rows. Diagnostic reports
-keep the loader-quality field for every object.
+Each object file's extent and logical byte count come from the ISO directory
+record. A Yamaha object begins with `FSFSDEV3SPLX<type>`. The object header,
+not its ISO pathname, determines the payload type. Damaged directory metadata
+must not be replaced with guessed ownership from nearby object-like bytes.
 
 ## Sampler Menu Labels
 
-Yamaha CD-ROM images can store labels used by the sampler's disk menu. axklib
-uses these labels for user-facing paths when they are present.
+Yamaha CD-ROM images store group and volume labels separately from raw folder
+identifiers.
 
 Label sources:
 
-| Label | Typical storage shape | Metadata field |
-| --- | --- | --- |
-| Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. | `iso_group_label` |
-| Volume label | Row in a group-local compact menu table. | `iso_volume_label` |
+| Label | Storage |
+| --- | --- |
+| Group label | Final `_DSKNAME` row in the group `0000` catalog references a 16-byte label file. |
+| Volume label | Row in a group-local menu table. |
 
 Group catalog rows and the supported category-catalog form are 32 bytes:
 
@@ -318,7 +190,7 @@ display-name bytes) elided, so the retained 28 bytes start with the remaining
 13 display-name bytes and place the filename at file offset `0x0e`. Subsequent
 rows are ordinary 32-byte rows starting at file offset `0x1c`, and four zero
 bytes pad the tail. The reader selects the layout that yields coherent `Fnnn`
-targets; the generated writer uses ordinary 32-byte category rows.
+targets; ordinary category rows contain 32 bytes.
 
 An ordinary group row maps a 16-byte volume display name to an `Fnnn` volume
 directory. An ordinary category row maps an object display name to an `Fnnn`
@@ -326,20 +198,15 @@ object file. The special final group row differs from ordinary padding: bytes
 `0x01..0x08` are `_DSKNAME`, bytes `0x09..0x10` are NUL, and its filename points
 to the group-label file.
 
-For populated recognized categories, validation checks that `0000` exists,
-that the supported row layout yields distinct `Fnnn` targets, that every target
-file exists, and that every `Fnnn` object file has a catalog row. Empty category
-directories do not require a catalog. Payload decoding remains in the object
-inventory and validation pass; opening the ISO does not read every waveform
-payload merely to validate menu structure. Display labels may be truncated or
-space-normalized relative to embedded names and are not required to match.
-These are diagnostics: the ISO tree and independently readable objects remain
-available even when the Yamaha menu catalog is inconsistent. Catalog hash bytes
-are not currently a validation gate.
+A populated category's catalog maps distinct `Fnnn` targets to existing object
+files, and every object file has a catalog row. Empty categories do not require
+a catalog. Catalog labels can be truncated or space-normalized relative to
+embedded names; label equality is not an object-identity rule. Menu consistency
+and readability of individual ISO extents are separate properties.
 
 For `N` consecutively numbered volume directories starting at `F001`, the final
 `_DSKNAME` row points to `F(N+1)`. That file is exactly 16 bytes containing the
-ASCII group display name padded with spaces. A one-volume writer image therefore
+ASCII group display name padded with spaces. A one-volume layout therefore
 uses this group-level layout:
 
 ```text
@@ -348,112 +215,32 @@ uses this group-level layout:
 F002:         16-byte group display name
 ```
 
-A group label is confirmed only when the final row references an existing
-16-byte file. Missing or malformed label metadata does not prevent object
-inventory; axklib retains the raw group identifier instead. `axklib validate`
-reports these sampler-incompatible menu contracts as errors without turning
-them into ISO open failures. This keeps recovery and extraction available while
-preventing a readable image from being mistaken for one the sampler will
-enumerate.
-
-The validated compatibility contract requires each Yamaha group menu to have a
-group-level `0000` file made of complete 32-byte rows. Its final row must be
-`_DSKNAME`, must reference `F(N+1)` after `N` volume directories, and that target
-must be an existing, non-empty, fixed-width 16-byte group-label file. Catalog
-hash validation is not part of this compatibility gate. The writer nevertheless
-emits the hash algorithm above for every group and category row.
-
-Label precedence for display paths:
-
-1. Decoded CD-ROM menu label stored in the ISO.
-2. Content-derived fallback from visible objects in the raw folder.
-3. Raw ISO folder identifier.
-
-Content-derived fallback labels are navigation aids. Reports keep raw folder
-fields so callers can distinguish fallback labels from decoded menu labels.
-
-## Duplicate Volume Labels
-
-Sampler-facing CD-ROM volume labels are not required to be unique within a group.
-When two raw volume folders have the same display label, axklib keeps them as
-separate volumes and appends the raw folder suffix:
-
-```text
-|-- Or11 Argent (F001) [VOLUME]
-|-- Or11 Argent (F002) [VOLUME]
-```
-
-This prevents separate ISO folders from being merged while preserving the label
-a sampler user recognizes.
+A group label requires an existing 16-byte target. Missing or malformed labels
+do not change the raw ISO directory identity, but can prevent correct sampler
+menu enumeration. Two distinct raw volume directories may have identical display
+labels; that does not merge their files or lookup scopes.
 
 ## Program Source-Load Assignments
 
-CD-ROM Program assignment rows can describe how objects are loaded from the disc.
-axklib keeps source-load matching separate from ordinary stored Program
-assignments.
+A source-load row can describe a target type different from the object stored
+on the disc. This must not be confused with an ordinary saved Program
+assignment. The selector is not a public object identifier.
 
-Public behavior:
-
-| Case | `info` behavior | Report behavior |
-| --- | --- | --- |
-| Source-load assignment matched to a target object | Can be shown as a Program child when relationship quality is sufficient. | Row keeps raw ISO path, match method, assignment row, and quality fields. |
-| Assignment row with lower quality or no target | Not shown as a normal Program child. | Kept in relationship CSV/JSON diagnostics. |
-| Source row that resolves to a different stored object type | Loaded target type is not invented as a normal stored assignment. | `assignment_state` can be `source-load-assignment`. |
-
-The raw selector bytes in Program rows are diagnostic fields. They are not used
-as public target IDs.
-
-Sample (`SBNK`) member names can repeat across different raw `Fnnn` volumes.
-The sampler resolves members by name, so exact placement that leaves one
-matching Wave Data object in the Sample's own raw volume produces a `Known`
-relationship. Matching objects in other raw volumes remain recorded as
-candidates. Multiple matching objects inside one raw volume remain
-`Tentative`.
-
-CD-ROM visible/off rows with missing local SBAC targets stay relationship
-diagnostics, not Program children. The cached SBNK member reference can be
-stale; when it matches Wave Data that the member name does not select, axklib
-keeps it as a `sbnk-member-cache` diagnostic and does not create a relationship.
+A Sample's Wave Data name is resolved within its own raw volume. A matching
+name in another volume does not remove a local ambiguity or supply a missing
+local member. Cached member references can be stale and do not override the
+stored name. See [Program assignments](sampler-data.md#program-assignment-rows).
 
 ## Paired Sample-Member Stereo
 
 Some CD-ROM volumes store stereo material as paired sampler-visible `SBNK`
 Samples in one `SBAC` Sample Bank. The left and right Samples have matching names with
 terminal `-L` and `-R`, and each member links to its own physical `SMPL` object.
-Structured waveform export keeps the physical mono `SMPL` files and writes an
-additional `_samples/rendered/` stereo WAV when the pair is known and audio-compatible.
-For rendered stereo names, duplicate-marked paired Samples can use the owning
-Sample Bank label so the output path remains sampler-facing instead of
-only numeric.
+Each Sample remains a separate object; a paired filename alone is insufficient
+to establish matching sample rate, width and playback length.
 
-## Path Mapping
-CD-ROM path mapping combines raw folder identity and decoded labels:
-
-```text
-raw path:        8F6EB510/F001/PROG/F003
-facing path:     ORGANS/Or11 Argent/Programs/003: Arg Per4
-report fields:   raw group, raw volume, object key, display labels
-```
-
-See [Name, Path, And Export Mapping](names-and-paths.md) for duplicate label,
-path sanitization, and export directory behavior.
-
-## Validation
-
-CD-ROM validation and diagnostics cover:
-
-| Condition | Handling |
-| --- | --- |
-| Missing or malformed PVD | Unsupported ISO container. |
-| Short read from an ISO extent | Load error for the affected source. |
-| Missing group-level `0000` | Validation error; readable object inventory remains available. |
-| Group `0000` not a multiple of 32 bytes | Validation error for incomplete menu rows. |
-| Missing, misplaced, or wrongly targeted `_DSKNAME` row | Validation error with the raw group and expected `Fnnn` target. |
-| Missing, empty, or non-16-byte group-label file | Validation error; the raw group remains usable for diagnostics. |
-| Clean ISO object with impossible internal count | Object row marked with an impossible-capacity loader-quality value. |
-| Duplicate volume labels | Display name gets raw suffix; reports keep both raw identities. |
-| Broken active Program path | Validation reports sampler-facing volume and Program examples. |
-| Unmatched source-load assignment | Relationship report row stays diagnostic instead of becoming a Program child. |
+For display paths, diagnostics and stereo export, see
+[Names, Paths, And Exports](names-and-paths.md) and [Report Schemas](report-schemas.md).
 
 ## Minimal Read Walkthrough
 
@@ -463,7 +250,7 @@ CD-ROM validation and diagnostics cover:
 4. Read file bytes by `extent_sector * 2048` and ISO file size.
 5. Select files beginning with `FSFSDEV3SPLX` and supported type tags.
 6. Decode group and volume labels from Yamaha menu files when present.
-7. Attach raw path and sampler-facing label metadata to every object.
+7. Keep raw paths distinct from sampler-facing labels.
 8. Decode shared object payloads.
 9. Build relationships and source-load Program assignment rows.
-10. Render user-facing paths with duplicate-label disambiguation.
+10. Keep duplicate display labels in their separate raw directory scopes.

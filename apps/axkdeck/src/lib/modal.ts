@@ -1,3 +1,5 @@
+import { on } from 'svelte/events';
+
 export interface ModalOptions {
     onescape?: () => void;
 }
@@ -8,6 +10,25 @@ interface InertState {
 }
 
 const inertStates = new WeakMap<HTMLElement, InertState>();
+let activeModalCount = 0;
+
+function retainScrollbarMode(): () => void {
+    if (activeModalCount === 0) {
+        const measurement = document.createElement('div');
+        measurement.className = 'modal-scrollbar-measurement';
+        document.body.append(measurement);
+        // Remove GTK's painted thumb outline only when even a stable gutter consumes no space.
+        const overlays = measurement.offsetWidth > 0 && measurement.offsetWidth === measurement.clientWidth;
+        measurement.remove();
+        document.documentElement.classList.toggle('modal-overlay-scrollbars', overlays);
+    }
+    activeModalCount += 1;
+    return () => {
+        activeModalCount -= 1;
+        if (activeModalCount === 0) document.documentElement.classList.remove('modal-overlay-scrollbars');
+    };
+}
+
 const focusableSelector =
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), ' +
     'a[href], [tabindex]:not([tabindex="-1"])';
@@ -62,6 +83,7 @@ function focusInitialElement(element: HTMLElement): void {
 export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     let options = initialOptions;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const releaseScrollbarMode = retainScrollbarMode();
     const background = backgroundElements(node);
     background.forEach(retainInert);
     if (!node.hasAttribute('tabindex')) node.tabIndex = -1;
@@ -89,7 +111,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             first.focus();
         }
     };
-    node.addEventListener('keydown', keydown);
+    const removeKeydown = on(node, 'keydown', keydown);
     let userInteracted = false;
     const markInteraction = (): void => {
         userInteracted = true;
@@ -121,11 +143,12 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             options = next;
         },
         destroy() {
-            node.removeEventListener('keydown', keydown);
+            removeKeydown();
             node.removeEventListener('pointerdown', markInteraction);
             node.removeEventListener('input', markInteraction);
             observer.disconnect();
             background.forEach(releaseInert);
+            releaseScrollbarMode();
             if (previousFocus?.isConnected) previousFocus.focus();
         },
     };

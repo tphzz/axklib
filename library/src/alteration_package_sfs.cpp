@@ -47,7 +47,7 @@ Result<void> grow_package_category_directories(TransactionState &state, const Pa
             std::ranges::count(*entries, DirectoryEntryState::deleted, &ParsedDirectoryEntry::state));
         const auto appended = count > reusable ? count - reusable : 0U;
         const auto required_size = static_cast<std::uint64_t>(payload->size()) + appended * 32U;
-        auto growth = grow_directory_capacity(state, partition->second, *directory, required_size, cancellation);
+        auto growth = grow_record_capacity(state, partition->second, *directory, required_size, cancellation);
         if (!growth)
             return std::unexpected{growth.error()};
         auto &totals = actual[{partition_index, volume_name}];
@@ -126,7 +126,8 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         if (!has_action(object, PackageImportObjectAction::insert)) {
             if (has_action(object, PackageImportObjectAction::reuse) &&
                 has_action(object, PackageImportObjectAction::relocate)) {
-                if (!object.target_sfs_id || (object.object_type != "SBNK" && object.object_type != "PROG")) {
+                if (!object.target_sfs_id ||
+                    (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG")) {
                     return std::unexpected{
                         transaction_error("planned reused relocation is not a supported fixed object")};
                 }

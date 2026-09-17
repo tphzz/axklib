@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,6 +42,7 @@ struct VerifiedPackageSet {
     std::vector<PackageInput> inputs;
     std::vector<axk::PortablePackage> packages;
     std::uint64_t retained_payload_bytes{};
+    std::function<Result<void>(const CancellationToken &)> verify_sources{};
 };
 
 struct SessionPackagePlanRecord {
@@ -119,9 +121,10 @@ class SessionMutationGuard {
         : images_(images), image_id_(image_id), owner_id_(owner_id), revision_(revision) {}
     ~SessionMutationGuard() {
         if (active_)
-            images_.abort_mutation(image_id_, owner_id_, revision_);
+            images_.abort_mutation(image_id_, owner_id_, revision_, invalidate_session_);
     }
     void finish() noexcept { active_ = false; }
+    void invalidate_on_abort(bool value) noexcept { invalidate_session_ = value; }
 
   private:
     ImageSessionManager &images_;
@@ -129,6 +132,7 @@ class SessionMutationGuard {
     std::string owner_id_;
     std::uint64_t revision_{};
     bool active_{true};
+    bool invalidate_session_{};
 };
 
 std::string normalized_path(const std::filesystem::path &path);

@@ -3,6 +3,40 @@ import { describe, expect, it, vi } from 'vitest';
 import ImageIntegrityDialog from './ImageIntegrityDialog.svelte';
 
 describe('ImageIntegrityDialog', () => {
+    it('explains guarded EX access without offering repair or disabling all writes', async () => {
+        const onclose = vi.fn();
+        render(ImageIntegrityDialog, {
+            props: {
+                issues: [
+                    {
+                        code: 'EX5_CAPACITY_EXCEEDS_IMAGE',
+                        severity: 'WARNING',
+                        message: 'EX5 filesystem declares one sector beyond the image.',
+                        objectId: null,
+                        samplerPath: '/',
+                    },
+                ],
+                loading: false,
+                error: '',
+                repairAvailable: false,
+                repairing: false,
+                repairLabel: '',
+                repairError: '',
+                onrepair: vi.fn(),
+                onclose,
+            },
+        });
+        expect(screen.getByText('EX image size mismatch')).toBeTruthy();
+        expect(screen.getByText(/Guarded writing remains available/)).toBeTruthy();
+        expect(screen.getByText(/EX hardware may still attempt/)).toBeTruthy();
+        expect(screen.queryByText(/No blocking SFS/)).toBeNull();
+        expect(screen.queryByText(/Alteration is disabled/)).toBeNull();
+        expect(screen.queryByRole('button', { name: /repair/i })).toBeNull();
+        await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onclose).toHaveBeenCalledOnce();
+        await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+        expect(onclose).toHaveBeenCalledTimes(2);
+    });
     it('explains allocation blockers without offering a repair action', async () => {
         const onclose = vi.fn();
         render(ImageIntegrityDialog, {

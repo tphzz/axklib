@@ -55,6 +55,7 @@ export type ImageTreeAction =
     | 'inspect-allocation'
     | 'repair-placement'
     | 'import-packages'
+    | 'import-floppy'
     | 'export-package'
     | 'export-volume-packages'
     | 'export-volume-floppies'
@@ -172,6 +173,7 @@ export interface InspectorRelationshipItem {
     objectId?: string;
     name: string;
     detail: string;
+    detailTitle?: string;
     navigable: boolean;
 }
 

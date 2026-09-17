@@ -117,6 +117,7 @@ add_library(
   src/server_allocation_map_response.cpp
   src/server_application.cpp
   src/server_image_responses.cpp
+  src/server_image_filesystem.cpp
   src/server_infrastructure_responses.cpp
   src/server_job_responses.cpp
   src/server_lifecycle.cpp
@@ -230,6 +231,7 @@ if(BUILD_TESTING)
     tests/event_dispatcher_test.cpp
     tests/event_tickets_test.cpp
     tests/http_headers_test.cpp
+    tests/image_session_contract_test.cpp
     tests/job_json_test.cpp
     tests/process_lifetime_test.cpp
     tests/request_validation_test.cpp
@@ -244,7 +246,9 @@ if(BUILD_TESTING)
     axk_server_tests
     PRIVATE axk_server_adapter GTest::gtest_main nlohmann_json_schema_validator::validator
   )
-  target_include_directories(axk_server_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_include_directories(
+    axk_server_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${AXK_REPOSITORY_ROOT}/library/internal"
+  )
   axk_set_project_warnings(axk_server_tests)
   axk_enable_sanitizers(axk_server_tests)
   axk_enable_coverage(axk_server_tests)
@@ -309,7 +313,7 @@ endif()
 install(TARGETS axklib_server RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT server)
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT server)
-foreach(package crow asio hash-library openssl nlohmann-json libsndfile soxr utfcpp
+foreach(package crow asio hash-library icu openssl nlohmann-json libsndfile soxr utfcpp
                 libflac libogg libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

@@ -150,59 +150,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "PRF3 is reserved for partition support files")};
         }
-        if (volume.sample_banks.empty() != volume.programs.empty() ||
-            volume.sample_banks.size() != volume.programs.size()) {
-            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                              "current SBAC/PROG profile requires one Sample Bank per Program")};
-        }
-        if (!volume.programs.empty()) {
-            std::map<std::string, const SampleSpec *> sample_specs;
-            std::map<std::string, const SampleBankSpec *> sample_bank_specs;
-            for (const auto &sample : volume.samples)
-                sample_specs.emplace(sample.name, &sample);
-            for (const auto &sample_bank : volume.sample_banks)
-                sample_bank_specs.emplace(sample_bank.name, &sample_bank);
-            std::set<std::string> assigned_sample_banks;
-            std::set<std::string> assigned_direct;
-            for (const auto &program : volume.programs) {
-                if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-                    program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
-                    program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
-                    program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
-                    program.assignments[1].receive_channel != 2U) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "Program profile requires SBAC channel 1 "
-                                                      "then SBNK channel 2")};
-                }
-                const auto sample_bank = sample_bank_specs.find(program.assignments[0].target_name);
-                const auto direct = sample_specs.find(program.assignments[1].target_name);
-                if (sample_bank == sample_bank_specs.end() || direct == sample_specs.end() ||
-                    !assigned_sample_banks.insert(sample_bank->first).second ||
-                    !assigned_direct.insert(direct->first).second ||
-                    std::ranges::contains(sample_bank->second->member_samples, direct->first)) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "Program targets must be unique, known, and separate")};
-                }
-                if (direct->second->right_waveform_id || direct->second->interleaved_audio_path) {
-                    return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                      "SBAC/PROG writer profile supports mono Samples only")};
-                }
-                if (sample_bank->second->member_samples.size() == 1U) {
-                    const auto *member = sample_specs.at(sample_bank->second->member_samples[0]);
-                    if (member->waveform_id != direct->second->waveform_id ||
-                        member->root_key != direct->second->root_key || member->key_low != direct->second->key_low ||
-                        member->key_high != direct->second->key_high || member->level != direct->second->level) {
-                        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                          "one-member Sample Bank and direct Sample control "
-                                                          "parameters must match")};
-                    }
-                }
-            }
-            if (assigned_sample_banks.size() != sample_bank_specs.size()) {
-                return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "every Sample Bank must be assigned once")};
-            }
-        }
+        if (auto valid = detail::validate_authored_volume(volume); !valid)
+            return std::unexpected{
+                make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, valid.error().message)};
         const auto volume_id = next++;
         std::array<std::uint32_t, 5> category_ids{};
         for (auto &value : category_ids)
@@ -234,7 +184,7 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return std::unexpected{imported.error()};
             const auto id = next++;
             const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(waveform_index) * 0x100U;
-            auto payload = detail::prepare_smpl_payload(spec, *imported, reference_value);
+            auto payload = detail::prepare_smpl_payload(spec, *imported, reference_value, volume.name);
             if (!payload)
                 return std::unexpected{payload.error()};
             smpl_entries.emplace_back(spec.name, id, 16U);
@@ -242,22 +192,26 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             loaded.emplace(spec.id, LoadedWaveform{spec, std::move(*imported), reference_value});
         }
         std::map<std::string, std::pair<std::string, std::string>> generated_members;
-        std::set<std::string> banked_samples;
+        std::map<std::string, const SampleParameters *> bank_parameter_overrides;
         for (const auto &sample_bank : volume.sample_banks) {
-            banked_samples.insert(sample_bank.member_samples.begin(), sample_bank.member_samples.end());
-        }
-        std::map<std::string, std::vector<std::uint8_t>> linked_programs;
-        for (const auto &program : volume.programs) {
-            if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-                program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
-                program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
-                program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
-                program.assignments[1].receive_channel != 2U) {
-                return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                                  "Program profile requires SBAC channel 1 then SBNK channel "
-                                                  "2")};
+            for (const auto &member : sample_bank.member_samples) {
+                if (!bank_parameter_overrides
+                         .emplace(member, sample_bank.parameter_overrides ? &*sample_bank.parameter_overrides : nullptr)
+                         .second) {
+                    return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                                      "Sample cannot belong to multiple Sample Banks")};
+                }
             }
-            linked_programs[program.assignments[1].target_name].push_back(program.number);
+        }
+        std::map<std::string, std::vector<std::uint8_t>> linked_sample_programs;
+        std::map<std::string, std::vector<std::uint8_t>> linked_sample_bank_programs;
+        for (const auto &program : volume.programs) {
+            for (const auto &assignment : program.assignments) {
+                auto &links = assignment.target_kind == "SBAC" ? linked_sample_bank_programs : linked_sample_programs;
+                auto &programs = links[assignment.target_name];
+                if (!std::ranges::contains(programs, program.number))
+                    programs.push_back(program.number);
+            }
         }
         std::map<std::string, SampleSpec> samples;
         for (const auto &sample : volume.samples) {
@@ -283,11 +237,11 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                 return audio;
             };
             const auto add_member = [&](std::string key, std::string name, std::size_t channel) -> Result<void> {
-                WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path, sample.root_key,
-                                  sample.target_sample_rate};
+                WaveformSpec spec{key, std::move(name), *sample.interleaved_audio_path,
+                                  sample.parameters.root_key.value_or(60U), sample.target_sample_rate};
                 const auto reference_value = 0x016b1dbcU + static_cast<std::uint32_t>(loaded.size()) * 0x100U;
                 auto audio = make_channel(channel);
-                auto payload = detail::prepare_smpl_payload(spec, audio, reference_value);
+                auto payload = detail::prepare_smpl_payload(spec, audio, reference_value, volume.name);
                 if (!payload)
                     return std::unexpected{payload.error()};
                 const auto id = next++;
@@ -332,17 +286,23 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
                     right->second.spec.name, right->second.reference_value, right->second.audio.output_sample_rate,
                     static_cast<std::uint32_t>(right->second.audio.output_frames)});
             }
-            auto payload = detail::prepare_sbnk_payload(
-                sample, left_member, right_member, banked_samples.contains(sample.name), linked_programs[sample.name]);
+            auto effective_sample = sample;
+            const auto bank = bank_parameter_overrides.find(sample.name);
+            if (bank != bank_parameter_overrides.end() && bank->second != nullptr)
+                effective_sample = detail::apply_sample_bank_parameter_overrides(sample, *bank->second);
+            auto payload = detail::prepare_sbnk_payload(effective_sample, left_member, right_member,
+                                                        bank != bank_parameter_overrides.end(),
+                                                        linked_sample_programs[sample.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
             sbnk_entries.emplace_back(sample.name, id, 16U);
             objects.push_back({id, std::move(*payload), RecordKind::object});
-            samples.emplace(sample.name, sample);
+            samples.emplace(sample.name, std::move(effective_sample));
         }
         for (const auto &sample_bank : volume.sample_banks) {
-            auto payload = detail::prepare_sbac_payload(sample_bank, samples);
+            auto payload =
+                detail::prepare_sbac_payload(sample_bank, samples, linked_sample_bank_programs[sample_bank.name]);
             if (!payload)
                 return std::unexpected{payload.error()};
             const auto id = next++;
@@ -513,8 +473,8 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         std::fill(header.begin() + 0x88, header.begin() + 0x90, std::byte{0xff});
         for (const auto &[offset, value] : std::array<std::pair<std::size_t, std::uint32_t>, 7>{
                  {{0x90, static_cast<std::uint32_t>(geometry.cluster_count)},
-                  {0x94, 2},
-                  {0x98, 2},
+                  {0x94, detail::sfs_initial_bitmap_cluster},
+                  {0x98, detail::sfs_initial_bitmap_cluster},
                   {0x9c, static_cast<std::uint32_t>(geometry.bitmap_cluster)},
                   {0xa0, detail::sfs_directory_index_capacity},
                   {0xa4, static_cast<std::uint32_t>(geometry.directory_index_cluster)},
@@ -593,13 +553,13 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         }
         const auto bitmap_layout = detail::sfs_allocation_bitmap_layout(
             geometry.start_sector, static_cast<std::uint32_t>(geometry.cluster_count), 2U,
-            static_cast<std::uint32_t>(geometry.bitmap_cluster));
+            detail::sfs_initial_bitmap_cluster, static_cast<std::uint32_t>(geometry.bitmap_cluster));
         if (!bitmap_layout || bitmap_layout->rounded_bytes != bitmap.size()) {
             return std::unexpected{make_error(ErrorCode::internal_invariant, ErrorCategory::internal,
                                               "prepared SFS allocation bitmap geometry is inconsistent")};
         }
-        if (!publication->write_at(bitmap_layout->fixed_location_offset, bitmap) ||
-            !publication->write_at(bitmap_layout->header_addressed_offset, bitmap) ||
+        if (!publication->write_at(bitmap_layout->bitmap_copy1_offset, bitmap) ||
+            !publication->write_at(bitmap_layout->bitmap_copy2_offset, bitmap) ||
             !publication->write_at((geometry.start_sector + geometry.directory_index_cluster * 2U) * 512U, index))
             return std::unexpected{
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write partition allocation data")};

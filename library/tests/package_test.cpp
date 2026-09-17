@@ -7,6 +7,7 @@
 #include <future>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <vector>
@@ -114,17 +115,21 @@ axk::VolumeSpec graph_volume(const std::filesystem::path &audio_path) {
     axk::SampleSpec banked;
     banked.name = "Grouped Sample";
     banked.waveform_id = "wave";
-    banked.root_key = 60U;
-    banked.key_high = 127U;
+    banked.parameters.root_key = 60U;
+    banked.parameters.key_high = 127U;
     volume.samples.push_back(std::move(banked));
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Graph Bank", {"Grouped Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Graph Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Graph Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -136,8 +141,8 @@ axk::VolumeSpec single_sample_volume(const std::filesystem::path &audio_path, st
     axk::SampleSpec sample;
     sample.name = std::move(sample_name);
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     return volume;
 }
@@ -152,7 +157,10 @@ axk::VolumeSpec single_sample_bank_volume(const std::filesystem::path &audio_pat
     direct.name = "Direct Sample";
     volume.samples.push_back(std::move(direct));
     volume.programs.push_back(
-        {1U, "Pgm 001", {{"SBAC", volume.sample_banks.front().name, 1U}, {"SBNK", volume.samples.back().name, 2U}}});
+        {1U,
+         "Pgm 001",
+         {{"SBAC", volume.sample_banks.front().name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", volume.samples.back().name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -289,7 +297,7 @@ void clear_cluster_claim(std::fstream &image, const axk::Partition &partition, s
     const auto mask = static_cast<unsigned char>(0x80U >> (cluster % 8U));
     const std::array offsets{
         (static_cast<std::uint64_t>(partition.start_sector) +
-         static_cast<std::uint64_t>(partition.bitmap_cluster) * partition.sectors_per_cluster) *
+         static_cast<std::uint64_t>(partition.bitmap_copy2_cluster) * partition.sectors_per_cluster) *
                 512U +
             byte_index,
         static_cast<std::uint64_t>(partition.start_sector) * 512U + 2048U + byte_index,
@@ -648,7 +656,7 @@ TEST(PortablePackage, ExportsAndVerifiesTypedSmplFromFat12) {
     ASSERT_EQ(built->package.roots.size(), 1U);
     ASSERT_EQ(built->package.nodes.size(), 1U);
     EXPECT_EQ(built->package.nodes.front().object_type, "SMPL");
-    EXPECT_EQ(built->package.nodes.front().relocations.size(), 2U);
+    EXPECT_EQ(built->package.nodes.front().relocations.size(), 8U);
     ASSERT_TRUE(built->package.nodes.front().semantic_sha256);
     ASSERT_TRUE(built->package.nodes.front().audio_sha256);
     EXPECT_EQ(built->package.nodes.front().semantic_sha256->size(), 64U);
@@ -656,12 +664,12 @@ TEST(PortablePackage, ExportsAndVerifiesTypedSmplFromFat12) {
     EXPECT_NE(built->package.nodes.front().semantic_sha256, built->package.nodes.front().normalized_sha256);
     EXPECT_NE(built->package.nodes.front().audio_sha256, built->package.nodes.front().normalized_sha256);
     EXPECT_EQ(*built->package.nodes.front().semantic_sha256,
-              "f0bc9a18c0c14d35e0cb81c375fd43ef8cd6528bb52eb29aee67ef8bbfe82b82");
+              "e3b47824e8002294724c2bc4a2b0f24bd32743c8776d12f62bb1525e8ffd5f4c");
     EXPECT_EQ(*built->package.nodes.front().audio_sha256,
               "2e0f5102be7b10596b272fd8df2cb288a304bd6f8a1b9c7603d13494cd13a024");
     EXPECT_EQ(built->package.nodes.front().normalized_sha256,
-              "e64305ce4d25f82f73b5512fa6945d74ba554e0cf481e42accb76fd397117d37");
-    EXPECT_EQ(built->package.package_id, "674d364947736a718728ea1af87f7882fb03ff5fc47f433dabf165af2a5c2d6b");
+              "8ae3113ddc0e4a0b2fc7a713343c22a3298ebe7400e29496b357b513fac5345b");
+    EXPECT_EQ(built->package.package_id, "db307f8ba6629f8f305c9c5221d407f5906b1d2f41d63f3e00eb5c021503a87d");
 
     const auto reopened = axk::open_portable_package(built->archive, "TEST.axksmpl");
     ASSERT_TRUE(reopened) << reopened.error().message;
@@ -750,8 +758,16 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
     volume.samples.push_back(std::move(third_direct));
     volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     volume.sample_banks.push_back({"Graph Bank 3", {"Grouped Sample 3"}});
-    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
-    volume.programs.push_back({3U, "Pgm 003", {{"SBAC", "Graph Bank 3", 1U}, {"SBNK", "Direct Sample 3", 2U}}});
+    volume.programs.push_back(
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume.programs.push_back(
+        {3U,
+         "Pgm 003",
+         {{"SBAC", "Graph Bank 3", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 3", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);
     ASSERT_TRUE(written) << written.error().message;
@@ -866,7 +882,11 @@ TEST(PortablePackage, PreservesUnresolvedProgramRowForEveryProgramRootWithoutInv
     auto target_volume = graph_volume(audio_path);
     target_volume.name = "Target Volume";
     target_volume.sample_banks.front().name = "Graph Bank     *";
-    target_volume.programs = {{2U, "Pgm 002", {{"SBAC", "Graph Bank     *", 1U}, {"SBNK", "Direct Sample", 2U}}}};
+    target_volume.programs = {
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank     *", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}}};
     axk::HdsBuildManifest target_manifest{"1.0", 4U * 1024U * 1024U, {}};
     target_manifest.partitions.push_back({"P1", {std::move(target_volume)}});
     const auto target_written = axk::write_hds_image(target_manifest, target_path);
@@ -1082,17 +1102,21 @@ TEST(PortablePackage, RejectsAmbiguousExactProgramTargetEvenForVolume) {
     axk::SampleSpec other_member;
     other_member.name = "Other Member";
     other_member.waveform_id = "wave";
-    other_member.root_key = 60U;
-    other_member.key_high = 127U;
+    other_member.parameters.root_key = 60U;
+    other_member.parameters.key_high = 127U;
     volume.samples.push_back(std::move(other_member));
     axk::SampleSpec other_direct;
     other_direct.name = "Other Direct";
     other_direct.waveform_id = "wave";
-    other_direct.root_key = 60U;
-    other_direct.key_high = 127U;
+    other_direct.parameters.root_key = 60U;
+    other_direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(other_direct));
     volume.sample_banks.push_back({"Other Bank", {"Other Member"}});
-    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Other Bank", 1U}, {"SBNK", "Other Direct", 2U}}});
+    volume.programs.push_back(
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Other Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Other Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
@@ -1261,18 +1285,21 @@ TEST(PortablePackage, TypedSuffixFollowsSelectedRootRatherThanDependencyClosure)
     axk::SampleSpec banked_two;
     banked_two.name = "Grouped Sample 2";
     banked_two.waveform_id = "wave2";
-    banked_two.root_key = 60U;
-    banked_two.key_high = 127U;
+    banked_two.parameters.root_key = 60U;
+    banked_two.parameters.key_high = 127U;
     authored_volume.samples.push_back(std::move(banked_two));
     axk::SampleSpec direct_two;
     direct_two.name = "Direct Sample 2";
     direct_two.waveform_id = "wave2";
-    direct_two.root_key = 60U;
-    direct_two.key_high = 127U;
+    direct_two.parameters.root_key = 60U;
+    direct_two.parameters.key_high = 127U;
     authored_volume.samples.push_back(std::move(direct_two));
     authored_volume.sample_banks.push_back({"Graph Bank 2", {"Grouped Sample 2"}});
     authored_volume.programs.push_back(
-        {2U, "Pgm 002", {{"SBAC", "Graph Bank 2", 1U}, {"SBNK", "Direct Sample 2", 2U}}});
+        {2U,
+         "Pgm 002",
+         {{"SBAC", "Graph Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     auto second_volume = single_sample_volume(audio_path, "Graph Volume 2", "Graph Wave 3", "Grouped Sample 3");
     manifest.partitions.push_back({"P1", {std::move(authored_volume), std::move(second_volume)}});
     ASSERT_TRUE(axk::write_hds_image(manifest, source_path));
@@ -1636,18 +1663,22 @@ TEST(PortablePackage, SbacRelationshipOrdinalsPreserveSourceSlotOrder) {
         axk::SampleSpec sample;
         sample.name = name;
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         volume.samples.push_back(std::move(sample));
     }
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Ordered Bank", {"Z Sample", "A Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Ordered Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Ordered Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});
     const auto written = axk::write_hds_image(manifest, source_path);
@@ -1849,7 +1880,10 @@ TEST(PortablePackage, NormativeJsonSchemaMatchesCanonicalManifestShapeAndEnums) 
     EXPECT_EQ(string_set(definitions.at("relocation").at("properties").at("role").at("enum")),
               (std::set<std::string>{"PROG_ASSIGNMENT_HANDLE", "SBAC_SLOT_HANDLE", "SBNK_GROUP_MEMBERSHIP",
                                      "SBNK_LEFT_MEMBER_CACHED_REFERENCE", "SBNK_PROGRAM_BITMAP",
-                                     "SBNK_RIGHT_MEMBER_CACHED_REFERENCE", "SMPL_GROUP_ID", "SMPL_REFERENCE_VALUE"}));
+                                     "SBNK_RIGHT_MEMBER_CACHED_REFERENCE", "SMPL_EMBEDDED_CONTAINER_NAME",
+                                     "SMPL_NAME_HASH_NEXT_HANDLE", "SMPL_NAME_HASH_NEXT_HANDLE_ALIAS",
+                                     "SMPL_REFERENCE_PREFIX", "SMPL_REFERENCE_VALUE", "SMPL_SAVE_BUFFER_RESIDUE_0X43",
+                                     "SMPL_SAVE_BUFFER_RESIDUE_0X6F", "SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER"}));
     std::filesystem::remove_all(output_root, error);
 }
 
@@ -2256,15 +2290,32 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
         }
 
         if (node.object_type == "SMPL") {
-            ASSERT_EQ(profile->relocations.size(), 2U);
-            EXPECT_EQ(profile->relocations[0].offset, 0x6cU);
-            EXPECT_EQ(profile->relocations[0].width, 4U);
-            EXPECT_EQ(profile->relocations[0].role, "SMPL_GROUP_ID");
-            EXPECT_TRUE(profile->relocations[0].mask_hex.empty());
-            EXPECT_EQ(profile->relocations[1].offset, 0x78U);
-            EXPECT_EQ(profile->relocations[1].width, 4U);
-            EXPECT_EQ(profile->relocations[1].role, "SMPL_REFERENCE_VALUE");
-            EXPECT_TRUE(profile->relocations[1].mask_hex.empty());
+            const std::array expected{
+                std::tuple{0x43U, 7U, std::string_view{"SMPL_SAVE_BUFFER_RESIDUE_0X43"}},
+                std::tuple{0x54U, 16U, std::string_view{"SMPL_EMBEDDED_CONTAINER_NAME"}},
+                std::tuple{0x68U, 4U, std::string_view{"SMPL_NAME_HASH_NEXT_HANDLE_ALIAS"}},
+                std::tuple{0x6cU, 3U, std::string_view{"SMPL_REFERENCE_PREFIX"}},
+                std::tuple{0x6fU, 5U, std::string_view{"SMPL_SAVE_BUFFER_RESIDUE_0X6F"}},
+                std::tuple{0x74U, 4U, std::string_view{"SMPL_NAME_HASH_NEXT_HANDLE"}},
+                std::tuple{0x78U, 4U, std::string_view{"SMPL_REFERENCE_VALUE"}},
+                std::tuple{0xaaU, 2U, std::string_view{"SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER"}},
+            };
+            ASSERT_EQ(profile->relocations.size(), expected.size());
+            for (std::size_t index = 0; index < expected.size(); ++index) {
+                EXPECT_EQ(profile->relocations[index].offset, std::get<0>(expected[index]));
+                EXPECT_EQ(profile->relocations[index].width, std::get<1>(expected[index]));
+                EXPECT_EQ(profile->relocations[index].role, std::get<2>(expected[index]));
+                EXPECT_TRUE(profile->relocations[index].mask_hex.empty());
+            }
+
+            auto unsupported_transfer = node.raw_payload;
+            unsupported_transfer[0x84U] = std::byte{0x20};
+            const auto unsupported_decoded = axk::decode_object(unsupported_transfer);
+            ASSERT_TRUE(unsupported_decoded);
+            const auto unsupported_profile =
+                axk::package_internal::build_relocation_profile(*unsupported_decoded, unsupported_transfer);
+            ASSERT_FALSE(unsupported_profile);
+            EXPECT_EQ(unsupported_profile.error().code, axk::ErrorCode::unsupported_profile);
         } else if (node.object_type == "SBNK") {
             ASSERT_EQ(profile->relocations.size(), 4U);
             EXPECT_EQ(profile->relocations[0].offset, 0xa0U);
@@ -2335,8 +2386,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             ASSERT_TRUE(normalized_decoded) << normalized_decoded.error().message;
             const auto *normalized_group = std::get_if<axk::CurrentSbac>(&normalized_decoded->payload);
             ASSERT_NE(normalized_group, nullptr);
-            EXPECT_TRUE(
-                std::ranges::all_of(normalized_group->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
+            EXPECT_TRUE(std::ranges::all_of(normalized_group->slots,
+                                            [](const auto &slot) { return slot.transient_member_pointer == 0U; }));
         } else if (node.object_type == "PROG") {
             const auto *program = std::get_if<axk::CurrentProg>(&decoded->payload);
             ASSERT_NE(program, nullptr);
@@ -2399,10 +2450,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             for (const auto index : portable_rows)
                 EXPECT_EQ(normalized_program->assignments[index].raw_handle, 0U);
 
-            const auto empty_row = std::ranges::find_if(program->assignments,
-                                                        [](const auto &assignment) { return assignment.name.empty(); });
-            ASSERT_NE(empty_row, program->assignments.end());
-            const auto empty_index = static_cast<std::size_t>(std::distance(program->assignments.begin(), empty_row));
+            const auto empty_index = program->assignments.size();
+            ASSERT_LT(empty_index, program->layout.assignment_capacity);
             auto invalid_handle = node.raw_payload;
             invalid_handle[0x130U + empty_index * 0x38U] = std::byte{0x01};
             const auto invalid_decoded = axk::decode_object(invalid_handle);
@@ -2461,8 +2510,10 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
 
         axk::package_internal::PackageNodeRelocationContext context;
         context.destination_name = destination_name(node);
-        if (node.object_type == "SMPL")
+        if (node.object_type == "SMPL") {
+            context.destination_embedded_container_name = "Target Volume";
             context.wave_data_reference_value = 0x234U;
+        }
         if (node.object_type == "SBNK") {
             context.linked_program_numbers = {2U, 33U, 96U, 128U};
             context.sample_bank_member =
@@ -2502,8 +2553,23 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             EXPECT_TRUE(allowed) << node.object_type << ' ' << node.name << " changed byte " << offset;
         }
         if (node.object_type == "SMPL") {
-            EXPECT_EQ(be32(*relocated, 0x6cU), 0x234U - 0xbaU);
+            const auto relocated_decoded = axk::decode_object(*relocated);
+            ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
+            const auto *wave_data = std::get_if<axk::CurrentSmpl>(&relocated_decoded->payload);
+            ASSERT_NE(wave_data, nullptr);
+            EXPECT_EQ(wave_data->embedded_container_name.value, "Target Volume");
+            for (std::size_t offset = 0x43U; offset <= 0x49U; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
+            for (std::size_t offset = 0x68U; offset <= 0x6bU; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
+            EXPECT_EQ((*relocated)[0x6cU], std::byte{});
+            EXPECT_EQ((*relocated)[0x6dU], std::byte{});
+            EXPECT_EQ((*relocated)[0x6eU], std::byte{0x02});
+            for (std::size_t offset = 0x6fU; offset <= 0x77U; ++offset)
+                EXPECT_EQ((*relocated)[offset], std::byte{}) << offset;
             EXPECT_EQ(be32(*relocated, 0x78U), 0x234U);
+            EXPECT_EQ((*relocated)[0xaaU], std::byte{});
+            EXPECT_EQ((*relocated)[0xabU], std::byte{});
         } else if (node.object_type == "SBNK") {
             EXPECT_EQ(be32(*relocated, 0xa0U), 0x234U);
             EXPECT_EQ(be32(*relocated, 0xc0U), 0x00000002U);
@@ -2515,8 +2581,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
             const auto *sample_bank = std::get_if<axk::CurrentSbac>(&relocated_decoded->payload);
             ASSERT_NE(sample_bank, nullptr);
-            EXPECT_TRUE(
-                std::ranges::all_of(sample_bank->slots, [](const auto &slot) { return slot.raw_handle == 0U; }));
+            EXPECT_TRUE(std::ranges::all_of(sample_bank->slots,
+                                            [](const auto &slot) { return slot.transient_member_pointer == 0U; }));
         } else if (node.object_type == "PROG") {
             const auto relocated_decoded = axk::decode_object(*relocated);
             ASSERT_TRUE(relocated_decoded) << relocated_decoded.error().message;
@@ -2801,6 +2867,7 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     const auto sfs_capacity_conflict = std::ranges::find_if(
         plan->conflicts, [](const auto &conflict) { return conflict.code == "SFS_CLUSTER_EXHAUSTED"; });
     ASSERT_NE(sfs_capacity_conflict, plan->conflicts.end());
+    EXPECT_EQ(sfs_capacity_conflict->partition_index, std::optional<std::uint8_t>{0U});
     EXPECT_NE(sfs_capacity_conflict->message.find("free cluster(s)"), std::string::npos);
     EXPECT_NE(sfs_capacity_conflict->message.find("Wave Data"), std::string::npos);
     EXPECT_NE(sfs_capacity_conflict->message.find("needs at least"), std::string::npos);
@@ -2817,6 +2884,53 @@ TEST(PackageImportPlanner, ReportsInsufficientSfsAndFat12CapacityBeforeApply) {
     EXPECT_FALSE(fat_plan->valid());
     EXPECT_TRUE(std::ranges::any_of(fat_plan->conflicts,
                                     [](const auto &conflict) { return conflict.code == "FAT12_CLUSTER_EXHAUSTED"; }));
+    std::filesystem::remove_all(output_root, error);
+}
+
+TEST(PackageImportPlanner, ScaffoldingCapacityConflictsIdentifyTheirPartition) {
+    const auto output_root = publication_root("axklib-package-scaffolding-capacity");
+    std::error_code error;
+    std::filesystem::remove_all(output_root, error);
+    std::filesystem::create_directories(output_root);
+    const auto target_path = output_root / "target.hds";
+    axk::HdsBuildManifest manifest{"1.0", 1024U * 1024U, {}};
+    manifest.partitions.push_back({"P1", {}});
+    ASSERT_TRUE(axk::write_hds_image(manifest, target_path));
+    const auto built = fat_smpl_package();
+    ASSERT_TRUE(built) << built.error().message;
+    const std::vector packages(128U, built->package);
+    axk::PackageImportRequest request;
+    for (std::size_t index = 0U; index < packages.size(); ++index) {
+        auto target = destination(index, std::format("Volume{}", index));
+        target.create_destination = true;
+        request.root_destinations.push_back(std::move(target));
+    }
+    const auto plan = axk::plan_package_import(target_path, packages, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_FALSE(plan->valid());
+    bool scaffolding_failure{};
+    for (const auto &conflict : plan->conflicts) {
+        if (conflict.code != "SFS_CLUSTER_EXHAUSTED")
+            continue;
+        EXPECT_EQ(conflict.partition_index, std::optional<std::uint8_t>{0U});
+        if (conflict.message.find("scaffolding") != std::string::npos) {
+            scaffolding_failure = true;
+            EXPECT_FALSE(conflict.volume_name.empty());
+        }
+    }
+    EXPECT_TRUE(scaffolding_failure);
+    EXPECT_TRUE(axk::verify_package_import_plan(*plan));
+    auto mismatched = *plan;
+    for (auto &conflict : mismatched.conflicts) {
+        if (conflict.code == "SFS_CLUSTER_EXHAUSTED")
+            conflict.partition_index = 1U;
+    }
+    const auto verified = axk::verify_package_import_plan(mismatched);
+    ASSERT_FALSE(verified);
+    EXPECT_EQ(verified.error().message, "package import plan contains an invalid destination action");
+    const auto output_path = output_root / "blocked.hds";
+    EXPECT_FALSE(axk::apply_package_import(target_path, packages, *plan, output_path, false));
+    EXPECT_FALSE(std::filesystem::exists(output_path));
     std::filesystem::remove_all(output_root, error);
 }
 
@@ -3122,6 +3236,9 @@ TEST(PackageImportApply, AtomicallyInsertsAndThenReusesAnExactSmpl) {
     EXPECT_EQ(imported.front()->sfs_id.value, *plan->objects.front().target_sfs_id);
     const auto *wave_data = std::get_if<axk::CurrentSmpl>(&imported.front()->object.payload);
     ASSERT_NE(wave_data, nullptr);
+    EXPECT_EQ(wave_data->embedded_container_name.value, "New Volume");
+    EXPECT_EQ(wave_data->transient_name_hash_next_handle.value, 0U);
+    EXPECT_EQ(wave_data->transient_512_byte_block_counter.value, 0U);
     EXPECT_EQ(wave_data->wave_data_reference_value.value, *plan->objects.front().target_wave_data_reference_value);
 
     const auto repeat_plan = axk::plan_package_import(first_output, packages, request);
@@ -3486,8 +3603,8 @@ TEST(PackageImportApply, PreservesStereoClosureAndExactPhysicalPcm) {
     sample.name = "Stereo Sample";
     sample.waveform_id = "left";
     sample.right_waveform_id = "right";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {}};
     manifest.partitions.push_back({"P1", {std::move(volume)}});

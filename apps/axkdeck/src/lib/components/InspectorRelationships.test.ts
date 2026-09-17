@@ -16,13 +16,14 @@ describe('InspectorRelationships', () => {
                                 id: 'known',
                                 objectId: 'bank-1',
                                 name: 'Piano Bank',
-                                detail: 'Assignment · =Smp',
+                                detail: '=Smp',
+                                detailTitle: 'Receive channel',
                                 navigable: true,
                             },
                             {
                                 id: 'unknown',
                                 name: 'Missing Bank',
-                                detail: 'Assignment',
+                                detail: '',
                                 navigable: false,
                             },
                         ],
@@ -32,12 +33,17 @@ describe('InspectorRelationships', () => {
             },
         });
 
-        const relationship = screen.getByRole('button', { name: 'Piano Bank Assignment · =Smp' });
+        const relationship = screen.getByRole('button', { name: 'Piano Bank =Smp' });
+        expect(screen.getByTitle('Receive channel').textContent).toBe('=Smp');
+        expect(screen.getByTitle('Piano Bank').textContent).toBe('Piano Bank');
+        expect(screen.getByTitle('Not resolvable').querySelector('span')).toBeNull();
         await fireEvent.click(relationship, { detail: 1 });
         await fireEvent.click(relationship, { detail: 0 });
 
         expect(onnavigate).toHaveBeenNthCalledWith(1, 'bank-1', false);
         expect(onnavigate).toHaveBeenNthCalledWith(2, 'bank-1', true);
+        expect(screen.getByRole('heading', { name: 'Relationships', level: 4 })).toBeTruthy();
+        expect(screen.getByRole('heading', { name: 'Sample Banks', level: 5 })).toBeTruthy();
         expect(screen.getByTitle('Not resolvable').textContent).toContain('Missing Bank');
         expect(screen.queryByRole('button', { name: /Missing Bank/ })).toBeNull();
     });

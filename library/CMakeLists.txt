@@ -111,16 +111,26 @@ add_library(
   src/media_a3k_archive.cpp
   src/media_catalog.cpp
   src/media_fat12.cpp
+  src/media_ex5.cpp
+  src/media_fat_disk.cpp
   src/media_fat12_catalog.cpp
   src/media_floppy_catalog.cpp
   src/media_floppy_set_reader.cpp
+  src/media_floppy_assembly.cpp
+  src/media_object_directory_set.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
   src/media_yamaha.cpp
+  src/su700.cpp
   src/object.cpp
+  src/prog_codec.cpp
+        src/program_parameter_codec.cpp
+        src/program_effect_parameter_codec.cpp
+        src/program_assignment_parameter_codec.cpp
   src/package.cpp
   src/package_archive.cpp
   src/package_build.cpp
+  src/floppy_import.cpp
   src/package_import.cpp
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
@@ -147,8 +157,38 @@ add_library(
   src/sfs_allocation.cpp
   src/sfs_container.cpp
   src/sfs_directory.cpp
+  src/sfs_files_edit.cpp
+  src/sfs_files_import.cpp
+  src/sfs_files_preparation.cpp
+  src/filesystem_preparation.cpp
+  src/fat_files_edit.cpp
+  src/fat_files_import.cpp
+  src/fat_files_state.cpp
+  src/fat_files_preparation.cpp
+  src/sfs_files_publication.cpp
+  src/sfs_files_state.cpp
+  src/sfs_geometry.cpp
   src/sfs_repair.cpp
   src/system_file.cpp
+  src/system_file_patch.cpp
+  src/sample_parameter_decode.cpp
+  src/sample_parameter_codec.cpp
+  src/system_registered_program.cpp
+  src/system_registered_sample.cpp
+  src/system_recording.cpp
+  src/system_global.cpp
+  src/system_global_write.cpp
+  src/system_remix.cpp
+  src/system_favorites.cpp
+  src/system_panel.cpp
+  src/system_mlan.cpp
+  src/system_midi.cpp
+  src/system_disk.cpp
+  src/system_playback.cpp
+  src/system_recording_write.cpp
+  src/system_recording_configuration_write.cpp
+  src/system_file_preparation.cpp
+  src/system_file_publication.cpp
   src/tx16w.cpp
   src/tx16w_a_series.cpp
   src/utf8.cpp
@@ -211,6 +251,7 @@ add_library(
   src/alteration.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
+  src/alteration_manifest_template.cpp
   src/alteration_manifest_program.cpp
   src/alteration_manifest_sample_bank.cpp
   src/alteration_manifest_placement.cpp
@@ -222,10 +263,20 @@ add_library(
   src/alteration_program.cpp
   src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
+  src/alteration_sample_bank_parameters.cpp
+  src/alteration_wave_data_parameters.cpp
+  src/alteration_manifest_program_replacement.cpp
+  src/alteration_program_replacement.cpp
+  src/alteration_sample_retarget.cpp
+  src/alteration_manifest_sample_retarget.cpp
+  src/prog_assignment_replacement_codec.cpp
+  src/wave_data_parameter_update.cpp
   src/alteration_extent_normalization.cpp
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp
+  src/alteration_program_parameters.cpp
+  src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
   src/alteration_tx16w.cpp
@@ -244,9 +295,16 @@ add_library(
   src/media_write_fat12.cpp
   src/media_write_iso9660.cpp
   src/object_write_codec.cpp
+  src/prog_write_codec.cpp
+  src/sample_parameter_json.cpp
+  src/program_parameter_json.cpp
+  src/program_assignment_parameter_json.cpp
+  src/program_spec_json.cpp
+  src/sample_bank_parameter_update.cpp
   src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
+  src/writer_manifest_template.cpp
   src/writer_profiles.cpp
 )
 add_library(axklib::audio ALIAS axk_audio)
@@ -509,7 +567,9 @@ if(BUILD_TESTING)
     axk_core_tests
     tests/bytes_test.cpp
     tests/alteration_test.cpp
+    tests/program_parameter_alteration_test.cpp
     tests/audio_import_test.cpp
+    tests/audio_import_contract_test.cpp
     tests/audio_test.cpp
     tests/wav_stream_test.cpp
     tests/audio_export_wav_source_test.cpp
@@ -523,24 +583,64 @@ if(BUILD_TESTING)
     tests/hardening_test.cpp
     tests/media_a3k_archive_test.cpp
     tests/media_fat12_test.cpp
+    tests/media_object_directory_set_test.cpp
+    tests/su700_test.cpp
+    tests/media_ex5_test.cpp
+    tests/media_ex5_capacity_test.cpp
     tests/media_iso9660_test.cpp
     tests/media_conversion_test.cpp
     tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
+    tests/prog_codec_test.cpp
+    tests/program_parameters_test.cpp
+    tests/program_effect_parameters_test.cpp
+    tests/program_assignment_parameters_test.cpp
+    tests/program_parameter_json_test.cpp
+    tests/program_parameter_bounds_test.cpp
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
     tests/package_test.cpp
+    tests/package_graph_test.cpp
+    tests/floppy_import_test.cpp
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp
+    tests/sfs_files_test.cpp
+    tests/fat_files_test.cpp
+    tests/sfs_geometry_test.cpp
     tests/sfs_write_codec_test.cpp
     tests/system_file_test.cpp
+    tests/system_recording_test.cpp
+    tests/system_global_test.cpp
+    tests/system_global_write_test.cpp
+    tests/system_favorites_test.cpp
+    tests/system_panel_test.cpp
+    tests/system_mlan_test.cpp
+    tests/system_midi_test.cpp
+    tests/system_disk_test.cpp
+    tests/system_playback_test.cpp
+    tests/system_remix_write_test.cpp
+    tests/system_recording_write_test.cpp
+    tests/system_registered_program_write_test.cpp
+    tests/system_registered_sample_write_test.cpp
+    tests/system_file_write_test.cpp
+    tests/sample_parameter_decode_test.cpp
     tests/tx16w_test.cpp
     tests/utf8_test.cpp
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/fresh_object_graph_test.cpp
+    tests/sample_bank_parameter_alteration_test.cpp
+    tests/sample_parameter_edit_validation_test.cpp
+    tests/wave_data_parameter_alteration_test.cpp
+    tests/program_assignment_replacement_test.cpp
+    tests/sample_playback_window_test.cpp
+    tests/sample_wave_data_retarget_test.cpp
+    tests/sample_bank_member_growth_test.cpp
+    tests/smpl_writer_test.cpp
+    tests/sample_eq_test.cpp
   )
   target_compile_features(axk_core_tests PRIVATE cxx_std_23)
   target_compile_definitions(
@@ -576,6 +676,12 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_core_tests)
   axk_enable_coverage(axk_core_tests)
   gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)
+  add_executable(axk_core_reader_tests tests/core_reader_test.cpp)
+  target_link_libraries(axk_core_reader_tests PRIVATE axklib::core GTest::gtest_main)
+  axk_set_project_warnings(axk_core_reader_tests)
+  axk_enable_sanitizers(axk_core_reader_tests)
+  axk_enable_coverage(axk_core_reader_tests)
+  gtest_discover_tests(axk_core_reader_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_effect_dump tests/effect_dump.cpp)
   target_compile_features(axk_effect_dump PRIVATE cxx_std_23)
   target_link_libraries(axk_effect_dump PRIVATE axklib::core nlohmann_json::nlohmann_json)

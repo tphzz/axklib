@@ -515,9 +515,12 @@ jobs:
             build/tmp/arm64/bin/axklib-server \
             -output build/tmp/universal/bin/axklib-server
 
-          lipo build/tmp/universal/bin/axklib -verify_arch x86_64 arm64
+          # Xcode 27 lipo requires one architecture per verification invocation.
+          lipo build/tmp/universal/bin/axklib -verify_arch x86_64
+          lipo build/tmp/universal/bin/axklib -verify_arch arm64
           lipo -info build/tmp/universal/bin/axklib
-          lipo build/tmp/universal/bin/axklib-server -verify_arch x86_64 arm64
+          lipo build/tmp/universal/bin/axklib-server -verify_arch x86_64
+          lipo build/tmp/universal/bin/axklib-server -verify_arch arm64
           lipo -info build/tmp/universal/bin/axklib-server
           build/tmp/universal/bin/axklib --version
           build/tmp/universal/bin/axklib-server --print-version
@@ -741,8 +744,10 @@ jobs:
           sidecar="$app/Contents/MacOS/axklib-server"
           test -f "$main"
           test -f "$sidecar"
-          lipo "$main" -verify_arch x86_64 arm64
-          lipo "$sidecar" -verify_arch x86_64 arm64
+          lipo "$main" -verify_arch x86_64
+          lipo "$main" -verify_arch arm64
+          lipo "$sidecar" -verify_arch x86_64
+          lipo "$sidecar" -verify_arch arm64
           minimum_system_version=$(
             /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
               "$app/Contents/Info.plist"

@@ -14,13 +14,20 @@ const object: SamplerObject = {
     partitionName: 'Partition 0',
     volumeName: 'Volume',
     categoryName: 'SMPL',
+    objectEncoding: 'current',
+    directoryEntryName: 'TONE.001',
     sfsId: 9,
     storedSizeBytes: 128,
     sizeWithDependenciesBytes: null,
     sampleRate: 44_100,
     rootKey: 60,
-    frameCount: 4,
+    storedFrameCount: 4,
+    waveStartFrame: 0,
+    waveLengthFrames: 4,
+    storageState: 'COMPLETE',
     sampleWidthBytes: 2,
+    embeddedContainerName: 'Volume',
+    loopMode: 2,
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
@@ -74,7 +81,14 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
 
     const objects = await transport.objectPage(image.sessionId, 0, 64);
     expect(objects).toMatchObject({ totalCount: 1 });
-    expect(objects.objects[0]).toMatchObject({ objectType: 'SMPL', name: 'Tone' });
+    expect(objects.objects[0]).toMatchObject({
+        objectType: 'SMPL',
+        name: 'Tone',
+        objectEncoding: 'current',
+        directoryEntryName: 'TONE.001',
+        embeddedContainerName: 'Volume',
+        loopMode: 2,
+    });
 
     const relationships = await transport.relationshipPage(image.sessionId, 0, 64, { scopeId: 'volume-1' });
     expect(relationships).toMatchObject({ totalCount: 1 });
@@ -104,12 +118,17 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
 
     const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
     expect(preview).toEqual({
-        frameCount: 4,
+        objectId: 'wave-1',
         lanes: [
             {
                 role: 'MONO',
                 sourceObjectId: 'wave-1',
-                frameCount: 4,
+                sampleRate: 44_100,
+                storedFrameCount: 4,
+                playbackStartFrame: 0,
+                playbackLengthFrames: 4,
+                loopStartFrame: 0,
+                loopLengthFrames: 0,
                 bins: [{ minimum: -1, maximum: 1 }],
             },
         ],
@@ -133,12 +152,17 @@ describe('ImageTransport shared read contract', () => {
         const transport = new InMemoryImageTransport({
             opened,
             preview: {
-                frameCount: 4,
+                objectId: 'wave-1',
                 lanes: [
                     {
                         role: 'MONO',
                         sourceObjectId: 'wave-1',
-                        frameCount: 4,
+                        sampleRate: 44_100,
+                        storedFrameCount: 4,
+                        playbackStartFrame: 0,
+                        playbackLengthFrames: 4,
+                        loopStartFrame: 0,
+                        loopLengthFrames: 0,
                         bins: [{ minimum: -1, maximum: 1 }],
                     },
                 ],
@@ -245,12 +269,28 @@ describe('ImageTransport shared read contract', () => {
                                 id: 'sample-1',
                                 type: 'SMPL',
                                 name: 'Tone',
+                                format: 'current',
                                 partitionIndex: 0,
                                 partitionName: 'Partition 0',
                                 volumeName: 'Volume',
                                 categoryName: 'SMPL',
+                                entryName: 'TONE.001',
                                 sizeBytes: 128,
-                                waveform: { sampleRate: 44_100, sampleWidthBytes: 2, rootKey: 60, frameCount: 4 },
+                                waveform: {
+                                    sampleRate: 44_100,
+                                    sampleWidthBytes: 2,
+                                    rootKey: 60,
+                                    fineTuneCents: -7,
+                                    loopMode: 2,
+                                    loopModeLabel: '->0->',
+                                    storedFrameCount: 4,
+                                    waveStartFrame: 0,
+                                    waveLengthFrames: 4,
+                                    storageState: 'COMPLETE',
+                                    loopStartFrame: 1,
+                                    loopLengthFrames: 2,
+                                    embeddedContainerName: 'Volume',
+                                },
                             },
                         ],
                         totalCount: 1,
@@ -301,12 +341,17 @@ describe('ImageTransport shared read contract', () => {
                 }
                 if (url.pathname.endsWith('/preview')) {
                     return json({
-                        frameCount: 4,
+                        objectId: 'wave-1',
                         lanes: [
                             {
                                 role: 'MONO',
                                 sourceObjectId: 'wave-1',
-                                frameCount: 4,
+                                sampleRate: 44_100,
+                                storedFrameCount: 4,
+                                playbackStartFrame: 0,
+                                playbackLengthFrames: 4,
+                                loopStartFrame: 0,
+                                loopLengthFrames: 0,
                                 bins: [{ minimum: -1, maximum: 1 }],
                             },
                         ],

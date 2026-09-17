@@ -8,8 +8,9 @@
 namespace {
 
 struct ClusterState {
-    bool fixed_used{};
-    bool header_used{};
+    bool copy1_used{};
+    bool copy2_used{};
+    bool active_used{};
     bool implicit_reserved{};
     bool reconstructed_used{};
     std::vector<axk::app::ImageAllocationOwner> owners;
@@ -33,8 +34,6 @@ std::string payload_kind_name(axk::PayloadKind kind) {
         return "DIRECTORY";
     case axk::PayloadKind::object:
         return "OBJECT";
-    case axk::PayloadKind::alternating_byte_object:
-        return "ALTERNATING_BYTE_OBJECT";
     case axk::PayloadKind::unknown:
         return "UNKNOWN";
     }
@@ -81,7 +80,7 @@ std::string allocation_kind(const ClusterState &state) {
     if (state.owners.size() > 1U)
         return "CONFLICT";
     if (state.owners.empty())
-        return state.header_used ? "UNCLAIMED" : "FREE";
+        return state.active_used ? "UNCLAIMED" : "FREE";
     const auto &owner = state.owners.front();
     if (owner.claim_kind != "DATA")
         return owner.claim_kind;
@@ -91,7 +90,7 @@ std::string allocation_kind(const ClusterState &state) {
 }
 
 bool same_run_state(const ClusterState &left, const ClusterState &right) {
-    return left.fixed_used == right.fixed_used && left.header_used == right.header_used &&
+    return left.copy1_used == right.copy1_used && left.copy2_used == right.copy2_used &&
            left.implicit_reserved == right.implicit_reserved && left.reconstructed_used == right.reconstructed_used &&
            left.owners == right.owners && left.flags == right.flags;
 }
@@ -101,7 +100,8 @@ bool same_run_state(const ClusterState &left, const ClusterState &right) {
 axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
     const Partition &partition, const std::unordered_map<std::uint32_t, AllocationObjectIdentity> &objects_by_sfs_id,
     std::uint32_t sector_size_bytes) {
-    if (sector_size_bytes == 0U || partition.sectors_per_cluster == 0U || partition.cluster_count == 0U) {
+    if (sector_size_bytes == 0U || partition.sectors_per_cluster == 0U || partition.cluster_count == 0U ||
+        partition.allocation.active_bitmap_copy == 0U) {
         return std::unexpected(make_error(ErrorCode::container_invalid_geometry, ErrorCategory::container,
                                           "partition allocation map has invalid geometry"));
     }
@@ -112,8 +112,10 @@ axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
     }
 
     std::vector<ClusterState> clusters(partition.cluster_count);
-    mark_ranges(clusters, partition.allocation.fixed_location.used_cluster_ranges, &ClusterState::fixed_used);
-    mark_ranges(clusters, partition.allocation.header_addressed.used_cluster_ranges, &ClusterState::header_used);
+    mark_ranges(clusters, partition.allocation.bitmap_copy1.used_cluster_ranges, &ClusterState::copy1_used);
+    mark_ranges(clusters, partition.allocation.bitmap_copy2.used_cluster_ranges, &ClusterState::copy2_used);
+    for (auto &state : clusters)
+        state.active_used = partition.allocation.active_bitmap_copy == 1U ? state.copy1_used : state.copy2_used;
 
     const auto first_payload = std::min<std::uint64_t>(static_cast<std::uint64_t>(partition.directory_index_cluster) +
                                                            partition.directory_index_span_clusters,
@@ -176,15 +178,15 @@ axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
         std::ranges::sort(state.owners, {}, [](const ImageAllocationOwner &owner) {
             return std::tuple{owner.claim_kind, owner.sfs_id.value_or(0U), owner.extent_index.value_or(0U)};
         });
-        if (state.fixed_used != state.header_used) {
+        if (state.copy1_used != state.copy2_used) {
             state.flags.emplace_back("BITMAP_COPY_MISMATCH");
             ++summary.bitmap_copy_mismatch_clusters;
         }
-        if (state.reconstructed_used && !state.header_used) {
+        if (state.reconstructed_used && !state.active_used) {
             state.flags.emplace_back("CLAIMED_BUT_FREE");
             ++summary.claimed_but_free_clusters;
         }
-        if (state.header_used && !state.reconstructed_used) {
+        if (state.active_used && !state.reconstructed_used) {
             state.flags.emplace_back("USED_WITHOUT_CLAIM");
             ++summary.used_without_claim_clusters;
         }
@@ -193,7 +195,7 @@ axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
             ++summary.conflicting_clusters;
         }
         if (!state.implicit_reserved) {
-            if (state.header_used)
+            if (state.active_used)
                 ++summary.allocated_clusters;
             else
                 ++summary.free_clusters;
@@ -226,10 +228,10 @@ axk::Result<axk::app::ImageAllocationMap> axk::app::build_image_allocation_map(
                                static_cast<std::uint64_t>(count) * partition.sectors_per_cluster,
                                (static_cast<std::uint64_t>(partition.start_sector) * sector_size_bytes) +
                                    static_cast<std::uint64_t>(start) * cluster_bytes,
-                               static_cast<std::uint64_t>(count) * cluster_bytes, clusters[start].fixed_used,
-                               clusters[start].header_used, clusters[start].reconstructed_used,
+                               static_cast<std::uint64_t>(count) * cluster_bytes, clusters[start].copy1_used,
+                               clusters[start].copy2_used, clusters[start].reconstructed_used,
                                allocation_kind(clusters[start]), clusters[start].owners, clusters[start].flags});
-        if (!clusters[start].implicit_reserved && !clusters[start].header_used) {
+        if (!clusters[start].implicit_reserved && !clusters[start].active_used) {
             ++result.summary.free_run_count;
             result.summary.largest_free_run_clusters = std::max(result.summary.largest_free_run_clusters, count);
         }

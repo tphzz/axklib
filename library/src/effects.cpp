@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstddef>
 #include <format>
 #include <ranges>
 
@@ -33,7 +34,7 @@ std::optional<std::int32_t> integer(std::string_view value) {
     return result;
 }
 
-std::optional<std::int32_t> table_index(const generated::EffectParameterData &parameter, std::uint8_t raw_value) {
+std::optional<std::int32_t> table_index(const generated::EffectParameterData &parameter, std::uint16_t raw_value) {
     const auto scaler = integer(parameter.raw_scaler);
     const auto shift = integer(parameter.raw_shift);
     if (!scaler || *scaler == 0 || !shift)
@@ -52,7 +53,7 @@ std::string tenths_ms(std::int32_t tenths) {
                             : std::format("{:.1f}ms", static_cast<double>(tenths) / 10.0);
 }
 
-std::optional<std::string> numeric_display(std::string_view source, std::uint8_t raw_value, std::int32_t index) {
+std::optional<std::string> numeric_display(std::string_view source, std::uint16_t raw_value, std::int32_t index) {
     if (source.starts_with("LSB_Value"))
         return std::to_string(raw_value);
     if (source == "Value_63_63" || source == "Value_64_63" || source == "Mod_Depth_Ofst_R")
@@ -75,7 +76,7 @@ std::optional<std::string> numeric_display(std::string_view source, std::uint8_t
 }
 
 const generated::KnownEffectDisplay *known_display(std::uint16_t raw_type, std::uint8_t parameter_number,
-                                                   std::uint8_t raw_value) {
+                                                   std::uint16_t raw_value) {
     const auto found = std::ranges::find_if(generated::known_effect_displays, [&](const auto &row) {
         return row.raw_type == raw_type && row.parameter_number == parameter_number && row.raw_value == raw_value;
     });
@@ -114,7 +115,26 @@ std::optional<EffectProfile> parse_effect_profile(std::string_view value) noexce
 }
 
 bool effect_type_supported(std::uint16_t raw_type, EffectProfile profile) noexcept {
-    return type_data(raw_type) != nullptr && (profile != EffectProfile::a3000 || raw_type < 54U);
+    return type_data(raw_type) != nullptr && (profile != EffectProfile::a3000 || raw_type <= 54U);
+}
+
+std::optional<EffectWriteInfo> effect_write_info(std::uint16_t raw_type, EffectProfile profile) noexcept {
+    if (profile != EffectProfile::a3000 && profile != EffectProfile::a4000 && profile != EffectProfile::a5000)
+        return std::nullopt;
+    if (raw_type >= generated::effect_write_types.size())
+        return std::nullopt;
+    if (profile == EffectProfile::a3000 && raw_type >= generated::a3000_effect_reset_words.size())
+        return std::nullopt;
+    const auto &data = generated::effect_write_types[raw_type];
+    EffectWriteInfo result;
+    result.legacy_type = data.legacy_type;
+    result.reset_words =
+        profile == EffectProfile::a3000 ? generated::a3000_effect_reset_words[raw_type] : data.reset_words;
+    for (std::size_t index = 0; index < result.parameters.size(); ++index) {
+        const auto &domain = data.parameters[index];
+        result.parameters[index] = {static_cast<EffectParameterKind>(domain.kind), domain.minimum, domain.maximum};
+    }
+    return result;
 }
 
 std::optional<EffectTypeInfo> effect_type_info(std::uint16_t raw_type, EffectProfile profile) noexcept {
@@ -131,13 +151,25 @@ std::optional<EffectParameterInfo> effect_parameter_info(std::uint16_t raw_type,
     const auto *row = parameter_data(raw_type, parameter_number);
     if (row == nullptr)
         return std::nullopt;
-    return EffectParameterInfo{row->raw_type,   row->parameter_number, row->effect_label, row->parameter_label,
-                               row->range_text, row->raw_min,          row->raw_max,      row->raw_interval,
-                               row->raw_scaler, row->raw_shift,        row->value_source, row->table_source};
+    return EffectParameterInfo{row->raw_type,
+                               row->parameter_number,
+                               row->effect_label,
+                               row->parameter_label,
+                               row->range_text,
+                               row->raw_min,
+                               row->raw_max,
+                               row->raw_interval,
+                               row->raw_scaler,
+                               row->raw_shift,
+                               row->value_source,
+                               row->table_source,
+                               row->value_source == "CONTROL_ACTION" ? EffectParameterKind::control_action
+                               : row->value_source == "EMPTY_VALUE"  ? EffectParameterKind::unused
+                                                                     : EffectParameterKind::stored_value};
 }
 
 EffectDisplayValue format_effect_parameter(std::optional<std::uint16_t> raw_type, std::uint8_t parameter_number,
-                                           std::optional<std::uint8_t> raw_value, EffectProfile profile) {
+                                           std::optional<std::uint16_t> raw_value, EffectProfile profile) {
     if (!raw_type || !raw_value)
         return {{}, std::nullopt, "Unknown", {}, "No raw effect type or parameter value available."};
     if (!effect_type_supported(*raw_type, profile))
@@ -148,6 +180,13 @@ EffectDisplayValue format_effect_parameter(std::optional<std::uint16_t> raw_type
                 "Raw effect type is not supported by the selected A-series "
                 "profile."};
     const auto *parameter = parameter_data(*raw_type, parameter_number);
+    if (parameter != nullptr &&
+        (parameter->value_source == "CONTROL_ACTION" || parameter->value_source == "EMPTY_VALUE"))
+        return {{},
+                std::nullopt,
+                "Unknown",
+                std::string{parameter->table_source},
+                "This slot is not a numeric stored parameter."};
     const auto index = parameter == nullptr ? std::nullopt : table_index(*parameter, *raw_value);
     if (const auto *known = known_display(*raw_type, parameter_number, *raw_value))
         return {std::string{known->display}, index, "Known", "validated UI-load check", std::string{validated_note}};

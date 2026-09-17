@@ -54,6 +54,7 @@ inline std::vector<std::byte> smpl_object(std::string_view name = "TEST") {
     be16(bytes, 0x28, 32000);
     be16(bytes, 0x2a, 2);
     ascii(bytes, 0x32, name);
+    bytes[0x84] = std::byte{0x30};
     be16(bytes, 0x8c, 32000);
     be32(bytes, 0x96, 2);
     be32(bytes, 0x9e, 2);
@@ -82,8 +83,8 @@ inline void set_fat12(std::span<std::byte> fat, std::uint16_t cluster, std::uint
 inline std::vector<std::byte> fat_fixture(std::uint16_t chain_end = 0xfffU) {
     constexpr std::size_t sectors = 100;
     constexpr std::size_t sector_size = 512;
-    constexpr std::size_t root_offset = 3 * sector_size;
-    constexpr std::size_t data_offset = 4 * sector_size;
+    constexpr std::size_t floppy_root_offset = 3 * sector_size;
+    constexpr std::size_t floppy_data_offset = 4 * sector_size;
     std::vector<std::byte> bytes(sectors * sector_size);
     le16(bytes, 0x0b, sector_size);
     bytes[0x0d] = std::byte{1};
@@ -93,19 +94,19 @@ inline std::vector<std::byte> fat_fixture(std::uint16_t chain_end = 0xfffU) {
     le16(bytes, 0x13, sectors);
     bytes[0x15] = std::byte{0xf0};
     le16(bytes, 0x16, 1);
-    for (const auto fat_offset : {sector_size, 2 * sector_size}) {
-        bytes[fat_offset] = std::byte{0xf0};
-        bytes[fat_offset + 1] = std::byte{0xff};
-        bytes[fat_offset + 2] = std::byte{0xff};
-        set_fat12(std::span{bytes}.subspan(fat_offset, sector_size), 2, chain_end);
+    for (const auto floppy_fat_offset : {sector_size, 2 * sector_size}) {
+        bytes[floppy_fat_offset] = std::byte{0xf0};
+        bytes[floppy_fat_offset + 1] = std::byte{0xff};
+        bytes[floppy_fat_offset + 2] = std::byte{0xff};
+        set_fat12(std::span{bytes}.subspan(floppy_fat_offset, sector_size), 2, chain_end);
     }
-    ascii(bytes, root_offset, "SMPTEST ");
-    ascii(bytes, root_offset + 8, "004");
-    bytes[root_offset + 0x0b] = std::byte{0x20};
-    le16(bytes, root_offset + 0x1a, 2);
+    ascii(bytes, floppy_root_offset, "SMPTEST ");
+    ascii(bytes, floppy_root_offset + 8, "004");
+    bytes[floppy_root_offset + 0x0b] = std::byte{0x20};
+    le16(bytes, floppy_root_offset + 0x1a, 2);
     const auto object = smpl_object();
-    le32(bytes, root_offset + 0x1c, static_cast<std::uint32_t>(object.size()));
-    std::ranges::copy(object, bytes.begin() + data_offset);
+    le32(bytes, floppy_root_offset + 0x1c, static_cast<std::uint32_t>(object.size()));
+    std::ranges::copy(object, bytes.begin() + floppy_data_offset);
     return bytes;
 }
 
@@ -125,8 +126,8 @@ inline std::vector<std::byte> nested_fat_fixture() {
     le16(bytes, data + 0x1a, 3);
     le32(bytes, data + 0x1c, static_cast<std::uint32_t>(object.size()));
     std::ranges::copy(object, bytes.begin() + data + 512);
-    for (const auto fat_offset : {512U, 1024U}) {
-        auto fat = std::span{bytes}.subspan(fat_offset, 512);
+    for (const auto floppy_fat_offset : {512U, 1024U}) {
+        auto fat = std::span{bytes}.subspan(floppy_fat_offset, 512);
         set_fat12(fat, 2, 0xfff);
         set_fat12(fat, 3, 0xfff);
     }
@@ -145,8 +146,8 @@ inline std::vector<std::byte> fat_fixture_with_invalid_then_valid_waveform() {
     le16(bytes, root + 32U + 0x1aU, 3);
     le32(bytes, root + 32U + 0x1cU, static_cast<std::uint32_t>(valid.size()));
     std::ranges::copy(valid, bytes.begin() + data + 512U);
-    for (const auto fat_offset : {512U, 1024U})
-        set_fat12(std::span{bytes}.subspan(fat_offset, 512), 3, 0xfff);
+    for (const auto floppy_fat_offset : {512U, 1024U})
+        set_fat12(std::span{bytes}.subspan(floppy_fat_offset, 512), 3, 0xfff);
     return bytes;
 }
 

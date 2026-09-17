@@ -1,27 +1,81 @@
 # Supported Media Profiles
 
-The native library exposes opened container variants through
-`axk::MediaContainer`. `axk::open_media()` detects Yamaha SFS images, FAT12
-floppies, ISO9660 CD-ROM images, A3K `.a3k` volume archives, standalone
-`FSFSDEV3SPLX` object files, and AXK object directories. The individual
-`axk::FatImage`, `axk::IsoImage`, `axk::A3kArchive`, and
-`axk::StandaloneObject` types are available when an application already knows
-the container kind.
+axklib opens Yamaha SFS images, FAT12 floppies, standard FAT16 volumes and
+primary-MBR FAT16 disks, EX5 disks, ISO9660 CD-ROMs, A3K volume archives,
+SU700 SFS disks and FAT12 floppies, standalone Yamaha objects and explicit
+object directories. The installed SDK entry point is documented in
+[C++ API](cpp-api.md).
 
-These readers implement the supported profiles for Yamaha
-A-series media. They are not general-purpose FAT or ISO libraries. An image
+These readers implement specific supported Yamaha media profiles.
+They are not general-purpose FAT or ISO libraries. An image
 outside that compatibility scope may happen to use the accepted structures,
 but that does not make arbitrary media a supported input contract.
 
 ## FAT12 profile
 
-The FAT reader accepts FAT12 only. It checks the BPB geometry, duplicated FATs,
+The A-series floppy profile accepts FAT12 only. It checks the BPB geometry, duplicated FATs,
 cluster bounds, chain termination, loops, bad and reserved cluster markers,
 cross-linked files, root and subdirectory records, duplicate names, and declared
 file sizes. Directory entries use their DOS 8.3 identity; long-filename entries
-are ignored. FAT16, FAT32, exFAT, filesystem repair, and in-place filesystem
+are ignored. FAT32, exFAT, filesystem repair, and in-place filesystem
 mutation are unsupported. `axklib create floppy` separately creates the narrow
 fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
+
+## SU700 profile
+
+SU700 hard disks open through SFS and floppies through FAT12. Files navigation
+and raw file export preserve `SONGCONT.DAT`, `.SSP` samples, `.SSQ` songs and
+other files. These payloads are not A-series sampler objects: opening the
+filesystem does not enable A-series Device navigation, Sample parameter editing,
+audio decoding, or portable A-series package conversion for them.
+
+The [SU700 floppy import](server.md#su700-floppy-import) operation copies a
+complete flat floppy into a new named volume on an existing writable SU700 SFS
+root. It places songs in `SUSQ`, samples in `SUSP`, and the control file at the
+volume root, preserving file payloads and stored basenames. Inspection checks
+references and payload framing; it does not validate every song event or DSP
+parameter. Import does not merge existing volumes, reconstruct divided disk
+sets, or create a new SU700 disk image.
+
+See [SU700 Files](su700.md) for the stored structures and unresolved meanings.
+Filesystem editing remains subject to the allocation and source-write checks
+below, independently of device-specific payload semantics.
+
+## EX5 disk profile
+
+The separate [EX5 Disk Images](ex5.md) profile provides directory and raw-file access, with guarded
+filesystem edits on writable, structurally admitted images. It uses EX5-specific recognition and size
+fields, not generic FAT16 detection. Files remain opaque and are not projected
+into the A-series sampler-object catalog.
+
+## Standard FAT16 profile
+
+Standard FAT16 is admitted as a plain volume starting at byte zero,
+or inside primary MBR partitions of type `0x04`, `0x06` or
+`0x0e`. MBR regions must be nonempty, disjoint and wholly inside the image.
+Each volume is read through its declared partition boundary; boot geometry
+cannot borrow bytes from a neighboring partition. Extended partitions, GPT,
+FAT32 and exFAT are not supported. Mixed unsupported MBR partition types are
+rejected rather than silently omitted.
+EX5-formatted MO media uses the distinct [EX5 removable profile](ex5.md#removable-media-profile).
+
+Standard BPB total-sector fields and FAT16 end markers `0xfff8..0xffff`
+apply here. This policy is deliberately separate from the EX5 hard-disk
+profile. Both FAT copies must agree, and reachable allocation chains must be
+bounded, acyclic and non-overlapping. Directory and file entries retain their
+raw FAT attributes, including read-only, hidden, system and archive flags.
+Names use the DOS 8.3 identity; long-name rows are not interpreted.
+
+The Files view lists primary partitions independently. Files remain opaque;
+this profile does not decode device-specific sound or sequence payloads.
+
+### Filesystem Editing
+
+SFS, standard FAT16 and EX5 roots can expose raw file editing when their source
+is writable and allocation metadata is safe. See
+[Raw Filesystem Operations](write.md#raw-filesystem-operations) for names,
+conflicts, permissions and transaction guarantees. Read capability alone never
+implies writable device-specific objects.
 
 ## ISO9660 profile
 
@@ -45,15 +99,27 @@ An `AXK_OBJECT_DIRECTORY` is either one flat host directory whose regular files
 contain `FSFSDEV3SPLX` Yamaha objects, or a bounded parent containing one level
 of such leaf directories. Object recognition, decoding, catalog construction,
 relationship resolution, preview, audition, and package export use the same
-object layer as image-backed media. Unrecognized regular support files are
-ignored.
+object layer as image-backed media. `YAMAHA.SYM` and its zero-length marker
+files are validated when present. Other regular support files are ignored.
 
 The session presents the admitted objects as one synthetic `Object directory`
 volume. That scope can be exported as a `.axkvol` package, but its name and
 partition index are navigation metadata; they do not recover an original
 floppy volume label or partition layout.
 
-The parent form supports Yamaha multi-floppy object sets. A split `SMPL` file
+For a flat folder retaining a valid Yamaha catalog and disk-set marker, opening
+reports `INCOMPLETE` immediately when more members are needed. Selected companion
+folders must form one contiguous, same-label disk sequence beginning at disk 1.
+Attachment admits every cataloged sampler object, including Programs, Samples,
+Sample Banks, and sequences on later disks. Split Wave Data uses the same
+assembly rules as raw floppy images. A final marker reports `COMPLETE` only
+after the sequence and waveform coverage validate. Explicit nearby search
+examines at most 31 immediate sibling folders and rejects duplicate disk indices.
+Folder names are not used as disk identities. Canceling the companion dialog
+leaves the partial session available for browsing.
+
+Without a usable catalog, the parent form supports recovery of Yamaha
+multi-floppy object sets. A split `SMPL` file
 declares its complete logical Wave Data byte count, its local segment size, and
 its segment offset. Axklib groups matching headers and assembles only complete,
 contiguous, byte-identical segment sets. A flat leaf opens without inspecting
@@ -71,7 +137,7 @@ The profile is intentionally read-only and bounded to 224 entries per leaf,
 1,024 total entries, 16 MiB of aggregate file data, and one nested directory
 level. Links, deeper nesting, case-insensitive duplicate paths, unsafe names,
 and directories without a recognized object are rejected. The directory does
-not recover FAT allocation, DOS directory order, deleted entries, volume labels,
+not recover FAT allocation, DOS directory order, deleted entries, FAT volume labels,
 or any other missing container metadata. Higher collection directories remain
 navigation scopes rather than media sessions.
 
@@ -88,27 +154,31 @@ Inventory loads only object prefixes and metadata needed by the catalog. Wave
 Data payloads remain lazy until preview, audition, audio/SFZ export, or package
 export needs them. A whole archive can be exported directly as one `.axkvol`,
 but archive creation, repacking, alteration, repair, package import, and media
-conversion are unsupported. See [A3K Volume Archives](a3k-archive.md) for
-the bounded byte contract and support status.
+conversion are unsupported. [A3K Volume Archives](a3k-archive.md) links to the
+external format reference; the support boundaries above describe axklib.
 
 ## Format Documentation Map
 
 The public format pages divide the byte contracts by layer:
 
-| Layer or file class | Exact public contract |
+| Layer or file class | Documentation |
 | --- | --- |
+| SFS partition geometry, allocation, index records and directory entries | [SFS Filesystem](sfs-filesystem.md) |
 | FAT12 boot sector, FAT entries, directory entries, DOS 8.3 names, and generated root filenames | [FAT12 Floppy Images](floppy.md) |
+| EX5 disk descriptor, FAT16 geometry, directories and raw file reads | [EX5 Disk Images](ex5.md) |
+| SU700 control table, native sample chunks and song framing | [SU700 Files](su700.md) |
 | ISO descriptors, both path tables, directory records, raw folder names, `0000` catalogs, group-label files, and generated `Fnnn` names | [CD-ROM Images](cdrom.md) |
-| A3K header, payload area, terminal index, and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
+| A3K archive format (external reference) | [A3K Volume Archives](a3k-archive.md); axklib behavior is described under [A3K Archive Profile](#a3k-archive-profile) |
 | Complete `FSFSDEV3SPLX<type>` files and decoded `SMPL`, `SBNK`, `SBAC`, and `PROG` fields | [Sampler Data Structures](sampler-data.md) |
 | Fresh floppy, fresh ISO, and floppy-object-to-ISO manifests | [Writer And Alteration](write.md) |
 | Sampler-facing labels, duplicate disambiguation, and export filenames | [Name, Path, And Export Mapping](names-and-paths.md) |
 
-This documentation is exact about structures that axklib reads or writes. A
-file being visible to the container reader does not imply that its inner format
-is decoded. The 257-record `YAMAHA.SYM` disk/file/category catalog is decoded
-and synthesized; other model-specific floppy system files remain opaque, as do
-type-specific fields in `PRF3`. The admitted current
+Format pages specify established encodings and explicitly identify remaining
+unknowns. A file being visible to the container reader does not imply that its
+inner format is decoded or writable. The 257-record `YAMAHA.SYM`
+disk/file/category catalog is decoded and synthesized; other model-specific
+floppy system files remain opaque, as do
+PRF3 layouts other than the documented [System Files](system-files.md). The admitted current
 `SEQU` timeline is documented in
 [Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
 recognized Yamaha object payloads; it does not silently claim support for
@@ -116,7 +186,7 @@ opaque support-file formats.
 
 ## Yamaha object layer
 
-All object payloads use the same current-object decoders as SFS images. The
+A-series object payloads use the same current-object decoders as SFS images. The
 normalized object catalog can therefore be passed to the normal relationship
 graph service.
 
@@ -127,8 +197,8 @@ object directories through one session API.
 
 ## CD menu labels
 
-`MediaObject::group_label` and `MediaObject::volume_label` retain a value,
-status, and basis:
+CD group and volume labels retain a value, status, and basis in inventory
+output:
 
 - `confirmed` identifies a decoded Yamaha CD menu label.
 - `navigation_aid` identifies a content-derived fallback chosen from the first
@@ -136,23 +206,10 @@ status, and basis:
 - `raw_identifier` identifies an ISO directory name such as `F001`.
 
 Content-derived fallbacks are display and export navigation aids only. They are
-not promoted to sampler metadata. `structured_object_paths()` sanitizes path
+not promoted to sampler metadata. Export path mapping sanitizes path
 components and adds raw volume identifiers when displayed labels collide.
 
-## Example
+## Further Reading
 
-```cpp
-#include <axklib/media.hpp>
-
-auto media = axk::open_media("library.iso");
-if (!media) {
-  throw std::runtime_error(axk::render_error(media.error()));
-}
-
-auto objects = media->objects();
-if (!objects) {
-  throw std::runtime_error(axk::render_error(objects.error()));
-}
-
-auto paths = axk::structured_object_paths(*objects);
-```
+Use [C++ API](cpp-api.md) for installed interfaces and
+[Typical Usage](typical-usage.md) for SDK and CLI examples.

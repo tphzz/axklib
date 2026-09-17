@@ -218,9 +218,7 @@ Result<void> validate_package_closure(const PortablePackage &package) {
         } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&decoded->payload)) {
             auto edges = package_children(package, node.node_id, "SBAC_SLOT_TO_SBNK");
             std::ranges::sort(edges, {}, &PackageRelationship::ordinal);
-            const auto active_slots =
-                std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
-            if (edges.size() != static_cast<std::size_t>(active_slots))
+            if (edges.size() != sample_bank->effective_member_count)
                 return std::unexpected{package_error("package SBAC closure does not match its "
                                                      "active member slots")};
             std::set<std::uint32_t> ordinals;
@@ -229,7 +227,8 @@ Result<void> validate_package_closure(const PortablePackage &package) {
                 const auto valid_ordinal = edge->ordinal < sample_bank->slots.size();
                 const auto expected_name =
                     valid_ordinal ? std::string_view{sample_bank->slots[edge->ordinal].name} : std::string_view{};
-                if (!ordinals.emplace(edge->ordinal).second || expected_name.empty() || target == nullptr ||
+                if (!ordinals.emplace(edge->ordinal).second || !valid_ordinal ||
+                    !sample_bank->slots[edge->ordinal].active || expected_name.empty() || target == nullptr ||
                     target->object_type != "SBNK" || target->name != expected_name) {
                     return std::unexpected{package_error(
                         std::format("package SBAC slot {} requires SBNK '{}', but the edge "

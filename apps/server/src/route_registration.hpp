@@ -16,6 +16,7 @@ namespace axk::server::detail {
 
 using RequestRoute = std::function<crow::response(const crow::request &)>;
 using ItemRoute = std::function<crow::response(const crow::request &, std::string)>;
+using SubItemRoute = std::function<crow::response(const crow::request &, std::string, std::string)>;
 using ResponseRoute = std::function<void(const crow::request &, crow::response &)>;
 using ItemResponseRoute = std::function<void(const crow::request &, crow::response &, std::string)>;
 
@@ -46,7 +47,9 @@ struct FileRoutes {
     ItemRoute image;
     ItemRoute attach_companions;
     ItemRoute image_content;
+    ItemRoute image_filesystem;
     ItemRoute image_objects;
+    SubItemRoute image_object;
     ItemRoute image_relationships;
     ItemRoute image_system_program_contexts;
     ItemRoute image_allocation_map;

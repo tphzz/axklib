@@ -29,16 +29,20 @@ import type {
     PackageBatchDestinationStrategy,
     PackageBatchImportRequest,
 } from './packageBatchTypes';
+import { ImportCompletion } from './importCompletion.svelte';
 
 const maximumBatchPackages = 256;
 
 export class PackageBatchImportWorkflow {
     request = $state<PackageBatchImportRequest | null>(null);
+    readonly completion: ImportCompletion;
     private generation = 0;
     private abortController: AbortController | null = null;
     private plannedItemIds: string[] = [];
 
-    constructor(private readonly dependencies: PackageBatchImportDependencies) {}
+    constructor(private readonly dependencies: PackageBatchImportDependencies) {
+        this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
+    }
 
     dropAvailable(): boolean {
         return this.dependencies.mutationsAvailable?.() ?? false;
@@ -57,6 +61,8 @@ export class PackageBatchImportWorkflow {
     }
 
     open(item: DiskTreeItem | null): void {
+        if (this.request?.status === 'applying') return;
+        this.completion.reset();
         ++this.generation;
         this.abortController?.abort();
         this.abortController = null;
@@ -387,6 +393,7 @@ export class PackageBatchImportWorkflow {
         const sessionId = this.dependencies.sessionId();
         if (
             !request?.plan?.valid ||
+            request.status !== 'ready' ||
             request.hasUnvalidatedChanges ||
             selectedItems.length === 0 ||
             sessionId === null ||
@@ -395,48 +402,38 @@ export class PackageBatchImportWorkflow {
             return;
         }
         const generation = ++this.generation;
-        let jobStarted = false;
+        let resourcesReleased = false;
         this.request = { ...request, status: 'applying', error: '' };
         this.dependencies.setStatus(`Importing ${selectedItems.length} packages`);
         try {
             await this.dependencies.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
+            await this.completion.run(
                 () => this.dependencies.transport.startImagePackageImport(request.plan!.planToken),
-                (update) => update.progress?.label && this.dependencies.setStatus(update.progress.label),
-                () => {
-                    jobStarted = true;
+                async () => {
+                    if (generation !== this.generation) return;
+                    const last = selectedItems.at(-1);
+                    if (last?.source.kind === 'server-file') {
+                        this.dependencies.pickerHistory.lastImportedWorkspaceFile = last.source.reference;
+                    } else if (last?.localPath) {
+                        this.dependencies.pickerHistory.lastImportedLocalPath = last.localPath;
+                    }
+                    if (!resourcesReleased) {
+                        for (const item of request.items) await this.releaseUpload(item.upload);
+                        await this.releasePlan(request.plan);
+                        resourcesReleased = true;
+                    }
+                    await this.dependencies.refreshSession({
+                        partitionIndex: request.destinationPartitionIndex!,
+                        volumeName: request.plan!.packages[0]?.destinationVolumeName,
+                    });
+                    if (generation !== this.generation) return;
+                    this.request = null;
+                    this.dependencies.setStatus(`Imported ${selectedItems.length} packages`);
                 },
+                (update) => update.progress?.label && this.dependencies.setStatus(update.progress.label),
             );
-            if (completed.status !== 'completed') {
-                if (this.isStalePlanError(completed.errorCode)) {
-                    await this.recoverStalePlan(request, generation);
-                    return;
-                }
-                const message = completed.error ?? 'Package import did not complete';
-                this.dependencies.setStatus(message);
-                if (generation === this.generation && this.request) {
-                    this.request = { ...this.request, status: 'ready', error: message };
-                }
-                return;
-            }
-            const last = selectedItems.at(-1);
-            if (last?.source.kind === 'server-file') {
-                this.dependencies.pickerHistory.lastImportedWorkspaceFile = last.source.reference;
-            } else if (last?.localPath) {
-                this.dependencies.pickerHistory.lastImportedLocalPath = last.localPath;
-            }
-            await Promise.all(request.items.map((item) => this.releaseUpload(item.upload)));
-            this.request = null;
-            await this.dependencies.refreshSession({
-                partitionIndex: request.destinationPartitionIndex,
-                volumeName: request.plan.packages[0]?.destinationVolumeName,
-            });
-            this.dependencies.setStatus(`Imported ${selectedItems.length} packages`);
+            if (generation === this.generation) await this.syncCompletion();
         } catch (error) {
-            if (jobStarted) {
-                await this.recoverUncertainApply(request, generation);
-                return;
-            }
             const message = userFacingMessage(error);
             this.dependencies.setStatus(message);
             if (generation === this.generation && this.request) {
@@ -464,7 +461,7 @@ export class PackageBatchImportWorkflow {
             await this.dependencies.refreshSession({ partitionIndex: request.destinationPartitionIndex! });
             if (generation !== this.generation || !this.request) return;
             this.request = { ...this.request, status: 'ready' };
-            this.dependencies.setStatus('Image changed; check import conflicts again');
+            this.dependencies.setStatus('Image changed; review the import again');
         } catch (error) {
             if (generation !== this.generation || !this.request) return;
             const message = userFacingMessage(error);
@@ -473,26 +470,27 @@ export class PackageBatchImportWorkflow {
         }
     }
 
-    private async recoverUncertainApply(request: PackageBatchImportRequest, generation: number): Promise<void> {
-        if (generation !== this.generation) return;
-        this.request = null;
-        this.plannedItemIds = [];
-        await Promise.all(request.items.map((item) => this.releaseUpload(item.upload)));
-        const message = 'Import completion could not be confirmed; review the refreshed image before retrying';
-        try {
-            await this.dependencies.refreshSession({
-                partitionIndex: request.destinationPartitionIndex!,
-                volumeName: request.plan?.packages[0]?.destinationVolumeName,
-            });
-            this.dependencies.setStatus(message);
-        } catch (error) {
-            reportError('Refresh after uncertain package import failed', error);
-            this.dependencies.setStatus(`${message}. Refresh failed: ${userFacingMessage(error)}`);
+    async recoverCompletion(): Promise<void> {
+        const generation = this.generation;
+        await this.completion.recover();
+        if (generation === this.generation) await this.syncCompletion();
+    }
+
+    private async syncCompletion(): Promise<void> {
+        if (!this.request) return;
+        if (this.completion.phase === 'idle' && this.isStalePlanError(this.completion.failure?.errorCode)) {
+            this.completion.reset();
+            await this.recoverStalePlan(this.request, this.generation);
+            return;
         }
+        const error = this.completion.message;
+        if (this.completion.phase === 'idle') this.completion.reset();
+        this.request = { ...this.request, status: this.completion.phase === 'idle' ? 'ready' : 'applying', error };
+        this.dependencies.setStatus(error);
     }
 
     async close(): Promise<void> {
-        if (this.request?.status === 'applying') return;
+        if (this.request?.status === 'applying' && this.completion.phase !== 'refresh-failed') return;
         const request = this.request;
         this.request = null;
         ++this.generation;

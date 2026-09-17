@@ -57,13 +57,6 @@ struct WaveDataMemberExport {
     RelationshipQuality quality{RelationshipQuality::unknown};
 };
 
-struct SampleParameterContext {
-    std::string object_key;
-    std::string display_name;
-    std::string relationship_type;
-    CurrentSbnk decoded;
-};
-
 struct SampleExport {
     std::string object_key;
     std::string display_name;
@@ -74,7 +67,6 @@ struct SampleExport {
     std::uint8_t key_high{};
     std::int8_t coarse_tune{};
     CurrentSbnk decoded;
-    std::vector<SampleParameterContext> parameter_contexts;
 };
 
 struct SampleBankExport {

@@ -43,8 +43,8 @@ void write_directory_entry(axk::ByteWriter &writer, std::span<std::byte> bytes, 
 }
 
 void mirror_fixture_allocation_bitmap(std::span<std::byte> bytes, std::size_t partition_offset,
-                                      std::size_t header_bitmap_offset, std::size_t byte_count = 1024U) {
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(header_bitmap_offset), byte_count,
+                                      std::size_t bitmap_copy2_offset, std::size_t byte_count = 1024U) {
+    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(bitmap_copy2_offset), byte_count,
                 bytes.begin() + static_cast<std::ptrdiff_t>(partition_offset + 2048U));
 }
 
@@ -64,8 +64,10 @@ std::vector<std::byte> image_fixture() {
     const auto partition = 3U * sector_size;
     write_magic(bytes, partition);
     write_ascii(bytes, partition + 0x40, "Test Partition");
+    EXPECT_TRUE(writer.write_be32(partition + 0x80, 2));
     EXPECT_TRUE(writer.write_be32(partition + 0x90, 1022));
     EXPECT_TRUE(writer.write_be32(partition + 0x94, 2));
+    EXPECT_TRUE(writer.write_be32(partition + 0x98, 2));
     EXPECT_TRUE(writer.write_be32(partition + 0x9c, 3));
     EXPECT_TRUE(writer.write_be32(partition + 0xa4, 4));
     EXPECT_TRUE(writer.write_be32(partition + 0xa8, 2));
@@ -198,7 +200,9 @@ std::vector<std::byte> deep_directory_fixture(std::size_t directory_count) {
     const auto partition = 3U * sector_size;
     write_magic(bytes, partition);
     write_ascii(bytes, partition + 0x40, "Deep Chain");
+    EXPECT_TRUE(writer.write_be32(partition + 0x80, 2));
     EXPECT_TRUE(writer.write_be32(partition + 0x90, cluster_count));
+    EXPECT_TRUE(writer.write_be32(partition + 0x98, 2));
     EXPECT_TRUE(writer.write_be32(partition + 0x94, 2));
     EXPECT_TRUE(writer.write_be32(partition + 0x9c, 3));
     EXPECT_TRUE(writer.write_be32(partition + 0xa4, index_cluster));
@@ -384,12 +388,14 @@ std::shared_ptr<SparseReader> sparse_geometry_fixture(std::uint64_t total_sector
         axk::ByteWriter header_writer{header};
         write_magic(header, 0);
         write_ascii(header, 0x40, "Partition " + std::to_string(index));
+        EXPECT_TRUE(header_writer.write_be32(0x80, 2));
+        EXPECT_TRUE(header_writer.write_be32(0x98, 2));
         EXPECT_TRUE(header_writer.write_be32(0x90, static_cast<std::uint32_t>(count / 2U)));
         EXPECT_TRUE(header_writer.write_be32(0x94, 2));
-        EXPECT_TRUE(header_writer.write_be32(0x9c, 3));
         const auto bitmap_bytes = (count / 2U + 7U) / 8U;
         const auto bitmap_clusters = (bitmap_bytes + 1023U) / 1024U;
-        EXPECT_TRUE(header_writer.write_be32(0xa4, static_cast<std::uint32_t>(3U + bitmap_clusters)));
+        EXPECT_TRUE(header_writer.write_be32(0x9c, static_cast<std::uint32_t>(2U + bitmap_clusters)));
+        EXPECT_TRUE(header_writer.write_be32(0xa4, static_cast<std::uint32_t>(2U + 2U * bitmap_clusters)));
         EXPECT_TRUE(header_writer.write_be32(0xa8, 358));
         const auto header_offset = start * sector_size;
         sparse->add(header_offset, header);
@@ -405,13 +411,13 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         std::string_view filename;
         std::uint32_t allocated;
         std::uint64_t free_kib;
-        std::size_t known_record_count;
+        std::size_t record_count;
         std::string_view last_known_type;
         std::string_view last_known_name;
     };
     constexpr std::array cases{
-        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 25, "SBNK", "_NewSample"},
-        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 40, "SBNK", "JS03   *********"},
+        Expected{"HD00_512_single_sbnk_authored.hds", 447, 213, 26, "SBNK", "_NewSample"},
+        Expected{"HD00_512_multi_sbnk_authored.hds", 477, 183, 41, "SBNK", "JS03   *********"},
     };
     const auto root = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored";
 
@@ -422,20 +428,20 @@ TEST(SfsReader, MatchesMaintainedSemanticContractsOnFixtures) {
         const auto &partition = result->partitions()[0];
         EXPECT_EQ(partition.cluster_count, 1022U);
         EXPECT_EQ(partition.directory_index_span_clusters, 358U);
-        EXPECT_EQ(partition.allocation.fixed_location.used_cluster_count, expected.allocated);
-        EXPECT_EQ(partition.allocation.header_addressed.used_cluster_count, expected.allocated);
+        EXPECT_EQ(partition.allocation.bitmap_copy1.used_cluster_count, expected.allocated);
+        EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_count, expected.allocated);
         EXPECT_TRUE(partition.allocation.stored_copies_match);
         EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, expected.allocated);
         ASSERT_TRUE(partition.allocation.free_space);
         EXPECT_EQ(partition.allocation.free_space->sampler_visible_free_kib, expected.free_kib);
-        ASSERT_GE(partition.records.size(), expected.known_record_count);
-        const auto &last = partition.records[expected.known_record_count - 1U];
+        ASSERT_EQ(partition.records.size(), expected.record_count);
+        const auto &last = partition.records.back();
         EXPECT_EQ(last.object_type, expected.last_known_type);
         EXPECT_EQ(last.object_name, expected.last_known_name);
-        EXPECT_TRUE(partition.allocation.fixed_location.marked_used_without_index_extent.empty());
-        EXPECT_TRUE(partition.allocation.fixed_location.index_extent_marked_free.empty());
-        EXPECT_TRUE(partition.allocation.header_addressed.marked_used_without_index_extent.empty());
-        EXPECT_TRUE(partition.allocation.header_addressed.index_extent_marked_free.empty());
+        EXPECT_TRUE(partition.allocation.bitmap_copy1.marked_used_without_index_extent.empty());
+        EXPECT_TRUE(partition.allocation.bitmap_copy1.index_extent_marked_free.empty());
+        EXPECT_TRUE(partition.allocation.bitmap_copy2.marked_used_without_index_extent.empty());
+        EXPECT_TRUE(partition.allocation.bitmap_copy2.index_extent_marked_free.empty());
     }
 }
 
@@ -465,8 +471,8 @@ TEST(SfsReader, ParsesDuplicatedGeometryDirectoriesAllocationAndFreeSpace) {
     EXPECT_EQ(partition.records[0].payload_kind, axk::PayloadKind::directory);
     ASSERT_EQ(partition.records[0].directory_entries.size(), 3U);
     EXPECT_EQ(partition.records[0].directory_entries[2].name, "Samples");
-    EXPECT_EQ(partition.allocation.fixed_location.used_cluster_count, 1U);
-    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_count, 1U);
+    EXPECT_EQ(partition.allocation.bitmap_copy1.used_cluster_count, 1U);
+    EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_count, 1U);
     EXPECT_TRUE(partition.allocation.stored_copies_match);
     EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 1U);
     ASSERT_TRUE(partition.allocation.free_space);
@@ -513,7 +519,7 @@ TEST(SfsReader, RejectsAllocationBitmapThatPointsIntoANeighboringPartition) {
     EXPECT_EQ(result->partitions().front().index.value, 1U);
     EXPECT_TRUE(std::ranges::any_of(result->diagnostics(), [](const axk::Error &error) {
         return error.code == axk::ErrorCode::container_invalid_geometry &&
-               error.message.find("bitmap extends beyond") != std::string::npos;
+               error.message.find("bitmap/index regions overlap or exceed") != std::string::npos;
     }));
     EXPECT_EQ(first_partition_start + neighboring_partition_cluster * 2U,
               first_partition_start + partition_slot_sectors);
@@ -594,16 +600,57 @@ TEST(SfsReader, InventoryReadsOnlyAnObjectPrefixNotWaveformPayload) {
     EXPECT_EQ(payload_read_sizes[0], 512U);
 }
 
-TEST(SfsReader, ClassifiesEstablishedAlternatingByteObjectType) {
+TEST(SfsReader, KeepsThirdPartyAlternatingByteRecordUnknown) {
     auto reader = std::make_shared<axk::MemoryReader>(alternating_object_fixture());
     const auto result = axk::open_image(reader, "alternating-object.hds");
     ASSERT_TRUE(result);
     ASSERT_EQ(result->partitions().size(), 1U);
     ASSERT_EQ(result->partitions()[0].records.size(), 1U);
     const auto &record = result->partitions()[0].records[0];
-    EXPECT_EQ(record.payload_kind, axk::PayloadKind::alternating_byte_object);
-    EXPECT_EQ(record.object_type, "SMPL");
+    EXPECT_EQ(record.payload_kind, axk::PayloadKind::unknown);
+    EXPECT_TRUE(record.object_type.empty());
     EXPECT_TRUE(record.object_name.empty());
+}
+
+TEST(SfsReader, KeepsLiveEmptyFilesWithoutAllocatingPayloadClusters) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size + 4U * 72U;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x9e000000U));
+    ASSERT_TRUE(writer.write_be16(index + 0x46U, 1U));
+    auto reader = std::make_shared<axk::MemoryReader>(std::move(bytes));
+    const auto image = axk::open_image(reader, "empty-file.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &partition = image->partitions().front();
+    const auto file = std::ranges::find(partition.records, axk::SfsId{4U}, &axk::IndexRecord::sfs_id);
+    ASSERT_NE(file, partition.records.end());
+    EXPECT_EQ(file->data_size, 0U);
+    EXPECT_EQ(file->cluster_count, 0U);
+    EXPECT_TRUE(file->extents.empty());
+    EXPECT_EQ(file->attributes, 0x9e000000U);
+    EXPECT_EQ(file->link_count, 1U);
+    EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 1U);
+    EXPECT_TRUE(partition.diagnostics.empty());
+    const auto payload = image->read_record_data(partition.index, file->sfs_id, 0U);
+    ASSERT_TRUE(payload) << payload.error().message;
+    EXPECT_TRUE(payload->empty());
+    EXPECT_FALSE(image->read_record_range(partition.index, file->sfs_id, 0U, 1U));
+}
+
+TEST(SfsReader, DoesNotTreatDeletedOrMalformedEmptySlotsAsLiveFiles) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size + 4U * 72U;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x1e000000U));
+    ASSERT_TRUE(writer.write_be32(index + 72U + 0x42U, 0x9e000000U));
+    ASSERT_TRUE(writer.write_be32(index + 72U + 6U, 1U));
+    const auto image = axk::open_image(std::make_shared<axk::MemoryReader>(std::move(bytes)), "invalid-empty.hds");
+    ASSERT_TRUE(image);
+    const auto &partition = image->partitions().front();
+    EXPECT_EQ(partition.records.size(), 1U);
+    EXPECT_TRUE(std::ranges::any_of(partition.diagnostics, [](const axk::Error &error) {
+        return error.code == axk::ErrorCode::object_malformed && error.context.raw_offset == index + 72U;
+    }));
 }
 
 TEST(SfsReader, EnumeratesEverySupportedPartitionCountAtMinimumAndTwoGiB) {
@@ -638,17 +685,17 @@ TEST(SfsReader, ResolvesFragmentedFortyEightExtentDirectoryAndListAllocation) {
     EXPECT_EQ(record.payload_kind, axk::PayloadKind::directory);
     ASSERT_EQ(record.directory_entries.size(), 3U);
     EXPECT_EQ(record.directory_entries[2].name, "Samples");
-    EXPECT_EQ(partition.allocation.fixed_location.used_cluster_count, 49U);
-    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_count, 49U);
-    ASSERT_EQ(partition.allocation.header_addressed.used_cluster_ranges.size(), 1U);
-    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_ranges[0].start_cluster, 6U);
-    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_ranges[0].end_cluster, 54U);
+    EXPECT_EQ(partition.allocation.bitmap_copy1.used_cluster_count, 49U);
+    EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_count, 49U);
+    ASSERT_EQ(partition.allocation.bitmap_copy2.used_cluster_ranges.size(), 1U);
+    EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_ranges[0].start_cluster, 6U);
+    EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_ranges[0].end_cluster, 54U);
     EXPECT_TRUE(partition.allocation.stored_copies_match);
     EXPECT_EQ(partition.allocation.reconstructed_used_cluster_count, 49U);
-    EXPECT_TRUE(partition.allocation.fixed_location.marked_used_without_index_extent.empty());
-    EXPECT_TRUE(partition.allocation.fixed_location.index_extent_marked_free.empty());
-    EXPECT_TRUE(partition.allocation.header_addressed.marked_used_without_index_extent.empty());
-    EXPECT_TRUE(partition.allocation.header_addressed.index_extent_marked_free.empty());
+    EXPECT_TRUE(partition.allocation.bitmap_copy1.marked_used_without_index_extent.empty());
+    EXPECT_TRUE(partition.allocation.bitmap_copy1.index_extent_marked_free.empty());
+    EXPECT_TRUE(partition.allocation.bitmap_copy2.marked_used_without_index_extent.empty());
+    EXPECT_TRUE(partition.allocation.bitmap_copy2.index_extent_marked_free.empty());
 
     const auto complete = result->read_record_data(partition.index, record.sfs_id, record.data_size);
     ASSERT_TRUE(complete) << complete.error().message;
@@ -678,17 +725,17 @@ TEST(SfsReader, ReportsContinuationCycleAndBitmapMismatchWithoutRepair) {
     const auto mismatch = axk::open_image(mismatch_reader, "mismatch.hds");
     ASSERT_TRUE(mismatch);
     const auto &allocation = mismatch->partitions()[0].allocation;
-    const auto &ranges = allocation.header_addressed.index_extent_marked_free;
+    const auto &ranges = allocation.bitmap_copy2.index_extent_marked_free;
     ASSERT_EQ(ranges.size(), 1U);
     EXPECT_EQ(ranges[0].start_cluster, 54U);
     EXPECT_EQ(ranges[0].end_cluster, 54U);
     EXPECT_FALSE(allocation.stored_copies_match);
-    ASSERT_EQ(allocation.fixed_not_header.size(), 1U);
-    EXPECT_EQ(allocation.fixed_not_header[0].start_cluster, 54U);
+    ASSERT_EQ(allocation.copy1_not_copy2.size(), 1U);
+    EXPECT_EQ(allocation.copy1_not_copy2[0].start_cluster, 54U);
     const auto validation = axk::validate_semantics(*mismatch, {}, {});
     const auto issue = std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH", &axk::ValidationIssue::code);
     ASSERT_NE(issue, validation.issues.end());
-    EXPECT_NE(issue->message.find("header-addressed bitmap has 0 used-without-extent and 1 extent-marked-free"),
+    EXPECT_NE(issue->message.find("bitmap copy 2 has 0 used-without-extent and 1 extent-marked-free"),
               std::string::npos);
     EXPECT_NE(std::ranges::find(validation.issues, "SFS_ALLOCATION_BITMAP_COPIES_DIFFER", &axk::ValidationIssue::code),
               validation.issues.end());
@@ -708,12 +755,12 @@ TEST(SfsReader, MutationSafetyDoesNotDependOnRetainedMismatchRanges) {
     const auto &allocation = result->partitions().front().allocation;
     EXPECT_TRUE(allocation.stored_copies_match);
     EXPECT_EQ(allocation.stored_copy_mismatch_byte_count, 0U);
-    EXPECT_TRUE(allocation.fixed_not_header.empty());
-    EXPECT_TRUE(allocation.header_not_fixed.empty());
-    EXPECT_TRUE(allocation.fixed_location.index_extent_marked_free.empty());
-    EXPECT_TRUE(allocation.header_addressed.index_extent_marked_free.empty());
-    EXPECT_EQ(allocation.fixed_location.index_extent_marked_free_count, 1U);
-    EXPECT_EQ(allocation.header_addressed.index_extent_marked_free_count, 1U);
+    EXPECT_TRUE(allocation.copy1_not_copy2.empty());
+    EXPECT_TRUE(allocation.copy2_not_copy1.empty());
+    EXPECT_TRUE(allocation.bitmap_copy1.index_extent_marked_free.empty());
+    EXPECT_TRUE(allocation.bitmap_copy2.index_extent_marked_free.empty());
+    EXPECT_EQ(allocation.bitmap_copy1.index_extent_marked_free_count, 1U);
+    EXPECT_EQ(allocation.bitmap_copy2.index_extent_marked_free_count, 1U);
     EXPECT_FALSE(axk::allocation_is_safe_for_mutation(allocation));
     const auto validation = axk::validate_semantics(*result, {}, {});
     EXPECT_NE(std::ranges::find(validation.issues, "SFS_ALLOCATION_MISMATCH", &axk::ValidationIssue::code),
@@ -749,8 +796,8 @@ TEST(SfsRepair, RejectsExtentNormalizationWhenAnotherAllocationMismatchExists) {
     const auto &allocation = opened->partitions().front().allocation;
     EXPECT_TRUE(allocation.stored_copies_match);
     EXPECT_EQ(allocation.extent_byte_total_mismatch_count, 1U);
-    EXPECT_EQ(allocation.fixed_location.index_extent_marked_free_count, 1U);
-    EXPECT_EQ(allocation.header_addressed.index_extent_marked_free_count, 1U);
+    EXPECT_EQ(allocation.bitmap_copy1.index_extent_marked_free_count, 1U);
+    EXPECT_EQ(allocation.bitmap_copy2.index_extent_marked_free_count, 1U);
 
     const auto plan = axk::inspect_sfs_extent_layout_repair(*opened);
     ASSERT_FALSE(plan);
@@ -835,8 +882,8 @@ TEST(SfsRepair, NormalizesMultipleDirectAndContinuationRecordsInOneCopy) {
     ASSERT_EQ(direct->extents.size(), 1U);
     EXPECT_EQ(direct->extents.front().cluster_offset, 55U);
     EXPECT_EQ(direct->extents.front().byte_count, 4U);
-    EXPECT_EQ(partition.allocation.fixed_location.used_cluster_count, 50U);
-    EXPECT_EQ(partition.allocation.header_addressed.used_cluster_count, 50U);
+    EXPECT_EQ(partition.allocation.bitmap_copy1.used_cluster_count, 50U);
+    EXPECT_EQ(partition.allocation.bitmap_copy2.used_cluster_count, 50U);
     std::filesystem::remove_all(root, error);
 }
 
@@ -951,6 +998,21 @@ TEST(SfsReader, PermitsMissingFormatterSupportTargetsOnlyAtThePartitionRoot) {
     const auto validation = axk::validate_semantics(*image, {}, {});
     EXPECT_EQ(std::ranges::find(validation.issues, "SFS_DIRECTORY_ENTRY_TARGET_MISSING", &axk::ValidationIssue::code),
               validation.issues.end());
+}
+
+TEST(SfsReader, ReadsNativeAttributesSeparatelyFromDirectoryEntrySize) {
+    auto bytes = image_fixture();
+    axk::ByteWriter writer{bytes};
+    constexpr auto index = 11U * sector_size;
+    ASSERT_TRUE(writer.write_be32(index + 0x42U, 0x94646972U));
+    ASSERT_TRUE(writer.write_be16(index + 0x46U, 3U));
+    const auto image = axk::open_image(std::make_shared<axk::MemoryReader>(std::move(bytes)), "attributes.hds");
+    ASSERT_TRUE(image) << image.error().message;
+    const auto &record = image->partitions().front().records.front();
+    EXPECT_EQ(record.attributes, 0x94646972U);
+    EXPECT_EQ(record.link_count, 3U);
+    ASSERT_FALSE(record.directory_entries.empty());
+    EXPECT_EQ(record.directory_entries.front().entry_size_bytes, 32U);
 }
 
 TEST(SfsReader, RejectsNonSfsAndCancellationWithoutPartialContainer) {

@@ -121,8 +121,23 @@ Result<std::vector<CategoryObject>> category_objects(TransactionState &state, Mu
                                                      ObjectType expected_type, const CancellationToken &cancellation);
 Result<void> replace_fixed_object_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                           std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<OperationReport> update_sample_bank_parameters(TransactionState &state, OperationContext context,
+                                                      const UpdateSampleBankParametersOperation &operation,
+                                                      const CancellationToken &cancellation);
+Result<OperationReport> retarget_sample_wave_data(TransactionState &state, OperationContext context,
+                                                  const RetargetSampleWaveDataOperation &operation,
+                                                  const CancellationToken &cancellation);
+Result<OperationReport> update_wave_data_parameters(TransactionState &state, OperationContext context,
+                                                    const UpdateWaveDataParametersOperation &operation,
+                                                    const CancellationToken &cancellation);
+Result<OperationReport> replace_program_assignments(TransactionState &state, OperationContext context,
+                                                    const ReplaceProgramAssignmentsOperation &operation,
+                                                    const CancellationToken &cancellation);
 Result<bool> sbnk_program_bit(std::span<const std::byte> payload, std::uint8_t program);
 Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
+                                  bool enabled, const CancellationToken &cancellation);
+Result<bool> sbac_program_bit(std::span<const std::byte> payload, std::uint8_t program);
+Result<void> set_sbac_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
                                   bool enabled, const CancellationToken &cancellation);
 Result<void> set_sbnk_sample_bank_flag(TransactionState &state, MutablePartition &partition, SfsId id, bool enabled,
                                        const CancellationToken &cancellation);
@@ -139,10 +154,10 @@ Result<std::vector<Extent>> allocate_extents(MutablePartition &partition, std::u
 Result<std::vector<std::uint32_t>> allocate_list_clusters(MutablePartition &partition, std::size_t count);
 std::vector<Extent> merge_extents(std::span<const Extent> existing, std::span<const Extent> added);
 Result<void> normalize_extent_byte_counts(std::span<Extent> extents, std::size_t payload_size);
-Result<std::pair<std::uint64_t, std::uint64_t>> grow_directory_capacity(TransactionState &state,
-                                                                        MutablePartition &partition, SfsId id,
-                                                                        std::uint64_t required_size,
-                                                                        const CancellationToken &cancellation);
+Result<std::pair<std::uint64_t, std::uint64_t>> grow_record_capacity(TransactionState &state,
+                                                                     MutablePartition &partition, SfsId id,
+                                                                     std::uint64_t required_size,
+                                                                     const CancellationToken &cancellation);
 Result<std::pair<SfsId, std::uint64_t>> allocate_record(MutablePartition &partition, std::vector<std::byte> payload,
                                                         PayloadKind kind, std::optional<SfsId> requested_id = {},
                                                         std::uint16_t directory_tail = 0U);
@@ -176,6 +191,9 @@ Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext co
                                     const DeleteSampleOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,
                                     const InsertSampleOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
+                                               const UpdateSampleParametersOperation &operation,
+                                               const CancellationToken &cancellation);
 Result<OperationReport> insert_waveform(TransactionState &state, OperationContext context,
                                         const InsertWaveformOperation &operation,
                                         const CancellationToken &cancellation);
@@ -198,6 +216,9 @@ Result<OperationReport> delete_program(TransactionState &state, OperationContext
                                        const DeleteProgramOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_program(TransactionState &state, OperationContext context,
                                        const InsertProgramOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> update_program_parameters(TransactionState &state, OperationContext context,
+                                                  const UpdateProgramParametersOperation &operation,
+                                                  const CancellationToken &cancellation);
 Result<OperationReport> rename_program(TransactionState &state, OperationContext context,
                                        const RenameProgramOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> clear_program_assignments(TransactionState &state, OperationContext context,
@@ -219,6 +240,8 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
 Result<OperationReport> assign_sbac_members(TransactionState &state, OperationContext context,
                                             const AssignSampleBankMembersOperation &operation,
                                             const CancellationToken &cancellation);
+Result<void> append_sbac_members_to_payload(std::vector<std::byte> &payload, const CurrentSbac &sample_bank,
+                                            const std::vector<std::string> &names);
 Result<OperationReport> rename_sbac(TransactionState &state, OperationContext context,
                                     const RenameSampleBankOperation &operation, const CancellationToken &cancellation);
 

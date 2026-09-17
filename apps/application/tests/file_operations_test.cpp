@@ -182,6 +182,52 @@ TEST_F(FileOperationsTest, ValidationWritesTheCompleteCliArtifactSetAndSummary) 
     EXPECT_EQ(volume.front().at("fail_count"), 0U);
 }
 
+TEST_F(FileOperationsTest, ValidationRejectsVisibleCategoryEntryWithUnrecognizedPayload) {
+    const auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto inventory = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(inventory) << inventory.error().message;
+    ASSERT_FALSE(inventory->catalog.objects.empty());
+    const auto &object = inventory->catalog.objects.front();
+    const auto &container = std::get<axk::Container>(media->storage());
+    const auto partition = std::ranges::find(container.partitions(), object.partition, &axk::Partition::index);
+    ASSERT_NE(partition, container.partitions().end());
+    const auto record = std::ranges::find(partition->records, object.sfs_id, &axk::IndexRecord::sfs_id);
+    ASSERT_NE(record, partition->records.end());
+    ASSERT_FALSE(record->extents.empty());
+    const auto data_offset =
+        (partition->start_sector +
+         static_cast<std::uint64_t>(record->extents.front().cluster_offset) * partition->sectors_per_cluster) *
+        container.superblock().sector_size_bytes;
+    std::fstream image{root_ / "fixture.hds", std::ios::in | std::ios::out | std::ios::binary};
+    ASSERT_TRUE(image);
+    image.seekp(static_cast<std::streamoff>(data_offset));
+    image.put('X');
+    image.close();
+
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox_));
+    const auto result = registry.invoke(
+        "report.validate",
+        {{"sources", {{{"rootId", "workspace"}, {"relativePath", "fixture.hds"}}}},
+         {"destination", {{"rootId", "workspace"}, {"relativePath", "reports/unrecognized"}}},
+         {"policy", "normal"}},
+        {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->at("failed").get<bool>());
+
+    std::ifstream issues_input{root_ / "reports" / "unrecognized" / "validation_issues.json"};
+    const auto issues = nlohmann::json::parse(issues_input);
+    EXPECT_TRUE(std::ranges::any_of(
+        issues, [](const auto &issue) { return issue.at("code") == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES"; }));
+
+    std::ifstream volume_input{root_ / "reports" / "unrecognized" / "volume_validation_summary.json"};
+    const auto volume = nlohmann::json::parse(volume_input);
+    ASSERT_EQ(volume.size(), 1U);
+    EXPECT_EQ(volume.front().at("fail_count"), 1U);
+    EXPECT_EQ(volume.front().at("malformed_category_entry_count"), 1U);
+}
+
 TEST_F(FileOperationsTest, ValidationChecksExportTreesAndRejectsAmbiguousRequests) {
     std::filesystem::create_directories(root_ / "exports");
     std::ofstream{root_ / "exports" / "broken.json", std::ios::binary} << "{";

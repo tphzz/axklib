@@ -23,12 +23,17 @@ function object(objectType: string, name: string): SamplerObject {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: objectType,
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 0,
         storedSizeBytes: 128,
         sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
-        frameCount: 0,
+        storedFrameCount: 0,
+        waveStartFrame: 0,
+        waveLengthFrames: 0,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 0,
     };
 }
@@ -88,7 +93,8 @@ describe('ObjectWorkspace', () => {
                 ...object('SMPL', name),
                 sampleRate: 44_100,
                 sampleWidthBytes: 2,
-                frameCount: 1,
+                storedFrameCount: 1,
+                waveLengthFrames: 1,
             };
             return {
                 id: waveObject.key,
@@ -136,7 +142,8 @@ describe('ObjectWorkspace', () => {
                 ...object('SMPL', name),
                 sampleRate: 44_100,
                 sampleWidthBytes: 2,
-                frameCount: 1,
+                storedFrameCount: 1,
+                waveLengthFrames: 1,
             };
             return {
                 id: waveObject.key,
@@ -195,7 +202,8 @@ describe('ObjectWorkspace', () => {
                 ...object('SMPL', name),
                 sampleRate: 44_100,
                 sampleWidthBytes: 2,
-                frameCount: 1,
+                storedFrameCount: 1,
+                waveLengthFrames: 1,
             };
             return {
                 id: waveObject.key,
@@ -277,13 +285,15 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 2'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const wave10 = {
             ...object('SMPL', 'SMP 10'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         render(ObjectWorkspace, {
             props: {
@@ -611,7 +621,11 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 44_100,
+            storedFrameCount: 44_100,
+            waveStartFrame: 4_410,
+            waveLengthFrames: 35_280,
+            loopStartFrame: 11_025,
+            loopLengthFrames: 22_050,
         };
         const onwavedataselect = vi.fn();
         render(ObjectWorkspace, {
@@ -645,7 +659,8 @@ describe('ObjectWorkspace', () => {
         expect(document.querySelector('.wave-data-row canvas')).toBeTruthy();
         expect(screen.queryByText('SMPL')).toBeNull();
         expect(document.querySelector('.object-code')).toBeNull();
-        expect(document.querySelector('.waveform span')).toBeNull();
+        expect(document.querySelectorAll('.wave-data-row .waveform-window-boundary')).toHaveLength(2);
+        expect(document.querySelectorAll('.wave-data-row .waveform-loop-boundary')).toHaveLength(2);
 
         const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
         expect(selectionTarget.parentElement?.classList.contains('wave-data-row')).toBe(true);
@@ -661,7 +676,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,
@@ -711,7 +727,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 100,
+            storedFrameCount: 100,
+            waveLengthFrames: 100,
         };
         const waveData = {
             id: waveObject.key,
@@ -732,7 +749,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 002'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 100,
+            storedFrameCount: 100,
+            waveLengthFrames: 100,
         };
         const secondWaveData = {
             ...waveData,
@@ -846,7 +864,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,
@@ -889,7 +908,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,
@@ -938,7 +958,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,
@@ -978,7 +999,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,
@@ -1022,7 +1044,8 @@ describe('ObjectWorkspace', () => {
             ...object('SMPL', 'SMP 001'),
             sampleRate: 44_100,
             sampleWidthBytes: 2,
-            frameCount: 1,
+            storedFrameCount: 1,
+            waveLengthFrames: 1,
         };
         const waveData = {
             id: waveObject.key,

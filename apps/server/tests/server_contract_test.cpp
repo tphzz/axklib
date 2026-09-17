@@ -62,6 +62,7 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companions"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects/{objectId}"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/relationships"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/validation/issues"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/preview"));
@@ -81,10 +82,18 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("components").at("schemas").contains("JobEvent"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentItem"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageContentPageResponse"));
+    EXPECT_TRUE(document.at("components").at("schemas").contains("ImageObjectDetailResponse"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("ImageCompanionsRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionPrepareRequest"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AuditionBundle"));
     EXPECT_TRUE(document.at("components").at("schemas").contains("AudioSourceInfo"));
+    const auto &wave_data_metadata = document.at("components").at("schemas").at("WaveDataMetadata");
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "embeddedContainerName"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "storedFrameCount"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "waveStartFrame"));
+    EXPECT_TRUE(std::ranges::contains(wave_data_metadata.at("required"), "waveLengthFrames"));
+    EXPECT_FALSE(std::ranges::contains(wave_data_metadata.at("required"), "frameCount"));
+    EXPECT_EQ(wave_data_metadata.at("properties").at("embeddedContainerName").at("type"), "string");
     const auto &headers = document.at("components").at("headers");
     EXPECT_TRUE(headers.contains("XRequestId"));
 }
@@ -276,12 +285,23 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
     EXPECT_EQ(files.at("items").at("$ref"), "#/components/schemas/SystemProgramContext");
     const auto &context = document.at("components").at("schemas").at("SystemProgramContext");
     ASSERT_EQ(context.at("oneOf").size(), 4U);
+    const auto &schemas = document.at("components").at("schemas");
+    const auto &system = schemas.at("A3000SystemProgramContextAvailable");
+    EXPECT_TRUE(std::ranges::contains(system.at("required"), "storageRevision"));
+    EXPECT_EQ(system.at("properties").at("storageRevision").at("const"), 0U);
+    EXPECT_FALSE(system.at("properties").contains("model"));
+    const auto &system2 = schemas.at("A4000A5000SystemProgramContextAvailable");
+    EXPECT_TRUE(std::ranges::contains(system2.at("required"), "storageRevision"));
+    EXPECT_EQ(system2.at("properties").at("storageRevision").at("enum"), nlohmann::json::array({0U, 1U}));
+    EXPECT_FALSE(system2.at("properties").contains("model"));
+    EXPECT_EQ(system2.at("properties").at("parts").at("minItems"), 32U);
+    EXPECT_EQ(system2.at("properties").at("parts").at("maxItems"), 32U);
 }
 
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 59U);
+    EXPECT_EQ(entries.size(), 72U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -363,6 +383,7 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/images/{imageId}/companions", "post", "ImageCompanionsRequest", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}/content", "get", "", "200", "ImageContentPageResponse"},
         Expectation{"/images/{imageId}/objects", "get", "", "200", "ImageObjectPageResponse"},
+        Expectation{"/images/{imageId}/objects/{objectId}", "get", "", "200", "ImageObjectDetailResponse"},
         Expectation{"/images/{imageId}/relationships", "get", "", "200", "ImageRelationshipPageResponse"},
         Expectation{"/images/{imageId}/validation/issues", "get", "", "200", "ImageValidationPageResponse"},
         Expectation{"/images/{imageId}/preview", "get", "", "200", "ImagePreviewResponse"},
@@ -921,7 +942,10 @@ TEST(ServerContract, ProgramAssignmentCleanupInspectionAndJobUseReviewedSelectio
     EXPECT_FALSE(
         axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_reason));
     auto invalid_ordinal = inspection;
-    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 16U;
+    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 998U;
+    EXPECT_TRUE(
+        axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_ordinal));
+    invalid_ordinal["candidates"][0]["assignmentOrdinal"] = 999U;
     EXPECT_FALSE(
         axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspection", invalid_ordinal));
 

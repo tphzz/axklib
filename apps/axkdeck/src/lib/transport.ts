@@ -1,4 +1,9 @@
 import type { DiskTreeItem } from './types';
+import type { HardDiskCreationProfile, HardDiskCreationProfileId } from './hardDiskCreation';
+export type * from './hardDiskCreation';
+import type { FilesystemTransport } from './filesystem';
+import type { Su700Transport } from './su700Import';
+import type { FloppyTransport } from './floppyImport';
 import type {
     DirectoryListing,
     DirectoryLocation,
@@ -202,23 +207,21 @@ export interface ObjectPageFilter {
     objectType?: string;
     scopeId?: string;
 }
-
 export interface RelationshipPage {
     relationships: SamplerRelationship[];
     totalCount: number;
 }
-
 export interface RelationshipPageFilter {
     scopeId?: string;
     sourceObjectId?: string;
     targetObjectId?: string;
     relationshipType?: string;
 }
-
 export type RelationshipQuality = 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
 export type SystemProgramContext = components['schemas']['SystemProgramContext'];
 export type SystemProgramContexts = components['schemas']['SystemProgramContexts'];
 export type SystemProgramPart = components['schemas']['SystemProgramPart'];
+export type ObjectDetail = components['schemas']['ImageObjectDetail'];
 
 export interface SamplerRelationship {
     id: string;
@@ -234,7 +237,6 @@ export interface SamplerRelationship {
     assignmentState: string;
     receiveChannelDisplay: string;
 }
-
 export interface SamplerObject {
     key: string;
     objectType: string;
@@ -243,14 +245,21 @@ export interface SamplerObject {
     partitionName: string;
     volumeName: string;
     categoryName: string;
+    objectEncoding: string;
+    directoryEntryName: string;
     sfsId: number;
     storedSizeBytes: number;
     sizeWithDependenciesBytes: number | null;
     sampleRate: number;
     rootKey: number;
-    frameCount: number;
+    storedFrameCount: number;
+    waveStartFrame: number;
+    waveLengthFrames: number;
+    storageState: 'COMPLETE' | 'INCOMPLETE';
     sampleWidthBytes: number;
+    embeddedContainerName?: string;
     fineTuneCents?: number;
+    loopMode?: number;
     loopModeLabel?: string;
     loopStartFrame?: number;
     loopLengthFrames?: number;
@@ -268,19 +277,14 @@ export interface SamplerObject {
         }[];
     };
 }
-
-export interface PreviewEnvelope {
-    frameCount: number;
+type ApiPreviewEnvelope = components['schemas']['ImagePreviewResponse']['data'];
+type ApiPreviewLane = components['schemas']['ImagePreviewLane'];
+export interface PreviewEnvelope extends Omit<ApiPreviewEnvelope, 'lanes'> {
     lanes: readonly PreviewLane[];
 }
-
-export interface PreviewLane {
-    role: 'MONO' | 'LEFT' | 'RIGHT';
-    sourceObjectId: string;
-    frameCount: number;
-    bins: readonly { minimum: number; maximum: number }[];
+export interface PreviewLane extends Omit<ApiPreviewLane, 'bins'> {
+    bins: readonly components['schemas']['ImagePreviewBin'][];
 }
-
 export interface AuditionLaneDescriptor {
     role: 'MONO' | 'LEFT' | 'RIGHT';
     sourceObjectId: string;
@@ -313,21 +317,6 @@ export interface PlanSummary {
     sizeBytes: number;
     appliesChanges: boolean;
     planToken?: string;
-}
-
-export type HardDiskCreationProfileId = 'FLOPPY_SCALE' | 'CD_R_650' | 'CD_R_700' | 'HDS_1_GIB' | 'HDS_2_GIB';
-
-export interface HardDiskCreationPartitionOption {
-    partitionCount: number;
-    partitionSizeBytes: number;
-    unusedTailBytes: number;
-}
-
-export interface HardDiskCreationProfile {
-    profileId: HardDiskCreationProfileId;
-    sizeBytes: number;
-    defaultPartitionCount: number;
-    partitionOptions: HardDiskCreationPartitionOption[];
 }
 
 export interface JobState {
@@ -473,7 +462,8 @@ export interface ImageOpenOptions {
     onUpdate?: (job: JobState) => void;
 }
 
-export interface ImageTransport extends ProgramAssignmentCleanupTransport {
+export interface ImageTransport
+    extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport, FloppyTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
@@ -490,6 +480,7 @@ export interface ImageTransport extends ProgramAssignmentCleanupTransport {
     contentChildren(sessionId: number, parentId: string, offset: number, limit: number): Promise<ContentPage>;
     validationIssues(sessionId: number): Promise<ImageValidationIssue[]>;
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage>;
+    objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail>;
     relationshipPage(
         sessionId: number,
         offset: number,

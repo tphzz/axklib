@@ -65,6 +65,12 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return delete_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertSampleOperation>)
                     return insert_sbnk(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateSampleParametersOperation>)
+                    return update_sbnk_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)
+                    return update_sample_bank_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>)
+                    return update_wave_data_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertWaveformOperation>)
                     return insert_waveform(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DeleteWaveformOperation>)
@@ -89,6 +95,12 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_program(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, ClearProgramAssignmentsOperation>)
                     return clear_program_assignments(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateProgramParametersOperation>)
+                    return update_program_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ReplaceProgramAssignmentsOperation>)
+                    return replace_program_assignments(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, RetargetSampleWaveDataOperation>)
+                    return retarget_sample_wave_data(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DeleteSequenceOperation>)
                     return delete_sequence(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertSequenceOperation>)
@@ -332,7 +344,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             if (!has_action(object, PackageImportObjectAction::insert)) {
                 if (has_action(object, PackageImportObjectAction::reuse) &&
                     has_action(object, PackageImportObjectAction::relocate)) {
-                    if (!object.target_sfs_id || (object.object_type != "SBNK" && object.object_type != "PROG")) {
+                    if (!object.target_sfs_id || (object.object_type != "SMPL" && object.object_type != "SBNK" &&
+                                                  object.object_type != "PROG")) {
                         return std::unexpected{
                             transaction_error("planned reused relocation is not a supported fixed object")};
                     }

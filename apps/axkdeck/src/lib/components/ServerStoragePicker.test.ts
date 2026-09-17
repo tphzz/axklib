@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ImageTransport } from '../transport';
 import ServerStoragePicker from './ServerStoragePicker.svelte';
+import { storagePickerDirectory, storagePickerFixture, storagePickerNames } from '../../test/storagePickerFixture';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
@@ -72,6 +73,94 @@ function activeOption(list: HTMLElement): HTMLElement {
 }
 
 describe('ServerStoragePicker', () => {
+    it('offers current-folder selection and image multi-selection in the same floppy picker', async () => {
+        const backend = transport();
+        vi.mocked(backend.sandboxDirectory).mockImplementation(async (directory) => ({
+            directory,
+            entries: [
+                { name: 'disk1', relativePath: 'disk1', kind: 'DIRECTORY', size: null },
+                { name: 'disk.img', relativePath: 'disk.img', kind: 'FILE', size: 100 },
+                { name: 'notes.txt', relativePath: 'notes.txt', kind: 'FILE', size: 10 },
+            ],
+            truncated: false,
+            nextCursor: null,
+        }));
+        const onselect = vi.fn(),
+            onselectmany = vi.fn();
+        const view = render(ServerStoragePicker, {
+            props: {
+                transport: backend,
+                mode: 'floppy-source',
+                title: 'Choose floppy source',
+                extensions: ['img', 'ima'],
+                multiple: true,
+                initialDirectory: { rootId: 'workspace', relativePath: '' },
+                onselect,
+                onselectmany,
+                oncancel: vi.fn(),
+            },
+        });
+        await view.findByRole('option', { name: /disk.img/ });
+        expect(view.queryByRole('option', { name: /notes.txt/ })).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Select current folder' }));
+        expect(onselect).toHaveBeenCalledWith(
+            expect.objectContaining({ kind: 'server-directory', reference: { rootId: 'workspace', relativePath: '' } }),
+        );
+        await fireEvent.click(view.getByRole('option', { name: /disk.img/ }));
+        expect(view.queryByRole('button', { name: 'Select current folder' })).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Select 1 file' }));
+        expect(onselectmany).toHaveBeenCalledWith([expect.objectContaining({ kind: 'server-file' })]);
+        await fireEvent.click(view.getByRole('option', { name: /disk.img/ }));
+        await fireEvent.click(view.getByRole('option', { name: /disk1/ }));
+        await waitFor(() =>
+            expect(backend.sandboxDirectory).toHaveBeenLastCalledWith(
+                expect.objectContaining({ relativePath: 'disk1' }),
+            ),
+        );
+        expect(view.getByRole('button', { name: 'Select current folder' })).toBeTruthy();
+    });
+    it.each([false, true])(
+        'preserves natural server order and selection across pages (remembered: %s)',
+        async (remembered) => {
+            render(ServerStoragePicker, {
+                props: {
+                    transport: storagePickerFixture(),
+                    mode: 'file',
+                    title: 'Open image',
+                    extensions: ['hds'],
+                    multiple: true,
+                    initialDirectory: storagePickerDirectory,
+                    initialFile: remembered
+                        ? { ...storagePickerDirectory, relativePath: 'Drum Kits/Disk10.hds' }
+                        : undefined,
+                    onselect: vi.fn(),
+                    oncancel: vi.fn(),
+                },
+            });
+            if (!remembered) {
+                const selected = await screen.findByRole('option', { name: /disk2\.hds/ });
+                await fireEvent.click(selected);
+                await fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+                await screen.findByRole('option', { name: /Disk10\.hds/ });
+                expect(selected.getAttribute('aria-selected')).toBe('true');
+            } else {
+                await screen.findByRole('option', { name: /Disk10\.hds/ });
+            }
+            const list = screen.getByRole('listbox', { name: 'Storage entries' });
+            const names = within(list)
+                .getAllByRole('option')
+                .map((option) => option.querySelector('strong')?.textContent);
+            expect(names).toEqual(storagePickerNames);
+            expect(activeOption(list).textContent).toContain(remembered ? 'Disk10.hds' : 'disk2.hds');
+            await fireEvent.keyDown(list, { key: 'Home' });
+            expect(activeOption(list).textContent).toContain('ACE-FR2L');
+            await fireEvent.keyDown(list, { key: 'ArrowDown' });
+            expect(activeOption(list).textContent).toContain('ACE-tone');
+            await fireEvent.keyDown(list, { key: 'End' });
+            expect(activeOption(list).textContent).toContain('Disk10.hds');
+        },
+    );
+
     it('uses the task title without exposing server-filesystem terminology', async () => {
         render(ServerStoragePicker, {
             props: {

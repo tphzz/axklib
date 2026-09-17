@@ -22,7 +22,9 @@
 #include "axklib/package.hpp"
 #include "axklib/package_import_planning.hpp"
 #include "content_digest.hpp"
+#include "floppy_import_operations.hpp"
 #include "package_operations_internal.hpp"
+#include "session_import_plan.hpp"
 
 using namespace axk::app::package_operations_internal;
 
@@ -149,86 +151,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                             {"packageObjectCount", package_object_count},
                             {"packagePayloadBytes", package_set->retained_payload_bytes}});
 
-                auto preparation = prepare_session_import(input, package_set->packages, session->volume_scopes_by_id);
-                if (!preparation)
-                    return std::unexpected(preparation.error());
-
-                const auto planning_started = Clock::now();
-                const auto packages = std::span<const axk::PortablePackage>{package_set->packages};
-                axk::package_import_internal::RetainedPackageImportStats planning_stats;
-                const axk::package_import_internal::RetainedPackageImportTarget target{
-                    session->reader,          std::filesystem::path{session->source.relative_path},
-                    session->media,           session->target_snapshot_id,
-                    session->catalog_objects, session->catalog_issues,
-                    &planning_stats,          true};
-                auto plan = axk::package_import_internal::plan_package_import_retained(
-                    target, packages, preparation->request, context.cancellation);
-                if (!plan)
-                    return std::unexpected(core_error(plan.error(), session->source.relative_path));
-                diagnostic("planning", planning_started,
-                           {{"imageId", identity->first},
-                            {"actionCount", plan->objects.size()},
-                            {"conflictCount", plan->conflicts.size()},
-                            {"targetPayloadBytesRead", planning_stats.target_payload_bytes_read},
-                            {"targetPayloadObjectsRead", planning_stats.target_payload_objects_read}});
-
-                const auto storage_started = Clock::now();
-                const auto now = Clock::now();
-                auto token = secure_random_hex(24U);
-                if (!token)
-                    return std::unexpected(token.error());
-                auto record = std::make_shared<SessionPackagePlanRecord>(
-                    SessionPackagePlanRecord{*token, context.owner_id, now + state->retention, identity->first,
-                                             identity->second, package_set, std::move(*plan), false});
-                {
-                    std::lock_guard lock{state->mutex};
-                    cleanup_session_plans(*state, now);
-                    if (replace_plan_token) {
-                        const auto found = state->plans.find(*replace_plan_token);
-                        if (found == state->plans.end() || found->second->owner_id != context.owner_id ||
-                            found->second->claimed || found->second->package_set != package_set) {
-                            return std::unexpected(operation_error(
-                                "package_plan_stale", "replacement package import plan changed while replanning"));
-                        }
-                    } else if (state->plans.size() >= state->maximum_plans) {
-                        return std::unexpected(operation_error(
-                            "package_plan_capacity", "too many package import plans are active", std::nullopt, true));
-                    }
-                    if (!replace_plan_token) {
-                        const auto retained = retained_session_package_bytes(*state);
-                        if (retained > state->maximum_retained_package_bytes ||
-                            package_set->retained_payload_bytes > state->maximum_retained_package_bytes - retained) {
-                            return std::unexpected(operation_error(
-                                "package_plan_capacity", "retained package import payload budget is exhausted",
-                                std::nullopt, true));
-                        }
-                    }
-                    if (state->plans.contains(*token))
-                        return std::unexpected(operation_error("secure_random_failed", "package plan token collision"));
-                    state->plans.emplace(*token, record);
-                    if (replace_plan_token)
-                        state->plans.erase(*replace_plan_token);
-                }
-                diagnostic("storage", storage_started,
-                           {{"imageId", identity->first},
-                            {"replacement", replace_plan_token.has_value()},
-                            {"retainedPackageBytes", package_set->retained_payload_bytes}});
-                auto result =
-                    plan_json(record->plan, record->token, static_cast<std::uint64_t>(state->retention.count() * 60));
-                result["imageId"] = record->image_id;
-                result["revision"] = record->expected_revision;
-                result["packages"] = session_package_summaries(packages, preparation->destination_volume_names);
-                diagnostic("total", operation_started,
-                           {{"imageId", identity->first},
-                            {"revision", identity->second},
-                            {"cacheHit", replace_plan_token.has_value()},
-                            {"imageBytes", session->reader->size()},
-                            {"packageCount", package_set->packages.size()},
-                            {"packageObjectCount", package_object_count},
-                            {"packagePayloadBytes", package_set->retained_payload_bytes},
-                            {"targetPayloadBytesRead", planning_stats.target_payload_bytes_read},
-                            {"targetPayloadObjectsRead", planning_stats.target_payload_objects_read}});
-                return result;
+                return store_session_import_plan(state, input, context, *session, package_set, replace_plan_token,
+                                                 operation_started);
             });
         if (!bound)
             return bound;
@@ -260,10 +184,11 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
             return bound;
     }
 
-    if (!registry.is_implemented("images.package_import")) {
+    for (const auto *operation : {"images.package_import", "images.floppy_import"}) {
+        if (registry.is_implemented(operation))
+            continue;
         auto bound = registry.bind(
-            "images.package_import",
-            [state, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+            operation, [state, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
                 std::string token;
                 try {
                     token = input.at("planToken").get<std::string>();
@@ -280,6 +205,10 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                         operation_error("package_plan_conflicts", "package import plan contains unresolved conflicts"));
                 }
 
+                if (record->package_set->verify_sources) {
+                    if (auto verified = record->package_set->verify_sources(context.cancellation); !verified)
+                        return std::unexpected(verified.error());
+                }
                 auto mutation = images.begin_mutation(record->image_id, context.owner_id, record->expected_revision);
                 if (!mutation)
                     return std::unexpected(mutation.error());
@@ -314,9 +243,11 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     prepared_commit.emplace(std::move(*validation));
                     return {};
                 };
+                mutation_guard.invalidate_on_abort(true);
                 if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches,
                                                   context.cancellation, validate_commit);
                     !applied) {
+                    mutation_guard.invalidate_on_abort(!journals.storage_ready());
                     return std::unexpected(applied.error());
                 }
                 if (!prepared_commit)
@@ -420,5 +351,5 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
         if (!bound)
             return bound;
     }
-    return {};
+    return bind_floppy_import_operations(registry, sandbox, uploads, images, state);
 }

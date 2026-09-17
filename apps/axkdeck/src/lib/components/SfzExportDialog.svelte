@@ -105,7 +105,9 @@
                 <Icon name="music" size={16} />
                 <h2>{dialogTitle}</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="package-dialog-content">

@@ -401,8 +401,8 @@ axk::app::Result<axk::app::ImageProgramGenerationPlan> axk::app::ImageSessionMan
                                                  "generated Program slots no longer match the reviewed free-slot plan",
                                                  true));
         ordered.push_back(*found->second);
-        ProgramAssignmentSpec assignment{candidate.target_object_type, candidate.target_object_name, 0U,
-                                         ProgramReceiveMode::sample};
+        ProgramAssignmentSpec assignment{
+            candidate.target_object_type, candidate.target_object_name, {.receive = ProgramReceiveInherit{}}};
         ProgramSpec program{expected_number, found->second->program_name, {std::move(assignment)}};
         manifest.operations.push_back({std::format("generate-program-{:03}", expected_number),
                                        InsertProgramOperation{PartitionIndex{*content_item->partition_index},

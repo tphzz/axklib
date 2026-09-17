@@ -12,8 +12,9 @@ import type { PackageBatchImportWorkflow } from './packageBatchWorkflow.svelte';
 import type { PackageImportWorkflow } from './packageWorkflow.svelte';
 import type { SequenceImportWorkflow } from './sequenceWorkflow.svelte';
 import type { Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
+import type { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 
-export type MediaDropKind = 'audio' | 'midi' | 'tx16w' | 'package' | 'mixed';
+export type MediaDropKind = 'audio' | 'midi' | 'floppy' | 'package' | 'mixed';
 type ClassifiedMedia = MediaDropKind | 'none';
 
 export interface MediaDropNotice {
@@ -22,11 +23,14 @@ export interface MediaDropNotice {
 }
 
 interface MediaDropDependencies {
+    enabled: () => boolean;
+    interfaceZoom: () => number;
     isDesktop: boolean;
     workspaceView: () => WorkspaceView;
     audioImport: AudioImportWorkflow;
     sequenceImport: SequenceImportWorkflow;
     tx16wImport: Tx16wImportWorkflow;
+    floppyImport: FloppyImportWorkflow;
     packageImport: PackageImportWorkflow;
     packageBatchImport: PackageBatchImportWorkflow;
     sessionId: () => number | null;
@@ -53,6 +57,8 @@ export class MediaDropWorkflow {
         let disposed = false;
         let unlisten: (() => void) | null = null;
         void listenForNativeMediaDrops({
+            enabled: this.dependencies.enabled,
+            interfaceZoom: this.dependencies.interfaceZoom,
             onHover: (paths) => this.updateHover(paths),
             onDrop: (files, _position, droppedPathCount) => {
                 const kind = classifyDroppedNames(files.map((file) => file.name));
@@ -63,7 +69,7 @@ export class MediaDropWorkflow {
                 });
                 if (droppedPathCount > 0 && files.length === 0) {
                     this.dependencies.setStatus(
-                        'No supported package, A3K, audio, MIDI, or TX16W disk files were dropped',
+                        'No supported package, A3K, audio, MIDI, or floppy image files were dropped',
                     );
                     return;
                 }
@@ -131,7 +137,7 @@ export class MediaDropWorkflow {
             this.dependencies.setStatus('Drop one media type at a time');
             this.notice = {
                 title: 'Import unavailable',
-                message: 'Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.',
+                message: 'Drop packages, A3K archives, audio, MIDI, and floppy images separately.',
             };
             return;
         }
@@ -161,17 +167,8 @@ export class MediaDropWorkflow {
             }
             return;
         }
-        const volumeTarget = this.selectedVolumeTarget();
-        if (selectedKind === 'tx16w') {
-            if (!this.dependencies.tx16wImport.dropAvailable()) {
-                this.dependencies.setStatus('TX16W import requires a writable SFS hard-disk image');
-                this.notice = {
-                    title: 'TX16W import unavailable',
-                    message: 'Open a writable SFS hard-disk image, then drop the TX16W disk again.',
-                };
-                return;
-            }
-            await this.dependencies.tx16wImport.requestDroppedFiles(files, volumeTarget);
+        if (selectedKind === 'floppy') {
+            await this.dependencies.floppyImport.requestDroppedFiles(files, this.dependencies.selectedSource());
             return;
         }
         if (selectedKind === 'midi') {
@@ -221,6 +218,7 @@ export class MediaDropWorkflow {
             this.dependencies.audioImport.request !== null ||
             this.dependencies.sequenceImport.request !== null ||
             this.dependencies.tx16wImport.request !== null ||
+            this.dependencies.floppyImport.request !== null ||
             this.dependencies.packageImport.request !== null ||
             this.dependencies.packageBatchImport.request !== null
         );
@@ -273,7 +271,7 @@ export function classifyDroppedNames(names: readonly string[]): ClassifiedMedia 
     if (Number(audio) + Number(midi) + Number(tx16w) + Number(packageMedia) > 1) return 'mixed';
     if (audio) return 'audio';
     if (midi) return 'midi';
-    if (tx16w) return 'tx16w';
+    if (tx16w) return 'floppy';
     if (packageMedia) return 'package';
     return 'none';
 }

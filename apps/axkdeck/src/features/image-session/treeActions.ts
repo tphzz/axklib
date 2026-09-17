@@ -8,6 +8,7 @@ import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
 import type { PackageBatchImportWorkflow } from '../import/packageBatchWorkflow.svelte';
+import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ImageSessionWorkflow } from './workflow.svelte';
 
@@ -17,6 +18,7 @@ interface ImageTreeActionDependencies {
     mutation: MutationWorkflow;
     directComputer: DirectComputerWorkflow;
     packageBatchImport: PackageBatchImportWorkflow;
+    floppyImport?: FloppyImportWorkflow;
     exports: ExportWorkflow;
     volumePackages: VolumePackageExportWorkflow;
     volumeFloppies: VolumeFloppyExportWorkflow;
@@ -56,6 +58,11 @@ export function createImageTreeActionHandler(dependencies: ImageTreeActionDepend
                     }),
                 )
                 .catch((error) => imageSession.setStatus(userFacingMessage(error)));
+            return;
+        }
+        if (action === 'import-floppy') {
+            if (!imageSession.packageImportAvailable || (item.kind !== 'partition' && item.kind !== 'volume')) return;
+            void dependencies.floppyImport?.chooseFiles(item);
             return;
         }
         if (action === 'import-packages') {

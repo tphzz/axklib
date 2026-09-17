@@ -29,6 +29,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/alteration_transaction.hpp"
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/filesystem_edit_operations.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/application/session_placement_operations.hpp"
@@ -51,6 +52,8 @@ using axk::app::detail::reader_sha256;
 axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry &registry, const Sandbox &sandbox,
                                                                UploadStore &uploads, ImageSessionManager &images,
                                                                AlterationJournalStore &journals) {
+    if (auto bound = bind_filesystem_edit_operations(registry, sandbox, uploads, images, journals); !bound)
+        return bound;
     const auto alter_session = [&sandbox, &uploads, &images,
                                 &journals](const Json &input, const OperationContext &context) -> Result<Json> {
         const auto operation_started = Clock::now();
@@ -87,9 +90,10 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             std::string_view owner_id;
             std::uint64_t revision;
             bool &finished;
+            bool invalidate_session{};
             ~AbortGuard() {
                 if (!finished)
-                    images.abort_mutation(image_id, owner_id, revision);
+                    images.abort_mutation(image_id, owner_id, revision, invalidate_session);
             }
         } guard{images, image_id, context.owner_id, expected_revision, mutation_finished};
         diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
@@ -157,9 +161,11 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             prepared_commit.emplace(std::move(*validation));
             return {};
         };
+        guard.invalidate_session = true;
         if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation,
                                           validate_commit);
             !applied) {
+            guard.invalidate_session = !journals.storage_ready();
             return std::unexpected(applied.error());
         }
         if (!prepared_commit)
@@ -359,8 +365,13 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     revision = input.at("expectedRevision").get<std::uint64_t>();
                     content_scope_id = input.at("contentScopeId").get<std::string>();
                     for (const auto &row : input.at("assignments")) {
-                        selections.push_back({row.at("programObjectId").get<std::string>(),
-                                              row.at("assignmentOrdinal").get<std::uint8_t>()});
+                        const auto &ordinal_value = row.at("assignmentOrdinal");
+                        if (!ordinal_value.is_number_integer() || ordinal_value < 0 ||
+                            ordinal_value >= axk::maximum_stored_program_assignments)
+                            return std::unexpected(
+                                operation_error("invalid_request", "assignmentOrdinal must be between 0 and 998"));
+                        selections.push_back(
+                            {row.at("programObjectId").get<std::string>(), ordinal_value.get<std::uint16_t>()});
                     }
                 } catch (const Json::exception &) {
                     return std::unexpected(operation_error(
@@ -379,7 +390,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                   context);
                 if (!altered)
                     return std::unexpected(altered.error());
-                std::map<std::pair<std::string, std::uint8_t>, const ImageProgramAssignmentCleanupCandidate *>
+                std::map<std::pair<std::string, std::uint16_t>, const ImageProgramAssignmentCleanupCandidate *>
                     candidates;
                 for (const auto &candidate : plan->inspection.candidates)
                     candidates.emplace(std::pair{candidate.program_object_id, candidate.assignment_ordinal},

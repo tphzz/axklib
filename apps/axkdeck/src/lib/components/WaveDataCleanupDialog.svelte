@@ -74,7 +74,9 @@
     >
         <header class="dialog-header">
             <h2>Clean up Wave Data</h2>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="wave-data-cleanup-content">

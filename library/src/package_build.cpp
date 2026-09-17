@@ -22,6 +22,7 @@
 #include "axklib/file_publication.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/package_closure.hpp"
+#include "axklib/package_graph.hpp"
 #include "axklib/package_relocation.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
@@ -179,10 +180,10 @@ std::map<std::string, std::string, std::less<>> assign_node_ids(std::vector<Prov
     return result;
 }
 
-Result<PackageBuild> build_selected_package(const MediaContainer &source, std::span<const SelectedRoot> selected,
-                                            const RelationshipGraph &graph,
-                                            const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects,
-                                            const CancellationToken &cancellation) {
+Result<PortablePackage> build_selected_graph(MediaKind source_kind, std::span<const SelectedRoot> selected,
+                                             const RelationshipGraph &graph,
+                                             const std::map<std::string, const ObjectSnapshot *, std::less<>> &objects,
+                                             const CancellationToken &cancellation) {
     std::set<std::string, std::less<>> included_keys;
     std::vector<std::pair<const Relationship *, std::uint32_t>> included_relationships;
     std::vector<const ObjectSnapshot *> queue;
@@ -257,7 +258,7 @@ Result<PackageBuild> build_selected_package(const MediaContainer &source, std::s
 
     PortablePackage package;
     package.schema_version = std::string{schema_version};
-    package.source_media_kind = media_kind_name(source.kind());
+    package.source_media_kind = media_kind_name(source_kind);
     for (const auto &node : provisional) {
         PackageNode packaged;
         packaged.node_id = node_ids.at(node.snapshot->key);
@@ -308,6 +309,10 @@ Result<PackageBuild> build_selected_package(const MediaContainer &source, std::s
     package.payloads_verified = true;
     if (const auto verified = verify_portable_package(package); !verified)
         return std::unexpected{verified.error()};
+    return package;
+}
+
+Result<PackageBuild> serialize_package(PortablePackage package) {
     const auto manifest = package_internal::canonical_json(package_internal::manifest_json(package, true));
 
     std::map<std::string, std::vector<std::byte>, std::less<>> payloads;
@@ -336,20 +341,39 @@ std::map<std::string, const ObjectSnapshot *, std::less<>> catalog_objects(const
 
 } // namespace
 
-Result<PackageBuild> build_portable_package(const MediaContainer &source,
-                                            std::span<const PackageRootSelector> root_selectors,
-                                            const CancellationToken &cancellation) {
+Result<PortablePackage> build_portable_graph(const MediaContainer &source,
+                                             std::span<const PackageRootSelector> root_selectors,
+                                             const CancellationToken &cancellation) {
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     auto catalog = build_object_catalog(source, 64U * 1024U * 1024U, cancellation);
     if (!catalog)
         return std::unexpected{catalog.error()};
-    auto selected = select_roots(*catalog, root_selectors);
+    return package_internal::build_graph(source.kind(), *catalog, root_selectors, cancellation);
+}
+
+Result<PortablePackage> package_internal::build_graph(MediaKind source_kind, const ObjectCatalog &catalog,
+                                                      std::span<const PackageRootSelector> root_selectors,
+                                                      const CancellationToken &cancellation) {
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    auto selected = select_roots(catalog, root_selectors);
     if (!selected)
         return std::unexpected{selected.error()};
-    const auto graph = build_relationship_graph(*catalog);
-    const auto objects = catalog_objects(*catalog);
-    return build_selected_package(source, *selected, graph, objects, cancellation);
+    const auto graph = build_relationship_graph(catalog);
+    const auto objects = catalog_objects(catalog);
+    return build_selected_graph(source_kind, *selected, graph, objects, cancellation);
+}
+
+Result<PackageBuild> build_portable_package(const MediaContainer &source,
+                                            std::span<const PackageRootSelector> root_selectors,
+                                            const CancellationToken &cancellation) {
+    auto package = build_portable_graph(source, root_selectors, cancellation);
+    if (!package)
+        return std::unexpected{package.error()};
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    return serialize_package(std::move(*package));
 }
 
 Result<PackageBatchBuild> build_portable_packages(const MediaContainer &source,
@@ -377,14 +401,19 @@ Result<PackageBatchBuild> build_portable_packages(const MediaContainer &source,
             result.failures.push_back({index, selected.error()});
             continue;
         }
-        auto package = build_selected_package(source, *selected, graph, objects, cancellation);
+        auto package = build_selected_graph(source.kind(), *selected, graph, objects, cancellation);
         if (!package) {
             if (package.error().code == ErrorCode::operation_cancelled)
                 return std::unexpected{package.error()};
             result.failures.push_back({index, package.error()});
             continue;
         }
-        result.packages.push_back({index, std::move(*package)});
+        auto serialized = serialize_package(std::move(*package));
+        if (!serialized) {
+            result.failures.push_back({index, serialized.error()});
+            continue;
+        }
+        result.packages.push_back({index, std::move(*serialized)});
     }
     return result;
 }

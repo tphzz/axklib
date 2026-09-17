@@ -62,7 +62,8 @@ class DownloadArchiveStore {
                                                          CancellationToken cancellation = {},
                                                          ProgressSink *progress = nullptr);
     [[nodiscard]] Result<DownloadArchiveSnapshot>
-    create_owned_directory(std::string owner_id, const std::filesystem::path &source, std::string filename);
+    create_owned_directory(std::string owner_id, const std::filesystem::path &source, std::string filename,
+                           CancellationToken cancellation = {}, ProgressSink *progress = nullptr);
     [[nodiscard]] Result<DownloadArchiveSnapshot>
     retain_owned_file(std::string owner_id, const std::filesystem::path &source, std::string filename,
                       std::string media_type, CancellationToken cancellation = {}, ProgressSink *progress = nullptr);

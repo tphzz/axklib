@@ -13,10 +13,13 @@
 #include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
+#include "axklib/sample_parameter_codec.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::detail {
+
+Result<void> validate_authored_volume(const VolumeSpec &volume);
 
 class TemporaryPublication;
 
@@ -153,13 +156,23 @@ struct PreparedVolumeFloppyExport {
 };
 
 Result<std::vector<std::byte>> prepare_smpl_payload(const WaveformSpec &spec, const ImportedAudio &audio,
-                                                    std::uint32_t reference_value);
+                                                    std::uint32_t reference_value,
+                                                    std::string_view embedded_container_name);
 Result<std::vector<std::byte>> prepare_sbnk_payload(const SampleSpec &spec, const PreparedWaveformMember &left,
                                                     const std::optional<PreparedWaveformMember> &right = {},
                                                     bool sample_bank_member = false,
                                                     const std::vector<std::uint8_t> &linked_programs = {});
 Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample_bank,
-                                                    const std::map<std::string, SampleSpec> &samples);
+                                                    const std::map<std::string, SampleSpec> &samples,
+                                                    const std::vector<std::uint8_t> &linked_programs = {});
+std::uint16_t sample_pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate);
+SampleSpec apply_sample_bank_parameter_overrides(const SampleSpec &sample, const SampleParameters &overrides);
+Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &parameters);
+Result<void> validate_wave_data_parameters(const WaveDataParameters &parameters);
+Result<void> apply_wave_data_parameters_to_payload(std::vector<std::byte> &payload,
+                                                   const WaveDataParameters &parameters);
+Result<void> apply_sample_bank_parameters_to_payload(std::vector<std::byte> &payload,
+                                                     const SampleParameters &parameters);
 Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program);
 Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &record);
 Result<std::vector<std::uint32_t>> plan_extent_byte_counts(std::span<const Extent> extents, std::uint32_t size);

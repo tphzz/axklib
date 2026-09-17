@@ -2,14 +2,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
+#include <optional>
 #include <ranges>
 #include <span>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include "axklib/audio.hpp"
+#include "axklib/catalog.hpp"
+#include "axklib/object.hpp"
 #include "axklib/wav_stream.hpp"
+
+#include "media_test_fixtures.hpp"
 
 namespace {
 
@@ -63,6 +73,70 @@ TEST(Audio, DecodesExactCurrentPcmAndWritesDeterministicWave) {
     const auto preview = axk::build_preview_envelope(*waveform, 16);
     ASSERT_TRUE(preview);
     EXPECT_EQ(preview->bins.size(), 16U);
+}
+
+TEST(Audio, RespectsDeclaredSixteenBitWidthForMarkerLikePcm) {
+    auto bytes = smpl_object("MARKER LIKE");
+    bytes[0xac] = std::byte{0x00};
+    bytes[0xad] = std::byte{0x55};
+    bytes[0xae] = std::byte{0x80};
+    bytes[0xaf] = std::byte{0xaa};
+    auto object = axk::decode_object(bytes);
+    ASSERT_TRUE(object);
+    const axk::ObjectSnapshot snapshot{"p0:sfs9",          axk::PartitionIndex{0}, axk::SfsId{9},   "fixture",
+                                       std::move(*object), std::nullopt,           std::move(bytes)};
+
+    const auto waveform = axk::decode_waveform(snapshot, "marker-like.obj");
+    ASSERT_TRUE(waveform);
+    EXPECT_EQ(waveform->format.sample_width_bytes, 2U);
+    EXPECT_EQ(waveform->frame_count, 2U);
+    EXPECT_EQ(waveform->stored_payload_transform, "byteswap16");
+    EXPECT_EQ(waveform->pcm,
+              (std::vector<std::byte>{std::byte{0x55}, std::byte{0x00}, std::byte{0xaa}, std::byte{0x80}}));
+}
+
+TEST(Audio, RejectsUnsupportedTransferControlsWithoutLosingMetadata) {
+    for (unsigned control = 0U; control <= 0xffU; ++control) {
+        SCOPED_TRACE(control);
+        auto bytes = smpl_object();
+        bytes[0x84] = static_cast<std::byte>(control);
+        auto object = axk::decode_object(bytes);
+        ASSERT_TRUE(object);
+        const auto &smpl = std::get<axk::CurrentSmpl>(object->payload);
+        EXPECT_EQ(smpl.pcm_transfer_control.value, control);
+        const axk::ObjectSnapshot snapshot{"wave",          axk::PartitionIndex{0}, axk::SfsId{9},
+                                           "fixture",       std::move(*object),     std::nullopt,
+                                           std::move(bytes)};
+        const auto waveform = axk::decode_waveform(snapshot, "transfer.obj");
+        if (control == 0x30U) {
+            ASSERT_TRUE(waveform);
+        } else {
+            ASSERT_FALSE(waveform);
+            EXPECT_EQ(waveform.error().code, axk::ErrorCode::audio_unsupported_format);
+            EXPECT_EQ(waveform.error().category, axk::ErrorCategory::audio);
+            EXPECT_NE(waveform.error().message.find(std::format("0x{:02x}", control)), std::string::npos);
+        }
+    }
+}
+
+TEST(Audio, AcceptsCurrentTransferControlForBothStoredWidths) {
+    for (const auto width : {std::uint16_t{1}, std::uint16_t{2}}) {
+        auto bytes = smpl_object();
+        be16(bytes, 0x2aU, width);
+        auto object = axk::decode_object(bytes);
+        ASSERT_TRUE(object);
+        const axk::ObjectSnapshot snapshot{"wave",          axk::PartitionIndex{0}, axk::SfsId{9},
+                                           "fixture",       std::move(*object),     std::nullopt,
+                                           std::move(bytes)};
+        const auto waveform = axk::decode_waveform(snapshot, "transfer.obj");
+        ASSERT_TRUE(waveform);
+        EXPECT_EQ(waveform->format.sample_width_bytes, width);
+        EXPECT_EQ(waveform->frame_count, 4U / width);
+        const auto expected =
+            width == 1U ? std::vector<std::byte>{std::byte{0x12}, std::byte{0x34}, std::byte{0x56}, std::byte{0x78}}
+                        : std::vector<std::byte>{std::byte{0x34}, std::byte{0x12}, std::byte{0x78}, std::byte{0x56}};
+        EXPECT_EQ(waveform->pcm, expected);
+    }
 }
 
 TEST(Audio, PadsShorterStereoMemberAndRejectsFormatMismatch) {

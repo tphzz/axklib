@@ -14,6 +14,9 @@ function(axk_set_project_warnings target)
         -Wconversion
         -Wsign-conversion
     )
+    if(CMAKE_CXX_COMPILER_ID MATCHES "^(Clang|AppleClang)$")
+      target_compile_options(${target} PRIVATE -Wshadow -Wshadow-uncaptured-local)
+    endif()
     if(AXK_WARNINGS_AS_ERRORS)
       target_compile_options(${target} PRIVATE -Werror)
     endif()

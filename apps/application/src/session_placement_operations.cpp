@@ -301,7 +301,7 @@ Json repair_manifest(const axk::app::detail::PlacementRepairPlan &plan) {
 
 axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegistry &registry,
                                                                    ImageSessionManager &images,
-                                                                   OperationRegistry::Handler alter_session) {
+                                                                   OperationRegistry::Handler alteration_handler) {
     if (!registry.is_implemented("images.volume_deletion.inspect")) {
         auto bound = registry.bind("images.volume_deletion.inspect",
                                    [&images](const Json &input, const OperationContext &context) -> Result<Json> {
@@ -334,8 +334,8 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
     if (!registry.is_implemented("images.placement.repair")) {
         auto bound = registry.bind(
             "images.placement.repair",
-            [&images, alter_session = std::move(alter_session)](const Json &input,
-                                                                const OperationContext &context) -> Result<Json> {
+            [&images, alter_session = std::move(alteration_handler)](const Json &input,
+                                                                     const OperationContext &context) -> Result<Json> {
                 auto request = parse_placement_request(input);
                 if (!request)
                     return std::unexpected(request.error());

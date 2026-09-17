@@ -217,6 +217,16 @@ describe('HttpImageTransport', () => {
                         nextCursor: null,
                     });
                 }
+                if (url.pathname.endsWith('/images/image-remote/objects/object-1')) {
+                    return json({
+                        data: {
+                            schemaVersion: 1,
+                            image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
+                            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+                            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
+                        },
+                    });
+                }
                 if (url.pathname.endsWith('/images/image-remote/objects') && !url.searchParams.has('cursor')) {
                     expect(url.searchParams.get('type')).toBe('SMPL');
                     expect(url.searchParams.get('scopeId')).toBe('volume-1');
@@ -236,7 +246,10 @@ describe('HttpImageTransport', () => {
                                     sampleRate: 44100,
                                     sampleWidthBytes: 2,
                                     rootKey: 60,
-                                    frameCount: 100,
+                                    storedFrameCount: 120,
+                                    waveStartFrame: 10,
+                                    waveLengthFrames: 100,
+                                    storageState: 'COMPLETE',
                                 },
                             },
                         ],
@@ -307,11 +320,20 @@ describe('HttpImageTransport', () => {
                     key: 'object-1',
                     sampleRate: 44100,
                     rootKey: 60,
+                    storedFrameCount: 120,
+                    waveStartFrame: 10,
+                    waveLengthFrames: 100,
+                    storageState: 'COMPLETE',
                     storedSizeBytes: 88_064,
                     sizeWithDependenciesBytes: null,
                 },
             ],
             totalCount: 2,
+        });
+        await expect(transport.objectDetail(1, 'object-1')).resolves.toMatchObject({
+            schemaVersion: 1,
+            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
         });
         await expect(transport.contentChildren(1, 'partition-1', 0, 64)).resolves.toMatchObject({
             items: [{ id: 'volume-1', partitionIndex: 0 }],
@@ -319,7 +341,7 @@ describe('HttpImageTransport', () => {
         });
         await transport.keepImageAlive(1);
         await transport.closeImage(1);
-        expect(requests).toHaveLength(7);
+        expect(requests).toHaveLength(8);
         expect(requests.filter((request) => request.includes('/content'))).toHaveLength(3);
     });
 
@@ -2155,16 +2177,18 @@ describe('HttpImageTransport', () => {
                             sample: {
                                 name: 'Mono',
                                 waveform_name: 'Mono Wave',
-                                root_key: 60,
-                                fine_tune_cents: 0,
-                                key_low: 0,
-                                key_high: 127,
-                                velocity_low: 0,
-                                velocity_high: 127,
-                                loop_mode: 4,
-                                loop_start_frame: 0,
-                                loop_length_frames: 0,
-                                level: 100,
+                                parameters: {
+                                    root_key: 60,
+                                    fine_tune_cents: 0,
+                                    key_low: 0,
+                                    key_high: 127,
+                                    velocity_low: 0,
+                                    velocity_high: 127,
+                                    loop_mode: 4,
+                                    loop_start_frame: 0,
+                                    loop_length_frames: 0,
+                                    level: 100,
+                                },
                             },
                         },
                         {
@@ -2192,16 +2216,18 @@ describe('HttpImageTransport', () => {
                                 name: 'Stereo',
                                 waveform_name: 'Stereo-L',
                                 right_waveform_name: 'Stereo-R',
-                                root_key: 69,
-                                fine_tune_cents: -5,
-                                key_low: 12,
-                                key_high: 108,
-                                velocity_low: 4,
-                                velocity_high: 120,
-                                loop_mode: 1,
-                                loop_start_frame: 100,
-                                loop_length_frames: 1_000,
-                                level: 100,
+                                parameters: {
+                                    root_key: 69,
+                                    fine_tune_cents: -5,
+                                    key_low: 12,
+                                    key_high: 108,
+                                    velocity_low: 4,
+                                    velocity_high: 120,
+                                    loop_mode: 1,
+                                    loop_start_frame: 100,
+                                    loop_length_frames: 1_000,
+                                    level: 100,
+                                },
                             },
                         },
                         {

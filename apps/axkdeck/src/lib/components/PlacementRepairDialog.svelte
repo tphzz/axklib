@@ -80,7 +80,9 @@
                 <Icon name="layers" size={16} />
                 <h2>Repair object placement</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="placement-repair-content">

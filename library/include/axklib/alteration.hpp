@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -8,7 +9,10 @@
 #include <vector>
 
 #include "axklib/io.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sampler_model.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
@@ -55,6 +59,27 @@ struct InsertSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
     SampleSpec sample;
+};
+
+struct UpdateSampleParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    SampleParameters parameters;
+};
+
+struct UpdateSampleBankParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    SampleParameters parameters;
+};
+
+struct UpdateWaveDataParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string waveform_name;
+    WaveDataParameters parameters;
 };
 
 struct InsertWaveformOperation {
@@ -132,7 +157,17 @@ struct ClearProgramAssignmentsOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::uint8_t program_number{};
-    std::vector<std::uint8_t> assignment_ordinals;
+    std::vector<std::uint16_t> assignment_ordinals;
+};
+
+struct UpdateProgramParametersOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    // No inferred model: the default is unsupported by this current-layout operation.
+    ASeriesModel model{ASeriesModel::a3000};
+    ProgramParameters parameters;
+    std::vector<ProgramAssignmentParameterPatch> assignments;
 };
 
 struct SequenceSpec {
@@ -185,14 +220,38 @@ struct ImportTx16wDiskSetOperation {
     tx16w::ImportMode import_mode{tx16w::ImportMode::hierarchy};
 };
 
-using AlterationOperationData =
-    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
-                 InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation, RenameSampleOperation,
-                 DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
-                 RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
-                 DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
-                 RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
-                 ClearProgramAssignmentsOperation>;
+struct ProgramAssignmentEdit {
+    std::optional<std::size_t> retain_ordinal;
+    std::optional<ProgramAssignmentSpec> assignment;
+};
+
+struct ReplaceProgramAssignmentsOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    ASeriesModel model{ASeriesModel::a4000};
+    std::string expected_payload_sha256;
+    std::vector<ProgramAssignmentEdit> assignments;
+};
+
+struct RetargetSampleWaveDataOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    std::string waveform_name;
+    std::string expected_payload_sha256;
+    std::optional<std::string> right_waveform_name{};
+};
+
+using AlterationOperationData = std::variant<
+    DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
+    UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation,
+    RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
+    RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
+    DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
+    RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
+    ClearProgramAssignmentsOperation, UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
+    UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation>;
 
 struct AlterationOperation {
     std::string id;
@@ -225,6 +284,7 @@ struct AudioImportSummary {
     bool sample_width_converted{};
     bool split_stereo{};
     std::string dither_algorithm;
+    // Channel values outside normalized [-1, 1] after resampling, before dither.
     std::uint64_t clipped_samples{};
 };
 

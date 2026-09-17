@@ -98,7 +98,7 @@ std::vector<axk::ReportRow> program_detail_rows(std::span<const LoadedSource> so
                 {"assignment_name", assignment.name},
                 {"assignment_raw_handle_0x10", static_cast<std::uint64_t>(assignment.raw_handle)},
                 {"assignment_kind_byte_0x14", static_cast<std::uint64_t>(assignment.kind)},
-                {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.flags)},
+                {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.raw_receive_selector)},
                 {"assignment_output1_byte_0x1d",
                  static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(assignment.raw_row[0x1d]))},
                 {"assignment_output2_byte_0x28",
@@ -210,7 +210,7 @@ std::vector<axk::ReportRow> program_ignored_detail_rows(std::span<const LoadedSo
                 });
                 std::string reason;
                 if (!known_kind && !name_match) {
-                    reason = "ignored-reserved-or-tail-slot-no-known-kind-and-no-name-match";
+                    reason = "ignored-unsupported-counted-row-no-known-kind-and-no-name-match";
                 } else if (assignment.raw_handle == 0U) {
                     reason = "ignored-null-handle-unmatched-assignment";
                 } else {
@@ -231,11 +231,11 @@ std::vector<axk::ReportRow> program_ignored_detail_rows(std::span<const LoadedSo
                     {"prog_name", item.object.header.name},
                     {"prog_payload_size", program_media == nullptr ? std::uint64_t{0} : program_media->size},
                     {"assignment_index", static_cast<std::uint64_t>(index)},
-                    {"assignment_offset", static_cast<std::uint64_t>(0x120U + index * 0x38U)},
+                    {"assignment_offset", static_cast<std::uint64_t>(assignment.offset)},
                     {"raw_name_guess", assignment.name},
                     {"assignment_raw_handle_0x10", static_cast<std::uint64_t>(assignment.raw_handle)},
                     {"assignment_kind_byte_0x14", static_cast<std::uint64_t>(assignment.kind)},
-                    {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.flags)},
+                    {"assignment_flag_byte_0x15", static_cast<std::uint64_t>(assignment.raw_receive_selector)},
                     {"reason", std::move(reason)},
                 });
             }

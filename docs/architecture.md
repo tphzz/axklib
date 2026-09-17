@@ -3,16 +3,110 @@
 The native implementation separates storage, sampler semantics, and host
 integration.
 
+## Desktop Workspace Modules
+
+Axkdeck separates the shared workspace shell from backend orchestration and
+device presentation. `src/App.svelte` selects a bundled backend application from
+`features/backends/registry.ts`; the existing axklib transport, A-series catalog,
+audition, editing and dialog workflows live behind `features/backends/axklib/`.
+An alternative backend application does not implement `ImageTransport` or use
+A-series object types merely to enter the shell.
+
+`WorkspacePresentation` supplies navigation, central content, optional lower
+tools and an optional inspector. It can also supply object tabs, selection
+actions and playback controls. All pane geometry, visibility toggles, interface
+scaling and the Device/Files switch belong to `WorkspaceShell`. The common image
+action area is supplied separately from presentation-specific navigation. The
+axklib backend supplies the current A-series Device presentation; adding another
+device presentation must not introduce device switches into the shared shell.
+
+The reusable Files components depend only on `FilesystemAccess` and neutral
+entry/page contracts in `lib/filesystem.ts`. A backend adapter translates its
+wire representation into that contract. It provides stored entry identities,
+parents, roots, names, sizes, paging and full-root search; it does not project
+sampler relationships into synthetic directories. The sidebar selects roots or
+partitions, while the central tree owns directory expansion. Unknown files stay
+visible without a device interpretation. Files supports browsing, inspection,
+directory creation and confirmed file/recursive directory deletion on writable
+SFS roots. Raw file/directory exports are also available for readable roots,
+including read-only images. Import review and FAT mutation controls use the
+same per-root capability and transaction contracts.
+
+Files selection is scoped to the active root and rendered entries. Modifier
+clicks and keyboard ranges support batch deletion; context menus retain an
+existing selection. Focus-only navigation does not alter the batch. Changed
+searches clear selection, and collapsing a directory replaces selected hidden
+descendants with their visible parent. Refresh restores surviving unique paths,
+not reused entry IDs. Deletion review includes the complete selection; execution
+removes redundant descendant targets and submits one atomic job.
+
+Creation and import destinations use actual selection, not the retained
+keyboard cursor: a selected directory, a selected file's parent, or the active
+root after deselection. Background clicks clear selection without discarding
+expansion or scroll. Dialogs capture their destination before editing starts.
+Both cross-mode inspector actions use the fixed `InspectorModeFooter`, labeled
+**To Files** and **To Device**, outside the scrolling properties.
+
+The axklib-specific `AxklibFilesView` supplies a SU700 floppy import adapter.
+Generic Files components only know its command and drop-interception interface.
+The backend advertises `supportedImports: ["SU700_FLOPPY"]` for writable SFS
+roots containing a recognized SU700 volume. Empty or unrecognized roots do not
+advertise this operation. Other backends can supply their own import adapters.
+
+SU700 import accepts one complete, flat FAT12 image and creates a new named
+volume with `SONGCONT.DAT`, `SUSQ` songs and `SUSP` samples. Stored eight-byte
+basenames, including internal padding before the extension, and all payload
+bytes are preserved. Extra files are included by default and can be deselected.
+The shared destination chooser is new-volume-only; merge, overwrite, disk-set
+reconstruction and SU700 object editing are not supported. Inspection validates
+control references, complete payload boundaries, names and destination capacity.
+Execution rechecks source identity and image revision, then uses one atomic
+Files transaction with rollback. This is host-validated import support, not a
+claim of hardware playback validation.
+
+The separate `FilesystemMutationDriver` binds execution, observation,
+cancellation and image refresh. The axklib adapter uses the shared job controller
+and invalidates audition before mutation. Review captures the session, entry
+identities and revision. A committed write followed by failed refresh can only
+retry refresh; interrupted job observation checks the same job rather than
+resubmitting its edits. Per-root capabilities disable unsupported controls.
+
+`FilesystemExportActions` supplies the session-bound export job driver and host
+destination adapter. Partition menus and the Files toolbar share one review
+workflow with a frozen selection/revision, exact output paths and omission
+notices. Managed-local batches use one native folder picker; remote sessions
+use the existing destination chooser. The selected route survives failures.
+Uncertain execution checks the existing job rather than resubmitting. Failed
+local download publication retains its archive for an explicit destination
+retry; successful publication or closing the review releases that archive.
+Export does not mutate the image, refresh selection or repair object links.
+
+Device and Files are independent capabilities. Recognized A-series objects
+enable Device; empty SFS images also allow A-series authoring. Files-only images
+open in Files with Device unavailable. Archives and standalone object sources
+can have Device without a filesystem view. No Akai or E-mu backend is bundled.
+
+The Files controller retains per-root selection, expansion, search and scroll
+state while switching modes. Revision changes discard cached entries and
+revalidate the active root's identities. Cross-view navigation requires a unique
+physical entry/object mapping, opens ancestors, loads the required pages and
+reveals the row once. It never guesses by display name. Split floppy sets retain
+their separate physical roots without claiming an ambiguous combined-object
+mapping. Loading and revision failures remain visible instead of falling back
+to a projected object tree.
+
 ## Public Documentation Boundary
 
 Public documentation describes supported contracts, limits, validation rules,
-and concise hardware compatibility status. It excludes local checkout paths,
-inventories of internal source material, named forensic artifacts,
-investigation tooling, and experiment-worklog narratives. Small retained test
-fixtures may document their identity, hash, topology, and active test purpose,
-but not private acquisition history. Runtime diagnostics follow the same rule:
-they explain the input contract and corrective action without referring to the
-validation history that established it.
+and concise hardware compatibility status. Small retained test fixtures may
+document their identity, hash, topology, and active test purpose. Runtime
+diagnostics describe the input contract and corrective action.
+
+Format pages specify stored bytes, encoding, relationships and modification
+constraints independently of a particular decoder. Unspecified meanings and
+preservation requirements remain explicit. API symbols, report field names,
+application workflows and generated-output conventions have separate contract
+pages. Only installed SDK interfaces are presented as public C++ APIs.
 
 ```mermaid
 flowchart TD
@@ -57,7 +151,8 @@ not include CLI11 or CLI headers.
 
 The media source modules preserve a separate responsibility boundary:
 
-- `media_fat12.cpp` owns the supported FAT12 container profile.
+- `media_fat12.cpp` owns shared FAT directory and file reads; `media_ex5.cpp`
+  supplies the separate read-only EX5 disk geometry and content projection.
 - `media_iso9660.cpp` owns the supported primary ISO9660 container profile.
 - `media_a3k_archive.cpp` owns the bounded read-only A3K archive profile.
 - `media_build.cpp` inventories metadata before loading a selected dependency

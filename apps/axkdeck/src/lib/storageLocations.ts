@@ -27,7 +27,7 @@ export interface UploadRef {
     uploadId: string;
 }
 
-export type UploadKind = 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST' | 'DISK_IMAGE';
+export type UploadKind = 'AUDIO' | 'MIDI' | 'PACKAGE' | 'MANIFEST' | 'DISK_IMAGE' | 'FILE';
 
 export interface ClientUploadLocation {
     kind: 'client-upload';

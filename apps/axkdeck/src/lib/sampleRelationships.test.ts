@@ -51,12 +51,17 @@ function waveData(id: string): WaveDataItem {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: 'SMPL',
+        objectEncoding: 'current',
+        directoryEntryName: `${id}.001`,
         sfsId: 0,
         storedSizeBytes: 2,
         sizeWithDependenciesBytes: null,
         sampleRate: 44_100,
         rootKey: 60,
-        frameCount: 1,
+        storedFrameCount: 1,
+        waveStartFrame: 0,
+        waveLengthFrames: 1,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 2,
     };
     return {

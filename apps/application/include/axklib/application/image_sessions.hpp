@@ -10,14 +10,19 @@
 #include <unordered_map>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "axklib/application/allocation_map.hpp"
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/filesystem.hpp"
+#include "axklib/application/image_filesystem.hpp"
 #include "axklib/application/path_reservations.hpp"
 #include "axklib/deletion.hpp"
 #include "axklib/export.hpp"
+#include "axklib/filesystem_import.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
+#include "axklib/types.hpp"
 
 namespace axk::app {
 
@@ -70,6 +75,7 @@ struct ImageSessionMutation {
     std::uint64_t revision{};
     FileRef source;
     std::shared_ptr<SandboxMutation> target;
+    MediaKind media_kind{MediaKind::sfs};
 };
 
 struct PreparedImageSessionCommit {
@@ -95,12 +101,14 @@ struct ImageSessionRead {
     ImageSourceRef source;
     std::shared_ptr<const RandomAccessReader> reader;
     const MediaContainer *media{};
-    std::string target_snapshot_id;
+    // Explicit content identity for retained plans, evaluated only while this read lease is held.
+    std::function<Result<std::string>(const CancellationToken &)> content_fingerprint;
     std::vector<const ObjectSnapshot *> catalog_objects;
     std::vector<CatalogIssue> catalog_issues;
     std::unordered_map<std::string, std::string> object_keys_by_id;
     std::unordered_map<std::string, ImageVolumeScopeIdentity> volume_scopes_by_id;
     std::shared_ptr<void> lease;
+    std::function<Result<void>()> verify_source_unchanged;
 };
 
 struct ImagePartitionCapacity {
@@ -138,13 +146,17 @@ struct ImageContentScope {
 struct WaveformMetadata {
     std::uint16_t sample_rate{};
     std::uint16_t sample_width_bytes{};
+    std::string embedded_container_name;
     std::uint8_t root_key{};
     std::int8_t fine_tune_cents{};
     std::uint8_t loop_mode{};
     std::string loop_mode_label;
-    std::uint32_t frame_count{};
+    std::uint32_t stored_frame_count{};
+    std::uint32_t wave_start_frame{};
+    std::uint32_t wave_length_frames{};
     std::uint32_t loop_start_frame{};
     std::uint32_t loop_length_frames{};
+    std::string storage_state;
 };
 
 struct SequenceMetadata {
@@ -222,7 +234,7 @@ struct ImageSystemProgramPart {
 struct ImageSystemProgramContext {
     SystemProgramContextFile file_kind{SystemProgramContextFile::system};
     SystemProgramContextAvailability availability{SystemProgramContextAvailability::not_present};
-    std::string model;
+    std::uint8_t storage_revision{};
     std::optional<std::string> saved_program_mode;
     std::optional<ImageSystemMidiAddress> basic_receive;
     std::optional<bool> omni;
@@ -353,7 +365,7 @@ struct ImageProgramAssignmentCleanupCandidate {
     std::string program_object_id;
     std::uint8_t program_number{};
     std::string program_name;
-    std::uint8_t assignment_ordinal{};
+    std::uint16_t assignment_ordinal{};
     std::string assignment_name;
     std::string target_object_type;
     std::string receive_channel_display;
@@ -372,7 +384,7 @@ struct ImageProgramAssignmentCleanupInspection {
 
 struct ImageProgramAssignmentCleanupSelection {
     std::string program_object_id;
-    std::uint8_t assignment_ordinal{};
+    std::uint16_t assignment_ordinal{};
 };
 
 struct ImageProgramAssignmentCleanupPlan {
@@ -397,13 +409,17 @@ struct ImagePreviewBin {
 struct ImageWaveformPreviewLane {
     std::string role;
     std::string source_object_id;
-    std::uint64_t frame_count{};
+    std::uint32_t sample_rate{};
+    std::uint64_t stored_frame_count{};
+    std::uint64_t playback_start_frame{};
+    std::uint64_t playback_length_frames{};
+    std::uint64_t loop_start_frame{};
+    std::uint64_t loop_length_frames{};
     std::vector<ImagePreviewBin> bins;
 };
 
 struct ImageWaveformPreview {
     std::string object_id;
-    std::uint64_t frame_count{};
     std::vector<ImageWaveformPreviewLane> lanes;
 };
 
@@ -469,6 +485,20 @@ class ImageSessionManager {
                                                                 const CompanionSelection &selection,
                                                                 const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
+    [[nodiscard]] Result<ImageFilesystemPage> filesystem(std::string_view image_id, std::string_view owner_id,
+                                                         std::uint64_t expected_revision,
+                                                         const ImageFilesystemQuery &query = {});
+    [[nodiscard]] Result<ResolvedImageFilesystemEdits>
+    inspect_su700_import(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                         std::string_view root_entry_id, std::string_view volume_name,
+                         std::span<const FilesystemEdit> edits, const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<ResolvedImageFilesystemEdits>
+    resolve_filesystem_edits(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                             std::span<const ImageFilesystemEdit> edits);
+    [[nodiscard]] Result<std::vector<FilesystemImportDecision>>
+    inspect_filesystem_import(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                              std::string_view parent_entry_id, std::span<const FilesystemImportEntry> entries,
+                              const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageObjectDeletionPlan> plan_deletion(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const std::vector<std::string> &target_object_ids,
@@ -495,14 +525,22 @@ class ImageSessionManager {
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision);
+    [[nodiscard]] Result<ImageSessionMutation> begin_filesystem_mutation(std::string_view image_id,
+                                                                         std::string_view owner_id,
+                                                                         std::uint64_t expected_revision,
+                                                                         PartitionIndex partition);
     [[nodiscard]] Result<PreparedImageSessionCommit>
     prepare_mutation_commit(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                             const CancellationToken &cancellation = {});
+    [[nodiscard]] Result<void> refresh_rolled_back_mutation(std::string_view image_id, std::string_view owner_id,
+                                                            std::uint64_t expected_revision);
     [[nodiscard]] ImageSessionSummary finalize_mutation_commit(PreparedImageSessionCommit prepared) noexcept;
     [[nodiscard]] Result<ImageSessionSummary> commit_mutation(std::string_view image_id, std::string_view owner_id,
                                                               std::uint64_t expected_revision,
                                                               const CancellationToken &cancellation = {});
-    void abort_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision) noexcept;
+    // Invalidate when source restoration or its refreshed access metadata is unverified.
+    void abort_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                        bool invalidate_session = false) noexcept;
     [[nodiscard]] Result<void> close(std::string_view image_id, std::string_view owner_id);
     [[nodiscard]] Result<ImagePage<ImageContentItem>> content(std::string_view image_id, std::string_view owner_id,
                                                               std::size_t limit,
@@ -515,6 +553,8 @@ class ImageSessionManager {
             std::optional<std::string_view> cursor = std::nullopt,
             std::optional<std::string_view> object_type = std::nullopt,
             std::optional<std::string_view> content_scope_id = std::nullopt);
+    [[nodiscard]] Result<nlohmann::ordered_json> object_detail(std::string_view image_id, std::string_view owner_id,
+                                                               std::string_view object_id);
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(std::string_view image_id, std::string_view owner_id, std::size_t limit,
                   std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});
@@ -539,6 +579,9 @@ class ImageSessionManager {
     void cleanup();
 
   private:
+    [[nodiscard]] Result<ImageSessionMutation>
+    begin_mutation_access(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                          std::optional<PartitionIndex> filesystem_partition);
     [[nodiscard]] Result<ImageSessionSummary>
     open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
                                 const std::vector<ImageSourceRef> &companion_sources,

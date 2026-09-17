@@ -1,3 +1,4 @@
+import { collectVolumes, findPartition, findSourceItem } from './sourceTree';
 import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type {
@@ -24,6 +25,7 @@ import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflo
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
 import { ImageSessionController } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
+import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
 import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
@@ -52,6 +54,7 @@ interface SessionCollaborators {
     volumeFloppies: VolumeFloppyExportWorkflow;
     mediaExports: MediaExportWorkflow;
     packageImport: PackageImportWorkflow;
+    floppyImport?: FloppyImportWorkflow;
     deletion: DeletionWorkflow;
     programGeneration: ProgramGenerationWorkflow;
     extentRepairs: ExtentLayoutRepairWorkflow;
@@ -104,6 +107,7 @@ export class ImageSessionWorkflow {
     extentLayoutRepairAvailable = $state(false);
     allocationInspectionAvailable = $state(false);
     imageFormat = $state<string | null>(null);
+    revision = $state(0);
     integrityDialogOpen = $state(false);
     integrityIssues = $state<ImageValidationIssue[]>([]);
     integrityLoading = $state(false);
@@ -116,6 +120,7 @@ export class ImageSessionWorkflow {
     private lastOpenedImageFile = $state<FileRef | null>(null);
     private lastCompanionDirectory = $state<DirectoryRef | null>(null);
     private lastAutomaticIntegrityKey = '';
+    private automaticCapacityWarnings = new Set<string>();
     private nextOpenRequestId = 1;
     private openProgressTimer: ReturnType<typeof setTimeout> | null = null;
     private openProgressActive = false;
@@ -330,7 +335,14 @@ export class ImageSessionWorkflow {
             '',
             {
                 parentDialog: 'companion-disks',
-                initialDirectory: this.lastCompanionDirectory,
+                initialDirectory:
+                    this.lastCompanionDirectory ??
+                    (this.location
+                        ? {
+                              rootId: this.location.reference.rootId,
+                              relativePath: this.location.reference.relativePath.replace(/\/?[^/]+\/?$/, ''),
+                          }
+                        : null),
                 ondirectorychange: (directory) => (this.lastCompanionDirectory = directory),
                 requireWritableDirectory: false,
             },
@@ -377,7 +389,8 @@ export class ImageSessionWorkflow {
             if (this.sessionId !== sessionId || this.companionRequest?.requestId !== request.requestId) return;
             this.companionRequest = null;
             await this.applyOpenedImage(opened, preferred);
-            if (request.retry) await this.retryCompanionAction(request.retry);
+            if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(request.retry);
+            else if (request.retry) await this.retryCompanionAction(request.retry);
         } catch (error) {
             if (
                 this.sessionId === sessionId &&
@@ -520,7 +533,7 @@ export class ImageSessionWorkflow {
             sources: [...this.companionSources],
             retry,
             sourceKind: this.location.kind === 'server-file' ? 'file' : 'directory',
-            setLabel: this.floppySet?.setLabel || this.location.displayName,
+            setLabel: this.floppySet?.setLabel.trim() || this.location.displayName,
             nextRequiredIndex: this.floppySet?.nextRequiredIndex ?? null,
             busy: false,
             error: '',
@@ -536,6 +549,7 @@ export class ImageSessionWorkflow {
         this.integrityDialogOpen = false;
         this.integrityIssues = [];
         this.integrityError = '';
+        this.integrityLoading = false;
         this.companionSources = opened.companionSources;
         this.floppySet = opened.floppySet;
         mutation.setCapabilities(opened);
@@ -553,6 +567,7 @@ export class ImageSessionWorkflow {
         this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
         this.allocationInspectionAvailable = opened.allocationInspectionAvailable;
         this.imageFormat = opened.format ?? null;
+        this.revision = opened.revision;
         this.sourceItems = opened.tree;
         const preferredItem = preferred
             ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
@@ -566,13 +581,23 @@ export class ImageSessionWorkflow {
             await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
         else catalog.clear();
         this.status = validationStatus(opened.validation);
-        if (opened.validation.errorCount > 0) await this.showAllocationBlockers(opened);
+        if (opened.validation.errorCount > 0 || (opened.format === 'ex5-disk' && opened.validation.warningCount > 0))
+            await this.showAutomaticIntegrityIssues(opened);
+        else this.automaticCapacityWarnings.clear();
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
     }
 
-    private async showAllocationBlockers(opened: OpenedImage): Promise<void> {
-        await this.loadIntegrityIssues(opened.sessionId);
-        if (this.sessionId !== opened.sessionId || this.integrityError) return;
+    private async showAutomaticIntegrityIssues(opened: OpenedImage): Promise<void> {
+        await this.loadIntegrityIssues(opened.sessionId, opened.revision);
+        if (this.sessionId !== opened.sessionId || this.revision !== opened.revision || this.integrityError) return;
+        const capacityWarnings = new Set<string>();
+        for (const issue of this.integrityIssues) {
+            if (issue.code !== 'EX5_CAPACITY_EXCEEDS_IMAGE' && issue.code !== 'EX5_FILE_DATA_UNAVAILABLE') continue;
+            const key = JSON.stringify([opened.sessionId, issue.code, issue.samplerPath, issue.message]);
+            if (!this.automaticCapacityWarnings.has(key)) this.integrityDialogOpen = true;
+            capacityWarnings.add(key);
+        }
+        this.automaticCapacityWarnings = capacityWarnings;
         const blockerCodes = [...new Set(this.integrityIssues.map((issue) => issue.code))]
             .filter((code) => allocationBlockerCodes.has(code))
             .sort();
@@ -583,16 +608,17 @@ export class ImageSessionWorkflow {
         this.integrityDialogOpen = true;
     }
 
-    private async loadIntegrityIssues(sessionId: number): Promise<void> {
+    private async loadIntegrityIssues(sessionId: number, revision = this.revision): Promise<void> {
         this.integrityLoading = true;
         this.integrityError = '';
         try {
             const issues = await this.transport.validationIssues(sessionId);
-            if (this.sessionId === sessionId) this.integrityIssues = issues;
+            if (this.sessionId === sessionId && this.revision === revision) this.integrityIssues = issues;
         } catch (error) {
-            if (this.sessionId === sessionId) this.integrityError = userFacingMessage(error);
+            if (this.sessionId === sessionId && this.revision === revision)
+                this.integrityError = userFacingMessage(error);
         } finally {
-            if (this.sessionId === sessionId) this.integrityLoading = false;
+            if (this.sessionId === sessionId && this.revision === revision) this.integrityLoading = false;
         }
     }
 
@@ -624,6 +650,7 @@ export class ImageSessionWorkflow {
         collaborators.extentRepairs.dispose();
         this.companionRequest = null;
         await collaborators.packageImport.dispose();
+        await collaborators.floppyImport?.dispose();
         await this.controller.close();
         collaborators.clearExportSelection();
         this.companionSources = [];
@@ -633,6 +660,7 @@ export class ImageSessionWorkflow {
         this.integrityLoading = false;
         this.integrityError = '';
         this.lastAutomaticIntegrityKey = '';
+        this.automaticCapacityWarnings.clear();
         collaborators.mutation.reset();
         this.objectDeletionAvailable = false;
         this.waveDataCleanupAvailable = false;
@@ -646,6 +674,7 @@ export class ImageSessionWorkflow {
         this.extentLayoutRepairAvailable = false;
         this.allocationInspectionAvailable = false;
         this.imageFormat = null;
+        this.revision = 0;
         collaborators.deletion.dispose();
         collaborators.programGeneration.dispose();
         this.programGenerationAvailable = false;
@@ -663,36 +692,4 @@ function sameImageSource(left: ImageLocation, right: ImageLocation): boolean {
 
 function noImageSource(): DiskTreeItem {
     return { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
-}
-
-function collectVolumes(items: readonly DiskTreeItem[]): DiskTreeItem[] {
-    const result: DiskTreeItem[] = [];
-    for (const item of items) {
-        if (item.kind === 'volume') result.push(item);
-        result.push(...collectVolumes(item.children ?? []));
-    }
-    return result;
-}
-
-function findPartition(items: readonly DiskTreeItem[], partitionIndex: number): DiskTreeItem | null {
-    for (const item of items) {
-        if (item.kind === 'partition' && item.partitionIndex === partitionIndex) return item;
-        const nested = findPartition(item.children ?? [], partitionIndex);
-        if (nested) return nested;
-    }
-    return null;
-}
-
-function findSourceItem(items: DiskTreeItem[], partitionIndex: number, volumeName?: string): DiskTreeItem | null {
-    for (const item of items) {
-        if (
-            item.partitionIndex === partitionIndex &&
-            (volumeName === undefined ? item.kind === 'partition' : item.kind === 'volume' && item.name === volumeName)
-        ) {
-            return item;
-        }
-        const nested = findSourceItem(item.children ?? [], partitionIndex, volumeName);
-        if (nested) return nested;
-    }
-    return null;
 }

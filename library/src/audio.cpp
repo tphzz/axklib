@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <limits>
 
 #include "axklib/media.hpp"
@@ -40,9 +41,21 @@ std::int32_t sample_value(const Waveform &waveform, std::uint64_t frame, std::ui
 
 } // namespace
 
+Result<void> validate_smpl_pcm_transfer_control(const CurrentSmpl &smpl) {
+    if (smpl.pcm_transfer_control.value != 0x30U) {
+        return std::unexpected{
+            make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
+                       std::format("Wave Data PCM transfer control 0x{:02x} is unsupported; expected 0x30",
+                                   smpl.pcm_transfer_control.value))};
+    }
+    return {};
+}
+
 static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std::string object_key,
                                                 std::filesystem::path source_path, PartitionIndex partition,
                                                 SfsId sfs_id, std::string name, std::span<const std::byte> payload) {
+    if (const auto profile = validate_smpl_pcm_transfer_control(decoded); !profile)
+        return std::unexpected(profile.error());
     if (decoded.stored_segment_offset != 0U || decoded.stored_segment_bytes != decoded.stored_pcm_bytes) {
         return std::unexpected{
             make_error(ErrorCode::object_missing, ErrorCategory::audio,
@@ -71,33 +84,16 @@ static Result<Waveform> decode_waveform_payload(const CurrentSmpl &decoded, std:
     result.loop_start = decoded.loop_start_frame.value;
     result.loop_length = decoded.loop_length_frames.value;
     if (result.stored_sample_width_bytes == 2U) {
-        bool alternating = stored.size() >= 2U;
-        const auto limit = stored.size() - (stored.size() % 2U);
-        for (std::size_t offset = 1; offset < limit; offset += 2U) {
-            const auto expected = offset % 4U == 1U ? 0x55U : 0xaaU;
-            alternating &= std::to_integer<std::uint8_t>(stored[offset]) == expected;
+        if (stored.size() % 2U != 0U) {
+            return std::unexpected{
+                make_error(ErrorCode::object_malformed, ErrorCategory::audio, "16-bit SMPL PCM has an odd byte count")};
         }
-        if (alternating) {
-            result.format.sample_width_bytes = 1;
-            result.stored_payload_transform = "alternating-byte-signed-high-byte";
-            result.alternating_byte_payload_detected = true;
-            result.pcm.reserve((stored.size() + 1U) / 2U);
-            for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
-                result.pcm.push_back(
-                    static_cast<std::byte>((std::to_integer<std::uint8_t>(stored[offset]) + 128U) & 0xffU));
-            }
-        } else {
-            if (stored.size() % 2U != 0U) {
-                return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::audio,
-                                                  "16-bit SMPL PCM has an odd byte count")};
-            }
-            result.format.sample_width_bytes = 2;
-            result.stored_payload_transform = "byteswap16";
-            result.pcm.resize(stored.size());
-            for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
-                result.pcm[offset] = stored[offset + 1U];
-                result.pcm[offset + 1U] = stored[offset];
-            }
+        result.format.sample_width_bytes = 2;
+        result.stored_payload_transform = "byteswap16";
+        result.pcm.resize(stored.size());
+        for (std::size_t offset = 0; offset < stored.size(); offset += 2U) {
+            result.pcm[offset] = stored[offset + 1U];
+            result.pcm[offset + 1U] = stored[offset];
         }
     } else if (result.stored_sample_width_bytes == 1U) {
         result.format.sample_width_bytes = 1;

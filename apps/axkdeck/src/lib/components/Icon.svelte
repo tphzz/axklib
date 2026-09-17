@@ -5,8 +5,10 @@
         | 'chevron'
         | 'check'
         | 'close'
+        | 'copy'
         | 'disc'
         | 'eject'
+        | 'file'
         | 'file-plus'
         | 'folder'
         | 'folder-open'
@@ -78,8 +80,9 @@
         <path d="M3 7.5V6h6l2 3h9l1 2" /><path d="m3 9 2 10h14l2-8H5" />
     {:else if name === 'folder-plus'}
         <path d="M3 7.5V19h18V8H11l-2-3H3v2.5Z" /><path d="M12 11v5M9.5 13.5h5" />
-    {:else if name === 'file-plus'}
-        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5M12 11v6M9 14h6" />
+    {:else if name === 'file' || name === 'file-plus'}
+        <path d="M6 3h8l4 4v14H6V3Z" /><path d="M14 3v5h5" />
+        {#if name === 'file-plus'}<path d="M12 11v6M9 14h6" />{/if}
     {:else if name === 'hard-drive'}
         <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 13h18" /><circle cx="17" cy="16" r="1" />
     {:else if name === 'home'}
@@ -164,6 +167,10 @@
         <path d="M12 16V4M7 9l5-5 5 5M4 20h16" />
     {:else if name === 'close'}
         <path d="m6 6 12 12M18 6 6 18" />
+    {:else if name === 'copy'}
+        <rect x="9" y="9" width="11" height="11" rx="2" /><path
+            d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"
+        />
     {:else if name === 'check'}
         <path d="m5 12 4 4L19 6" />
     {:else if name === 'lock'}

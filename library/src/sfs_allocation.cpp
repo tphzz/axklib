@@ -4,8 +4,8 @@
 
 axk::Result<axk::detail::SfsAllocationBitmapLayout>
 axk::detail::sfs_allocation_bitmap_layout(std::uint64_t partition_start_sector, std::uint32_t cluster_count,
-                                          std::uint32_t sectors_per_cluster, std::uint32_t bitmap_cluster,
-                                          std::uint32_t sector_size) {
+                                          std::uint32_t sectors_per_cluster, std::uint32_t bitmap_copy1_cluster,
+                                          std::uint32_t bitmap_copy2_cluster, std::uint32_t sector_size) {
     if (cluster_count == 0U || sectors_per_cluster == 0U || sector_size == 0U) {
         return std::unexpected{make_error(ErrorCode::container_invalid_geometry, ErrorCategory::container,
                                           "SFS allocation bitmap geometry contains a zero value")};
@@ -24,12 +24,13 @@ axk::detail::sfs_allocation_bitmap_layout(std::uint64_t partition_start_sector, 
     const auto span_clusters = *rounded_numerator / *cluster_bytes;
     const auto rounded_bytes = checked_multiply(span_clusters, *cluster_bytes);
     const auto partition_start = checked_multiply(partition_start_sector, sector_size);
-    const auto header_relative = checked_multiply(bitmap_cluster, *cluster_bytes);
-    if (!rounded_bytes || !partition_start || !header_relative || span_clusters == 0U) {
+    const auto first_relative = checked_multiply(bitmap_copy1_cluster, *cluster_bytes);
+    const auto header_relative = checked_multiply(bitmap_copy2_cluster, *cluster_bytes);
+    if (!rounded_bytes || !partition_start || !first_relative || !header_relative || span_clusters == 0U) {
         return std::unexpected{make_error(ErrorCode::container_invalid_geometry, ErrorCategory::container,
                                           "SFS allocation bitmap offsets overflowed")};
     }
-    const auto fixed_offset = checked_add(*partition_start, sfs_fixed_allocation_bitmap_offset);
+    const auto fixed_offset = checked_add(*partition_start, *first_relative);
     const auto header_offset = checked_add(*partition_start, *header_relative);
     if (!fixed_offset || !header_offset) {
         return std::unexpected{make_error(ErrorCode::container_invalid_geometry, ErrorCategory::container,

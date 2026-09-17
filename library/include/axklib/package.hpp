@@ -471,6 +471,11 @@ package_program_assignment_disposition_name(PackageProgramAssignmentDisposition 
 AXK_API Result<void> verify_portable_package(const PortablePackage &package);
 AXK_API Result<void> verify_package_import_plan(const PackageImportPlan &plan);
 
+// Prepare verified objects and their dependency closure without serializing an archive.
+AXK_API Result<PortablePackage> build_portable_graph(const MediaContainer &source,
+                                                     std::span<const PackageRootSelector> roots,
+                                                     const CancellationToken &cancellation = {});
+
 AXK_API Result<PackageBuild> build_portable_package(const MediaContainer &source,
                                                     std::span<const PackageRootSelector> roots,
                                                     const CancellationToken &cancellation = {});

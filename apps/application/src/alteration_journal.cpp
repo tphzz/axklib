@@ -1,6 +1,7 @@
 #include "axklib/application/alteration_journal.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <ranges>
 #include <string_view>
 #include <system_error>
@@ -26,6 +27,15 @@ namespace {
 
 constexpr std::size_t maximum_journal_count = 128U;
 
+struct JournalQuarantineGuard {
+    std::atomic_bool &ready;
+    bool resolved{};
+    ~JournalQuarantineGuard() {
+        if (!resolved)
+            ready.store(false, std::memory_order_relaxed);
+    }
+};
+
 axk::app::Error journal_error(std::string message, bool retryable = false) {
     return {"alteration_journal_unavailable", std::move(message), {}, retryable};
 }
@@ -42,18 +52,24 @@ axk::app::Result<axk::PublicationOutcome> publish_file(const std::filesystem::pa
     return std::move(*published);
 }
 
-axk::app::Result<void> compare_patch(const axk::app::SandboxMutation &target,
-                                     const axk::app::AlterationJournalPatch &patch, bool replacement,
-                                     std::size_t chunk_bytes) {
-    const auto &expected = replacement ? patch.replacement : patch.original;
+axk::app::Result<void> compare_original_patch(const axk::app::SandboxMutation &target,
+                                              const axk::app::AlterationJournalPatch &patch, std::size_t chunk_bytes,
+                                              const axk::CancellationToken &cancellation) {
+    const auto &expected = patch.original;
     const auto maximum_chunk = std::max<std::size_t>(chunk_bytes, 1U);
-    std::vector<std::byte> current(std::min(maximum_chunk, expected.size()));
-    for (std::size_t offset = 0U; offset < expected.size();) {
-        const auto size = std::min(maximum_chunk, expected.size() - offset);
+    std::vector<std::byte> current(std::min<std::uint64_t>(maximum_chunk, expected.size()));
+    std::vector<std::byte> expected_bytes(current.size());
+    for (std::uint64_t offset = 0U; offset < expected.size();) {
+        if (auto checked = cancellation.check(); !checked)
+            return std::unexpected(axk::app::Error{"operation_cancelled", checked.error().message});
+        const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(maximum_chunk, expected.size() - offset));
         auto current_chunk = std::span{current}.first(size);
+        auto expected_chunk = std::span{expected_bytes}.first(size);
+        if (auto read = expected.read_exact_at(offset, expected_chunk); !read)
+            return read;
         if (auto read = target.read_exact_at(patch.offset + offset, current_chunk); !read)
             return std::unexpected(journal_error(read.error().message));
-        if (!std::ranges::equal(current_chunk, std::span{expected}.subspan(offset, size)))
+        if (!std::ranges::equal(current_chunk, expected_chunk))
             return std::unexpected(journal_error("alteration target does not match its journal", true));
         offset += size;
     }
@@ -97,7 +113,7 @@ axk::app::AlterationJournalStore::AlterationJournalStore(std::filesystem::path d
                                                          std::size_t maximum_patch_write_bytes)
     : directory_(std::move(directory)), maximum_journal_bytes_(std::max<std::uint64_t>(maximum_journal_bytes, 1U)),
       interruption_hook_(std::move(interruption_hook)),
-      maximum_patch_write_bytes_(std::max<std::size_t>(maximum_patch_write_bytes, 1U)) {
+      maximum_patch_write_bytes_(std::clamp<std::size_t>(maximum_patch_write_bytes, 1U, 1024U * 1024U)) {
     const auto available = detail::prepare_private_directory(directory_).has_value();
     storage_available_.store(available, std::memory_order_relaxed);
     storage_ready_.store(available, std::memory_order_relaxed);
@@ -111,17 +127,18 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
                                                                std::uint64_t image_size_bytes,
                                                                std::span<const AlterationJournalPatch> patches,
                                                                const CancellationToken &cancellation,
-                                                               const std::function<Result<void>()> &validate) {
+                                                               const std::function<Result<void>()> &validate,
+                                                               const std::function<void()> &on_rollback_verified) {
     if (!storage_ready())
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
         return std::unexpected(journal_error("alteration target size changed"));
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected(Error{"operation_cancelled", checked.error().message});
-    if (auto bound = target->verify_bound(); !bound)
+    if (auto bound = target->verify_unchanged(); !bound)
         return std::unexpected(bound.error());
     for (const auto &patch : patches) {
-        if (auto compared = compare_patch(*target, patch, false, maximum_patch_write_bytes_); !compared)
+        if (auto compared = compare_original_patch(*target, patch, maximum_patch_write_bytes_, cancellation); !compared)
             return compared;
     }
 
@@ -138,28 +155,45 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
                             maximum_journal_bytes_, cancellation, maximum_patch_write_bytes_);
     if (!journal_publication)
         return std::unexpected{journal_publication.error()};
+    JournalQuarantineGuard journal_guard{storage_ready_};
     if (journal_publication->durability != axk::PublicationDurability::confirmed) {
         quarantine();
         return std::unexpected(journal_error("alteration journal durability could not be confirmed", true));
     }
-    const auto rollback = [&]() -> Result<void> {
-        for (const auto &patch : std::views::reverse(patches)) {
-            if (auto written = target->write_exact_at(patch.offset, patch.original); !written)
-                return written;
+    auto journal = journal_io::inspect(path, maximum_journal_bytes_, maximum_patch_write_bytes_);
+    if (!journal) {
+        quarantine();
+        return std::unexpected(journal.error());
+    }
+    if (auto compared = journal_io::compare_target(*target, path, *journal, false, maximum_patch_write_bytes_);
+        !compared) {
+        if (auto removed = remove_file(path, "stale alteration journal"); !removed) {
+            quarantine();
+            return removed;
         }
-        return target->flush();
+        journal_guard.resolved = true;
+        return compared;
+    }
+    const auto rollback = [&]() -> Result<void> {
+        return journal_io::restore_original_bytes(*target, path, *journal, maximum_patch_write_bytes_, [&] {
+            return interruption_hook_ && interruption_hook_("after-rollback-flush", 0U);
+        });
     };
     const auto rollback_and_remove = [&](bool remove_marker) -> Result<void> {
         if (auto restored = rollback(); !restored) {
             quarantine();
             return restored;
         }
+        if (on_rollback_verified)
+            on_rollback_verified();
         if (auto removed = remove_file(path, "alteration journal"); !removed) {
             quarantine();
             return removed;
         }
-        if (!remove_marker)
+        if (!remove_marker) {
+            journal_guard.resolved = true;
             return {};
+        }
         const auto marker = commit_marker_path(path);
         std::error_code error;
         const auto exists = std::filesystem::exists(marker, error);
@@ -173,16 +207,50 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
                 return removed;
             }
         }
+        journal_guard.resolved = true;
         return {};
     };
+    if (auto unchanged = target->verify_unchanged(); !unchanged) {
+        if (auto removed = remove_file(path, "stale alteration journal"); !removed) {
+            quarantine();
+            return removed;
+        }
+        journal_guard.resolved = true;
+        return unchanged;
+    }
+    auto frozen = FileReader::open(path);
+    if (!frozen) {
+        if (auto removed = remove_file(path, "unreadable alteration journal"); !removed) {
+            quarantine();
+            return removed;
+        }
+        journal_guard.resolved = true;
+        return std::unexpected(journal_error(frozen.error().message));
+    }
+    std::vector<std::byte> buffer(maximum_patch_write_bytes_);
     std::size_t write_chunk_index{};
-    for (std::size_t index = 0U; index < patches.size(); ++index) {
-        const auto &patch = patches[index];
-        std::size_t replacement_offset{};
-        while (replacement_offset < patch.replacement.size()) {
-            const auto chunk_size = std::min(maximum_patch_write_bytes_, patch.replacement.size() - replacement_offset);
-            const auto chunk = std::span{patch.replacement}.subspan(replacement_offset, chunk_size);
-            if (auto written = target->write_exact_at(patch.offset + replacement_offset, chunk); !written) {
+    for (std::size_t index = 0U; index < journal->patches.size(); ++index) {
+        const auto &patch = journal->patches[index];
+        std::uint64_t replacement_offset{};
+        while (replacement_offset < patch.size) {
+            if (auto checked = cancellation.check(); !checked) {
+                frozen = {};
+                if (auto recovered = rollback_and_remove(false); !recovered)
+                    return recovered;
+                return std::unexpected(Error{"operation_cancelled", checked.error().message});
+            }
+            const auto chunk_size = static_cast<std::size_t>(
+                std::min<std::uint64_t>(maximum_patch_write_bytes_, patch.size - replacement_offset));
+            const auto chunk = std::span{buffer}.first(chunk_size);
+            if (auto read = (*frozen)->read_exact_at(patch.replacement_file_offset + replacement_offset, chunk);
+                !read) {
+                frozen = {};
+                if (auto recovered = rollback_and_remove(false); !recovered)
+                    return recovered;
+                return std::unexpected(journal_error(read.error().message));
+            }
+            if (auto written = target->write_exact_at(patch.target_offset + replacement_offset, chunk); !written) {
+                frozen = {};
                 if (auto recovered = rollback_and_remove(false); !recovered)
                     return recovered;
                 return written;
@@ -206,6 +274,12 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
             return std::unexpected(journal_error("simulated alteration interruption", true));
         }
     }
+    frozen = {};
+    if (auto checked = cancellation.check(); !checked) {
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
+        return std::unexpected(Error{"operation_cancelled", checked.error().message});
+    }
     if (auto flushed = target->flush(); !flushed) {
         if (auto recovered = rollback_and_remove(false); !recovered)
             return recovered;
@@ -216,12 +290,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
             return recovered;
         return bound;
     }
-    for (const auto &patch : patches) {
-        if (auto compared = compare_patch(*target, patch, true, maximum_patch_write_bytes_); !compared) {
-            if (auto recovered = rollback_and_remove(false); !recovered)
-                return recovered;
-            return compared;
-        }
+    if (auto compared = journal_io::compare_target(*target, path, *journal, true, maximum_patch_write_bytes_);
+        !compared) {
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
+        return compared;
     }
     if (validate) {
         if (auto validated = validate(); !validated) {
@@ -234,6 +307,11 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
                 return recovered;
             return bound;
         }
+    }
+    if (auto checked = cancellation.check(); !checked) {
+        if (auto recovered = rollback_and_remove(false); !recovered)
+            return recovered;
+        return std::unexpected(Error{"operation_cancelled", checked.error().message});
     }
     const auto marker = commit_marker_path(path);
     const auto &journal_checksum = journal_publication->file_checksum;
@@ -254,6 +332,7 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         quarantine();
         return {};
     }
+    journal_guard.resolved = true;
     return {};
 }
 
@@ -301,8 +380,9 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
                     journal_io::recognize_uncommitted_target(**target, path, *journal, maximum_patch_write_bytes_);
                 !recognized)
                 return recognized;
-            if (auto restored =
-                    journal_io::restore_original_bytes(**target, path, *journal, maximum_patch_write_bytes_);
+            if (auto restored = journal_io::restore_original_bytes(
+                    **target, path, *journal, maximum_patch_write_bytes_,
+                    [&] { return interruption_hook_ && interruption_hook_("after-rollback-flush", 0U); });
                 !restored)
                 return restored;
         }

@@ -68,8 +68,6 @@ std::string object_format_name(ObjectFormat format) {
     switch (format) {
     case ObjectFormat::current:
         return "current";
-    case ObjectFormat::alternating_byte:
-        return "alternating-byte";
     case ObjectFormat::unknown:
         return "unknown";
     }
@@ -82,6 +80,10 @@ std::string media_kind_name(MediaKind kind) {
         return "sfs";
     case MediaKind::fat12_floppy:
         return "fat12-floppy";
+    case MediaKind::ex5_disk:
+        return "ex5-disk";
+    case MediaKind::fat16_disk:
+        return "fat16-disk";
     case MediaKind::fat12_floppy_set:
         return "fat12-floppy-set";
     case MediaKind::iso9660:
@@ -232,9 +234,7 @@ required_relationships(const ObjectSnapshot &object, const RelationshipGraph &gr
             result.push_back(*row);
         }
     } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&object.object.payload)) {
-        const auto active_slots =
-            std::ranges::count_if(sample_bank->slots, [](const SbacSlot &slot) { return !slot.name.empty(); });
-        if (candidates.size() != static_cast<std::size_t>(active_slots)) {
+        if (candidates.size() != sample_bank->effective_member_count) {
             return std::unexpected{make_error(ErrorCode::relationship_unresolved, ErrorCategory::relationship,
                                               "Sample Bank package export cannot resolve every active Sample member")};
         }
@@ -301,7 +301,6 @@ Result<std::optional<WaveformDigests>> waveform_digests(const DecodedObject &dec
                         {"root_key", smpl->root_key.value},
                         {"sample_rate", smpl->sample_rate.value},
                         {"schema", "axklib-smpl-semantic-v1"},
-                        {"source_wave_name", smpl->source_wave_name.value},
                         {"stored_pcm_bytes", smpl->stored_pcm_bytes},
                         {"stored_pcm_offset", smpl->stored_pcm_offset},
                         {"stored_sample_width_bytes", smpl->stored_sample_width_bytes.value},

@@ -2,6 +2,7 @@
 
 #include "axklib/utf8.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <limits>
 #include <set>
@@ -10,70 +11,17 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/file_publication.hpp"
+#include "axklib/program_spec_json.hpp"
+#include "axklib/sample_parameter_codec.hpp"
+#include "axklib/sample_parameter_json.hpp"
 #include "axklib/sfs.hpp"
 
 namespace axk {
 namespace {
 
 using Json = nlohmann::json;
-using OrderedJson = nlohmann::ordered_json;
-
 Error manifest_error(std::string message) {
     return make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, std::move(message));
-}
-
-OrderedJson empty_volume(std::string_view name) {
-    OrderedJson result = OrderedJson::object();
-    result["name"] = name;
-    result["waveforms"] = OrderedJson::array();
-    result["samples"] = OrderedJson::array();
-    return result;
-}
-
-OrderedJson authored_starter_volume(std::string_view name) {
-    OrderedJson result = OrderedJson::object();
-    result["name"] = name;
-    result["waveforms"] =
-        OrderedJson::array({{{"id", "tone"}, {"name", "Authored Tone"}, {"path", "tone.wav"}, {"root_key", 60}}});
-    result["samples"] = OrderedJson::array({{{"name", "Authored Tone"},
-                                             {"waveform_id", "tone"},
-                                             {"root_key", 60},
-                                             {"key_low", 60},
-                                             {"key_high", 60},
-                                             {"level", 100}}});
-    return result;
-}
-
-Result<OrderedJson> manifest_template(BuildManifestKind kind) {
-    OrderedJson result = OrderedJson::object();
-    result["schema_version"] = build_manifest_schema_version;
-    switch (kind) {
-    case BuildManifestKind::hds: {
-        result["size_bytes"] = 536'870'912;
-        OrderedJson partition = OrderedJson::object();
-        partition["name"] = "New Partition";
-        partition["volumes"] = OrderedJson::array();
-        result["partitions"] = OrderedJson::array({std::move(partition)});
-        return result;
-    }
-    case BuildManifestKind::fat12_floppy:
-        result["format"] = "fat12_floppy";
-        result["authored_volume"] = authored_starter_volume("FAT ROOT");
-        return result;
-    case BuildManifestKind::iso9660: {
-        result["format"] = "iso9660";
-        OrderedJson iso = OrderedJson::object();
-        iso["volume_id"] = "AXK_AUDIO";
-        iso["raw_group"] = "46DEF120";
-        iso["group_name"] = "NEW GROUP";
-        iso["raw_volume"] = "F001";
-        iso["volume_name"] = "NEW VOLUME";
-        result["iso"] = std::move(iso);
-        result["authored_volume"] = empty_volume("NEW VOLUME");
-        return result;
-    }
-    }
-    return std::unexpected{manifest_error("unknown build manifest template kind")};
 }
 
 Result<void> fields(const Json &value, std::string_view context, std::initializer_list<std::string_view> required,
@@ -175,7 +123,7 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
         result.fine_tune_cents = static_cast<std::int8_t>(*fine);
     }
     if (value.contains("loop_mode")) {
-        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
+        auto mode = integer(value["loop_mode"], context + ".loop_mode", 0, 5);
         if (!mode)
             return std::unexpected{mode.error()};
         result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
@@ -198,10 +146,9 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
 }
 
 Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"name", "root_key", "key_low", "key_high"},
-                            {"level", "waveform_id", "right_waveform_id", "interleaved_audio_path",
-                             "left_waveform_name", "right_waveform_name", "target_sample_rate", "fine_tune_cents",
-                             "velocity_low", "velocity_high", "loop_mode", "loop_start_frame", "loop_length_frames"});
+    if (auto valid = fields(value, context, {"name"},
+                            {"waveform_id", "right_waveform_id", "interleaved_audio_path", "left_waveform_name",
+                             "right_waveform_name", "target_sample_rate", "parameters", "playback_window"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -213,30 +160,10 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
         return std::unexpected{manifest_error(context + " has an invalid audio source field combination")};
     }
     auto name = text(value["name"], context + ".name");
-    auto root = integer(value["root_key"], context + ".root_key", 0, 127);
-    auto low = integer(value["key_low"], context + ".key_low", 0, 127);
-    auto high = integer(value["key_high"], context + ".key_high", 0, 127);
     if (!name)
         return std::unexpected{name.error()};
-    if (!root)
-        return std::unexpected{root.error()};
-    if (!low)
-        return std::unexpected{low.error()};
-    if (!high)
-        return std::unexpected{high.error()};
-    if (*high < *low)
-        return std::unexpected{manifest_error(context + ".key_high precedes key_low")};
     SampleSpec result;
     result.name = *name;
-    result.root_key = static_cast<std::uint8_t>(*root);
-    result.key_low = static_cast<std::uint8_t>(*low);
-    result.key_high = static_cast<std::uint8_t>(*high);
-    if (value.contains("level")) {
-        auto level = integer(value["level"], context + ".level", 0, 127);
-        if (!level)
-            return std::unexpected{level.error()};
-        result.level = static_cast<std::uint8_t>(*level);
-    }
     const auto optional_text = [&](std::string_view field) -> Result<std::optional<std::string>> {
         if (!value.contains(field))
             return std::optional<std::string>{};
@@ -261,6 +188,12 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
     result.right_waveform_id = *right_id;
     result.left_waveform_name = *left_name;
     result.right_waveform_name = *right_name;
+    if (value.contains("playback_window")) {
+        auto window = detail::parse_sample_playback_window_json(value["playback_window"]);
+        if (!window)
+            return std::unexpected{window.error()};
+        result.playback_window = *window;
+    }
     if (interleaved) {
         auto source = path(value["interleaved_audio_path"], context + ".interleaved_audio_path", base);
         if (!source)
@@ -274,41 +207,25 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
             return std::unexpected{rate.error()};
         result.target_sample_rate = static_cast<std::uint32_t>(*rate);
     }
-    if (value.contains("fine_tune_cents")) {
-        auto fine = signed_integer(value["fine_tune_cents"], context + ".fine_tune_cents", -63, 63);
-        if (!fine)
-            return std::unexpected{fine.error()};
-        result.fine_tune_cents = static_cast<std::int8_t>(*fine);
+    if (value.contains("parameters")) {
+        auto parameters = detail::parse_sample_parameters_json(value["parameters"], context + ".parameters", false,
+                                                               ErrorCode::manifest_invalid, ErrorCategory::manifest);
+        if (!parameters)
+            return std::unexpected{parameters.error()};
+        result.parameters = std::move(*parameters);
+        if (auto valid = detail::validate_sample_parameters(result.parameters); !valid)
+            return std::unexpected{valid.error()};
     }
-    for (const auto field : {std::string_view{"velocity_low"}, std::string_view{"velocity_high"}}) {
-        if (!value.contains(field))
-            continue;
-        auto velocity = integer(value[field], context + "." + std::string{field}, 0, 127);
-        if (!velocity)
-            return std::unexpected{velocity.error()};
-        (field == "velocity_low" ? result.velocity_low : result.velocity_high) = static_cast<std::uint8_t>(*velocity);
-    }
-    if (value.contains("loop_mode")) {
-        auto mode = integer(value["loop_mode"], context + ".loop_mode", 1, 4);
-        if (!mode)
-            return std::unexpected{mode.error()};
-        result.loop_mode = static_cast<AudioSamplerLoopMode>(*mode);
-    }
-    if (value.contains("loop_start_frame")) {
-        auto start = integer(value["loop_start_frame"], context + ".loop_start_frame", 0,
-                             std::numeric_limits<std::uint32_t>::max());
-        if (!start)
-            return std::unexpected{start.error()};
-        result.loop_start_frame = static_cast<std::uint32_t>(*start);
-    }
-    if (value.contains("loop_length_frames")) {
-        auto length = integer(value["loop_length_frames"], context + ".loop_length_frames", 0,
-                              std::numeric_limits<std::uint32_t>::max());
-        if (!length)
-            return std::unexpected{length.error()};
-        result.loop_length_frames = static_cast<std::uint32_t>(*length);
+    if ((result.right_waveform_id || result.interleaved_audio_path) &&
+        (result.parameters.expand_detune.value_or(0) != 0 || result.parameters.expand_dephase.value_or(0) != 0)) {
+        return std::unexpected{manifest_error(context + " stereo Sample cannot use expanded-mono controls")};
     }
     return result;
+}
+
+Result<SampleParameters> sample_bank_parameter_overrides(const Json &value, const std::string &context) {
+    return detail::parse_sample_parameters_json(value, context, true, ErrorCode::manifest_invalid,
+                                                ErrorCategory::manifest);
 }
 
 Result<VolumeSpec> volume(const Json &value, std::string context, const std::filesystem::path &base) {
@@ -354,10 +271,12 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
         return std::unexpected{manifest_error(context + ".sample_banks must be an array")};
     }
     std::set<std::string> sample_bank_names;
+    std::set<std::string> banked_samples;
     for (std::size_t index = 0; index < sample_banks_json.size(); ++index) {
         const auto sample_bank_context = context + ".sample_banks[" + std::to_string(index) + "]";
         const auto &row = sample_banks_json[index];
-        if (auto valid = fields(row, sample_bank_context, {"name", "member_samples"}); !valid) {
+        if (auto valid = fields(row, sample_bank_context, {"name", "member_samples"}, {"parameter_overrides"});
+            !valid) {
             return std::unexpected{valid.error()};
         }
         auto sample_bank_name = text(row["name"], sample_bank_context + ".name");
@@ -366,7 +285,7 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
         if (!sample_bank_names.insert(*sample_bank_name).second) {
             return std::unexpected{manifest_error(context + " has duplicate Sample Bank names")};
         }
-        SampleBankSpec sample_bank{*sample_bank_name, {}};
+        SampleBankSpec sample_bank{*sample_bank_name, {}, {}};
         if (!row["member_samples"].is_array()) {
             return std::unexpected{manifest_error(sample_bank_context + ".member_samples must be an array")};
         }
@@ -387,6 +306,27 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             if (!sample_names.contains(member)) {
                 return std::unexpected{manifest_error(sample_bank_context + " references an unknown Sample")};
             }
+            if (!banked_samples.insert(member).second)
+                return std::unexpected{manifest_error(context + " assigns a Sample to multiple Sample Banks")};
+        }
+        if (row.contains("parameter_overrides")) {
+            auto overrides = sample_bank_parameter_overrides(row["parameter_overrides"],
+                                                             sample_bank_context + ".parameter_overrides");
+            if (!overrides)
+                return std::unexpected{overrides.error()};
+            const auto enables_expanded_mono =
+                overrides->expand_detune.value_or(0) != 0 || overrides->expand_dephase.value_or(0) != 0;
+            if (enables_expanded_mono) {
+                for (const auto &member : sample_bank.member_samples) {
+                    const auto sample = std::ranges::find(result.samples, member, &SampleSpec::name);
+                    if (sample != result.samples.end() &&
+                        (sample->right_waveform_id || sample->interleaved_audio_path)) {
+                        return std::unexpected{manifest_error(
+                            sample_bank_context + " cannot apply expanded-mono controls to a stereo Sample")};
+                    }
+                }
+            }
+            sample_bank.parameter_overrides = std::move(*overrides);
         }
         result.sample_banks.push_back(std::move(sample_bank));
     }
@@ -398,59 +338,19 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     for (std::size_t index = 0; index < programs.size(); ++index) {
         const auto program_context = context + ".programs[" + std::to_string(index) + "]";
         const auto &row = programs[index];
-        if (auto valid = fields(row, program_context, {"number", "name", "assignments"}); !valid) {
-            return std::unexpected{valid.error()};
-        }
-        auto number = integer(row["number"], program_context + ".number", 1, 128);
-        auto program_name = text(row["name"], program_context + ".name");
-        if (!number)
-            return std::unexpected{number.error()};
-        if (!program_name)
-            return std::unexpected{program_name.error()};
-        if (!program_numbers.insert(*number).second) {
+        auto program = detail::parse_program_spec_json(row);
+        if (!program)
+            return std::unexpected{manifest_error(program_context + ": " + program.error().message)};
+        if (!program_numbers.insert(program->number).second) {
             return std::unexpected{manifest_error(context + " has duplicate Program numbers")};
         }
-        if (!row["assignments"].is_array()) {
-            return std::unexpected{manifest_error(program_context + ".assignments must be an array")};
-        }
-        ProgramSpec program{static_cast<std::uint8_t>(*number), std::move(*program_name), {}};
-        for (std::size_t assignment_index = 0; assignment_index < row["assignments"].size(); ++assignment_index) {
-            const auto assignment_context = program_context + ".assignments[" + std::to_string(assignment_index) + "]";
-            const auto &assignment = row["assignments"][assignment_index];
-            if (auto valid = fields(assignment, assignment_context, {"receive_mode"},
-                                    {"receive_channel", "sample", "sample_bank"});
-                !valid) {
-                return std::unexpected{valid.error()};
+        for (const auto &assignment : program->assignments) {
+            if ((assignment.target_kind == "SBNK" && !sample_names.contains(assignment.target_name)) ||
+                (assignment.target_kind == "SBAC" && !sample_bank_names.contains(assignment.target_name))) {
+                return std::unexpected{manifest_error(program_context + " assignment references an unknown target")};
             }
-            const bool sample_target = assignment.contains("sample");
-            const bool sample_bank_target = assignment.contains("sample_bank");
-            if (sample_target == sample_bank_target)
-                return std::unexpected{manifest_error(assignment_context + " must contain exactly one target")};
-            const auto target_field = sample_target ? "sample" : "sample_bank";
-            auto target = text(assignment[target_field], assignment_context + "." + target_field);
-            auto receive_mode = text(assignment["receive_mode"], assignment_context + ".receive_mode");
-            if (!target)
-                return std::unexpected{target.error()};
-            if (!receive_mode || (*receive_mode != "MIDI_CHANNEL" && *receive_mode != "SAMPLE"))
-                return std::unexpected{manifest_error(assignment_context + ".receive_mode is invalid")};
-            const auto midi_mode = *receive_mode == "MIDI_CHANNEL";
-            if (assignment.contains("receive_channel") != midi_mode)
-                return std::unexpected{
-                    manifest_error(assignment_context + " must specify receive_channel only for MIDI_CHANNEL")};
-            auto channel = midi_mode
-                               ? integer(assignment["receive_channel"], assignment_context + ".receive_channel", 1, 16)
-                               : Result<std::uint64_t>{0U};
-            if (!channel)
-                return std::unexpected{channel.error()};
-            if ((sample_target && !sample_names.contains(*target)) ||
-                (sample_bank_target && !sample_bank_names.contains(*target))) {
-                return std::unexpected{manifest_error(assignment_context + " references an unknown target")};
-            }
-            program.assignments.push_back({sample_target ? "SBNK" : "SBAC", *target,
-                                           static_cast<std::uint8_t>(*channel),
-                                           midi_mode ? ProgramReceiveMode::midi_channel : ProgramReceiveMode::sample});
         }
-        result.programs.push_back(std::move(program));
+        result.programs.push_back(std::move(*program));
     }
     return result;
 }
@@ -648,52 +548,6 @@ Result<MediaBuildManifest> load_media_build_manifest(const std::filesystem::path
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not read media manifest")};
     return parse_media_build_manifest(contents.str(), path.parent_path());
-}
-
-Result<std::string> serialize_build_manifest_template(BuildManifestKind kind) {
-    try {
-        auto value = manifest_template(kind);
-        if (!value)
-            return std::unexpected{value.error()};
-        return value->dump(2) + "\n";
-    } catch (const OrderedJson::exception &error) {
-        return std::unexpected{
-            manifest_error(std::string{"could not serialize build manifest template: "} + error.what())};
-    }
-}
-
-Result<PublicationOutcome> write_build_manifest_template(BuildManifestKind kind,
-                                                         const std::filesystem::path &output_path, bool overwrite) {
-    auto serialized = serialize_build_manifest_template(kind);
-    if (!serialized)
-        return std::unexpected{serialized.error()};
-
-    std::error_code filesystem_error;
-    if (!overwrite && std::filesystem::exists(output_path, filesystem_error)) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                       "refusing to replace existing build manifest: " + text::path_to_utf8(output_path))};
-    }
-    if (filesystem_error) {
-        return std::unexpected{
-            make_error(ErrorCode::io_open_failed, ErrorCategory::io, "could not inspect build manifest output path")};
-    }
-    if (!output_path.parent_path().empty())
-        std::filesystem::create_directories(output_path.parent_path(), filesystem_error);
-    if (filesystem_error) {
-        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
-                                          "could not create build manifest output directory")};
-    }
-    auto temporary = detail::TemporaryPublication::create(output_path, [&](const detail::TemporaryFileSink &sink) {
-        return sink(std::as_bytes(std::span{serialized->data(), serialized->size()}));
-    });
-    if (!temporary)
-        return std::unexpected{temporary.error()};
-    const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
-    auto published = temporary->publish(mode);
-    if (!published)
-        return std::unexpected{published.error()};
-    return std::move(*published);
 }
 
 } // namespace axk

@@ -1,3 +1,4 @@
+#include "content_digest.hpp"
 #include "image_sessions_internal.hpp"
 
 axk::app::Result<axk::app::ImageSessionRead>
@@ -7,6 +8,9 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
     if (!session)
         return std::unexpected(session.error());
     auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->invalidated)
+        return std::unexpected(
+            session_error("image_session_invalidated", "image session requires recovery and reopening"));
     if ((*session)->revision != expected_revision)
         return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
     if ((*session)->mutating)
@@ -16,6 +20,23 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
     if (const auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
         return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     auto lease = std::make_shared<std::unique_lock<std::mutex>>(std::move(access));
+    auto fingerprint = [state = *session, lease](const CancellationToken &cancellation) -> Result<std::string> {
+        static_cast<void>(lease);
+        const std::scoped_lock cache_lock{state->fingerprint_mutex};
+        if (auto checked = cancellation.check(); !checked)
+            return std::unexpected(core_error(checked.error(), state->source));
+        if (auto checked = state->verify_source_unchanged(); !checked)
+            return std::unexpected(checked.error());
+        if (!state->content_fingerprint) {
+            auto digest = detail::reader_sha256(*state->source_reader, cancellation);
+            if (!digest)
+                return std::unexpected(digest.error());
+            if (auto checked = state->verify_source_unchanged(); !checked)
+                return std::unexpected(checked.error());
+            state->content_fingerprint = std::move(*digest);
+        }
+        return *state->content_fingerprint;
+    };
     std::vector<const ObjectSnapshot *> catalog_objects;
     catalog_objects.reserve((*session)->snapshots_by_id.size());
     std::unordered_map<std::string, std::string> object_keys_by_id;
@@ -31,46 +52,89 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
                 item.id, ImageVolumeScopeIdentity{*item.partition_index, *item.volume_directory_id, item.display_name});
         }
     }
-    return ImageSessionRead{(*session)->image_id,
-                            (*session)->revision,
-                            (*session)->source,
-                            (*session)->source_reader,
-                            &*(*session)->media,
-                            (*session)->target_snapshot_id,
-                            std::move(catalog_objects),
-                            (*session)->catalog_issues,
-                            std::move(object_keys_by_id),
-                            std::move(volume_scopes_by_id),
-                            std::move(lease)};
+    return ImageSessionRead{
+        (*session)->image_id,           (*session)->revision,       (*session)->source,
+        (*session)->source_reader,      &*(*session)->media,        std::move(fingerprint),
+        std::move(catalog_objects),     (*session)->catalog_issues, std::move(object_keys_by_id),
+        std::move(volume_scopes_by_id), std::move(lease),           (*session)->verify_source_unchanged};
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>
 axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::string_view owner_id,
                                               std::uint64_t expected_revision) {
+    return begin_mutation_access(image_id, owner_id, expected_revision, std::nullopt);
+}
+
+axk::app::Result<axk::app::ImageSessionMutation>
+axk::app::ImageSessionManager::begin_filesystem_mutation(std::string_view image_id, std::string_view owner_id,
+                                                         std::uint64_t expected_revision, PartitionIndex partition) {
+    return begin_mutation_access(image_id, owner_id, expected_revision, partition);
+}
+
+axk::app::Result<axk::app::ImageSessionMutation>
+axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, std::string_view owner_id,
+                                                     std::uint64_t expected_revision,
+                                                     std::optional<PartitionIndex> filesystem_partition) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
     auto access = std::unique_lock{(*session)->access_mutex};
+    if ((*session)->invalidated)
+        return std::unexpected(
+            session_error("image_session_invalidated", "image session requires recovery and reopening"));
     if ((*session)->revision != expected_revision)
         return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
-    if ((*session)->format != "sfs")
+    if (!filesystem_partition && (*session)->format != "sfs")
         return std::unexpected(session_error("image_mutation_unsupported", "only SFS image sessions can be altered"));
     const auto *container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;
-    if (container == nullptr || container->superblock().sector_size_bytes != 512U ||
-        !std::ranges::all_of(container->partitions(),
-                             [](const Partition &partition) { return partition.sectors_per_cluster == 2U; })) {
-        return std::unexpected(session_error("image_mutation_unsupported",
-                                             "image geometry is outside the supported 512-byte alteration profile"));
-    }
-    if (!std::ranges::all_of(container->partitions(), [](const Partition &partition) {
-            return allocation_is_safe_for_mutation(partition.allocation);
-        })) {
-        return std::unexpected(
-            session_error("image_integrity_unsafe",
-                          "image allocation metadata is inconsistent; alteration is disabled to avoid further damage"));
+    if (!(*session)->media)
+        return std::unexpected(session_error("image_media_unavailable", "image session media is unavailable", true));
+    if (filesystem_partition && !container) {
+        const auto &storage = (*session)->media->storage();
+        const auto *fat = std::get_if<FatImage>(&storage);
+        if (const auto *disk = std::get_if<FatDiskImage>(&storage)) {
+            if (filesystem_partition->value >= disk->partitions().size())
+                return std::unexpected(
+                    session_error("filesystem_partition_not_found", "filesystem partition does not exist"));
+            fat = &disk->partitions()[filesystem_partition->value].volume;
+        } else if (filesystem_partition->value != 0U) {
+            return std::unexpected(
+                session_error("filesystem_partition_not_found", "filesystem partition does not exist"));
+        }
+        if (!fat || fat->geometry().profile == FatProfile::a_series_floppy)
+            return std::unexpected(
+                session_error("image_mutation_unsupported", "raw filesystem editing requires SFS or supported FAT16"));
+    } else if (filesystem_partition) {
+        const auto selected = std::ranges::find(container->partitions(), *filesystem_partition, &Partition::index);
+        if (selected == container->partitions().end())
+            return std::unexpected(
+                session_error("filesystem_partition_not_found", "filesystem partition does not exist"));
+        if (!container->backup_superblock_matches() || !selected->backup_header_matches ||
+            !allocation_is_safe_for_mutation(selected->allocation) || !locate_partition_root_record(*selected))
+            return std::unexpected(
+                session_error("image_integrity_unsafe", "filesystem allocation metadata is inconsistent"));
+    } else {
+        if (!container)
+            return std::unexpected(session_error("image_media_unavailable", "SFS image media is unavailable", true));
+        if (container->superblock().sector_size_bytes != 512U ||
+            !std::ranges::all_of(container->partitions(),
+                                 [](const Partition &partition) { return partition.sectors_per_cluster == 2U; })) {
+            return std::unexpected(session_error(
+                "image_mutation_unsupported", "image geometry is outside the supported 512-byte alteration profile"));
+        }
+        if (!std::ranges::all_of(container->partitions(), [](const Partition &partition) {
+                return allocation_is_safe_for_mutation(partition.allocation) &&
+                       locate_partition_root_record(partition).has_value();
+            })) {
+            return std::unexpected(session_error(
+                "image_integrity_unsafe",
+                "image allocation metadata is inconsistent; alteration is disabled to avoid further damage"));
+        }
     }
     if ((*session)->mutating)
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
+    if (auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
+        return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
         return std::unexpected(upgraded.error());
     const FileRef source{(*session)->source.root_id, (*session)->source.relative_path};
@@ -79,9 +143,14 @@ axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::st
         (*session)->path_lease.downgrade();
         return std::unexpected(target.error());
     }
+    if ((*target)->revision() != (*session)->source_revision || !(*target)->verify_unchanged()) {
+        (*session)->path_lease.downgrade();
+        return std::unexpected(session_error("image_source_changed", "image source changed before mutation", true));
+    }
     (*session)->mutating = true;
     (*session)->mutation_guard.emplace(std::move(access));
-    return ImageSessionMutation{(*session)->image_id, (*session)->revision, std::move(source), std::move(*target)};
+    return ImageSessionMutation{(*session)->image_id, (*session)->revision, std::move(source), std::move(*target),
+                                (*session)->media->kind()};
 }
 
 axk::app::Result<axk::app::PreparedImageSessionCommit>
@@ -135,6 +204,23 @@ axk::app::ImageSessionManager::finalize_mutation_commit(PreparedImageSessionComm
     return std::move(prepared.summary);
 }
 
+axk::app::Result<void> axk::app::ImageSessionManager::refresh_rolled_back_mutation(std::string_view image_id,
+                                                                                   std::string_view owner_id,
+                                                                                   std::uint64_t expected_revision) {
+    auto prepared = prepare_mutation_commit(image_id, owner_id, expected_revision);
+    if (!prepared)
+        return std::unexpected(prepared.error());
+    auto current = std::static_pointer_cast<Implementation::Session>(prepared->current_state);
+    auto fresh = std::static_pointer_cast<Implementation::Session>(prepared->refreshed_state);
+    // A byte-exact rollback can still change native timestamps. Refresh only
+    // file access metadata, keeping the same revision and logical identities.
+    current->source_reader = std::move(fresh->source_reader);
+    current->verify_source_unchanged = std::move(fresh->verify_source_unchanged);
+    current->source_revision = std::move(fresh->source_revision);
+    current->content_fingerprint.reset();
+    return {};
+}
+
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::string_view owner_id,
                                                std::uint64_t expected_revision, const CancellationToken &cancellation) {
@@ -145,7 +231,7 @@ axk::app::ImageSessionManager::commit_mutation(std::string_view image_id, std::s
 }
 
 void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, std::string_view owner_id,
-                                                   std::uint64_t expected_revision) noexcept {
+                                                   std::uint64_t expected_revision, bool invalidate_session) noexcept {
     std::shared_ptr<Implementation::Session> session;
     {
         const std::scoped_lock lock{implementation_->mutex};
@@ -156,6 +242,9 @@ void axk::app::ImageSessionManager::abort_mutation(std::string_view image_id, st
     }
     if (!session->mutating || !session->mutation_guard || session->revision != expected_revision)
         return;
+    session->invalidated = invalidate_session;
+    if (invalidate_session)
+        session->auditions.clear();
     session->mutating = false;
     session->path_lease.downgrade();
     session->mutation_guard.reset();

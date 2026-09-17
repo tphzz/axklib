@@ -36,15 +36,17 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
+    import type { WaveformTimeline } from '../waveformTimeline';
     import Waveform from './Waveform.svelte';
 
     interface Props {
         values: readonly WaveformBin[];
+        timeline: WaveformTimeline;
         playheadRatio?: number;
         onvisible?: () => void;
     }
 
-    let { values, playheadRatio = 0, onvisible = () => undefined }: Props = $props();
+    let { values, timeline, playheadRatio = 0, onvisible = () => undefined }: Props = $props();
     let host: HTMLDivElement;
     let visible = $state(typeof IntersectionObserver === 'undefined');
 
@@ -62,6 +64,6 @@
 
 <div class="viewport-waveform" bind:this={host}>
     {#if visible}
-        <Waveform {values} {playheadRatio} />
+        <Waveform {values} {timeline} {playheadRatio} />
     {/if}
 </div>

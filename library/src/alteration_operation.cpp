@@ -10,6 +10,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"insert_volume"},
         std::string_view{"delete_sbnk"},
         std::string_view{"insert_sbnk"},
+        std::string_view{"update_sbnk_parameters"},
         std::string_view{"insert_waveform"},
         std::string_view{"delete_waveform"},
         std::string_view{"rename_waveform"},
@@ -29,6 +30,11 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"repair_object_placements"},
         std::string_view{"import_tx16w_disk_set"},
         std::string_view{"clear_program_assignments"},
+        std::string_view{"update_program_parameters"},
+        std::string_view{"update_sample_bank_parameters"},
+        std::string_view{"update_wave_data_parameters"},
+        std::string_view{"replace_program_assignments"},
+        std::string_view{"retarget_sample_wave_data"},
     };
     return names[operation.index()];
 }

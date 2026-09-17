@@ -1,3 +1,10 @@
+#include <cstddef>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <utility>
+
 #include "media_test_fixtures.hpp"
 
 #include "axklib/writer_internal.hpp"
@@ -193,6 +200,41 @@ TEST(Fat12Reader, ExportSkipsInvalidWaveformAndRetainsValidWaveforms) {
     EXPECT_NE(plan->decode_errors.front().find("PCM span"), std::string::npos);
 }
 
+TEST(Fat12Reader, ExportSkipsUnsupportedTransferControlWithoutWritingItsAudio) {
+    auto bytes = fat_fixture_with_invalid_then_valid_waveform();
+    constexpr std::size_t first_object = 4U * 512U;
+    be32(bytes, first_object + 0x10U, 0xacU);
+    bytes[first_object + 0x84U] = std::byte{0x31};
+    const auto image = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(bytes)), "transfer.ima");
+    ASSERT_TRUE(image);
+    const axk::MediaContainer media{*image};
+    const auto catalog = axk::build_object_catalog(media);
+    ASSERT_TRUE(catalog);
+    EXPECT_EQ(catalog->objects.size(), 2U);
+    const auto plan = axk::build_export_plan(media, *catalog, axk::build_relationship_graph(*catalog));
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_EQ(plan->volumes.size(), 1U);
+    ASSERT_EQ(plan->volumes.front().waveforms.size(), 1U);
+    EXPECT_EQ(plan->volumes.front().waveforms.front().display_name, "VALID");
+    ASSERT_EQ(plan->decode_errors.size(), 1U);
+    EXPECT_NE(plan->decode_errors.front().find("TEST"), std::string::npos);
+    EXPECT_NE(plan->decode_errors.front().find("0x31"), std::string::npos);
+    const auto output = std::filesystem::temp_directory_path() / "axklib-transfer-profile-export";
+    std::error_code error;
+    std::filesystem::remove_all(output, error);
+    const auto exported = axk::write_export_audio(*plan, output);
+    ASSERT_TRUE(exported) << exported.error().message;
+    ASSERT_EQ(exported->written_files.size(), 1U);
+    EXPECT_EQ(exported->written_files.front().filename(), "VALID.wav");
+    std::size_t wav_count{};
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(output)) {
+        if (entry.path().extension() == ".wav")
+            ++wav_count;
+    }
+    EXPECT_EQ(wav_count, 1U);
+    std::filesystem::remove_all(output, error);
+}
+
 TEST(Fat12Reader, ContentTreeRetainsAnEmptyFatRoot) {
     auto image = fat_fixture();
     image[3U * 512U] = std::byte{0};
@@ -226,7 +268,7 @@ TEST(Fat12Reader, ReadsSubdirectoriesAndRejectsCrossLinkedFiles) {
     EXPECT_EQ(invalid.error().code, axk::ErrorCode::allocation_invalid_extent);
 }
 
-TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
+TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndInvalidFat16Geometry) {
     auto loop = fat_fixture(2);
     auto result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(loop)), "loop.ima");
     ASSERT_FALSE(result);
@@ -254,7 +296,7 @@ TEST(Fat12Reader, RejectsLoopsBadClustersTruncationDuplicatesAndNonFat12) {
     fat16.resize(5000U * 512U);
     result = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(fat16)), "fat16.img");
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().code, axk::ErrorCode::unsupported_profile);
+    EXPECT_EQ(result.error().code, axk::ErrorCode::container_invalid_geometry);
 
     auto traversal = fat_fixture();
     traversal[3U * 512U + 2U] = std::byte{'/'};

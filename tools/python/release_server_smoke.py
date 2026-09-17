@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 
@@ -35,6 +35,10 @@ def wait_for_connection(path: Path, process: subprocess.Popen[bytes]) -> dict[st
             return document
         time.sleep(0.02)
     raise RuntimeError("axklib-server did not publish a connection file")
+
+
+class ApiClient(Protocol):
+    def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> tuple[int, Any]: ...
 
 
 class Client:
@@ -79,7 +83,7 @@ def info_request_for_file(root_id: str, relative_path: str) -> dict[str, Any]:
     }
 
 
-def wait_for_job(client: Client, job_id: str) -> dict[str, Any]:
+def wait_for_job(client: ApiClient, job_id: str) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         document = require_status(client.request("GET", f"/jobs/{job_id}"), 200, "job status")

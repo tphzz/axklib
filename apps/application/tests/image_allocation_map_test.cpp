@@ -14,8 +14,8 @@ TEST(ImageAllocationMap, ProducesExhaustiveRunsAndReportsScatteredData) {
     partition.sectors_per_cluster = 2U;
     partition.directory_index_cluster = 2U;
     partition.directory_index_span_clusters = 1U;
-    partition.allocation.fixed_location.used_cluster_ranges = {{3U, 4U}, {8U, 8U}};
-    partition.allocation.header_addressed.used_cluster_ranges = partition.allocation.fixed_location.used_cluster_ranges;
+    partition.allocation.bitmap_copy1.used_cluster_ranges = {{3U, 4U}, {8U, 8U}};
+    partition.allocation.bitmap_copy2.used_cluster_ranges = partition.allocation.bitmap_copy1.used_cluster_ranges;
     axk::IndexRecord record;
     record.sfs_id = axk::SfsId{7U};
     record.data_size = 2'500U;
@@ -94,8 +94,8 @@ TEST(ImageAllocationMap, IdentifiesFilesystemDirectoriesAndSupportFiles) {
     partition.sectors_per_cluster = 2U;
     partition.directory_index_cluster = 1U;
     partition.directory_index_span_clusters = 1U;
-    partition.allocation.fixed_location.used_cluster_ranges = {{2U, 4U}};
-    partition.allocation.header_addressed.used_cluster_ranges = partition.allocation.fixed_location.used_cluster_ranges;
+    partition.allocation.bitmap_copy1.used_cluster_ranges = {{2U, 4U}};
+    partition.allocation.bitmap_copy2.used_cluster_ranges = partition.allocation.bitmap_copy1.used_cluster_ranges;
 
     axk::IndexRecord support;
     support.sfs_id = axk::SfsId{0U};
@@ -106,8 +106,10 @@ TEST(ImageAllocationMap, IdentifiesFilesystemDirectoriesAndSupportFiles) {
     root.payload_kind = axk::PayloadKind::directory;
     root.directory_id = axk::LinkId{1U};
     root.parent_directory_id = axk::LinkId{1U};
-    root.directory_entries = {
-        {.flags = 0x20U, .raw_link_id = axk::LinkId{0U}, .target_link_id = axk::LinkId{0U}, .name = "sfserram"}};
+    root.directory_entries = {{.entry_size_bytes = 0x20U,
+                               .raw_link_id = axk::LinkId{0U},
+                               .target_link_id = axk::LinkId{0U},
+                               .name = "sfserram"}};
     root.extents = {{4U, 1U, 128U}};
     partition.records = {support, root};
 
@@ -137,8 +139,9 @@ TEST(ImageAllocationMap, DistinguishesBitmapMismatchesAndMultipleClaims) {
     partition.sectors_per_cluster = 2U;
     partition.directory_index_cluster = 1U;
     partition.directory_index_span_clusters = 1U;
-    partition.allocation.fixed_location.used_cluster_ranges = {{0U, 2U}};
-    partition.allocation.header_addressed.used_cluster_ranges = {{0U, 1U}, {3U, 3U}};
+    partition.allocation.bitmap_copy1.used_cluster_ranges = {{0U, 2U}};
+    partition.allocation.bitmap_copy2.used_cluster_ranges = {{0U, 1U}, {3U, 3U}};
+    partition.allocation.active_bitmap_copy = 2U;
     axk::IndexRecord first;
     first.sfs_id = axk::SfsId{1U};
     first.extents = {{2U, 1U, 512U}};
@@ -154,4 +157,11 @@ TEST(ImageAllocationMap, DistinguishesBitmapMismatchesAndMultipleClaims) {
     EXPECT_EQ(map->summary.claimed_but_free_clusters, 1U);
     EXPECT_EQ(map->summary.used_without_claim_clusters, 3U);
     EXPECT_EQ(map->summary.conflicting_clusters, 1U);
+
+    partition.allocation.active_bitmap_copy = 1U;
+    const auto selected_first = axk::app::build_image_allocation_map(partition, {}, 512U);
+    ASSERT_TRUE(selected_first);
+    EXPECT_EQ(selected_first->summary.claimed_but_free_clusters, 0U);
+    EXPECT_EQ(selected_first->summary.used_without_claim_clusters, 2U);
+    EXPECT_EQ(selected_first->summary.bitmap_copy_mismatch_clusters, 2U);
 }

@@ -326,10 +326,18 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             return conflict.code == "SFS_RECORD_CAPACITY_EXHAUSTED" && conflict.partition_index &&
                    *conflict.partition_index == destination.partition_index;
         });
+        // A blocked review may retain partial reservations, but it cannot be applied.
+        const auto cluster_capacity_exhausted = std::ranges::any_of(plan.conflicts, [&](const auto &conflict) {
+            return conflict.code == "SFS_CLUSTER_EXHAUSTED" && conflict.partition_index &&
+                   *conflict.partition_index == destination.partition_index &&
+                   conflict.volume_name == destination.volume_name && conflict.node_id.empty();
+        });
         const auto valid_creation =
             !destination.create ||
             (plan.target_kind == MediaKind::sfs && destination.infrastructure_sfs_ids.size() == 6U &&
-             destination.infrastructure_clusters == 12U &&
+             (destination.infrastructure_clusters == 12U ||
+              (cluster_capacity_exhausted && destination.infrastructure_clusters < 12U &&
+               destination.infrastructure_clusters % 2U == 0U)) &&
              (destination.root_directory_growth_bytes == 0U || destination.root_directory_growth_bytes == 32U)) ||
             (plan.target_kind == MediaKind::sfs && !has_infrastructure && record_capacity_exhausted) ||
             (plan.target_kind == MediaKind::iso9660 && !has_infrastructure);
@@ -407,7 +415,7 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             adjustment.adjustment_id != package_import_internal::program_assignment_adjustment_identity(adjustment) ||
             !adjustment_ids.emplace(adjustment.adjustment_id).second || row_owner.empty() ||
             !adjusted_rows.emplace(row_owner, adjustment.assignment_ordinal).second ||
-            adjustment.program_slot.empty() || adjustment.assignment_ordinal >= 128U ||
+            adjustment.program_slot.empty() || adjustment.assignment_ordinal >= maximum_stored_program_assignments ||
             (adjustment.target_object_type != "SBAC" && adjustment.target_object_type != "SBNK") ||
             adjustment.target_name.empty() || adjustment.reason_code != "UNRESOLVED_PROGRAM_ASSIGNMENT_COLLISION" ||
             adjustment.disposition != PackageProgramAssignmentDisposition::clear_assignment ||

@@ -1,4 +1,6 @@
 import { HttpImageTransport } from './httpTransport';
+import type { FilesystemPage } from './filesystem';
+import type { FilesystemExportInspection } from './filesystemExport';
 import type {
     ImageTransport,
     ImageSessionPackageImportPlan,
@@ -16,6 +18,7 @@ import type {
     HardDiskCreationProfile,
     JobState,
     ObjectPage,
+    ObjectDetail,
     ObjectDeletionInspection,
     OpenedImage,
     ImageValidationIssue,
@@ -35,6 +38,45 @@ import type {
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    startFloppyInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    releaseFloppyInspection(): Promise<void> {
+        return this.unavailable();
+    }
+    planFloppyImport(): Promise<ImageSessionPackageImportPlan> {
+        return this.unavailable();
+    }
+    startFloppyImport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startSu700Import(): Promise<JobState> {
+        return Promise.reject(new Error('No server connection'));
+    }
+    startFilesystemImportInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startFilesystemInputInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startFilesystemImageInspection(): Promise<JobState> {
+        return this.unavailable();
+    }
+    releaseFilesystemImageInspection(): Promise<void> {
+        return this.unavailable();
+    }
+    inspectFilesystemExport(): Promise<FilesystemExportInspection> {
+        return this.unavailable();
+    }
+    startFilesystemExport(): Promise<JobState> {
+        return this.unavailable();
+    }
+    filesystem(): Promise<FilesystemPage> {
+        return this.unavailable();
+    }
+    startFilesystemEdits(): Promise<JobState> {
+        return this.unavailable();
+    }
     readonly storageMode = 'unavailable' as const;
     readonly connectionMode = 'unavailable' as const;
     readonly supportsClientUploads = false;
@@ -194,6 +236,9 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     objectPage(): Promise<ObjectPage> {
+        return this.unavailable();
+    }
+    objectDetail(): Promise<ObjectDetail> {
         return this.unavailable();
     }
     relationshipPage(): Promise<RelationshipPage> {

@@ -1,7 +1,11 @@
 #include "filesystem_internal.hpp"
 
 axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &destination, bool overwrite,
-                                                            const std::filesystem::path &staging) const {
+                                                            const std::filesystem::path &staging,
+                                                            const CancellationToken &cancellation) const {
+    const auto cancelled = [] { return Error{"operation_cancelled", "Directory publication cancelled"}; };
+    if (cancellation.is_cancelled())
+        return std::unexpected(cancelled());
     struct StagedEntry {
         std::filesystem::path source;
         std::filesystem::path relative;
@@ -16,6 +20,8 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
     std::vector<StagedEntry> entries;
     for (std::filesystem::recursive_directory_iterator iterator{staging, error}, end; iterator != end && !error;
          iterator.increment(error)) {
+        if (cancellation.is_cancelled())
+            return std::unexpected(cancelled());
         const auto status = iterator->symlink_status(error);
         if (error || std::filesystem::is_symlink(status) ||
             (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status))) {
@@ -72,6 +78,10 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                 SetFileInformationByHandle(staged->get(), FileDispositionInfo, &disposition, sizeof(disposition)));
         };
         for (const auto &entry : entries) {
+            if (cancellation.is_cancelled()) {
+                discard_staged();
+                return std::unexpected(cancelled());
+            }
             auto entry_parent = open_parent(staged->get(), entry.relative.parent_path(), destination.relative_path);
             if (!entry_parent) {
                 discard_staged();
@@ -102,6 +112,11 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
                 std::max<std::uint64_t>(1U, std::min<std::uint64_t>(1024U * 1024U, (*input)->size()))));
             std::uint64_t offset{};
             while (offset < (*input)->size()) {
+                if (cancellation.is_cancelled()) {
+                    output->reset();
+                    discard_staged();
+                    return std::unexpected(cancelled());
+                }
                 const auto count =
                     static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
                 if (const auto read = (*input)->read_exact_at(offset, std::span{buffer}.first(count)); !read) {
@@ -124,6 +139,10 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
             }
         }
 
+        if (cancellation.is_cancelled()) {
+            discard_staged();
+            return std::unexpected(cancelled());
+        }
         auto existing =
             open_relative(parent->get(), relative->filename(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | DELETE,
                           FILE_OPEN, FILE_DIRECTORY_FILE, destination.relative_path);
@@ -209,6 +228,11 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
         const auto staged_identity = object_identity(staged_status);
         const auto discard_staged = [&] { static_cast<void>(delete_tree_at(**parent, temporary, staged_identity)); };
         for (const auto &entry : entries) {
+            if (cancellation.is_cancelled()) {
+                staged.reset();
+                discard_staged();
+                return std::unexpected(cancelled());
+            }
             auto entry_parent = open_parent(*staged, entry.relative.parent_path(), destination.relative_path);
             if (!entry_parent) {
                 staged.reset();
@@ -240,6 +264,12 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
             std::uint64_t offset{};
             bool failed{};
             while (offset < (*input)->size() && !failed) {
+                if (cancellation.is_cancelled()) {
+                    ::close(output);
+                    staged.reset();
+                    discard_staged();
+                    return std::unexpected(cancelled());
+                }
                 const auto count =
                     static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(), (*input)->size() - offset));
                 if (const auto read = (*input)->read_exact_at(offset, std::span{buffer}.first(count)); !read) {
@@ -276,6 +306,10 @@ axk::app::Result<void> axk::app::Sandbox::publish_directory(const DirectoryRef &
         }
         staged.reset();
 
+        if (cancellation.is_cancelled()) {
+            discard_staged();
+            return std::unexpected(cancelled());
+        }
         struct stat destination_status{};
         const auto destination_exists =
             ::fstatat(**parent, relative->filename().c_str(), &destination_status, AT_SYMLINK_NOFOLLOW) == 0;

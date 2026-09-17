@@ -26,6 +26,8 @@
     import PackageExportDialog from '../../lib/components/PackageExportDialog.svelte';
     import ExportProgressDialog from '../../lib/components/ExportProgressDialog.svelte';
     import PackageImportDialog from '../../lib/components/PackageImportDialog.svelte';
+    import FloppyImportDialog from '../../lib/components/FloppyImportDialog.svelte';
+    import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
     import PackageBatchImportDialog from '../../lib/components/PackageBatchImportDialog.svelte';
     import PlacementRepairDialog from '../../lib/components/PlacementRepairDialog.svelte';
     import ProgramGenerationDialog from '../../lib/components/ProgramGenerationDialog.svelte';
@@ -77,6 +79,7 @@
         closeConnectionSettings: () => void;
         mutation: MutationWorkflow;
         packageImport: PackageImportWorkflow;
+        floppyImport: FloppyImportWorkflow;
         packageBatchImport: PackageBatchImportWorkflow;
         exports: ExportWorkflow;
         volumePackages: VolumePackageExportWorkflow;
@@ -115,6 +118,7 @@
         closeConnectionSettings,
         mutation,
         packageImport,
+        floppyImport,
         packageBatchImport,
         exports,
         volumePackages,
@@ -247,8 +251,13 @@
         onsubmit={(target) => void mutation.submitSampleBankAssignment(target)}
     />
 {/if}
+{#if floppyImport.request && pickerRequest?.parentDialog !== 'floppy-import'}<FloppyImportDialog
+        workflow={floppyImport}
+    />{/if}
 {#if packageImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-import', packageImport.request.status !== 'choosing' || Boolean(packageImport.request.sourceName || packageImport.request.error))}
     <PackageImportDialog
+        completion={packageImport.completion}
+        onrecover={() => void packageImport.recoverCompletion()}
         targetName={packageImport.targetName()}
         destinationMode={packageImport.request.destinationMode}
         destinationPartitionIndex={packageImport.request.destinationPartitionIndex}
@@ -286,6 +295,8 @@
 {/if}
 {#if packageBatchImport.request && pickerRequest?.parentDialog !== 'package-import' && directChoiceVisible('package-batch-import', packageBatchImport.request.status !== 'choosing' || packageBatchImport.request.items.length > 0 || Boolean(packageBatchImport.request.error))}
     <PackageBatchImportDialog
+        completion={packageBatchImport.completion}
+        onrecover={() => void packageBatchImport.recoverCompletion()}
         desktop={isDesktop}
         canChangeSources={packageBatchImport.request.canChangeSources}
         items={packageBatchImport.request.items}
@@ -500,6 +511,7 @@
 {/if}
 {#if audioImport.request && pickerRequest?.parentDialog !== 'audio-import' && directChoiceVisible('audio-import', audioImport.request.files.length > 0)}
     <AudioImportDialog
+        completion={audioImport.completion}
         {transport}
         files={audioImport.request.files}
         target={audioImport.destination()}
@@ -520,12 +532,13 @@
             void audioImport.setExistingVolume(partitionIndex, volumeName)}
         ondestinationpartition={(partitionIndex) => audioImport.setDestinationPartition(partitionIndex)}
         ondestinationname={(volumeName) => audioImport.setDestinationVolumeName(volumeName)}
-        oncommit={(items, grouping) => audioImport.commit(items, grouping)}
+        oncommit={(items, grouping, reviewedWarnings) => audioImport.commit(items, grouping, reviewedWarnings)}
         oncancel={() => (audioImport.request = null)}
     />
 {/if}
 {#if sequenceImport.request && pickerRequest?.parentDialog !== 'sequence-import' && directChoiceVisible('sequence-import', sequenceImport.request.files.length > 0)}
     <MidiImportDialog
+        completion={sequenceImport.completion}
         {transport}
         files={sequenceImport.request.files}
         target={sequenceImport.destination()}
@@ -551,6 +564,8 @@
 {/if}
 {#if tx16wImport.request}
     <Tx16wImportDialog
+        completion={tx16wImport.completion}
+        onrecover={() => void tx16wImport.recoverCompletion()}
         request={tx16wImport.request}
         volumeOptions={tx16wImport.volumeOptions()}
         ontarget={(target) => void tx16wImport.selectTarget(target)}
@@ -574,13 +589,13 @@
         {#if mediaDrop.dragKind === 'mixed'}
             <strong>Drop one media type at a time</strong>
             <span>Use one media type per drop</span>
-        {:else if mediaDrop.dragKind === 'tx16w'}
+        {:else if mediaDrop.dragKind === 'floppy'}
             <strong
                 >{mediaDrop.dragTarget
-                    ? `Import TX16W disk set into ${mediaDrop.dragTarget.volumeName}`
-                    : 'Choose a target volume after dropping'}</strong
+                    ? `Import floppy into ${mediaDrop.dragTarget.volumeName}`
+                    : 'Import floppy images'}</strong
             >
-            <span>One or more TX16W Yamaha-format disk images (.img, .ima)</span>
+            <span>Floppy image or companion disk set (.img, .ima)</span>
         {:else if mediaDrop.dragKind === 'midi'}
             <strong
                 >{mediaDrop.dragTarget

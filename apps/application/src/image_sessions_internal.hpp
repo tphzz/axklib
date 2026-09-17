@@ -29,6 +29,7 @@
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/utf8.hpp"
+#include "image_filesystem_internal.hpp"
 
 namespace axk::app::image_sessions_internal {
 
@@ -89,9 +90,13 @@ struct axk::app::ImageSessionManager::Implementation {
     struct PcmMember {
         std::string object_id;
         std::string role;
-        bool alternating_byte{};
         std::uint16_t output_width{};
         std::uint32_t sample_rate{};
+        std::uint64_t stored_frame_count{};
+        std::uint64_t playback_start_frame{};
+        std::uint64_t playback_length_frames{};
+        std::uint64_t source_loop_start{};
+        std::uint64_t source_loop_length{};
         std::uint64_t physical_first_frame{};
         std::uint64_t frame_count{};
         std::uint64_t loop_start{};
@@ -104,6 +109,8 @@ struct axk::app::ImageSessionManager::Implementation {
         std::string loop_mode_label;
         std::vector<std::string> warnings;
     };
+
+    enum class PcmReadWindow : std::uint8_t { stored_pcm, playback };
 
     struct AuditionEntry {
         ImageAudition descriptor;
@@ -128,8 +135,11 @@ struct axk::app::ImageSessionManager::Implementation {
         std::vector<ImageValidationItem> validation;
         std::shared_ptr<const RandomAccessReader> source_reader;
         std::function<Result<void>()> verify_source_unchanged;
-        std::string target_snapshot_id;
+        std::string source_revision;
+        std::optional<std::string> content_fingerprint;
+        std::mutex fingerprint_mutex;
         std::optional<MediaContainer> media;
+        std::optional<detail::ImageFilesystemIndex> filesystem_index;
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors_by_id;
         std::unordered_map<std::string, ObjectSnapshot> snapshots_by_id;
         std::unordered_map<std::string, axk::WaveformStatus> waveform_status_by_id;
@@ -139,6 +149,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::size_t root_count{};
         std::uint64_t revision{1U};
         bool mutating{};
+        bool invalidated{};
         std::mutex access_mutex;
         std::optional<std::unique_lock<std::mutex>> mutation_guard;
         std::chrono::steady_clock::time_point last_access;
@@ -227,6 +238,9 @@ struct axk::app::ImageSessionManager::Implementation {
         }
         {
             const std::scoped_lock lock{result->access_mutex};
+            if (result->invalidated)
+                return std::unexpected(
+                    session_error("image_session_invalidated", "image session requires recovery and reopening"));
             result->last_access = clock();
         }
         return result;
@@ -341,8 +355,10 @@ struct axk::app::ImageSessionManager::Implementation {
         current.validation = std::move(fresh.validation);
         current.source_reader = std::move(fresh.source_reader);
         current.verify_source_unchanged = std::move(fresh.verify_source_unchanged);
-        current.target_snapshot_id = std::move(fresh.target_snapshot_id);
+        current.source_revision = std::move(fresh.source_revision);
+        current.content_fingerprint.reset();
         current.media = std::move(fresh.media);
+        current.filesystem_index.reset();
         current.descriptors_by_id = std::move(fresh.descriptors_by_id);
         current.snapshots_by_id = std::move(fresh.snapshots_by_id);
         current.waveform_status_by_id = std::move(fresh.waveform_status_by_id);
@@ -379,14 +395,15 @@ struct axk::app::ImageSessionManager::Implementation {
                                                      const CancellationToken &cancellation) const;
 
     Result<PcmMember> prepare_member(Session &session, std::string object_id, std::string role,
-                                     const CurrentSbnkMember *sample_member,
-                                     const CancellationToken &cancellation) const {
+                                     const CurrentSbnkMember *sample_member, PcmReadWindow read_window) const {
         const auto snapshot = session.snapshots_by_id.find(object_id);
         if (snapshot == session.snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "Wave Data object does not exist"));
         const auto *smpl = std::get_if<CurrentSmpl>(&snapshot->second.object.payload);
         if (smpl == nullptr)
             return std::unexpected(session_error("audition_unsupported", "audition requires SMPL Wave Data"));
+        if (const auto profile = validate_smpl_pcm_transfer_control(*smpl); !profile)
+            return std::unexpected(session_error("audition_unsupported", profile.error().message));
         if (smpl->stored_segment_offset != 0U || smpl->stored_segment_bytes != smpl->stored_pcm_bytes) {
             return std::unexpected(session_error(
                 "companion_disks_required",
@@ -400,42 +417,35 @@ struct axk::app::ImageSessionManager::Implementation {
             return std::unexpected(
                 session_error("invalid_audio_range", "Wave Data PCM size is not aligned to its sample width"));
         const auto physical_frame_count = smpl->stored_pcm_bytes / smpl->stored_sample_width_bytes.value;
-        const auto used_first_frame = sample_member == nullptr ? 0U : sample_member->wave_start_frame;
-        const auto used_frame_count =
-            sample_member == nullptr ? physical_frame_count : sample_member->wave_length_frames;
-        if (used_frame_count == 0U)
-            return std::unexpected(session_error("audition_unsupported", "Sample playback window is empty"));
-        if (used_first_frame > physical_frame_count || used_frame_count > physical_frame_count - used_first_frame)
+        const auto playback_first_frame =
+            sample_member ? sample_member->wave_start_frame : smpl->wave_start_frame.value;
+        const auto playback_frame_count =
+            sample_member ? sample_member->wave_length_frames : smpl->wave_length_frames.value;
+        const auto window_owner = sample_member == nullptr ? "Wave Data" : "Sample";
+        if (playback_frame_count == 0U) {
             return std::unexpected(
-                session_error("invalid_audio_range", "Sample playback window exceeds the linked Wave Data"));
-        bool alternating = smpl->stored_sample_width_bytes.value == 2U && smpl->stored_pcm_bytes >= 2U;
-        constexpr std::size_t chunk_size = 64U * 1024U;
-        for (std::uint64_t offset = 0U; alternating && offset < smpl->stored_pcm_bytes; offset += chunk_size) {
-            const auto count =
-                static_cast<std::size_t>(std::min<std::uint64_t>(chunk_size, smpl->stored_pcm_bytes - offset));
-            auto bytes = read_object_range(session, object_id, smpl->stored_pcm_offset + offset, count, cancellation);
-            if (!bytes)
-                return std::unexpected(bytes.error());
-            for (std::size_t index = 1U; index < bytes->size(); index += 2U) {
-                const auto absolute = offset + index;
-                const auto expected = absolute % 4U == 1U ? 0x55U : 0xaaU;
-                if (std::to_integer<std::uint8_t>((*bytes)[index]) != expected) {
-                    alternating = false;
-                    break;
-                }
-            }
+                session_error("audition_unsupported", std::format("{} playback window is empty", window_owner)));
         }
-        const auto output_width = static_cast<std::uint16_t>(alternating ? 1U : smpl->stored_sample_width_bytes.value);
+        if (playback_first_frame > physical_frame_count ||
+            playback_frame_count > physical_frame_count - playback_first_frame) {
+            return std::unexpected(
+                session_error("invalid_audio_range",
+                              std::format("{} playback window exceeds the stored Wave Data PCM", window_owner)));
+        }
+        const auto used_first_frame = read_window == PcmReadWindow::playback ? playback_first_frame : 0U;
+        const auto used_frame_count =
+            read_window == PcmReadWindow::playback ? playback_frame_count : physical_frame_count;
         return PcmMember{.object_id = std::move(object_id),
                          .role = std::move(role),
-                         .alternating_byte = alternating,
-                         .output_width = output_width,
+                         .output_width = smpl->stored_sample_width_bytes.value,
+                         .stored_frame_count = physical_frame_count,
+                         .playback_start_frame = playback_first_frame,
+                         .playback_length_frames = playback_frame_count,
                          .physical_first_frame = used_first_frame,
                          .frame_count = used_frame_count};
     }
 
-    Result<PcmSource> prepare_source(Session &session, std::string_view object_id,
-                                     const CancellationToken &cancellation) const {
+    Result<PcmSource> prepare_source(Session &session, std::string_view object_id, PcmReadWindow read_window) const {
         const auto snapshot = session.snapshots_by_id.find(std::string{object_id});
         if (snapshot == session.snapshots_by_id.end())
             return std::unexpected(session_error("object_not_found", "image object does not exist"));
@@ -502,7 +512,7 @@ struct axk::app::ImageSessionManager::Implementation {
             sample ? sample->loop_mode_label : std::get<CurrentSmpl>(snapshot->second.object.payload).loop_mode_label;
         for (auto &pending : pending_members) {
             auto member = prepare_member(session, std::move(pending.object_id), std::move(pending.role),
-                                         pending.sample_member, cancellation);
+                                         pending.sample_member, read_window);
             if (!member)
                 return std::unexpected(member.error());
             const auto &member_snapshot = session.snapshots_by_id.at(member->object_id);
@@ -512,20 +522,21 @@ struct axk::app::ImageSessionManager::Implementation {
             if (sample_rate == 0U)
                 return std::unexpected(session_error("audition_unsupported", "Sample playback rate is zero"));
             member->sample_rate = sample_rate;
-            if (pending.sample_member) {
-                if (pending.sample_member->loop_start_frame < pending.sample_member->wave_start_frame) {
-                    source.warnings.emplace_back(
-                        "Sample loop starts before its playback window; playback will use one-shot mode");
-                    source.loop_mode = 0U;
-                    source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
-                } else {
-                    member->loop_start =
-                        pending.sample_member->loop_start_frame - pending.sample_member->wave_start_frame;
-                    member->loop_length = pending.sample_member->loop_length_frames;
-                }
+            member->source_loop_start =
+                pending.sample_member ? pending.sample_member->loop_start_frame : smpl.loop_start_frame.value;
+            member->source_loop_length =
+                pending.sample_member ? pending.sample_member->loop_length_frames : smpl.loop_length_frames.value;
+            if (member->source_loop_start < member->playback_start_frame) {
+                source.warnings.emplace_back(
+                    std::format("{} loop starts before its playback window; playback will use one-shot mode",
+                                pending.sample_member ? "Sample" : "Wave Data"));
+                source.loop_mode = 0U;
+                source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
             } else {
-                member->loop_start = smpl.loop_start_frame.value;
-                member->loop_length = smpl.loop_length_frames.value;
+                member->loop_start = read_window == PcmReadWindow::playback
+                                         ? member->source_loop_start - member->playback_start_frame
+                                         : member->source_loop_start;
+                member->loop_length = member->source_loop_length;
             }
             if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
                 (member->loop_length == 0U || member->loop_start >= member->frame_count ||
@@ -590,15 +601,6 @@ struct axk::app::ImageSessionManager::Implementation {
                               frame_count * stored_width, cancellation);
         if (!stored)
             return std::unexpected(stored.error());
-        if (member.alternating_byte) {
-            std::vector<std::byte> result;
-            result.reserve(frame_count);
-            for (std::size_t offset = 0U; offset < stored->size(); offset += 2U) {
-                result.push_back(
-                    static_cast<std::byte>((std::to_integer<std::uint8_t>((*stored)[offset]) + 128U) & 0xffU));
-            }
-            return result;
-        }
         if (stored_width == 2U) {
             for (std::size_t offset = 0U; offset < stored->size(); offset += 2U)
                 std::swap((*stored)[offset], (*stored)[offset + 1U]);

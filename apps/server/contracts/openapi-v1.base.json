@@ -256,6 +256,121 @@
         "responses": {"204": {"description": "Temporary archive deleted"}, "404": {"description": "Archive absent, expired, or owned by another principal"}, "409": {"description": "Archive transfer is still active"}}
       }
     },
+    "/images/{imageId}/filesystem": {
+      "parameters": [
+        {
+          "name": "imageId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "expectedRevision",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        {
+          "name": "parentId",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        {
+          "name": "rootId",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        {
+          "name": "entryId",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        {
+          "name": "objectId",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        {
+          "name": "contentScopeId",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 512
+          }
+        },
+        {
+          "name": "query",
+          "in": "query",
+          "schema": {
+            "type": "string",
+            "maxLength": 256
+          }
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "schema": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        {
+          "$ref": "#/components/parameters/PageLimit"
+        }
+      ],
+      "get": {
+        "operationId": "images.filesystem",
+        "responses": {
+          "200": {
+            "description": "Read-only stored filesystem entries, independent of sampler relationships",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ImageFilesystemPage"
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "requestId"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/images/{imageId}": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}}
@@ -312,6 +427,22 @@
             "description": "Bounded decoded object metadata page",
             "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageObjectPageResponse"}}}
           }
+        }
+      }
+    },
+    "/images/{imageId}/objects/{objectId}": {
+      "parameters": [
+        {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
+        {"name": "objectId", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}}
+      ],
+      "get": {
+        "operationId": "images.object",
+        "responses": {
+          "200": {
+            "description": "Complete decoded object metadata and direct relationships without content payload bytes",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ImageObjectDetailResponse"}}}
+          },
+          "404": {"description": "Image object not found"}
         }
       }
     },
@@ -528,6 +659,180 @@
       "bearerAuth": {"type": "http", "scheme": "bearer"}
     },
     "schemas": {
+      "ImageFilesystemAttribute": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "label", "value", "description", "summary"],
+        "properties": {
+          "code": {"type": "string", "description": "Stable native attribute identity, independent of display text."},
+          "label": {"type": "string"},
+          "value": {"type": "string"},
+          "description": {"type": "string"},
+          "summary": {"type": "string", "description": "Compact display text. Empty for storage-only attributes."}
+        }
+      },
+      "ImageFilesystemEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "parentId",
+          "rootId",
+          "ancestorIds",
+          "name",
+          "path",
+          "kind",
+          "sizeBytes",
+          "childCount",
+          "objectId",
+          "contentScopeId",
+          "interpretation",
+          "storage",
+          "issue",
+          "filesystemMetadata",
+          "rawAttributes",
+          "attributes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rootId": {
+            "type": "string"
+          },
+          "ancestorIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ROOT",
+              "PARTITION",
+              "DIRECTORY",
+              "FILE"
+            ]
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "childCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "objectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contentScopeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "interpretation": {
+            "type": "string"
+          },
+          "storage": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "filesystemMetadata": {
+            "type": "boolean"
+          },
+          "rawAttributes": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ImageFilesystemAttribute" }
+          }
+        }
+      },
+      "ImageFilesystemRootCapabilities": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "maximumNameBytes", "namePolicy", "namePattern", "nameHint", "supportedImports"],
+        "properties": {
+          "rootId": {"type": "string"},
+          "createDirectory": {"type": "boolean"},
+          "putFile": {"type": "boolean"},
+          "deleteEntry": {"type": "boolean"},
+          "renameEntry": {"type": "boolean"},
+          "maximumNameBytes": {"type": "integer", "minimum": 0},
+          "namePolicy": {"type": "string", "enum": ["PRESERVE", "FAT_8_3_UPPERCASE"]},
+          "supportedImports": {"type": "array", "items": {"type": "string", "enum": ["SU700_FLOPPY", "FAT_FLOPPY_CONTENTS"]}, "uniqueItems": true},
+          "namePattern": {"type": "string"},
+          "nameHint": {"type": "string"}
+        }
+      },
+      "ImageFilesystemPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "available",
+          "filesystemName",
+          "deviceView",
+          "items",
+          "totalCount",
+          "rootCapabilities"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "filesystemName": {
+            "type": "string"
+          },
+          "deviceView": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageFilesystemEntry"
+            }
+          },
+          "rootCapabilities": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/ImageFilesystemRootCapabilities"}
+          },
+          "totalCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "FileRef": {
         "type": "object",
         "additionalProperties": false,
@@ -830,7 +1135,7 @@
         "required": ["filename", "kind", "mediaType", "size"],
         "properties": {
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE", "FILE"]},
           "mediaType": {"type": "string", "minLength": 1},
           "size": {"type": "integer", "minimum": 0},
           "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
@@ -843,7 +1148,7 @@
         "properties": {
           "uploadId": {"type": "string", "minLength": 1},
           "filename": {"type": "string", "minLength": 1},
-          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE"]},
+          "kind": {"enum": ["AUDIO", "MIDI", "PACKAGE", "MANIFEST", "DISK_IMAGE", "FILE"]},
           "mediaType": {"type": "string", "minLength": 1},
           "declaredSize": {"type": "integer", "minimum": 0},
           "receivedSize": {"type": "integer", "minimum": 0},
@@ -959,9 +1264,9 @@
         "additionalProperties": false,
         "required": ["index", "label", "marker"],
         "properties": {
-          "index": {"type": "integer", "minimum": 1, "maximum": 32},
+          "index": {"type": "integer", "minimum": 0, "maximum": 99, "description": "Two-digit catalog disk ordinal, or zero when the label has no valid ordinal. This is not the number of attached members."},
           "label": {"type": "string"},
-          "marker": {"enum": ["NONE", "CONTINUATION", "FINAL", "INVALID"]}
+          "marker": {"enum": ["NONE", "ORDINARY", "CONTINUATION", "FINAL", "INVALID"]}
         }
       },
       "ImageFloppySet": {
@@ -972,7 +1277,7 @@
           "status": {"enum": ["SINGLE", "INCOMPLETE", "COMPLETE", "RECOVERY"]},
           "setLabel": {"type": "string"},
           "members": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/components/schemas/ImageFloppySetMember"}},
-          "nextRequiredIndex": {"type": ["integer", "null"], "minimum": 1, "maximum": 32}
+          "nextRequiredIndex": {"type": ["integer", "null"], "minimum": 1, "maximum": 100, "description": "Next ordinal indicated by a continuation marker, not an increase of the 32-member attachment limit."}
         }
       },
       "ImageSession": {
@@ -1037,11 +1342,16 @@
       "ImagePreviewLane": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["role", "sourceObjectId", "frameCount", "bins"],
+        "required": ["role", "sourceObjectId", "sampleRate", "storedFrameCount", "playbackStartFrame", "playbackLengthFrames", "loopStartFrame", "loopLengthFrames", "bins"],
         "properties": {
           "role": {"enum": ["MONO", "LEFT", "RIGHT"]},
           "sourceObjectId": {"type": "string", "minLength": 1},
-          "frameCount": {"type": "integer", "minimum": 1},
+          "sampleRate": {"type": "integer", "minimum": 1, "maximum": 4294967295},
+          "storedFrameCount": {"type": "integer", "minimum": 1},
+          "playbackStartFrame": {"type": "integer", "minimum": 0},
+          "playbackLengthFrames": {"type": "integer", "minimum": 1},
+          "loopStartFrame": {"type": "integer", "minimum": 0},
+          "loopLengthFrames": {"type": "integer", "minimum": 0},
           "bins": {"type": "array", "minItems": 1, "items": {"$ref": "#/components/schemas/ImagePreviewBin"}}
         }
       },
@@ -1050,24 +1360,28 @@
         "additionalProperties": false,
         "required": ["data", "meta"],
         "properties": {
-          "data": {"type": "object", "additionalProperties": false, "required": ["objectId", "frameCount", "lanes"], "properties": {"objectId": {"type": "string", "minLength": 1}, "frameCount": {"type": "integer", "minimum": 1}, "lanes": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/ImagePreviewLane"}}}},
+          "data": {"type": "object", "additionalProperties": false, "required": ["objectId", "lanes"], "properties": {"objectId": {"type": "string", "minLength": 1}, "lanes": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/components/schemas/ImagePreviewLane"}}}},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
       "WaveDataMetadata": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sampleRate", "sampleWidthBytes", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "frameCount", "loopStartFrame", "loopLengthFrames"],
+        "required": ["sampleRate", "sampleWidthBytes", "embeddedContainerName", "rootKey", "fineTuneCents", "loopMode", "loopModeLabel", "storedFrameCount", "waveStartFrame", "waveLengthFrames", "loopStartFrame", "loopLengthFrames", "storageState"],
         "properties": {
           "sampleRate": {"type": "integer", "minimum": 0, "maximum": 65535},
           "sampleWidthBytes": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "embeddedContainerName": {"type": "string"},
           "rootKey": {"type": "integer", "minimum": 0, "maximum": 255},
           "fineTuneCents": {"type": "integer", "minimum": -128, "maximum": 127},
           "loopMode": {"type": "integer", "minimum": 0, "maximum": 255},
           "loopModeLabel": {"type": "string"},
-          "frameCount": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storedFrameCount": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "waveStartFrame": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "waveLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295},
           "loopStartFrame": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-          "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+          "loopLengthFrames": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storageState": {"type": "string", "enum": ["COMPLETE", "INCOMPLETE"]}
         }
       },
       "SequenceTempoEvent": {
@@ -1130,6 +1444,153 @@
         "required": ["data", "meta"],
         "properties": {
           "data": {"$ref": "#/components/schemas/ImageObjectPage"},
+          "meta": {"$ref": "#/components/schemas/ResponseMeta"}
+        }
+      },
+      "ImageObjectDetailPlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["partitionIndex", "partitionName", "volumeDirectoryId", "volumeName", "categoryName", "entryName", "containerDirectory"],
+        "properties": {
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "partitionName": {"type": "string"},
+          "volumeDirectoryId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "volumeName": {"type": "string"},
+          "categoryName": {"type": "string"},
+          "entryName": {"type": "string"},
+          "containerDirectory": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["logicalPath", "scopeKey", "rawGroup", "rawVolume", "groupLabel", "groupLabelStatus", "groupLabelBasis", "volumeLabel", "volumeLabelStatus", "volumeLabelBasis", "dataOffsetBytes"],
+        "properties": {
+          "logicalPath": {"type": "string"},
+          "scopeKey": {"type": "string"},
+          "rawGroup": {"type": "string"},
+          "rawVolume": {"type": "string"},
+          "groupLabel": {"type": "string"},
+          "groupLabelStatus": {"type": "string"},
+          "groupLabelBasis": {"type": "string"},
+          "volumeLabel": {"type": "string"},
+          "volumeLabelStatus": {"type": "string"},
+          "volumeLabelBasis": {"type": "string"},
+          "dataOffsetBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageObjectDetailHeader": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rawType", "name", "headerSizeBytes", "layoutSelector0x14", "recordSizeOrHeaderUsed0x18", "payloadBytes0x1c", "payloadBytes0x20", "payloadOffset0x24", "rawPrefixHex"],
+        "properties": {
+          "rawType": {"type": "string"},
+          "name": {"type": "string"},
+          "headerSizeBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "layoutSelector0x14": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "recordSizeOrHeaderUsed0x18": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadBytes0x1c": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadBytes0x20": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "payloadOffset0x24": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "rawPrefixHex": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailOmission": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "sizeBytes", "reason"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["AUDIO_PCM", "SEQUENCE_PAYLOAD", "OPAQUE_PAYLOAD"]},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      },
+      "ImageObjectDetailObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "key", "type", "name", "format", "scopeKey", "partitionIndex", "sfsId", "storedSizeBytes", "placementResolution", "placement", "placementCandidates", "descriptor", "header", "decoded", "omissions"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "key": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1, "maxLength": 16},
+          "name": {"type": "string"},
+          "format": {"type": "string"},
+          "scopeKey": {"type": "string"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
+          "sfsId": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "storedSizeBytes": {"type": "integer", "minimum": 0},
+          "placementResolution": {"type": "string", "enum": ["EXACT", "MISSING", "AMBIGUOUS"]},
+          "placement": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailPlacement"}, {"type": "null"}]},
+          "placementCandidates": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailPlacement"}},
+          "descriptor": {"$ref": "#/components/schemas/ImageObjectDetailDescriptor"},
+          "header": {"$ref": "#/components/schemas/ImageObjectDetailHeader"},
+          "decoded": {
+            "type": "object",
+            "description": "Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model.",
+            "required": ["kind"],
+            "properties": {"kind": {"type": "string"}},
+            "additionalProperties": true
+          },
+          "omissions": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailOmission"}}
+        }
+      },
+      "ImageObjectDetailReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "key", "type", "name"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "key": {"type": "string", "minLength": 1},
+          "type": {"type": "string", "minLength": 1, "maxLength": 16},
+          "name": {"type": "string"}
+        }
+      },
+      "ImageObjectDetailRelationship": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "selectedObjectRoles", "sourceObject", "targetObject", "candidateObjects", "type", "quality", "basis", "notes", "assignmentIndex", "assignmentName", "assignmentState", "receiveChannelDisplay"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "selectedObjectRoles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "enum": ["SOURCE", "TARGET", "CANDIDATE"]}},
+          "sourceObject": {"$ref": "#/components/schemas/ImageObjectDetailReference"},
+          "targetObject": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailReference"}, {"type": "null"}]},
+          "candidateObjects": {"type": "array", "items": {"oneOf": [{"$ref": "#/components/schemas/ImageObjectDetailReference"}, {"type": "null"}]}},
+          "type": {"type": "string", "minLength": 1, "maxLength": 64},
+          "quality": {"type": "string", "enum": ["KNOWN", "LIKELY", "TENTATIVE", "UNKNOWN"]},
+          "basis": {"type": "string"},
+          "notes": {"type": "string"},
+          "assignmentIndex": {"type": ["integer", "null"], "minimum": 0},
+          "assignmentName": {"type": "string"},
+          "assignmentState": {"type": "string"},
+          "receiveChannelDisplay": {"type": "string"}
+        }
+      },
+      "ImageObjectDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "image", "object", "relationships"],
+        "properties": {
+          "schemaVersion": {"type": "integer", "const": 1},
+          "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["imageId", "revision", "format"],
+            "properties": {
+              "imageId": {"type": "string", "minLength": 1},
+              "revision": {"type": "integer", "minimum": 1},
+              "format": {"type": "string", "minLength": 1}
+            }
+          },
+          "object": {"$ref": "#/components/schemas/ImageObjectDetailObject"},
+          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailRelationship"}}
+        }
+      },
+      "ImageObjectDetailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["data", "meta"],
+        "properties": {
+          "data": {"$ref": "#/components/schemas/ImageObjectDetail"},
           "meta": {"$ref": "#/components/schemas/ResponseMeta"}
         }
       },
@@ -1196,11 +1657,11 @@
       "A3000SystemProgramContextAvailable": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fileKind", "availability", "model", "basicReceive", "omni", "programChangeEnabled"],
+        "required": ["fileKind", "availability", "storageRevision", "basicReceive", "omni", "programChangeEnabled"],
         "properties": {
           "fileKind": {"const": "SYSTEM"},
           "availability": {"const": "AVAILABLE"},
-          "model": {"const": "A3000"},
+          "storageRevision": {"type": "integer", "const": 0},
           "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
           "omni": {"type": "boolean"},
           "programChangeEnabled": {"type": "boolean"}
@@ -1209,16 +1670,16 @@
       "A4000A5000SystemProgramContextAvailable": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["fileKind", "availability", "model", "savedProgramMode", "basicReceive", "omni", "programChangeEnabled", "parts"],
+        "required": ["fileKind", "availability", "storageRevision", "savedProgramMode", "basicReceive", "omni", "programChangeEnabled", "parts"],
         "properties": {
           "fileKind": {"const": "SYSTEM2"},
           "availability": {"const": "AVAILABLE"},
-          "model": {"enum": ["A4000", "A5000"]},
+          "storageRevision": {"type": "integer", "enum": [0, 1]},
           "savedProgramMode": {"enum": ["SINGLE", "MULTI"]},
           "basicReceive": {"$ref": "#/components/schemas/SystemMidiAddress"},
           "omni": {"type": "boolean"},
           "programChangeEnabled": {"type": "boolean"},
-          "parts": {"type": "array", "minItems": 16, "maxItems": 32, "items": {"$ref": "#/components/schemas/SystemProgramPart"}}
+          "parts": {"type": "array", "minItems": 32, "maxItems": 32, "items": {"$ref": "#/components/schemas/SystemProgramPart"}}
         }
       },
       "SystemProgramContextNotPresent": {
@@ -1280,7 +1741,7 @@
           "claimKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DATA"]},
           "sfsId": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
           "extentIndex": {"type": ["integer", "null"], "minimum": 0, "maximum": 4294967295},
-          "recordKind": {"type": "string", "enum": ["METADATA", "DIRECTORY", "SUPPORT", "OBJECT", "ALTERNATING_BYTE_OBJECT", "UNKNOWN"]},
+          "recordKind": {"type": "string", "enum": ["METADATA", "DIRECTORY", "SUPPORT", "OBJECT", "UNKNOWN"]},
           "objectId": {"type": ["string", "null"]},
           "objectType": {"type": "string"},
           "objectName": {"type": "string"},
@@ -1291,7 +1752,7 @@
       "ImageAllocationRun": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["startCluster", "clusterCount", "startSector", "sectorCount", "byteOffset", "byteCount", "fixedBitmapUsed", "headerBitmapUsed", "reconstructedUsed", "allocationKind", "owners", "consistencyFlags"],
+        "required": ["startCluster", "clusterCount", "startSector", "sectorCount", "byteOffset", "byteCount", "bitmapCopy1Used", "bitmapCopy2Used", "reconstructedUsed", "allocationKind", "owners", "consistencyFlags"],
         "properties": {
           "startCluster": {"type": "integer", "minimum": 0},
           "clusterCount": {"type": "integer", "minimum": 1},
@@ -1299,8 +1760,8 @@
           "sectorCount": {"type": "integer", "minimum": 1},
           "byteOffset": {"type": "integer", "minimum": 0},
           "byteCount": {"type": "integer", "minimum": 1},
-          "fixedBitmapUsed": {"type": "boolean"},
-          "headerBitmapUsed": {"type": "boolean"},
+          "bitmapCopy1Used": {"type": "boolean"},
+          "bitmapCopy2Used": {"type": "boolean"},
           "reconstructedUsed": {"type": "boolean", "description": "True when a decoded SFS data extent or continuation record claims this cluster. The implicit reserved metadata prefix is excluded."},
           "allocationKind": {"type": "string", "enum": ["RESERVED", "CONTINUATION", "DIRECTORY", "SUPPORT", "DATA", "UNKNOWN", "FREE", "UNCLAIMED", "CONFLICT"]},
           "owners": {"type": "array", "items": {"$ref": "#/components/schemas/ImageAllocationOwner"}},
@@ -1328,7 +1789,7 @@
           "totalExtentCount": {"type": "integer", "minimum": 0},
           "maximumExtentCount": {"type": "integer", "minimum": 0},
           "bitmapCopyMismatchClusters": {"type": "integer", "minimum": 0},
-          "claimedButFreeClusters": {"type": "integer", "minimum": 0, "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the header-addressed allocation bitmap."},
+          "claimedButFreeClusters": {"type": "integer", "minimum": 0, "description": "Payload clusters claimed by a decoded data extent or continuation record but clear in the active allocation bitmap."},
           "usedWithoutClaimClusters": {"type": "integer", "minimum": 0},
           "conflictingClusters": {"type": "integer", "minimum": 0},
           "invalidExtentRecords": {"type": "integer", "minimum": 0}
@@ -2438,7 +2899,7 @@
           "existingObjectKey": {"type": ["string", "null"]},
           "programSlot": {"type": "string", "minLength": 1},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "targetObjectType": {"enum": ["SBAC", "SBNK"]},
           "targetName": {"type": "string", "minLength": 1},
           "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 255},
@@ -3789,7 +4250,7 @@
           "sampleWidthConverted": {"type": "boolean"},
           "ditherAlgorithm": {"type": "string"},
           "splitStereo": {"type": "boolean"},
-          "clippedSamples": {"type": "integer", "minimum": 0}
+          "clippedSamples": {"type": "integer", "minimum": 0, "description": "Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded."}
         }
       },
       "AlterationOperationReport": {
@@ -3892,6 +4353,627 @@
           "warnings": {"type": "array", "items": {"$ref": "#/components/schemas/Issue"}},
           "applied": {"type": "boolean"},
           "operations": {"type": "array", "items": {"$ref": "#/components/schemas/AlterationOperationReport"}}
+        }
+      },
+      "FloppyImportSource": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/FilesystemFileInput"},
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["directoryRef"],
+            "properties": {"directoryRef": {"$ref": "#/components/schemas/DirectoryRef"}}
+          }
+        ]
+      },
+      "FloppyImportInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sources"
+        ],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/FloppyImportSource"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "FloppyImportInspectionReleaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inspectionToken"
+        ],
+        "properties": {
+          "inspectionToken": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "FloppyImportObject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "objectKey",
+          "name",
+          "displayName",
+          "objectType",
+          "sizeBytes",
+          "requiredObjectKeys",
+          "exclusionReason"
+        ],
+        "properties": {
+          "objectKey": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "objectType": {
+            "type": "string",
+            "enum": [
+              "PROG",
+              "SBAC",
+              "SBNK",
+              "SMPL",
+              "SEQU",
+              "PRF3",
+              "UNKNOWN"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "requiredObjectKeys": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "exclusionReason": {
+            "type": "string"
+          }
+        }
+      },
+      "FloppyImportInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "format",
+          "inspectionToken",
+          "complete",
+          "label",
+          "nextRequiredIndex",
+          "members",
+          "objects",
+          "excludedFiles",
+          "issues"
+        ],
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "A_SERIES",
+              "SU700",
+              "TX16W",
+              "UNKNOWN"
+            ]
+          },
+          "inspectionToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "nextRequiredIndex": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 32
+          },
+          "members": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "index",
+                "label"
+              ],
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "objects": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {
+              "$ref": "#/components/schemas/FloppyImportObject"
+            }
+          },
+          "excludedFiles": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "memberName",
+                "path",
+                "sizeBytes"
+              ],
+              "properties": {
+                "memberName": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "issues": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ImageFloppyImportPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "inspectionToken",
+          "selectedObjectKeys",
+          "destination"
+        ],
+        "properties": {
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ImageSessionPackageImportDestination"
+          },
+          "renames": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "$ref": "#/components/schemas/PackageRename"
+            }
+          },
+          "programSlotAssignments": {
+            "type": "array",
+            "maxItems": 32768,
+            "items": {
+              "$ref": "#/components/schemas/PackageProgramSlotAssignment"
+            }
+          },
+          "opaqueSequenceDecisions": {
+            "type": "array",
+            "maxItems": 1024,
+            "items": {
+              "$ref": "#/components/schemas/PackageOpaqueSequenceDecision"
+            }
+          },
+          "inspectionToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selectedObjectKeys": {
+            "type": "array",
+            "maxItems": 8192,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      },
+      "FilesystemPathComponents": {
+        "type": "array", "minItems": 1, "maxItems": 63,
+        "items": {"type": "string", "minLength": 1, "maxLength": 255}
+      },
+      "FilesystemFileInput": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["fileRef"], "properties": {"fileRef": {"$ref": "#/components/schemas/FileRef"}}},
+          {"type": "object", "additionalProperties": false, "required": ["uploadRef"], "properties": {"uploadRef": {"$ref": "#/components/schemas/UploadRef"}}}
+        ]
+      },
+      "FilesystemImageReleaseRequest": {
+        "type": "object", "additionalProperties": false, "required": ["inspectionToken"],
+        "properties": {"inspectionToken": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+      },
+      "FilesystemImageReleaseResult": {"type": "object", "additionalProperties": false},
+      "FilesystemImageInspectionRequest": {
+        "type": "object", "additionalProperties": false, "required": ["source"],
+        "properties": {"source": {"$ref": "#/components/schemas/FilesystemFileInput"}}
+      },
+      "FilesystemImageInspection": {
+        "type": "object", "additionalProperties": false, "required": ["inspectionToken", "entries"],
+        "properties": {
+          "inspectionToken": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "entries": {"type": "array", "maxItems": 8192, "items": {
+            "type": "object", "additionalProperties": false, "required": ["entryId", "relativePath", "directory", "snapshot"],
+            "properties": {
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 32},
+              "relativePath": {"$ref": "#/components/schemas/FilesystemPathComponents"},
+              "directory": {"type": "boolean"},
+              "snapshot": {"oneOf": [{"type": "null"}, {"$ref": "#/components/schemas/FilesystemInputSnapshot"}]}
+            }
+          }}
+        }
+      },
+      "FilesystemEditInput": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/FilesystemFileInput"},
+          {"type": "object", "additionalProperties": false, "required": ["imageEntryRef"], "properties": {
+            "imageEntryRef": {"type": "object", "additionalProperties": false, "required": ["inspectionToken", "entryId"], "properties": {
+              "inspectionToken": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 32}
+            }}
+          }}
+        ]
+      },
+      "FilesystemImportEntry": {
+        "type": "object", "additionalProperties": false,
+        "required": ["relativePath", "directory", "sizeBytes"],
+        "properties": {
+          "relativePath": {"$ref": "#/components/schemas/FilesystemPathComponents"},
+          "directory": {"type": "boolean"},
+          "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "conflict": {"type": "string", "enum": ["SKIP", "REPLACE"], "default": "SKIP"}
+        }
+      },
+      "FilesystemImportDecision": {
+        "type": "object", "additionalProperties": false,
+        "required": ["relativePath", "directory", "sizeBytes", "conflict", "action", "existingSizeBytes", "issue"],
+        "properties": {
+          "relativePath": {"$ref": "#/components/schemas/FilesystemPathComponents"},
+          "directory": {"type": "boolean"},
+          "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "conflict": {"type": "string", "enum": ["SKIP", "REPLACE"]},
+          "action": {"type": "string", "enum": ["CREATE_DIRECTORY", "MERGE_DIRECTORY", "CREATE_FILE", "SKIP_FILE", "REPLACE_FILE", "CONFLICT"]},
+          "existingSizeBytes": {"type": ["integer", "null"], "minimum": 0},
+          "issue": {"type": "string"}
+        }
+      },
+      "ImageFilesystemImportInspectionRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "parentEntryId", "entries"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "parentEntryId": {"type": "string", "minLength": 1, "maxLength": 512},
+          "entries": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/components/schemas/FilesystemImportEntry"}}
+        }
+      },
+      "ImageFilesystemImportInspectionResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "revision", "parentEntryId", "entries", "conflictCount"],
+        "properties": {
+          "imageId": {"type": "string"},
+          "revision": {"type": "integer", "minimum": 1},
+          "parentEntryId": {"type": "string"},
+          "entries": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/components/schemas/FilesystemImportDecision"}},
+          "conflictCount": {"type": "integer", "minimum": 0, "maximum": 10000}
+        }
+      },
+      "Su700ImportDestination": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "rootEntryId", "volumeName"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "rootEntryId": {"type": "string", "minLength": 1, "maxLength": 512},
+          "volumeName": {"type": "string", "minLength": 1, "maxLength": 16}
+        }
+      },
+      "Su700ExtraSelection": {"type": "array", "maxItems": 10000, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 255}},
+      "Su700ImportInspectionRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "destination", "includedExtras"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FilesystemFileInput"},
+          "destination": {"oneOf": [{"type": "null"}, {"$ref": "#/components/schemas/Su700ImportDestination"}]},
+          "includedExtras": {"oneOf": [{"type": "null"}, {"$ref": "#/components/schemas/Su700ExtraSelection"}]}
+        }
+      },
+      "Su700ImportRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "expectedSource", "destination", "includedExtras"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FilesystemFileInput"},
+          "expectedSource": {"$ref": "#/components/schemas/FilesystemInputSnapshot"},
+          "destination": {"$ref": "#/components/schemas/Su700ImportDestination"},
+          "includedExtras": {"$ref": "#/components/schemas/Su700ExtraSelection"}
+        }
+      },
+      "Su700ImportFile": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sourcePath", "relativePath", "sizeBytes", "role"],
+        "properties": {
+          "sourcePath": {"type": "string"},
+          "relativePath": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"type": "string"}},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "role": {"type": "string", "enum": ["CONTROL", "SONG", "SAMPLE", "EXTRA"]}
+        }
+      },
+      "Su700ImportInspection": {
+        "type": "object", "additionalProperties": false,
+        "required": ["status", "issue", "snapshot", "suggestedVolumeName", "songCount", "sampleCount", "files", "destinationReady", "totalBytes"],
+        "properties": {
+          "status": {"type": "string", "enum": ["UNRELATED", "COMPLETE", "UNSUPPORTED"]},
+          "issue": {"type": "string"},
+          "snapshot": {"$ref": "#/components/schemas/FilesystemInputSnapshot"},
+          "suggestedVolumeName": {"type": "string"},
+          "songCount": {"type": "integer", "minimum": 0, "maximum": 20},
+          "sampleCount": {"type": "integer", "minimum": 0, "maximum": 800},
+          "files": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/components/schemas/Su700ImportFile"}},
+          "destinationReady": {"type": "boolean"},
+          "totalBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "Su700ImportResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "revision", "rootEntryId", "volumeName", "warnings"],
+        "properties": {
+          "imageId": {"type": "string"}, "revision": {"type": "integer", "minimum": 1},
+          "rootEntryId": {"type": "string"}, "volumeName": {"type": "string"},
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "FilesystemInputSnapshot": {
+        "type": "object", "additionalProperties": false,
+        "required": ["revision", "sizeBytes", "sha256"],
+        "properties": {
+          "revision": {"type": "string", "minLength": 1, "maxLength": 512},
+          "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      },
+      "FilesystemInspectedInput": {
+        "type": "object", "additionalProperties": false,
+        "required": ["source", "snapshot"],
+        "properties": {
+          "source": {"$ref": "#/components/schemas/FilesystemFileInput"},
+          "snapshot": {"$ref": "#/components/schemas/FilesystemInputSnapshot"}
+        }
+      },
+      "FilesystemInputInspectionRequest": {
+        "type": "object", "additionalProperties": false, "required": ["inputs"],
+        "properties": {
+          "inputs": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/components/schemas/FilesystemFileInput"}}
+        }
+      },
+      "FilesystemInputInspectionResult": {
+        "type": "object", "additionalProperties": false, "required": ["inputs"],
+        "properties": {
+          "inputs": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/components/schemas/FilesystemInspectedInput"}}
+        }
+      },
+      "ImageFilesystemEdit": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "entryId", "newName"],
+            "properties": {
+              "kind": {"const": "RENAME"},
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "newName": {"type": "string", "minLength": 1, "maxLength": 255}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "parentEntryId", "relativePath"],
+            "properties": {
+              "kind": {"const": "CREATE_DIRECTORY"},
+              "parentEntryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "relativePath": {"$ref": "#/components/schemas/FilesystemPathComponents"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "parentEntryId", "relativePath", "source", "expectedSource"],
+            "properties": {
+              "kind": {"const": "PUT_FILE"},
+              "parentEntryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "relativePath": {"$ref": "#/components/schemas/FilesystemPathComponents"},
+              "source": {"$ref": "#/components/schemas/FilesystemEditInput"},
+              "expectedSource": {"$ref": "#/components/schemas/FilesystemInputSnapshot"},
+              "conflict": {"type": "string", "enum": ["SKIP", "REPLACE"], "default": "SKIP"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "entryId", "recursive"],
+            "properties": {
+              "kind": {"const": "DELETE"},
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "recursive": {"type": "boolean"}
+            }
+          }
+        ]
+      },
+      "ImageFilesystemEditRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "acknowledgeDeviceRelationships", "edits"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "acknowledgeDeviceRelationships": {"const": true},
+          "edits": {"type": "array", "minItems": 1, "maxItems": 10000, "items": {"$ref": "#/components/schemas/ImageFilesystemEdit"}}
+        }
+      },
+      "ImageFilesystemEditResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "revision", "warnings"],
+        "properties": {
+          "imageId": {"type": "string"},
+          "revision": {"type": "integer", "minimum": 1},
+          "warnings": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "ImageFilesystemExportEntryIds": {
+        "type": "array", "minItems": 1, "maxItems": 10000,
+        "items": {"type": "string", "minLength": 1, "maxLength": 512}
+      },
+      "ImageFilesystemExportInspectionRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "entryIds", "layout"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "entryIds": {"$ref": "#/components/schemas/ImageFilesystemExportEntryIds"},
+          "layout": {"$ref": "#/components/schemas/ImageFilesystemExportLayout"}
+        }
+      },
+      "ImageFilesystemExportLayout": {"enum": ["EXPORT_FOLDER", "SELECTED_ENTRIES"]},
+      "ImageFilesystemExportRoot": {
+        "oneOf": [
+          {"type": "null"},
+          {"type": "object", "additionalProperties": false,
+           "required": ["entryId", "sourcePath", "name"],
+           "properties": {"entryId": {"type": "string"}, "sourcePath": {"type": "string"}, "name": {"type": "string", "minLength": 1}}}
+        ]
+      },
+      "ImageFilesystemExportEntries": {
+        "type": "array",
+        "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["entryId", "sourcePath", "relativePath", "directory", "sizeBytes"],
+          "properties": {
+            "entryId": {"type": "string"},
+            "sourcePath": {"type": "string"},
+            "relativePath": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "directory": {"type": "boolean"},
+            "sizeBytes": {"type": "integer", "minimum": 0}
+          }
+        }
+      },
+      "ImageFilesystemExportNotices": {
+        "type": "array",
+        "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["entryId", "sourcePath", "message"],
+          "properties": {
+            "entryId": {"type": "string"},
+            "sourcePath": {"type": "string"},
+            "message": {"type": "string"}
+          }
+        }
+      },
+      "ImageFilesystemExportInspection": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "revision", "rootDirectory", "entries", "notices", "totalBytes"],
+        "properties": {
+          "imageId": {"type": "string"},
+          "revision": {"type": "integer", "minimum": 1},
+          "rootDirectory": {"$ref": "#/components/schemas/ImageFilesystemExportRoot"},
+          "entries": {"$ref": "#/components/schemas/ImageFilesystemExportEntries"},
+          "notices": {"$ref": "#/components/schemas/ImageFilesystemExportNotices"},
+          "totalBytes": {"type": "integer", "minimum": 0}
+        }
+      },
+      "ImageFilesystemExportDestination": {
+        "oneOf": [
+          {
+            "type": "object", "additionalProperties": false, "required": ["kind", "output"],
+            "properties": {
+              "kind": {"const": "WORKSPACE"},
+              "output": {"$ref": "#/components/schemas/DirectoryRef"}
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false, "required": ["kind", "directoryName"],
+            "properties": {
+              "kind": {"const": "DOWNLOAD"},
+              "directoryName": {"type": "string", "minLength": 1, "maxLength": 128}
+            }
+          }
+        ]
+      },
+      "ImageFilesystemExportRequest": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "expectedRevision", "entryIds", "layout", "destination"],
+        "properties": {
+          "imageId": {"type": "string", "minLength": 1},
+          "expectedRevision": {"type": "integer", "minimum": 1},
+          "entryIds": {"$ref": "#/components/schemas/ImageFilesystemExportEntryIds"},
+          "layout": {"$ref": "#/components/schemas/ImageFilesystemExportLayout"},
+          "destination": {"$ref": "#/components/schemas/ImageFilesystemExportDestination"}
+        }
+      },
+      "ImageFilesystemExportResult": {
+        "type": "object", "additionalProperties": false,
+        "required": ["imageId", "revision", "rootDirectory", "entries", "notices", "totalBytes", "destination", "output", "download"],
+        "properties": {
+          "imageId": {"type": "string"},
+          "revision": {"type": "integer", "minimum": 1},
+          "rootDirectory": {"$ref": "#/components/schemas/ImageFilesystemExportRoot"},
+          "entries": {"$ref": "#/components/schemas/ImageFilesystemExportEntries"},
+          "notices": {"$ref": "#/components/schemas/ImageFilesystemExportNotices"},
+          "totalBytes": {"type": "integer", "minimum": 0},
+          "destination": {"enum": ["WORKSPACE", "DOWNLOAD"]},
+          "output": {"oneOf": [{"$ref": "#/components/schemas/DirectoryRef"}, {"type": "null"}]},
+          "download": {"oneOf": [{"$ref": "#/components/schemas/RetainedDownload"}, {"type": "null"}]}
         }
       },
       "ImageSessionAlterationRequest": {
@@ -4396,7 +5478,7 @@
           "programObjectId": {"type": "string", "minLength": 1},
           "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "assignmentName": {"type": "string", "minLength": 1},
           "targetObjectType": {"enum": ["SBAC", "SBNK"]},
           "receiveChannelDisplay": {"type": "string"},
@@ -4427,7 +5509,7 @@
         "required": ["programObjectId", "assignmentOrdinal"],
         "properties": {
           "programObjectId": {"type": "string", "minLength": 1},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15}
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998}
         }
       },
       "ImageProgramAssignmentCleanupRequest": {
@@ -4454,7 +5536,7 @@
           "programObjectId": {"type": "string", "minLength": 1},
           "programNumber": {"type": "integer", "minimum": 1, "maximum": 128},
           "programName": {"type": "string"},
-          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 15},
+          "assignmentOrdinal": {"type": "integer", "minimum": 0, "maximum": 998},
           "assignmentName": {"type": "string", "minLength": 1}
         }
       },

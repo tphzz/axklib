@@ -329,7 +329,9 @@ export class CatalogWorkflow {
                     name: objectPresentationName(object, names),
                     note: noteName(object.rootKey),
                     duration:
-                        object.sampleRate > 0 ? `${(object.frameCount / object.sampleRate).toFixed(2)} s` : 'Unknown',
+                        object.sampleRate > 0
+                            ? `${(object.waveLengthFrames / object.sampleRate).toFixed(2)} s`
+                            : 'Unknown',
                     sampleRate: object.sampleRate > 0 ? `${(object.sampleRate / 1000).toFixed(1)} kHz` : 'Unknown',
                     bitDepth: object.sampleWidthBytes > 0 ? `${object.sampleWidthBytes * 8}-bit` : 'Unknown',
                     channels: 'Mono' as const,

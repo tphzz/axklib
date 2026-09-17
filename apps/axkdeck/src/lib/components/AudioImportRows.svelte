@@ -13,6 +13,7 @@
         capabilities?: AudioImportCapabilities;
         busy: boolean;
         committing: boolean;
+        completionStatus?: string;
         grouped: boolean;
         audition: AudioImportAuditionState;
         onchangeTargetSampleRate: (row: AudioImportRow, event: Event) => void;
@@ -27,6 +28,7 @@
         capabilities,
         busy,
         committing,
+        completionStatus = '',
         grouped,
         audition,
         onchangeTargetSampleRate,
@@ -121,7 +123,9 @@
                     {/if}
                 </div>
                 <div class="card-header-actions">
-                    {#if committing}
+                    {#if completionStatus}
+                        <span class="status-neutral">{completionStatus}</span>
+                    {:else if committing}
                         <span class="status-neutral">Importing…</span>
                     {:else if row.status === 'waiting'}
                         <span class="status-neutral">Checking…</span>

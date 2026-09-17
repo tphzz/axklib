@@ -12,6 +12,8 @@
 
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 
 namespace axk {
 
@@ -25,7 +27,7 @@ enum class ObjectType : std::uint8_t {
     prf3,
 };
 
-enum class ObjectFormat : std::uint8_t { current, alternating_byte, unknown };
+enum class ObjectFormat : std::uint8_t { current, unknown };
 enum class Verification : std::uint8_t { verified, corroborated, tentative, unknown };
 
 inline constexpr std::size_t current_record_envelope_size = 0x30U;
@@ -66,19 +68,24 @@ struct ObjectHeader {
 struct CurrentSmpl {
     FieldValue<std::uint16_t> sample_rate;
     FieldValue<std::uint16_t> stored_sample_width_bytes;
-    FieldValue<std::string> source_wave_name;
-    FieldValue<std::uint32_t> group_id;
+    FieldValue<std::string> embedded_container_name;
+    FieldValue<std::uint32_t> transient_name_hash_next_handle;
     FieldValue<std::uint32_t> wave_data_reference_value;
     FieldValue<std::uint16_t> duplicate_sample_rate;
     FieldValue<std::uint8_t> root_key;
     FieldValue<std::int8_t> fine_tune_cents;
+    FieldValue<std::uint8_t> pcm_transfer_control;
+    std::uint8_t pcm_transfer_format_selector{};
     FieldValue<std::uint8_t> loop_mode;
     std::string loop_mode_label;
+    FieldValue<std::uint32_t> wave_start_frame;
     FieldValue<std::uint32_t> wave_length_frames;
+    std::optional<std::uint64_t> wave_end_frame_exclusive;
     FieldValue<std::uint32_t> loop_start_frame;
     FieldValue<std::uint32_t> loop_length_frames;
     std::optional<std::uint64_t> loop_end_frame_inclusive;
     std::optional<std::uint64_t> loop_end_frame_exclusive;
+    FieldValue<std::uint16_t> transient_512_byte_block_counter;
     std::uint32_t stored_pcm_offset{};
     std::uint32_t stored_pcm_bytes{};
     std::uint32_t stored_segment_offset{};
@@ -103,6 +110,23 @@ struct CurrentSbnkMember {
     std::uint32_t loop_length_frames{};
 };
 
+struct CurrentObjectCommonRecord {
+    FieldValue<std::uint8_t> object_class;
+    FieldValue<std::uint8_t> state;
+    FieldValue<std::string> name;
+    FieldValue<std::uint8_t> state_0x42;
+    FieldValue<std::array<std::byte, 7>> saver_residue_0x43_0x49;
+    FieldValue<std::array<std::byte, 10>> raw_common_state_0x4a_0x53;
+    FieldValue<std::string> embedded_container_name;
+    FieldValue<std::array<std::byte, 4>> raw_common_state_0x64_0x67;
+    FieldValue<std::uint32_t> transient_name_hash_alias;
+    FieldValue<std::array<std::byte, 3>> body_prefix_alias;
+    FieldValue<std::array<std::byte, 5>> saver_residue_0x6f_0x73;
+    FieldValue<std::uint32_t> transient_name_hash_next_handle;
+    bool transient_name_hash_alias_matches{};
+    bool body_prefix_alias_matches{};
+};
+
 struct SbnkControlRecord {
     std::uint8_t device{};
     std::uint8_t function{};
@@ -117,8 +141,8 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
+    CurrentObjectCommonRecord common;
     std::string sample_name;
-    std::string instrument_name;
     bool right_slot_present{};
     std::string right_link_role;
     CurrentSbnkMember left;
@@ -128,6 +152,9 @@ struct CurrentSbnk {
     std::vector<std::uint8_t> linked_program_numbers;
     std::uint8_t sample_flags{};
     std::uint8_t mapout_flags{};
+    bool uses_program_portamento{};
+    bool mono_mode{};
+    bool legacy_velocity_xfade_default_5{};
     std::uint8_t key_range_high{};
     std::uint8_t key_range_low{};
     std::uint8_t sample_level{};
@@ -136,6 +163,9 @@ struct CurrentSbnk {
     std::uint8_t velocity_range_low{};
     std::uint8_t loop_mode{};
     std::string loop_mode_label;
+    std::size_t control_record_storage_offset{};
+    bool control_record_tail_copy_present{};
+    std::optional<bool> control_record_copies_match;
     std::vector<SbnkControlRecord> control_records;
     std::vector<NumericField> numeric_fields;
     std::vector<std::byte> raw_parameter_window;
@@ -145,42 +175,72 @@ struct CurrentSbnk {
 
 struct SbacSlot {
     std::string name;
-    std::uint32_t raw_handle{};
+    bool active{};
+    std::uint32_t transient_member_pointer{};
     std::uint32_t offset{};
 };
 
+enum class SbacStorageLayout : std::uint8_t {
+    legacy_without_parameter_tail,
+    current_split_parameter_tail,
+};
+
 struct CurrentSbac {
+    CurrentObjectCommonRecord common;
+    SbacStorageLayout storage_layout{SbacStorageLayout::legacy_without_parameter_tail};
+    std::optional<std::size_t> parameter_tail_offset;
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};
-    std::array<std::uint32_t, 3> value_enable_words{};
-    std::vector<std::uint8_t> enabled_parameter_numbers;
-    std::vector<std::uint8_t> enabled_numbers_outside_table;
-    std::uint8_t bulk_assigned_sample_count{};
-    std::uint8_t active_slot_count{};
-    std::size_t maximum_slot_count{};
+    std::array<std::uint32_t, 3> pending_parameter_propagation_words{};
+    std::vector<std::uint8_t> pending_parameter_numbers;
+    std::vector<std::uint8_t> reserved_pending_parameter_numbers;
+    std::uint8_t stored_member_count{};
+    std::size_t effective_member_count{};
+    std::size_t maximum_member_count{};
     std::vector<SbacSlot> slots;
 };
 
+inline constexpr std::size_t maximum_stored_program_assignments = 999U;
+
 struct ProgAssignment {
+    ProgramAssignmentParameters parameters;
     std::string name;
     std::uint32_t raw_handle{};
     std::uint8_t kind{};
-    std::uint8_t flags{};
-    std::int8_t level_offset{};
-    std::int8_t velocity_sensitivity{};
-    std::int8_t pan_offset{};
-    std::uint8_t key_limit_high{};
-    std::uint8_t key_limit_low{};
-    std::uint8_t velocity_limit_high{};
-    std::uint8_t velocity_limit_low{};
+    std::uint8_t raw_receive_selector{};
     std::array<std::byte, 0x38> raw_row{};
+    std::size_t offset{};
+};
+
+enum class ProgStorageLayout : std::uint8_t {
+    legacy_without_parameter_tail,
+    current_split_parameter_tail,
+};
+
+struct ProgLayout {
+    ProgStorageLayout storage_layout{ProgStorageLayout::legacy_without_parameter_tail};
+    std::uint32_t version{};
+    std::size_t logical_size{};
+    std::uint16_t stored_assignment_count{};
+    std::size_t assignment_capacity{};
+    std::optional<std::size_t> parameter_tail_offset;
+};
+
+struct ProgEffectBlock {
+    std::array<std::byte, 0x28> raw_bytes{};
+    std::uint16_t type{};
+    std::array<std::uint16_t, 16> parameter_values{};
 };
 
 struct CurrentProg {
+    CurrentObjectCommonRecord common;
+    ProgLayout layout;
     std::string program_name;
-    std::vector<SbnkControlRecord> control_records;
-    std::vector<std::byte> raw_control_block;
-    std::vector<std::byte> raw_control_tail_copy;
-    std::array<std::vector<std::byte>, 3> effect_blocks;
+    ProgramParameters parameters;
+    std::array<std::byte, 0x18> raw_common_parameter_block{};
+    std::vector<std::byte> raw_extended_parameter_block;
+    std::array<std::byte, 16> raw_canonical_control_block{};
+    std::array<std::byte, 16> raw_legacy_control_block{};
+    std::vector<ProgEffectBlock> effect_blocks;
     std::vector<ProgAssignment> assignments;
 };
 

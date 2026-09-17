@@ -5,6 +5,11 @@
     interface Props {
         objectName: string;
         selectionCount?: number;
+        selectionNoun?: string;
+        oncreatedirectory?: () => void;
+        onimportfiles?: () => void;
+        onimportdirectory?: () => void;
+        additionalImports?: { label: string; action: () => void }[];
         left: number;
         top: number;
         onrename?: () => void;
@@ -13,6 +18,7 @@
         onexportwav?: () => void;
         onexportsfz?: () => void;
         onexportmidi?: () => void;
+        onexportfiles?: () => void;
         ondelete?: () => void;
         onclose: () => void;
     }
@@ -20,6 +26,11 @@
     let {
         objectName,
         selectionCount = 1,
+        selectionNoun = 'objects',
+        oncreatedirectory,
+        onimportfiles,
+        onimportdirectory,
+        additionalImports = [],
         left,
         top,
         onrename,
@@ -28,25 +39,29 @@
         onexportwav,
         onexportsfz,
         onexportmidi,
+        onexportfiles,
         ondelete,
         onclose,
     }: Props = $props();
     let rootMenu = $state<HTMLDivElement>();
     let submenuMenu = $state<HTMLDivElement>();
     let exportParent = $state<HTMLButtonElement>();
+    let importParent = $state<HTMLButtonElement>();
     let rootLeft = $state(0);
     let rootTop = $state(0);
     let submenuLeft = $state(0);
     let submenuTop = $state(0);
     let rootPositioned = $state(false);
     let submenuPositioned = $state(false);
-    let exportOpen = $state(false);
+    let openKind = $state<'import' | 'export' | null>(null);
     const invoker =
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
             ? document.activeElement
             : null;
-    const hasMutations = $derived(Boolean(onrename || onassignsamplebank || ondelete));
-    const hasExports = $derived(Boolean(onexportpackage || onexportwav || onexportsfz || onexportmidi));
+    const hasMutations = $derived(Boolean(oncreatedirectory || onrename || onassignsamplebank || ondelete));
+    const hasExports = $derived(
+        Boolean(onexportpackage || onexportwav || onexportsfz || onexportmidi || onexportfiles),
+    );
 
     function directMenuItems(menu: HTMLDivElement | undefined): HTMLButtonElement[] {
         if (!menu) return [];
@@ -75,8 +90,9 @@
     }
 
     function positionSubmenu(): void {
-        if (!submenuMenu || !exportParent) return;
-        const parentRect = exportParent.getBoundingClientRect();
+        const parent = openKind === 'import' ? importParent : exportParent;
+        if (!submenuMenu || !parent) return;
+        const parentRect = parent.getBoundingClientRect();
         const preferredLeft = parentRect.right + 2;
         submenuLeft =
             preferredLeft + submenuMenu.offsetWidth <= window.innerWidth - 8
@@ -85,8 +101,8 @@
         submenuTop = clamp(parentRect.top, 8, Math.max(8, window.innerHeight - submenuMenu.offsetHeight - 8));
     }
 
-    function openExport(focusFirst: boolean): void {
-        exportOpen = true;
+    function openTransfer(kind: 'import' | 'export', focusFirst: boolean): void {
+        openKind = kind;
         submenuPositioned = false;
         flushSync();
         positionSubmenu();
@@ -95,10 +111,11 @@
         if (focusFirst) focusItem(submenuMenu, 0);
     }
 
-    function closeExport(restoreParent: boolean): void {
-        exportOpen = false;
+    function closeSubmenu(restoreParent: boolean): void {
+        const parent = openKind === 'import' ? importParent : exportParent;
+        openKind = null;
         submenuPositioned = false;
-        if (restoreParent) queueMicrotask(() => exportParent?.focus());
+        if (restoreParent) queueMicrotask(() => parent?.focus());
     }
 
     function handleRootKey(event: KeyboardEvent): void {
@@ -109,23 +126,26 @@
             onclose();
         } else if (event.key === 'ArrowDown') {
             event.preventDefault();
-            closeExport(false);
+            closeSubmenu(false);
             focusItem(rootMenu, current + 1);
         } else if (event.key === 'ArrowUp') {
             event.preventDefault();
-            closeExport(false);
+            closeSubmenu(false);
             focusItem(rootMenu, current - 1);
         } else if (event.key === 'Home') {
             event.preventDefault();
-            closeExport(false);
+            closeSubmenu(false);
             focusItem(rootMenu, 0);
         } else if (event.key === 'End') {
             event.preventDefault();
-            closeExport(false);
+            closeSubmenu(false);
             focusItem(rootMenu, items.length - 1);
-        } else if (event.key === 'ArrowRight' && document.activeElement === exportParent) {
+        } else if (
+            event.key === 'ArrowRight' &&
+            (document.activeElement === exportParent || document.activeElement === importParent)
+        ) {
             event.preventDefault();
-            openExport(true);
+            openTransfer(document.activeElement === importParent ? 'import' : 'export', true);
         }
         event.stopPropagation();
     }
@@ -135,7 +155,7 @@
         const current = items.indexOf(document.activeElement as HTMLButtonElement);
         if (event.key === 'Escape' || event.key === 'ArrowLeft') {
             event.preventDefault();
-            closeExport(true);
+            closeSubmenu(true);
         } else if (event.key === 'ArrowDown') {
             event.preventDefault();
             focusItem(submenuMenu, current + 1);
@@ -169,7 +189,7 @@
         };
         const reposition = (): void => {
             positionRoot();
-            if (exportOpen) positionSubmenu();
+            if (openKind) positionSubmenu();
         };
         window.addEventListener('pointerdown', dismissFromOutsidePointer, true);
         window.addEventListener('resize', reposition);
@@ -194,8 +214,16 @@
     onclick={(event) => event.stopPropagation()}
     onkeydown={handleRootKey}
 >
+    {#if oncreatedirectory}
+        <button
+            type="button"
+            role="menuitem"
+            onmouseenter={() => closeSubmenu(false)}
+            onclick={() => choose(oncreatedirectory)}>New directory...</button
+        >
+    {/if}
     {#if onrename}
-        <button type="button" role="menuitem" onmouseenter={() => closeExport(false)} onclick={() => choose(onrename)}
+        <button type="button" role="menuitem" onmouseenter={() => closeSubmenu(false)} onclick={() => choose(onrename)}
             >Rename…</button
         >
     {/if}
@@ -203,7 +231,7 @@
         <button
             type="button"
             role="menuitem"
-            onmouseenter={() => closeExport(false)}
+            onmouseenter={() => closeSubmenu(false)}
             onclick={() => choose(onassignsamplebank)}>Assign to Sample Bank…</button
         >
     {/if}
@@ -212,13 +240,27 @@
             class="danger-menu-item"
             type="button"
             role="menuitem"
-            onmouseenter={() => closeExport(false)}
+            onmouseenter={() => closeSubmenu(false)}
             onclick={() => choose(ondelete)}
-            >{selectionCount === 1 ? 'Delete…' : `Delete ${selectionCount} objects…`}</button
+            >{selectionCount === 1 ? 'Delete…' : `Delete ${selectionCount} ${selectionNoun}…`}</button
         >
     {/if}
-    {#if hasMutations && hasExports}
+    {#if hasMutations && (hasExports || onimportfiles || onimportdirectory || additionalImports.length)}
         <div class="context-menu-separator" role="separator"></div>
+    {/if}
+    {#if onimportfiles || onimportdirectory || additionalImports.length}
+        <button
+            bind:this={importParent}
+            class="context-submenu-trigger"
+            type="button"
+            role="menuitem"
+            aria-haspopup="menu"
+            aria-expanded={openKind === 'import'}
+            onmouseenter={() => openTransfer('import', false)}
+            onclick={() => openTransfer('import', true)}
+        >
+            <span>Import</span><Icon name="chevron" size={13} />
+        </button>
     {/if}
     {#if hasExports}
         <button
@@ -227,37 +269,52 @@
             type="button"
             role="menuitem"
             aria-haspopup="menu"
-            aria-expanded={exportOpen}
-            onmouseenter={() => openExport(false)}
-            onclick={() => openExport(true)}
+            aria-expanded={openKind === 'export'}
+            onmouseenter={() => openTransfer('export', false)}
+            onclick={() => openTransfer('export', true)}
         >
             <span>Export</span><Icon name="chevron" size={13} />
         </button>
     {/if}
 </div>
 
-{#if exportOpen}
+{#if openKind}
     <div
         bind:this={submenuMenu}
         class="tree-context-menu tree-context-submenu"
         role="menu"
-        aria-label="Export actions"
+        aria-label={openKind === 'import' ? 'Import actions' : 'Export actions'}
         tabindex="-1"
         style={`left: ${submenuLeft}px; top: ${submenuTop}px; visibility: ${submenuPositioned ? 'visible' : 'hidden'}; pointer-events: ${submenuPositioned ? 'auto' : 'none'};`}
         onclick={(event) => event.stopPropagation()}
         onkeydown={handleSubmenuKey}
     >
-        {#if onexportpackage}
-            <button type="button" role="menuitem" onclick={() => choose(onexportpackage)}>Export package…</button>
-        {/if}
-        {#if onexportwav}
-            <button type="button" role="menuitem" onclick={() => choose(onexportwav)}>Export WAV…</button>
-        {/if}
-        {#if onexportsfz}
-            <button type="button" role="menuitem" onclick={() => choose(onexportsfz)}>Export SFZ…</button>
-        {/if}
-        {#if onexportmidi}
-            <button type="button" role="menuitem" onclick={() => choose(onexportmidi)}>Export MIDI…</button>
+        {#if openKind === 'import'}
+            {#if onimportfiles}<button type="button" role="menuitem" onclick={() => choose(onimportfiles)}
+                    >Add files...</button
+                >{/if}
+            {#if onimportdirectory}<button type="button" role="menuitem" onclick={() => choose(onimportdirectory)}
+                    >Import from disk...</button
+                >{/if}
+            {#each additionalImports as item}<button type="button" role="menuitem" onclick={() => choose(item.action)}
+                    >{item.label}</button
+                >{/each}
+        {:else}
+            {#if onexportfiles}
+                <button type="button" role="menuitem" onclick={() => choose(onexportfiles)}>Export to disk...</button>
+            {/if}
+            {#if onexportpackage}
+                <button type="button" role="menuitem" onclick={() => choose(onexportpackage)}>Export package…</button>
+            {/if}
+            {#if onexportwav}
+                <button type="button" role="menuitem" onclick={() => choose(onexportwav)}>Export WAV…</button>
+            {/if}
+            {#if onexportsfz}
+                <button type="button" role="menuitem" onclick={() => choose(onexportsfz)}>Export SFZ…</button>
+            {/if}
+            {#if onexportmidi}
+                <button type="button" role="menuitem" onclick={() => choose(onexportmidi)}>Export MIDI…</button>
+            {/if}
         {/if}
     </div>
 {/if}

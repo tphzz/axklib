@@ -79,12 +79,12 @@ inspect_session(const Session &session, std::uint64_t expected_revision, std::st
         const auto *decoded = snapshot == session.snapshots_by_id.end()
                                   ? nullptr
                                   : std::get_if<axk::CurrentProg>(&snapshot->second.object.payload);
-        if (!number || decoded == nullptr || *relationship.assignment_index >= axk::maximum_program_assignments)
+        if (!number || decoded == nullptr || *relationship.assignment_index >= decoded->assignments.size())
             continue;
         result.candidates.push_back({.program_object_id = program->first,
                                      .program_number = *number,
                                      .program_name = decoded->program_name,
-                                     .assignment_ordinal = static_cast<std::uint8_t>(*relationship.assignment_index),
+                                     .assignment_ordinal = static_cast<std::uint16_t>(*relationship.assignment_index),
                                      .assignment_name = relationship.assignment_name,
                                      .target_object_type = target_type(relationship),
                                      .receive_channel_display = relationship.receive_channel_display,
@@ -100,7 +100,7 @@ inspect_session(const Session &session, std::uint64_t expected_revision, std::st
     return result;
 }
 
-std::pair<std::string_view, std::uint8_t> selection_key(const ImageProgramAssignmentCleanupSelection &selection) {
+std::pair<std::string_view, std::uint16_t> selection_key(const ImageProgramAssignmentCleanupSelection &selection) {
     return {selection.program_object_id, selection.assignment_ordinal};
 }
 
@@ -136,11 +136,11 @@ axk::app::ImageSessionManager::plan_program_assignment_cleanup(
             session_error("program_assignment_cleanup_invalid", "select at least one assignment to clean"));
     }
 
-    std::map<std::pair<std::string_view, std::uint8_t>, const ImageProgramAssignmentCleanupCandidate *> candidates;
+    std::map<std::pair<std::string_view, std::uint16_t>, const ImageProgramAssignmentCleanupCandidate *> candidates;
     for (const auto &candidate : inspection->candidates)
         candidates.emplace(std::pair{std::string_view{candidate.program_object_id}, candidate.assignment_ordinal},
                            &candidate);
-    std::set<std::pair<std::string, std::uint8_t>> selected;
+    std::set<std::pair<std::string, std::uint16_t>> selected;
     for (const auto &selection : selections) {
         if (!selected.emplace(selection.program_object_id, selection.assignment_ordinal).second) {
             return std::unexpected(session_error("program_assignment_cleanup_invalid",

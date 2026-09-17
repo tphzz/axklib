@@ -7,6 +7,7 @@
 
 #include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
+#include "media_ex5_internal.hpp"
 #include "media_internal.hpp"
 
 namespace axk {
@@ -148,8 +149,13 @@ MediaContainer::MediaContainer(MediaStorage storage) : storage_{std::move(storag
 MediaKind MediaContainer::kind() const noexcept {
     if (std::holds_alternative<Container>(storage_))
         return MediaKind::sfs;
-    if (std::holds_alternative<FatImage>(storage_))
-        return MediaKind::fat12_floppy;
+    if (std::holds_alternative<FatDiskImage>(storage_))
+        return MediaKind::fat16_disk;
+    if (const auto *fat = std::get_if<FatImage>(&storage_)) {
+        if (fat->geometry().profile == FatProfile::fat16)
+            return MediaKind::fat16_disk;
+        return fat->geometry().profile != FatProfile::a_series_floppy ? MediaKind::ex5_disk : MediaKind::fat12_floppy;
+    }
     if (std::holds_alternative<FloppyDiskSet>(storage_))
         return MediaKind::fat12_floppy_set;
     if (std::holds_alternative<IsoImage>(storage_))
@@ -164,6 +170,8 @@ MediaKind MediaContainer::kind() const noexcept {
 std::filesystem::path MediaContainer::source_path() const {
     if (const auto *sfs = std::get_if<Container>(&storage_))
         return sfs->source_path();
+    if (const auto *disk = std::get_if<FatDiskImage>(&storage_))
+        return disk->source_name();
     if (const auto *fat = std::get_if<FatImage>(&storage_))
         return fat->source_name();
     if (const auto *set = std::get_if<FloppyDiskSet>(&storage_))
@@ -188,6 +196,8 @@ std::span<const MediaValidationIssue> MediaContainer::validation_issues() const 
         return iso->validation_issues();
     if (const auto *archive = variant_ptr<A3kArchive>(storage_))
         return archive->validation_issues();
+    if (const auto *directory = variant_ptr<AxkObjectDirectory>(storage_))
+        return directory->validation_issues();
     return {};
 }
 
@@ -198,6 +208,8 @@ Result<std::vector<MediaObject>> MediaContainer::objects(std::size_t maximum_obj
 
 Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mode, std::size_t maximum_object_bytes,
                                                          const CancellationToken &cancellation) const {
+    if (std::holds_alternative<FatDiskImage>(storage_))
+        return std::vector<MediaObject>{};
     if (const auto *fat = variant_ptr<FatImage>(storage_))
         return fat->objects(mode, maximum_object_bytes, cancellation);
     if (const auto *set = variant_ptr<FloppyDiskSet>(storage_))
@@ -267,6 +279,12 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
     auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
     if (!prefix)
         return std::unexpected{prefix.error()};
+    if (detail::ex5_disk_signature(*prefix)) {
+        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!fat)
+            return std::unexpected{fat.error()};
+        return MediaContainer{std::move(*fat)};
+    }
     if (detail::object_prefix(*prefix)) {
         auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
         if (!object)
@@ -297,14 +315,23 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
             return std::unexpected{iso.error()};
         return MediaContainer{std::move(*iso)};
     }
-    if (prefix->size() >= 512U && detail::le16(*prefix, 0x0b) >= 512U &&
-        std::to_integer<std::uint8_t>((*prefix)[0x0d]) != 0U) {
+    const auto sector_size = prefix->size() >= 512U ? detail::le16(*prefix, 0x0b) : 0U;
+    const auto cluster_sectors = prefix->size() >= 512U ? std::to_integer<unsigned>((*prefix)[0x0d]) : 0U;
+    if ((sector_size == 512U || sector_size == 1024U || sector_size == 2048U || sector_size == 4096U) &&
+        cluster_sectors != 0U && cluster_sectors <= 128U && (cluster_sectors & (cluster_sectors - 1U)) == 0U &&
+        detail::le16(*prefix, 0x0e) != 0U && ((*prefix)[0x10] == std::byte{1} || (*prefix)[0x10] == std::byte{2})) {
         auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
         if (!fat)
             return std::unexpected{fat.error()};
         return MediaContainer{std::move(*fat)};
     }
     OpenOptions options;
+    if (prefix->size() >= 512U && (*prefix)[510U] == std::byte{0x55} && (*prefix)[511U] == std::byte{0xaa}) {
+        auto disk = FatDiskImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+        if (!disk)
+            return std::unexpected{disk.error()};
+        return MediaContainer{std::move(*disk)};
+    }
     options.cancellation = cancellation;
     auto sfs = open_image(std::move(reader), std::move(source_path), options);
     if (!sfs)

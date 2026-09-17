@@ -1,6 +1,6 @@
 # FAT12 Floppy Images
 
-Yamaha A-series floppy images handled by axklib use a FAT12 container and store
+Yamaha A-series floppy images use a FAT12 container and store
 Yamaha sampler object files in the FAT root directory. The FAT12 layer supplies
 file enumeration and cluster-chain reads. The embedded object payloads use the
 shared sampler object format described in [Sampler Data Structures](sampler-data.md).
@@ -17,106 +17,42 @@ flowchart TD
 
 ## Container Detection
 
-axklib treats `.ima` and `.img` files as FAT12 floppy candidates when they are
-not SFS images and do not match another supported container. The FAT reader then
-parses the boot sector. An image is rejected if the boot sector is too short or
-contains invalid geometry such as zero bytes per sector, zero sectors per
-cluster, or zero sectors per FAT.
+Image extensions do not determine the filesystem. A FAT12 boot sector must
+supply nonzero sector, cluster and FAT sizes with all regions inside the image.
+FAT12 is distinct from the SFS container even when files share Yamaha object
+headers. FAT16, FAT32 and exFAT are different layouts.
 
-A floppy image can contain `FSFSDEV3SPLX` object files without being an SFS
-hard-disk image. Keep those layers separate.
+An extracted object directory is not a floppy image: FAT allocation, FAT labels,
+directory order, deleted entries and support files cannot be reconstructed
+from object payloads alone. Multi-disk Wave Data uses the segment fields in
+[SMPL](sampler-data.md#smpl-wave-data-object).
+If the original `YAMAHA.SYM`, numeric filename extensions, and zero-length
+marker files are retained, the catalog still supplies the disk-set label,
+member index, logical object paths, and continuation/final marker. It does
+not supply the missing FAT layout.
 
-An external tool may expose only the object files from a floppy. Axklib can
-open one flat leaf directory, or a parent containing one level of related disk
-folders, explicitly as an `AXK_OBJECT_DIRECTORY`. The parent form assembles
-complete contiguous Wave Data that Yamaha split across several floppies. This
-provides read-only object inventory, relationships, preview, audition, and
-package export, but it is not a floppy image: FAT geometry, allocation chains,
-directory ordering, labels, support files, and deleted entries cannot be
-reconstructed from the object set. Higher collection directories remain browser
-or CLI navigation scopes. Opening one flat disk folder does not inspect its
-siblings. If an explicit preview, audition, or package export needs a missing
-Wave Data segment, an application can attach selected extracted companion disk
-folders to the current image session or explicitly request a bounded
-immediate-sibling search. Direct attachment of another raw `.ima` image is not
-part of this session API. Companion matching admits exact continuation segments with a normalized
-Yamaha header identity, even when Yamaha changes the host filename between
-disks, plus Wave Data objects whose embedded names exactly satisfy active
-unresolved Sample member lanes. It neither merges other sibling objects nor
-modifies the source folders.
-
-## Compatibility Profile
-
-The reader supports the FAT12 profile used by Yamaha
-A-series floppy media; it is not a general FAT implementation. It follows
-bounded FAT12 cluster chains, requires duplicated FAT copies to agree, and uses
-DOS 8.3 directory identities. Long-filename entries are ignored in favor of
-their 8.3 aliases. FAT16, FAT32, exFAT, filesystem repair, and filesystem
-alteration are unsupported.
-
-Populated image creation uses pinned FatFs code behind axklib's target-neutral
-object build plan. It is limited to a deterministic 1.44 MB superfloppy and
-root-directory object files. The generated image is reopened by this reader
-before publication. This populated-media profile has not yet been promoted by
-a physical Yamaha sampler test, so parser-valid output is not a
-hardware-compatibility claim.
-
-Blank image creation is a separate exact profile matching A5000 quick and full
-formats. `plan_floppy_creation()` admits the fixed 1,474,560-byte
-geometry and `write_formatted_floppy_image()` serializes it directly without an
-embedded image template. Axkdeck creates the full-format variant. The writer
-reopens the temporary image and requires the exact geometry, root files,
-catalog, and empty object inventory before atomic publication.
-
-SFS volume conversion has a separate multi-floppy profile. A volume that fits
-on one disk remains one raw `.ima` file. A larger admitted volume becomes a ZIP
-containing two through 32 ordered `.ima` members plus `manifest.json`. This
-constrained profile has loaded and auditioned successfully on an A5000 running
-system version 1.50. Sampler save/reload validation remains pending, so inspection
-includes a nonblocking warning for that unverified operation. Every nonfinal
-boundary contains an exact Wave Data continuation. When natural object packing
-would leave an ordinary boundary, the planner may move the final 512 payload
-bytes of a complete terminal Wave Data object to the next member as a
-continuation carrier. It rejects the export when it cannot construct that proven
-topology.
-
-Axkdeck also exposes **Export volumes to floppies...** for a complete
-file-backed SFS partition. This is a batch wrapper around that same per-volume
-profile, not a different disk topology. The selected destination has one
-collision-safe subdirectory per successful nonempty volume, and each
-subdirectory contains raw `disk01.ima`, `disk02.ima`, and subsequent members.
-The batch intentionally omits the individual export's ZIP wrapper so the
-result can be copied directly to physical media one member at a time. Matching
-batch and individual members are byte-identical.
-
-The root `volume-floppies.axklib.json` report records the partition identity,
-per-volume outcome, member paths, sizes, and SHA-256 digests. Empty and blocked
-volumes are recorded without a directory. Runtime failure removes only the
-affected volume directory; successful siblings remain. If nothing succeeds,
-no output is published.
+For software support, creation and import workflows see
+[Media Profiles](media.md) and [Writer And Alteration](write.md).
 
 ## FAT12 Geometry
 
-Supported 1.44 MB Yamaha floppies use the values in the `Yamaha profile`
-column. axklib normalizes the pinned FatFs formatter output to that same media
-descriptor and CHS profile before mounting and populating the image. The reader
-still validates actual filesystem geometry rather than requiring one boot-sector
-identity.
+The following geometry describes the 1.44 MB Yamaha profile. Other FAT
+geometries must be interpreted from their own boot fields.
 
-| Field | Boot offset | Size/type | Yamaha profile | Generated value |
-| --- | ---: | --- | ---: | ---: |
-| Bytes per sector | `0x0b` | u16le | `512` | `512` |
-| Sectors per cluster | `0x0d` | u8 | `1` | `1` |
-| Reserved sectors | `0x0e` | u16le | `1` | `1` |
-| FAT count | `0x10` | u8 | `2` | `2` |
-| Root directory entries | `0x11` | u16le | `224` | `224` |
-| Total sectors, 16-bit | `0x13` | u16le | `2880` | `2880` |
-| Media descriptor | `0x15` | u8 | `0xf0` | `0xf0` |
-| Sectors per FAT | `0x16` | u16le | `9` | `9` |
-| Sectors per track | `0x18` | u16le | `18` | `18` |
-| Heads | `0x1a` | u16le | `2` | `2` |
-| Hidden sectors | `0x1c` | u32le | `0` | `0` |
-| Total sectors, 32-bit fallback | `0x20` | u32le | `0` when `0x13` is used | `0` |
+| Field | Boot offset | Size/type | Yamaha profile |
+| --- | ---: | --- | ---: |
+| Bytes per sector | `0x0b` | u16le | `512` |
+| Sectors per cluster | `0x0d` | u8 | `1` |
+| Reserved sectors | `0x0e` | u16le | `1` |
+| FAT count | `0x10` | u8 | `2` |
+| Root directory entries | `0x11` | u16le | `224` |
+| Total sectors, 16-bit | `0x13` | u16le | `2880` |
+| Media descriptor | `0x15` | u8 | `0xf0` |
+| Sectors per FAT | `0x16` | u16le | `9` |
+| Sectors per track | `0x18` | u16le | `18` |
+| Heads | `0x1a` | u16le | `2` |
+| Hidden sectors | `0x1c` | u32le | `0` |
+| Total sectors, 32-bit fallback | `0x20` | u32le | `0` when `0x13` is used |
 
 Derived offsets:
 
@@ -126,12 +62,12 @@ fat_offset       = reserved_sectors * bytes_per_sector
 root_offset      = (reserved_sectors + fat_count * sectors_per_fat) * bytes_per_sector
 data_offset      = root_offset + root_dir_sectors * bytes_per_sector
 cluster_size     = bytes_per_sector * sectors_per_cluster
+data_cluster_count = (total_sectors - data_offset // bytes_per_sector) // sectors_per_cluster
 ```
 
 For the common 1.44 MB layout, `data_offset` is `0x4200`.
 
-Sampler-authored blank media and populated axklib media intentionally use
-different deterministic boot metadata. Blank media has these Confirmed fields:
+The Yamaha blank-media profile has these boot fields:
 
 | Offset | Size | Quick format | Full format |
 | --- | ---: | --- | --- |
@@ -143,27 +79,11 @@ different deterministic boot metadata. Blank media has these Confirmed fields:
 Both blank formats contain `YAMAHA.SYM` at cluster 2 with size 9,766 and a
 zero-length `A3000_SY.002`. Their blank root label entry has attribute `0x28`
 for quick format and `0x08` for full format. Full format additionally stores
-write time `0x2000` and initializes unused bytes after catalog offset `0x6826`
-to `0xe5`; quick format leaves them zero. Exact output hashes are regression
-tested against the two sampler-formatted reference images.
+write time `0x2000` and initializes unused bytes from image offset `0x6826`
+to `0xe5`; quick format leaves them zero.
 
-The populated-media writer has these deterministic fields:
-
-| Offset | Size | Generated bytes/value |
-| --- | ---: | --- |
-| `0x00` | 3 | Boot jump `eb 58 90`. |
-| `0x03` | 8 | OEM name `WINIMAGE`. |
-| `0x24` | 1 | BIOS drive number `0x00`. |
-| `0x26` | 1 | Extended boot signature `0x29`. |
-| `0x27` | 4 | Volume serial `0x5c210b40`, u32le. |
-| `0x2b` | 11 | Eleven spaces. No root-directory volume-label entry is generated. |
-| `0x36` | 8 | Filesystem text `FAT12` padded with spaces; FAT type still comes from cluster count. |
-| `0x1fe` | 2 | Signature `55 aa`. |
-
-Populated-media root-directory entries use attribute `0x00`. Creation and
-modification timestamps are fixed to `2026-01-01 00:00:00`; last-access
-dates are zero. This fixed metadata is a reproducibility convention, not a
-sampler-facing object field.
+Generated populated-media boot metadata is specified separately in
+[Writer And Alteration](write.md#generated-floppy-boot-metadata).
 
 The media descriptor is also written to byte zero of both FAT copies. This
 keeps the BPB and FAT reserved entry consistent; changing only boot offset
@@ -172,8 +92,8 @@ image.
 
 ## FAT12 Entries
 
-FAT12 stores 12-bit cluster-chain entries packed across bytes. axklib reads an
-entry for cluster `n` with:
+FAT12 stores 12-bit cluster-chain entries packed across bytes. The entry for
+cluster `n` is decoded as follows:
 
 ```text
 byte_index = fat_offset + n + n // 2
@@ -182,20 +102,32 @@ value      = pair >> 4          if n is odd
 value      = pair & 0x0fff      if n is even
 ```
 
-Cluster-chain traversal starts at the root directory entry's first cluster and
-continues while:
+For a nonempty file or subdirectory, cluster-chain traversal starts at the
+directory entry's first cluster. Each
+data-cluster number must satisfy both the FAT12 marker boundary and the
+data-area bounds derived from the boot geometry:
 
 ```text
-2 <= cluster < 0xff8
+2 <= cluster < 0xff0
+cluster - 2 < data_cluster_count
 ```
 
-Values `0xff8..0xfff` are treated as end-of-chain values. The reader tracks seen
-clusters and reports a loop if the chain repeats a cluster.
+The next FAT entry distinguishes a data-cluster link from an end or error:
+
+| Value | Meaning |
+| --- | --- |
+| `0x000` | Free cluster; invalid within an allocated chain. |
+| `0x001`, `0xff0..0xff6` | Reserved; invalid as data-cluster links. |
+| `0xff7` | Bad-cluster marker; invalid within a file or directory chain. |
+| `0xff8..0xfff` | End of chain. |
+
+A repeated cluster makes the chain cyclic and invalid. An end marker before
+the chain supplies the declared file length is also invalid.
 
 ## Root Directory Entries
 
-The root directory contains fixed 32-byte entries. axklib scans up to the boot
-sector's `root_entries` count.
+The root directory contains fixed 32-byte entries, bounded by the boot sector's
+`root_entries` count.
 
 | Entry offset | Size | Meaning |
 | --- | ---: | --- |
@@ -207,20 +139,19 @@ sector's `root_entries` count.
 
 Entry handling:
 
-| First byte / attribute | Reader behavior |
+| First byte / attribute | Meaning |
 | --- | --- |
 | `0x00` first byte | End of used root directory entries. |
 | `0xe5` first byte | Deleted entry; skipped. |
-| Attribute `0x0f` | Long-file-name entry; skipped. |
-| Attribute with `0x08` set | Volume-label entry; skipped. |
-| Attribute with `0x10` set | Subdirectory; its FAT chain is checked and queued for bounded traversal. |
-| File size `0` | Skipped by the current object reader. |
+| Attribute `0x0f` | Long-file-name component; the following short entry supplies the 8.3 alias. |
+| Attribute with `0x08` set | Volume-label entry, not a regular file. |
+| Attribute with `0x10` set | Subdirectory; contents follow its FAT chain. |
+| File size `0` | Empty file; no payload bytes. |
 
-The reader starts with the fixed root directory and then traverses ordinary
-subdirectories. `.` and `..` entries are ignored. Cluster ownership is global:
-a file or directory that reuses a cluster already claimed by another entry is
-rejected as cross-linked. The current writer deliberately emits object files in
-the root directory only.
+The fixed root directory can contain ordinary subdirectories. Their `.` and
+`..` entries refer to the current and parent directory, not new child entries.
+Cluster ownership is global: a file or directory that reuses another entry's
+storage is cross-linked.
 
 ## DOS 8.3 Name Parsing
 
@@ -251,10 +182,10 @@ Supported Yamaha floppy images commonly contain these root-file classes:
 | File class | Typical name | Contents and handling |
 | --- | --- | --- |
 | Sampler object | `SINE____.003`, `SMP_2555.004` | Complete `FSFSDEV3SPLX<type>` payload. The embedded type and name are authoritative. |
-| Symbol/support metadata | `YAMAHA.SYM` | A 9,766-byte disk/file/category catalog. Readers exclude it from object inventory; writers synthesize it from the output image. |
-| Standalone-disk marker | `A3000_SY.001` | Zero-length physical file cataloged as `\A3000.SYM` in slot 1. Readers exclude it from object inventory. |
-| Model/system metadata | names such as `A3000_SY.002` | Other non-object support data observed on some media. Its payload is not part of the public object decoder. |
-| Other DOS file | any valid DOS 8.3 name | Readable through the FAT layer, but ignored by object inventory unless it begins with a supported object signature. |
+| Symbol/support metadata | `YAMAHA.SYM` | A 9,766-byte disk/file/category catalog. It is filesystem support metadata, not a sampler object. |
+| Standalone-disk marker | `A3000_SY.001` | Zero-length physical file cataloged as `\A3000.SYM` in slot 1. It is not a sampler object. |
+| Model/system metadata | names such as `A3000_SY.002` | Other support data; its nonempty payload layout is unspecified here. |
+| Other DOS file | any valid DOS 8.3 name | File contents are independent of the Yamaha object layout. |
 
 Object stems often resemble an uppercase, DOS-compatible projection of the
 embedded object name. Numeric extensions commonly reflect file placement or
@@ -262,81 +193,33 @@ save order. Neither convention is required for decoding, and neither replaces
 the embedded header identity. There is no CD-style `0000` category catalog or
 `_DSKNAME` group row on this floppy profile.
 
-Known object tags and their inner byte layouts are documented in
+Object tags and their inner byte layouts are documented in
 [Sampler Data Structures](sampler-data.md). In particular, `SMPL` waveform
 payload boundaries come from the embedded big-endian header fields rather than
 from filename or FAT allocation length.
 
-## Generated Floppy File Layout
+## Yamaha File Catalog
 
-`axklib create floppy` writes exactly one root-directory file for each prepared
-Yamaha object, one synthesized `YAMAHA.SYM`, and the zero-length physical
-standalone-disk marker `A3000_SY.001`. It does not create unrelated model-specific
-system metadata, subdirectories, a root-directory FAT volume-label entry, or
-long filenames.
+The standalone floppy profile stores object files, `YAMAHA.SYM`, and a
+zero-length disk marker in the FAT root.
 
 `YAMAHA.SYM` is exactly 257 records of 38 bytes: one disk-name record, 224
 physical-file slot records, and 32 category records. A live record begins with
 `0x00`, stores a NUL-terminated logical path, and has a zero-filled tail. An
 unused record begins with `0xff`. Slot 1 catalogs `\A3000.SYM`; generated object
-slots begin at 2 and slot 0 remains unused. The catalog is written last in
-deterministic root-directory order. Rebuilding an existing image preserves a
-valid catalog's disk-name record while regenerating its file and category
-records from the output.
+slots begin at 2 and slot 0 remains unused. The catalog and physical directory
+must describe the same files; the disk-name record is separate from those rows.
 
-Objects are sorted deterministically by object type, embedded name, and payload
-size. Known types sort as `SMPL`, `SBNK`, `SBAC`, `PROG`, `SEQU`, then `PRF3`.
-Each DOS filename is generated as follows:
+Physical filename generation and object ordering are software conventions;
+see [Generated Floppy Names](write.md#generated-floppy-names).
 
-```text
-stem:
-  take the first 8 embedded-name byte positions
-  uppercase ASCII letters and preserve digits and underscore
-  replace every other byte position with underscore
-  pad a shorter name to 8 positions with underscore
+## Multi-Floppy Sets
 
-extension:
-  Yamaha catalog slot in the complete sorted object list
-  formatted as three decimal digits: 002, 003, ... 223
-```
+Wave Data can span disks; other sampler objects remain whole. Segments repeat
+the source header with total bytes at `0x1c`, physical segment bytes at `0x20`
+and the segment's logical byte offset at `0x24`.
 
-Object stems may repeat because the three-digit catalog-slot extension is unique.
-If a complete physical filename still collides with a retained root file, image
-creation fails rather than silently replacing it. The writer supports at most
-222 generated objects: the Yamaha file catalog reserves slots 0 and 1, while
-`A3000_SY.001` and `YAMAHA.SYM` occupy two of the 224 FAT root entries.
-
-For example, freshly authored Wave Data and a Sample both named
-`Authored Tone` are sorted as `SMPL` then `SBNK` and become:
-
-```text
-AUTHORED.002   FSFSDEV3SPLXSMPL...
-AUTHORED.003   FSFSDEV3SPLXSBNK...
-```
-
-The filename algorithm is a generated-container convention. Transferring an
-existing object preserves every object payload byte but generates new DOS
-filenames; it does not preserve the source directory entry or cluster chain.
-
-## Multi-Floppy Conversion Sets
-
-Media conversion writes Programs first, then each Sample (`SBNK`)
-followed by its not-yet-emitted Known Wave Data dependencies, remaining Wave
-Data, Sample Banks (`SBAC`), then Sequences and `PRF3`. Shared Wave Data is
-written at first use only.
-
-When a Sample fits at the end of one member but its first-use whole Wave Data
-does not, the Wave Data starts the next member without repeating the Sample.
-Whole objects otherwise move to a later member without splitting. Wave Data
-larger than an empty member is segmented normally. If an otherwise ordinary
-rollover would occur, the planner may instead split the final 512 payload bytes
-from a complete terminal Wave Data object and place that exact same-object
-continuation first on the next member. Each segment repeats the source header
-and retains the complete logical payload size at `0x1c`; `0x20` is rewritten to
-the local segment size and `0x24` to its contiguous logical payload offset.
-Other object types are never split.
-
-Every member contains its own exact synthesized `YAMAHA.SYM`. Every nonfinal
+Every member contains its own `YAMAHA.SYM`. Every nonfinal
 member catalogs zero-length `A3000F.SYM`, and its final Wave Data segment has an
 exact same-object continuation at the start of the next member. The final member
 catalogs zero-length `A3000E.SYM`. An ordinary nonfinal `A3000.SYM` boundary is
@@ -345,29 +228,8 @@ slots are local to each disk and may be reused
 on later members. Segments of one continued Wave Data object use its logical
 catalog series path, object name, and normalized header as their cross-member
 identity rather than one physical slot.
-The ZIP manifest carries the deterministic logical disk names and exact member
-order:
-
-```text
-manifest.json
-payloads/disk01.ima
-payloads/disk02.ima
-...
-```
-
-The manifest schema is `axklib.floppy-disk-set.v1`. It records the disk count,
-logical name, member path, fixed image size, image and `YAMAHA.SYM` SHA-256
-digests, exact member marker, and hardware-validation state. ZIP is a host
-transport container only: extract the `.ima` members and present them to the
-sampler in manifest order, beginning with disk 1.
-
-Before publication, the writer reopens every FAT12 member, compares its exact
-object payloads and catalog, reassembles every split Wave Data object byte for
-byte, reopens the ZIP, and checks its inspected size. More than 32 required
-images is a blocking conversion issue. The manifest records
-`hardwareValidation: "LOAD_AND_AUDITION_VERIFIED"`. The supported topology has
-loaded and auditioned through four members on an A5000 running system version
-1.50. Sampler save/reload validation remains pending.
+Host transport wrappers and conversion limits are described in
+[Writer And Alteration](write.md#multi-floppy-transport).
 
 ## Reading File Bytes
 
@@ -376,59 +238,34 @@ A FAT file read is:
 ```text
 remaining = file_size
 for cluster in cluster_chain:
+    if remaining == 0:
+        break
     offset = data_offset + (cluster - 2) * cluster_size
-    append image[offset : offset + min(cluster_size, remaining)]
-    remaining -= cluster_size
-return first file_size bytes
+    read_size = min(cluster_size, remaining)
+    require offset + read_size <= image_size
+    append image[offset : offset + read_size]
+    remaining -= read_size
+require remaining == 0
+return assembled bytes
 ```
 
 The first byte of a Yamaha object payload is normally the first byte of the FAT
-file. axklib records both the FAT file's first cluster and the absolute object
-byte offset:
+file. Its absolute byte offset is:
 
 ```text
 object_offset = data_offset + (first_cluster - 2) * cluster_size
 ```
 
-If the shared object header reports an internal payload start, axklib also
-records `stored_payload_offset = object_offset + header_size`.
+A Yamaha payload begins with `FSFSDEV3SPLX<type>`. Its embedded offset fields
+are relative to that file, not the beginning of the disk. Allocation beyond the
+logical FAT file size is not part of the object. A non-Yamaha file remains a
+filesystem file; it does not acquire an object type from its extension.
 
-## Embedded Object Detection
+## Structural Consistency
 
-A FAT file is handed to the sampler object decoder when its bytes start with:
-
-```text
-FSFSDEV3SPLX<type>
-```
-
-Supported type tags are listed in [Sampler Data Structures](sampler-data.md).
-The FAT reader attaches this placement metadata to each object:
-
-| Metadata | Meaning |
-| --- | --- |
-| `fat_file` | Slash-separated DOS 8.3 logical path. Root files contain only the filename. |
-| `fat_directory_offset` | Absolute byte offset of the file's directory entry, whether in the fixed root or a subdirectory cluster. |
-| `fat_first_cluster` | First cluster from the root directory entry. |
-| `fat_cluster_count` | Number of clusters followed by the chain. |
-| `fat_file_size` | File size from the root directory entry. |
-| `fat_object_offset` | Absolute byte offset of the object file start. |
-| `fat_stored_payload_offset` | Object offset plus shared header size when known. |
-
-The object key is based on the FAT logical path. The scope key is the FAT root;
-subdirectory components remain part of the object key and `fat_file` metadata.
-
-## Validation And Diagnostics
-
-FAT12 diagnostics are split into container and sampler-data problems.
-
-| Condition | Report shape |
-| --- | --- |
-| Boot sector too short | Unsupported FAT/floppy container. |
-| Invalid geometry | Unsupported FAT/floppy container. |
-| Repeated cluster in a chain | FAT chain loop error for the affected file. |
-| File does not start with object magic | Ignored by object scan. |
-| Unsupported object type tag | Ignored by normal object loader or surfaced as unsupported in lower-level reports. |
-| Sampler object decode issue | Reported by object, relationship, validation, or export commands. |
+Region boundaries must fit the image. FAT copies must agree; chains must not
+loop or cross-link, and must cover the logical byte count. Container validity
+and validity of the sampler payload are separate questions.
 
 ## Minimal Read Walkthrough
 
@@ -440,5 +277,5 @@ FAT12 diagnostics are split into container and sampler-data problems.
 5. Decode the DOS 8.3 filename, first cluster, and file size.
 6. Follow the FAT12 cluster chain and reassemble the file bytes.
 7. Select files beginning with `FSFSDEV3SPLX`.
-8. Decode the shared object header and attach FAT placement metadata.
-9. Pass the object payload to the shared sampler-data decoder.
+8. Decode the shared object header independently of FAT placement.
+9. Interpret the payload according to its object type in [Sampler Data](sampler-data.md).

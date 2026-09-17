@@ -2,6 +2,7 @@
 
 #include "axklib/bytes.hpp"
 #include "axklib/utf8.hpp"
+#include "media_signatures.hpp"
 #include "sfs_internal.hpp"
 
 #include <algorithm>
@@ -133,9 +134,10 @@ bool allocation_is_safe_for_mutation(const AllocationSummary &allocation) noexce
     const auto bitmap_matches_extents = [](const AllocationBitmapSummary &bitmap) {
         return bitmap.marked_used_without_index_extent_count == 0U && bitmap.index_extent_marked_free_count == 0U;
     };
-    return allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
-           allocation.fixed_not_header.empty() && allocation.header_not_fixed.empty() &&
-           bitmap_matches_extents(allocation.fixed_location) && bitmap_matches_extents(allocation.header_addressed) &&
+    return allocation.bitmap_copy1_valid && allocation.bitmap_copy2_valid && allocation.active_bitmap_copy != 0U &&
+           allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
+           allocation.copy1_not_copy2.empty() && allocation.copy2_not_copy1.empty() &&
+           bitmap_matches_extents(allocation.bitmap_copy1) && bitmap_matches_extents(allocation.bitmap_copy2) &&
            allocation.invalid_extent_record_count == 0U && allocation.extent_total_mismatch_count == 0U &&
            allocation.extent_byte_total_mismatch_count == 0U && allocation.conflicting_cluster_count == 0U;
 }
@@ -155,6 +157,15 @@ Result<Container> open_image(std::shared_ptr<const RandomAccessReader> image, st
     }
     if (options.progress)
         options.progress->report({ProgressPhase::opening, 0, std::nullopt, text::path_to_utf8(source_path), {}});
+    if (image->size() >= 0x220U) {
+        const auto descriptor = sfs_detail::read_bytes(*image, 0x200U, 0x20U, options.cancellation);
+        if (!descriptor)
+            return std::unexpected{descriptor.error()};
+        if (detail::ex5_descriptor_signature(*descriptor)) {
+            return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                              "EX5 disk is not SFS; use read-only open_media access")};
+        }
+    }
     const auto primary_bytes = sfs_detail::read_bytes(*image, 0, sfs_default_sector_size, options.cancellation);
     if (!primary_bytes)
         return std::unexpected{primary_bytes.error()};

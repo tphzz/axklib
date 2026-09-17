@@ -1,4 +1,5 @@
 import type { components } from './generated/axklibApiV1';
+import type { FloppyPlanRequest, FloppyInputLocation } from './floppyImport';
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { HttpImageSessions } from './httpImageSessions';
 import type { HttpJobController } from './httpJobController';
@@ -30,6 +31,38 @@ import type {
 } from './transport';
 
 export class HttpPackageOperations {
+    async startFloppyInspection(sources: FloppyInputLocation[]): Promise<JobState> {
+        const job = await this.client.invoke<never>('images.floppy_import.inspect', {
+            sources: sources.map((source) =>
+                source.kind === 'server-directory' ? { directoryRef: source.reference } : serverInput(source),
+            ),
+        });
+        if (!this.jobs.isJob(job)) throw new Error('Floppy inspection did not return a job');
+        return this.jobs.map(job);
+    }
+    async releaseFloppyInspection(inspectionToken: string): Promise<void> {
+        const result = await this.client.invoke('images.floppy_import.release', { inspectionToken });
+        if (this.jobs.isJob(result)) throw new Error('Floppy inspection release unexpectedly returned a job');
+    }
+    async planFloppyImport(sessionId: number, request: FloppyPlanRequest): Promise<ImageSessionPackageImportPlan> {
+        const session = this.imageSessions.get(sessionId);
+        const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.floppy_import.plan', {
+            ...request,
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+        });
+        if (this.jobs.isJob(result)) throw new Error('Floppy planning unexpectedly returned a job');
+        return result;
+    }
+    async startFloppyImport(planToken: string): Promise<JobState> {
+        const job = await this.client.invoke<never>(
+            'images.floppy_import',
+            { planToken },
+            { idempotencyKey: randomIdempotencyKey() },
+        );
+        if (!this.jobs.isJob(job)) throw new Error('Floppy import did not return a job');
+        return this.jobs.map(job);
+    }
     constructor(
         private readonly client: AxklibHttpApiClient,
         private readonly jobs: HttpJobController,

@@ -46,11 +46,13 @@
                 <Icon name="folder-plus" size={16} />
                 <h2>Add companion disks</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <div class="companion-disk-content">
-            {#if sourceKind === 'file'}
+            {#if sourceKind === 'file' || nextRequiredIndex !== null}
                 <p>
                     Floppy set <strong>{setLabel}</strong>{nextRequiredIndex === null
                         ? ' is incomplete.'
@@ -103,10 +105,20 @@
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
-            <button class="primary-button" type="button" disabled={busy || sources.length === 0} onclick={onconfirm}>
-                {busy ? 'Adding companions' : 'Add and retry'}
-            </button>
+            <span class="dialog-footer-status" role="status"
+                >{busy ? 'Adding companions' : `${sources.length} selected`}</span
+            >
+            <div class="dialog-footer-actions">
+                <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={busy || sources.length === 0}
+                    onclick={onconfirm}
+                >
+                    Add and retry
+                </button>
+            </div>
         </footer>
     </div>
 </div>

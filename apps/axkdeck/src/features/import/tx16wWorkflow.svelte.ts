@@ -5,10 +5,12 @@ import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { tx16wDiskMediaType } from '../../lib/tx16wImport';
 import type { JobController } from '../jobs/actions';
+import { ImportCompletion } from './importCompletion.svelte';
 
 export interface Tx16wVolumeOption {
     key: string;
     label: string;
+    partitionName: string;
     target: AudioImportTarget;
 }
 
@@ -50,7 +52,11 @@ export class Tx16wImportWorkflow {
     private abortController: AbortController | null = null;
     private nextMemberId = 0;
 
-    constructor(private readonly dependencies: Tx16wImportDependencies) {}
+    readonly completion: ImportCompletion;
+
+    constructor(private readonly dependencies: Tx16wImportDependencies) {
+        this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
+    }
 
     dropAvailable(): boolean {
         return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
@@ -85,6 +91,8 @@ export class Tx16wImportWorkflow {
             return;
         }
         await this.close();
+        if (this.completion.phase === 'unconfirmed') return;
+        this.completion.reset();
         this.request = {
             members: admitted.map((source) => this.member(source)),
             target,
@@ -133,13 +141,17 @@ export class Tx16wImportWorkflow {
         }
     }
 
-    async selectTarget(target: AudioImportTarget): Promise<void> {
+    async selectTarget(target: AudioImportTarget | null): Promise<void> {
         const request = this.request;
         if (!request || request.status === 'importing') return;
         request.target = target;
         request.inspection = null;
         request.error = '';
-        await this.inspect();
+        if (target) await this.inspect();
+        else {
+            this.abortController?.abort();
+            request.status = 'waiting-target';
+        }
     }
 
     async selectImportMode(importMode: Tx16wImportMode): Promise<void> {
@@ -152,6 +164,7 @@ export class Tx16wImportWorkflow {
     }
 
     async commit(): Promise<void> {
+        if (this.completion.locked) return;
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         const sources = request?.members.map((member) => member.resolvedSource);
@@ -167,63 +180,62 @@ export class Tx16wImportWorkflow {
         const importMode = request.importMode;
         const objectCount = Object.values(request.inspection.counts).reduce((total, count) => total + count, 0);
         const started = performance.now();
-        let submitted = false;
         request.status = 'importing';
         request.error = '';
         this.dependencies.setStatus('Importing TX16W disk set');
         try {
             await this.dependencies.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
+            await this.completion.run(
+                () => this.dependencies.transport.startTx16wDiskSetImport(sessionId, sources, target, importMode),
                 async () => {
-                    const job = await this.dependencies.transport.startTx16wDiskSetImport(
-                        sessionId,
-                        sources,
-                        target,
-                        importMode,
+                    this.dependencies.selectWorkspace('programs');
+                    await this.dependencies.refreshSession(target);
+                    this.dependencies.reportTiming('tx16w-disk-set-import', started, objectCount);
+                    this.dependencies.setStatus(
+                        `Imported ${request.members.length} TX16W disk image${request.members.length === 1 ? '' : 's'}`,
                     );
-                    submitted = true;
-                    return job;
+                    if (this.completion.warnings.length === 0) await this.releaseAndClose();
                 },
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
+                request.inspection.notices.map((notice) => notice.message),
             );
-            if (completed.status !== 'completed') throw new Error(completed.error ?? 'TX16W import did not complete');
-            this.dependencies.selectWorkspace('programs');
-            await this.dependencies.refreshSession(target);
-            this.dependencies.reportTiming('tx16w-disk-set-import', started, objectCount);
-            this.dependencies.setStatus(
-                `Imported ${request.members.length} TX16W disk image${request.members.length === 1 ? '' : 's'}`,
-            );
-            await this.close();
+            this.updateCompletionError();
         } catch (error) {
             const message = userFacingMessage(error);
-            if (submitted) {
-                try {
-                    await this.dependencies.refreshSession(target);
-                    this.dependencies.setStatus(`Import result could not be confirmed; image refreshed: ${message}`);
-                    await this.close();
-                } catch (refreshError) {
-                    request.status = 'ready';
-                    request.error = `${message}. Refresh also failed: ${userFacingMessage(refreshError)}`;
-                    this.dependencies.setStatus(request.error);
-                }
-            } else {
-                request.status = 'ready';
-                request.error = message;
-                this.dependencies.setStatus(message);
-            }
+            request.status = 'ready';
+            request.error = message;
+            this.dependencies.setStatus(message);
         }
     }
 
+    async recoverCompletion(): Promise<void> {
+        await this.completion.recover();
+        this.updateCompletionError();
+    }
+
+    private updateCompletionError(): void {
+        if (!this.request) return;
+        if (!this.completion.locked) this.request.status = 'ready';
+        this.request.error = this.completion.message;
+        this.dependencies.setStatus(this.completion.message);
+    }
+
     async close(): Promise<void> {
+        if (this.completion.busy || this.completion.phase === 'unconfirmed') return;
+        await this.releaseAndClose();
+    }
+
+    private async releaseAndClose(): Promise<void> {
         this.abortController?.abort();
         this.abortController = null;
-        const uploads = this.request?.members.flatMap((member) => (member.upload ? [member.upload] : [])) ?? [];
-        this.request = null;
+        const request = this.request;
+        const uploads = request?.members.flatMap((member) => (member.upload ? [member.upload] : [])) ?? [];
         await Promise.all(
             uploads.map((upload) => this.dependencies.transport.releaseClientUpload(upload).catch(() => undefined)),
         );
+        if (this.request === request) this.request = null;
     }
 
     private member(source: ClientUploadSource | FileLocation): Tx16wImportMember {
@@ -297,6 +309,7 @@ export function collectTx16wVolumeOptions(items: readonly DiskTreeItem[]): Tx16w
                 result.push({
                     key: `${target.partitionIndex}:${target.volumeName}`,
                     label: `${nextPartitionName || `Partition ${target.partitionIndex + 1}`} · ${item.name}`,
+                    partitionName: nextPartitionName || `Partition ${target.partitionIndex + 1}`,
                     target,
                 });
             }

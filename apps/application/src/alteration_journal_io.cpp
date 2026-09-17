@@ -165,6 +165,10 @@ axk::app::Result<std::uint64_t> axk::app::journal_io::encoded_size(const FileRef
     for (const auto &patch : patches) {
         if (patch.original.size() != patch.replacement.size())
             return std::unexpected(journal_error("alteration patch changes the image size"));
+        if (auto checked = patch.original.read_exact_at(0U, {}); !checked)
+            return std::unexpected(checked.error());
+        if (auto checked = patch.replacement.read_exact_at(0U, {}); !checked)
+            return std::unexpected(checked.error());
         if (!checked_add(size, 16U) || !checked_add(size, patch.original.size()) ||
             !checked_add(size, patch.replacement.size())) {
             return std::unexpected(journal_error("alteration journal size exceeds supported limits"));
@@ -186,6 +190,18 @@ axk::app::journal_io::publish(const std::filesystem::path &path, const FileRef &
     for (const auto &patch : patches) {
         if (patch.offset > image_size_bytes || patch.original.size() > image_size_bytes - patch.offset)
             return std::unexpected(journal_error("alteration patch exceeds the image boundary"));
+    }
+    std::vector<const AlterationJournalPatch *> ordered;
+    ordered.reserve(patches.size());
+    for (const auto &patch : patches)
+        if (patch.original.size() != 0U)
+            ordered.push_back(&patch);
+    std::ranges::sort(ordered, {}, &AlterationJournalPatch::offset);
+    std::uint64_t previous_end{};
+    for (const auto *patch : ordered) {
+        if (patch->offset < previous_end)
+            return std::unexpected(journal_error("alteration patches overlap"));
+        previous_end = patch->offset + patch->original.size();
     }
     if (auto cancelled = check_cancelled(cancellation); !cancelled)
         return std::unexpected(cancelled.error());
@@ -220,21 +236,24 @@ axk::app::journal_io::publish(const std::filesystem::path &path, const FileRef &
             return std::unexpected(written.error());
     }
     const auto maximum_chunk = std::max<std::size_t>(chunk_bytes, 1U);
+    std::vector<std::byte> buffer(maximum_chunk);
     for (const auto &patch : patches) {
         std::array<std::byte, 16> descriptor{};
         write_u64(descriptor, 0U, patch.offset);
         write_u64(descriptor, 8U, patch.original.size());
         if (auto written = append(*publication, payload_hash, file_hash, descriptor); !written)
             return std::unexpected(written.error());
-        const std::array payloads{std::span<const std::byte>{patch.original},
-                                  std::span<const std::byte>{patch.replacement}};
-        for (const auto payload : payloads) {
-            for (std::size_t offset = 0U; offset < payload.size();) {
+        const std::array payloads{&patch.original, &patch.replacement};
+        for (const auto *payload : payloads) {
+            for (std::uint64_t offset = 0U; offset < payload->size();) {
                 if (auto cancelled = check_cancelled(cancellation); !cancelled)
                     return std::unexpected(cancelled.error());
-                const auto size = std::min(maximum_chunk, payload.size() - offset);
-                if (auto written = append(*publication, payload_hash, file_hash, payload.subspan(offset, size));
-                    !written) {
+                const auto size =
+                    static_cast<std::size_t>(std::min<std::uint64_t>(maximum_chunk, payload->size() - offset));
+                auto chunk = std::span{buffer}.first(size);
+                if (auto read = payload->read_exact_at(offset, chunk); !read)
+                    return std::unexpected(read.error());
+                if (auto written = append(*publication, payload_hash, file_hash, chunk); !written) {
                     return std::unexpected(written.error());
                 }
                 offset += size;
@@ -426,8 +445,8 @@ axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const 
 
 axk::app::Result<void> axk::app::journal_io::restore_original_bytes(SandboxMutation &target,
                                                                     const std::filesystem::path &journal_path,
-                                                                    const Inspection &journal,
-                                                                    std::size_t chunk_bytes) {
+                                                                    const Inspection &journal, std::size_t chunk_bytes,
+                                                                    const std::function<bool()> &after_flush) {
     auto reader = Reader::open(journal_path, std::numeric_limits<std::uint64_t>::max());
     if (!reader)
         return std::unexpected(reader.error());
@@ -444,5 +463,11 @@ axk::app::Result<void> axk::app::journal_io::restore_original_bytes(SandboxMutat
             offset += size;
         }
     }
-    return target.flush();
+    if (auto flushed = target.flush(); !flushed)
+        return flushed;
+    if (after_flush && after_flush())
+        return std::unexpected(journal_error("simulated rollback interruption", true));
+    if (auto bound = target.verify_bound(); !bound)
+        return bound;
+    return compare_target(target, journal_path, journal, false, chunk_bytes);
 }

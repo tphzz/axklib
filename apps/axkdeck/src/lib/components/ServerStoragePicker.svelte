@@ -17,8 +17,9 @@
     } from '../storageLocations';
     import { restoreRememberedFile, storageEntryIsVisible } from '../storagePickerRestoration';
     import Icon from './Icon.svelte';
+    import StoragePickerFooter from './StoragePickerFooter.svelte';
 
-    type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source';
+    import type { PickerMode } from '../../features/dialogs/picker';
     interface Props {
         transport: ImageTransport;
         mode: PickerMode;
@@ -123,7 +124,11 @@
     });
 
     function entryIsVisible(entry: SandboxEntry): boolean {
-        return storageEntryIsVisible(entry, mode === 'file' || mode === 'media-source', normalizedExtensions);
+        return storageEntryIsVisible(
+            entry,
+            mode === 'file' || mode === 'media-source' || mode === 'floppy-source',
+            normalizedExtensions,
+        );
     }
 
     function rootIsDisabled(root: SandboxRoot): boolean {
@@ -446,7 +451,9 @@
     >
         <header class="dialog-header">
             <h2>{title}</h2>
-            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}>×</button>
+            <button class="icon-button" type="button" aria-label="Close" onclick={oncancel}
+                ><Icon name="close" size={15} /></button
+            >
         </header>
 
         <nav class="storage-picker-location" aria-label="Storage location">
@@ -614,43 +621,22 @@
 
         {#if error}<p class="storage-picker-error" role="alert">{error}</p>{/if}
 
-        <footer class="dialog-footer">
-            {#if nextCursor}
-                <button class="secondary-button" type="button" disabled={loading} onclick={() => void loadMore()}
-                    >Load more</button
-                >
-            {/if}
-            {#if (mode === 'save-file' || mode === 'save-directory') && directory}
-                <input
-                    bind:value={outputName}
-                    aria-label={mode === 'save-directory' ? 'Output folder name' : 'Output filename'}
-                    placeholder={mode === 'save-directory' ? 'Output folder name' : 'Output filename'}
-                />
-                <button class="primary-button" type="button" onclick={selectOutput}>Select output</button>
-            {:else if mode === 'directory' && directory}
-                <button class="primary-button" type="button" onclick={selectCurrentDirectory}>Select directory</button>
-            {:else if mode === 'media-source' && directory}
-                <button
-                    class="primary-button"
-                    type="button"
-                    disabled={loading || openingCurrentFolder}
-                    onclick={() => void openCurrentMediaSource()}
-                >
-                    {openingCurrentFolder ? 'Opening' : 'Open current folder'}
-                </button>
-            {:else if mode === 'file' && multiple && directory}
-                <button
-                    class="primary-button"
-                    type="button"
-                    disabled={selectedFilePaths.length === 0}
-                    onclick={selectFiles}
-                >
-                    Select {selectedFilePaths.length}
-                    {selectedFilePaths.length === 1 ? 'file' : 'files'}
-                </button>
-            {/if}
-            <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
-        </footer>
+        <StoragePickerFooter
+            {mode}
+            hasDirectory={!!directory}
+            hasMore={!!nextCursor}
+            {multiple}
+            {loading}
+            opening={openingCurrentFolder}
+            selectedCount={selectedFilePaths.length}
+            bind:outputName
+            onloadmore={() => void loadMore()}
+            onoutput={selectOutput}
+            ondirectory={selectCurrentDirectory}
+            onmedia={() => void openCurrentMediaSource()}
+            onfiles={selectFiles}
+            {oncancel}
+        />
     </div>
 </div>
 
@@ -665,7 +651,13 @@
         >
             <header class="dialog-header">
                 <h2>New folder</h2>
-                <button class="icon-button" type="button" aria-label="Close" onclick={closeEntryAction}>×</button>
+                <button
+                    class="icon-button"
+                    type="button"
+                    aria-label="Close"
+                    disabled={entryActionBusy}
+                    onclick={closeEntryAction}><Icon name="close" size={15} /></button
+                >
             </header>
             <div class="entry-action-content">
                 <label>

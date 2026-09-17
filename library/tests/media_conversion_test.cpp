@@ -20,6 +20,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/floppy_import.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -92,17 +93,21 @@ axk::VolumeSpec source_volume(const std::filesystem::path &audio_path, std::stri
     axk::SampleSpec sample;
     sample.name = "Source Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
     axk::SampleSpec direct;
     direct.name = "Direct Sample";
     direct.waveform_id = "wave";
-    direct.root_key = 60U;
-    direct.key_high = 127U;
+    direct.parameters.root_key = 60U;
+    direct.parameters.key_high = 127U;
     volume.samples.push_back(std::move(direct));
     volume.sample_banks.push_back({"Source Bank", {"Source Sample"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Source Bank", 1U}, {"SBNK", "Direct Sample", 2U}}});
+    volume.programs.push_back(
+        {1U,
+         "Pgm 001",
+         {{"SBAC", "Source Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+          {"SBNK", "Direct Sample", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     return volume;
 }
 
@@ -114,8 +119,8 @@ axk::VolumeSpec dense_source_volume(const std::filesystem::path &audio_path) {
         axk::SampleSpec sample;
         sample.name = std::format("Sample {:03}", index);
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         volume.samples.push_back(std::move(sample));
     }
     for (std::uint8_t number = 1U; number <= 64U; ++number) {
@@ -123,7 +128,10 @@ axk::VolumeSpec dense_source_volume(const std::filesystem::path &audio_path) {
         volume.sample_banks.push_back({bank_name, {volume.samples[number - 1U].name}});
         volume.programs.push_back({number,
                                    std::format("Pgm {:03}", number),
-                                   {{"SBAC", bank_name, 1U}, {"SBNK", volume.samples[64U + number - 1U].name, 2U}}});
+                                   {{"SBAC", bank_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                    {"SBNK",
+                                     volume.samples[64U + number - 1U].name,
+                                     {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     }
     return volume;
 }
@@ -499,6 +507,24 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     EXPECT_EQ(incomplete->status(), axk::FloppySetStatus::incomplete);
     EXPECT_EQ(incomplete->next_required_index(), 2U);
 
+    const auto partial_import = axk::FloppyImportSource::open({members.front()});
+    ASSERT_TRUE(partial_import) << partial_import.error().message;
+    EXPECT_FALSE(partial_import->inspection().complete);
+    EXPECT_EQ(partial_import->inspection().next_required_index, 2U);
+    EXPECT_FALSE(partial_import->prepare(std::array{std::string{"anything"}}));
+    const auto last_only = axk::FloppyImportSource::open({members.back()});
+    ASSERT_TRUE(last_only) << last_only.error().message;
+    EXPECT_FALSE(last_only->inspection().complete);
+    EXPECT_EQ(last_only->inspection().next_required_index, 1U);
+    EXPECT_FALSE(axk::FloppyImportSource::open({members.front(), members.front()}));
+    auto reversed_members = members;
+    std::ranges::reverse(reversed_members);
+    const auto import_source = axk::FloppyImportSource::open(std::move(reversed_members));
+    ASSERT_TRUE(import_source) << import_source.error().message;
+    ASSERT_EQ(import_source->inspection().objects.size(), 5U);
+    EXPECT_TRUE(import_source->inspection().complete);
+    EXPECT_EQ(import_source->inspection().members.front().index, 1U);
+
     const auto complete = axk::FloppyDiskSet::open(std::move(members), "loose set");
     ASSERT_TRUE(complete) << complete.error().message;
     EXPECT_EQ(complete->status(), axk::FloppySetStatus::complete);
@@ -506,6 +532,27 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     const auto complete_objects = complete->objects();
     ASSERT_TRUE(complete_objects) << complete_objects.error().message;
     ASSERT_EQ(complete_objects->size(), 5U);
+    const axk::MediaContainer import_media{*complete};
+    for (const auto &object : import_source->inspection().objects) {
+        EXPECT_TRUE(object.exclusion_reason.empty()) << object.name << ": " << object.exclusion_reason;
+        const auto direct = import_source->prepare(std::array{object.key});
+        ASSERT_TRUE(direct) << direct.error().message;
+        axk::PackageRootSelector package_root;
+        package_root.object_key = object.key;
+        package_root.kind = direct->roots.front().kind;
+        const auto archived = axk::build_portable_package(import_media, std::array{package_root});
+        ASSERT_TRUE(archived) << archived.error().message;
+        EXPECT_EQ(direct->package_id, archived->package.package_id);
+        EXPECT_EQ(direct->nodes, archived->package.nodes);
+        EXPECT_EQ(direct->relationships, archived->package.relationships);
+        if (object.type == axk::ObjectType::smpl) {
+            EXPECT_EQ(direct->nodes.size(), 1U);
+            EXPECT_TRUE(object.required_object_keys.empty());
+        } else {
+            EXPECT_GT(direct->nodes.size(), 1U);
+            EXPECT_FALSE(object.required_object_keys.empty());
+        }
+    }
     const auto source_objects = source_media->objects();
     ASSERT_TRUE(source_objects) << source_objects.error().message;
     const auto source_wave = std::ranges::find_if(*source_objects, [](const axk::MediaObject &object) {

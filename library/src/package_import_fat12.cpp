@@ -338,7 +338,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             if (found == existing.end())
                 return std::unexpected{planner_error("planned FAT12 existing object is missing")};
             if (*relocated != found->snapshot->raw_payload) {
-                if (object.object_type != "SBNK" && object.object_type != "PROG") {
+                if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG") {
                     return std::unexpected{planner_error("existing FAT12 object relocation fields "
                                                          "differ from the target")};
                 }

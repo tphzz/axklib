@@ -10,6 +10,7 @@
 #include <set>
 #include <tuple>
 
+#include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/object.hpp"
 #include "axklib/package_archive.hpp"
@@ -73,9 +74,14 @@ Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext co
     return report;
 }
 
-Result<detail::PreparedWaveformMember> waveform_member(TransactionState &state, MutablePartition &partition,
-                                                       std::string_view volume_name, std::string_view waveform_name,
-                                                       const CancellationToken &cancellation) {
+struct InsertionWaveData {
+    detail::PreparedWaveformMember member;
+    SamplePlaybackWindow window;
+};
+
+Result<InsertionWaveData> waveform_member(TransactionState &state, MutablePartition &partition,
+                                          std::string_view volume_name, std::string_view waveform_name,
+                                          const CancellationToken &cancellation) {
     auto located = category_object(state, partition, volume_name, "SMPL", waveform_name, "SMPL", cancellation);
     if (!located)
         return std::unexpected{located.error()};
@@ -89,8 +95,25 @@ Result<detail::PreparedWaveformMember> waveform_member(TransactionState &state, 
     if (wave_data == nullptr || wave_data->wave_data_reference_value.value == 0U) {
         return std::unexpected{transaction_error("waveform has no usable current SMPL reference value")};
     }
-    return detail::PreparedWaveformMember{std::string{waveform_name}, wave_data->wave_data_reference_value.value,
-                                          wave_data->duplicate_sample_rate.value, wave_data->wave_length_frames.value};
+    if (auto control = validate_smpl_pcm_transfer_control(*wave_data); !control)
+        return std::unexpected{control.error()};
+    const auto width = wave_data->stored_sample_width_bytes.value;
+    const auto start = wave_data->wave_start_frame.value;
+    const auto length = wave_data->wave_length_frames.value;
+    if ((width != 1U && width != 2U) || wave_data->stored_segment_offset != 0U ||
+        wave_data->stored_segment_bytes != wave_data->stored_pcm_bytes || wave_data->stored_pcm_offset < 0xacU ||
+        wave_data->stored_pcm_offset > payload->size() ||
+        wave_data->stored_pcm_bytes > payload->size() - wave_data->stored_pcm_offset ||
+        wave_data->stored_pcm_bytes % width != 0U || wave_data->sample_rate.value == 0U ||
+        wave_data->sample_rate.value != wave_data->duplicate_sample_rate.value || length == 0U ||
+        static_cast<std::uint64_t>(start) + length > wave_data->stored_pcm_bytes / width ||
+        static_cast<std::uint64_t>(start) + length > maximum_wave_data_frames_per_channel)
+        return std::unexpected{transaction_error("Sample insertion requires complete bounded current Wave Data")};
+    return InsertionWaveData{
+        {std::string{waveform_name}, wave_data->wave_data_reference_value.value, wave_data->sample_rate.value,
+         static_cast<std::uint32_t>(
+             std::min<std::uint64_t>(wave_data->stored_pcm_bytes / width, maximum_wave_data_frames_per_channel))},
+        {start, length}};
 }
 
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,
@@ -129,13 +152,18 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
         auto member = waveform_member(state, partition, operation.volume_name, *spec.right_waveform_id, cancellation);
         if (!member)
             return std::unexpected{member.error()};
-        if (member->sample_rate != left->sample_rate || member->frame_count != left->frame_count) {
+        if (member->member.sample_rate != left->member.sample_rate ||
+            (!spec.playback_window && (member->window.start_frame != left->window.start_frame ||
+                                       member->window.length_frames != left->window.length_frames))) {
             return std::unexpected{transaction_error("stereo Sample requires matching Wave Data sample "
-                                                     "rates and frame counts")};
+                                                     "rates and playback windows")};
         }
-        right = std::move(*member);
+        right = std::move(member->member);
     }
-    auto payload = detail::prepare_sbnk_payload(spec, *left, right);
+    auto effective = spec;
+    if (!effective.playback_window)
+        effective.playback_window = left->window;
+    auto payload = detail::prepare_sbnk_payload(effective, left->member, right);
     if (!payload)
         return std::unexpected{payload.error()};
     // The alteration contract preserves the complete current SBNK contract
@@ -169,6 +197,40 @@ Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext co
     report.object_name = spec.name;
     report.inserted_sfs_ids = {bank_id};
     report.allocated_clusters = cluster_count;
+    return report;
+}
+
+Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
+                                               const UpdateSampleParametersOperation &operation,
+                                               const CancellationToken &cancellation) {
+    auto partition_index = resolve_partition(state, operation.partition);
+    if (!partition_index)
+        return std::unexpected{partition_index.error()};
+    const auto found = state.partitions.find(partition_index->value);
+    if (found == state.partitions.end())
+        return std::unexpected{transaction_error("partition index does not exist")};
+    auto &partition = found->second;
+    auto located =
+        category_object(state, partition, operation.volume_name, "SBNK", operation.sample_name, "SBNK", cancellation);
+    if (!located)
+        return std::unexpected{located.error()};
+    auto payload = current_payload(state, partition, located->second, cancellation);
+    if (!payload)
+        return std::unexpected{payload.error()};
+    if (auto updated = detail::apply_sample_parameters_to_payload(*payload, operation.parameters); !updated)
+        return std::unexpected{updated.error()};
+    if (auto replaced =
+            replace_fixed_object_payload(state, partition, located->second, std::move(*payload), cancellation);
+        !replaced) {
+        return std::unexpected{replaced.error()};
+    }
+
+    OperationReport report;
+    report.id = context.id;
+    report.type = context.type;
+    report.partition = *partition_index;
+    report.volume_name = operation.volume_name;
+    report.object_name = operation.sample_name;
     return report;
 }
 
@@ -241,7 +303,7 @@ Result<OperationReport> insert_waveform_audio(TransactionState &state, Operation
         waveform.loop_mode = spec.loop_mode;
         waveform.loop_start_frame = spec.loop_start_frame;
         waveform.loop_length_frames = spec.loop_length_frames;
-        auto payload = detail::prepare_smpl_payload(waveform, mono, link_id);
+        auto payload = detail::prepare_smpl_payload(waveform, mono, link_id, operation.volume_name);
         if (!payload)
             return std::unexpected{payload.error()};
         auto stored = allocate_record(partition, std::move(*payload), PayloadKind::object);
@@ -519,12 +581,12 @@ Result<OperationReport> rename_sbnk(TransactionState &state, OperationContext co
         auto payload = sample_bank_row.payload;
         bool changed{};
         for (const auto &slot : sample_bank->slots) {
+            if (!slot.active)
+                continue;
             if (slot.name == operation.new_sample_name)
                 return std::unexpected{transaction_error("SBAC already references SBNK rename destination")};
             if (slot.name != operation.sample_name)
                 continue;
-            if (slot.raw_handle != 0U)
-                return std::unexpected{transaction_error("SBAC member has unsupported nonzero handle")};
             put_padded_name(payload, slot.offset, operation.new_sample_name);
             changed = true;
         }
@@ -566,7 +628,7 @@ Result<OperationReport> rename_sbnk(TransactionState &state, OperationContext co
                 continue;
             if (assignment.raw_handle != 0U)
                 return std::unexpected{transaction_error("Program assignment has unsupported nonzero handle")};
-            put_padded_name(payload, 0x120U + index * 0x38U, operation.new_sample_name);
+            put_padded_name(payload, assignment.offset, operation.new_sample_name);
             changed = true;
         }
         if (changed) {

@@ -26,6 +26,9 @@
 #include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/catalog.hpp"
+#include "axklib/floppy_catalog_internal.hpp"
+#include "axklib/io.hpp"
 #include "axklib/package.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/writer.hpp"
@@ -88,8 +91,8 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     axk::SampleSpec sample;
     sample.name = "Sample";
     sample.waveform_id = "wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(sample);
     sample.name = "Direct";
     volume.samples.push_back(sample);
@@ -99,8 +102,14 @@ void write_mixed_root_source(const std::filesystem::path &path) {
     volume.samples.push_back(std::move(sample));
     volume.sample_banks.push_back({"Bank", {"Sample"}});
     volume.sample_banks.push_back({"Bank 2", {"Sample 2"}});
-    volume.programs.push_back({1U, "Pgm 001", {{"SBAC", "Bank", 1U}, {"SBNK", "Direct", 2U}}});
-    volume.programs.push_back({2U, "Pgm 002", {{"SBAC", "Bank 2", 1U}, {"SBNK", "Direct 2", 2U}}});
+    volume.programs.push_back({1U,
+                               "Pgm 001",
+                               {{"SBAC", "Bank", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                {"SBNK", "Direct", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
+    volume.programs.push_back({2U,
+                               "Pgm 002",
+                               {{"SBAC", "Bank 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+                                {"SBNK", "Direct 2", {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
     const auto written = axk::write_hds_image(manifest, path);
@@ -125,15 +134,15 @@ void write_selected_wav_source(const std::filesystem::path &path) {
     axk::SampleSpec mono;
     mono.name = "Mono Sample";
     mono.waveform_id = "mono";
-    mono.root_key = 60U;
-    mono.key_high = 127U;
+    mono.parameters.root_key = 60U;
+    mono.parameters.key_high = 127U;
     volume.samples.push_back(std::move(mono));
     axk::SampleSpec stereo;
     stereo.name = "Stereo Sample";
     stereo.waveform_id = "left";
     stereo.right_waveform_id = "right";
-    stereo.root_key = 60U;
-    stereo.key_high = 127U;
+    stereo.parameters.root_key = 60U;
+    stereo.parameters.key_high = 127U;
     volume.samples.push_back(std::move(stereo));
 
     const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
@@ -188,8 +197,8 @@ void write_batch_volume_source(const std::filesystem::path &path) {
         axk::SampleSpec sample;
         sample.name = std::move(sample_name);
         sample.waveform_id = "wave";
-        sample.root_key = 60U;
-        sample.key_high = 127U;
+        sample.parameters.root_key = 60U;
+        sample.parameters.key_high = 127U;
         result.samples.push_back(std::move(sample));
         return result;
     };
@@ -219,8 +228,8 @@ void write_audio_source_with_orphan_wave_data(const std::filesystem::path &path)
     axk::SampleSpec sample;
     sample.name = "Linked Sample";
     sample.waveform_id = "linked-wave";
-    sample.root_key = 60U;
-    sample.key_high = 127U;
+    sample.parameters.root_key = 60U;
+    sample.parameters.key_high = 127U;
     volume.samples.push_back(std::move(sample));
 
     const axk::HdsBuildManifest manifest{"1.0", 2U * 1024U * 1024U, {{"hd1", {std::move(volume)}}}};
@@ -383,6 +392,64 @@ class PackageOperationsTest : public testing::Test {
                                                 [&](const auto &entry) { return entry.second.display_name == name; });
         EXPECT_NE(found, read->volume_scopes_by_id.end());
         return found == read->volume_scopes_by_id.end() ? std::string{} : found->first;
+    }
+
+    void write_floppy() {
+        const auto path = root_ / "mixed-roots.hds";
+        auto reader = axk::FileReader::open(path);
+        ASSERT_TRUE(reader);
+        const auto media = axk::open_media(path);
+        ASSERT_TRUE(media);
+        const auto catalog = axk::build_object_catalog(*media);
+        ASSERT_TRUE(catalog);
+        ASSERT_FALSE(catalog->objects.empty());
+        axk::MediaConversionRequest request;
+        request.volume_directory_id = catalog->objects.front().placement->volume_directory.value;
+        auto written = axk::write_media_conversion(*reader, path, request, root_ / "source.img");
+        ASSERT_TRUE(written) << written.error().message;
+    }
+
+    void unpack_floppy(bool disk_set = false) {
+        if (!std::filesystem::exists(root_ / "source.img"))
+            write_floppy();
+        auto reader = axk::FileReader::open(root_ / "source.img");
+        ASSERT_TRUE(reader);
+        const auto fat = axk::FatImage::open(*reader);
+        ASSERT_TRUE(fat) << fat.error().message;
+        ASSERT_TRUE(fat->yamaha_catalog());
+        const auto count = disk_set ? 2U : 1U;
+        for (unsigned disk = 1U; disk <= count; ++disk) {
+            const auto folder = root_ / "unpacked" / (disk_set ? std::format("part{}", 3U - disk) : "disk");
+            std::filesystem::create_directories(folder);
+            std::vector<axk::YamahaFloppyCatalogEntry> catalog_entries;
+            for (const auto &file : fat->files()) {
+                if (disk_set) {
+                    const auto slot = axk::detail::yamaha_floppy_filename_slot(file.path);
+                    if (!slot || (*slot % 2U) + 1U != disk)
+                        continue;
+                    const auto entry =
+                        std::ranges::find(fat->yamaha_catalog()->files, *slot, &axk::YamahaFloppyCatalogEntry::slot);
+                    if (entry == fat->yamaha_catalog()->files.end() || entry->logical_path.ends_with(".SYM"))
+                        continue;
+                    catalog_entries.push_back(*entry);
+                }
+                const auto bytes = fat->read_file(file);
+                ASSERT_TRUE(bytes);
+                std::ofstream out{folder / file.path, std::ios::binary};
+                out.write(reinterpret_cast<const char *>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+                ASSERT_TRUE(out);
+            }
+            if (disk_set) {
+                catalog_entries.push_back({223U, disk == count ? "\\A3000E.SYM" : "\\A3000F.SYM"});
+                const auto catalog = axk::detail::encode_yamaha_floppy_catalog(
+                    std::format("{:<14}{:02}", "IMPORT SET", disk), catalog_entries, fat->yamaha_catalog()->categories);
+                ASSERT_TRUE(catalog) << catalog.error().message;
+                std::ofstream out{folder / "YAMAHA.SYM", std::ios::binary};
+                out.write(reinterpret_cast<const char *>(catalog->data()),
+                          static_cast<std::streamsize>(catalog->size()));
+                std::ofstream marker{folder / (disk == count ? "A3000E_S.223" : "A3000F_S.223"), std::ios::binary};
+            }
+        }
     }
 
     std::filesystem::path root_;
@@ -591,6 +658,178 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_EQ(refreshed->revision, 2U);
     EXPECT_GT(refreshed->object_count, opened->object_count);
+}
+
+TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVolumeAtomically) {
+    write_floppy();
+    const nlohmann::json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    const auto inspected = registry_.invoke("images.floppy_import.inspect", {{"sources", {source}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_EQ(inspected->at("format"), "A_SERIES");
+    EXPECT_TRUE(inspected->at("complete").get<bool>());
+    EXPECT_TRUE(inspected->at("nextRequiredIndex").is_null());
+    const auto token = inspected->at("inspectionToken").get<std::string>();
+    auto stranger = context();
+    stranger.owner_id = "stranger";
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.release", {{"inspectionToken", token}}, stranger));
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    const auto &objects = inspected->at("objects");
+    const auto sample = std::ranges::find_if(
+        objects, [](const auto &entry) { return entry.at("objectType") == "SBNK" && entry.at("name") == "Direct"; });
+    ASSERT_NE(sample, objects.end());
+    const nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"inspectionToken", token},
+        {"selectedObjectKeys", {sample->at("objectKey")}},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "From floppy"}}}};
+    const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_TRUE(plan->at("valid").get<bool>()) << *plan;
+    EXPECT_EQ(plan->at("actions").size(), 2U);
+    EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
+    auto invalid = request;
+    invalid["selectedObjectKeys"] = nlohmann::json::array();
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", invalid, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, stranger));
+    EXPECT_TRUE(registry_.invoke("images.floppy_import.release", {{"inspectionToken", token}}, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+    const auto applied = registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_EQ(applied->at("revision"), 2U);
+    EXPECT_TRUE(applied->at("applied").get<bool>());
+    EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+    const auto refreshed = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(refreshed);
+    EXPECT_EQ(refreshed->object_count, 2U);
+    EXPECT_FALSE(volume_content_id(*refreshed, "From floppy").empty());
+}
+
+TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWriting) {
+    write_floppy();
+    const auto before = read_bytes(root_ / "target.hds");
+    const nlohmann::json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    const auto inspected = registry_.invoke("images.floppy_import.inspect", {{"sources", {source}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    const auto &objects = inspected->at("objects");
+    const auto wave = std::ranges::find_if(objects, [](const auto &entry) { return entry.at("objectType") == "SMPL"; });
+    ASSERT_NE(wave, objects.end());
+    const nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"inspectionToken", inspected->at("inspectionToken")},
+        {"selectedObjectKeys", {wave->at("objectKey")}},
+        {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
+    const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    {
+        std::fstream stream{root_ / "source.img", std::ios::binary | std::ios::in | std::ios::out};
+        ASSERT_TRUE(stream);
+        stream.put('X');
+    }
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+    EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+    EXPECT_EQ(read_bytes(root_ / "target.hds"), before);
+    EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjects) {
+    unpack_floppy(true);
+    const auto inspected = registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked"}}}}}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->at("complete").get<bool>());
+    EXPECT_EQ(inspected->at("members").size(), 2U);
+    const auto raw = registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}}}}}, context());
+    ASSERT_TRUE(raw) << raw.error().message;
+    EXPECT_EQ(inspected->at("objects").size(), raw->at("objects").size());
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    nlohmann::json keys = nlohmann::json::array();
+    for (const auto &object : inspected->at("objects")) {
+        EXPECT_EQ(object.at("exclusionReason"), "");
+        keys.push_back(object.at("objectKey"));
+    }
+    const auto plan = registry_.invoke(
+        "images.floppy_import.plan",
+        {{"imageId", opened->image_id},
+         {"expectedRevision", opened->revision},
+         {"inspectionToken", inspected->at("inspectionToken")},
+         {"selectedObjectKeys", keys},
+         {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Folder set"}}}},
+        context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->at("valid").get<bool>()) << *plan;
+    const auto applied = registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(applied->at("applied").get<bool>());
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyDetectsAddedRemovedAndChangedFilesBeforeWriting) {
+    unpack_floppy();
+    const auto before = read_bytes(root_ / "target.hds");
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    for (const auto mutation : {"add", "remove", "change"}) {
+        SCOPED_TRACE(mutation);
+        std::filesystem::remove_all(root_ / "unpacked");
+        unpack_floppy();
+        const auto inspected = registry_.invoke(
+            "images.floppy_import.inspect",
+            {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked/disk"}}}}}}},
+            context());
+        ASSERT_TRUE(inspected) << inspected.error().message;
+        const auto &objects = inspected->at("objects");
+        const auto wave =
+            std::ranges::find_if(objects, [](const auto &entry) { return entry.at("objectType") == "SMPL"; });
+        ASSERT_NE(wave, objects.end());
+        const nlohmann::json request{
+            {"imageId", opened->image_id},
+            {"expectedRevision", opened->revision},
+            {"inspectionToken", inspected->at("inspectionToken")},
+            {"selectedObjectKeys", {wave->at("objectKey")}},
+            {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
+        const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+        ASSERT_TRUE(plan) << plan.error().message;
+        if (std::string_view{mutation} == "remove")
+            std::filesystem::remove(root_ / "unpacked/disk/YAMAHA.SYM");
+        else {
+            std::ofstream changed{root_ / "unpacked/disk" /
+                                      (std::string_view{mutation} == "add" ? "added.txt" : "YAMAHA.SYM"),
+                                  std::ios::binary};
+            changed.put('X');
+        }
+        EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+        EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
+        EXPECT_EQ(read_bytes(root_ / "target.hds"), before);
+    }
+}
+
+TEST_F(PackageOperationsTest, UnpackedFloppyRejectsAmbiguousAndUnsafeSourceSelections) {
+    unpack_floppy(true);
+    const nlohmann::json parent{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked"}}}};
+    const nlohmann::json leaf{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked/part2"}}}};
+    const nlohmann::json file{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
+    for (const auto &sources : {nlohmann::json::array({parent, file}), nlohmann::json::array({leaf, leaf}),
+                                nlohmann::json::array({parent, leaf})})
+        EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", sources}}, context()));
+    EXPECT_FALSE(registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "../outside"}}}}}}}, context()));
+    auto cancelled = context();
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    cancelled.cancellation = cancellation.token();
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", {parent}}}, cancelled));
+    std::filesystem::copy(root_ / "unpacked/part2", root_ / "unpacked/duplicate",
+                          std::filesystem::copy_options::recursive);
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.inspect", {{"sources", {parent}}}, context()));
 }
 
 TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomicallyFromPlacementHints) {

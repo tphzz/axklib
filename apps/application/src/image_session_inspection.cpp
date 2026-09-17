@@ -38,13 +38,15 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     const auto supported_mutation_profile =
         mutable_container != nullptr && mutable_container->superblock().sector_size_bytes == 512U &&
         std::ranges::all_of(mutable_container->partitions(), [](const Partition &partition) {
-            return partition.sectors_per_cluster == 2U && allocation_is_safe_for_mutation(partition.allocation);
+            return partition.sectors_per_cluster == 2U && allocation_is_safe_for_mutation(partition.allocation) &&
+                   locate_partition_root_record(partition).has_value();
         });
     if ((*session)->format == "sfs" && supported_mutation_profile && source_metadata && source_metadata->writable) {
         available_operations.emplace_back("images.alter.volumes");
         available_operations.emplace_back("images.alter.partitions");
         available_operations.emplace_back("images.alter.objects");
         available_operations.emplace_back("images.package.import");
+        available_operations.emplace_back("images.floppy.import");
         available_operations.emplace_back("images.deletion.orphans.inspect");
         available_operations.emplace_back("images.programs.generate.inspect");
         available_operations.emplace_back("images.programs.generate");

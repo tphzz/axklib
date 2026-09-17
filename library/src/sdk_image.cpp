@@ -146,7 +146,7 @@ object_info public_object(const ObjectSnapshot &item) {
     } else if (const auto *sample = std::get_if<CurrentSbnk>(&item.object.payload)) {
         value.member_count = sample->right.has_value() ? 2U : 1U;
     } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&item.object.payload)) {
-        value.member_count = sample_bank->active_slot_count;
+        value.member_count = sample_bank->effective_member_count;
     } else if (const auto *program = std::get_if<CurrentProg>(&item.object.payload)) {
         value.name = program->program_name;
         value.member_count = program->assignments.size();

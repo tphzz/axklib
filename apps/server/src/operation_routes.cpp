@@ -25,10 +25,10 @@ void register_operation_routes(ServerCrowApp &app, const app::OperationRegistry 
     for (const auto &entry : registry.entries())
         routes[{entry.descriptor.method, entry.descriptor.route}].push_back(entry.descriptor.id);
 
-    for (auto &[key, operation_ids] : routes) {
+    for (auto &[key, registered_ids] : routes) {
         auto &route = app.route_dynamic(key.route);
         route.methods(key.method == app::HttpMethod::get ? crow::HTTPMethod::Get : crow::HTTPMethod::Post);
-        route([handler, operation_ids = std::move(operation_ids)](const crow::request &request) {
+        route([handler, operation_ids = std::move(registered_ids)](const crow::request &request) {
             return handler(request, operation_ids);
         });
     }

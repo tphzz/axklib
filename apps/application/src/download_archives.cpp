@@ -413,7 +413,8 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
 
 axk::app::Result<axk::app::DownloadArchiveSnapshot>
 axk::app::DownloadArchiveStore::create_owned_directory(std::string owner_id, const std::filesystem::path &source,
-                                                       std::string filename) {
+                                                       std::string filename, CancellationToken cancellation,
+                                                       ProgressSink *progress) {
     if (filename.empty() || filename == "." || filename == ".." || filename.find_first_of("/\\") != std::string::npos ||
         !filename.ends_with(".tar")) {
         return std::unexpected(
@@ -436,7 +437,7 @@ axk::app::DownloadArchiveStore::create_owned_directory(std::string owner_id, con
     auto sandbox = Sandbox::create({{"generated-export", "Generated export", source, false}});
     if (!sandbox)
         return std::unexpected(sandbox.error());
-    auto created = create(std::move(owner_id), *sandbox, {"generated-export", ""});
+    auto created = create(std::move(owner_id), *sandbox, {"generated-export", ""}, cancellation, progress);
     if (!created)
         return std::unexpected(created.error());
 

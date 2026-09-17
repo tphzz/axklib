@@ -11,12 +11,17 @@ function object(objectType: string, name: string): SamplerObject {
         partitionName: 'Partition 0',
         volumeName: 'Volume',
         categoryName: objectType,
+        objectEncoding: 'current',
+        directoryEntryName: `${name}.001`,
         sfsId: 0,
         storedSizeBytes: 128,
         sizeWithDependenciesBytes: null,
         sampleRate: 0,
         rootKey: 0,
-        frameCount: 0,
+        storedFrameCount: 0,
+        waveStartFrame: 0,
+        waveLengthFrames: 0,
+        storageState: 'COMPLETE',
         sampleWidthBytes: 0,
     };
 }

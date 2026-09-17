@@ -82,6 +82,9 @@ class SandboxMutation final : public axk::RandomAccessReader {
     [[nodiscard]] Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> source);
     [[nodiscard]] Result<void> flush();
     [[nodiscard]] Result<void> verify_bound() const;
+    // Only before the first write; our own writes legitimately change the revision.
+    [[nodiscard]] Result<void> verify_unchanged() const;
+    [[nodiscard]] std::string revision() const;
     [[nodiscard]] const FileRef &reference() const noexcept;
     [[nodiscard]] std::string stable_identity() const;
 
@@ -147,7 +150,8 @@ class Sandbox {
                                             const axk::RandomAccessReader &source) const;
     [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;
     [[nodiscard]] Result<void> publish_directory(const DirectoryRef &destination, bool overwrite,
-                                                 const std::filesystem::path &staging) const;
+                                                 const std::filesystem::path &staging,
+                                                 const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_file(const FileRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_directory(const DirectoryRef &reference) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_output_file(const FileRef &reference, bool overwrite) const;

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import Icon from './Icon.svelte';
     import type { ObjectRenameTarget } from '../types';
     import { modal } from '../modal';
 
@@ -59,7 +60,9 @@
         <form class="volume-action-form" onsubmit={submit}>
             <header class="dialog-header">
                 <h2>Rename {subject}</h2>
-                <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={cancel}>×</button>
+                <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={cancel}
+                    ><Icon name="close" size={15} /></button
+                >
             </header>
             <div class="volume-action-content">
                 <label>

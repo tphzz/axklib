@@ -33,8 +33,8 @@ const relationshipKinds = new Map<string, RelationshipKind>([
         {
             sourceType: 'PROG',
             targetType: 'SBAC',
-            outgoingDetail: 'Assignment',
-            incomingDetail: 'Assigned by',
+            outgoingDetail: '',
+            incomingDetail: '',
         },
     ],
     [
@@ -42,8 +42,8 @@ const relationshipKinds = new Map<string, RelationshipKind>([
         {
             sourceType: 'PROG',
             targetType: 'SBNK',
-            outgoingDetail: 'Assignment',
-            incomingDetail: 'Assigned by',
+            outgoingDetail: '',
+            incomingDetail: '',
         },
     ],
     [
@@ -51,8 +51,8 @@ const relationshipKinds = new Map<string, RelationshipKind>([
         {
             sourceType: 'SBAC',
             targetType: 'SBNK',
-            outgoingDetail: 'Member',
-            incomingDetail: 'Member of',
+            outgoingDetail: '',
+            incomingDetail: '',
         },
     ],
     [
@@ -60,8 +60,8 @@ const relationshipKinds = new Map<string, RelationshipKind>([
         {
             sourceType: 'SBNK',
             targetType: 'SMPL',
-            outgoingDetail: 'Left Wave Data',
-            incomingDetail: 'Used as left member',
+            outgoingDetail: 'Left',
+            incomingDetail: 'Left',
         },
     ],
     [
@@ -69,8 +69,8 @@ const relationshipKinds = new Map<string, RelationshipKind>([
         {
             sourceType: 'SBNK',
             targetType: 'SMPL',
-            outgoingDetail: 'Right Wave Data',
-            incomingDetail: 'Used as right member',
+            outgoingDetail: 'Right',
+            incomingDetail: 'Right',
         },
     ],
 ]);
@@ -79,13 +79,19 @@ function genericProgramAssignmentKind(target: InspectorRelationshipObject): Rela
     return {
         sourceType: 'PROG',
         targetType: target.objectType,
-        outgoingDetail: 'Assignment',
-        incomingDetail: 'Assigned by',
+        outgoingDetail: '',
+        incomingDetail: '',
     };
 }
 
-function assignmentDetail(base: string, relationship: SamplerRelationship): string {
-    return relationship.receiveChannelDisplay ? `${base} · ${relationship.receiveChannelDisplay}` : base;
+function relationshipDetail(
+    base: string,
+    relationship: SamplerRelationship,
+): Pick<InspectorRelationshipItem, 'detail' | 'detailTitle'> {
+    if (relationship.relationshipType.startsWith('PROG_ASSIGNMENT_') && relationship.receiveChannelDisplay) {
+        return { detail: relationship.receiveChannelDisplay, detailTitle: 'Receive channel' };
+    }
+    return { detail: base };
 }
 
 function unresolvedName(objectType: InspectorRelatedObjectType, relationship: SamplerRelationship): string {
@@ -107,11 +113,14 @@ function appendItem(
         grouped.set(objectType, group);
         return;
     }
-    const details = [...new Set([...existing.detail.split(' / '), ...item.detail.split(' / ')])];
+    const details = [...new Set([...existing.detail.split(' / '), ...item.detail.split(' / ')].filter(Boolean))];
     group.set(key, {
         ...existing,
         objectId: existing.objectId ?? item.objectId,
         detail: details.join(' / '),
+        ...((existing.detailTitle ?? item.detailTitle)
+            ? { detailTitle: existing.detailTitle ?? item.detailTitle }
+            : {}),
         navigable: existing.navigable || item.navigable,
     });
 }
@@ -126,7 +135,7 @@ function relatedItem(
         id: `${relationship.id}:${object.objectId}`,
         objectId: navigable ? object.objectId : undefined,
         name: object.name,
-        detail: assignmentDetail(detail, relationship),
+        ...relationshipDetail(detail, relationship),
         navigable,
     };
 }
@@ -151,7 +160,7 @@ export function inspectorRelationshipGroups(
                 appendItem(grouped, fixedKind.targetType, {
                     id: relationship.id,
                     name: unresolvedName(fixedKind.targetType, relationship),
-                    detail: assignmentDetail(fixedKind.outgoingDetail, relationship),
+                    ...relationshipDetail(fixedKind.outgoingDetail, relationship),
                     navigable: false,
                 });
             } else {
@@ -167,7 +176,7 @@ export function inspectorRelationshipGroups(
                             : {
                                   id: `${relationship.id}:${targetId}`,
                                   name: unresolvedName(kind.targetType, relationship),
-                                  detail: assignmentDetail(kind.outgoingDetail, relationship),
+                                  ...relationshipDetail(kind.outgoingDetail, relationship),
                                   navigable: false,
                               },
                     );

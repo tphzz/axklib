@@ -73,6 +73,38 @@ TEST_F(UploadStoreTest, ReceivesBoundedChunksAndFinalizesOnlyAfterHashVerificati
 #endif
 }
 
+TEST_F(UploadStoreTest, RawFilesAllowEmptyAndExtensionlessInputsWithoutWeakeningTypedUploads) {
+    auto value = store();
+    const auto created = value.create({.owner_id = "owner",
+                                       .filename = "README",
+                                       .kind = axk::app::UploadKind::file,
+                                       .media_type = "application/octet-stream",
+                                       .declared_size = 0U,
+                                       .sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"});
+    ASSERT_TRUE(created) << created.error().message;
+    EXPECT_EQ(axk::app::upload_kind_name(created->kind), "FILE");
+    EXPECT_FALSE(value.lease(created->reference, "owner"));
+    ASSERT_TRUE(value.complete(created->reference, "owner"));
+    EXPECT_FALSE(value.lease(created->reference, "other"));
+    const auto lease = value.lease(created->reference, "owner");
+    ASSERT_TRUE(lease);
+    EXPECT_EQ(std::filesystem::file_size(lease->path()), 0U);
+    EXPECT_FALSE(value.remove(created->reference, "owner"));
+    EXPECT_FALSE(value.create({.owner_id = "owner",
+                               .filename = "empty.wav",
+                               .kind = axk::app::UploadKind::audio,
+                               .media_type = "audio/wav",
+                               .declared_size = 0U,
+                               .sha256 = {}}));
+    for (const auto name : {"..", ".", "../escape", "nested/file", "nested\\file"})
+        EXPECT_FALSE(value.create({.owner_id = "owner",
+                                   .filename = name,
+                                   .kind = axk::app::UploadKind::file,
+                                   .media_type = "application/octet-stream",
+                                   .declared_size = 0U,
+                                   .sha256 = {}}));
+}
+
 #if !defined(_WIN32)
 TEST(UploadStorePermissions, RejectsAnUnsafePreexistingStorageDirectory) {
     const auto directory = std::filesystem::temp_directory_path() / "axklib-upload-store-unsafe";

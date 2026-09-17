@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "operations": [
+    {
+      "id": "volume-audio-import",
+      "type": "insert_volume",
+      "partition_index": 0,
+      "volume": {
+        "name": "Imported",
+        "waveforms": [],
+        "samples": []
+      }
+    },
+    {
+      "id": "wave-0",
+      "type": "insert_waveform",
+      "partition_index": 0,
+      "volume_name": "Imported",
+      "audio": {
+        "path": "audio/import-0",
+        "waveform_names": [
+          "Mono Wave"
+        ],
+        "root_key": 60,
+        "fine_tune_cents": 0,
+        "loop_mode": 4,
+        "loop_start_frame": 0,
+        "loop_length_frames": 0,
+        "target_sample_rate": 44100
+      }
+    },
+    {
+      "id": "sample-0",
+      "type": "insert_sbnk",
+      "partition_index": 0,
+      "volume_name": "Imported",
+      "sample": {
+        "name": "Mono",
+        "waveform_name": "Mono Wave",
+        "parameters": {
+          "root_key": 60,
+          "fine_tune_cents": 0,
+          "key_low": 0,
+          "key_high": 127,
+          "velocity_low": 0,
+          "velocity_high": 127,
+          "loop_mode": 4,
+          "loop_start_frame": 0,
+          "loop_length_frames": 0,
+          "level": 100
+        }
+      }
+    },
+    {
+      "id": "wave-1",
+      "type": "insert_waveform",
+      "partition_index": 0,
+      "volume_name": "Imported",
+      "audio": {
+        "path": "audio/import-1",
+        "waveform_names": [
+          "Stereo-L",
+          "Stereo-R"
+        ],
+        "root_key": 69,
+        "fine_tune_cents": -5,
+        "loop_mode": 1,
+        "loop_start_frame": 8,
+        "loop_length_frames": 32,
+        "target_sample_rate": 44100
+      }
+    },
+    {
+      "id": "sample-1",
+      "type": "insert_sbnk",
+      "partition_index": 0,
+      "volume_name": "Imported",
+      "sample": {
+        "name": "Stereo",
+        "waveform_name": "Stereo-L",
+        "right_waveform_name": "Stereo-R",
+        "parameters": {
+          "root_key": 69,
+          "fine_tune_cents": -5,
+          "key_low": 12,
+          "key_high": 108,
+          "velocity_low": 4,
+          "velocity_high": 120,
+          "loop_mode": 1,
+          "loop_start_frame": 8,
+          "loop_length_frames": 32,
+          "level": 100
+        }
+      }
+    },
+    {
+      "id": "sample-bank",
+      "type": "insert_sbac",
+      "partition_index": 0,
+      "volume_name": "Imported",
+      "sample_bank": {
+        "name": "Imported Bank",
+        "member_samples": [
+          "Mono",
+          "Stereo"
+        ]
+      }
+    }
+  ]
+}

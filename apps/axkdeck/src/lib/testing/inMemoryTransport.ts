@@ -33,6 +33,7 @@ import type {
     JobState,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDetail,
     ObjectDeletionInspection,
     ObjectRenameMutation,
     OpenedImage,
@@ -134,6 +135,80 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
+    startFloppyInspection(sources: import('../floppyImport').FloppyInputLocation[]): Promise<JobState> {
+        return this.invoke('startFloppyInspection', [sources]);
+    }
+    releaseFloppyInspection(token: string): Promise<void> {
+        return this.invoke('releaseFloppyInspection', [token]);
+    }
+    planFloppyImport(
+        sessionId: number,
+        request: import('../floppyImport').FloppyPlanRequest,
+    ): Promise<ImageSessionPackageImportPlan> {
+        return this.invoke('planFloppyImport', [sessionId, request]);
+    }
+    startFloppyImport(token: string): Promise<JobState> {
+        return this.invoke('startFloppyImport', [token]);
+    }
+    inspectFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        layout: import('../filesystemExport').FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<import('../filesystemExport').FilesystemExportInspection> {
+        return this.invoke('inspectFilesystemExport', [sessionId, expectedRevision, entryIds, layout]);
+    }
+    startFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        destination: import('../filesystemExport').FilesystemExportDestination,
+        layout: import('../filesystemExport').FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemExport', [sessionId, expectedRevision, entryIds, destination, layout]);
+    }
+    filesystem(
+        sessionId: number,
+        query?: import('../filesystem').FilesystemQuery,
+    ): Promise<import('../filesystem').FilesystemPage> {
+        if (this.options.operations?.filesystem) return this.invoke('filesystem', [sessionId, query]);
+        return Promise.resolve({
+            revision: this.options.opened.revision ?? 1,
+            available: false,
+            filesystemName: '',
+            deviceView: 'a-series',
+            items: [],
+            totalCount: 0,
+            rootCapabilities: [],
+        });
+    }
+    startFilesystemImportInspection(
+        sessionId: number,
+        expectedRevision: number,
+        parentEntryId: string,
+        entries: import('../filesystem').FilesystemImportEntry[],
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemImportInspection', [sessionId, expectedRevision, parentEntryId, entries]);
+    }
+    startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
+        return this.invoke('startFilesystemInputInspection', [inputs]);
+    }
+    startFilesystemImageInspection(source: InputFileLocation): Promise<JobState> {
+        return this.invoke('startFilesystemImageInspection', [source]);
+    }
+    releaseFilesystemImageInspection(token: string): Promise<void> {
+        return this.invoke('releaseFilesystemImageInspection', [token]);
+    }
+    startSu700Import(request: import('../su700Import').Su700Request): Promise<JobState> {
+        return this.invoke('startSu700Import', [request]);
+    }
+    startFilesystemEdits(
+        sessionId: number,
+        expectedRevision: number,
+        edits: import('../filesystem').FilesystemEdit[],
+    ): Promise<JobState> {
+        return this.invoke('startFilesystemEdits', [sessionId, expectedRevision, edits]);
+    }
     readonly storageMode: ImageTransport['storageMode'];
     readonly connectionMode: ImageTransport['connectionMode'];
     readonly supportsClientUploads: boolean;
@@ -247,6 +322,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     objectPage(sessionId: number, offset: number, limit: number, filter?: ObjectPageFilter): Promise<ObjectPage> {
         return this.invoke('objectPage', [sessionId, offset, limit, filter]);
+    }
+
+    objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
+        return this.invoke('objectDetail', [sessionId, objectId]);
     }
 
     relationshipPage(

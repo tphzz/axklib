@@ -185,13 +185,17 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
             if (item.waveform) {
                 waveform = {{"sampleRate", item.waveform->sample_rate},
                             {"sampleWidthBytes", item.waveform->sample_width_bytes},
+                            {"embeddedContainerName", item.waveform->embedded_container_name},
                             {"rootKey", item.waveform->root_key},
                             {"fineTuneCents", item.waveform->fine_tune_cents},
                             {"loopMode", item.waveform->loop_mode},
                             {"loopModeLabel", item.waveform->loop_mode_label},
-                            {"frameCount", item.waveform->frame_count},
+                            {"storedFrameCount", item.waveform->stored_frame_count},
+                            {"waveStartFrame", item.waveform->wave_start_frame},
+                            {"waveLengthFrames", item.waveform->wave_length_frames},
                             {"loopStartFrame", item.waveform->loop_start_frame},
-                            {"loopLengthFrames", item.waveform->loop_length_frames}};
+                            {"loopLengthFrames", item.waveform->loop_length_frames},
+                            {"storageState", item.waveform->storage_state}};
             }
             Json sequence;
             if (item.sequence) {
@@ -226,6 +230,17 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                         {"waveform", std::move(waveform)},
                         {"sequence", std::move(sequence)}};
         });
+}
+
+crow::response ServerApplication::image_object_response(const crow::request &request, const std::string &image_id,
+                                                        const std::string &object_id) {
+    const auto id = request_id(request);
+    if (auto denied = guard(request, id))
+        return std::move(*denied);
+    const auto metadata = images_.object_detail(image_id, request_owner(request), object_id);
+    if (!metadata)
+        return error_response(status_for_error(metadata.error()), metadata.error(), id);
+    return json_response(200, {{"data", *metadata}, {"meta", {{"requestId", id}}}}, id);
 }
 
 crow::response ServerApplication::image_relationships_response(const crow::request &request,
@@ -280,7 +295,7 @@ crow::response ServerApplication::image_system_program_contexts_response(const c
         Json file{{"fileKind", system_program_context_file_name(context.file_kind)},
                   {"availability", system_program_context_availability_name(context.availability)}};
         if (context.availability == axk::app::SystemProgramContextAvailability::available) {
-            file["model"] = context.model;
+            file["storageRevision"] = context.storage_revision;
             file["basicReceive"] = {{"port", context.basic_receive->port},
                                     {"channel", context.basic_receive->channel},
                                     {"display", context.basic_receive->display}};
@@ -343,14 +358,16 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
             values.push_back({{"minimum", bin.minimum}, {"maximum", bin.maximum}});
         lanes.push_back({{"role", lane.role},
                          {"sourceObjectId", lane.source_object_id},
-                         {"frameCount", lane.frame_count},
+                         {"sampleRate", lane.sample_rate},
+                         {"storedFrameCount", lane.stored_frame_count},
+                         {"playbackStartFrame", lane.playback_start_frame},
+                         {"playbackLengthFrames", lane.playback_length_frames},
+                         {"loopStartFrame", lane.loop_start_frame},
+                         {"loopLengthFrames", lane.loop_length_frames},
                          {"bins", std::move(values)}});
     }
     return json_response(
-        200,
-        {{"data",
-          {{"objectId", preview->object_id}, {"frameCount", preview->frame_count}, {"lanes", std::move(lanes)}}},
-         {"meta", {{"requestId", id}}}},
+        200, {{"data", {{"objectId", preview->object_id}, {"lanes", std::move(lanes)}}}, {"meta", {{"requestId", id}}}},
         id);
 }
 

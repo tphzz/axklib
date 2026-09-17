@@ -6,6 +6,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/object.hpp"
+#include "axklib/program_spec_json.hpp"
+
 namespace axk::detail {
 namespace {
 
@@ -45,36 +48,6 @@ Result<std::uint8_t> program_number(const Json &row, std::string_view context) {
     return static_cast<std::uint8_t>(value);
 }
 
-Result<ProgramAssignmentSpec> assignment(const Json &row, std::string_view context) {
-    if (!row.is_object() || !row.contains("receive_mode") || !row["receive_mode"].is_string())
-        return std::unexpected{invalid(std::string{context} + " has invalid fields")};
-    const auto sample_target = row.contains("sample");
-    const auto bank_target = row.contains("sample_bank");
-    if (sample_target == bank_target)
-        return std::unexpected{invalid(std::string{context} + " must contain exactly one target")};
-    const auto field = sample_target ? "sample" : "sample_bank";
-    const auto mode = row["receive_mode"].get<std::string>();
-    const auto midi_mode = mode == "MIDI_CHANNEL";
-    if (!midi_mode && mode != "SAMPLE")
-        return std::unexpected{invalid(std::string{context} + ".receive_mode is invalid")};
-    if (row.size() != (midi_mode ? 3U : 2U) || row.contains("receive_channel") != midi_mode)
-        return std::unexpected{invalid(std::string{context} + " has invalid fields for its receive mode")};
-    auto target = text(row, field, 16U, context);
-    if (!target)
-        return std::unexpected{target.error()};
-    std::uint8_t channel{};
-    if (midi_mode) {
-        if (!row["receive_channel"].is_number_integer())
-            return std::unexpected{invalid(std::string{context} + ".receive_channel must be an integer")};
-        const auto value = row["receive_channel"].get<int>();
-        if (value < 1 || value > 16)
-            return std::unexpected{invalid(std::string{context} + ".receive_channel must be between 1 and 16")};
-        channel = static_cast<std::uint8_t>(value);
-    }
-    return ProgramAssignmentSpec{sample_target ? "SBNK" : "SBAC", std::move(*target), channel,
-                                 midi_mode ? ProgramReceiveMode::midi_channel : ProgramReceiveMode::sample};
-}
-
 } // namespace
 
 Result<InsertProgramOperation> parse_insert_program_json(const Json &row, PartitionSelector selector,
@@ -84,26 +57,10 @@ Result<InsertProgramOperation> parse_insert_program_json(const Json &row, Partit
     auto volume = text(row, "volume_name", 16U, context);
     if (!volume)
         return std::unexpected{volume.error()};
-    const auto &program = row["program"];
-    const auto program_context = std::string{context} + ".program";
-    if (auto valid = exact_fields(program, {"number", "name", "assignments"}, program_context); !valid)
-        return std::unexpected{valid.error()};
-    auto number = program_number(program, program_context);
-    auto name = text(program, "name", 8U, program_context);
-    if (!number)
-        return std::unexpected{number.error()};
-    if (!name)
-        return std::unexpected{name.error()};
-    if (!program["assignments"].is_array())
-        return std::unexpected{invalid(program_context + ".assignments must be an array")};
-    ProgramSpec spec{*number, std::move(*name), {}};
-    for (std::size_t index = 0; index < program["assignments"].size(); ++index) {
-        auto parsed = assignment(program["assignments"][index], program_context + ".assignments");
-        if (!parsed)
-            return std::unexpected{parsed.error()};
-        spec.assignments.push_back(std::move(*parsed));
-    }
-    return InsertProgramOperation{std::move(selector), std::move(*volume), std::move(spec)};
+    auto spec = parse_program_spec_json(row["program"]);
+    if (!spec)
+        return std::unexpected{invalid(std::string{context} + ".program: " + spec.error().message)};
+    return InsertProgramOperation{std::move(selector), std::move(*volume), std::move(*spec)};
 }
 
 Result<ClearProgramAssignmentsOperation>
@@ -122,18 +79,17 @@ parse_clear_program_assignments_json(const Json &row, PartitionSelector selector
         return std::unexpected{number.error()};
     if (!row["assignment_ordinals"].is_array())
         return std::unexpected{invalid(std::string{context} + ".assignment_ordinals must be an array")};
-    std::vector<std::uint8_t> ordinals;
+    std::vector<std::uint16_t> ordinals;
     ordinals.reserve(row["assignment_ordinals"].size());
     for (const auto &value : row["assignment_ordinals"]) {
         if (!value.is_number_integer()) {
             return std::unexpected{invalid(std::string{context} + ".assignment_ordinals entries must be integers")};
         }
-        const auto ordinal = value.get<int>();
-        if (ordinal < 0 || ordinal >= static_cast<int>(maximum_program_assignments)) {
+        if (value < 0 || value >= maximum_stored_program_assignments) {
             return std::unexpected{
-                invalid(std::string{context} + ".assignment_ordinals entries must be between 0 and 15")};
+                invalid(std::string{context} + ".assignment_ordinals entries must be between 0 and 998")};
         }
-        ordinals.push_back(static_cast<std::uint8_t>(ordinal));
+        ordinals.push_back(value.get<std::uint16_t>());
     }
     return ClearProgramAssignmentsOperation{std::move(selector), std::move(*volume), *number, std::move(ordinals)};
 }

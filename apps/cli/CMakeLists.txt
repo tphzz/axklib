@@ -129,7 +129,7 @@ if(BUILD_TESTING)
   )
   target_link_libraries(
     axk_object_semantic_dump
-    PRIVATE axklib::core nlohmann_json::nlohmann_json
+    PRIVATE axklib::audio nlohmann_json::nlohmann_json
   )
   axk_set_project_warnings(axk_object_semantic_dump)
   axk_enable_sanitizers(axk_object_semantic_dump)
@@ -165,7 +165,7 @@ endif()
 install(TARGETS axklib_cli RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT cli)
 install(FILES "${AXK_REPOSITORY_ROOT}/LICENSE"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/axklib" COMPONENT cli)
-foreach(package cli11 hash-library nlohmann-json libsndfile soxr utfcpp libflac libogg
+foreach(package cli11 hash-library icu nlohmann-json libsndfile soxr utfcpp libflac libogg
                 libvorbis opus fatfs)
   install(
     FILES "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/share/${package}/copyright"

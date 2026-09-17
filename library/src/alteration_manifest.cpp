@@ -1,14 +1,19 @@
 #include "alteration_manifest_internal.hpp"
+#include "alteration_manifest_program.hpp"
+#include "alteration_manifest_wave_data.hpp"
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <set>
 #include <string_view>
 #include <type_traits>
 
+#include "axklib/sample_parameter_json.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/writer_internal.hpp"
 
 namespace axk::detail {
 namespace {
@@ -56,26 +61,37 @@ Result<void> require_program_name(std::string_view value, std::string_view field
     return {};
 }
 
-Result<void> validate_sample_parameters(const SampleSpec &sample) {
+constexpr bool valid_loop_mode(AudioSamplerLoopMode mode) {
+    return static_cast<std::uint8_t>(mode) <= static_cast<std::uint8_t>(AudioSamplerLoopMode::reverse_one_shot);
+}
+
+constexpr bool valid_loop_settings(AudioSamplerLoopMode mode, std::uint32_t start, std::uint32_t length) {
+    if (!valid_loop_mode(mode))
+        return false;
+    if (mode == AudioSamplerLoopMode::forward_loop || mode == AudioSamplerLoopMode::forward_loop_release)
+        return length != 0U;
+    return length != 0U || start == 0U;
+}
+
+bool uses_expanded_mono(const SampleParameters &parameters) {
+    return parameters.expand_detune.value_or(0) != 0 || parameters.expand_dephase.value_or(0) != 0;
+}
+
+Result<void> validate_sample_spec(const SampleSpec &sample) {
     if (auto valid = require_object_name(sample.name, "sample.name"); !valid)
         return valid;
-    if (sample.root_key > 127U || sample.key_low > 127U || sample.key_high > 127U || sample.level > 127U ||
-        sample.velocity_low > 127U || sample.velocity_high > 127U || sample.fine_tune_cents < -63 ||
-        sample.fine_tune_cents > 63)
-        return std::unexpected{manifest_error("sample MIDI values must be between 0 and 127")};
-    if (sample.key_high < sample.key_low || sample.velocity_high < sample.velocity_low)
-        return std::unexpected{manifest_error("sample key and velocity ranges must be ordered")};
-    if ((sample.loop_mode == AudioSamplerLoopMode::forward_loop && sample.loop_length_frames == 0U) ||
-        (sample.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
-         (sample.loop_start_frame != 0U || sample.loop_length_frames != 0U)) ||
-        (sample.loop_mode != AudioSamplerLoopMode::forward_loop &&
-         sample.loop_mode != AudioSamplerLoopMode::forward_one_shot))
+    if (auto valid = detail::validate_sample_parameters(sample.parameters); !valid)
+        return valid;
+    if (!valid_loop_settings(sample.parameters.loop_mode.value_or(AudioSamplerLoopMode::forward_one_shot),
+                             sample.parameters.loop_start_frame.value_or(0U),
+                             sample.parameters.loop_length_frames.value_or(0U))) {
         return std::unexpected{manifest_error("sample loop settings are invalid")};
+    }
     return {};
 }
 
 Result<void> validate_direct_sample(const SampleSpec &sample) {
-    if (auto valid = validate_sample_parameters(sample); !valid)
+    if (auto valid = validate_sample_spec(sample); !valid)
         return valid;
     if (sample.interleaved_audio_path || sample.left_waveform_name || sample.right_waveform_name ||
         sample.target_sample_rate) {
@@ -91,8 +107,14 @@ Result<void> validate_direct_sample(const SampleSpec &sample) {
             return valid;
         if (*sample.right_waveform_id == *sample.waveform_id)
             return std::unexpected{manifest_error("sample waveform identifiers must be distinct")};
+        if (uses_expanded_mono(sample.parameters))
+            return std::unexpected{manifest_error("stereo Sample cannot use expanded-mono controls")};
     }
     return {};
+}
+
+Result<void> validate_sample_bank_parameter_overrides(const SampleParameters &overrides) {
+    return detail::validate_sample_parameter_fields(overrides);
 }
 
 Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
@@ -107,6 +129,12 @@ Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
         if (!members.insert(member).second)
             return std::unexpected{manifest_error("member_samples must be distinct")};
     }
+    if (sample_bank.parameter_overrides) {
+        if (!detail::has_sample_parameter_values(*sample_bank.parameter_overrides))
+            return std::unexpected{manifest_error("parameter_overrides must contain at least one parameter")};
+        if (auto valid = validate_sample_bank_parameter_overrides(*sample_bank.parameter_overrides); !valid)
+            return valid;
+    }
     return {};
 }
 
@@ -115,35 +143,17 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
         return std::unexpected{manifest_error("program.number must be between 1 and 128")};
     if (auto valid = require_program_name(program.name, "program.name"); !valid)
         return valid;
-    if (program.assignments.empty() || program.assignments.size() > maximum_program_assignments) {
-        return std::unexpected{manifest_error("program.assignments must contain 1..16 assignments")};
+    if (program.assignments.size() > maximum_program_assignments) {
+        return std::unexpected{manifest_error("program.assignments must contain 0..999 assignments")};
     }
     for (const auto &assignment : program.assignments) {
         if (assignment.target_kind != "SBAC" && assignment.target_kind != "SBNK")
             return std::unexpected{manifest_error("Program assignment target must be SBAC or SBNK")};
         if (auto valid = require_object_name(assignment.target_name, "program assignment target"); !valid)
             return valid;
-        if (assignment.receive_mode == ProgramReceiveMode::midi_channel &&
-            (assignment.receive_channel == 0U || assignment.receive_channel > 16U)) {
-            return std::unexpected{manifest_error("MIDI_CHANNEL Program assignment requires channel 1..16")};
-        }
-        if (assignment.receive_mode == ProgramReceiveMode::sample && assignment.receive_channel != 0U)
-            return std::unexpected{manifest_error("SAMPLE Program assignment must not specify a MIDI channel")};
     }
-    return {};
-}
-
-Result<void> validate_authored_program(const ProgramSpec &program) {
-    if (auto valid = validate_program_fields(program); !valid)
-        return valid;
-    if (program.assignments.size() != 2U || program.assignments[0].target_kind != "SBAC" ||
-        program.assignments[0].receive_mode != ProgramReceiveMode::midi_channel ||
-        program.assignments[0].receive_channel != 1U || program.assignments[1].target_kind != "SBNK" ||
-        program.assignments[1].receive_mode != ProgramReceiveMode::midi_channel ||
-        program.assignments[1].receive_channel != 2U) {
-        return std::unexpected{manifest_error("authored Program assignments must be SBAC/channel 1 then "
-                                              "SBNK/channel 2")};
-    }
+    if (const auto payload = prepare_prog_payload(program); !payload)
+        return std::unexpected{payload.error()};
     return {};
 }
 
@@ -170,20 +180,18 @@ Result<void> validate_volume(const VolumeSpec &volume) {
             return std::unexpected{manifest_error("waveform.path must be a non-empty path")};
         if (waveform.root_key > 127U || waveform.fine_tune_cents < -63 || waveform.fine_tune_cents > 63 ||
             (waveform.target_sample_rate && *waveform.target_sample_rate == 0U) ||
-            (waveform.loop_mode == AudioSamplerLoopMode::forward_loop && waveform.loop_length_frames == 0U) ||
-            (waveform.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
-             (waveform.loop_start_frame != 0U || waveform.loop_length_frames != 0U)) ||
-            (waveform.loop_mode != AudioSamplerLoopMode::forward_loop &&
-             waveform.loop_mode != AudioSamplerLoopMode::forward_one_shot))
+            !valid_loop_settings(waveform.loop_mode, waveform.loop_start_frame, waveform.loop_length_frames))
             return std::unexpected{manifest_error("waveform parameters are out of range")};
     }
 
     std::set<std::string_view> sample_names;
+    std::map<std::string_view, const SampleSpec *> sample_specs;
     for (const auto &sample : volume.samples) {
-        if (auto valid = validate_sample_parameters(sample); !valid)
+        if (auto valid = validate_sample_spec(sample); !valid)
             return valid;
         if (!sample_names.insert(sample.name).second)
             return std::unexpected{manifest_error("volume has duplicate Sample names")};
+        sample_specs.emplace(sample.name, &sample);
         const auto direct = sample.waveform_id.has_value();
         const auto interleaved = sample.interleaved_audio_path.has_value();
         if (direct == interleaved || (interleaved && sample.right_waveform_id) ||
@@ -199,6 +207,8 @@ Result<void> validate_volume(const VolumeSpec &volume) {
                                              *sample.right_waveform_id == *sample.waveform_id)) {
                 return std::unexpected{manifest_error("sample has an invalid right waveform reference")};
             }
+            if (sample.right_waveform_id && uses_expanded_mono(sample.parameters))
+                return std::unexpected{manifest_error("stereo Sample cannot use expanded-mono controls")};
         } else {
             if (sample.interleaved_audio_path->empty())
                 return std::unexpected{manifest_error("sample.interleaved_audio_path must be a non-empty path")};
@@ -214,10 +224,13 @@ Result<void> validate_volume(const VolumeSpec &volume) {
             }
             if (sample.target_sample_rate && *sample.target_sample_rate == 0U)
                 return std::unexpected{manifest_error("sample.target_sample_rate is out of range")};
+            if (uses_expanded_mono(sample.parameters))
+                return std::unexpected{manifest_error("interleaved stereo Sample cannot use expanded-mono controls")};
         }
     }
 
     std::set<std::string_view> sample_bank_names;
+    std::set<std::string_view> banked_samples;
     for (const auto &sample_bank : volume.sample_banks) {
         if (auto valid = validate_sample_bank(sample_bank); !valid)
             return valid;
@@ -227,22 +240,35 @@ Result<void> validate_volume(const VolumeSpec &volume) {
                                 [&](const auto &member) { return !sample_names.contains(member); })) {
             return std::unexpected{manifest_error("Sample Bank references an unknown Sample")};
         }
+        for (const auto &member_name : sample_bank.member_samples) {
+            if (!banked_samples.insert(member_name).second)
+                return std::unexpected{manifest_error("Sample cannot belong to multiple Sample Banks")};
+            if (!sample_bank.parameter_overrides)
+                continue;
+            const auto effective =
+                apply_sample_bank_parameter_overrides(*sample_specs.at(member_name), *sample_bank.parameter_overrides);
+            if (auto valid = validate_sample_spec(effective); !valid)
+                return valid;
+            if ((effective.right_waveform_id || effective.interleaved_audio_path) &&
+                uses_expanded_mono(effective.parameters)) {
+                return std::unexpected{
+                    manifest_error("stereo Sample cannot receive expanded-mono Sample Bank controls")};
+            }
+        }
     }
 
-    if (volume.sample_banks.empty() != volume.programs.empty() ||
-        volume.sample_banks.size() != volume.programs.size()) {
-        return std::unexpected{
-            manifest_error("volume requires one Program for every Sample Bank in the current writer profile")};
-    }
     std::set<std::uint8_t> program_numbers;
     for (const auto &program : volume.programs) {
-        if (auto valid = validate_authored_program(program); !valid)
+        if (auto valid = validate_program_fields(program); !valid)
             return valid;
         if (!program_numbers.insert(program.number).second)
             return std::unexpected{manifest_error("volume has duplicate Program numbers")};
-        if (!sample_bank_names.contains(program.assignments[0].target_name) ||
-            !sample_names.contains(program.assignments[1].target_name)) {
-            return std::unexpected{manifest_error("Program assignment references an unknown target")};
+        for (const auto &assignment : program.assignments) {
+            const auto &names = assignment.target_kind == "SBAC" ? sample_bank_names : sample_names;
+            if (!names.contains(assignment.target_name))
+                return std::unexpected{manifest_error("Program assignment references an unknown target")};
+            if (assignment.target_kind == "SBNK" && banked_samples.contains(assignment.target_name))
+                return std::unexpected{manifest_error("A bank member cannot also be a direct Program assignment")};
         }
     }
     return {};
@@ -306,6 +332,26 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return require_object_name(operation.sample_name, "sample_name");
                 } else if constexpr (std::same_as<T, InsertSampleOperation>) {
                     return validate_direct_sample(operation.sample);
+                } else if constexpr (std::same_as<T, UpdateSampleParametersOperation>) {
+                    if (auto valid = require_object_name(operation.sample_name, "sample_name"); !valid)
+                        return valid;
+                    if (!detail::has_sample_parameter_values(operation.parameters))
+                        return std::unexpected{manifest_error("parameters must contain at least one parameter")};
+                    return detail::validate_sample_parameter_fields(operation.parameters);
+                } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {
+                    if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
+                        return valid;
+                    if (!detail::has_sample_parameter_values(operation.parameters))
+                        return std::unexpected{manifest_error("parameters must contain at least one parameter")};
+                    return detail::validate_sample_parameter_fields(operation.parameters);
+                } else if constexpr (std::same_as<T, ReplaceProgramAssignmentsOperation>) {
+                    return detail::validate_program_assignment_replacement(operation);
+                } else if constexpr (std::same_as<T, RetargetSampleWaveDataOperation>) {
+                    return detail::validate_sample_retarget(operation);
+                } else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>) {
+                    if (auto valid = require_object_name(operation.waveform_name, "waveform_name"); !valid)
+                        return valid;
+                    return detail::validate_wave_data_parameters(operation.parameters);
                 } else if constexpr (std::same_as<T, InsertWaveformOperation>) {
                     const auto &waveform = operation.waveform;
                     if (waveform.path.empty())
@@ -323,12 +369,8 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (waveform.root_key > 127U)
                         return std::unexpected{manifest_error("audio.root_key must be between 0 and 127")};
                     if (waveform.fine_tune_cents < -63 || waveform.fine_tune_cents > 63 ||
-                        (waveform.loop_mode == AudioSamplerLoopMode::forward_loop &&
-                         waveform.loop_length_frames == 0U) ||
-                        (waveform.loop_mode == AudioSamplerLoopMode::forward_one_shot &&
-                         (waveform.loop_start_frame != 0U || waveform.loop_length_frames != 0U)) ||
-                        (waveform.loop_mode != AudioSamplerLoopMode::forward_loop &&
-                         waveform.loop_mode != AudioSamplerLoopMode::forward_one_shot))
+                        !valid_loop_settings(waveform.loop_mode, waveform.loop_start_frame,
+                                             waveform.loop_length_frames))
                         return std::unexpected{manifest_error("audio sampler settings are invalid")};
                     if (waveform.target_sample_rate && *waveform.target_sample_rate == 0U)
                         return std::unexpected{manifest_error("audio.target_sample_rate is out of range")};
@@ -390,17 +432,19 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     if (operation.program_number == 0U || operation.program_number > 128U)
                         return std::unexpected{manifest_error("program_number must be between 1 and 128")};
                     if (operation.assignment_ordinals.empty() ||
-                        operation.assignment_ordinals.size() > maximum_program_assignments) {
-                        return std::unexpected{manifest_error("assignment_ordinals must contain 1..16 ordinals")};
+                        operation.assignment_ordinals.size() > maximum_stored_program_assignments) {
+                        return std::unexpected{manifest_error("assignment_ordinals must contain 1..999 ordinals")};
                     }
-                    std::set<std::uint8_t> ordinals;
+                    std::set<std::uint16_t> ordinals;
                     for (const auto ordinal : operation.assignment_ordinals) {
-                        if (ordinal >= maximum_program_assignments || !ordinals.insert(ordinal).second) {
+                        if (ordinal >= maximum_stored_program_assignments || !ordinals.insert(ordinal).second) {
                             return std::unexpected{
-                                manifest_error("assignment_ordinals must contain distinct values between 0 and 15")};
+                                manifest_error("assignment_ordinals must contain distinct values between 0 and 998")};
                         }
                     }
                     return {};
+                } else if constexpr (std::same_as<T, UpdateProgramParametersOperation>) {
+                    return detail::validate_program_parameter_update(operation);
                 } else if constexpr (std::same_as<T, DeleteSequenceOperation>) {
                     return require_object_name(operation.sequence_name, "sequence_name");
                 } else if constexpr (std::same_as<T, InsertSequenceOperation>) {
@@ -472,6 +516,8 @@ Result<void> validate_placement_repair_transaction(const AlterationManifest &man
 }
 
 } // namespace
+
+Result<void> validate_authored_volume(const VolumeSpec &volume) { return validate_volume(volume); }
 
 Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
     if (manifest.schema_version != alteration_manifest_schema_version)

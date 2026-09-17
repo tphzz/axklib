@@ -402,6 +402,18 @@ Result<bool> sbnk_program_bit(std::span<const std::byte> payload, std::uint8_t p
     return (word & (std::uint32_t{1} << ((program - 1U) % 32U))) != 0U;
 }
 
+Result<bool> sbac_program_bit(std::span<const std::byte> payload, std::uint8_t program) {
+    const auto offset = 0x90U + static_cast<std::size_t>((program - 1U) / 32U) * 4U;
+    if (payload.size() < offset + 4U) {
+        return std::unexpected{transaction_error("SBAC payload is too short for its Program-link bitmap")};
+    }
+    const auto word = (std::to_integer<std::uint32_t>(payload[offset]) << 24U) |
+                      (std::to_integer<std::uint32_t>(payload[offset + 1U]) << 16U) |
+                      (std::to_integer<std::uint32_t>(payload[offset + 2U]) << 8U) |
+                      std::to_integer<std::uint32_t>(payload[offset + 3U]);
+    return (word & (std::uint32_t{1} << ((program - 1U) % 32U))) != 0U;
+}
+
 Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
                                   bool enabled, const CancellationToken &cancellation) {
     auto payload = current_payload(state, partition, id, cancellation);
@@ -411,6 +423,27 @@ Result<void> set_sbnk_program_bit(TransactionState &state, MutablePartition &par
     if (!current)
         return std::unexpected{current.error()};
     const auto offset = 0xc0U + static_cast<std::size_t>((program - 1U) / 32U) * 4U;
+    auto word = (std::to_integer<std::uint32_t>((*payload)[offset]) << 24U) |
+                (std::to_integer<std::uint32_t>((*payload)[offset + 1U]) << 16U) |
+                (std::to_integer<std::uint32_t>((*payload)[offset + 2U]) << 8U) |
+                std::to_integer<std::uint32_t>((*payload)[offset + 3U]);
+    const auto mask = std::uint32_t{1} << ((program - 1U) % 32U);
+    word = enabled ? word | mask : word & ~mask;
+    ByteWriter writer{*payload};
+    if (auto written = writer.write_be32(offset, word); !written)
+        return std::unexpected{written.error()};
+    return replace_fixed_object_payload(state, partition, id, std::move(*payload), cancellation);
+}
+
+Result<void> set_sbac_program_bit(TransactionState &state, MutablePartition &partition, SfsId id, std::uint8_t program,
+                                  bool enabled, const CancellationToken &cancellation) {
+    auto payload = current_payload(state, partition, id, cancellation);
+    if (!payload)
+        return std::unexpected{payload.error()};
+    auto current = sbac_program_bit(*payload, program);
+    if (!current)
+        return std::unexpected{current.error()};
+    const auto offset = 0x90U + static_cast<std::size_t>((program - 1U) / 32U) * 4U;
     auto word = (std::to_integer<std::uint32_t>((*payload)[offset]) << 24U) |
                 (std::to_integer<std::uint32_t>((*payload)[offset + 1U]) << 16U) |
                 (std::to_integer<std::uint32_t>((*payload)[offset + 2U]) << 8U) |

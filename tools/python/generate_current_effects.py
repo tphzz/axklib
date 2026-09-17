@@ -15,6 +15,58 @@ def quoted(value: object) -> str:
     return json.dumps(value, ensure_ascii=True)
 
 
+def render_write_types(value: object) -> list[str]:
+    if not isinstance(value, list) or len(value) != 97:
+        raise ValueError("write tables must cover all 97 ordinary types")
+    out = [
+        "struct EffectWriteParameterData { std::uint8_t kind; std::uint16_t minimum; std::uint16_t maximum; };",
+        "struct EffectWriteTypeData { std::uint8_t legacy_type; std::array<std::uint16_t, 16> reset_words; std::array<EffectWriteParameterData, 16> parameters; };",
+        "inline constexpr std::array<EffectWriteTypeData, 97> effect_write_types{",
+    ]
+    kinds = {"stored_value": 0, "control_action": 1, "unused": 2}
+    for raw, row in enumerate(value):
+        if not isinstance(row, dict) or set(row) != {"raw_type", "legacy_type", "reset_words", "parameters"}:
+            raise ValueError("write type has unknown or missing keys")
+        if type(row["raw_type"]) is not int or row["raw_type"] != raw:
+            raise ValueError("write types must be ordered and unique")
+        if type(row["legacy_type"]) is not int or row["legacy_type"] != (raw if raw <= 54 else 0):
+            raise ValueError("invalid legacy type projection")
+        words, parameters = row["reset_words"], row["parameters"]
+        if not isinstance(words, list) or len(words) != 16 or any(type(word) is not int or not 0 <= word <= 65535 for word in words):
+            raise ValueError("reset vector must contain exactly sixteen u16 words")
+        if not isinstance(parameters, list) or len(parameters) != 16:
+            raise ValueError("write type must describe sixteen physical parameters")
+        rendered = []
+        for word, parameter in zip(words, parameters, strict=True):
+            if not isinstance(parameter, dict) or set(parameter) != {"kind", "minimum", "maximum"}:
+                raise ValueError("write parameter has unknown or missing keys")
+            kind = parameter["kind"]
+            minimum, maximum = parameter["minimum"], parameter["maximum"]
+            if not isinstance(kind, str) or kind not in kinds or type(minimum) is not int or type(maximum) is not int or not 0 <= minimum <= maximum <= 65535:
+                raise ValueError("invalid parameter write domain")
+            if kind == "stored_value" and not minimum <= word <= maximum:
+                raise ValueError("stored parameter default is outside its domain")
+            rendered.append(f"EffectWriteParameterData{{{kinds[kind]}, {minimum}, {maximum}}}")
+        out.append("    EffectWriteTypeData{" + str(row["legacy_type"]) + ", {" + ", ".join(map(str, words)) + "}, {" + ", ".join(rendered) + "}},")
+    out.extend(["};", ""])
+    return out
+
+
+def render_native_reset_words(value: object, current_types: Any) -> list[str]:
+    if not isinstance(value, list) or len(value) != 55:
+        raise ValueError("native reset tables must cover all 55 ordinary types")
+    out = ["inline constexpr std::array<std::array<std::uint16_t, 16>, 55> a3000_effect_reset_words{"]
+    for raw, words in enumerate(value):
+        if not isinstance(words, list) or len(words) != 16 or any(type(word) is not int or not 0 <= word <= 65535 for word in words):
+            raise ValueError("native reset vector must contain exactly sixteen u16 words")
+        for word, parameter in zip(words, current_types[raw]["parameters"], strict=True):
+            if parameter["kind"] == "stored_value" and not parameter["minimum"] <= word <= parameter["maximum"]:
+                raise ValueError("native stored parameter default is outside its domain")
+        out.append("    std::array<std::uint16_t, 16>{" + ", ".join(map(str, words)) + "},")
+    out.extend(["};", ""])
+    return out
+
+
 def render(value: object) -> str:
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
@@ -22,6 +74,8 @@ def render(value: object) -> str:
         "effect_parameters",
         "enum_value_tables",
         "known_display_values",
+        "write_types",
+        "a3000_reset_words",
     }:
         raise ValueError("effect data has unknown or missing top-level keys")
     if value["schema_version"] != "1.0":
@@ -45,7 +99,7 @@ def render(value: object) -> str:
         "struct EffectTypeData { std::uint16_t raw_type; std::uint16_t printed_number; std::string_view printed_label; std::string_view ui_label; bool validated; };",
         "struct EffectParameterData { std::uint16_t raw_type; std::uint8_t parameter_number; std::string_view effect_label; std::string_view parameter_label; std::string_view range_text; std::string_view raw_min; std::string_view raw_max; std::string_view raw_interval; std::string_view raw_scaler; std::string_view raw_shift; std::string_view value_source; std::string_view table_source; };",
         "struct EffectEnumValue { std::string_view table; std::uint16_t index; std::string_view label; };",
-        "struct KnownEffectDisplay { std::uint16_t raw_type; std::uint8_t parameter_number; std::uint8_t raw_value; std::string_view display; };",
+        "struct KnownEffectDisplay { std::uint16_t raw_type; std::uint8_t parameter_number; std::uint16_t raw_value; std::string_view display; };",
         "",
         f"inline constexpr std::array<EffectTypeData, {len(types)}> effect_types{{",
     ]
@@ -132,7 +186,10 @@ def render(value: object) -> str:
                 )
             ) + "},"
         )
-    out.extend(["};", "", "}  // namespace axk::generated", ""])
+    out.extend(["};", ""])
+    out.extend(render_write_types(value["write_types"]))
+    out.extend(render_native_reset_words(value["a3000_reset_words"], value["write_types"]))
+    out.extend(["}  // namespace axk::generated", ""])
     return "\n".join(out)
 
 

@@ -7,12 +7,14 @@ const mocks = vi.hoisted(() => ({
     sandboxDirectory: vi.fn(),
     inspectSandboxMediaSource: vi.fn(),
     openImage: vi.fn(),
+    filesystem: vi.fn(),
     refreshImage: vi.fn(),
     attachCompanions: vi.fn(),
     closeImage: vi.fn(),
     validationIssues: vi.fn(),
     contentChildren: vi.fn(),
     objectPage: vi.fn(),
+    objectDetail: vi.fn(),
     relationshipPage: vi.fn(),
     preview: vi.fn(),
     inspectPackage: vi.fn(),
@@ -42,12 +44,14 @@ vi.mock('./lib/createTransport', () => ({
         sandboxDirectory: mocks.sandboxDirectory,
         inspectSandboxMediaSource: mocks.inspectSandboxMediaSource,
         openImage: mocks.openImage,
+        filesystem: mocks.filesystem,
         refreshImage: mocks.refreshImage,
         attachCompanions: mocks.attachCompanions,
         closeImage: mocks.closeImage,
         validationIssues: mocks.validationIssues,
         contentChildren: mocks.contentChildren,
         objectPage: mocks.objectPage,
+        objectDetail: mocks.objectDetail,
         relationshipPage: mocks.relationshipPage,
         preview: mocks.preview,
         inspectPackage: mocks.inspectPackage,
@@ -97,6 +101,15 @@ async function chooseNestedImage(buttonName: 'Open image' | 'Open another image'
 describe('App panel layout', () => {
     beforeEach(() => {
         delete window.__AXKLIB_SERVER__;
+        mocks.filesystem.mockReset().mockResolvedValue({
+            revision: 1,
+            available: false,
+            deviceView: 'a-series',
+            filesystemName: '',
+            rootCapabilities: [],
+            items: [],
+            totalCount: 0,
+        });
         mocks.sandboxRoots.mockReset().mockResolvedValue([{ id: 'workspace', displayName: 'Yamaha', writable: true }]);
         mocks.sandboxDirectory.mockReset().mockImplementation(async (directory) => ({
             directory,
@@ -146,8 +159,9 @@ describe('App panel layout', () => {
         mocks.validationIssues.mockReset().mockResolvedValue([]);
         mocks.contentChildren.mockReset().mockResolvedValue({ items: [], totalCount: 0 });
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
+        mocks.objectDetail.mockReset();
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
-        mocks.preview.mockReset().mockResolvedValue({ frameCount: 1, lanes: [] });
+        mocks.preview.mockReset().mockResolvedValue({ objectId: 'wave-1', lanes: [] });
         mocks.inspectPackage.mockReset();
         mocks.planImagePackageImport.mockReset();
         mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);
@@ -408,7 +422,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: 0,
             rootKey: 60,
-            frameCount: 0,
+            storedFrameCount: 0,
+            waveStartFrame: 0,
+            waveLengthFrames: 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Navigation Bank', 1);
@@ -495,7 +512,7 @@ describe('App panel layout', () => {
             await chooseNestedImage();
             await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
-            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample Member' }), { detail: 1 });
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample' }), { detail: 1 });
 
             await waitFor(() => {
                 expect(screen.getByRole('region', { name: 'Sample hierarchy' })).toBeTruthy();
@@ -510,7 +527,7 @@ describe('App panel layout', () => {
                 expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(1);
             });
 
-            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left Wave Data' }), {
+            await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left' }), {
                 detail: 1,
             });
 
@@ -564,7 +581,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: objectType === 'SMPL' ? 44_100 : 0,
             rootKey: 60,
-            frameCount: objectType === 'SMPL' ? 1 : 0,
+            storedFrameCount: objectType === 'SMPL' ? 1 : 0,
+            waveStartFrame: 0,
+            waveLengthFrames: objectType === 'SMPL' ? 1 : 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
@@ -669,7 +689,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 2,
             sampleRate: objectType === 'SMPL' ? 44_100 : 0,
             rootKey: 60,
-            frameCount: objectType === 'SMPL' ? 1 : 0,
+            storedFrameCount: objectType === 'SMPL' ? 1 : 0,
+            waveStartFrame: 0,
+            waveLengthFrames: objectType === 'SMPL' ? 1 : 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: objectType === 'SMPL' ? 2 : 0,
         });
         const bank = samplerObject('SBAC-1', 'SBAC', 'Slice Bank');
@@ -883,6 +906,28 @@ describe('App panel layout', () => {
         expect(screen.getByText('Partitions and volumes')).toBeTruthy();
     });
 
+    it('keeps a Files initialization failure retryable without hiding Device status', async () => {
+        mocks.filesystem.mockRejectedValueOnce(new Error('Filesystem temporarily unavailable'));
+        renderAcknowledgedApp();
+        await chooseNestedImage();
+        const files = screen.getByRole('button', { name: 'Files' });
+        await waitFor(() => expect(files).toHaveProperty('disabled', false));
+        await fireEvent.click(files);
+        const alert = await screen.findByRole('alert');
+        expect(alert.textContent).toContain('Filesystem temporarily unavailable');
+        mocks.filesystem.mockResolvedValue({
+            revision: 1,
+            available: true,
+            deviceView: 'a-series',
+            filesystemName: 'SFS',
+            rootCapabilities: [],
+            items: [],
+            totalCount: 0,
+        });
+        await fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+        await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    });
+
     it('closes the active image and returns to the initial empty state', async () => {
         renderAcknowledgedApp();
 
@@ -1046,7 +1091,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 512,
             sampleRate: 0,
             rootKey: 60,
-            frameCount: 0,
+            storedFrameCount: 0,
+            waveStartFrame: 0,
+            waveLengthFrames: 0,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 0,
         };
         const volume = {
@@ -1327,7 +1375,10 @@ describe('App panel layout', () => {
             storedSizeBytes: 4096,
             sampleRate: 44_100,
             rootKey: 60,
-            frameCount: 44_100,
+            storedFrameCount: 44_100,
+            waveStartFrame: 0,
+            waveLengthFrames: 44_100,
+            storageState: 'COMPLETE' as const,
             sampleWidthBytes: 2,
         };
         const opened = {
@@ -1559,7 +1610,7 @@ describe('App panel layout', () => {
         ).toBe('My Volume');
         expect(mocks.planImagePackageImport).not.toHaveBeenCalled();
 
-        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(within(plannedDialog).getByRole('button', { name: 'Review' }));
 
         await vi.waitFor(() =>
             expect(mocks.planImagePackageImport).toHaveBeenCalledWith(
@@ -2028,7 +2079,7 @@ describe('App panel layout', () => {
         window.dispatchEvent(mixedDrop);
         const unavailable = await screen.findByRole('dialog', { name: 'Import unavailable' });
         expect(
-            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and TX16W disks separately.'),
+            within(unavailable).getByText('Drop packages, A3K archives, audio, MIDI, and floppy images separately.'),
         ).toBeTruthy();
         expect(screen.queryByRole('dialog', { name: 'Import MIDI' })).toBeNull();
         expect(screen.queryByRole('dialog', { name: 'Import audio' })).toBeNull();

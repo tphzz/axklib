@@ -4,6 +4,35 @@ import { describe, expect, it, vi } from 'vitest';
 import CompanionDiskDialog from './CompanionDiskDialog.svelte';
 
 describe('CompanionDiskDialog', () => {
+    it('shows the required disk for cataloged folders and keeps busy actions stable', async () => {
+        const oncancel = vi.fn();
+        const { rerender } = render(CompanionDiskDialog, {
+            props: {
+                sources: [],
+                sourceKind: 'directory',
+                setLabel: 'Set',
+                nextRequiredIndex: 3,
+                busy: false,
+                error: '',
+                onadd: vi.fn(),
+                onremove: vi.fn(),
+                onnearby: vi.fn(),
+                onconfirm: vi.fn(),
+                oncancel,
+            },
+        });
+        expect(screen.getByText(/requires disk 3/)).toBeTruthy();
+        expect(screen.queryByText(/Wave Data continues/)).toBeNull();
+        const action = screen.getByRole('button', { name: 'Add and retry' });
+        expect(action.parentElement?.classList.contains('dialog-footer-actions')).toBe(true);
+        expect(screen.getByRole('status').classList.contains('dialog-footer-status')).toBe(true);
+        await rerender({ busy: true });
+        expect(screen.getByRole('button', { name: 'Add and retry' })).toBe(action);
+        expect(screen.getByRole('status').textContent).toBe('Adding companions');
+        expect((screen.getByRole('button', { name: 'Close' }) as HTMLButtonElement).disabled).toBe(true);
+        await fireEvent.keyDown(document, { key: 'Escape' });
+        expect(oncancel).not.toHaveBeenCalled();
+    });
     it('collects explicit floppy images and keeps nearby discovery user initiated', async () => {
         const onadd = vi.fn();
         const onnearby = vi.fn();

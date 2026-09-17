@@ -19,6 +19,7 @@ import {
     type ImportDestinationMode,
 } from './packageDestinations';
 import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
+import { ImportCompletion } from './importCompletion.svelte';
 
 export interface AudioImportRequest {
     files: (ClientUploadSource | FileLocation)[];
@@ -55,7 +56,11 @@ export class AudioImportWorkflow {
     request = $state<AudioImportRequest | null>(null);
     private lastDirectory = $state<DirectoryRef | null>(null);
 
-    constructor(private readonly dependencies: AudioImportDependencies) {}
+    readonly completion: ImportCompletion;
+
+    constructor(private readonly dependencies: AudioImportDependencies) {
+        this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
+    }
 
     dropAvailable(): boolean {
         return (
@@ -110,7 +115,12 @@ export class AudioImportWorkflow {
         input.click();
     }
 
-    async commit(items: AudioImportItem[], grouping: AudioImportGrouping): Promise<void> {
+    async commit(
+        items: AudioImportItem[],
+        grouping: AudioImportGrouping,
+        reviewedWarnings: readonly string[] = [],
+    ): Promise<boolean> {
+        if (this.completion.locked) return false;
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('Audio import target is no longer available');
@@ -121,28 +131,31 @@ export class AudioImportWorkflow {
         this.dependencies.setStatus('Importing audio');
         try {
             await this.dependencies.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
+            return await this.completion.run(
                 () => this.dependencies.transport.startAudioImport(sessionId, target, items, grouping),
+                async () => {
+                    this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
+                    await this.dependencies.refreshSession({
+                        partitionIndex: target.partitionIndex,
+                        volumeName: target.volumeName,
+                    });
+                    if (grouping.kind === 'SAMPLE_BANK') {
+                        const inserted = this.dependencies
+                            .sampleBanks()
+                            .find((sampleBank) => sampleBank.name === grouping.sampleBankName);
+                        if (inserted) this.dependencies.selectSampleBank(inserted);
+                    } else {
+                        const inserted = this.dependencies.samples().find((sample) => sample.name === firstName);
+                        if (inserted) this.dependencies.selectSample(inserted);
+                    }
+                    this.dependencies.reportTiming('audio-import', started, items.length);
+                    this.dependencies.setStatus(`Imported ${items.length} audio file${items.length === 1 ? '' : 's'}`);
+                },
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
+                reviewedWarnings,
             );
-            if (completed.status !== 'completed') throw new Error(completed.error ?? 'Audio import did not complete');
-            this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
-            await this.dependencies.refreshSession({
-                partitionIndex: target.partitionIndex,
-                volumeName: target.volumeName,
-            });
-            if (grouping.kind === 'SAMPLE_BANK') {
-                const inserted = this.dependencies
-                    .sampleBanks()
-                    .find((sampleBank) => sampleBank.name === grouping.sampleBankName);
-                if (inserted) this.dependencies.selectSampleBank(inserted);
-            } else {
-                const inserted = this.dependencies.samples().find((sample) => sample.name === firstName);
-                if (inserted) this.dependencies.selectSample(inserted);
-            }
-            this.dependencies.reportTiming('audio-import', started, items.length);
         } catch (error) {
             this.dependencies.setStatus(userFacingMessage(error));
             throw error;
@@ -232,6 +245,7 @@ export class AudioImportWorkflow {
         files: (ClientUploadSource | FileLocation)[],
         selected: DiskTreeItem | null,
     ): AudioImportRequest {
+        this.completion.reset();
         const initial = selected ? initialImportDestination(selected) : null;
         const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
         return {

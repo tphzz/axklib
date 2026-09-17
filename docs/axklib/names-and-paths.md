@@ -286,6 +286,12 @@ sampler-visible Samples (`SBNK`), the graph records those Sample names in the
 should use the first alias when present and fall back to the physical `SMPL`
 display name only when no alias is known.
 
+Each Sample's `parameters.decoded_current_sbnk_member_parameters` array contains
+one context: that Sample's own decoded parameters, including both members for
+stereo. Other Samples sharing its Wave Data are represented by aliases and
+relationships, not by duplicated parameter blocks. Parameter storage therefore
+grows with the number of exported Samples rather than the number of shared pairs.
+
 Whole-input exact exports retain every decodable physical Wave Data object. A
 Wave Data object with no placement candidate, or with several candidates, is
 not assigned to an arbitrary volume and is not hidden. Its WAV remains in the

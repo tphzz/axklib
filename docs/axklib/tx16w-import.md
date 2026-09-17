@@ -19,23 +19,13 @@ mixing alternate editions that happen to have similar names. Adding or removing
 a member reruns inspection and the destination plan for the complete selected
 set.
 
-## Architecture
+## Import Stages
 
-TX16W support has two independent layers:
-
-1. `axklib/tx16w.hpp` defines a neutral TX16W data model and parser. It decodes
-   TX16W Waves, Timbres, Voices, Performances, key regions, assignments, native
-   controls, and relationships without depending on A-series object types.
-2. `axklib/tx16w_a_series.hpp` is an adapter. It projects a decoded TX16W
-   inspection into an A-series import plan containing Programs (`PROG`), Sample
-   Banks (`SBAC`), Samples (`SBNK`), and Wave Data (`SMPL`).
-
-The separation is intentional. Applications that target a different sampler
-family can reuse the TX16W parser and data model while supplying a different
-adapter. A target adapter should not be added to the neutral parser.
-
-The TX16W headers are source-level library interfaces. They are not currently
-part of the installed high-level SDK facade described in [C++ API](cpp-api.md).
+Inspection decodes TX16W Waves, Timbres, Voices, Performances, key regions,
+assignments, native controls, and relationships. Destination planning then maps
+that content to A-series Programs (`PROG`), Sample Banks (`SBAC`), Samples
+(`SBNK`), and Wave Data (`SMPL`). An inspectable source is not necessarily
+fully representable on the destination: review conversion notices before import.
 
 ## Supported Source Profile
 

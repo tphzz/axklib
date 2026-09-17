@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -15,6 +16,7 @@
 #include <span>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -49,9 +51,15 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
     }
 
     std::vector<axk::ReportRow> manifest;
-    std::vector<LoadedSource> loaded;
+    std::vector<axk::ReportRow> inventory;
+    std::vector<axk::ReportRow> relationships;
+    std::vector<axk::ReportRow> validation_issues;
+    std::vector<axk::ReportRow> wave_issues;
+    std::uint64_t wave_decoded{};
+    bool validation_failed{};
+    std::uint64_t ambiguous{};
     std::size_t load_error_count{};
-    loaded.reserve(request->sources.size());
+    std::size_t loaded_count{};
     for (std::size_t index = 0; index < request->sources.size(); ++index) {
         const auto &source_ref = request->sources[index];
         const auto display = source_display_path(source_ref, context);
@@ -69,23 +77,14 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
             context.progress->report(
                 {axk::ProgressPhase::reading, index, request->sources.size(), source_ref.relative_path, std::nullopt});
         }
-        auto source = load_source(sandbox, source_ref, false, context, axk::MediaObjectReadMode::complete);
-        if (!source) {
+        auto loaded = load_source(sandbox, source_ref, false, context, axk::MediaObjectReadMode::complete);
+        if (!loaded) {
             ++load_error_count;
             continue;
         }
-        loaded.push_back(std::move(*source));
-    }
-
-    std::vector<axk::ReportRow> inventory;
-    std::vector<axk::ReportRow> relationships;
-    std::vector<axk::ReportRow> validation_issues;
-    std::vector<axk::ReportRow> wave_issues;
-    std::uint64_t wave_decoded{};
-    bool validation_failed{};
-    std::uint64_t ambiguous{};
-    for (const auto &source : loaded) {
-        const auto display = source_display_path(source.source, context);
+        ++loaded_count;
+        // Retain report rows, not complete payloads from previously audited images.
+        const auto &source = *loaded;
         for (const auto &item : source.inventory.catalog.objects)
             inventory.push_back(inventory_row(source, item, display));
         for (const auto &row : source.graph.relationships) {
@@ -100,16 +99,17 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
                 const auto severity = issue.severity == axk::ValidationSeverity::error     ? "error"
                                       : issue.severity == axk::ValidationSeverity::warning ? "warning"
                                                                                            : "info";
-                validation_issues.push_back({{"severity", severity},
-                                             {"code", issue.code},
-                                             {"message", issue.message},
-                                             {"scope", "relationship"},
-                                             {"source_path", display},
-                                             {"sampler_path", issue.sampler_path},
-                                             {"object_key", issue.object_key},
-                                             {"quality", "Known"},
-                                             {"basis", "validation"},
-                                             {"recommended_next_check", ""}});
+                validation_issues.push_back(
+                    {{"severity", severity},
+                     {"code", issue.code},
+                     {"message", issue.message},
+                     {"scope", issue.code == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES" ? "volume" : "relationship"},
+                     {"source_path", display},
+                     {"sampler_path", issue.sampler_path},
+                     {"object_key", issue.object_key},
+                     {"quality", "Known"},
+                     {"basis", "validation"},
+                     {"recommended_next_check", ""}});
             }
         }
         if (!request->skip_wave_smoke) {
@@ -148,7 +148,7 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
 
     axk::ReportRow summary{
         {"input_count", static_cast<std::uint64_t>(request->sources.size())},
-        {"loaded_container_count", static_cast<std::uint64_t>(loaded.size())},
+        {"loaded_container_count", static_cast<std::uint64_t>(loaded_count)},
         {"load_error_count", static_cast<std::uint64_t>(load_error_count)},
         {"relationship_load_error_count", static_cast<std::uint64_t>(load_error_count)},
         {"object_count", static_cast<std::uint64_t>(inventory.size())},
@@ -224,7 +224,7 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
     if (auto published = sandbox.publish_directory(request->destination, request->overwrite, *destination); !published)
         return std::unexpected(published.error());
     return Json{{"operationId", "corpus.audit"},         {"sourceCount", request->sources.size()},
-                {"loadedCount", loaded.size()},          {"failedCount", load_error_count},
+                {"loadedCount", loaded_count},           {"failedCount", load_error_count},
                 {"objectCount", inventory.size()},       {"validationIssueCount", validation_issues.size()},
                 {"validationFailed", validation_failed}, {"relationshipCount", relationships.size()},
                 {"waveSmokeDecoded", wave_decoded},      {"waveSmokeErrorCount", wave_issues.size()},

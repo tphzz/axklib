@@ -19,12 +19,17 @@ const object: SamplerObject = {
     partitionName: 'PARTITION 1',
     volumeName: 'Volume',
     categoryName: 'PROG',
+    objectEncoding: 'current',
+    directoryEntryName: 'PROG.001',
     sfsId: 8,
     storedSizeBytes: 912,
     sizeWithDependenciesBytes: null,
     sampleRate: 0,
     rootKey: 0,
-    frameCount: 0,
+    storedFrameCount: 0,
+    waveStartFrame: 0,
+    waveLengthFrames: 0,
+    storageState: 'COMPLETE',
     sampleWidthBytes: 0,
 };
 

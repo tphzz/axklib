@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "axklib/bytes.hpp"
+#include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/utf8.hpp"
 #include "media_internal.hpp"
 
@@ -220,6 +221,25 @@ Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirecto
 
     AxkObjectDirectory result;
     result.source_name_ = std::move(source_name);
+    result.source_entry_count_ = entries.size();
+    std::vector<detail::FloppyCatalogFile> catalog_files;
+    for (const auto &entry : entries) {
+        catalog_files.push_back({entry.name, entry.reader->size()});
+        result.source_bytes_ += entry.reader->size();
+    }
+    if (std::ranges::any_of(entries,
+                            [](const auto &entry) { return detail::is_yamaha_floppy_catalog_path(entry.name); })) {
+        auto inspection =
+            detail::inspect_yamaha_floppy_catalog(catalog_files, [&](std::size_t index, std::size_t limit) {
+                const auto &reader = *entries[index].reader;
+                return detail::read_bytes(
+                    reader, 0U, static_cast<std::size_t>(std::min<std::uint64_t>(limit, reader.size())), cancellation);
+            });
+        result.catalog_ = std::move(inspection.catalog);
+        result.disk_identity_ = std::move(inspection.identity);
+        result.validation_issues_ = std::move(inspection.issues);
+        result.disk_members_.push_back(result.disk_identity_);
+    }
     bool nested{};
     for (auto &entry : entries) {
         nested = nested || path_parts(entry.name).size() > 1U;
@@ -254,6 +274,9 @@ Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirecto
         return std::unexpected{detail::media_error(
             ErrorCode::container_unrecognized, "directory contains no recognized Yamaha objects", result.source_name_)};
     }
+    // Cataloged members are assembled only after their disk sequence is validated.
+    if (result.disk_identity_.trusted_for_disk_set)
+        return result;
     std::map<std::vector<std::byte>, std::vector<std::size_t>, ByteVectorLess> segment_groups;
     for (std::size_t index = 0U; index < result.objects_.size(); ++index) {
         const auto &object = result.objects_[index];

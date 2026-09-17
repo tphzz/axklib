@@ -63,6 +63,8 @@ bool admitted_extension(axk::app::UploadKind kind, const std::filesystem::path &
         return extension == ".json";
     case axk::app::UploadKind::disk_image:
         return extension == ".img" || extension == ".ima" || extension == ".a3k";
+    case axk::app::UploadKind::file:
+        return true;
     }
     return false;
 }
@@ -81,6 +83,8 @@ bool valid_media_type(axk::app::UploadKind kind, std::string_view value) {
         return value == "application/json";
     case axk::app::UploadKind::disk_image:
         return value == "application/octet-stream" || value == "application/x-raw-disk-image";
+    case axk::app::UploadKind::file:
+        return value == "application/octet-stream";
     }
     return false;
 }
@@ -97,6 +101,8 @@ std::string_view disallowed_upload_message(axk::app::UploadKind kind) {
         return "manifest uploads require a JSON file";
     case axk::app::UploadKind::disk_image:
         return "media uploads require an IMG, IMA, or A3K file";
+    case axk::app::UploadKind::file:
+        return "file uploads require a filename and application/octet-stream media type";
     }
     return "upload type is not allowed";
 }
@@ -372,13 +378,15 @@ axk::app::UploadStore &axk::app::UploadStore::operator=(UploadStore &&) noexcept
 
 axk::app::Result<axk::app::UploadSnapshot> axk::app::UploadStore::create(UploadCreateRequest request) {
     if (request.owner_id.empty() || request.filename.empty() || request.filename.size() > 255U ||
-        request.declared_size == 0U || request.declared_size > implementation_->maximum_upload_bytes ||
-        !valid_digest(request.sha256)) {
+        (request.declared_size == 0U && request.kind != UploadKind::file) ||
+        request.declared_size > implementation_->maximum_upload_bytes || !valid_digest(request.sha256)) {
         return std::unexpected(upload_error("invalid_upload", "upload metadata or declared size is invalid"));
     }
     auto filename = text::path_from_utf8(request.filename);
-    if (!filename || filename->filename() != *filename || !admitted_extension(request.kind, *filename) ||
-        !valid_media_type(request.kind, request.media_type)) {
+    if (!filename || request.filename == "." || request.filename == ".." ||
+        request.filename.find_first_of("/\\") != std::string::npos ||
+        request.filename.find('\0') != std::string::npos || filename->filename() != *filename ||
+        !admitted_extension(request.kind, *filename) || !valid_media_type(request.kind, request.media_type)) {
         return std::unexpected(
             upload_error("upload_type_not_allowed", std::string{disallowed_upload_message(request.kind)}));
     }
@@ -604,6 +612,8 @@ std::string_view axk::app::upload_kind_name(UploadKind kind) noexcept {
         return "MANIFEST";
     case UploadKind::disk_image:
         return "DISK_IMAGE";
+    case UploadKind::file:
+        return "FILE";
     }
     return "AUDIO";
 }

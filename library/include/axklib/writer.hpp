@@ -13,7 +13,11 @@
 
 #include "axklib/error.hpp"
 #include "axklib/io.hpp"
+#include "axklib/program_assignment_parameters.hpp"
+#include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sample_parameters.hpp"
+#include "axklib/sampler_model.hpp"
 
 namespace axk {
 
@@ -27,7 +31,7 @@ inline constexpr std::uint64_t maximum_audio_decoded_source_bytes = 256ULL * 102
 inline constexpr std::uint64_t maximum_wave_data_pcm16_bytes_per_channel =
     maximum_wave_data_frames_per_channel * sizeof(std::int16_t);
 inline constexpr std::size_t maximum_sample_bank_members = 127U;
-inline constexpr std::size_t maximum_program_assignments = 16U;
+inline constexpr std::size_t maximum_program_assignments = 999U;
 inline constexpr std::array<std::uint32_t, 12> supported_sampler_sample_rates{
     4'000U, 5'512U, 6'000U, 8'000U, 11'025U, 12'000U, 16'000U, 22'050U, 24'000U, 32'000U, 44'100U, 48'000U};
 inline constexpr std::uint32_t default_sampler_sample_rate = 44'100U;
@@ -36,9 +40,14 @@ inline constexpr std::array<std::uint8_t, 1> supported_sampler_output_sample_wid
     sampler_output_sample_width_bits};
 inline constexpr std::string_view sampler_sample_width_policy = "PRESERVE_PCM16_EXPAND_PCM8";
 
-enum class AudioSamplerLoopMode : std::uint8_t {
-    forward_loop = 1,
-    forward_one_shot = 4,
+struct WaveDataParameters {
+    std::optional<std::uint8_t> root_key;
+    std::optional<std::int8_t> fine_tune_cents;
+    std::optional<AudioSamplerLoopMode> loop_mode;
+    std::optional<std::uint32_t> wave_start_frame;
+    std::optional<std::uint32_t> wave_length_frames;
+    std::optional<std::uint32_t> loop_start_frame;
+    std::optional<std::uint32_t> loop_length_frames;
 };
 
 struct WaveformSpec {
@@ -53,6 +62,11 @@ struct WaveformSpec {
     std::uint32_t loop_length_frames{};
 };
 
+struct SamplePlaybackWindow {
+    std::uint32_t start_frame{};
+    std::uint32_t length_frames{};
+};
+
 struct SampleSpec {
     std::string name;
     std::optional<std::string> waveform_id;
@@ -61,39 +75,28 @@ struct SampleSpec {
     std::optional<std::string> left_waveform_name;
     std::optional<std::string> right_waveform_name;
     std::optional<std::uint32_t> target_sample_rate;
-    std::uint8_t root_key{};
-    std::uint8_t key_low{};
-    std::uint8_t key_high{};
-    std::uint8_t level{100};
-    std::int8_t fine_tune_cents{};
-    std::uint8_t velocity_low{};
-    std::uint8_t velocity_high{127};
-    AudioSamplerLoopMode loop_mode{AudioSamplerLoopMode::forward_one_shot};
-    std::uint32_t loop_start_frame{};
-    std::uint32_t loop_length_frames{};
+    SampleParameters parameters;
+    std::optional<SamplePlaybackWindow> playback_window{};
 };
 
 struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
-};
-
-enum class ProgramReceiveMode : std::uint8_t {
-    midi_channel,
-    sample,
+    std::optional<SampleParameters> parameter_overrides{};
 };
 
 struct ProgramAssignmentSpec {
     std::string target_kind;
     std::string target_name;
-    std::uint8_t receive_channel{};
-    ProgramReceiveMode receive_mode{ProgramReceiveMode::midi_channel};
+    ProgramAssignmentParameters parameters{};
 };
 
 struct ProgramSpec {
     std::uint8_t number{};
     std::string name;
     std::vector<ProgramAssignmentSpec> assignments;
+    ASeriesModel model{ASeriesModel::a4000};
+    ProgramParameters parameters{};
 };
 
 struct VolumeSpec {
@@ -204,6 +207,7 @@ struct ImportedAudio {
     // Empty for exact PCM16 imports and exact PCM8 expansion; otherwise
     // identifies the reproducible policy used.
     std::string dither_algorithm;
+    // Channel values outside normalized [-1, 1] after resampling, before dither.
     std::uint64_t clipped_samples{};
 };
 

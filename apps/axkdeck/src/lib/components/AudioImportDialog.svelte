@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy, untrack } from 'svelte';
+    import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
     import { defaultAudioImportNames, defaultAudioSamplerSettings, validSamplerName } from '../audioImport';
     import { AudioImportAuditionController, type AudioImportAuditionState } from '../audio/audioImportAudition';
     import { browserUploadSource, type ClientUploadSource } from '../clientUploadSource';
@@ -42,7 +43,12 @@
         ondestinationvolume: (partitionIndex: number | null, volumeName: string) => void;
         ondestinationpartition: (partitionIndex: number) => void;
         ondestinationname: (volumeName: string) => void;
-        oncommit: (items: AudioImportItem[], grouping: AudioImportGrouping) => Promise<void>;
+        completion: ImportCompletion;
+        oncommit: (
+            items: AudioImportItem[],
+            grouping: AudioImportGrouping,
+            reviewedWarnings: string[],
+        ) => Promise<boolean>;
         oncancel: () => void;
     }
 
@@ -65,10 +71,13 @@
         ondestinationpartition,
         ondestinationname,
         oncommit,
+        completion,
         oncancel,
     }: Props = $props();
     let rows = $state<AudioImportRow[]>([]);
-    let busy = $state(false);
+    let localBusy = $state(false);
+    const busy = $derived(localBusy || completion.locked);
+    const closeDisabled = $derived(localBusy || completion.busy || completion.phase === 'unconfirmed');
     let committing = $state(false);
     let batchStaging = $state(false);
     let generalError = $state('');
@@ -82,8 +91,18 @@
     let stagingPromise: Promise<void> = Promise.resolve();
     const abortController = new AbortController();
     const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
-    const validationErrors = $derived.by(() => (committing ? rows.map(() => '') : validateRows(rows)));
-    const sampleBankError = $derived.by(() => validateSampleBank());
+    const validationLocked = $derived(committing || completion.locked);
+    const validationErrors = $derived.by(() => (validationLocked ? rows.map(() => '') : validateRows(rows)));
+    const sampleBankError = $derived.by(() => (validationLocked ? '' : validateSampleBank()));
+    const completionStatus = $derived(
+        completion.phase === 'warnings' || completion.phase === 'completed'
+            ? 'Imported'
+            : completion.phase === 'refresh-failed'
+              ? 'Imported; refresh pending'
+              : completion.phase === 'unconfirmed'
+                ? 'Outcome unconfirmed'
+                : '',
+    );
     const inspectedCount = $derived(rows.filter((row) => row.status === 'inspected' || row.status === 'failed').length);
     const ready = $derived(
         rows.length > 0 &&
@@ -348,9 +367,9 @@
     }
 
     async function cancel(): Promise<void> {
-        if (busy) return;
+        if (closeDisabled) return;
         abortController.abort();
-        busy = true;
+        localBusy = true;
         await stagingPromise;
         await auditionController.dispose();
         await releaseUploads();
@@ -372,7 +391,7 @@
     async function commit(): Promise<void> {
         if (!ready || busy) return;
         auditionController.stop();
-        busy = true;
+        localBusy = true;
         committing = true;
         generalError = '';
         try {
@@ -391,16 +410,28 @@
                 loopLengthFrames: row.loopLengthFrames,
                 targetSampleRate: row.targetSampleRate!,
             }));
-            await oncommit(
+            const completed = await oncommit(
                 items,
                 importMode === 'SAMPLE_BANK' ? { kind: 'SAMPLE_BANK', sampleBankName } : { kind: 'SAMPLES' },
+                rows.flatMap((row) => row.inspection?.issues.map((issue) => issue.message) ?? []),
             );
-            await releaseUploads();
-            oncancel();
+            if (completed || completion.phase === 'warnings') {
+                await releaseUploads();
+                if (completed) oncancel();
+            }
         } catch (error) {
             generalError = error instanceof Error ? error.message : String(error);
+        } finally {
             committing = false;
-            busy = false;
+            localBusy = false;
+        }
+    }
+
+    async function recover(): Promise<void> {
+        const completed = await completion.recover();
+        if (completed || completion.phase === 'warnings') {
+            await releaseUploads();
+            if (completed) oncancel();
         }
     }
 
@@ -451,7 +482,13 @@
     >
         <header class="dialog-header">
             <h2>Import audio</h2>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={() => void cancel()}>
+            <button
+                class="icon-button"
+                type="button"
+                aria-label="Close"
+                disabled={closeDisabled}
+                onclick={() => void cancel()}
+            >
                 <Icon name="close" size={15} />
             </button>
         </header>
@@ -517,7 +554,8 @@
                         {validationErrors}
                         capabilities={audioImportCapabilities}
                         {busy}
-                        {committing}
+                        committing={validationLocked}
+                        {completionStatus}
                         grouped={importMode === 'SAMPLE_BANK'}
                         audition={auditionState}
                         onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
@@ -528,12 +566,38 @@
                 {/if}
             {/if}
             {#if generalError}<p class="dialog-error" role="alert">{generalError}</p>{/if}
+            {#if completion.warnings.length}
+                <div class="completion-warnings dialog-warning" role="region" aria-label="Import warnings">
+                    {#each completion.warnings as warning}<p>{warning}</p>{/each}
+                </div>
+            {/if}
         </div>
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={busy} onclick={() => void cancel()}>Cancel</button>
-            {#if files.length > 0}
+            <span class="dialog-footer-status" role="status" title={completion.message || generalError}
+                >{completion.message ||
+                    generalError ||
+                    (ready ? 'Ready to import' : files.length ? 'Checking audio files' : 'Choose audio files')}</span
+            >
+            <button class="secondary-button" type="button" disabled={closeDisabled} onclick={() => void cancel()}
+                >{completion.phase === 'warnings'
+                    ? 'Done'
+                    : completion.phase === 'refresh-failed'
+                      ? 'Close'
+                      : 'Cancel'}</button
+            >
+            {#if completion.phase === 'refresh-failed' || completion.phase === 'unconfirmed' || completion.phase === 'checking' || completion.phase === 'refreshing'}
+                <button
+                    class="primary-button"
+                    type="button"
+                    disabled={completion.busy || (completion.phase === 'unconfirmed' && !completion.canCheck)}
+                    onclick={() => void recover()}
+                    >{completion.phase === 'refresh-failed' || completion.phase === 'refreshing'
+                        ? 'Refresh'
+                        : 'Check status'}</button
+                >
+            {:else if files.length > 0 && completion.phase !== 'warnings'}
                 <button class="primary-button" type="button" disabled={!ready || busy} onclick={() => void commit()}>
-                    {busy ? 'Importing' : `Import ${rows.length} ${rows.length === 1 ? 'file' : 'files'}`}
+                    Import
                 </button>
             {/if}
         </footer>
@@ -541,6 +605,16 @@
 </div>
 
 <style>
+    .completion-warnings {
+        flex: none;
+        max-height: 96px;
+        overflow: auto;
+        padding-right: var(--overlay-scrollbar-clearance);
+        scrollbar-gutter: stable;
+    }
+    .completion-warnings p {
+        margin: 0 0 4px;
+    }
     .audio-import-dialog {
         width: min(1280px, calc(100vw - 32px));
         max-width: none;

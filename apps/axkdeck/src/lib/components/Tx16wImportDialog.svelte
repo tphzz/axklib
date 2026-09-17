@@ -1,14 +1,19 @@
 <script lang="ts">
+    import { untrack } from 'svelte';
     import type { Tx16wImportRequest, Tx16wVolumeOption } from '../../features/import/tx16wWorkflow.svelte';
     import { browserUploadSource } from '../clientUploadSource';
     import type { Tx16wImportMode } from '../transport';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
+    import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
 
     interface Props {
         request: Tx16wImportRequest;
         volumeOptions: Tx16wVolumeOption[];
-        ontarget: (target: Tx16wVolumeOption['target']) => void;
+        ontarget: (target: Tx16wVolumeOption['target'] | null) => void;
+        completion: ImportCompletion;
+        onrecover: () => void;
         onmode: (mode: Tx16wImportMode) => void;
         onadd: (files: ReturnType<typeof browserUploadSource>[]) => void;
         onremove: (memberId: number) => void;
@@ -16,14 +21,26 @@
         oncancel: () => void;
     }
 
-    let { request, volumeOptions, ontarget, onmode, onadd, onremove, onconfirm, oncancel }: Props = $props();
-    let targetLabel = $state('');
-    const busy = $derived(['uploading', 'inspecting', 'importing'].includes(request.status));
+    let {
+        request,
+        volumeOptions,
+        completion,
+        onrecover,
+        ontarget,
+        onmode,
+        onadd,
+        onremove,
+        onconfirm,
+        oncancel,
+    }: Props = $props();
+    let partitionIndex = $state<number | null>(untrack(() => request.target?.partitionIndex ?? null));
+    let targetSelected = $state(true);
+    const busy = $derived(completion.locked || ['uploading', 'inspecting', 'importing'].includes(request.status));
     const inspection = $derived(request.inspection);
     const targetSelectionValid = $derived(
         volumeOptions.some(
             (option) =>
-                option.label === targetLabel &&
+                targetSelected &&
                 option.target.partitionIndex === request.target?.partitionIndex &&
                 option.target.volumeName === request.target?.volumeName,
         ),
@@ -31,21 +48,26 @@
     const canConfirm = $derived(request.status === 'ready' && inspection?.valid === true && targetSelectionValid);
     const blockedCount = $derived(inspection?.notices.filter((notice) => notice.disposition === 'BLOCKED').length ?? 0);
 
-    $effect(() => {
-        const target = request.target;
-        if (!target) return;
+    const partitionOptions = $derived(
+        Array.from(
+            new Map(
+                volumeOptions.map((option) => [
+                    option.target.partitionIndex,
+                    { partitionIndex: option.target.partitionIndex, name: option.partitionName },
+                ]),
+            ).values(),
+        ),
+    );
+    const destinations = $derived(
+        volumeOptions.map((option) => ({ ...option.target, name: option.partitionName, label: option.label })),
+    );
+    function selectTarget(partition: number | null, name: string): void {
+        partitionIndex = partition;
         const option = volumeOptions.find(
-            (candidate) =>
-                candidate.target.partitionIndex === target.partitionIndex &&
-                candidate.target.volumeName === target.volumeName,
+            (candidate) => candidate.target.partitionIndex === partition && candidate.target.volumeName === name,
         );
-        if (option) targetLabel = option.label;
-    });
-
-    function selectTarget(value: string): void {
-        targetLabel = value;
-        const option = volumeOptions.find((candidate) => candidate.label === value);
-        if (option) ontarget(option.target);
+        targetSelected = !!option;
+        ontarget(option?.target ?? null);
     }
 
     function dispositionLabel(disposition: string): string {
@@ -69,18 +91,45 @@
         role="dialog"
         aria-modal="true"
         aria-label="Import TX16W disk set"
-        use:modal={{ onescape: oncancel }}
+        use:modal={{
+            onescape: () => {
+                if (completion.canDismiss && (!busy || ['refresh-failed', 'warnings'].includes(completion.phase)))
+                    oncancel();
+            },
+        }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="disc" size={16} />
                 <h2>Import TX16W disk set</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}>
+            <button
+                class="icon-button"
+                type="button"
+                aria-label="Close"
+                disabled={!completion.canDismiss ||
+                    (busy && !['refresh-failed', 'warnings'].includes(completion.phase))}
+                onclick={oncancel}
+            >
                 <Icon name="close" size={15} />
             </button>
         </header>
 
+        <div class="tx16w-destination">
+            <ImportDestinationChooser
+                mode="existing"
+                {partitionIndex}
+                volumeName={targetSelected ? (request.target?.volumeName ?? '') : ''}
+                partitions={partitionOptions}
+                volumes={destinations}
+                disabled={busy || completion.locked}
+                unavailableModes={{ create: 'TX16W disk-set import requires an existing volume' }}
+                onmode={() => undefined}
+                onname={() => undefined}
+                onvolume={selectTarget}
+                onpartition={(index) => selectTarget(index, '')}
+            />
+        </div>
         <div class="tx16w-content">
             <section class="disk-set" aria-label="Disk set">
                 <div class="disk-set-heading">
@@ -151,23 +200,6 @@
                     >
                 </label>
             </fieldset>
-
-            <label class="target-field">
-                <span>Target volume</span>
-                <input
-                    class="dialog-field-control"
-                    type="text"
-                    list="tx16w-volume-options"
-                    placeholder="Select a volume"
-                    value={targetLabel}
-                    disabled={busy || volumeOptions.length === 0}
-                    autocomplete="off"
-                    oninput={(event) => selectTarget(event.currentTarget.value)}
-                />
-                <datalist id="tx16w-volume-options">
-                    {#each volumeOptions as option (option.key)}<option value={option.label}></option>{/each}
-                </datalist>
-            </label>
 
             {#if volumeOptions.length === 0}
                 <p class="dialog-error" role="alert">The open image has no writable SFS volumes.</p>
@@ -254,20 +286,48 @@
 
             {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
         </div>
+        {#if completion.warnings.length}<div class="dialog-results dialog-warning completion-warnings" role="alert">
+                {#each completion.warnings as warning}<p>{warning}</p>{/each}
+            </div>{/if}
 
-        <footer class="dialog-footer tx16w-footer">
-            <span
-                >{inspection
-                    ? inspection.valid
-                        ? 'Ready to import'
-                        : `${blockedCount} blocking ${blockedCount === 1 ? 'issue' : 'issues'}`
-                    : ''}</span
+        <footer class="dialog-footer">
+            <span class="dialog-footer-status" role="status"
+                >{completion.message ||
+                    request.error ||
+                    (busy
+                        ? 'Inspecting disk set'
+                        : inspection
+                          ? inspection.valid
+                              ? 'Ready to import'
+                              : `${blockedCount} blocking ${blockedCount === 1 ? 'issue' : 'issues'}`
+                          : 'Choose a destination')}</span
             >
-            <div>
-                <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
-                <button class="primary-button" type="button" disabled={!canConfirm} onclick={onconfirm}>
-                    {request.status === 'importing' ? 'Importing' : 'Import disk set'}
-                </button>
+            <div class="dialog-footer-actions">
+                <button
+                    class="secondary-button"
+                    type="button"
+                    disabled={!completion.canDismiss ||
+                        (busy && !['refresh-failed', 'warnings'].includes(completion.phase))}
+                    onclick={oncancel}
+                    >{completion.phase === 'warnings'
+                        ? 'Done'
+                        : completion.phase === 'refresh-failed'
+                          ? 'Close'
+                          : 'Cancel'}</button
+                >
+                {#if ['unconfirmed', 'checking', 'refresh-failed', 'refreshing'].includes(completion.phase)}
+                    <button
+                        class="primary-button"
+                        type="button"
+                        disabled={completion.busy || (completion.phase === 'unconfirmed' && !completion.canCheck)}
+                        onclick={onrecover}
+                        >{['unconfirmed', 'checking'].includes(completion.phase) ? 'Check status' : 'Refresh'}</button
+                    >
+                {:else if completion.phase !== 'warnings'}
+                    <button class="primary-button" type="button" disabled={!canConfirm} onclick={onconfirm}>
+                        Import
+                    </button>
+                {/if}
             </div>
         </footer>
     </div>
@@ -276,7 +336,10 @@
 <style>
     .tx16w-import-dialog {
         width: min(1120px, calc(100vw - 32px));
-        max-height: min(880px, calc(100vh - 32px));
+        height: min(720px, calc(100vh - 32px));
+    }
+    .completion-warnings {
+        margin: 0 12px 12px;
     }
 
     .tx16w-content {
@@ -287,12 +350,18 @@
         align-content: start;
         gap: 12px;
         padding: 14px 16px;
+        scrollbar-gutter: stable;
+        padding-right: calc(16px + var(--overlay-scrollbar-clearance));
+    }
+    .tx16w-destination {
+        flex: none;
+        padding: 12px 16px 0;
+        position: relative;
+        z-index: 2;
     }
 
     .disk-set-heading,
-    .object-counts,
-    .tx16w-footer,
-    .tx16w-footer > div {
+    .object-counts {
         display: flex;
         align-items: center;
     }
@@ -304,7 +373,6 @@
 
     .disk-set,
     .disk-set-heading > div,
-    .target-field,
     .tx16w-state {
         display: grid;
         gap: 5px;
@@ -383,19 +451,9 @@
 
     small,
     .disk-set > small,
-    summary span,
-    .tx16w-footer > span {
+    summary span {
         color: var(--color-text-muted);
         font-size: var(--dialog-metadata-font-size);
-    }
-
-    .target-field > span {
-        color: var(--color-text-muted);
-        font-size: var(--dialog-label-font-size);
-    }
-
-    .target-field input {
-        width: 100%;
     }
 
     .tx16w-state {
@@ -480,21 +538,12 @@
         font-size: var(--dialog-body-font-size);
     }
 
-    .mapping-notice.notice-blocked,
-    .tx16w-footer > span {
+    .mapping-notice.notice-blocked {
         color: var(--color-danger);
     }
 
     .disposition {
         color: var(--color-text-muted);
-    }
-
-    .tx16w-footer {
-        justify-content: space-between;
-    }
-
-    .tx16w-footer > div {
-        gap: 8px;
     }
 
     @media (max-width: 720px) {

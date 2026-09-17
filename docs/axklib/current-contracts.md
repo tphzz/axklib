@@ -1,15 +1,23 @@
 # Current Contract Index
 
 axklib is pre-release and maintains one current contract. This page maps
-cross-cutting subjects to their authoritative specification; it does not create
-parallel rules. When documents disagree, update the named specification and
-every in-repository producer, consumer, test, and summary together.
+cross-cutting subjects to their specification. Format pages describe stored
+bytes; operation and output pages describe axklib's supported interfaces and
+behavior. Unspecified format semantics remain distinct from unsupported
+software features.
 
 | Subject | Authoritative current specification |
 | --- | --- |
+| Stored sampler object bytes and relationships | [Sampler Data Structures](sampler-data.md) |
+| SYSTEM/SYSTEM2 configuration layout and unspecified state | [System Files](system-files.md) |
+| Native Sequence timeline | [Sequence Data](sequences.md) |
+| Sequence transfer and MIDI conversion | [Sequence Transfer And MIDI Conversion](sequence-midi.md) |
 | Writer admission, mandatory planning, and source preservation | [Writer And Alteration](write.md) |
 | SFS allocation copies and integrity validation | [SFS Filesystem](sfs-filesystem.md) |
-| Read-only A3K archive envelope and one-volume projection | [A3K Volume Archives](a3k-archive.md) |
+| A3K read-only support and one-volume projection | [A3K Archive Profile](media.md#a3k-archive-profile); external format reference via [A3K Volume Archives](a3k-archive.md) |
+| SU700 control, sample and song file structures | [SU700 Files](su700.md) |
+| SU700 song settings, track configuration, sample scenes and event words | [SU700 Song And Track Records](su700-song.md) |
+| SU700 effects scenes, routing and parameter encodings | [SU700 Effects Records](su700-effects.md) |
 | Exact physical audio, derived rendered stereo, and output layout | [Names, Paths, And Exports](names-and-paths.md) |
 | Relationship-quality admission for exact output | [Names, Paths, And Exports](names-and-paths.md) |
 | Separate-output alteration and journaled in-place session mutation | [Writer And Alteration](write.md) |

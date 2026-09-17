@@ -1,10 +1,13 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -19,6 +22,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/filesystem.hpp"
+#include "axklib/utf8.hpp"
 
 namespace {
 
@@ -208,6 +212,72 @@ TEST_F(SandboxTest, AcceptsThePublicDirectoryPageLimitAndRejectsLargerValues) {
     EXPECT_EQ(excessive.error().code, "invalid_file_reference");
 }
 
+TEST_F(SandboxTest, PagesNamesInNaturalCaseInsensitiveOrder) {
+    std::filesystem::create_directory(root_ / "sorted");
+    for (const auto *name : {"Virus", "ROKTON", "norddrms", "industrialkit", "ACE"})
+        std::filesystem::create_directory(root_ / "sorted" / name);
+    for (const auto *name : {"Disk10.hds", "disk2.hds", "Disk02.hds", "disk1.hds"})
+        std::ofstream(root_ / "sorted" / name) << "image";
+    const auto value = sandbox();
+    const std::vector<std::string> expected{"ACE",       "industrialkit", "norddrms",  "ROKTON",    "Virus",
+                                            "disk1.hds", "Disk02.hds",    "disk2.hds", "Disk10.hds"};
+    for (const auto limit : {1U, 2U, 4U, 20U}) {
+        std::vector<std::string> names;
+        std::optional<std::string> cursor;
+        do {
+            const auto page = value.list_directory({"workspace", "sorted"}, limit, cursor);
+            ASSERT_TRUE(page) << page.error().message;
+            ASSERT_FALSE(page->entries.empty());
+            for (const auto &entry : page->entries)
+                names.push_back(entry.name);
+            ASSERT_LE(names.size(), expected.size());
+            cursor = page->next_cursor;
+        } while (cursor);
+        EXPECT_EQ(names, expected);
+    }
+}
+
+TEST_F(SandboxTest, PreservesUnicodeNamesAcrossPagesAndRejectsMalformedMarkers) {
+    std::filesystem::create_directory(root_ / "unicode-order");
+    const auto accented = axk::text::path_from_utf8("\xc3\xa9"
+                                                    "clair2.hds");
+    ASSERT_TRUE(accented);
+    std::ofstream(root_ / "unicode-order" / *accented) << "aa";
+    std::ofstream(root_ / "unicode-order" / "Eclair10.hds") << "bbbb";
+    std::ofstream(root_ / "unicode-order" / "zulu.hds") << "ccc";
+    const auto value = sandbox();
+    const auto full = value.list_directory({"workspace", "unicode-order"}, 20U);
+    ASSERT_TRUE(full);
+    ASSERT_EQ(full->entries.size(), 3U);
+    EXPECT_EQ(full->entries[0].size, 2U);
+    EXPECT_EQ(full->entries[1].size, 4U);
+    std::optional<std::string> cursor;
+    for (const auto &expected : full->entries) {
+        const auto page = value.list_directory({"workspace", "unicode-order"}, 1U, cursor);
+        ASSERT_TRUE(page);
+        ASSERT_EQ(page->entries.size(), 1U);
+        EXPECT_EQ(page->entries[0].name, expected.name);
+        EXPECT_EQ(page->entries[0].relative_path, expected.relative_path);
+        cursor = page->next_cursor;
+    }
+    EXPECT_FALSE(cursor);
+    for (const auto *invalid : {"3000ff", "3000c3", "30002e2e", "3000610062", "3000612f62", "3000", "320061"})
+        EXPECT_FALSE(value.list_directory({"workspace", "unicode-order"}, 1U, invalid));
+    EXPECT_FALSE(value.list_directory({"workspace", "unicode-order"}, 1U, std::string(2050U, '0')));
+}
+
+TEST_F(SandboxTest, CursorRetainsItsOrderingBoundaryWhenTheNamedEntryIsRemoved) {
+    auto value = sandbox();
+    const auto first = value.list_directory({"workspace", "images"}, 1U);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(first->next_cursor);
+    std::filesystem::remove(root_ / "images" / "folder");
+    const auto next = value.list_directory({"workspace", "images"}, 1U, *first->next_cursor);
+    ASSERT_TRUE(next);
+    ASSERT_EQ(next->entries.size(), 1U);
+    EXPECT_EQ(next->entries[0].name, "alpha.hds");
+}
+
 TEST_F(SandboxTest, ResolvesMetadataAndWritableOutputsWithoutAcceptingAliases) {
     const auto value = sandbox();
     const auto metadata = value.metadata("workspace", "images/disk.hds");
@@ -237,14 +307,28 @@ TEST_F(SandboxTest, RetainsWritableFileIdentityAcrossBoundedMutation) {
     ASSERT_TRUE(mutation) << mutation.error().message;
     EXPECT_EQ((*mutation)->size(), 5U);
     ASSERT_TRUE((*mutation)->verify_bound());
+    ASSERT_TRUE((*mutation)->verify_unchanged());
+    ASSERT_EQ((*mutation)->revision(), value.open_file({"workspace", "images/disk.hds"})->revision);
     const std::array replacement{std::byte{'I'}, std::byte{'M'}};
     ASSERT_TRUE((*mutation)->write_exact_at(0U, replacement));
     ASSERT_TRUE((*mutation)->flush());
     ASSERT_TRUE((*mutation)->verify_bound());
+    const auto path = root_ / "images/disk.hds";
+    std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds{1});
+    EXPECT_FALSE((*mutation)->verify_unchanged());
     std::array<std::byte, 2> read{};
     ASSERT_TRUE((*mutation)->read_exact_at(0U, read));
     EXPECT_EQ(read, replacement);
     EXPECT_FALSE((*mutation)->write_exact_at(4U, replacement));
+}
+
+TEST_F(SandboxTest, MutationBindingRejectsLiveSizeChanges) {
+    const auto value = sandbox();
+    const auto mutation = value.open_mutation({"workspace", "images/disk.hds"});
+    ASSERT_TRUE(mutation);
+    std::filesystem::resize_file(root_ / "images/disk.hds", 2U);
+    EXPECT_FALSE((*mutation)->verify_bound());
+    EXPECT_FALSE((*mutation)->verify_unchanged());
 }
 
 TEST_F(SandboxTest, ExposesAnOpaqueRevisionThatChangesWithRetainedFileContent) {

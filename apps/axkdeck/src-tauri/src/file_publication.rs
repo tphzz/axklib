@@ -4,6 +4,38 @@ pub struct PublicationOutcome {
     pub warning: Option<String>,
 }
 
+#[cfg(unix)]
+pub(crate) fn publish_new_directory(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    use rustix::fs::{CWD, RenameFlags, renameat_with};
+    renameat_with(CWD, temporary, CWD, destination, RenameFlags::NOREPLACE).map_err(Into::into)
+}
+
+#[cfg(windows)]
+pub(crate) fn publish_new_directory(temporary: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+    let wide = |path: &Path| {
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>()
+    };
+    let temporary = wide(temporary);
+    let destination = wide(destination);
+    if unsafe {
+        MoveFileExW(
+            temporary.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 fn validate_destination(destination: &Path) -> Result<bool, String> {
     match destination.symlink_metadata() {
         Ok(metadata) => {
@@ -87,7 +119,7 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::publish_file;
+    use super::{publish_file, publish_new_directory};
 
     static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -103,6 +135,80 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create test directory");
         path
+    }
+
+    #[test]
+    fn directory_publication_does_not_replace_a_newly_created_empty_destination() {
+        let root = temporary_directory();
+        let temporary = root.join("staging");
+        let destination = root.join("export");
+        fs::create_dir(&temporary).unwrap();
+        fs::write(temporary.join("payload"), [1, 2, 3]).unwrap();
+        assert!(!destination.exists());
+        fs::create_dir(&destination).unwrap();
+
+        let result = publish_new_directory(&temporary, &destination);
+        let preserved =
+            temporary.join("payload").exists() && fs::read_dir(&destination).unwrap().count() == 0;
+        fs::remove_dir_all(root).unwrap();
+        assert!(
+            result.is_err(),
+            "must not replace the concurrently created directory"
+        );
+        assert!(preserved, "both directories must remain untouched");
+    }
+
+    #[test]
+    fn directory_publication_moves_the_complete_tree_to_an_absent_destination() {
+        let root = temporary_directory();
+        let temporary = root.join("staging");
+        let destination = root.join("export");
+        fs::create_dir_all(temporary.join("empty")).unwrap();
+        fs::write(temporary.join("payload"), [1, 2, 3]).unwrap();
+        publish_new_directory(&temporary, &destination).unwrap();
+        assert!(!temporary.exists());
+        assert!(destination.join("empty").is_dir());
+        assert_eq!(fs::read(destination.join("payload")).unwrap(), [1, 2, 3]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn directory_publication_rejects_files_and_nonempty_directories() {
+        let root = temporary_directory();
+        let temporary = root.join("staging");
+        fs::create_dir(&temporary).unwrap();
+        fs::write(temporary.join("payload"), b"new").unwrap();
+        let file = root.join("file");
+        let directory = root.join("directory");
+        fs::write(&file, b"old").unwrap();
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("old"), b"old").unwrap();
+        for destination in [&file, &directory] {
+            assert!(publish_new_directory(&temporary, destination).is_err());
+            assert_eq!(fs::read(temporary.join("payload")).unwrap(), b"new");
+        }
+        assert_eq!(fs::read(file).unwrap(), b"old");
+        assert_eq!(fs::read(directory.join("old")).unwrap(), b"old");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_publication_does_not_follow_or_replace_dangling_symlinks() {
+        let root = temporary_directory();
+        let temporary = root.join("staging");
+        let destination = root.join("link");
+        fs::create_dir(&temporary).unwrap();
+        std::os::unix::fs::symlink("missing", &destination).unwrap();
+        assert!(!destination.exists());
+        assert!(publish_new_directory(&temporary, &destination).is_err());
+        assert_eq!(
+            fs::read_link(&destination).unwrap(),
+            PathBuf::from("missing")
+        );
+        assert!(temporary.is_dir());
+        assert!(!root.join("missing").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

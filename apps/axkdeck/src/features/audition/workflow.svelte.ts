@@ -382,7 +382,12 @@ export class AuditionWorkflow {
     seekWaveData(item: WaveDataItem, ratio: number): void {
         void this.selectWaveData(item);
         if (this.state.objectId === item.objectKey) {
-            this.controller.seek(Math.floor(item.object.frameCount * ratio));
+            const absoluteFrame = Math.floor(item.object.storedFrameCount * ratio);
+            const relativeFrame = Math.max(
+                0,
+                Math.min(item.object.waveLengthFrames - 1, absoluteFrame - item.object.waveStartFrame),
+            );
+            this.controller.seek(relativeFrame);
         }
     }
 

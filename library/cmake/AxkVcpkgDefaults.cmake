@@ -49,6 +49,15 @@ if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   endif()
 endif()
 
+# Triplet settings reach dependencies, but not the consuming project's compiler.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux"
+   AND VCPKG_TARGET_TRIPLET MATCHES "^(x64|arm64)-linux-axk$"
+   AND NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
+  set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE
+      "${_axk_default_repository_root}/library/cmake/toolchains/LinuxClang18Libcxx.cmake"
+      CACHE FILEPATH "axklib default Linux compiler toolchain")
+endif()
+
 unset(_axk_default_repository_root)
 unset(_axk_host_processor)
 unset(_axk_triplet_architecture)

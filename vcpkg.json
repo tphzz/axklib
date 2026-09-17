@@ -20,6 +20,7 @@
       "description": "Dependencies used only by the internal application service",
       "dependencies": [
         "hash-library",
+        "icu",
         "openssl"
       ]
     },

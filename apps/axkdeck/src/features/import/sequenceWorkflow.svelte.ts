@@ -9,6 +9,7 @@ import type {
 } from '../../lib/transport';
 import type { DiskTreeItem, SequenceItem, WorkspaceView } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { ImportCompletion } from './importCompletion.svelte';
 import type { PickerController } from '../dialogs/picker';
 import type { JobController } from '../jobs/actions';
 import {
@@ -54,7 +55,11 @@ export class SequenceImportWorkflow {
     private lastDirectory = $state<DirectoryRef | null>(null);
     private destinationRevision = 0;
 
-    constructor(private readonly dependencies: SequenceImportDependencies) {}
+    readonly completion: ImportCompletion;
+
+    constructor(private readonly dependencies: SequenceImportDependencies) {
+        this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
+    }
 
     dropAvailable(): boolean {
         return (
@@ -109,7 +114,8 @@ export class SequenceImportWorkflow {
         input.click();
     }
 
-    async commit(items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy): Promise<void> {
+    async commit(items: SequenceImportItem[], systemExclusivePolicy: SequenceSystemExclusivePolicy): Promise<boolean> {
+        if (this.completion.locked) return false;
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null || this.destinationBusy) {
@@ -122,21 +128,23 @@ export class SequenceImportWorkflow {
         this.dependencies.setStatus('Importing MIDI');
         try {
             await this.dependencies.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
+            return await this.completion.run(
                 () => this.dependencies.transport.startSequenceImport(sessionId, target, items, systemExclusivePolicy),
+                async () => {
+                    this.dependencies.selectWorkspace('sequences');
+                    await this.dependencies.refreshSession({
+                        partitionIndex: target.partitionIndex,
+                        volumeName: target.volumeName,
+                    });
+                    const inserted = this.dependencies.sequences().find((sequence) => sequence.name === firstName);
+                    if (inserted) this.dependencies.selectSequence(inserted);
+                    this.dependencies.reportTiming('midi-import', started, items.length);
+                    this.dependencies.setStatus(`Imported ${items.length} MIDI file${items.length === 1 ? '' : 's'}`);
+                },
                 (update) => {
                     if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
                 },
             );
-            if (completed.status !== 'completed') throw new Error(completed.error ?? 'MIDI import did not complete');
-            this.dependencies.selectWorkspace('sequences');
-            await this.dependencies.refreshSession({
-                partitionIndex: target.partitionIndex,
-                volumeName: target.volumeName,
-            });
-            const inserted = this.dependencies.sequences().find((sequence) => sequence.name === firstName);
-            if (inserted) this.dependencies.selectSequence(inserted);
-            this.dependencies.reportTiming('midi-import', started, items.length);
         } catch (error) {
             this.dependencies.setStatus(userFacingMessage(error));
             throw error;
@@ -239,6 +247,7 @@ export class SequenceImportWorkflow {
         files: (ClientUploadSource | FileLocation)[],
         selected: DiskTreeItem | null,
     ): SequenceImportRequest {
+        this.completion.reset();
         const initial = selected ? initialImportDestination(selected) : null;
         const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
         return {

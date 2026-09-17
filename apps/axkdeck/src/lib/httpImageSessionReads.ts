@@ -1,10 +1,17 @@
 import { HttpImageSessions } from './httpImageSessions';
+import type { FilesystemEdit, FilesystemPage, FilesystemQuery, FilesystemImportEntry } from './filesystem';
+import type {
+    FilesystemExportDestination,
+    FilesystemExportInspection,
+    FilesystemExportLayout,
+} from './filesystemExport';
 import type {
     CompanionSelection,
     AllocationMapReference,
     ContentPage,
     ObjectPage,
     ObjectPageFilter,
+    ObjectDetail,
     OpenedImage,
     ImageValidationIssue,
     ImageOpenOptions,
@@ -15,9 +22,52 @@ import type {
     ProgramAssignmentCleanupSelection,
     JobState,
 } from './transport';
-import type { ImageLocation } from './storageLocations';
+import type { ImageLocation, InputFileLocation } from './storageLocations';
 
 export class HttpImageSessionReads {
+    startSu700Import(request: import('./su700Import').Su700Request): Promise<JobState> {
+        return this.imageSessions.startSu700Import(request);
+    }
+    startFilesystemImportInspection(
+        sessionId: number,
+        expectedRevision: number,
+        parentEntryId: string,
+        entries: FilesystemImportEntry[],
+    ): Promise<JobState> {
+        return this.imageSessions.startFilesystemImportInspection(sessionId, expectedRevision, parentEntryId, entries);
+    }
+    startFilesystemInputInspection(inputs: InputFileLocation[]): Promise<JobState> {
+        return this.imageSessions.startFilesystemInputInspection(inputs);
+    }
+    startFilesystemImageInspection(source: InputFileLocation): Promise<JobState> {
+        return this.imageSessions.startFilesystemImageInspection(source);
+    }
+    releaseFilesystemImageInspection(token: string): Promise<void> {
+        return this.imageSessions.releaseFilesystemImageInspection(token);
+    }
+    inspectFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        layout: FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<FilesystemExportInspection> {
+        return this.imageSessions.inspectFilesystemExport(sessionId, expectedRevision, entryIds, layout);
+    }
+    startFilesystemExport(
+        sessionId: number,
+        expectedRevision: number,
+        entryIds: string[],
+        destination: FilesystemExportDestination,
+        layout: FilesystemExportLayout = 'SELECTED_ENTRIES',
+    ): Promise<JobState> {
+        return this.imageSessions.startFilesystemExport(sessionId, expectedRevision, entryIds, destination, layout);
+    }
+    filesystem(sessionId: number, query?: FilesystemQuery): Promise<FilesystemPage> {
+        return this.imageSessions.filesystem(sessionId, query);
+    }
+    startFilesystemEdits(sessionId: number, expectedRevision: number, edits: FilesystemEdit[]): Promise<JobState> {
+        return this.imageSessions.startFilesystemEdits(sessionId, expectedRevision, edits);
+    }
     protected constructor(protected readonly imageSessions: HttpImageSessions) {}
 
     openImage(location: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage> {
@@ -46,6 +96,10 @@ export class HttpImageSessionReads {
 
     objectPage(sessionId: number, offset: number, limit: number, filter: ObjectPageFilter = {}): Promise<ObjectPage> {
         return this.imageSessions.objectPage(sessionId, offset, limit, filter);
+    }
+
+    objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
+        return this.imageSessions.objectDetail(sessionId, objectId);
     }
 
     relationshipPage(

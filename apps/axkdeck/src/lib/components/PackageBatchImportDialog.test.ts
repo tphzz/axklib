@@ -6,6 +6,9 @@ import { serverFileLocation } from '../storageLocations';
 import type { ImageSessionPackageImportPlan, PackageInspection } from '../transport';
 import type { BatchPackageItem } from '../../features/import/packageBatchTypes';
 import PackageBatchImportDialog from './PackageBatchImportDialog.svelte';
+import { capacityConflict } from '../../test/importCapacityFixture';
+import { ImportCompletion } from '../../features/import/importCompletion.svelte';
+import { JobController } from '../../features/jobs/actions';
 
 const dialogSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchImportDialog.svelte'), 'utf8');
 const tableSource = readFileSync(resolve(process.cwd(), 'src/lib/components/PackageBatchItemsTable.svelte'), 'utf8');
@@ -145,6 +148,11 @@ const callbacks = {
 
 function props() {
     return {
+        completion: new ImportCompletion(
+            { waitForJob: vi.fn() },
+            new JobController({ waitForJob: vi.fn(), cancelJob: vi.fn() }),
+        ),
+        onrecover: vi.fn(),
         desktop: false,
         canChangeSources: true,
         items,
@@ -216,6 +224,19 @@ function planWithRenameConflicts(): ImageSessionPackageImportPlan {
 }
 
 describe('PackageBatchImportDialog', () => {
+    it('summarizes space failures while keeping unrelated blockers visible', () => {
+        const blocked = structuredClone(plan);
+        blocked.valid = false;
+        blocked.conflicts = Array.from({ length: 63 }, (_, index) => capacityConflict(0, `wave-${index}`));
+        blocked.conflicts.push({ ...capacityConflict(0), code: 'UNKNOWN', message: 'Other blocker' });
+        render(PackageBatchImportDialog, { ...props(), plan: blocked });
+        expect(screen.getAllByText('Not enough space on Partition 1')).toHaveLength(1);
+        expect(screen.queryByText(/63 issues/)).toBeNull();
+        expect(screen.getByText('Other blocker')).toBeTruthy();
+        expect(screen.getByText('Technical details').closest('details')?.open).toBe(false);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByText('SFS record capacity')).toBeTruthy();
+    });
     beforeEach(() => vi.clearAllMocks());
 
     it('previews every destination and its object counts before one batch import', async () => {
@@ -236,7 +257,7 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByRole('columnheader', { name: 'SFS records' })).toBeTruthy();
         expect(screen.getByText('21')).toBeTruthy();
         expect(screen.getByText('16')).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(false);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(false);
 
         await fireEvent.input(screen.getByLabelText('New volume name for two.axkvol'), {
             target: { value: 'Percussion' },
@@ -294,7 +315,7 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByText('1 of 2 packages selected')).toBeTruthy();
         expect(screen.getByText('Not included')).toBeTruthy();
         expect(screen.queryByText('SFS record capacity')).toBeNull();
-        expect(screen.getByRole('status').textContent).toContain('Check import conflicts');
+        expect(screen.getByRole('status').textContent).toContain('Review changes before importing');
 
         await fireEvent.click(screen.getByRole('checkbox', { name: 'Include two.axkvol' }));
         expect(callbacks.ontoggleselected).toHaveBeenCalledWith('item-1', true);
@@ -312,8 +333,8 @@ describe('PackageBatchImportDialog', () => {
         });
 
         expect(screen.getByRole('status').textContent).toContain('Select at least one package');
-        expect(screen.getByRole('button', { name: 'Check conflicts' }).hasAttribute('disabled')).toBe(true);
-        expect(screen.getByRole('button', { name: 'Import 0 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Review' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('requires edited destinations to be checked before import', () => {
@@ -325,8 +346,8 @@ describe('PackageBatchImportDialog', () => {
             },
         });
 
-        expect(screen.getByRole('button', { name: 'Check conflicts' })).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Review' })).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('prompts for the first explicit conflict check before any plan exists', () => {
@@ -338,9 +359,9 @@ describe('PackageBatchImportDialog', () => {
             },
         });
 
-        expect(screen.getByRole('status').textContent).toContain('Check import conflicts');
+        expect(screen.getByRole('status').textContent).toContain('Review changes before importing');
         expect(callbacks.onreplan).not.toHaveBeenCalled();
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('keeps every rename conflict editable while draft names await one explicit check', async () => {
@@ -359,13 +380,13 @@ describe('PackageBatchImportDialog', () => {
         expect(secondRename.value).toBe('Sample 2');
         expect(screen.getByText('SFS record capacity')).toBeTruthy();
         expect(screen.getByRole('status').textContent).toContain('Review import issues');
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
 
         await fireEvent.input(secondRename, { target: { value: 'Snare fixed' } });
         expect(callbacks.onrename).toHaveBeenCalledWith('item-1', 'sample-2', 'Snare fixed');
         expect(callbacks.onreplan).not.toHaveBeenCalled();
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Review' }));
         expect(callbacks.onreplan).toHaveBeenCalledOnce();
     });
 
@@ -387,13 +408,13 @@ describe('PackageBatchImportDialog', () => {
     it('keeps conflict checking and readiness in the fixed footer', () => {
         render(PackageBatchImportDialog, { props: props() });
 
-        const checkConflicts = screen.getByRole('button', { name: 'Check conflicts' });
+        const checkConflicts = screen.getByRole('button', { name: 'Review' });
         const footer = checkConflicts.closest('footer');
         expect(footer?.classList.contains('dialog-footer')).toBe(true);
         expect(
             Array.from(footer?.querySelectorAll('button') ?? []).map((button) => button.textContent?.trim()),
-        ).toEqual(['Check conflicts', 'Cancel', 'Import 2 packages']);
-        expect(footer?.querySelector('.batch-package-footer-actions')).toBeTruthy();
+        ).toEqual(['Cancel', 'Review', 'Import']);
+        expect(footer?.querySelector('.dialog-footer-actions')).toBeTruthy();
         expect(footer?.querySelector('[role="status"]')?.textContent).toContain('Ready to import');
         expect(screen.queryByText('Ready to import', { selector: '.batch-package-content *' })).toBeNull();
     });
@@ -403,9 +424,9 @@ describe('PackageBatchImportDialog', () => {
             props: { ...props(), status: 'planning' },
         });
 
-        const checking = screen.getByRole('button', { name: 'Check conflicts' });
+        const checking = screen.getByRole('button', { name: 'Review' });
         expect(checking.hasAttribute('disabled')).toBe(true);
-        expect(screen.getByRole('status').textContent).toContain('Planning batch import…');
+        expect(screen.getByRole('status').textContent).toContain('Reviewing import');
     });
 
     it('resets the package and result scrollers after a successful conflict check', async () => {
@@ -422,7 +443,7 @@ describe('PackageBatchImportDialog', () => {
         expect(rows).toBeTruthy();
         rows!.scrollTop = 480;
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Review' }));
         expect(rows!.scrollTop).toBe(480);
         completeCheck?.();
 
@@ -439,7 +460,7 @@ describe('PackageBatchImportDialog', () => {
         expect(rows).toBeTruthy();
         rows!.scrollTop = 480;
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Check conflicts' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Review' }));
 
         await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('Conflict planning failed'));
         expect(rows!.scrollTop).toBe(480);
@@ -493,7 +514,7 @@ describe('PackageBatchImportDialog', () => {
 
         expect(screen.queryByText('Ready to import')).toBeNull();
         expect(screen.getByRole('alert').textContent).toContain('Alteration journal storage is full');
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
     });
 
     it('summarizes record exhaustion without repeating every blocked object', () => {
@@ -535,6 +556,6 @@ describe('PackageBatchImportDialog', () => {
         expect(screen.getByText(/16 objects · 16 short/)).toBeTruthy();
         expect(screen.queryByText(constrainedPlan.conflicts[0].message)).toBeNull();
         expect(screen.getByTitle('Requires 5010 records on an empty partition; maximum 5009')).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Import 2 packages' }).hasAttribute('disabled')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Import' }).hasAttribute('disabled')).toBe(true);
     });
 });

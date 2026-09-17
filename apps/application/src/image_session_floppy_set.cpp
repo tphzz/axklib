@@ -146,8 +146,8 @@ Result<OpenedFloppySource> open_floppy_source(const Sandbox &sandbox, const Imag
     if (!set)
         return std::unexpected(core_error(set.error(), source));
     auto summary = set_summary(*set);
-    auto verify = [verifiers = std::move(verifiers)]() -> Result<void> {
-        for (const auto &verifier : verifiers) {
+    auto verify = [member_verifiers = std::move(verifiers)]() -> Result<void> {
+        for (const auto &verifier : member_verifiers) {
             if (auto unchanged = verifier(); !unchanged)
                 return std::unexpected(unchanged.error());
         }

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -57,6 +58,7 @@ struct Publication {
                                                         const Inspection &journal, std::size_t chunk_bytes);
 
 [[nodiscard]] Result<void> restore_original_bytes(SandboxMutation &target, const std::filesystem::path &journal_path,
-                                                  const Inspection &journal, std::size_t chunk_bytes);
+                                                  const Inspection &journal, std::size_t chunk_bytes,
+                                                  const std::function<bool()> &after_flush = {});
 
 } // namespace axk::app::journal_io

@@ -45,13 +45,16 @@ axk::VolumeSpec program_volume(std::string name, std::string_view bank_prefix,
             axk::SampleSpec sample;
             sample.name = sample_name;
             sample.waveform_id = waveform_id;
-            sample.root_key = 60U;
-            sample.key_high = 127U;
+            sample.parameters.root_key = 60U;
+            sample.parameters.key_high = 127U;
             volume.samples.push_back(std::move(sample));
         }
         volume.sample_banks.push_back({bank_name, {banked_name}});
         volume.programs.push_back(
-            {slot, std::format("Pgm {:03}", slot), {{"SBAC", bank_name, 1U}, {"SBNK", direct_name, 2U}}});
+            {slot,
+             std::format("Pgm {:03}", slot),
+             {{"SBAC", bank_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 1U}}},
+              {"SBNK", direct_name, {.receive = axk::ProgramReceiveChannel{axk::MidiPort::a, 2U}}}}});
     }
     return volume;
 }

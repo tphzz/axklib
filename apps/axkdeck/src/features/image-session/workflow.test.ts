@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AxklibApiError } from '../../lib/httpErrors';
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, OpenedImage } from '../../lib/transport';
-import type { PickerController } from '../dialogs/picker';
+import { PickerController } from '../dialogs/picker';
 import { ImageSessionWorkflow } from './workflow.svelte';
 
 const location: ImageLocation = {
@@ -82,6 +82,97 @@ function connectWorkflow(workflow: ImageSessionWorkflow, loadVolume = vi.fn(asyn
 }
 
 describe('ImageSessionWorkflow open progress', () => {
+    it.each(['resolve', 'reject'] as const)('ignores a stale integrity %s after a clean revision', async (outcome) => {
+        const image = opened(7);
+        image.format = 'ex5-disk';
+        image.validation.warningCount = 1;
+        let resolve!: (issues: []) => void;
+        let reject!: (error: Error) => void;
+        const pending = new Promise<[]>((yes, no) => {
+            resolve = yes;
+            reject = no;
+        });
+        const validationIssues = vi.fn(() => pending);
+        const transport = {
+            openImage: vi.fn(async () => image),
+            refreshImage: vi.fn(async () => ({ ...opened(7), revision: 2 })),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues,
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        const opening = workflow.open(location);
+        await vi.waitFor(() => expect(validationIssues).toHaveBeenCalledOnce());
+        await workflow.refresh();
+        if (outcome === 'resolve') resolve([]);
+        else reject(new Error('stale validation failure'));
+        await opening;
+        expect(workflow.integrityDialogOpen).toBe(false);
+        expect(workflow.integrityLoading).toBe(false);
+        expect(workflow.integrityError).toBe('');
+        expect(workflow.integrityIssues).toEqual([]);
+    });
+
+    it('still opens the integrity dialog for an SFS allocation blocker', async () => {
+        const image = opened(7);
+        image.validation.errorCount = 1;
+        image.validation.valid = false;
+        const transport = {
+            openImage: vi.fn(async () => image),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues: vi.fn(async () => [
+                {
+                    code: 'SFS_ALLOCATION_CROSS_LINK',
+                    severity: 'ERROR',
+                    message: 'Cross-linked allocation',
+                    samplerPath: '/',
+                    objectId: null,
+                },
+            ]),
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open(location);
+        expect(workflow.integrityDialogOpen).toBe(true);
+    });
+
+    it('shows EX warnings once, retaining them on refresh and reopening for a new issue', async () => {
+        const image = opened(7);
+        image.format = 'ex5-disk';
+        image.validation.warningCount = 1;
+        const issue = {
+            code: 'EX5_CAPACITY_EXCEEDS_IMAGE',
+            severity: 'WARNING' as const,
+            message: 'One sector is absent',
+            samplerPath: '/',
+            objectId: null,
+        };
+        const validationIssues = vi.fn(async () => [issue]);
+        const transport = {
+            openImage: vi.fn(async () => image),
+            refreshImage: vi.fn(async () => ({ ...image, revision: 2 })),
+            closeImage: vi.fn(async () => undefined),
+            validationIssues,
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open(location);
+        expect(workflow.integrityDialogOpen).toBe(true);
+        workflow.integrityDialogOpen = false;
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(false);
+        expect(workflow.integrityIssues).toEqual([issue]);
+        validationIssues.mockResolvedValue([
+            issue,
+            { ...issue, code: 'EX5_FILE_DATA_UNAVAILABLE', samplerPath: 'TAIL.BIN', message: 'File data is absent' },
+        ]);
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(true);
+        workflow.integrityDialogOpen = false;
+        validationIssues.mockResolvedValue([issue]);
+        await workflow.refresh();
+        expect(workflow.integrityDialogOpen).toBe(false);
+    });
     it('shows delayed progress and cancels an active server job', async () => {
         vi.useFakeTimers();
         try {
@@ -256,5 +347,95 @@ describe('ImageSessionWorkflow volume selection', () => {
         workflow.selectTreeSource(volumeC, 'toggle', visible);
         expect(workflow.importDestinationSource()).toMatchObject({ id: 'none', kind: 'disk' });
         await workflow.dispose();
+    });
+});
+
+describe('ImageSessionWorkflow companion folders', () => {
+    const folder: ImageLocation = {
+        kind: 'axk-object-directory',
+        reference: { rootId: 'root', relativePath: 'set/disk1' },
+        displayName: 'disk1',
+    };
+    const disk2: ImageLocation = { ...folder, reference: { rootId: 'root', relativePath: 'set/disk2' } };
+    function diskSet(next: number | null): OpenedImage {
+        return {
+            ...opened(7),
+            format: 'axk-object-directory',
+            floppySet: {
+                status: next === null ? 'COMPLETE' : 'INCOMPLETE',
+                setLabel: '              ',
+                nextRequiredIndex: next,
+                members: [],
+            },
+        };
+    }
+
+    it.each(['local', 'remote'])(
+        'opens the server folder picker directly for a %s connection',
+        async (connectionMode) => {
+            const onPicker = vi.fn();
+            const picker = new PickerController(onPicker);
+            const workflow = new ImageSessionWorkflow(
+                {
+                    storageMode: 'server',
+                    connectionMode,
+                    openImage: vi.fn(async () => diskSet(2)),
+                } as unknown as ImageTransport,
+                picker,
+            );
+            connectWorkflow(workflow);
+            await workflow.open(folder);
+            expect(workflow.companionRequest).toMatchObject({
+                sourceKind: 'directory',
+                nextRequiredIndex: 2,
+                setLabel: 'disk1',
+            });
+            const adding = workflow.addCompanionDiskSource();
+            expect(onPicker).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    mode: 'directory',
+                    parentDialog: 'companion-disks',
+                    requireWritableDirectory: false,
+                    initialDirectory: { rootId: 'root', relativePath: 'set' },
+                }),
+            );
+            picker.finish({ ...disk2, kind: 'server-directory' });
+            await adding;
+            expect(workflow.companionRequest?.sources).toEqual([disk2]);
+            workflow.cancelCompanionDisks();
+            expect(workflow.companionRequest).toBeNull();
+            expect(workflow.sessionId).toBe(7);
+        },
+    );
+
+    it('waits for the final member before retrying and preserves the partial session on failure', async () => {
+        const playObject = vi.fn();
+        const attachCompanions = vi
+            .fn()
+            .mockResolvedValueOnce(diskSet(3))
+            .mockRejectedValueOnce(new Error('Wrong disk set'))
+            .mockResolvedValueOnce(diskSet(null));
+        const workflow = new ImageSessionWorkflow(
+            { openImage: vi.fn(async () => diskSet(2)), attachCompanions } as unknown as ImageTransport,
+            {} as PickerController,
+        );
+        workflow.connect({
+            catalog: { activeVolumeId: '', loadVolume: vi.fn(), clear: vi.fn() },
+            audition: { invalidateSession: vi.fn(), playObject },
+            mutation: { setCapabilities: vi.fn() },
+            clearExportSelection: vi.fn(),
+        } as never);
+        await workflow.open(folder);
+        workflow.requestCompanionDisks({ kind: 'audition', objectId: 'wave-1' });
+        const selection = { kind: 'sources', sources: [disk2] } as const;
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(workflow.companionRequest?.nextRequiredIndex).toBe(3);
+        expect(playObject).not.toHaveBeenCalled();
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(workflow.companionRequest?.error).toBe('Wrong disk set');
+        expect(workflow.sessionId).toBe(7);
+        await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });
+        expect(playObject).toHaveBeenCalledExactlyOnceWith('wave-1');
+        expect(workflow.companionRequest).toBeNull();
     });
 });

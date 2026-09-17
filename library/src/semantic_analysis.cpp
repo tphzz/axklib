@@ -3,6 +3,7 @@
 #include "semantic_support.hpp"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <ranges>
 #include <string>
@@ -48,6 +49,62 @@ std::string join(const std::vector<std::string> &values) {
     return result;
 }
 
+bool is_object_category(std::string_view name) {
+    static constexpr std::array categories{"SMPL", "SBNK", "SBAC", "PROG", "SEQU", "PRF3"};
+    return std::ranges::find(categories, name) != categories.end();
+}
+
+void append_unrecognized_category_entry_issues(const Container &container, std::vector<ValidationIssue> &issues) {
+    for (const auto &partition : container.partitions()) {
+        std::unordered_map<std::uint32_t, const IndexRecord *> records;
+        std::unordered_map<std::uint32_t, const IndexRecord *> directories;
+        for (const auto &record : partition.records) {
+            records.emplace(record.sfs_id.value, &record);
+            if (record.directory_id)
+                directories.emplace(record.directory_id->value, &record);
+        }
+        const auto root_id = locate_partition_root_record(partition);
+        if (!root_id)
+            continue;
+        const auto root = records.find(root_id->value);
+        if (root == records.end())
+            continue;
+        for (const auto &volume_entry : root->second->directory_entries) {
+            if (!volume_entry.target_link_id || volume_entry.name == "." || volume_entry.name == ".." ||
+                is_partition_support_root_entry(volume_entry.name)) {
+                continue;
+            }
+            const auto volume = directories.find(volume_entry.target_link_id->value);
+            if (volume == directories.end())
+                continue;
+            std::size_t unrecognized{};
+            for (const auto &category_entry : volume->second->directory_entries) {
+                if (!category_entry.target_link_id || !is_object_category(category_entry.name))
+                    continue;
+                const auto category = directories.find(category_entry.target_link_id->value);
+                if (category == directories.end())
+                    continue;
+                for (const auto &entry : category->second->directory_entries) {
+                    if (!entry.target_link_id || entry.name == "." || entry.name == "..")
+                        continue;
+                    const auto target = records.find(entry.target_link_id->value);
+                    if (target != records.end() && target->second->payload_kind != PayloadKind::object)
+                        ++unrecognized;
+                }
+            }
+            if (unrecognized == 0U)
+                continue;
+            issues.push_back({
+                "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES",
+                ValidationSeverity::error,
+                std::format("volume has {} visible object entries whose payload is unrecognized", unrecognized),
+                std::format("partition {}: {} / {}", partition.index.value, partition.name, volume_entry.name),
+                {},
+            });
+        }
+    }
+}
+
 } // namespace
 
 WaveformOrphanReport analyze_waveform_orphans(const Container &container, const ObjectCatalog &catalog,
@@ -76,7 +133,8 @@ WaveformOrphanReport analyze_waveform_orphans(const Container &container, const 
     std::unordered_set<std::uint8_t> partitions_with_unknown_records;
     for (const auto &partition : container.partitions()) {
         if (std::ranges::any_of(partition.records, [](const IndexRecord &record) {
-                return record.sfs_id.value != 0U && record.payload_kind == PayloadKind::unknown;
+                return record.sfs_id.value != 0U && record.data_size != 0U &&
+                       record.payload_kind == PayloadKind::unknown;
             })) {
             partitions_with_unknown_records.insert(partition.index.value);
         }
@@ -165,6 +223,12 @@ bool ValidationReport::valid() const noexcept {
 ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                     const RelationshipGraph &graph) {
     ValidationReport result;
+    for (const auto &diagnostic : container.diagnostics()) {
+        if (diagnostic.code == ErrorCode::container_invalid_geometry ||
+            diagnostic.code == ErrorCode::container_backup_mismatch)
+            result.issues.push_back(
+                {"SFS_CONTAINER_METADATA_INVALID", ValidationSeverity::error, diagnostic.message, {}, {}});
+    }
     result.coverage.object_count = catalog.objects.size();
     result.coverage.relationship_count = graph.relationships.size();
     for (const auto &item : catalog.objects) {
@@ -194,6 +258,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
             issue.sfs_id ? std::format("p{}:sfs{}", issue.partition.value, issue.sfs_id->value) : "",
         });
     }
+    append_unrecognized_category_entry_issues(container, result.issues);
     for (const auto &relation : graph.relationships) {
         switch (relation.quality) {
         case RelationshipQuality::known:
@@ -250,7 +315,24 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
     }
     for (const auto &partition : container.partitions()) {
         const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);
+        if (!locate_partition_root_record(partition))
+            result.issues.push_back({"SFS_DIRECTORY_ROOT_INVALID",
+                                     ValidationSeverity::error,
+                                     "partition does not contain exactly one readable root directory",
+                                     partition_path,
+                                     {}});
         for (const auto &diagnostic : partition.diagnostics) {
+            if (diagnostic.code == ErrorCode::container_invalid_geometry ||
+                diagnostic.code == ErrorCode::container_backup_mismatch) {
+                result.issues.push_back({diagnostic.code == ErrorCode::container_invalid_geometry
+                                             ? "SFS_INVALID_GEOMETRY"
+                                             : "SFS_PARTITION_BACKUP_MISMATCH",
+                                         ValidationSeverity::error,
+                                         diagnostic.message,
+                                         partition_path,
+                                         {}});
+                continue;
+            }
             if (diagnostic.code != ErrorCode::relationship_unresolved ||
                 diagnostic.context.object_type != "directory-entry") {
                 continue;
@@ -280,7 +362,7 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
             result.issues.push_back({
                 "SFS_ALLOCATION_BITMAP_COPIES_DIFFER",
                 ValidationSeverity::error,
-                std::format("the fixed-location and header-addressed SFS allocation bitmaps differ in {} byte(s)",
+                std::format("the first and second SFS allocation bitmaps differ in {} byte(s)",
                             partition.allocation.stored_copy_mismatch_byte_count),
                 partition_path,
                 {},
@@ -296,16 +378,16 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
                 {},
             });
         }
-        const auto fixed_without_record = partition.allocation.fixed_location.marked_used_without_index_extent_count;
-        const auto fixed_marked_free = partition.allocation.fixed_location.index_extent_marked_free_count;
-        const auto header_without_record = partition.allocation.header_addressed.marked_used_without_index_extent_count;
-        const auto header_marked_free = partition.allocation.header_addressed.index_extent_marked_free_count;
+        const auto fixed_without_record = partition.allocation.bitmap_copy1.marked_used_without_index_extent_count;
+        const auto fixed_marked_free = partition.allocation.bitmap_copy1.index_extent_marked_free_count;
+        const auto header_without_record = partition.allocation.bitmap_copy2.marked_used_without_index_extent_count;
+        const auto header_marked_free = partition.allocation.bitmap_copy2.index_extent_marked_free_count;
         if (partition.allocation.invalid_extent_record_count != 0U ||
             partition.allocation.extent_total_mismatch_count != 0U || fixed_without_record != 0U ||
             fixed_marked_free != 0U || header_without_record != 0U || header_marked_free != 0U) {
             auto message = std::format(
-                "partition allocation metadata disagrees with index extents: fixed bitmap has {} "
-                "used-without-extent and {} extent-marked-free cluster(s); header-addressed bitmap has {} "
+                "partition allocation metadata disagrees with index extents: bitmap copy 1 has {} "
+                "used-without-extent and {} extent-marked-free cluster(s); bitmap copy 2 has {} "
                 "used-without-extent and {} extent-marked-free cluster(s); {} record(s) contain invalid "
                 "extents; {} record(s) have extent totals that disagree with their headers",
                 fixed_without_record, fixed_marked_free, header_without_record, header_marked_free,

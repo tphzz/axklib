@@ -59,7 +59,7 @@ describe('inspectorRelationshipGroups', () => {
                         id: 'bank-member:bank-1',
                         objectId: 'bank-1',
                         name: 'Piano Bank',
-                        detail: 'Member of',
+                        detail: '',
                         navigable: true,
                     },
                 ],
@@ -72,7 +72,7 @@ describe('inspectorRelationshipGroups', () => {
                         id: 'sample-wave:wave-1',
                         objectId: 'wave-1',
                         name: 'Piano C3 L',
-                        detail: 'Left Wave Data',
+                        detail: 'Left',
                         navigable: true,
                     },
                 ],
@@ -99,7 +99,8 @@ describe('inspectorRelationshipGroups', () => {
                 id: 'relationship-1:bank-1',
                 objectId: undefined,
                 name: 'Piano Bank',
-                detail: 'Assignment · =Smp',
+                detail: '=Smp',
+                detailTitle: 'Receive channel',
                 navigable: false,
             },
         ]);
@@ -128,7 +129,7 @@ describe('inspectorRelationshipGroups', () => {
                         id: 'generic-assignment:sample-1',
                         objectId: 'sample-1',
                         name: 'Piano C3',
-                        detail: 'Assignment',
+                        detail: '',
                         navigable: true,
                     },
                 ],
@@ -149,8 +150,53 @@ describe('inspectorRelationshipGroups', () => {
         expect(groups[0]?.items).toHaveLength(1);
         expect(groups[0]?.items[0]).toMatchObject({
             objectId: 'bank-1',
-            detail: 'Assignment · A01 / Assignment · =Smp',
+            detail: 'A01 / =Smp',
             navigable: true,
         });
+    });
+
+    it('omits redundant labels in both directions and retains only distinct channels', () => {
+        const assignments = [
+            relationship({ id: 'empty', receiveChannelDisplay: '' }),
+            relationship({ id: 'first', receiveChannelDisplay: 'A01' }),
+            relationship({ id: 'duplicate', receiveChannelDisplay: 'A01' }),
+            relationship({ id: 'second', receiveChannelDisplay: '=Smp' }),
+        ];
+        for (const selected of ['program-1', 'bank-1']) {
+            expect(inspectorRelationshipGroups(selected, assignments, objects)[0]?.items[0]?.detail).toBe('A01 / =Smp');
+            expect(inspectorRelationshipGroups(selected, assignments.slice(0, 1), objects)[0]?.items[0]?.detail).toBe(
+                '',
+            );
+        }
+        const member = relationship({
+            sourceObjectId: 'bank-1',
+            targetObjectId: 'sample-1',
+            relationshipType: 'SBAC_SLOT_TO_SBNK',
+            receiveChannelDisplay: '',
+        });
+        for (const selected of ['bank-1', 'sample-1']) {
+            expect(inspectorRelationshipGroups(selected, [member], objects)[0]?.items[0]?.detail).toBe('');
+        }
+    });
+
+    it('keeps Left and Right roles in both directions and combines a shared wave once', () => {
+        const members = ['LEFT', 'RIGHT'].map((side) =>
+            relationship({
+                id: side,
+                sourceObjectId: 'sample-1',
+                targetObjectId: 'wave-1',
+                relationshipType: `SBNK_${side}_MEMBER_TO_SMPL`,
+                receiveChannelDisplay: '',
+            }),
+        );
+        for (const selected of ['sample-1', 'wave-1']) {
+            expect(inspectorRelationshipGroups(selected, members.slice(0, 1), objects)[0]?.items[0]?.detail).toBe(
+                'Left',
+            );
+            expect(inspectorRelationshipGroups(selected, members.slice(1), objects)[0]?.items[0]?.detail).toBe('Right');
+            const items = inspectorRelationshipGroups(selected, members, objects)[0]?.items;
+            expect(items).toHaveLength(1);
+            expect(items?.[0]?.detail).toBe('Left / Right');
+        }
     });
 });

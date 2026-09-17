@@ -22,6 +22,8 @@ namespace axk {
 enum class MediaKind : std::uint8_t {
     sfs,
     fat12_floppy,
+    ex5_disk,
+    fat16_disk,
     fat12_floppy_set,
     iso9660,
     a3k_archive,
@@ -32,6 +34,7 @@ enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifie
 enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
 enum class FloppySetMarker : std::uint8_t { none, ordinary, continuation, final, invalid };
 enum class FloppySetStatus : std::uint8_t { incomplete, complete };
+enum class FatProfile : std::uint8_t { a_series_floppy, ex5_disk, fat16, ex5_removable };
 
 struct YamahaFloppyCatalogEntry {
     std::uint16_t slot{};
@@ -55,6 +58,8 @@ struct FloppyDiskIdentity {
 };
 
 struct FatGeometry {
+    FatProfile profile{FatProfile::a_series_floppy};
+    std::uint64_t boot_offset{};
     std::uint16_t bytes_per_sector{};
     std::uint8_t sectors_per_cluster{};
     std::uint16_t reserved_sectors{};
@@ -67,6 +72,8 @@ struct FatGeometry {
     std::uint64_t root_offset{};
     std::uint64_t data_offset{};
     std::uint32_t data_cluster_count{};
+    std::uint64_t physical_size_bytes{};
+    std::uint32_t backed_data_cluster_count{};
 
     [[nodiscard]] std::uint32_t cluster_size() const noexcept;
 };
@@ -79,6 +86,15 @@ struct FatFile {
     std::uint32_t size{};
     std::vector<std::uint16_t> clusters;
     std::uint64_t first_data_offset{};
+    std::uint8_t attributes{};
+};
+
+struct FatDirectory {
+    std::string path;
+    std::string name;
+    std::uint64_t directory_offset{};
+    std::vector<std::uint16_t> clusters;
+    std::uint8_t attributes{};
 };
 
 struct IsoFile {
@@ -155,9 +171,8 @@ struct StructuredObjectPath {
     MenuLabel volume_label;
 };
 
-// Read-only FAT12 profile for Yamaha A-series floppy media. This is not a
-// general FAT implementation; FAT16, FAT32, exFAT, and filesystem writes are
-// unsupported.
+// FAT12, standard FAT16 and the distinct EX5 hard-disk FAT16 profile.
+// FAT32 and exFAT are unsupported.
 class AXK_API FatImage {
   public:
     [[nodiscard]] static Result<FatImage> open(std::shared_ptr<const RandomAccessReader> reader,
@@ -169,6 +184,7 @@ class AXK_API FatImage {
     [[nodiscard]] const FatGeometry &geometry() const noexcept;
     [[nodiscard]] const std::string &source_name() const noexcept;
     [[nodiscard]] const std::vector<FatFile> &files() const noexcept;
+    [[nodiscard]] const std::vector<FatDirectory> &directories() const noexcept;
     [[nodiscard]] const std::optional<YamahaFloppyCatalog> &yamaha_catalog() const noexcept;
     [[nodiscard]] const FloppyDiskIdentity &disk_identity() const noexcept;
     [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
@@ -190,9 +206,31 @@ class AXK_API FatImage {
     std::string source_name_;
     FatGeometry geometry_;
     std::vector<FatFile> files_;
+    std::vector<FatDirectory> directories_;
     std::optional<YamahaFloppyCatalog> yamaha_catalog_;
     FloppyDiskIdentity disk_identity_;
     std::vector<MediaValidationIssue> validation_issues_;
+};
+
+struct FatDiskPartition {
+    std::uint8_t number{};
+    std::uint64_t byte_offset{};
+    std::uint64_t size_bytes{};
+    FatImage volume;
+};
+
+// Primary MBR partitions. Each volume is read through its own bounded view.
+class AXK_API FatDiskImage {
+  public:
+    [[nodiscard]] static Result<FatDiskImage> open(std::shared_ptr<const RandomAccessReader> reader,
+                                                   std::string source_name = {},
+                                                   const CancellationToken &cancellation = {});
+    [[nodiscard]] const std::vector<FatDiskPartition> &partitions() const noexcept { return partitions_; }
+    [[nodiscard]] const std::string &source_name() const noexcept { return source_name_; }
+
+  private:
+    std::string source_name_;
+    std::vector<FatDiskPartition> partitions_;
 };
 
 // Read-only primary ISO9660 profile for Yamaha A-series CD-ROM media. Joliet
@@ -323,8 +361,8 @@ class AXK_API StandaloneObject {
 };
 
 // Read-only snapshot of one directory of Yamaha object files or a bounded
-// one-level set of such directories. Filesystem and FAT metadata are
-// intentionally not reconstructed.
+// one-level set of such directories. Retained Yamaha catalogs identify disk
+// members; missing filesystem and FAT metadata are not reconstructed.
 class AXK_API AxkObjectDirectory {
   public:
     static constexpr std::size_t maximum_leaf_entries = 224U;
@@ -342,6 +380,13 @@ class AXK_API AxkObjectDirectory {
     [[nodiscard]] static Result<AxkObjectDirectory> open(const std::filesystem::path &path,
                                                          const CancellationToken &cancellation = {});
 
+    [[nodiscard]] static Result<AxkObjectDirectory> open_members(std::vector<AxkObjectDirectory> members,
+                                                                 std::string source_name = {},
+                                                                 const CancellationToken &cancellation = {});
+    [[nodiscard]] const FloppyDiskIdentity &disk_identity() const noexcept;
+    [[nodiscard]] std::span<const FloppyDiskIdentity> disk_members() const noexcept;
+    [[nodiscard]] std::span<const MediaValidationIssue> validation_issues() const noexcept;
+
     [[nodiscard]] const std::string &source_name() const noexcept;
     [[nodiscard]] const std::vector<MediaObject> &stored_objects() const noexcept;
     [[nodiscard]] Result<std::vector<MediaObject>> objects(MediaObjectReadMode mode = MediaObjectReadMode::complete,
@@ -350,10 +395,16 @@ class AXK_API AxkObjectDirectory {
   private:
     std::string source_name_;
     std::vector<MediaObject> objects_;
+    std::optional<YamahaFloppyCatalog> catalog_;
+    FloppyDiskIdentity disk_identity_;
+    std::vector<FloppyDiskIdentity> disk_members_;
+    std::vector<MediaValidationIssue> validation_issues_;
+    std::uint64_t source_bytes_{};
+    std::size_t source_entry_count_{};
 };
 
-using MediaStorage =
-    std::variant<Container, FatImage, FloppyDiskSet, IsoImage, A3kArchive, StandaloneObject, AxkObjectDirectory>;
+using MediaStorage = std::variant<Container, FatImage, FatDiskImage, FloppyDiskSet, IsoImage, A3kArchive,
+                                  StandaloneObject, AxkObjectDirectory>;
 
 class AXK_API MediaContainer {
   public:

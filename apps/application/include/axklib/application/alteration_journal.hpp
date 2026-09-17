@@ -5,22 +5,53 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "axklib/application/filesystem.hpp"
+#include "axklib/io.hpp"
 
 namespace axk::app {
 
 inline constexpr std::uint64_t default_maximum_alteration_journal_bytes =
     2ULL * 2'147'483'648ULL + 64ULL * 1024ULL * 1024ULL;
 
+// Owned small metadata or a borrowed range of an immutable, shared input.
+// Reader-backed bytes are frozen in the journal before the target is modified.
+class AlterationJournalBytes {
+  public:
+    AlterationJournalBytes() : AlterationJournalBytes(std::vector<std::byte>{}) {}
+    AlterationJournalBytes(std::initializer_list<std::byte> bytes)
+        : AlterationJournalBytes(std::vector<std::byte>{bytes}) {}
+    AlterationJournalBytes(std::vector<std::byte> bytes)
+        : reader_(std::make_shared<MemoryReader>(std::move(bytes))), size_(reader_->size()) {}
+    AlterationJournalBytes(std::shared_ptr<const RandomAccessReader> reader, std::uint64_t offset, std::uint64_t size)
+        : reader_(std::move(reader)), offset_(offset), size_(size) {}
+
+    [[nodiscard]] std::uint64_t size() const noexcept { return size_; }
+    [[nodiscard]] Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
+        if (!reader_ || offset_ > reader_->size() || size_ > reader_->size() - offset_ || offset > size_ ||
+            bytes.size() > size_ - offset)
+            return std::unexpected(Error{"alteration_journal_unavailable", "alteration input range is invalid"});
+        if (auto read = reader_->read_exact_at(offset_ + offset, bytes); !read)
+            return std::unexpected(Error{"alteration_journal_unavailable", read.error().message});
+        return {};
+    }
+
+  private:
+    std::shared_ptr<const RandomAccessReader> reader_;
+    std::uint64_t offset_{};
+    std::uint64_t size_{};
+};
+
 struct AlterationJournalPatch {
     std::uint64_t offset{};
-    std::vector<std::byte> original;
-    std::vector<std::byte> replacement;
+    AlterationJournalBytes original;
+    AlterationJournalBytes replacement;
 };
 
 class AlterationJournalStore {
@@ -37,7 +68,8 @@ class AlterationJournalStore {
     [[nodiscard]] Result<void> apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
                                      std::span<const AlterationJournalPatch> patches,
                                      const CancellationToken &cancellation = {},
-                                     const std::function<Result<void>()> &validate = {});
+                                     const std::function<Result<void>()> &validate = {},
+                                     const std::function<void()> &on_rollback_verified = {});
 
   private:
     std::filesystem::path directory_;

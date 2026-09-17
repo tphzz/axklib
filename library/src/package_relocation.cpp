@@ -117,7 +117,7 @@ Result<void> clear_program_assignment_rows_in_place(std::vector<std::byte> &payl
             return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
                                               "Program assignment adjustment does not name a stored assignment row")};
         }
-        const auto offset = 0x120U + static_cast<std::size_t>(ordinal) * 0x38U;
+        const auto offset = assignment.offset;
         if (offset > payload.size() || 0x38U > payload.size() - offset) {
             return std::unexpected{make_error(ErrorCode::transaction_rejected, ErrorCategory::transaction,
                                               "Program assignment adjustment row is out of bounds")};
@@ -181,12 +181,12 @@ Result<std::vector<std::byte>> patch_names(const PortablePackage &package, const
                 return std::unexpected{relocation_error(node, "SBAC relationship source is not decoded")};
             source_name = sample_bank->slots[edge.ordinal].name;
         } else if (edge.role == "PROG_ASSIGNMENT_TO_SBAC" || edge.role == "PROG_ASSIGNMENT_TO_SBNK") {
-            offset = 0x120U + static_cast<std::size_t>(edge.ordinal) * 0x38U;
             const auto *program = std::get_if<CurrentProg>(&decoded->payload);
             if (program == nullptr || edge.ordinal >= program->assignments.size()) {
                 return std::unexpected{relocation_error(node, "Program relationship source is not decoded")};
             }
             source_name = program->assignments[edge.ordinal].name;
+            offset = program->assignments[edge.ordinal].offset;
         } else {
             return std::unexpected{relocation_error(node, "package relocation encountered an unsupported edge role")};
         }
@@ -241,14 +241,32 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
     RelocationProfile result;
     result.normalized_payload.assign(raw_payload.begin(), raw_payload.end());
     switch (object.header.type) {
-    case ObjectType::smpl:
-        if (!std::holds_alternative<CurrentSmpl>(object.payload))
+    case ObjectType::smpl: {
+        const auto *wave_data = std::get_if<CurrentSmpl>(&object.payload);
+        if (wave_data == nullptr)
             return std::unexpected{profile_error(object, "current SMPL payload is not decoded")};
-        if (auto added = add_range(result, object, 0x6cU, 4U, "SMPL_GROUP_ID"); !added)
+        if (wave_data->pcm_transfer_control.value != 0x30U) {
+            return std::unexpected{
+                profile_error(object, "portable packages require the proven current SMPL PCM transfer profile")};
+        }
+        if (auto added = add_range(result, object, 0x43U, 7U, "SMPL_SAVE_BUFFER_RESIDUE_0X43"); !added)
+            return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0x54U, 16U, "SMPL_EMBEDDED_CONTAINER_NAME"); !added)
+            return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0x68U, 4U, "SMPL_NAME_HASH_NEXT_HANDLE_ALIAS"); !added)
+            return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0x6cU, 3U, "SMPL_REFERENCE_PREFIX"); !added)
+            return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0x6fU, 5U, "SMPL_SAVE_BUFFER_RESIDUE_0X6F"); !added)
+            return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0x74U, 4U, "SMPL_NAME_HASH_NEXT_HANDLE"); !added)
             return std::unexpected{added.error()};
         if (auto added = add_range(result, object, 0x78U, 4U, "SMPL_REFERENCE_VALUE"); !added)
             return std::unexpected{added.error()};
+        if (auto added = add_range(result, object, 0xaaU, 2U, "SMPL_TRANSIENT_512_BYTE_BLOCK_COUNTER"); !added)
+            return std::unexpected{added.error()};
         break;
+    }
     case ObjectType::sbnk: {
         if (!std::holds_alternative<CurrentSbnk>(object.payload))
             return std::unexpected{profile_error(object, "current SBNK payload is not decoded")};
@@ -283,7 +301,7 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
             const auto &assignment = program->assignments[index];
             const auto supported_kind = assignment.kind == 0x10U || assignment.kind == 0x11U;
             if (!assignment.name.empty() && supported_kind) {
-                const auto offset = 0x130U + static_cast<std::uint32_t>(index) * 0x38U;
+                const auto offset = static_cast<std::uint32_t>(assignment.offset + 0x10U);
                 if (auto added = add_range(result, object, offset, 4U, "PROG_ASSIGNMENT_HANDLE"); !added)
                     return std::unexpected{added.error()};
             }
@@ -328,18 +346,34 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             return std::unexpected{relocation_error(node, "package relocation field is out of bounds")};
         return {};
     };
+    const auto write_reference_prefix = [&](std::size_t offset, std::uint32_t value) -> Result<void> {
+        for (std::size_t index = 0; index < 3U; ++index) {
+            const auto shift = static_cast<unsigned int>((3U - index) * 8U);
+            if (auto written = writer.write_u8(offset + index, static_cast<std::uint8_t>(value >> shift)); !written) {
+                return std::unexpected{relocation_error(node, "package relocation field is out of bounds")};
+            }
+        }
+        return {};
+    };
     for (const auto &relocation : node.relocations)
         allowed.push_back({relocation.offset, relocation.width});
 
     if (node.object_type == "SMPL") {
-        if (!context.wave_data_reference_value || *context.wave_data_reference_value < 0xbaU || result.size() < 0x7cU) {
+        if (context.destination_embedded_container_name.empty() || !context.wave_data_reference_value ||
+            result.size() < 0xacU) {
             return std::unexpected{
-                relocation_error(node, "SMPL relocation requires a valid destination reference value")};
+                relocation_error(node, "SMPL relocation requires a destination container and reference value")};
         }
-        if (auto written = write_be32(0x6cU, *context.wave_data_reference_value - 0xbaU); !written)
+        if (auto written = put_name(result, 0x54U, context.destination_embedded_container_name); !written)
             return std::unexpected{written.error()};
+        std::fill(result.begin() + 0x43, result.begin() + 0x4a, std::byte{});
+        std::fill(result.begin() + 0x68, result.begin() + 0x6c, std::byte{});
+        if (auto written = write_reference_prefix(0x6cU, *context.wave_data_reference_value); !written)
+            return std::unexpected{written.error()};
+        std::fill(result.begin() + 0x6f, result.begin() + 0x78, std::byte{});
         if (auto written = write_be32(0x78U, *context.wave_data_reference_value); !written)
             return std::unexpected{written.error()};
+        std::fill(result.begin() + 0xaa, result.begin() + 0xac, std::byte{});
     } else if (node.object_type == "SBNK") {
         if (result.size() < 0xd1U) {
             return std::unexpected{relocation_error(node, "SBNK relocation payload is truncated")};
@@ -407,7 +441,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
             if (!assignment.name.empty() && (assignment.kind == 0x10U || assignment.kind == 0x11U)) {
-                if (auto written = write_be32(0x130U + index * 0x38U, 0U); !written)
+                if (auto written = write_be32(assignment.offset + 0x10U, 0U); !written)
                     return std::unexpected{written.error()};
             }
         }
@@ -431,10 +465,12 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
         return std::unexpected{relocation_error(node, "relocated object header name does not match its destination")};
     }
     if (const auto *wave_data = std::get_if<CurrentSmpl>(&decoded->payload)) {
-        if (!context.wave_data_reference_value ||
-            wave_data->wave_data_reference_value.value != *context.wave_data_reference_value ||
-            wave_data->group_id.value != *context.wave_data_reference_value - 0xbaU) {
-            return std::unexpected{relocation_error(node, "relocated SMPL IDs did not decode to the planned values")};
+        if (wave_data->embedded_container_name.value != context.destination_embedded_container_name ||
+            wave_data->transient_name_hash_next_handle.value != 0U ||
+            wave_data->transient_512_byte_block_counter.value != 0U || !context.wave_data_reference_value ||
+            wave_data->wave_data_reference_value.value != *context.wave_data_reference_value) {
+            return std::unexpected{
+                relocation_error(node, "relocated SMPL metadata did not decode to its canonical destination")};
         }
     } else if (const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload)) {
         std::set<std::uint8_t> expected_programs(context.linked_program_numbers.begin(),
@@ -477,7 +513,7 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             if (!name)
                 return std::unexpected{name.error()};
             if (edge.ordinal >= sample_bank->slots.size() || sample_bank->slots[edge.ordinal].name != *name ||
-                sample_bank->slots[edge.ordinal].raw_handle != 0U) {
+                sample_bank->slots[edge.ordinal].transient_member_pointer != 0U) {
                 return std::unexpected{relocation_error(node, "relocated SBAC slot did not decode "
                                                               "to the planned target")};
             }

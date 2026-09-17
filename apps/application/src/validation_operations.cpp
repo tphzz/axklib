@@ -7,6 +7,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -133,16 +134,20 @@ Result<Json> execute_validation(const Sandbox &sandbox, const Json &input, const
             if (issue.severity == axk::ValidationSeverity::error ||
                 (request->policy == "strict" && issue.severity == axk::ValidationSeverity::warning))
                 failed = true;
-            issues.push_back({{"severity", severity},
-                              {"code", issue.code},
-                              {"message", issue.message},
-                              {"scope", "relationship"},
-                              {"source_path", axk::text::path_to_utf8(source.path)},
-                              {"sampler_path", issue.sampler_path},
-                              {"object_key", issue.object_key},
-                              {"quality", "Known"},
-                              {"basis", "validation"},
-                              {"recommended_next_check", ""}});
+            axk::ReportRow row{
+                {"severity", severity},
+                {"code", issue.code},
+                {"message", issue.message},
+                {"scope", issue.code == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES" ? "volume" : "relationship"},
+                {"source_path", axk::text::path_to_utf8(source.path)},
+                {"sampler_path", issue.sampler_path},
+                {"object_key", issue.object_key},
+                {"quality", "Known"},
+                {"basis", "validation"},
+                {"recommended_next_check", ""}};
+            if (issue.code == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES")
+                volume_issues.push_back(row);
+            issues.push_back(std::move(row));
         }
         auto relationship_issues = validate_media_details(source, false);
         for (auto &issue : relationship_issues) {
@@ -164,16 +169,7 @@ Result<Json> execute_validation(const Sandbox &sandbox, const Json &input, const
         std::ranges::move(source_extents, std::back_inserter(allocation_extents));
         auto source_mismatches = allocation_mismatch_rows(source.path, container.partitions());
         std::ranges::move(source_mismatches, std::back_inserter(allocation_mismatches));
-        const auto prior_issue_count = issues.size();
-        auto source_volumes = volume_validation_rows(source.path, container, source.catalog, volume_issues, issues);
-        for (auto index = prior_issue_count; index < issues.size(); ++index) {
-            const auto code =
-                std::ranges::find(issues[index], "code", &std::pair<std::string, axk::ReportValue>::first);
-            if (code != issues[index].end())
-                ++issue_counts[std::get<std::string>(code->second.value)];
-            if (request->policy == "strict")
-                failed = true;
-        }
+        auto source_volumes = volume_validation_rows(source.path, container, source.catalog);
         std::ranges::move(source_volumes, std::back_inserter(volumes));
     }
 

@@ -8,12 +8,13 @@ namespace axk::alteration_internal {
 namespace {
 
 bool allocation_has_only_extent_byte_total_mismatches(const AllocationSummary &allocation) {
-    return allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
-           allocation.fixed_not_header.empty() && allocation.header_not_fixed.empty() &&
-           allocation.fixed_location.marked_used_without_index_extent_count == 0U &&
-           allocation.fixed_location.index_extent_marked_free_count == 0U &&
-           allocation.header_addressed.marked_used_without_index_extent_count == 0U &&
-           allocation.header_addressed.index_extent_marked_free_count == 0U &&
+    return allocation.bitmap_copy1_valid && allocation.bitmap_copy2_valid && allocation.active_bitmap_copy != 0U &&
+           allocation.stored_copies_match && allocation.stored_copy_mismatch_byte_count == 0U &&
+           allocation.copy1_not_copy2.empty() && allocation.copy2_not_copy1.empty() &&
+           allocation.bitmap_copy1.marked_used_without_index_extent_count == 0U &&
+           allocation.bitmap_copy1.index_extent_marked_free_count == 0U &&
+           allocation.bitmap_copy2.marked_used_without_index_extent_count == 0U &&
+           allocation.bitmap_copy2.index_extent_marked_free_count == 0U &&
            allocation.invalid_extent_record_count == 0U && allocation.extent_total_mismatch_count == 0U &&
            allocation.extent_byte_total_mismatch_count != 0U && allocation.conflicting_cluster_count == 0U;
 }

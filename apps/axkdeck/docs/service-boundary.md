@@ -12,6 +12,23 @@ idempotent cancellation. Errors use a stable code/message/context envelope.
 Large audio is represented as a file or ranged resource transfer rather than an
 unbounded JSON payload.
 
+`GET /api/v1/images/{imageId}/objects/{objectId}` is the diagnostic object-detail
+read used by the inspector's JSON copy action. It projects the session's
+canonical decoded object, placement details, header fields, omissions, and all
+direct graph relationships. It deliberately omits PCM, sequence event payloads,
+and opaque object bodies. This endpoint is not a portable-package model:
+portable packages remain the resolvable outbound closure used for transfer,
+while object detail also preserves incoming links, unresolved candidates, and
+field source details for one loaded object.
+
+Waveform previews return one or two full stored-PCM envelopes. Every lane
+identifies its source Wave Data and carries its sample rate, stored frame count,
+playback window, and loop window. For a Sample, the playback and loop values
+come from that Sample's corresponding left or right member; for direct Wave
+Data they come from the Wave Data object itself. This keeps collection rows and
+all inspector previews on one stored timeline without treating a cropped
+preview as the underlying Wave Data.
+
 Audition preparation accepts an ordered set of Sample or Wave Data identifiers
 and returns one bounded bundle descriptor. Each clip contains one or two
 independent mono-WAV lane ranges with its own source format and loop metadata.
