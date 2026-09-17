@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shlex
 import tarfile
 import zipfile
 from pathlib import Path
@@ -847,7 +848,8 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "SHA256SUMS" not in workflow
     assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm desktop:build -- --target universal-apple-darwin" in workflow
-    assert "lipo \"$sidecar\" -verify_arch x86_64 arm64" in workflow
+    for architecture in ("x86_64", "arm64"):
+        assert f'lipo "$sidecar" -verify_arch {architecture}\n' in workflow
     assert action_reference_count(workflow_with_platform, "pnpm/action-setup", "v6") == 4
     assert "# v4" not in "\n".join(
         line for line in workflow_with_platform.splitlines() if "pnpm/action-setup@" in line
@@ -1283,10 +1285,31 @@ def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None
     assert "spctl --assess --type execute" in verification_step
     assert '"$app/Contents/MacOS/axkdeck"' in verification_step
     assert '"$app/Contents/MacOS/axklib-server"' in verification_step
-    assert 'lipo "$main" -verify_arch x86_64 arm64' in verification_step
-    assert 'lipo "$sidecar" -verify_arch x86_64 arm64' in verification_step
+    for binary in ("$main", "$sidecar"):
+        for architecture in ("x86_64", "arm64"):
+            assert f'lipo "{binary}" -verify_arch {architecture}\n' in verification_step
     assert '"$app/Contents/Resources/licenses/axkdeck.spdx.json"' in verification_step
     assert '"$app/Contents/Resources/licenses/LGPL-2.1-or-later.txt"' in verification_step
+
+
+def test_macos_lipo_verifies_each_architecture_in_a_separate_invocation() -> None:
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    checks: dict[str, list[str]] = {}
+    for line in workflow.splitlines():
+        if line.strip().startswith("lipo ") and "-verify_arch" in line:
+            arguments = shlex.split(line)
+            # Xcode 27 rejects multiple architectures after a single -verify_arch.
+            assert len(arguments) == 4, line
+            assert arguments[2] == "-verify_arch", line
+            checks.setdefault(arguments[1], []).append(arguments[3])
+    assert checks == {
+        "$verification_binary": ["x86_64"],
+        "build/tmp/universal/bin/axklib": ["x86_64", "arm64"],
+        "build/tmp/universal/bin/axklib-server": ["x86_64", "arm64"],
+        "$main": ["x86_64", "arm64"],
+        "$sidecar": ["x86_64", "arm64"],
+    }
 
 
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:
