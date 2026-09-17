@@ -13,7 +13,7 @@ import type { InputFileLocation } from '../../lib/storageLocations';
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
 import type { JobState } from '../../lib/transport';
 import { userFacingMessage } from '../../lib/userFacingMessage';
-import { validFilesystemName } from './editWorkflow.svelte';
+import { normalizeFilesystemName, validFilesystemName } from './nameValidation';
 import {
     fileSources,
     importPaths,
@@ -262,6 +262,7 @@ export class FilesImportWorkflow {
             const previous = fileSources(this.rows);
             try {
                 this.rows = sourceRows(entries);
+                for (const row of this.rows) row.name = normalizeFilesystemName(row.name, this.capabilities!);
             } catch (error) {
                 await imports.release(sources);
                 throw error;
@@ -288,7 +289,7 @@ export class FilesImportWorkflow {
 
     rename(index: number, name: string): void {
         if (!this.editable || !this.rows[index]) return;
-        this.rows[index].name = name;
+        this.rows[index].name = normalizeFilesystemName(name, this.capabilities!);
         this.invalidate();
     }
     setConflict(index: number, conflict: 'SKIP' | 'REPLACE'): void {

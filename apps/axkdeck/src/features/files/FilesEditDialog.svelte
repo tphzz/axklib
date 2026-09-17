@@ -1,6 +1,7 @@
 <script lang="ts">
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
+    import FilesystemNameField from './FilesystemNameField.svelte';
     import type { FilesEditWorkflow } from './editWorkflow.svelte';
     let { workflow }: { workflow: FilesEditWorkflow } = $props();
     const review = $derived(workflow.review!);
@@ -54,17 +55,18 @@
                     <p class="destination" title={review.entries[0].path || review.entries[0].name}>
                         {review.entries[0].path || review.entries[0].name}
                     </p>
-                    <label
-                        ><span>{nameLabel}</span>
-                        <input
-                            class="dialog-field-control"
-                            aria-label={nameLabel}
-                            autocomplete="off"
-                            data-dialog-initial-focus={review.kind === 'rename' ? 'select' : 'caret'}
-                            bind:value={workflow.name}
+                    <div class="name-control">
+                        <span>{nameLabel}</span>
+                        <FilesystemNameField
+                            label={nameLabel}
+                            capabilities={review.capabilities}
+                            error={workflow.nameError}
+                            initialFocus={review.kind === 'rename' ? 'select' : 'caret'}
+                            value={workflow.name}
+                            onchange={(name) => (workflow.name = name)}
                             disabled={workflow.phase !== 'ready'}
                         />
-                    </label>
+                    </div>
                     <p class="name-hint">{review.capabilities.nameHint}</p>
                 {:else}
                     <p>Permanently delete the selected entries and all contents of selected directories?</p>
@@ -108,6 +110,14 @@
 </div>
 
 <style>
+    .name-control {
+        display: grid;
+        gap: 4px;
+    }
+    .name-control > span {
+        font-size: var(--dialog-metadata-font-size);
+        color: var(--color-text-muted);
+    }
     .destination,
     .files-action-status,
     .files-deletion-targets li {

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import FilesystemNameField from './FilesystemNameField.svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportSourceChoice from '../../lib/components/ImportSourceChoice.svelte';
@@ -126,15 +127,17 @@
                             {@const index = page * 100 + offset}
                             <div class="import-row" role="row">
                                 <span role="cell" class="import-name"
-                                    ><input
-                                        class="dialog-field-control"
-                                        aria-label={`Filename ${index + 1}`}
-                                        aria-invalid={!workflow.validName(row.name)}
+                                    ><FilesystemNameField
+                                        label={`Filename ${index + 1}`}
+                                        capabilities={workflow.capabilities!}
+                                        error={row.decision?.action === 'CONFLICT'
+                                            ? row.decision.issue || 'This destination is blocked.'
+                                            : undefined}
+                                        immediate
                                         title={row.source?.displayName ?? paths[index].join('/')}
                                         value={row.name}
                                         disabled={!workflow.editable}
-                                        autocomplete="off"
-                                        oninput={(event) => workflow.rename(index, event.currentTarget.value)}
+                                        onchange={(name) => workflow.rename(index, name)}
                                     />{#if hierarchy}<span
                                             class="import-parent"
                                             title={paths[index].slice(0, -1).join('/') || '/'}
@@ -332,7 +335,6 @@
     .import-row > * {
         min-width: 0;
     }
-    .import-row input,
     .import-row select {
         width: 100%;
     }

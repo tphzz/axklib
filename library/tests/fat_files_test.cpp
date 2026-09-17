@@ -69,8 +69,8 @@ TEST(FatFiles, RenamePreservesStorageAndMetadataAndRekeysDescendants) {
         const auto original = axk::FatImage::open(source).value();
         const auto old = original.files().front();
         const std::vector<axk::FilesystemEdit> edits{
-            axk::RenameFilesystemEntry{{"DEMOS"}, "RENAMED"},
-            axk::RenameFilesystemEntry{{"RENAMED", "DEMO1.S1A"}, "NEW.S1A"},
+            axk::RenameFilesystemEntry{{"demos"}, "Renamed"},
+            axk::RenameFilesystemEntry{{"renamed", "demo1.s1a"}, "New.s1a"},
         };
         const auto plan = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits);
         ASSERT_TRUE(plan) << plan.error().message;
@@ -89,10 +89,38 @@ TEST(FatFiles, RenamePreservesStorageAndMetadataAndRekeysDescendants) {
                          i < original.directories().front().directory_offset + 11U))
                 << i;
         }
-        for (const auto &name : {"RENAMED", "..", "a/b", "", "lower", "LONGNAMEX"}) {
+        for (const auto &name : {"RENAMED", "renamed", "..", "a/b", "", "LONGNAMEX"}) {
             const std::vector<axk::FilesystemEdit> invalid{axk::RenameFilesystemEntry{{"RENAMED"}, name}};
             EXPECT_FALSE(axk::detail::prepare_fat_file_edits(plan->preview, axk::PartitionIndex{0}, invalid)) << name;
         }
+    }
+}
+
+TEST(FatFiles, MixedCaseImportsStoreUppercaseAndPreserveCollisionPolicies) {
+    for (const auto &bytes : {plain_fixture(), plain_fixture(true), ex5_fixture(), ex5_capacity_fixture(false, true)}) {
+        const auto source = std::make_shared<axk::MemoryReader>(bytes);
+        const std::vector<axk::FilesystemEdit> edits{
+            axk::CreateFilesystemDirectory{{"New"}},
+            axk::CreateFilesystemDirectory{{"new", "Child"}},
+            axk::PutFilesystemFile{{"NEW", "child", "Mixed.bin"}, input(3)},
+            axk::PutFilesystemFile{{"new", "CHILD", "mixed.BIN"}, input(7), axk::FileConflict::skip},
+        };
+        const auto plan = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits);
+        ASSERT_TRUE(plan) << plan.error().message;
+        const auto changed = axk::FatImage::open(plan->preview).value();
+        const auto file = std::ranges::find(changed.files(), "NEW/CHILD/MIXED.BIN", &axk::FatFile::path);
+        ASSERT_NE(file, changed.files().end());
+        EXPECT_EQ(changed.read_file(*file).value().size(), 3U);
+        const std::vector<axk::FilesystemEdit> replace{
+            axk::PutFilesystemFile{{"new", "child", "mixed.bin"}, input(7), axk::FileConflict::replace}};
+        const auto replaced = axk::detail::prepare_fat_file_edits(plan->preview, axk::PartitionIndex{0}, replace);
+        ASSERT_TRUE(replaced) << replaced.error().message;
+        const auto final_image = axk::FatImage::open(replaced->preview).value();
+        const auto final_file = std::ranges::find(final_image.files(), "NEW/CHILD/MIXED.BIN", &axk::FatFile::path);
+        ASSERT_NE(final_file, final_image.files().end());
+        EXPECT_EQ(final_image.read_file(*final_file).value().size(), 7U);
+        const std::vector<axk::FilesystemEdit> collision{axk::RenameFilesystemEntry{{"new"}, "demos"}};
+        EXPECT_FALSE(axk::detail::prepare_fat_file_edits(plan->preview, axk::PartitionIndex{0}, collision));
     }
 }
 
@@ -365,7 +393,7 @@ TEST(FatFiles, RejectsReadOnlyReplacementAndRecursiveDeletionButAllowsSkip) {
 TEST(FatFiles, RejectsInvalidNamesCollisionsAndCancellation) {
     const auto bytes = plain_fixture();
     const auto source = std::make_shared<axk::MemoryReader>(bytes);
-    for (const auto name : {"lower.bin", "TOOLONGNAME.BIN", "A.LONG", "A.B.C", "../X", "A.", "A B"}) {
+    for (const auto name : {"TOOLONGNAME.BIN", "A.LONG", "A.B.C", "../X", "A.", "A B"}) {
         const std::array<axk::FilesystemEdit, 1> edits{axk::PutFilesystemFile{{name}, input(0)}};
         EXPECT_FALSE(axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits)) << name;
     }
@@ -491,7 +519,7 @@ TEST(FatFiles, ReviewsOrderedImportsWithoutAllocatingOrChangingBytes) {
     ASSERT_TRUE(review) << review.error().message;
     const std::vector<Action> expected{Action::merge_directory,  Action::skip_file,   Action::replace_file,
                                        Action::create_directory, Action::create_file, Action::skip_file,
-                                       Action::replace_file,     Action::conflict,    Action::conflict,
+                                       Action::replace_file,     Action::conflict,    Action::create_file,
                                        Action::conflict,         Action::conflict,    Action::create_file};
     ASSERT_EQ(review->size(), expected.size());
     for (std::size_t i = 0; i < expected.size(); ++i)

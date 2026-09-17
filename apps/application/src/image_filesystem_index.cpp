@@ -190,15 +190,17 @@ class Builder {
                 fat.geometry().data_cluster_count - fat.geometry().backed_data_cluster_count);
         if ((ex5 || fat16) && source && axk::detail::inspect_fat_file_edit_support(source, partition)) {
             index.edit_partitions.emplace(index.entries[root].id, partition);
-            index.root_capabilities.back() = {
-                index.entries[root].id,
-                true,
-                true,
-                true,
-                true,
-                12U,
-                R"(^[A-Z0-9!#$%&'()@^_`{}~-]{1,8}(\.[A-Z0-9!#$%&'()@^_`{}~-]{1,3})?$)",
-                "Use uppercase ASCII 8.3 names (up to 8 characters plus an optional 3-character extension)."};
+            index.root_capabilities.back() = {index.entries[root].id,
+                                              true,
+                                              true,
+                                              true,
+                                              true,
+                                              12U,
+                                              R"(^[A-Z0-9!#$%&'()@^_`{}~-]{1,8}(\.[A-Z0-9!#$%&'()@^_`{}~-]{1,3})?$)",
+                                              "Use 1-8 ASCII characters plus an optional 1-3 character extension. "
+                                              "Letters are uppercased automatically.",
+                                              {},
+                                              "FAT_8_3_UPPERCASE"};
         }
         std::map<std::string, std::size_t> directories{{"", root}};
         auto sorted = fat.directories();

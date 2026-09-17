@@ -37,6 +37,38 @@ const access: FilesystemAccess = {
 };
 
 describe('FilesController', () => {
+    it('preserves expanded folders after importing into a new revision without selecting the destination', async () => {
+        const folder = entry('folder', 'disk', 'directory');
+        const child = { ...file, parentId: folder.id, ancestorIds: ['disk', folder.id], path: '/folder/file' };
+        let revision = 1;
+        const source: FilesystemAccess = {
+            inspect: async (query = {}) => {
+                const entries = [root, folder, ...(revision > 1 ? [child] : [])];
+                const items = query.entryId
+                    ? entries.filter((item) => item.id === query.entryId)
+                    : query.parentId
+                      ? entries.filter((item) => item.parentId === query.parentId)
+                      : query.rootId
+                        ? entries.filter((item) => item.name.includes(query.query ?? ''))
+                        : [root];
+                return { ...page(items), revision };
+            },
+        };
+        const before = new FilesController(source);
+        await before.initialize();
+        await before.toggle(folder);
+        before.scrollTop = 42;
+        const context = before.capture();
+        before.dispose();
+        revision = 2;
+        const after = new FilesController(source);
+        await after.initialize(context);
+        expect(after.expanded(folder.id)).toBe(true);
+        expect(after.rows.map((row) => row.entry.id)).toEqual([folder.id, child.id]);
+        expect(after.selection).toEqual([]);
+        expect(after.scrollTop).toBe(42);
+        expect(after.revealSequence).toBe(0);
+    });
     it.each([2, 3])('restores renamed navigation only at the confirmed revision, received %s', async (revision) => {
         const folder = entry('folder', 'disk', 'directory');
         const child = {
@@ -87,6 +119,7 @@ describe('FilesController', () => {
             deleteEntry: true,
             renameEntry: true,
             maximumNameBytes: 23,
+            namePolicy: 'PRESERVE' as const,
             namePattern: '^[ -~]{1,23}$',
             nameHint: 'Printable ASCII',
             supportedImports: [],

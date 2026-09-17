@@ -7,6 +7,7 @@ export const writableFilesRoot: FilesystemRootCapabilities = {
     deleteEntry: true,
     renameEntry: true,
     maximumNameBytes: 23,
+    namePolicy: 'PRESERVE',
     namePattern: '^[ -~]{1,23}$',
     nameHint: 'Use 1-23 printable ASCII characters.',
     supportedImports: [],

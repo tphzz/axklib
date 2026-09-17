@@ -69,6 +69,7 @@ export interface FilesystemRootCapabilities {
     deleteEntry: boolean;
     renameEntry: boolean;
     maximumNameBytes: number;
+    namePolicy: 'PRESERVE' | 'FAT_8_3_UPPERCASE';
     namePattern: string;
     nameHint: string;
     supportedImports: string[];

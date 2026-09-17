@@ -131,21 +131,22 @@ describe('Files import workflow', () => {
         expect(imports.inspectInputs).not.toHaveBeenCalled();
         expect(workflow.target).toBeNull();
     });
-    it('requires reviewed FAT 8.3 names without changing the chosen source identity', async () => {
+    it('uppercases FAT names without changing the chosen source identity', async () => {
         const { workflow, imports, mutations } = setup({
             ...writableFilesRoot,
             maximumNameBytes: 12,
+            namePolicy: 'FAT_8_3_UPPERCASE',
             namePattern: "^[A-Z0-9!#$%&'()@^_`{}~-]{1,8}(\\.[A-Z0-9!#$%&'()@^_`{}~-]{1,3})?$",
             nameHint: 'Use uppercase ASCII 8.3 names.',
         });
         await workflow.chooseWorkspace();
-        expect(workflow.rows[0].name).toBe('source.bin');
-        expect(workflow.canInspect).toBe(false);
-        expect(workflow.canSubmit).toBe(false);
-        expect(imports.inspectDestination).not.toHaveBeenCalled();
+        expect(workflow.rows[0].name).toBe('SOURCE.BIN');
+        expect(workflow.canInspect).toBe(true);
+        expect(workflow.canSubmit).toBe(true);
+        expect(imports.inspectDestination).toHaveBeenCalled();
         workflow.rename(0, 'TOO-LONG-NAME.BIN');
         expect(workflow.canInspect).toBe(false);
-        workflow.rename(0, 'SOURCE.BIN');
+        workflow.rename(0, 'Source.bin');
         expect(workflow.canInspect).toBe(true);
         await workflow.inspect();
         expect(workflow.canSubmit).toBe(true);
@@ -220,6 +221,30 @@ describe('Files import workflow', () => {
         await pending;
         expect(workflow.target).toBeNull();
         expect(imports.inspectDestination).not.toHaveBeenCalled();
+    });
+    it('normalizes destination folders after establishing source hierarchy', async () => {
+        const { workflow, imports, mutations } = setup({
+            ...writableFilesRoot,
+            namePolicy: 'FAT_8_3_UPPERCASE',
+            maximumNameBytes: 12,
+            namePattern: '^[A-Z0-9]{1,8}(\\.[A-Z0-9]{1,3})?$',
+        });
+        imports.chooseDirectory.mockResolvedValue([
+            { relativePath: ['Folder'], directory: true },
+            { relativePath: ['Folder', 'Nested'], directory: true },
+            { relativePath: ['Folder', 'Nested', 'tone.bin'], directory: false, source },
+        ]);
+        await workflow.chooseDirectory();
+        expect(workflow.rows.map((row) => row.name)).toEqual(['FOLDER', 'NESTED', 'TONE.BIN']);
+        expect(workflow.rows.map((row) => row.parent)).toEqual([null, 0, 1]);
+        expect(imports.inspectInputs).toHaveBeenCalledWith([source], expect.any(Function));
+        await workflow.submit();
+        expect(mutations.execute.mock.calls[0][1][2]).toMatchObject({
+            kind: 'PUT_FILE',
+            relativePath: ['FOLDER', 'NESTED', 'TONE.BIN'],
+            source,
+            expectedSource: snapshot,
+        });
     });
     it('reviews directory contents and submits parent-before-child edits with snapshots only for files', async () => {
         const { workflow, imports, mutations } = setup();

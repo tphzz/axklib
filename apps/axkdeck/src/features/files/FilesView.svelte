@@ -121,6 +121,7 @@
     ]);
     $effect(() => {
         const rootId = controller.rootId;
+        if (!controller.viewReady) return;
         clearTimeout(timer);
         query = untrack(() => controller.query);
         const top = untrack(() => controller.scrollTop);
@@ -356,7 +357,9 @@
             if (!(event.relatedTarget instanceof Node) || !scroller.contains(event.relatedTarget)) dropTarget = null;
         }}
         ondrop={dropped}
-        onscroll={() => (controller.scrollTop = scroller.scrollTop)}
+        onscroll={() => {
+            if (controller.viewReady) controller.scrollTop = scroller.scrollTop;
+        }}
         role="treegrid"
         tabindex="-1"
         aria-label="Filesystem entries"

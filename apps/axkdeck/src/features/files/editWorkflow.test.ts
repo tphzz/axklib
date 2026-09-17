@@ -3,7 +3,8 @@ import type { FilesystemMutationDriver } from '../../lib/filesystem';
 import { FilesystemWriteRejected } from '../../lib/filesystem';
 import type { JobState } from '../../lib/transport';
 import { filesystemEntry, writableFilesRoot } from '../../lib/testing/filesystem';
-import { FilesEditWorkflow, validFilesystemName } from './editWorkflow.svelte';
+import { FilesEditWorkflow } from './editWorkflow.svelte';
+import { validFilesystemName } from './nameValidation';
 
 const completed: JobState = { jobId: 7, kind: 'images.filesystem.edit', status: 'completed' };
 function setup(kind: 'create' | 'delete' = 'create') {
@@ -20,6 +21,30 @@ function setup(kind: 'create' | 'delete' = 'create') {
 }
 
 describe('Files edits', () => {
+    it('rejects case-only FAT renames and submits canonical names', async () => {
+        const { driver, workflow } = setup();
+        workflow.close();
+        const capabilities = {
+            ...writableFilesRoot,
+            namePolicy: 'FAT_8_3_UPPERCASE' as const,
+            maximumNameBytes: 12,
+            namePattern: '^[A-Z0-9]{1,8}$',
+        };
+        workflow.open(
+            { kind: 'rename', revision: 3, entries: [filesystemEntry({ name: 'OLD' })], capabilities },
+            driver,
+        );
+        workflow.name = 'old';
+        expect(workflow.canSubmit).toBe(false);
+        expect(workflow.nameError).toBe('Enter a different name.');
+        workflow.name = 'New';
+        await workflow.submit();
+        expect(driver.execute).toHaveBeenCalledWith(
+            3,
+            [{ kind: 'RENAME', entryId: 'folder', newName: 'NEW' }],
+            expect.any(Function),
+        );
+    });
     it('allows dismissal after a definite submission rejection without inferring an uncertain outcome', async () => {
         const { workflow, driver } = setup();
         driver.execute.mockRejectedValueOnce(new FilesystemWriteRejected('Revision changed'));

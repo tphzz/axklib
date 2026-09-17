@@ -31,6 +31,8 @@ Result<void> State::reserve_directory_bytes(std::size_t bytes) {
     return {};
 }
 Result<std::array<std::byte, 11>> short_name(std::string_view name) {
+    const auto uppercase = detail::upper_ascii(std::string{name});
+    name = uppercase;
     const auto dot = name.find('.');
     const auto stem = name.substr(0, dot);
     const auto extension = dot == std::string_view::npos ? std::string_view{} : name.substr(dot + 1U);
@@ -40,7 +42,7 @@ Result<std::array<std::byte, 11>> short_name(std::string_view name) {
     };
     if (stem.empty() || stem.size() > 8U || extension.size() > 3U ||
         (dot != std::string_view::npos && extension.empty()) || !valid(stem) || !valid(extension))
-        return std::unexpected(error("New FAT names require explicit uppercase ASCII 8.3 names"));
+        return std::unexpected(error("FAT names require 1-8 ASCII characters and an optional 1-3 character extension"));
     std::array<std::byte, 11> result;
     result.fill(std::byte{' '});
     for (std::size_t i = 0; i < stem.size(); ++i)
@@ -171,7 +173,8 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                 auto name = short_name(operation.new_name);
                 if (!name)
                     return std::unexpected(name.error());
-                const auto destination = parent_path + (parent_path.empty() ? "" : "/") + operation.new_name;
+                const auto destination =
+                    parent_path + (parent_path.empty() ? "" : "/") + detail::upper_ascii(operation.new_name);
                 if (nodes.contains(destination))
                     return std::unexpected(error("FAT name is unchanged or already exists"));
                 auto &node = found->second;

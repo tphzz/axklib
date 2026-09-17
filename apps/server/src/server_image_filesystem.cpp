@@ -70,6 +70,7 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                                 {"deleteEntry", root.delete_entry},
                                 {"renameEntry", root.rename_entry},
                                 {"maximumNameBytes", root.maximum_name_bytes},
+                                {"namePolicy", root.name_policy},
                                 {"supportedImports", root.supported_imports},
                                 {"namePattern", root.name_pattern},
                                 {"nameHint", root.name_hint}});

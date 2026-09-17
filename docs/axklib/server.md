@@ -116,8 +116,11 @@ no selection the active partition/root is the destination. The review captures
 that destination and image revision before choosing sources. Partition and
 entry Import submenus also expose Import from disk for recursive workspace
 directory contents. All these controls use the active root's capabilities and
-name constraints. FAT destinations require explicitly reviewed uppercase ASCII
-8.3 names; no aliases are synthesized from incompatible source names.
+name constraints. Root capabilities include `namePolicy`: `PRESERVE` retains
+case, while `FAT_8_3_UPPERCASE` uppercases ASCII letters in destination names.
+FAT names must fit 8.3 limits; no aliases are synthesized from incompatible
+source names. Source paths remain unchanged. Each editable name has a validation
+indicator with a tooltip explaining rejected names or destination conflicts.
 
 Dropping raw files or directories onto a Files directory row
 targets that directory; empty tree space targets the active root. The pointer
@@ -216,7 +219,9 @@ Submit `{"kind":"RENAME","entryId":"...","newName":"..."}` through
 mixing identity-bound edits with path changes is rejected. Rename changes a
 file or directory name within its existing parent, never moves or overwrites
 another entry. Roots, filesystem metadata and protected entries cannot be
-renamed. Native name limits apply, including explicit uppercase 8.3 FAT names.
+renamed. Native name limits apply, including 8.3 FAT names. FAT edits accept
+lowercase ASCII letters and store them in uppercase; case-only renames are
+unchanged names and are rejected. SFS names retain their case.
 Existing FAT long-name records attached to the renamed entry are retired;
 other long-name records are preserved. Payloads, allocation, links and unrelated
 metadata remain unchanged. Guarded EX5 media retain their existing capacity

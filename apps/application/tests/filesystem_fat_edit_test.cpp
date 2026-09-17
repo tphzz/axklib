@@ -140,7 +140,7 @@ TEST_P(FatFilesystemEdits, RenamesPopulatedDirectoriesThroughTheRegisteredJobWit
         {"imageId", opened.image_id},
         {"expectedRevision", opened.revision},
         {"acknowledgeDeviceRelationships", true},
-        {"edits", nlohmann::json::array({{{"kind", "RENAME"}, {"entryId", directory_id}, {"newName", "RENAMED"}}})}};
+        {"edits", nlohmann::json::array({{{"kind", "RENAME"}, {"entryId", directory_id}, {"newName", "Renamed"}}})}};
     const auto result = registry.invoke("images.filesystem.edit", request, context);
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_TRUE(result->at("warnings").empty());
@@ -424,6 +424,7 @@ TEST_P(FatFilesystemEdits, ResolvesReviewsAndRunsRegisteredJobsWithTheCorrectRoo
     EXPECT_TRUE(capability->delete_entry);
     EXPECT_TRUE(capability->rename_entry);
     EXPECT_EQ(capability->maximum_name_bytes, 12U);
+    EXPECT_EQ(capability->name_policy, "FAT_8_3_UPPERCASE");
     const std::vector<axk::app::ImageFilesystemEdit> requests{
         axk::app::CreateImageFilesystemDirectory{root_id, {"NEW"}}};
     const auto resolved = sessions->resolve_filesystem_edits(opened.image_id, "owner", 1U, requests);

@@ -774,7 +774,7 @@
       "ImageFilesystemRootCapabilities": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "maximumNameBytes", "namePattern", "nameHint", "supportedImports"],
+        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "maximumNameBytes", "namePolicy", "namePattern", "nameHint", "supportedImports"],
         "properties": {
           "rootId": {"type": "string"},
           "createDirectory": {"type": "boolean"},
@@ -782,6 +782,7 @@
           "deleteEntry": {"type": "boolean"},
           "renameEntry": {"type": "boolean"},
           "maximumNameBytes": {"type": "integer", "minimum": 0},
+          "namePolicy": {"type": "string", "enum": ["PRESERVE", "FAT_8_3_UPPERCASE"]},
           "supportedImports": {"type": "array", "items": {"type": "string", "enum": ["SU700_FLOPPY"]}, "uniqueItems": true},
           "namePattern": {"type": "string"},
           "nameHint": {"type": "string"}

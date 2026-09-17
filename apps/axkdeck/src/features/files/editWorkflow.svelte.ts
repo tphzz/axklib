@@ -8,22 +8,13 @@ import type {
 import type { JobState } from '../../lib/transport';
 import { FilesystemWriteRejected } from '../../lib/filesystem';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { filesystemNameError, normalizeFilesystemName } from './nameValidation';
 
 export interface FilesEditReview {
     kind: 'create' | 'delete' | 'rename';
     revision: number;
     entries: FilesystemEntry[];
     capabilities: FilesystemRootCapabilities;
-}
-
-export function validFilesystemName(name: string, capabilities: FilesystemRootCapabilities): boolean {
-    if (!name || name === '.' || name === '..' || /[/\\\0]/.test(name)) return false;
-    if (new TextEncoder().encode(name).length > capabilities.maximumNameBytes) return false;
-    try {
-        return !!capabilities.namePattern && new RegExp(capabilities.namePattern).exec(name)?.[0] === name;
-    } catch {
-        return false;
-    }
 }
 
 export class FilesEditWorkflow {
@@ -47,15 +38,24 @@ export class FilesEditWorkflow {
     get busy(): boolean {
         return this.phase === 'running' || this.phase === 'refreshing';
     }
+    get nameError(): string | null {
+        if (!this.review) return null;
+        const error = filesystemNameError(this.name, this.review.capabilities);
+        if (error) return error;
+        if (
+            this.review.kind === 'rename' &&
+            normalizeFilesystemName(this.name, this.review.capabilities) ===
+                normalizeFilesystemName(this.review.entries[0].name, this.review.capabilities)
+        )
+            return 'Enter a different name.';
+        return null;
+    }
     get canSubmit(): boolean {
         return (
             !!this.review &&
             !this.busy &&
             (this.phase !== 'unconfirmed' || this.jobId !== null) &&
-            (this.phase !== 'ready' ||
-                this.review.kind === 'delete' ||
-                (validFilesystemName(this.name, this.review.capabilities) &&
-                    (this.review.kind !== 'rename' || this.name !== this.review.entries[0].name)))
+            (this.phase !== 'ready' || this.review.kind === 'delete' || !this.nameError)
         );
     }
 
@@ -107,6 +107,7 @@ export class FilesEditWorkflow {
             await this.refresh();
         } else {
             const review = this.review;
+            this.name = normalizeFilesystemName(this.name, review.capabilities);
             const selected = new Set(review.entries.map((entry) => entry.id));
             const edits: FilesystemEdit[] =
                 review.kind === 'create'

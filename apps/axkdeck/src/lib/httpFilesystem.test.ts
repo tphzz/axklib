@@ -259,6 +259,7 @@ describe('Files HTTP binding', () => {
                 deleteEntry: true,
                 renameEntry: true,
                 maximumNameBytes: 23,
+                namePolicy: 'PRESERVE',
                 namePattern: '^[ -~]{1,23}$',
                 nameHint: 'Printable ASCII',
                 supportedImports: [],

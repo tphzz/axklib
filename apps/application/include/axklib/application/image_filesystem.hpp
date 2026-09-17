@@ -62,6 +62,7 @@ struct ImageFilesystemRootCapabilities {
     std::string name_pattern{};
     std::string name_hint{};
     std::vector<std::string> supported_imports{};
+    std::string name_policy{"PRESERVE"};
 };
 
 struct ImageFilesystemPage {

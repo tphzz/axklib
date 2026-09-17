@@ -11,7 +11,8 @@ import { updateFilesSelection, type FilesSelection } from './selection';
 interface RootState {
     focused: FilesystemEntry | null;
     selection: FilesSelection;
-    expanded: string[];
+    expanded: FilesystemEntry[];
+    loadedCounts: Record<string, number>;
     query: string;
     results: FilesystemEntry[];
     resultCount: number;
@@ -36,12 +37,14 @@ export class FilesController {
     filesystemName = $state('');
     revision = $state(0);
     initialized = $state(false);
+    viewReady = $state(false);
     error = $state('');
     busy = $state(false);
     revealId = $state('');
     revealSequence = $state(0);
     private rootCapabilities = $state<FilesystemRootCapabilities[]>([]);
     private states = $state<Record<string, RootState>>({});
+    private pendingStates: Record<string, RootState> = {};
     private children = $state<Record<string, FilesystemEntry[]>>({});
     private counts = $state<Record<string, number>>({});
     private loading = new Set<string>();
@@ -93,14 +96,14 @@ export class FilesController {
             if (depth > 64) return;
             for (const entry of this.children[parent] ?? []) {
                 rows.push({ entry, depth });
-                if (state.expanded.includes(entry.id)) visit(entry.id, depth + 1);
+                if (state.expanded.some((item) => item.id === entry.id)) visit(entry.id, depth + 1);
             }
         };
         visit(this.rootId, 0);
         return rows;
     }
     expanded(id: string): boolean {
-        return this.states[this.rootId]?.expanded.includes(id) ?? false;
+        return this.states[this.rootId]?.expanded.some((entry) => entry.id === id) ?? false;
     }
     hasMore(id: string): boolean {
         return (this.children[id]?.length ?? 0) < (this.counts[id] ?? 0);
@@ -129,10 +132,22 @@ export class FilesController {
     }
 
     capture(): FilesContext {
+        const states = JSON.parse(JSON.stringify({ ...this.states, ...this.pendingStates })) as Record<
+            string,
+            RootState
+        >;
+        const entries = new Map(
+            [...this.roots, ...Object.values(this.children).flat()].map((entry) => [entry.id, entry]),
+        );
+        for (const [id, children] of Object.entries(this.children)) {
+            const parent = entries.get(id);
+            if (parent && states[parent.rootId] && !this.pendingStates[parent.rootId])
+                states[parent.rootId].loadedCounts[parent.path] = children.length;
+        }
         return {
             revision: this.revision,
             rootId: this.rootId,
-            states: JSON.parse(JSON.stringify(this.states)) as Record<string, RootState>,
+            states,
             rename: this.rename,
         };
     }
@@ -149,6 +164,7 @@ export class FilesController {
         this.counts = {};
         this.loading.clear();
         this.initialized = false;
+        this.viewReady = false;
         this.rootCapabilities = [];
         this.busy = true;
         this.error = '';
@@ -176,6 +192,16 @@ export class FilesController {
                                 ...state,
                                 focused: state.focused ? remap(state.focused) : null,
                                 selection: { ...state.selection, items: state.selection.items.map(remap) },
+                                expanded: state.expanded.map(remap),
+                                loadedCounts: Object.fromEntries(
+                                    Object.entries(state.loadedCounts).map(([path, count]) => [
+                                        id === rename.entry.rootId &&
+                                        (path === rename.entry.path || path.startsWith(rename.entry.path + '/'))
+                                            ? newPath + path.slice(rename.entry.path.length)
+                                            : path,
+                                        count,
+                                    ]),
+                                ),
                             },
                         ]),
                     ),
@@ -204,6 +230,7 @@ export class FilesController {
                             focused: null,
                             selection: { items: [], anchorId: '' },
                             expanded: [],
+                            loadedCounts: saved?.loadedCounts ?? {},
                             query: saved?.query ?? '',
                             results: [],
                             resultCount: 0,
@@ -212,60 +239,12 @@ export class FilesController {
                     ];
                 }),
             );
+            this.pendingStates = Object.fromEntries(
+                roots.filter((root) => context.states[root.id]).map((root) => [root.id, context.states[root.id]]),
+            );
             const rootId = roots.find((root) => root.id === context.rootId)?.id ?? roots[0]?.id;
             if (rootId) {
                 await this.chooseRoot(rootId);
-                if (!this.current(generation)) return;
-                const saved = context.states[rootId];
-                // Opaque identities can be reused after directory records change.
-                for (const id of context.revision === first.revision ? (saved?.expanded ?? []) : []) {
-                    const entry = await this.lookup({ entryId: id }).catch(() => null);
-                    if (!this.current(generation)) return;
-                    if (entry?.rootId === rootId) {
-                        await this.reveal(entry);
-                        if (!this.expanded(id)) await this.toggle(entry);
-                    }
-                }
-                const restored: FilesystemEntry[] = [];
-                const restoredById = new Map<string, FilesystemEntry>();
-                for (const entry of saved?.selection.items ?? []) {
-                    const current = await this.restoreEntry(entry).catch(() => null);
-                    if (!this.current(generation)) return;
-                    if (current?.rootId === rootId && (await this.reveal(current))) {
-                        restored.push(current);
-                        restoredById.set(entry.id, current);
-                    }
-                }
-                const selected = saved?.focused
-                    ? (restoredById.get(saved.focused.id) ?? (await this.restoreEntry(saved.focused).catch(() => null)))
-                    : null;
-                if (!this.current(generation)) return;
-                if (selected?.rootId === rootId) await this.reveal(selected);
-                else this.states[rootId].focused = null;
-                if (!this.current(generation)) return;
-                if (saved?.query) await this.search(saved.query);
-                if (!this.current(generation)) return;
-                const pending = new Set([...restored, ...(selected ? [selected] : [])].map((entry) => entry.id));
-                let checked = 0;
-                while (saved?.query && pending.size) {
-                    const results = this.states[rootId].results;
-                    for (const entry of results.slice(checked)) pending.delete(entry.id);
-                    if (!pending.size || !this.moreResults) break;
-                    checked = results.length;
-                    await this.search(saved.query, true);
-                    if (!this.current(generation)) return;
-                    if (this.states[rootId].results.length === checked) break;
-                }
-                const visible = new Set(this.rows.map((row) => row.entry.id));
-                this.states[rootId].selection = {
-                    items: restored.filter((entry) => visible.has(entry.id)),
-                    anchorId: restoredById.get(saved?.selection.anchorId ?? '')?.id ?? selected?.id ?? '',
-                };
-                this.states[rootId].focused =
-                    selected && visible.has(selected.id)
-                        ? selected
-                        : (restored.find((entry) => visible.has(entry.id)) ?? null);
-                this.states[rootId].scrollTop = saved?.scrollTop ?? 0;
                 this.revealSequence = 0;
             }
             if (this.current(generation)) this.initialized = true;
@@ -279,19 +258,107 @@ export class FilesController {
     async chooseRoot(id: string): Promise<void> {
         if (!this.roots.some((root) => root.id === id) || this.disposed) return;
         this.searchGeneration += 1;
+        this.viewReady = false;
         this.busy = false;
         this.rootId = id;
         this.states[id] ??= {
             focused: null,
             selection: { items: [], anchorId: '' },
             expanded: [],
+            loadedCounts: {},
             query: '',
             results: [],
             resultCount: 0,
             scrollTop: 0,
         };
-        if (!(id in this.children)) await this.loadChildren(id);
-        if (this.states[id].query) await this.search(this.states[id].query);
+        const generation = this.generation;
+        const saved = this.pendingStates[id];
+        if (saved) await this.restoreRoot(id, saved);
+        else {
+            if (!(id in this.children)) await this.loadChildren(id);
+            if (this.current(generation) && this.rootId === id && this.states[id].query)
+                await this.search(this.states[id].query);
+        }
+        if (this.current(generation) && this.rootId === id) this.viewReady = true;
+    }
+
+    private async restoreRoot(id: string, saved: RootState): Promise<void> {
+        const generation = this.generation;
+        const active = (): boolean => this.current(generation) && this.rootId === id;
+        const state = this.states[id];
+        const resolved = new Map<string, FilesystemEntry>();
+        for (const entry of [...saved.expanded, ...saved.selection.items, ...(saved.focused ? [saved.focused] : [])]) {
+            if (resolved.has(entry.id)) continue;
+            const current = await this.restoreEntry(entry).catch(() => null);
+            if (!active()) return;
+            if (current) resolved.set(entry.id, current);
+        }
+        state.expanded = saved.expanded.flatMap((entry) => resolved.get(entry.id) ?? []);
+        const restored = saved.selection.items.flatMap((entry) => resolved.get(entry.id) ?? []);
+        const focused = saved.focused ? resolved.get(saved.focused.id) : undefined;
+        const targets = [...restored, ...(focused ? [focused] : [])];
+        await this.loadExpanded(
+            this.roots.find((root) => root.id === id)!,
+            state,
+            targets,
+        );
+        if (!active()) return;
+        if (saved.query) {
+            await this.search(saved.query);
+            if (!active()) return;
+            const pending = new Set(targets.map((entry) => entry.id));
+            let checked = 0;
+            while (pending.size || state.results.length < saved.results.length) {
+                for (const entry of state.results.slice(checked)) pending.delete(entry.id);
+                if ((!pending.size && state.results.length >= saved.results.length) || !this.moreResults) break;
+                checked = state.results.length;
+                await this.search(saved.query, true);
+                if (!active()) return;
+                if (state.results.length === checked) break;
+            }
+        }
+        const visible = new Set(this.rows.map((row) => row.entry.id));
+        state.selection = {
+            items: restored.filter((entry) => visible.has(entry.id)),
+            anchorId: resolved.get(saved.selection.anchorId)?.id ?? '',
+        };
+        state.focused = focused && visible.has(focused.id) ? focused : (state.selection.items[0] ?? null);
+        state.scrollTop = saved.scrollTop;
+        delete this.pendingStates[id];
+    }
+
+    // Refill visible branches without changing expansion, selection, or navigation.
+    private async loadExpanded(
+        parent: FilesystemEntry,
+        state: RootState,
+        targets: FilesystemEntry[] = [],
+    ): Promise<void> {
+        if (parent.ancestorIds.length > 64) return;
+        const generation = this.generation;
+        const required = new Set<string>();
+        for (const entry of [...state.expanded, ...targets]) {
+            const chain = [...entry.ancestorIds, entry.id];
+            const index = chain.indexOf(parent.id);
+            if (index >= 0 && index + 1 < chain.length) required.add(chain[index + 1]);
+        }
+        if (!(parent.id in this.children)) await this.loadChildren(parent.id);
+        while (this.current(generation)) {
+            const children = this.children[parent.id] ?? [];
+            for (const child of children) required.delete(child.id);
+            if (
+                !this.hasMore(parent.id) ||
+                (!required.size && children.length >= (state.loadedCounts[parent.path] ?? 0))
+            )
+                break;
+            await this.loadChildren(parent.id);
+            if (children.length === this.children[parent.id]?.length) break;
+        }
+        if (!this.current(generation)) return;
+        for (const child of this.children[parent.id] ?? []) {
+            if (child.kind === 'directory' && state.expanded.some((entry) => entry.id === child.id))
+                await this.loadExpanded(child, state, targets);
+            if (!this.current(generation)) return;
+        }
     }
 
     async loadChildren(id: string): Promise<void> {
@@ -316,8 +383,8 @@ export class FilesController {
     async toggle(entry: FilesystemEntry): Promise<void> {
         const state = this.states[this.rootId];
         if (!state || entry.kind === 'file') return;
-        if (state.expanded.includes(entry.id)) {
-            state.expanded = state.expanded.filter((id) => id !== entry.id);
+        if (state.expanded.some((item) => item.id === entry.id)) {
+            state.expanded = state.expanded.filter((item) => item.id !== entry.id);
             const hidden = state.selection.items.some((item) => item.ancestorIds.includes(entry.id));
             state.selection.items = state.selection.items.filter((item) => !item.ancestorIds.includes(entry.id));
             if (hidden) {
@@ -328,8 +395,8 @@ export class FilesController {
             if (hidden) state.selection.anchorId = entry.id;
             if (state.focused?.ancestorIds.includes(entry.id)) state.focused = entry;
         } else {
-            state.expanded = [...state.expanded, entry.id];
-            if (!(entry.id in this.children)) await this.loadChildren(entry.id);
+            state.expanded = [...state.expanded, entry];
+            await this.loadExpanded(entry, state);
         }
     }
 
@@ -425,7 +492,8 @@ export class FilesController {
                 this.error ||= 'The entry could not be located in its directory';
                 return false;
             }
-            if (!state.expanded.includes(parent)) state.expanded.push(parent);
+            const directory = this.children[chain[index - 1]]?.find((item) => item.id === parent);
+            if (directory && !state.expanded.some((item) => item.id === parent)) state.expanded.push(directory);
         }
         this.select(entry);
         this.revealId = entry.id;

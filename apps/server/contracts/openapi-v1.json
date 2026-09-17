@@ -4137,6 +4137,13 @@
           "namePattern": {
             "type": "string"
           },
+          "namePolicy": {
+            "enum": [
+              "PRESERVE",
+              "FAT_8_3_UPPERCASE"
+            ],
+            "type": "string"
+          },
           "putFile": {
             "type": "boolean"
           },
@@ -4164,6 +4171,7 @@
           "deleteEntry",
           "renameEntry",
           "maximumNameBytes",
+          "namePolicy",
           "namePattern",
           "nameHint",
           "supportedImports"

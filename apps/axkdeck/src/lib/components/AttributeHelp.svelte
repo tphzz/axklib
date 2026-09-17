@@ -1,15 +1,18 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
     import { on } from 'svelte/events';
+    import type { Snippet } from 'svelte';
 
     let {
         label,
         description,
         contextKey = '',
+        children,
     }: {
         label: string;
         description: string;
         contextKey?: string;
+        children?: Snippet;
     } = $props();
     const id = $props.id();
     let trigger = $state<HTMLButtonElement>();
@@ -135,6 +138,7 @@
     <button
         type="button"
         class="attribute-help-label"
+        aria-label={children ? label : undefined}
         bind:this={trigger}
         aria-describedby={open ? id : undefined}
         onpointerenter={enter}
@@ -143,7 +147,8 @@
         onblur={() => {
             if (!pinned) close();
         }}
-        onclick={toggle}>{label}</button
+        onclick={toggle}
+        >{#if children}{@render children()}{:else}{label}{/if}</button
     >
     {#if open}
         <div

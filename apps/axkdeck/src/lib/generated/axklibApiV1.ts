@@ -2735,6 +2735,8 @@ export interface components {
             maximumNameBytes: number;
             nameHint: string;
             namePattern: string;
+            /** @enum {string} */
+            namePolicy: 'PRESERVE' | 'FAT_8_3_UPPERCASE';
             putFile: boolean;
             renameEntry: boolean;
             rootId: string;
