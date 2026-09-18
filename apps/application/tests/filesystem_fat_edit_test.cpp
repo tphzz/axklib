@@ -194,6 +194,85 @@ TEST_P(FatFilesystemEdits, ImportsSelectedFloppyContentsAndTheRawImageWithoutCha
                                 context));
 }
 
+TEST_P(FatFilesystemEdits, MovesASelectionThroughTheJobAndRejectsStaleAndMixedRequests) {
+    axk::app::AlterationJournalStore journals{root / "journals"};
+    const auto seeded = apply(journals);
+    ASSERT_TRUE(seeded) << seeded.error().message;
+    const auto revision = seeded->revision;
+    const auto roots = sessions->filesystem(opened.image_id, "owner", revision).value();
+    const auto root_id = roots.items.back().id;
+    const auto folders = sessions->filesystem(opened.image_id, "owner", revision, {.parent_id = root_id}).value();
+    const auto directory = std::ranges::find(folders.items, "NEW", &axk::app::ImageFilesystemEntry::name);
+    ASSERT_NE(directory, folders.items.end());
+    const auto files = sessions->filesystem(opened.image_id, "owner", revision, {.parent_id = directory->id}).value();
+    ASSERT_EQ(files.items.size(), 2U);
+    axk::app::UploadStore uploads{root / "uploads", 1048576U, 1048576U, 8U, 1024U, std::chrono::minutes{5}};
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_filesystem_edit_operations(registry, *sandbox, uploads, *sessions, journals));
+    const axk::app::OperationContext context{
+        .owner_id = "owner", .request_id = "move", .cancellation = {}, .progress = nullptr, .display_path = {}};
+    auto edits_json = nlohmann::json::array();
+    for (const auto &entry : files.items)
+        edits_json.push_back({{"kind", "MOVE"}, {"entryId", entry.id}, {"destinationParentEntryId", root_id}});
+    nlohmann::json request{{"imageId", opened.image_id},
+                           {"expectedRevision", revision},
+                           {"acknowledgeDeviceRelationships", true},
+                           {"edits", edits_json}};
+    const auto before = digest();
+    auto mixed = request;
+    mixed["edits"].push_back({{"kind", "DELETE"}, {"entryId", directory->id}, {"recursive", true}});
+    EXPECT_FALSE(registry.invoke("images.filesystem.edit", mixed, context));
+    EXPECT_EQ(digest(), before);
+    if (roots.items.size() > 1U) {
+        auto cross_partition = request;
+        cross_partition["edits"][0]["destinationParentEntryId"] = roots.items.front().id;
+        EXPECT_FALSE(registry.invoke("images.filesystem.edit", cross_partition, context));
+        EXPECT_EQ(digest(), before);
+    }
+    const auto moved = registry.invoke("images.filesystem.edit", request, context);
+    ASSERT_TRUE(moved) << moved.error().message;
+    EXPECT_EQ(moved->at("revision"), revision + 1U);
+    const auto children = sessions->filesystem(opened.image_id, "owner", revision + 1U, {.parent_id = root_id}).value();
+    for (const auto &entry : files.items)
+        EXPECT_NE(std::ranges::find(children.items, entry.name, &axk::app::ImageFilesystemEntry::name),
+                  children.items.end());
+    const auto changed_digest = digest();
+    EXPECT_FALSE(registry.invoke("images.filesystem.edit", request, context));
+    EXPECT_EQ(digest(), changed_digest);
+}
+
+TEST_P(FatFilesystemEdits, CancellingAPartiallyWrittenMoveRestoresBothDirectoriesAndTheRevision) {
+    axk::app::AlterationJournalStore seed_journals{root / "seed-journals"};
+    const auto seeded = apply(seed_journals);
+    ASSERT_TRUE(seeded) << seeded.error().message;
+    const auto before = digest();
+    axk::CancellationSource cancellation;
+    bool reached{};
+    axk::app::AlterationJournalStore journals{root / "move-journals", 32U * 1024U * 1024U,
+                                              [&](std::string_view phase, std::size_t) {
+                                                  if (phase == "after-patch-chunk") {
+                                                      reached = true;
+                                                      cancellation.cancel();
+                                                  }
+                                                  return false;
+                                              },
+                                              127U};
+    const std::vector<axk::FilesystemEdit> moves{axk::MoveFilesystemEntry{{"NEW", "DATA.BIN"}, {}},
+                                                 axk::MoveFilesystemEntry{{"NEW", "EMPTY.BIN"}, {}}};
+    const auto cancelled = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner",
+                                                            seeded->revision, partition, moves, cancellation.token());
+    ASSERT_FALSE(cancelled);
+    EXPECT_TRUE(reached);
+    EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+    EXPECT_EQ(digest(), before);
+    EXPECT_TRUE(journals.storage_ready());
+    EXPECT_TRUE(sessions->begin_read(opened.image_id, "owner", seeded->revision));
+    const auto retried = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner",
+                                                          seeded->revision, partition, moves);
+    ASSERT_TRUE(retried) << retried.error().message;
+    EXPECT_EQ(retried->revision, seeded->revision + 1U);
+}
+
 TEST_P(FatFilesystemEdits, RenamesPopulatedDirectoriesThroughTheRegisteredJobWithoutChangingData) {
     const auto roots = sessions->filesystem(opened.image_id, "owner", opened.revision);
     ASSERT_TRUE(roots);

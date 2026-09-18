@@ -82,7 +82,8 @@ unsafe allocation remain available for browsing and export of readable content.
 
 ### Work With Files
 
-- Create directories, rename files and directories, and review batch deletion
+- Create directories, rename entries, drag selected files and folders to move
+  them within a partition, and review batch deletion
   on supported writable SFS, FAT16 and EX5 filesystems.
 - Import files and directory trees through a picker or drag-and-drop; export
   selected files and folders, or drag copies out to the operating system.

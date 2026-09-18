@@ -162,6 +162,7 @@ add_library(
   src/sfs_files_preparation.cpp
   src/filesystem_preparation.cpp
   src/fat_files_edit.cpp
+  src/fat_files_move.cpp
   src/fat_files_import.cpp
   src/fat_files_state.cpp
   src/fat_files_preparation.cpp

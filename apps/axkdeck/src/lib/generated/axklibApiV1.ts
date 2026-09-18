@@ -2637,6 +2637,12 @@ export interface components {
         };
         ImageFilesystemEdit:
             | {
+                  destinationParentEntryId: string;
+                  entryId: string;
+                  /** @constant */
+                  kind: 'MOVE';
+              }
+            | {
                   entryId: string;
                   /** @constant */
                   kind: 'RENAME';
@@ -2789,6 +2795,7 @@ export interface components {
             createDirectory: boolean;
             deleteEntry: boolean;
             maximumNameBytes: number;
+            moveEntry: boolean;
             nameHint: string;
             namePattern: string;
             /** @enum {string} */

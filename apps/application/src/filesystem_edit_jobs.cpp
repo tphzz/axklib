@@ -60,6 +60,10 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                     if (kind == "DELETE") {
                         requests.emplace_back(RemoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
                                                                          row.at("recursive").get<bool>()});
+                    } else if (kind == "MOVE") {
+                        requests.emplace_back(
+                            MoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
+                                                     row.at("destinationParentEntryId").get<std::string>()});
                     } else if (kind == "RENAME") {
                         requests.emplace_back(RenameImageFilesystemEntry{row.at("entryId").get<std::string>(),
                                                                          row.at("newName").get<std::string>()});

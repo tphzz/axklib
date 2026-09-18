@@ -212,6 +212,74 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                     bytes[8U + i] = static_cast<std::byte>(operation.new_name[i]);
                 parent->directory_renamed = true;
                 return {};
+            } else if constexpr (std::is_same_v<T, MoveFilesystemEntry>) {
+                if (!existing)
+                    return std::unexpected(error("Filesystem entry to move does not exist"));
+                auto destination_path = operation.destination_parent;
+                destination_path.push_back(name);
+                if (auto checked = check_path(destination_path); !checked)
+                    return checked;
+                auto *destination = &records.at(root.value);
+                for (const auto &component : operation.destination_parent) {
+                    if (auto loaded = load_directory(*destination); !loaded)
+                        return loaded;
+                    auto offset = find_entry(*destination, component);
+                    if (!offset)
+                        return std::unexpected(offset.error());
+                    if (!*offset)
+                        return std::unexpected(error("Move destination directory does not exist"));
+                    auto next = child(*this, *destination, **offset);
+                    if (!next)
+                        return std::unexpected(next.error());
+                    destination = *next;
+                    if (destination == existing)
+                        return std::unexpected(error("A directory cannot move into itself or its descendants"));
+                    if (destination->info.payload_kind != PayloadKind::directory ||
+                        protected_records.contains(destination->info.sfs_id.value))
+                        return std::unexpected(error("Move destination is not an editable directory"));
+                }
+                if (destination == parent)
+                    return {};
+                if (auto loaded = load_directory(*destination); !loaded)
+                    return loaded;
+                auto collision = find_entry(*destination, name);
+                if (!collision)
+                    return std::unexpected(collision.error());
+                if (*collision)
+                    return std::unexpected(error("A destination entry already has this name: " + name));
+                if (existing->info.payload_kind == PayloadKind::directory) {
+                    if (auto loaded = load_directory(*existing); !loaded)
+                        return loaded;
+                    std::size_t parents{};
+                    for (const auto &[id, record] : records) {
+                        static_cast<void>(id);
+                        for (const auto &entry : record.info.directory_entries)
+                            if (entry.name != "." && entry.name != ".." &&
+                                entry.raw_link_id.value == existing->info.sfs_id.value)
+                                ++parents;
+                    }
+                    if (parents != 1U || ByteReader{existing->directory}.be32(36U).value() != parent->info.sfs_id.value)
+                        return std::unexpected(error("Directory aliases cannot be moved safely"));
+                    if (auto changed = change_links(*parent, -1); !changed)
+                        return changed;
+                    if (auto changed = change_links(*destination, 1); !changed)
+                        return changed;
+                    if (auto written = ByteWriter{existing->directory}.write_be32(36U, destination->info.sfs_id.value);
+                        !written)
+                        return written;
+                    existing->directory_renamed = true;
+                }
+                const auto previous_size = destination->directory.size();
+                const auto previously_changed = destination->directory_changed;
+                if (auto inserted = insert(*destination, name, existing->info.sfs_id); !inserted)
+                    return inserted;
+                if (destination->directory.size() == previous_size) {
+                    destination->directory_changed = previously_changed;
+                    destination->directory_renamed = true;
+                }
+                parent->directory_renamed = true;
+                return ByteWriter{parent->directory}.write_be32(**found + 4U,
+                                                                0xf0000000U | existing->info.sfs_id.value);
             } else if constexpr (std::is_same_v<T, CreateFilesystemDirectory>) {
                 if (existing)
                     return existing->info.payload_kind == PayloadKind::directory

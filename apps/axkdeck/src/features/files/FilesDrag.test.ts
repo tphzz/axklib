@@ -72,6 +72,8 @@ it('keeps clicks selection-only, starts after threshold, preserves the batch and
     await fireEvent(window, pointer('pointermove', 13));
     expect(driver.inspect).not.toHaveBeenCalled();
     await fireEvent(window, pointer('pointermove', 30));
+    expect(driver.inspect).not.toHaveBeenCalled();
+    await fireEvent(window, pointer('pointermove', window.innerWidth + 10));
     await waitFor(() => expect(driver.drag.start).toHaveBeenCalledOnce());
     expect(driver.execute).toHaveBeenCalledWith(
         7,

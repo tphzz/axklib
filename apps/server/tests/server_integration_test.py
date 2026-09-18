@@ -865,7 +865,7 @@ def exercise_raw_filesystem_jobs(
     assert status == 200, roots
     root_id = roots["data"]["items"][0]["id"]
     assert roots["data"]["rootCapabilities"] == [{
-        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True, "renameEntry": True,
+        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True, "renameEntry": True, "moveEntry": True,
         "maximumNameBytes": 23, "namePolicy": "PRESERVE", "namePattern": "^[ -~]{1,23}$",
         "nameHint": "Use 1-23 printable ASCII characters.",
         "supportedImports": [],

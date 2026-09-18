@@ -774,13 +774,14 @@
       "ImageFilesystemRootCapabilities": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "maximumNameBytes", "namePolicy", "namePattern", "nameHint", "supportedImports"],
+        "required": ["rootId", "createDirectory", "putFile", "deleteEntry", "renameEntry", "moveEntry", "maximumNameBytes", "namePolicy", "namePattern", "nameHint", "supportedImports"],
         "properties": {
           "rootId": {"type": "string"},
           "createDirectory": {"type": "boolean"},
           "putFile": {"type": "boolean"},
           "deleteEntry": {"type": "boolean"},
           "renameEntry": {"type": "boolean"},
+          "moveEntry": {"type": "boolean"},
           "maximumNameBytes": {"type": "integer", "minimum": 0},
           "namePolicy": {"type": "string", "enum": ["PRESERVE", "FAT_8_3_UPPERCASE"]},
           "supportedImports": {"type": "array", "items": {"type": "string", "enum": ["SU700_FLOPPY", "FAT_FLOPPY_CONTENTS"]}, "uniqueItems": true},
@@ -4811,6 +4812,15 @@
       },
       "ImageFilesystemEdit": {
         "oneOf": [
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "entryId", "destinationParentEntryId"],
+            "properties": {
+              "kind": {"const": "MOVE"},
+              "entryId": {"type": "string", "minLength": 1, "maxLength": 512},
+              "destinationParentEntryId": {"type": "string", "minLength": 1, "maxLength": 512}
+            }
+          },
           {
             "type": "object", "additionalProperties": false,
             "required": ["kind", "entryId", "newName"],

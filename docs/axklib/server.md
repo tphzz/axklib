@@ -213,6 +213,18 @@ and invalidated after commit or rollback. Package application still verifies
 the planned content fingerprint. Standalone copy-publishing writers retain
 their own source-content checks.
 
+Writable roots advertise `moveEntry` separately from other Files actions.
+Move requests use `{ "kind": "MOVE", "entryId": "...", "destinationParentEntryId": "..." }`
+inside `images.filesystem.edit`, bound to `expectedRevision`. A move batch contains
+only moves to one directory in the same partition; partition roots and protected
+metadata cannot be moved. Selected descendants move with their selected ancestor.
+Same-parent entries are unchanged. Name collisions reject the whole transaction;
+there is no overwrite or directory merge. Payloads and native attributes are
+preserved, with directory parent links updated transactionally. Raw moves do not
+repair sampler-object relationships. Use the ordinary edit acknowledgement and
+job recovery rules; a committed move followed by a failed refresh must not be
+resubmitted.
+
 Writable roots advertise `renameEntry` separately from other Files actions.
 Submit `{"kind":"RENAME","entryId":"...","newName":"..."}` through
 `images.filesystem.edit`. A rename request must contain exactly one edit:

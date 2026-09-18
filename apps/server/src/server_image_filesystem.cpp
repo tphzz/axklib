@@ -69,6 +69,7 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                                 {"putFile", root.put_file},
                                 {"deleteEntry", root.delete_entry},
                                 {"renameEntry", root.rename_entry},
+                                {"moveEntry", root.move_entry},
                                 {"maximumNameBytes", root.maximum_name_bytes},
                                 {"namePolicy", root.name_policy},
                                 {"supportedImports", root.supported_imports},

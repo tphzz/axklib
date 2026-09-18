@@ -43,6 +43,16 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
         return std::unexpected(unchanged.error());
     if (edits.empty() || edits.size() > 10000U)
         return std::unexpected(session_error("invalid_request", "Choose between 1 and 10000 filesystem changes"));
+    std::string move_destination;
+    const bool all_moves = std::ranges::all_of(
+        edits, [](const auto &item) { return std::holds_alternative<MoveImageFilesystemEntry>(item); });
+    for (const auto &edit : edits)
+        if (const auto *move = std::get_if<MoveImageFilesystemEntry>(&edit)) {
+            if (!all_moves || (!move_destination.empty() && move_destination != move->destination_parent_entry_id))
+                return std::unexpected(
+                    session_error("invalid_request", "Move batches require one destination and no other edit kinds"));
+            move_destination = move->destination_parent_entry_id;
+        }
     // Paths resolved from this revision must not be retargeted by earlier renames in a batch.
     if (edits.size() != 1U && std::ranges::any_of(edits, [](const auto &edit) {
             return std::holds_alternative<RenameImageFilesystemEntry>(edit);
@@ -67,8 +77,9 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                 using Request = std::decay_t<decltype(request)>;
                 constexpr bool removing = std::is_same_v<Request, RemoveImageFilesystemEntry>;
                 constexpr bool renaming = std::is_same_v<Request, RenameImageFilesystemEntry>;
+                constexpr bool moving = std::is_same_v<Request, MoveImageFilesystemEntry>;
                 const auto &id = [&]() -> const std::string & {
-                    if constexpr (removing || renaming)
+                    if constexpr (removing || renaming || moving)
                         return request.entry_id;
                     else
                         return request.parent_entry_id;
@@ -81,10 +92,10 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                     return std::unexpected(
                         session_error("invalid_request", "Choose entries from one filesystem partition"));
                 result.partition = selected->partition;
-                if constexpr (removing || renaming) {
+                if constexpr (removing || renaming || moving) {
                     if (!entry.parent_id)
                         return std::unexpected(session_error("filesystem_entry_protected",
-                                                             "Partition roots cannot be deleted or renamed"));
+                                                             "Partition roots cannot be deleted, renamed or moved"));
                     if constexpr (renaming)
                         if (auto checked = check_relative_path({request.new_name}); !checked)
                             return std::unexpected(checked.error());
@@ -97,6 +108,19 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                 auto path = std::move(selected->path);
                 if constexpr (removing) {
                     return RemoveFilesystemEntry{std::move(path), request.recursive};
+                } else if constexpr (moving) {
+                    auto destination = paths.resolve(request.destination_parent_entry_id);
+                    if (!destination)
+                        return std::unexpected(destination.error());
+                    if (destination->partition != selected->partition || destination->entry->kind == "file")
+                        return std::unexpected(
+                            session_error("invalid_request", "Choose a directory in the same partition"));
+                    const auto capability = std::ranges::find(index.root_capabilities, entry.root_id,
+                                                              &ImageFilesystemRootCapabilities::root_id);
+                    if (capability == index.root_capabilities.end() || !capability->move_entry)
+                        return std::unexpected(
+                            session_error("unsupported_operation", "Moving is unavailable for this partition"));
+                    return MoveFilesystemEntry{std::move(path), std::move(destination->path)};
                 } else if constexpr (renaming) {
                     return RenameFilesystemEntry{std::move(path), request.new_name};
                 } else {

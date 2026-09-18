@@ -3560,6 +3560,30 @@
           {
             "additionalProperties": false,
             "properties": {
+              "destinationParentEntryId": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "entryId": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "MOVE"
+              }
+            },
+            "required": [
+              "kind",
+              "entryId",
+              "destinationParentEntryId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
               "entryId": {
                 "maxLength": 512,
                 "minLength": 1,
@@ -4246,6 +4270,9 @@
             "minimum": 0,
             "type": "integer"
           },
+          "moveEntry": {
+            "type": "boolean"
+          },
           "nameHint": {
             "type": "string"
           },
@@ -4286,6 +4313,7 @@
           "putFile",
           "deleteEntry",
           "renameEntry",
+          "moveEntry",
           "maximumNameBytes",
           "namePolicy",
           "namePattern",
@@ -22110,9 +22138,9 @@
                     "acknowledgeDeviceRelationships": true,
                     "edits": [
                       {
+                        "destinationParentEntryId": "x",
                         "entryId": "x",
-                        "kind": "RENAME",
-                        "newName": "x"
+                        "kind": "MOVE"
                       }
                     ],
                     "expectedRevision": 1,

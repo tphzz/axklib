@@ -68,6 +68,7 @@ export interface FilesystemRootCapabilities {
     putFile: boolean;
     deleteEntry: boolean;
     renameEntry: boolean;
+    moveEntry: boolean;
     maximumNameBytes: number;
     namePolicy: 'PRESERVE' | 'FAT_8_3_UPPERCASE';
     namePattern: string;
@@ -96,7 +97,8 @@ export type FilesystemEdit =
           conflict: 'SKIP' | 'REPLACE';
       }
     | { kind: 'DELETE'; entryId: string; recursive: boolean }
-    | { kind: 'RENAME'; entryId: string; newName: string };
+    | { kind: 'RENAME'; entryId: string; newName: string }
+    | { kind: 'MOVE'; entryId: string; destinationParentEntryId: string };
 
 export interface FilesystemTransport {
     startFilesystemImportInspection(

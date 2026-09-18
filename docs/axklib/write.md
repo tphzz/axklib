@@ -888,7 +888,7 @@ a later apply request; `alter.hds` receives and revalidates the complete request
 ## Raw Filesystem Operations
 
 Files-mode editing supports admitted writable SFS, standard FAT16, and EX5
-HD/removable roots. It provides directory creation, file import, rename and
+HD/removable roots. It provides directory creation, file import, rename, move and
 deletion independently of A-series object editing. FAT12 and ISO roots remain
 read-only; creation of new images uses the separate profiles above.
 
@@ -914,13 +914,24 @@ allowed.
 The destination is the selected directory, a selected file's parent, or the
 active root when selection is empty. Names must satisfy the root's advertised
 byte limit and naming rules. Reserved filesystem metadata and partition roots
-cannot be renamed or deleted. Entry attributes can prohibit a change even when
+cannot be renamed, moved or deleted. Entry attributes can prohibit a change even when
 the containing root is writable. Nonempty directory deletion requires explicit
 recursive confirmation.
 
+In Files mode, drag one or more selected files or folders onto a folder or the
+active partition root to review a move. Moving is limited to one partition;
+dropping opens a confirmation before any changes are written. Selected descendants
+travel with their selected folder, and entries already in the destination stay
+in place. Existing destination names or duplicate names in the selection block
+the whole batch: moving never overwrites files or merges folders. Folder cycles
+are rejected. A successful move preserves file contents, native attributes and
+payload allocation, updates directory parent references, and retains expanded
+folders and selection after refresh. The destination directory may need additional
+allocation to hold its new entries.
+
 Import review resolves name conflicts before writing. Directory entries merge;
 file conflicts use an explicit Skip or Replace choice. Raw changes do not update
-sampler-object relationships. Renaming or deleting a file that a sampler object
+sampler-object relationships. Moving, renaming or deleting a file that a sampler object
 references can therefore leave that relationship unresolved.
 
 Each batch is bound to its reviewed image revision and input identities. It

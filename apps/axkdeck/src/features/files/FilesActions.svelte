@@ -6,6 +6,7 @@
     import type { FilesController, FilesContext } from './controller.svelte';
     import { FilesEditWorkflow } from './editWorkflow.svelte';
     import FilesEditDialog from './FilesEditDialog.svelte';
+    import { moveTargetAllowed } from './moveSelection';
     import type {
         FilesystemDropReader,
         FilesystemImportActions,
@@ -44,6 +45,7 @@
                 row?.focus({ preventScroll: true });
             });
         },
+        (review, revision) => controller.recordMove(review.revision, review.entries, review.destination!, revision),
     );
     let toolbar: HTMLDivElement;
     const importer = new FilesImportWorkflow((message) => setStatus(message));
@@ -203,6 +205,40 @@
     export function isBusy(): boolean {
         return (
             resolving || !!workflow.review || !!importer.target || !!imageFiles.importer.target || !!imageImport?.busy
+        );
+    }
+
+    export function canMove(entries: FilesystemEntry[], target: FilesystemEntry | null): boolean {
+        return (
+            !!driver &&
+            !!controller.capabilities?.moveEntry &&
+            !controller.busy &&
+            !isBusy() &&
+            !exportBlocked &&
+            moveTargetAllowed(entries, target)
+        );
+    }
+
+    export async function move(entries: FilesystemEntry[], target: FilesystemEntry): Promise<void> {
+        if (!canMove(entries, target) || !driver || !controller.capabilities) return;
+        const current = controller;
+        const revision = current.revision;
+        const boundDriver = driver;
+        let context: FilesContext | undefined;
+        await workflow.openMove(
+            { kind: 'move', revision, entries, destination: target, capabilities: current.capabilities! },
+            {
+                ...boundDriver,
+                refresh: async () => {
+                    context ??= current.capture();
+                    await boundDriver.refresh();
+                    await tick();
+                    await controller.initialize(context);
+                    if (!controller.initialized || controller.error)
+                        throw new Error(controller.error || 'Filesystem refresh failed');
+                },
+            },
+            () => current.reviewChildren(target.id, revision),
         );
     }
 

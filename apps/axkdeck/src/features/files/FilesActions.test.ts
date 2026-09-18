@@ -58,6 +58,7 @@ async function setup(
                         putFile: writable,
                         deleteEntry: writable,
                         renameEntry: writable,
+                        moveEntry: writable,
                     },
                 ],
                 items,

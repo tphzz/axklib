@@ -10,7 +10,9 @@
             ? 'New directory'
             : review.kind === 'rename'
               ? `Rename ${review.entries[0].kind}`
-              : 'Delete filesystem entries',
+              : review.kind === 'move'
+                ? 'Move entries'
+                : 'Delete filesystem entries',
     );
     const nameLabel = $derived(review.kind === 'rename' ? 'Name' : 'Directory name');
     const label = $derived(
@@ -19,7 +21,9 @@
                 ? 'Create'
                 : review.kind === 'rename'
                   ? 'Rename'
-                  : 'Delete permanently'
+                  : review.kind === 'move'
+                    ? 'Move'
+                    : 'Delete permanently'
             : workflow.phase === 'unconfirmed' && workflow.jobId !== null
               ? 'Check status'
               : 'Refresh',
@@ -51,7 +55,27 @@
                 >
             </header>
             <div class="volume-action-content">
-                {#if review.kind !== 'delete'}
+                {#if review.kind === 'move'}
+                    <p class="destination" title={review.destination?.path}>
+                        Move to {review.destination?.path || '/'}
+                    </p>
+                    <ul class="files-deletion-targets">
+                        {#each review.entries as entry (entry.id)}
+                            <li
+                                title={workflow.phase === 'ready'
+                                    ? workflow.conflicts[entry.id] || entry.path
+                                    : entry.path}
+                            >
+                                {entry.path}
+                                {#if workflow.phase === 'ready' && workflow.conflicts[entry.id]}
+                                    <span class="dialog-error"
+                                        ><Icon name="triangle-alert" size={12} /> {workflow.conflicts[entry.id]}</span
+                                    >
+                                {/if}
+                            </li>
+                        {/each}
+                    </ul>
+                {:else if review.kind !== 'delete'}
                     <p class="destination" title={review.entries[0].path || review.entries[0].name}>
                         {review.entries[0].path || review.entries[0].name}
                     </p>
