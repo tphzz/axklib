@@ -262,6 +262,10 @@ class UnavailableTransport implements ImageTransport {
     startObjectRename(): Promise<JobState> {
         return this.unavailable();
     }
+
+    startObjectParameterEdit(): Promise<JobState> {
+        return Promise.reject(new Error('Image editing is unavailable'));
+    }
     inspectVolumeDeletion(): Promise<VolumeDeletionInspection> {
         return this.unavailable();
     }

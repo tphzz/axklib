@@ -15,6 +15,7 @@ import type {
     PlaybackRun,
 } from './auditionTypes';
 import { planDirectPlayback } from './directPlaybackSchedule';
+import { bufferLevelSummary } from './bufferLevels';
 
 export type {
     AuditionControllerOptions,
@@ -65,7 +66,6 @@ interface OutputContextAccess {
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
 const minimumForwardLoopSequenceSeconds = 0.5;
-const diagnosticSampleBudget = 32_768;
 
 function monotonicNow(): number {
     return globalThis.performance?.now() ?? Date.now();
@@ -77,24 +77,6 @@ function newPlaybackId(): string {
 
 function defaultDiagnosticSink({ event, level, ...fields }: AuditionDiagnosticEvent): void {
     reportDiagnostic(event, fields, level);
-}
-
-function bufferLevelSummary(buffer: AudioBuffer): { peak: number; rms: number; sampledValues: number } {
-    const valuesPerChannel = Math.max(1, Math.floor(diagnosticSampleBudget / buffer.numberOfChannels));
-    const stride = Math.max(1, Math.floor(buffer.length / valuesPerChannel));
-    let peak = 0;
-    let squareSum = 0;
-    let sampledValues = 0;
-    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
-        const values = buffer.getChannelData(channel);
-        for (let frame = 0; frame < values.length; frame += stride) {
-            const value = values[frame] ?? 0;
-            peak = Math.max(peak, Math.abs(value));
-            squareSum += value * value;
-            sampledValues += 1;
-        }
-    }
-    return { peak, rms: sampledValues === 0 ? 0 : Math.sqrt(squareSum / sampledValues), sampledValues };
 }
 
 export class AuditionController {
@@ -129,10 +111,14 @@ export class AuditionController {
         }
     }
 
-    async play(sessionId: number, objectId: string): Promise<void> {
+    async play(
+        sessionId: number,
+        objectId: string,
+        prepare?: (context: AudioContext, signal: AbortSignal) => Promise<CachedAudition>,
+    ): Promise<void> {
         this.sequenceGeneration += 1;
         this.cancelSequenceCompletion();
-        await this.playOne(sessionId, objectId);
+        await this.playOne(sessionId, objectId, prepare);
     }
 
     playSequence(
@@ -232,7 +218,11 @@ export class AuditionController {
         }
     }
 
-    private async playOne(sessionId: number, objectId: string): Promise<void> {
+    private async playOne(
+        sessionId: number,
+        objectId: string,
+        prepare?: (context: AudioContext, signal: AbortSignal) => Promise<CachedAudition>,
+    ): Promise<void> {
         const generation = ++this.generation;
         const requestKey = this.assets.key(sessionId, objectId);
         this.assets.cancelActiveRequest(requestKey);
@@ -255,7 +245,9 @@ export class AuditionController {
             const context = output.context;
             // Resume synchronously from the click handler before any network await.
             const resumed = this.resumeContext(output, run);
-            const loaded = this.assets.load(sessionId, objectId, context, false, run);
+            const loaded = prepare
+                ? prepare(context, this.assets.beginPreparedRequest(requestKey))
+                : this.assets.load(sessionId, objectId, context, false, run);
             let [, entry] = await Promise.all([resumed, loaded]);
             if (generation !== this.generation) return;
             // An oversized speculative request may finish just as an explicit play promotes it.
@@ -357,7 +349,7 @@ export class AuditionController {
         source.loopStart = schedule.loopStartSeconds;
         source.loopEnd = schedule.loopEndSeconds;
         source.connect(gain);
-        gain.connect(context.destination);
+        gain.connect(entry.output ?? context.destination);
         const startTime = context.currentTime + startLeadSeconds;
         const stopTime = schedule.stopAfterSeconds === null ? null : startTime + schedule.stopAfterSeconds;
         gain.gain.value = 0;
@@ -398,7 +390,12 @@ export class AuditionController {
             naturalDurationSeconds: entry.buffer.duration,
             scheduledDurationSeconds: schedule.stopAfterSeconds ?? (schedule.loop ? null : entry.buffer.duration),
         });
-        this.update({ objectId: entry.objectId, status: 'playing', playheadFrame: sourceFrame });
+        this.update({
+            objectId: entry.objectId,
+            status: 'playing',
+            playheadFrame: sourceFrame,
+            ...(entry.transient ? { draft: true } : {}),
+        });
         this.scheduleCursor(active);
     }
 
@@ -486,7 +483,12 @@ export class AuditionController {
             const elapsed = Math.max(0, this.audibleContextTime() - active.startTime);
             const frame = playbackFrameAtTime(active.timelineDescriptor, active.startFrame, elapsed);
             if (frame !== null) {
-                this.update({ objectId: active.entry.objectId, status: 'playing', playheadFrame: frame });
+                this.update({
+                    objectId: active.entry.objectId,
+                    status: 'playing',
+                    playheadFrame: frame,
+                    ...(active.entry.transient ? { draft: true } : {}),
+                });
             }
             active.animationFrame = requestAnimationFrame(tick);
         };

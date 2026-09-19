@@ -2,6 +2,7 @@
     import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SamplerObject } from '../transport';
     import Icon from './Icon.svelte';
+    import { objectEditors } from '../../features/object-editor/context';
 
     interface Props {
         name: string;
@@ -12,10 +13,22 @@
 
     let { name, object, metadata = '', indicator }: Props = $props();
     const tooltip = $derived(objectSizeTooltip(object));
+    const editors = objectEditors();
+    const dirty = $derived(
+        editors?.documents.some((document) => document.detail?.object.id === object.key && document.draft.dirty) ??
+            false,
+    );
 </script>
 
 <span class="object-size-primary">
     <strong title={tooltip}>{name}</strong>
+    <span
+        class="object-size-indicator object-size-dirty"
+        class:dirty
+        aria-hidden={!dirty}
+        aria-label={dirty ? 'Unsaved Sample edits' : undefined}
+        title={dirty ? 'Unsaved Sample edits' : undefined}>*</span
+    >
     {#if indicator === 'stereo'}
         <span class="object-size-indicator" role="img" aria-label="Stereo Sample" title="Stereo Sample">
             <Icon name="stereo" size={12} />
@@ -61,5 +74,17 @@
         display: inline-flex;
         flex: 0 0 auto;
         color: var(--color-accent);
+    }
+    .object-size-dirty {
+        width: 8px;
+        height: 10px;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        line-height: 10px;
+        visibility: hidden;
+    }
+    .object-size-dirty.dirty {
+        visibility: visible;
     }
 </style>

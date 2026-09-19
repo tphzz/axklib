@@ -1566,6 +1566,152 @@
           "receiveChannelDisplay": {"type": "string"}
         }
       },
+      "SampleEditorControl": {
+        "type": "object", "additionalProperties": false,
+        "properties": {"device": {"type": "integer"}, "function": {"type": "integer"}, "type": {"type": "integer"}, "range": {"type": "integer"}}
+      },
+      "A4000A5000SampleParameters": {
+        "type": "object", "additionalProperties": false, "properties": {
+          "fixed_pitch": {"type": "boolean"},
+          "key_crossfade": {"type": "boolean"},
+          "mono_mode": {"type": "boolean"},
+          "sample_eq_type": {"type": "integer"},
+          "midi_receive_channel": {"type": "integer"},
+          "pitch_bend_type": {"type": "integer"},
+          "pitch_bend_range": {"type": "integer"},
+          "coarse_tune": {"type": "integer"},
+          "root_key": {"type": "integer"},
+          "fine_tune_cents": {"type": "integer"},
+          "key_low": {"type": "integer"},
+          "key_high": {"type": "integer"},
+          "loop_mode": {"type": "integer"},
+          "loop_tempo_hundredths": {"type": "integer"},
+          "loop_start_frame": {"type": "integer"},
+          "loop_length_frames": {"type": "integer"},
+          "wave_start_velocity_sensitivity": {"type": "integer"},
+          "filter_type": {"type": "integer"},
+          "filter_cutoff": {"type": "integer"},
+          "filter_q_width": {"type": "integer"},
+          "filter_scaling_break1": {"type": "integer"},
+          "filter_scaling_break2": {"type": "integer"},
+          "filter_scaling_cutoff1": {"type": "integer"},
+          "filter_scaling_cutoff2": {"type": "integer"},
+          "filter_velocity_to_cutoff": {"type": "integer"},
+          "filter_velocity_to_q_width": {"type": "integer"},
+          "expand_detune": {"type": "integer"},
+          "expand_dephase": {"type": "integer"},
+          "expand_width": {"type": "integer"},
+          "random_pitch": {"type": "integer"},
+          "level": {"type": "integer"},
+          "pan": {"type": "integer"},
+          "velocity_low_limit": {"type": "integer"},
+          "velocity_offset": {"type": "integer"},
+          "velocity_high": {"type": "integer"},
+          "velocity_low": {"type": "integer"},
+          "level_scaling_break1": {"type": "integer"},
+          "level_scaling_break2": {"type": "integer"},
+          "level_scaling_level1": {"type": "integer"},
+          "level_scaling_level2": {"type": "integer"},
+          "velocity_sensitivity": {"type": "integer"},
+          "alternate_group": {"type": "integer"},
+          "sample_eq_frequency": {"type": "integer"},
+          "sample_eq_gain_db": {"type": "integer"},
+          "sample_eq_width_tenths": {"type": "integer"},
+          "filter_cutoff_distance": {"type": "integer"},
+          "filter_gain": {"type": "integer"},
+          "velocity_xfade_high": {"type": "integer"},
+          "velocity_xfade_low": {"type": "integer"},
+          "output1_destination": {"type": "integer"},
+          "output1_level": {"type": "integer"},
+          "output2_destination": {"type": "integer"},
+          "output2_level": {"type": "integer"},
+          "portamento_type": {"type": "integer"},
+          "portamento_rate": {"type": "integer"},
+          "portamento_time": {"type": "integer"},
+          "aeg": {"type": "object", "additionalProperties": false, "properties": {
+          "attack_rate": {"type": "integer"},
+          "decay_rate": {"type": "integer"},
+          "release_rate": {"type": "integer"},
+          "sustain_level": {"type": "integer"},
+          "attack_mode": {"type": "integer"},
+          "rate_key_scaling": {"type": "integer"},
+          "rate_velocity_sensitivity": {"type": "integer"}
+          }},
+          "feg": {"type": "object", "additionalProperties": false, "properties": {
+          "attack_rate": {"type": "integer"},
+          "decay_rate": {"type": "integer"},
+          "release_rate": {"type": "integer"},
+          "init_level": {"type": "integer"},
+          "attack_level": {"type": "integer"},
+          "sustain_level": {"type": "integer"},
+          "release_level": {"type": "integer"},
+          "rate_key_scaling": {"type": "integer"},
+          "rate_velocity_sensitivity": {"type": "integer"},
+          "attack_level_velocity_sensitivity": {"type": "integer"},
+          "level_velocity_sensitivity": {"type": "integer"}
+          }},
+          "peg": {"type": "object", "additionalProperties": false, "properties": {
+          "attack_rate": {"type": "integer"},
+          "decay_rate": {"type": "integer"},
+          "release_rate": {"type": "integer"},
+          "init_level": {"type": "integer"},
+          "attack_level": {"type": "integer"},
+          "sustain_level": {"type": "integer"},
+          "release_level": {"type": "integer"},
+          "rate_key_scaling": {"type": "integer"},
+          "rate_velocity_sensitivity": {"type": "integer"},
+          "level_velocity_sensitivity": {"type": "integer"},
+          "range": {"type": "integer"}
+          }},
+          "lfo": {"type": "object", "additionalProperties": false, "properties": {
+          "wave": {"type": "integer"},
+          "speed": {"type": "integer"},
+          "delay_time": {"type": "integer"},
+          "key_on_sync": {"type": "boolean"},
+          "cutoff_mod_phase_invert": {"type": "boolean"},
+          "pitch_mod_phase_invert": {"type": "boolean"},
+          "cutoff_mod_depth": {"type": "integer"},
+          "pitch_mod_depth": {"type": "integer"},
+          "amp_mod_depth": {"type": "integer"}
+          }},
+          "controls": {"type": "object", "additionalProperties": false, "properties": {
+            "1": {"$ref": "#/components/schemas/SampleEditorControl"},
+            "2": {"$ref": "#/components/schemas/SampleEditorControl"},
+            "3": {"$ref": "#/components/schemas/SampleEditorControl"},
+            "4": {"$ref": "#/components/schemas/SampleEditorControl"},
+            "5": {"$ref": "#/components/schemas/SampleEditorControl"},
+            "6": {"$ref": "#/components/schemas/SampleEditorControl"}
+          }}
+        }
+      },
+      "SamplePlaybackWindow": {
+        "type": "object", "additionalProperties": false, "required": ["start_frame", "length_frames"],
+        "properties": {"start_frame": {"type": "integer", "minimum": 0}, "length_frames": {"type": "integer", "minimum": 0}}
+      },
+      "A4000A5000SampleEditor": {
+        "type": "object", "additionalProperties": false,
+        "required": ["profile", "editable", "reason", "payloadSha256", "partitionIndex", "volumeName", "parameters", "eqCoefficients", "blockedParameters", "unavailableParameters", "playbackWindow", "canEditPlayback", "maximumFrames", "sources"],
+        "properties": {
+          "profile": {"type": "string", "const": "a4000-a5000/sample"},
+          "editable": {"type": "boolean"}, "reason": {"type": "string"},
+          "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string"},
+          "parameters": {"$ref": "#/components/schemas/A4000A5000SampleParameters"},
+          "eqCoefficients": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "integer", "minimum": -32768, "maximum": 32767}, "description": "Stored Sample EQ Q13 coefficients in b1, b2, b0, -a1, -a2 order. Unrelated edits preserve them."},
+          "blockedParameters": {"type": "array", "items": {"type": "string"}},
+          "unavailableParameters": {"type": "object", "description": "Read-only reasons for absent decoded parameters, keyed by dotted parameter path. This does not authorize writes.", "additionalProperties": {
+            "type": "object", "additionalProperties": false, "required": ["reason", "message"],
+            "properties": {"reason": {"type": "string", "enum": ["NOT_IN_LAYOUT", "UNSUPPORTED_VALUE"]}, "message": {"type": "string"}}
+          }},
+          "playbackWindow": {"$ref": "#/components/schemas/SamplePlaybackWindow"},
+          "canEditPlayback": {"type": "boolean"}, "maximumFrames": {"type": "integer", "minimum": 0},
+          "sources": {"type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["objectId", "role", "frames", "sampleRate"],
+            "properties": {"objectId": {"type": "string"}, "role": {"type": "string"}, "frames": {"type": "integer"}, "sampleRate": {"type": "integer"}}
+          }}
+        }
+      },
       "ImageObjectDetail": {
         "type": "object",
         "additionalProperties": false,
@@ -1583,6 +1729,7 @@
             }
           },
           "object": {"$ref": "#/components/schemas/ImageObjectDetailObject"},
+          "editing": {"oneOf": [{"$ref": "#/components/schemas/A4000A5000SampleEditor"}, {"type": "null"}]},
           "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailRelationship"}}
         }
       },
@@ -1891,6 +2038,7 @@
         "additionalProperties": false,
         "required": ["imageId", "objectIds"],
         "properties": {
+          "sourceWindow": {"type": "string", "enum": ["PLAYBACK", "STORED"], "default": "PLAYBACK"},
           "imageId": {"type": "string", "minLength": 1},
           "objectIds": {
             "type": "array",

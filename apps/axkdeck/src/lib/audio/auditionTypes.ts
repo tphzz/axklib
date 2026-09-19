@@ -4,6 +4,7 @@ export interface AuditionState {
     objectId: string | null;
     status: 'idle' | 'preparing' | 'playing' | 'failed';
     playheadFrame: number;
+    draft?: boolean;
     error?: string;
     errorCode?: string;
     errorContext?: unknown;
@@ -67,6 +68,7 @@ export interface CachedAudition {
     buffer: AudioBuffer;
     weightBytes: number;
     transient: boolean;
+    output?: AudioNode;
 }
 
 export type AuditionDiagnosticSink = (event: AuditionDiagnosticEvent) => void;

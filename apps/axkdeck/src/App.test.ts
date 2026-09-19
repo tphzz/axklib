@@ -876,11 +876,12 @@ describe('App panel layout', () => {
     });
 
     it('defaults the object browser to two-thirds of the middle workspace', () => {
+        const size = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
         const { container } = renderAcknowledgedApp();
-
-        expect(container.querySelector<HTMLElement>('.main-stage')?.style.getPropertyValue('--split-position')).toBe(
-            '66.66666666666666%',
-        );
+        expect(
+            parseFloat(container.querySelector<HTMLElement>('.main-stage')!.style.getPropertyValue('--split-position')),
+        ).toBeCloseTo(((900 - 8) * 2) / 3);
+        size.mockRestore();
     });
 
     it('keeps image management commands out of the top toolbar', async () => {

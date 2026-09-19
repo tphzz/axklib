@@ -115,7 +115,8 @@ Result<DecodedSampleParameters> decode_sample_parameter_block(std::span<const st
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample parameter generation is unsupported")};
     const auto native = generation == SampleParameterGeneration::a3000;
-    if (bytes.size() != (native ? 0xbcU : 0xe0U))
+    const auto extended = !native && bytes.size() == 0xe0U;
+    if (bytes.size() != 0xbcU && !extended)
         return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
                                           "Sample parameter block has the wrong size for its generation")};
     const ByteReader r{bytes};
@@ -143,20 +144,22 @@ Result<DecodedSampleParameters> decode_sample_parameter_block(std::span<const st
     read_scalars(r, p, native);
     read_envelopes(r, p, native);
     for (std::size_t index = 0; index < p.controls.size(); ++index) {
-        const auto offset = (native ? 0U : 0xbcU) + index * 4U;
+        const auto offset = (extended ? 0xbcU : 0U) + index * 4U;
         p.controls[index] = {known(*r.u8(offset), 0, native ? 125 : 126),
                              known(*r.u8(offset + 1U), 0, native ? 21 : 36), known(*r.u8(offset + 2U), 0, 3),
                              known(*r.s8(offset + 3U), -63, 63)};
     }
-    const auto outputs = native ? 0xa5U : 0xd6U;
-    p.output1_destination = known(*r.u8(outputs), 0, native ? 4 : 12);
-    p.output1_level = known(*r.u8(outputs + 1U), 0, 127);
-    p.output2_destination = known(*r.u8(outputs + 2U), 0, native ? 5 : 12);
-    p.output2_level = known(*r.u8(outputs + 3U), 0, 127);
+    if (native || extended) {
+        const auto outputs = native ? 0xa5U : 0xd6U;
+        p.output1_destination = known(*r.u8(outputs), 0, native ? 4 : 12);
+        p.output1_level = known(*r.u8(outputs + 1U), 0, 127);
+        p.output2_destination = known(*r.u8(outputs + 2U), 0, native ? 5 : 12);
+        p.output2_level = known(*r.u8(outputs + 3U), 0, 127);
+    }
     if (native) {
         p.portamento_type = static_cast<std::uint8_t>(result.mapout_flags & 1U);
         p.velocity_crossfade = (result.mapout_flags & 8U) != 0U;
-    } else {
+    } else if (extended) {
         result.controller_copies_match = std::ranges::equal(bytes.first(0x18), bytes.subspan(0xbc, 0x18));
         p.velocity_xfade_high = known(*r.u8(0xd4), 0, 127);
         p.velocity_xfade_low = known(*r.u8(0xd5), 0, 127);

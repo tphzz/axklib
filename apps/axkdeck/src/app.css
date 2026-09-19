@@ -29,6 +29,9 @@
   --density-table-header: 20px;
   --density-metadata-row: 22px;
   --density-gap: 4px;
+  --density-panel-padding: 6px;
+  --density-section-gap: 12px;
+  --density-cell-padding: 3px;
   --dialog-title-font-size: 13px;
   --dialog-body-font-size: 11px;
   --dialog-section-font-size: 11px;
@@ -351,7 +354,7 @@ input:focus-visible {
 
 .image-summary {
   position: relative;
-  padding: 6px 9px 7px;
+  padding: var(--density-panel-padding);
   border-bottom: 1px solid var(--color-border);
   background: rgb(255 255 255 / 1.5%);
 }
@@ -1172,7 +1175,7 @@ input:focus-visible {
 }
 
 .inspector-content {
-  padding: 8px calc(9px + var(--overlay-scrollbar-clearance)) 0 9px;
+  padding: var(--density-panel-padding) calc(var(--density-panel-padding) + var(--overlay-scrollbar-clearance)) 0 var(--density-panel-padding);
 }
 
 .inspector-empty {
@@ -2108,9 +2111,9 @@ input:focus-visible {
 
 .object-deletion-content {
   display: grid;
-  gap: 14px;
+  gap: var(--density-section-gap);
   min-height: 0;
-  padding: 12px;
+  padding: var(--density-panel-padding);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -2299,7 +2302,7 @@ input:focus-visible {
 .volume-action-content {
   display: grid;
   gap: 8px;
-  padding: 12px;
+  padding: var(--density-panel-padding);
 }
 
 .volume-action-content label {
@@ -2774,7 +2777,7 @@ input:focus-visible {
 .entry-action-content {
   display: grid;
   gap: 7px;
-  padding: 12px;
+  padding: var(--density-panel-padding);
 }
 
 .entry-action-content strong,
@@ -2879,12 +2882,12 @@ input:focus-visible {
 
 /* Object workspace */
 .main-stage {
-  grid-template-rows: minmax(180px, var(--split-position)) 4px minmax(180px, 1fr);
+  grid-template-rows: minmax(0, var(--split-position)) 8px minmax(0, 1fr);
   background: var(--color-bg);
 }
 
 .main-stage.has-audition-bar {
-  grid-template-rows: minmax(180px, var(--split-position)) 30px 4px minmax(180px, 1fr);
+  grid-template-rows: minmax(0, var(--split-position)) 30px 8px minmax(0, 1fr);
 }
 
 .main-stage.lower-panel-closed {
@@ -3147,42 +3150,6 @@ input:focus-visible {
   grid-column: 1 / -1;
   place-items: center;
   padding: 12px;
-}
-
-.horizontal-splitter {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  width: 100%;
-  height: 4px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  outline: 0;
-  background: #111416;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.horizontal-splitter span {
-  width: 44px;
-  height: 2px;
-  border-radius: 1px;
-  background: #596169;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.horizontal-splitter:hover span,
-.horizontal-splitter:focus-visible span,
-.horizontal-splitter.resizing span {
-  opacity: 1;
-}
-
-.horizontal-splitter:focus-visible {
-  border-color: var(--color-accent);
 }
 
 .contained-object-workspace {

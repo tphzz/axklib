@@ -1835,6 +1835,148 @@ export interface components {
             /** @constant */
             storageRevision: 0;
         };
+        A4000A5000SampleEditor: {
+            blockedParameters: string[];
+            canEditPlayback: boolean;
+            editable: boolean;
+            /** @description Stored Sample EQ Q13 coefficients in b1, b2, b0, -a1, -a2 order. Unrelated edits preserve them. */
+            eqCoefficients: number[];
+            maximumFrames: number;
+            parameters: components['schemas']['A4000A5000SampleParameters'];
+            partitionIndex: number;
+            payloadSha256: string;
+            playbackWindow: components['schemas']['SamplePlaybackWindow'];
+            /** @constant */
+            profile: 'a4000-a5000/sample';
+            reason: string;
+            sources: {
+                frames: number;
+                objectId: string;
+                role: string;
+                sampleRate: number;
+            }[];
+            /** @description Read-only reasons for absent decoded parameters, keyed by dotted parameter path. This does not authorize writes. */
+            unavailableParameters: {
+                [key: string]: {
+                    message: string;
+                    /** @enum {string} */
+                    reason: 'NOT_IN_LAYOUT' | 'UNSUPPORTED_VALUE';
+                };
+            };
+            volumeName: string;
+        };
+        A4000A5000SampleParameters: {
+            aeg?: {
+                attack_mode?: number;
+                attack_rate?: number;
+                decay_rate?: number;
+                rate_key_scaling?: number;
+                rate_velocity_sensitivity?: number;
+                release_rate?: number;
+                sustain_level?: number;
+            };
+            alternate_group?: number;
+            coarse_tune?: number;
+            controls?: {
+                1?: components['schemas']['SampleEditorControl'];
+                2?: components['schemas']['SampleEditorControl'];
+                3?: components['schemas']['SampleEditorControl'];
+                4?: components['schemas']['SampleEditorControl'];
+                5?: components['schemas']['SampleEditorControl'];
+                6?: components['schemas']['SampleEditorControl'];
+            };
+            expand_dephase?: number;
+            expand_detune?: number;
+            expand_width?: number;
+            feg?: {
+                attack_level?: number;
+                attack_level_velocity_sensitivity?: number;
+                attack_rate?: number;
+                decay_rate?: number;
+                init_level?: number;
+                level_velocity_sensitivity?: number;
+                rate_key_scaling?: number;
+                rate_velocity_sensitivity?: number;
+                release_level?: number;
+                release_rate?: number;
+                sustain_level?: number;
+            };
+            filter_cutoff?: number;
+            filter_cutoff_distance?: number;
+            filter_gain?: number;
+            filter_q_width?: number;
+            filter_scaling_break1?: number;
+            filter_scaling_break2?: number;
+            filter_scaling_cutoff1?: number;
+            filter_scaling_cutoff2?: number;
+            filter_type?: number;
+            filter_velocity_to_cutoff?: number;
+            filter_velocity_to_q_width?: number;
+            fine_tune_cents?: number;
+            fixed_pitch?: boolean;
+            key_crossfade?: boolean;
+            key_high?: number;
+            key_low?: number;
+            level?: number;
+            level_scaling_break1?: number;
+            level_scaling_break2?: number;
+            level_scaling_level1?: number;
+            level_scaling_level2?: number;
+            lfo?: {
+                amp_mod_depth?: number;
+                cutoff_mod_depth?: number;
+                cutoff_mod_phase_invert?: boolean;
+                delay_time?: number;
+                key_on_sync?: boolean;
+                pitch_mod_depth?: number;
+                pitch_mod_phase_invert?: boolean;
+                speed?: number;
+                wave?: number;
+            };
+            loop_length_frames?: number;
+            loop_mode?: number;
+            loop_start_frame?: number;
+            loop_tempo_hundredths?: number;
+            midi_receive_channel?: number;
+            mono_mode?: boolean;
+            output1_destination?: number;
+            output1_level?: number;
+            output2_destination?: number;
+            output2_level?: number;
+            pan?: number;
+            peg?: {
+                attack_level?: number;
+                attack_rate?: number;
+                decay_rate?: number;
+                init_level?: number;
+                level_velocity_sensitivity?: number;
+                range?: number;
+                rate_key_scaling?: number;
+                rate_velocity_sensitivity?: number;
+                release_level?: number;
+                release_rate?: number;
+                sustain_level?: number;
+            };
+            pitch_bend_range?: number;
+            pitch_bend_type?: number;
+            portamento_rate?: number;
+            portamento_time?: number;
+            portamento_type?: number;
+            random_pitch?: number;
+            root_key?: number;
+            sample_eq_frequency?: number;
+            sample_eq_gain_db?: number;
+            sample_eq_type?: number;
+            sample_eq_width_tenths?: number;
+            velocity_high?: number;
+            velocity_low?: number;
+            velocity_low_limit?: number;
+            velocity_offset?: number;
+            velocity_sensitivity?: number;
+            velocity_xfade_high?: number;
+            velocity_xfade_low?: number;
+            wave_start_velocity_sensitivity?: number;
+        };
         A4000A5000SystemProgramContextAvailable: {
             /** @constant */
             availability: 'AVAILABLE';
@@ -2022,6 +2164,11 @@ export interface components {
         AuditionPrepareRequest: {
             imageId: string;
             objectIds: string[];
+            /**
+             * @default PLAYBACK
+             * @enum {string}
+             */
+            sourceWindow: 'PLAYBACK' | 'STORED';
         };
         Capabilities: {
             /** @constant */
@@ -2919,6 +3066,7 @@ export interface components {
             warnings: components['schemas']['Issue'][];
         };
         ImageObjectDetail: {
+            editing?: components['schemas']['A4000A5000SampleEditor'] | null;
             image: {
                 format: string;
                 imageId: string;
@@ -4589,6 +4737,16 @@ export interface components {
                 roots: components['schemas']['RootInfo'][];
             };
             meta: components['schemas']['ResponseMeta'];
+        };
+        SampleEditorControl: {
+            device?: number;
+            function?: number;
+            range?: number;
+            type?: number;
+        };
+        SamplePlaybackWindow: {
+            length_frames: number;
+            start_frame: number;
         };
         SequenceMetadata: {
             effectiveInitialTempoMicrosecondsPerQuarterNote: number;

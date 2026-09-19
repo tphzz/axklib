@@ -64,6 +64,10 @@ unsafe allocation remain available for browsing and export of readable content.
   parent and volume context.
 - Audition individual Samples, Sample Banks, and their playable audio directly
   from the desktop, with waveform playback windows and loop boundaries visible.
+- Edit supported A4000/A5000 Samples in six device-specific parameter tabs,
+  with draggable playback/loop markers, session-only drafts, undo/redo and
+  explicit Save. Draft audition previews bounds, pitch, level and pan;
+  it does not emulate sampler filters, envelopes or effects.
 
 ### Import And Organize
 

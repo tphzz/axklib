@@ -10,6 +10,12 @@ defaults below. An existing-Sample update or Sample Bank override must contain
 at least one field. Omitted fields in an existing object are preserved. Omitted
 fields in a fresh Sample receive the defaults below.
 
+Existing 356-byte SBNK Samples support updates to their stored parameter prefix,
+including the six prefix controller records, without growing the object. Output
+destinations and levels, extended velocity crossfade, and extended portamento
+settings require the complete parameter extension. Short Sample editor snapshots
+omit these fields; they must not be filled with fresh-Sample defaults.
+
 ## General, MIDI, Pitch, And Loop
 
 | JSON field | Accepted value | Fresh default |
@@ -189,7 +195,7 @@ The following object state is deliberately not public authoring input:
 | --- | --- |
 | Sample Bank membership, mono/stereo, and expanded topology flags | Derived from graph membership and active Wave Data topology. |
 | Per-member sample rate | Derived from each referenced Wave Data object. |
-| Full per-member wave-start addresses and playback lengths | Derived from `playback_window` and its source-dependent defaults when creating or inserting a Sample; nonzero starts are supported. Existing parameter updates and retargeting preserve the stored window. |
+| Full per-member wave-start addresses and playback lengths | Derived from `playback_window` and its source-dependent defaults when creating or inserting a Sample; nonzero starts are supported. An existing Sample update can explicitly supply `playback_window`, validated jointly with its resulting loops. Otherwise parameter updates and retargeting preserve the stored window. |
 | Pitch, loop-end, Program-portamento, and other playback caches | Recomputed when their public source values change. |
 | Linked Program bitmaps and Sample Bank pending-propagation state | Derived from relationships; pending bits are clear after immediate application. |
 | Reserved bytes and opaque packed-bit lanes | Canonical defaults in fresh objects and byte-preserved in existing objects. |

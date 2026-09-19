@@ -1,6 +1,8 @@
 #pragma once
 
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include <nlohmann/json_fwd.hpp>
 
@@ -8,6 +10,8 @@
 #include "axklib/writer.hpp"
 
 namespace axk::detail {
+
+nlohmann::json sample_parameters_json(const SampleParameters &value, std::vector<std::string> *unavailable = nullptr);
 
 Result<SamplePlaybackWindow> parse_sample_playback_window_json(const nlohmann::json &value);
 

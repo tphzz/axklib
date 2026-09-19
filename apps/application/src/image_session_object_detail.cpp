@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <sstream>
 
+#include "a_series_sample_editor.hpp"
 #include "axklib/program_parameter_json.hpp"
 
 namespace {
@@ -291,6 +292,9 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
+    const auto summary = inspect(image_id, owner_id);
+    if (!summary)
+        return std::unexpected(summary.error());
     const std::scoped_lock access{(*session)->access_mutex};
     const auto snapshot = (*session)->snapshots_by_id.find(std::string{object_id});
     const auto descriptor = (*session)->descriptors_by_id.find(std::string{object_id});
@@ -371,8 +375,30 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         {"header", header_json(snapshot->second.object.header)},
         {"decoded", decoded_json(snapshot->second.object, omissions)},
         {"omissions", std::move(omissions)}};
+    Json editing = nullptr;
+    if (std::holds_alternative<CurrentSbnk>(snapshot->second.object.payload) &&
+        media_descriptor.size <= 1024U * 1024U) {
+        // Session catalogs retain decoded metadata, not necessarily the original object bytes.
+        const auto payload = implementation_->read_object_range(**session, object_id, 0U,
+                                                                static_cast<std::size_t>(media_descriptor.size), {});
+        if (!payload)
+            return std::unexpected(payload.error());
+        Json sources = Json::array();
+        const auto pcm =
+            implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm);
+        if (pcm)
+            for (const auto &member : pcm->members)
+                sources.push_back({{"objectId", member.object_id},
+                                   {"role", member.role},
+                                   {"frames", member.frame_count},
+                                   {"sampleRate", member.sample_rate}});
+        editing = detail::a_series_sample_editor(
+            snapshot->second, *payload, std::ranges::contains(summary->available_operations, "images.alter.objects"),
+            sources);
+    }
     return Json{{"schemaVersion", 1U},
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},
                 {"object", std::move(object)},
+                {"editing", std::move(editing)},
                 {"relationships", std::move(relationships)}};
 }

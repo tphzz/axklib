@@ -23,6 +23,7 @@
 #include "axklib/writer.hpp"
 
 #include "a3k_test_fixture.hpp"
+#include "a_series_sample_editor.hpp"
 
 namespace {
 
@@ -1107,6 +1108,19 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     const auto opened = sessions.open({"workspace", "program-scope.hds"}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples);
+    ASSERT_FALSE(samples->items.empty());
+    const auto detail = sessions.object_detail(opened->image_id, "owner-a", samples->items.front().id);
+    ASSERT_TRUE(detail) << detail.error().message;
+    const auto &editing = detail->at("editing");
+    ASSERT_FALSE(editing.is_null());
+    EXPECT_EQ(editing.at("profile"), "a4000-a5000/sample");
+    EXPECT_EQ(editing.at("editable"), true);
+    EXPECT_EQ(editing.at("payloadSha256").get<std::string>().size(), 64U);
+    EXPECT_TRUE(editing.at("parameters").contains("level"));
+    EXPECT_FALSE(editing.at("sources").empty());
+
     const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_FALSE(roots->items.empty());
@@ -1751,6 +1765,11 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
+    const auto detail = sessions.object_detail(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(detail) << detail.error().message;
+    ASSERT_FALSE(detail->at("editing").is_null());
+    EXPECT_EQ(detail->at("editing").at("profile"), "a4000-a5000/sample");
+
     const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
@@ -1759,6 +1778,58 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, ShortSampleEditorExposesStoredParametersWithoutExtendedDefaults) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source);
+    const auto *container = std::get_if<axk::Container>(&source->storage());
+    ASSERT_NE(container, nullptr);
+    const auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog);
+    const auto sample = std::ranges::find_if(
+        catalog->objects, [](const auto &object) { return object.object.header.type == axk::ObjectType::sbnk; });
+    ASSERT_NE(sample, catalog->objects.end());
+    auto bytes = sample->raw_payload;
+    bytes.resize(0x164U);
+    write_be32(bytes, 0x1cU, 0x134U);
+    for (const auto selector : {1U, 2U, 4U}) {
+        write_be32(bytes, 0x14U, selector);
+        const auto decoded = axk::decode_object(bytes);
+        ASSERT_TRUE(decoded);
+        auto snapshot = *sample;
+        snapshot.object = *decoded;
+        const auto editing = axk::app::detail::a_series_sample_editor(snapshot, bytes, true,
+                                                                      nlohmann::json::array({{{"frames", 1000U}}}));
+        ASSERT_FALSE(editing.is_null()) << selector;
+        EXPECT_EQ(editing.at("profile"), "a4000-a5000/sample");
+        EXPECT_EQ(editing.at("editable"), true);
+        EXPECT_EQ(editing.at("canEditPlayback"), true);
+        const auto *stored_sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
+        ASSERT_NE(stored_sample, nullptr);
+        const auto stored_parameters = axk::decode_sample_parameter_block(stored_sample->raw_parameter_window,
+                                                                          axk::SampleParameterGeneration::current);
+        ASSERT_TRUE(stored_parameters);
+        EXPECT_EQ(editing.at("eqCoefficients"), nlohmann::json(stored_parameters->eq_coefficients));
+        EXPECT_TRUE(editing.at("parameters").contains("level"));
+        EXPECT_TRUE(editing.at("parameters").contains("controls"));
+        EXPECT_FALSE(editing.at("parameters").contains("output1_destination"));
+        EXPECT_FALSE(editing.at("parameters").contains("portamento_type"));
+        const auto &unavailable = editing.at("unavailableParameters");
+        EXPECT_EQ(unavailable.at("output1_destination").at("reason"), "NOT_IN_LAYOUT");
+        EXPECT_EQ(unavailable.at("portamento_type").at("reason"), "NOT_IN_LAYOUT");
+        EXPECT_EQ(unavailable.at("velocity_xfade_low").at("reason"), "NOT_IN_LAYOUT");
+        EXPECT_FALSE(unavailable.contains("level"));
+
+        auto unsupported = snapshot;
+        std::get<axk::CurrentSbnk>(unsupported.object.payload).raw_parameter_window[0x61U] = std::byte{255};
+        const auto unknown = axk::app::detail::a_series_sample_editor(unsupported, bytes, true,
+                                                                      nlohmann::json::array({{{"frames", 1000U}}}));
+        EXPECT_EQ(unknown.at("unavailableParameters").at("filter_type").at("reason"), "UNSUPPORTED_VALUE");
+        EXPECT_FALSE(unknown.at("parameters").contains("filter_type"));
+    }
+    write_be32(bytes, 0x14U, 99U);
+    EXPECT_TRUE(axk::app::detail::a_series_sample_editor(*sample, bytes, true, nlohmann::json::array()).is_null());
 }
 
 TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWaveDataWindow) {
@@ -1867,6 +1938,14 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(sample_preview_lane.loop_start_frame, 40U);
     EXPECT_EQ(sample_preview_lane.loop_length_frames, 8U);
     EXPECT_EQ(sample_preview_lane.bins.size(), 32U);
+
+    const auto stored_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id}, {}, true);
+    ASSERT_TRUE(stored_audition) << stored_audition.error().message;
+    ASSERT_EQ(stored_audition->clips.front().lanes.size(), 1U);
+    EXPECT_EQ(stored_audition->clips.front().lanes.front().frame_count, 132U);
+    const auto stored_pcm = sessions.audition_range(stored_audition->audition_id, "owner-a", 44U, 264U);
+    ASSERT_TRUE(stored_pcm) << stored_pcm.error().message;
+    EXPECT_EQ(stored_pcm->bytes.size(), 264U);
 
     const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id});
     const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave->id});

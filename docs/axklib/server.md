@@ -1078,6 +1078,37 @@ differ and clients normalize them independently. The default aggregate content
 limit is 128 MiB. A failure rejects the complete request and includes the
 responsible object ID when one object caused it.
 
+The optional `sourceWindow` is `PLAYBACK` by default. `STORED` prepares the
+complete linked Wave Data spans for client-side Sample draft preview; the same
+selection validation and content limits apply. It does not alter stored Samples.
+
+Sample object details may include an `editing` snapshot for the
+`a4000-a5000/sample` profile: revision, payload digest, placement, decoded
+parameters, source frame bounds, and field restrictions. Its read-only
+`eqCoefficients` array contains five signed Q13 values in stored order
+`b1, b2, b0, -a1, -a2`; the desktop uses these for the unchanged EQ response
+rather than regenerating them from nominal controls. The read-only
+`unavailableParameters` map uses dotted field paths and supplies a `reason`
+and `message` for each omitted decoded value. `NOT_IN_LAYOUT` identifies fields
+absent from the short parameter layout; `UNSUPPORTED_VALUE` identifies a stored
+value outside the supported domain. Neither classification adds defaults or
+permits rewriting the field. Stereo restrictions remain in `blockedParameters`
+and retain their decoded values. These metadata fields are not mutation inputs.
+Unsupported layouts
+return no editor profile. The desktop retains session-only drafts across the
+six Sample editing tabs and object selection. Save applies only the selected
+Sample's changed values, after rechecking its identity; Discard reloads that
+Sample. Undo/redo applies to the unsaved draft and resets after Save.
+Image close/replacement and desktop exit request confirmation for unsaved drafts.
+Unconfirmed writes retain their job identity for status recovery; a refresh
+failure after a confirmed write never resubmits it.
+
+Draft audition previews playback bounds, loops, pitch, level and pan through
+the desktop audio engine. It is not a hardware synthesis emulator: filters,
+envelopes, LFO, routing and effects remain sampler-playback parameters. Random
+pan previews at center. Destructive PCM operations and A3000 editing are not
+part of this editor.
+
 Until the first supported public release, the checked-in contract is corrected
 in place and every in-repository consumer is updated with it. Compatibility
 baselines and deprecation policy begin only after a contract has shipped.

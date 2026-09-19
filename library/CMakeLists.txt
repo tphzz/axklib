@@ -276,6 +276,7 @@ add_library(
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp
+  src/alteration_sample_update.cpp
   src/alteration_program_parameters.cpp
   src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
@@ -298,6 +299,7 @@ add_library(
   src/object_write_codec.cpp
   src/prog_write_codec.cpp
   src/sample_parameter_json.cpp
+  src/sample_parameter_serialize.cpp
   src/program_parameter_json.cpp
   src/program_assignment_parameter_json.cpp
   src/program_spec_json.cpp

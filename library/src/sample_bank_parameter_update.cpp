@@ -55,9 +55,9 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload);
-    if (sample == nullptr || payload.size() < parameter_offset + short_parameter_bytes)
+    if (sample == nullptr || sample->raw_parameter_window.size() < short_parameter_bytes)
         return std::unexpected{invalid("object is not an editable current Sample")};
-    const auto has_complete_parameters = payload.size() >= parameter_offset + complete_parameter_bytes;
+    const auto has_complete_parameters = sample->raw_parameter_window.size() >= complete_parameter_bytes;
     if (!has_complete_parameters && requires_extended_tail(overrides)) {
         return std::unexpected{invalid("Sample parameter requires the extended current Sample layout")};
     }
@@ -115,7 +115,7 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     }
 
     std::array<std::byte, complete_parameter_bytes> parameters{};
-    const auto stored_parameter_bytes = std::min(complete_parameter_bytes, payload.size() - parameter_offset);
+    const auto stored_parameter_bytes = sample->raw_parameter_window.size();
     std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_offset), stored_parameter_bytes,
                 parameters.begin());
     if (auto applied = apply_sample_parameters_to_block(

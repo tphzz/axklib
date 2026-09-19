@@ -62,6 +62,7 @@ interface SessionCollaborators {
 }
 
 export class ImageSessionWorkflow {
+    confirmEditorLeave: () => Promise<boolean> = async () => true;
     sourceItems = $state<DiskTreeItem[]>([]);
     volumeSelection = $state<VolumeSelectionState>(emptyVolumeSelection());
     selectedSource = $state<DiskTreeItem>({
@@ -225,6 +226,7 @@ export class ImageSessionWorkflow {
     }
 
     async open(location: ImageLocation, preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+        if (!(await this.confirmEditorLeave())) return;
         const requestId = this.nextOpenRequestId++;
         this.beginOpenProgress(requestId, location);
         this.status = 'Opening image';
@@ -406,6 +408,7 @@ export class ImageSessionWorkflow {
     }
 
     async close(): Promise<void> {
+        if (!(await this.confirmEditorLeave())) return;
         if (!this.location && this.sessionId === null) return;
         this.status = 'Closing image';
         try {

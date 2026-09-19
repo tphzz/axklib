@@ -5,6 +5,7 @@ import {
     type DownloadArchiveSnapshot,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import type { ObjectParameterEdit } from './objectEditing';
 import type {
     AudioImportGrouping,
     AudioImportItem,
@@ -351,6 +352,10 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imageSessions.startMutations(sessionId, [objectRenameOperation(mutation)]);
     }
 
+    startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState> {
+        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+    }
+
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.imageSessions.inspectVolumeDeletion(sessionId, targets);
     }
@@ -420,11 +425,13 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         sessionId: number,
         objectKeys: readonly string[],
         signal?: AbortSignal,
+        storedPcm = false,
     ): Promise<AuditionBundleDescriptor> {
         const session = this.imageSessions.get(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
             imageId: session.remoteId,
             objectIds: objectKeys,
+            ...(storedPcm ? { sourceWindow: 'STORED' } : {}),
         });
         if (!this.jobs.isJob(submitted)) throw new Error('auditions.prepare did not return a job');
         const localJob = this.jobs.map(submitted);

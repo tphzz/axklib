@@ -50,10 +50,8 @@
         }
     }
 
-    function mountTooltip(node: HTMLElement) {
+    function positionTooltip(node: HTMLElement) {
         if (!trigger) return;
-        tooltip = node;
-        document.body.appendChild(node);
         const anchor = trigger.getBoundingClientRect();
         const bodyScale = document.body.offsetWidth
             ? document.body.getBoundingClientRect().width / document.body.offsetWidth
@@ -70,6 +68,12 @@
             below + bounds.height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - bounds.height - 6);
         node.style.left = `${left / scale}px`;
         node.style.top = `${top / scale}px`;
+    }
+
+    function mountTooltip(node: HTMLElement) {
+        tooltip = node;
+        document.body.appendChild(node);
+        positionTooltip(node);
         return {
             destroy() {
                 node.remove();
@@ -124,7 +128,9 @@
                 window,
                 'scroll',
                 (event) => {
-                    if (event.target !== tooltip) close();
+                    if (event.target === tooltip) return;
+                    if (document.activeElement === trigger && tooltip) positionTooltip(tooltip);
+                    else close();
                 },
                 { capture: true },
             ),

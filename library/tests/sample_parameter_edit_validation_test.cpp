@@ -378,4 +378,20 @@ TEST_F(SampleParameterEditValidation, ShortLayoutRejectsEveryExtendedOnlyFieldAt
     }
 }
 
+TEST_F(SampleParameterEditValidation, PaddedShortLayoutPreservesPaddingAndUsesPrefixControllers) {
+    use_short_parameter_layout();
+    ASSERT_FALSE(HasFatalFailure());
+    payload.resize(0x200U, std::byte{0x5a});
+    auto expected = payload;
+    expected[0xa8U] = std::byte{74};
+    expected[0x116U] = std::byte{87};
+    axk::SampleParameters edit;
+    edit.controls[0].device = 74U;
+    edit.level = 87U;
+    ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, edit));
+    EXPECT_EQ(payload, expected);
+    edit.output1_level = 80U;
+    expect_rejected_without_changes(edit);
+}
+
 } // namespace

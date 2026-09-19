@@ -178,7 +178,8 @@ struct DecodedSampleParameters {
     std::vector<std::byte> raw_bytes;
 };
 
-// Requires exactly 0xbc native or 0xe0 current bytes. Scalar leaves outside
+// Requires exactly 0xbc native or 0xbc/0xe0 current bytes. Short current blocks
+// use prefix controllers and omit extension-only parameters. Scalar leaves outside
 // their known domains remain absent; raw bytes and both member lanes are kept.
 // The root/fine-tune/loop-window convenience leaves refer to the first lane;
 // they do not assert equality with the second lane. This is not a write plan.

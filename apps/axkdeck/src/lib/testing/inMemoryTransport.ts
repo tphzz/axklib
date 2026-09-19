@@ -364,6 +364,13 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startObjectRename', [sessionId, mutation]);
     }
 
+    startObjectParameterEdit(
+        sessionId: number,
+        edit: import('../objectEditing').ObjectParameterEdit,
+    ): Promise<JobState> {
+        return this.invoke('startObjectParameterEdit', [sessionId, edit]);
+    }
+
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.invoke('inspectVolumeDeletion', [sessionId, targets]);
     }
@@ -445,8 +452,9 @@ export class InMemoryImageTransport implements ImageTransport {
         sessionId: number,
         objectKeys: readonly string[],
         signal?: AbortSignal,
+        storedPcm?: boolean,
     ): Promise<AuditionBundleDescriptor> {
-        return this.invoke('prepareAuditionBundle', [sessionId, objectKeys, signal]);
+        return this.invoke('prepareAuditionBundle', [sessionId, objectKeys, signal, storedPcm]);
     }
 
     readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {

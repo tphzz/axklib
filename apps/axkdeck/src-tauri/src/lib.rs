@@ -3,6 +3,7 @@ mod desktop_preferences;
 mod directory_tar;
 #[cfg(test)]
 mod directory_tar_tests;
+mod editor_exit;
 mod file_publication;
 mod local_directory_exports;
 mod local_packages;
@@ -466,6 +467,7 @@ pub fn run() {
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
         .manage(Mutex::new(DirectorySaveCandidateStore::default()))
         .manage(native_drag::state())
+        .manage(editor_exit::EditorExitGuard::default())
         .manage(startup.clone())
         .setup(move |app| {
             setup_startup.enable_logging();
@@ -524,6 +526,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            editor_exit::set_editor_exit_guard,
+            editor_exit::approve_editor_exit,
             complete_startup,
             server_connection,
             remote_server_settings,
@@ -557,6 +561,7 @@ pub fn run() {
         ]);
     startup.record(StartupMilestone::TauriBuilderConfigured);
     builder
-        .run(tauri::generate_context!())
-        .expect("failed to run axkdeck");
+        .build(tauri::generate_context!())
+        .expect("failed to build axkdeck")
+        .run(editor_exit::handle_exit);
 }

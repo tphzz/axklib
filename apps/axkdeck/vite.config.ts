@@ -1,11 +1,12 @@
 import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vitest/config';
+import { svelteStyleLoader } from './tools/svelte-style-loader.mjs';
 
 const tauriHost = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-    plugins: [svelte(), tailwindcss()],
+    plugins: [svelteStyleLoader(), svelte(), tailwindcss()],
     resolve: {
         conditions: ['browser'],
     },

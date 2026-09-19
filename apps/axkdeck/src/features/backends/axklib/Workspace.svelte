@@ -8,6 +8,7 @@
     import Icon from '../../../lib/components/Icon.svelte';
     import ImageNavigator from '../../../lib/components/ImageNavigator.svelte';
     import ObjectEditor from '../../../lib/components/ObjectEditor.svelte';
+    import DeviceEditorHost from '../../object-editor/DeviceEditorHost.svelte';
     import ObjectInspector from '../../../lib/components/ObjectInspector.svelte';
     import ObjectWorkspace from '../../../lib/components/ObjectWorkspace.svelte';
     import ProgramWorkspace, { type ProgramPresentation } from '../../../lib/components/ProgramWorkspace.svelte';
@@ -544,13 +545,17 @@
     />
 {/snippet}
 {#snippet deviceLower()}
-    <ObjectEditor
-        selection={editorSelection}
-        multiPartContext={multiPartEditorContext}
-        assignmentQuery={audition.laneQueries.programs.secondary}
-        onassignmentquerychange={(value) => (audition.laneQueries.programs.secondary = value)}
-        onassignmentselect={(row) => audition.selectAssignment(row)}
-    />
+    {#if editorSelection?.kind === 'sample'}
+        <DeviceEditorHost {sessionId} selection={editorSelection} />
+    {:else}
+        <ObjectEditor
+            selection={editorSelection}
+            multiPartContext={multiPartEditorContext}
+            assignmentQuery={audition.laneQueries.programs.secondary}
+            onassignmentquerychange={(value) => (audition.laneQueries.programs.secondary = value)}
+            onassignmentselect={(row) => audition.selectAssignment(row)}
+        />
+    {/if}
 {/snippet}
 {#snippet deviceInspector()}
     <div class="device-inspector-zone">
@@ -654,6 +659,7 @@
                   content: deviceContent,
                   inspector: deviceInspector,
                   lower: lowerPanelAvailable ? deviceLower : undefined,
+                  lowerPreferredHeight: editorSelection?.kind === 'sample' ? 360 : undefined,
                   tabs: deviceTabs,
                   playback: auditionAvailable ? devicePlayback : undefined,
                   selectionActions: deviceActions,

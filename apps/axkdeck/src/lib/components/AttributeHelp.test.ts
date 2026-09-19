@@ -67,6 +67,18 @@ describe('Attribute label help', () => {
         expect(view.queryByRole('tooltip')).toBeNull();
     });
 
+    it('keeps keyboard help anchored after focus scrolls its field into view', async () => {
+        const view = setup();
+        const trigger = view.getByRole('button');
+        await act(() => trigger.focus());
+        const tooltip = view.getByRole('tooltip');
+        await fireEvent.scroll(view.container);
+        expect(view.getByRole('tooltip')).toBe(tooltip);
+        expect(trigger.getAttribute('aria-describedby')).toBe(tooltip.id);
+        await fireEvent.blur(trigger);
+        expect(view.queryByRole('tooltip')).toBeNull();
+    });
+
     it('pins on click, ignores internal pointers, and closes on repeat click or outside pointer', async () => {
         const view = setup();
         const trigger = view.getByRole('button');

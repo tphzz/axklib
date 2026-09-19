@@ -7,14 +7,39 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include "axklib/bytes.hpp"
+#include "axklib/sample_parameter_json.hpp"
 #include "axklib/sample_parameters.hpp"
 #include "axklib/system_file.hpp"
 #include "axklib/writer.hpp"
 #include "axklib/writer_internal.hpp"
 
 namespace {
+
+TEST(SampleParameterJson, PartialValuesRoundTripWithoutAddingDefaults) {
+    axk::SampleParameters values;
+    values.pan = -64;
+    values.fixed_pitch = false;
+    values.loop_mode = axk::AudioSamplerLoopMode::forward_loop_release;
+    values.aeg.attack_rate = 0;
+    values.controls[4].range = -17;
+    const auto json = axk::detail::sample_parameters_json(values);
+    EXPECT_EQ(json.size(), 5U);
+    EXPECT_FALSE(json.contains("level"));
+    EXPECT_EQ(json.at("controls").size(), 1U);
+    EXPECT_TRUE(json.at("controls").contains("5"));
+    auto parsed = axk::detail::parse_sample_parameters_json(json, "parameters", true, axk::ErrorCode::manifest_invalid,
+                                                            axk::ErrorCategory::manifest);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->pan, -64);
+    EXPECT_EQ(parsed->fixed_pitch, false);
+    EXPECT_EQ(parsed->loop_mode, axk::AudioSamplerLoopMode::forward_loop_release);
+    EXPECT_EQ(parsed->aeg.attack_rate, 0);
+    EXPECT_EQ(parsed->controls[4].range, -17);
+    EXPECT_FALSE(parsed->level);
+}
 
 std::vector<std::byte> block(axk::SampleParameterGeneration generation) {
     std::vector<std::byte> bytes(generation == axk::SampleParameterGeneration::a3000 ? 0xbcU : 0xe0U);
@@ -87,6 +112,30 @@ TEST(SampleParameterDecode, KeepsBothLanesDerivedWordsAndAllRawBytes) {
     EXPECT_EQ(decoded->eq_coefficients, (std::array<std::int16_t, 5>{-32768, -1, 0, 8192, 32767}));
     EXPECT_EQ(decoded->cached_wave_end, 0xffffffffU);
     EXPECT_EQ(decoded->cached_loop_end, 0x98765432U);
+}
+
+TEST(SampleParameterDecode, ShortCurrentBlockUsesPrefixControllersAndOmitsAbsentExtension) {
+    auto bytes = block(axk::SampleParameterGeneration::current);
+    bytes.resize(0xbcU);
+    bytes[0] = std::byte{126};
+    bytes[1] = std::byte{36};
+    bytes[0x6e] = std::byte{97};
+    const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
+    ASSERT_TRUE(decoded);
+    EXPECT_EQ(decoded->raw_bytes, bytes);
+    EXPECT_EQ(decoded->parameters.controls[0].device, 126);
+    EXPECT_EQ(decoded->parameters.controls[0].function, 36);
+    EXPECT_EQ(decoded->parameters.level, 97);
+    EXPECT_FALSE(decoded->controller_copies_match);
+    EXPECT_FALSE(decoded->parameters.output1_destination);
+    EXPECT_FALSE(decoded->parameters.output1_level);
+    EXPECT_FALSE(decoded->parameters.output2_destination);
+    EXPECT_FALSE(decoded->parameters.output2_level);
+    EXPECT_FALSE(decoded->parameters.portamento_type);
+    EXPECT_FALSE(decoded->parameters.portamento_rate);
+    EXPECT_FALSE(decoded->parameters.portamento_time);
+    EXPECT_FALSE(decoded->parameters.velocity_xfade_low);
+    EXPECT_FALSE(decoded->parameters.velocity_xfade_high);
 }
 
 TEST(SampleParameterDecode, UsesCanonicalControllersAndGenerationSpecificOutputs) {

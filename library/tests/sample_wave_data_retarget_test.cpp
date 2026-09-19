@@ -33,6 +33,31 @@ axk::Result<axk::AlterationManifest> parse_retarget(const Json &operation) {
         Json{{"schema_version", "1.0"}, {"operations", Json::array({operation})}}.dump());
 }
 
+TEST(SamplePlaybackEditManifest, AcceptsWindowOnlyAndRejectsInvalidGuardsAndBounds) {
+    const Json operation{{"id", "edit"},
+                         {"type", "update_sbnk_parameters"},
+                         {"partition_index", 0},
+                         {"volume_name", "V"},
+                         {"sample_name", "S"},
+                         {"parameters", Json::object()},
+                         {"playback_window", {{"start_frame", 1}, {"length_frames", 2}}},
+                         {"expected_payload_sha256", std::string(64U, 'a')}};
+    const auto parsed = parse_retarget(operation);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    auto invalid = operation;
+    invalid["expected_payload_sha256"] = "ABC";
+    EXPECT_FALSE(parse_retarget(invalid));
+    invalid = operation;
+    invalid["playback_window"]["length_frames"] = 0;
+    EXPECT_FALSE(parse_retarget(invalid));
+    invalid = operation;
+    invalid["playback_window"]["start_frame"] = 16777216;
+    EXPECT_FALSE(parse_retarget(invalid));
+    invalid = operation;
+    invalid.erase("playback_window");
+    EXPECT_FALSE(parse_retarget(invalid));
+}
+
 std::vector<char> image_bytes(const std::filesystem::path &path) {
     std::ifstream input{path, std::ios::binary};
     return {std::istreambuf_iterator<char>{input}, {}};
@@ -249,6 +274,64 @@ TEST_F(SampleWaveDataRetarget, StrictManifestRejectsMissingGuardMalformedTargets
 
 TEST_F(SampleWaveDataRetarget, MonoRetargetPreservesBankMembershipParametersEqWindowsAndAllPcm) {
     expect_exact_retarget("Mono", "New Left");
+}
+
+TEST_F(SampleWaveDataRetarget, CombinedWindowAndLoopEditPreservesEveryOtherByte) {
+    for (const auto selector : {1U, 2U, 4U}) {
+        for (const auto *name : {"Mono", "Stereo"}) {
+            // Legacy-layout Samples use the same stored playback lanes.
+            patch_sample(name, 0x14U, {std::byte{0}, std::byte{0}, std::byte{0}, static_cast<std::byte>(selector)});
+            ASSERT_FALSE(HasFatalFailure());
+            auto edit = operation(name, "Old Left");
+            edit["type"] = "update_sbnk_parameters";
+            edit.erase("waveform_name");
+            edit["parameters"] = {{"loop_start_frame", 0}, {"loop_length_frames", 16}};
+            edit["playback_window"] = {{"start_frame", 0}, {"length_frames", 16}};
+            auto parsed = parse_retarget(edit);
+            ASSERT_TRUE(parsed) << parsed.error().message;
+            const auto destination = root / (std::string{name} + std::to_string(selector) + ".hds");
+            auto changed = axk::alter_hds(source, *parsed, destination);
+            ASSERT_TRUE(changed) << changed.error().message;
+            const auto after = catalog(destination);
+            ASSERT_TRUE(after);
+            for (const auto &old : before.objects) {
+                const auto *current = find(*after, old.object.header.type, old.object.header.name);
+                ASSERT_NE(current, nullptr);
+                auto expected = old.raw_payload;
+                if (old.object.header.type == axk::ObjectType::sbnk && old.object.header.name == name) {
+                    axk::ByteWriter writer{expected};
+                    for (const auto offset : {0xe8U, 0xf8U})
+                        ASSERT_TRUE(writer.write_be32(offset, 0));
+                    for (const auto offset : {0xf0U, 0x100U, 0x15cU, 0x160U})
+                        ASSERT_TRUE(writer.write_be32(offset, 16));
+                    if (std::string_view{name} == "Stereo") {
+                        for (const auto offset : {0xecU, 0xfcU})
+                            ASSERT_TRUE(writer.write_be32(offset, 0));
+                        for (const auto offset : {0xf4U, 0x104U})
+                            ASSERT_TRUE(writer.write_be32(offset, 16));
+                    }
+                }
+                EXPECT_EQ(current->raw_payload, expected) << old.object.header.name;
+            }
+        }
+    }
+}
+
+TEST_F(SampleWaveDataRetarget, WindowUpdateRejectsRetainedLoopOutsideWindowAndStalePayload) {
+    auto edit = operation("Mono", "Old Left");
+    edit["type"] = "update_sbnk_parameters";
+    edit.erase("waveform_name");
+    edit["parameters"] = Json::object();
+    edit["playback_window"] = {{"start_frame", 0}, {"length_frames", 5}};
+    auto parsed = parse_retarget(edit);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *parsed));
+    edit["playback_window"]["length_frames"] = 16;
+    edit["expected_payload_sha256"] = std::string(64U, '0');
+    parsed = parse_retarget(edit);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_FALSE(axk::inspect_hds_alteration(source, *parsed));
+    EXPECT_FALSE(std::filesystem::exists(output));
 }
 
 TEST_F(SampleWaveDataRetarget, StereoRetargetRefreshesBothRatesAndPitchCachesPreservingProgramLinksAndParameters) {

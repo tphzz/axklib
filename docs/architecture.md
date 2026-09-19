@@ -20,6 +20,129 @@ action area is supplied separately from presentation-specific navigation. The
 axklib backend supplies the current A-series Device presentation; adding another
 device presentation must not introduce device switches into the shared shell.
 
+Object editing is organized independently of backend selection. Shared draft,
+history, save/recovery and exit-confirmation behavior lives in
+`features/object-editor/`; device/object pages and parameter semantics live in
+`features/devices/a-series/sample/`. The editor registry selects the explicit
+server-provided `a4000-a5000/sample` profile. It does not infer a device from a
+filename or add device-specific branches to Files mode. Future device profiles
+provide their own field definitions, validation, write mapping and audition.
+
+Drafts are keyed by session and object identity. A revision change revalidates
+the original payload digest and placement before a draft can save; a changed
+payload remains a conflict until explicitly discarded. Saving sends only changed
+parameters with revision and payload preconditions, through the existing atomic
+mutation job. Playback-window and loop changes share that transaction. Browsing
+another Sample, volume or mode does not write or discard drafts. Source object
+bytes are read on demand for the bounded editor snapshot rather than retained in
+every catalog entry. Desktop window-close and application-quit guards cover both
+dirty drafts and unresolved writes.
+
+The Sample editor keeps main tabs beside identity and Save actions, with one
+active subpage and a persistent draft-audition strip. Waveform boundaries are
+presented as start/end positions and mapped to the native start/length contract;
+numeric entry and drag gestures share the same validation and undo history.
+Level and filter scaling use native MIDI-note coordinates, with a keyboard and
+precise breakpoint controls. Common numeric and choice controls live in the
+object-editor layer, while parameter groupings remain device-specific.
+Shared spacing tokens keep panel padding, section gaps and table cells compact
+without shrinking text or input targets. Form-only pages use left-aligned,
+bounded columns; intermediate widths keep Output routing below Mix and Pitch
+bend below Sample portamento. Entirely unavailable groups use compact columns
+instead of reserving slider-width space. Missing columns wrap rather than stretch
+apart. The identity header reserves dirty-marker space so tabs do not move on edit.
+Collection identities also reserve a compact dirty-marker slot; unsaved edits
+cannot change name/metadata height, stereo-indicator placement or name truncation.
+
+Graphical pages share a resizable graph/controls layout, plot frame, keyboard
+axis and compact parameter groups. Wide panes start with equal-width columns;
+below 900 CSS pixels the graph stays above switchable control groups. Controls
+scroll independently, and layout choices do not dirty the object. The shell
+accepts a preferred lower-pane height from its presentation; Sample editing
+requests 360 CSS pixels or one third of the workspace, subject to available
+height and manual resizing. Waveform editing remains full-width. Workspace and
+graph splitters use one shared component with a single line inside an eight-pixel
+pointer target, keyboard resizing and a reset action.
+
+Responsive editor thresholds use shared `ResizeObserver` measurements of layout
+width, not zoomed bounding rectangles or CSS container queries. This keeps
+stacked control-group navigation aligned with layout under native WebKitGTK
+page zoom. Choice controls use measured label widths before showing segments;
+otherwise they use a bounded menu. The audition strip reserves stable button
+and status geometry across playback transitions.
+Sample settings keeps source duration alongside sample-rate metadata, rather than
+in a separate footer. It describes the underlying source, not the trimmed or looped range.
+Editor popups observe their rendered size and keep the edge nearest the field
+anchored as filtering changes the list height. Opening direction stays fixed until
+dismissal; content scrolls within the available space on that side.
+
+Envelope stage models and parameter bindings belong to the device adapter.
+Amplitude, filter and pitch share a full-width stage presentation while
+retaining their distinct level ranges, editable endpoints and Hold behavior.
+Envelope spacing responds to native rates; horizontal handles edit rates and
+vertical handles edit levels in one undoable gesture. Release is edited at its
+endpoint, not an artificial midpoint on the slope.
+The Amplitude release endpoint stays at zero; Filter/Pitch endpoints edit both
+release rate and level. Spacing is relative,
+without calibrated transition times. Maximum-rate transitions do not receive a
+visible minimum-width ramp; AEG release 127 is immediate as documented by Yamaha.
+Offscreen handles are hidden inside the fixed viewport, with Fit/zoom restoring
+access. Rate dragging may extend beyond the viewport without expanding its drawing
+surface or changing the bounded level domain. LFO plots show relative speed, delay and
+buildup, with independent pitch, amplitude and cutoff traces and an illustrative
+Sample & Hold pattern. Sample & Hold speed belongs to the Program. Delay shifts
+the clean oscillator trace; a separate guide shows relative buildup rather than
+distorting the first cycle. Analytical corners retain vertical discontinuities.
+
+Graph titles, readouts and tools share one fixed-height row outside the curves. Shared drag
+handling freezes the coordinate frame and grab offset for a complete pointer
+gesture, coalesces movement per animation frame, and flushes the release position.
+Draft patches publish related values atomically. Canvas buffers and theme colors
+are refreshed on size or theme changes, not on every parameter edit.
+Envelope viewports persist per draft and envelope page until explicit
+zoom or Fit to width; editing, releasing a handle and undo do not auto-fit.
+
+Filter and Sample EQ have separate graphical subpages. Generic plotting and
+handle components accept neutral traces and coordinates; A-series adapters own
+the parameter bindings and response models. Filter curves are schematic and
+use native cutoff/Q values, not calibrated frequency units. The EQ response
+uses the pre-quantization parameter response for its solid editing curve. An
+optional dashed overlay shows stored Q13 coefficients until an EQ parameter
+changes, then regenerated draft Q13 coefficients. Low-frequency coefficient
+rounding can substantially displace the plotted peak, so it is not used to position
+the editing curve. Neither curve is a measured hardware response. The native
+writer's coefficient equations and maintained reference vectors are unchanged.
+These plots do not extend
+audio preview into EQ, filter, envelope or LFO synthesis.
+EQ uses one frequency/gain handle. Wheel or Alt-drag edits Peak/Dip width;
+normal wheel and Alt+Arrow steps are 0.5, or 0.1 with Shift. Alt-drag uses twice
+the original width sensitivity; Shift-drag reduces pointer sensitivity fourfold.
+Frequency snapping has hysteresis around
+native discrete boundaries, and each drag or wheel burst is one undo step.
+Shelves retain fixed width. These interaction changes do not alter coefficient math.
+
+Velocity range uses a compact vertical soft-to-hard MIDI velocity band beside
+paired numeric boundaries and crossfade controls. It is not a keyboard range
+or a calibrated loudness meter. MIDI/CTRL choices use shared searchable,
+keyboard-accessible popups. Clearing a search preserves the assigned parameter;
+only choosing an option changes the draft. Popup placement, dismissal, numeric
+suffix alignment and slider focus treatment are shared across editor controls.
+The Control subpage presents all six assignments as numbered rows with
+Controller, Function, Type and Range columns, retaining distinct accessible
+field names. Missing or unsupported stored values display Unavailable instead
+of disabled placeholder inputs. Read-only per-field API metadata distinguishes
+settings absent from the stored layout from unrecognized stored values; help is
+available on hover and keyboard focus. Stereo-blocked fields retain their values and explain the
+restriction; neither case grants new write capabilities.
+
+Position units, zoom, snapping, monitor lead-in, beat-count selection, preview
+note and audition volume are local view settings. Only an explicit tempo
+calculation or parameter edit changes the draft. Source-rate PCM is loaded on
+demand for zoom, zero-cross snapping and audition, with a 128 MiB working limit
+and temporary-resource cleanup. Changing editor identity or its source snapshot
+releases cached PCM and stops its preview. Loop Remix, destructive PCM operations
+and complete synthesis preview remain outside the implemented editor.
+
 The reusable Files components depend only on `FilesystemAccess` and neutral
 entry/page contracts in `lib/filesystem.ts`. A backend adapter translates its
 wire representation into that contract. It provides stored entry identities,

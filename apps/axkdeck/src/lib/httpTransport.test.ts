@@ -219,12 +219,10 @@ describe('HttpImageTransport', () => {
                 }
                 if (url.pathname.endsWith('/images/image-remote/objects/object-1')) {
                     return json({
-                        data: {
-                            schemaVersion: 1,
-                            image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
-                            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
-                            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
-                        },
+                        schemaVersion: 1,
+                        image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
+                        object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+                        relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
                     });
                 }
                 if (url.pathname.endsWith('/images/image-remote/objects') && !url.searchParams.has('cursor')) {

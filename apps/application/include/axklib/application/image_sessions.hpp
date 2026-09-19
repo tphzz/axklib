@@ -571,7 +571,8 @@ class ImageSessionManager {
                                                        const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageAudition> prepare_audition(std::string_view image_id, std::string_view owner_id,
                                                          const std::vector<std::string> &object_ids,
-                                                         const CancellationToken &cancellation = {});
+                                                         const CancellationToken &cancellation = {},
+                                                         bool stored_pcm = false);
     [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,
                                                             std::uint64_t offset, std::size_t size,
                                                             const CancellationToken &cancellation = {});

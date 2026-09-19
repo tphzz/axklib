@@ -329,11 +329,10 @@ export class HttpImageSessions {
 
     async objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
         const session = this.get(sessionId);
-        const response = await this.client.request<components['schemas']['ImageObjectDetailResponse']>(
+        return this.client.request<ObjectDetail>(
             'GET',
             `/images/${encodeURIComponent(session.remoteId)}/objects/${encodeURIComponent(objectId)}`,
         );
-        return response.data;
     }
 
     async relationshipPage(
@@ -570,14 +569,18 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
-    async startMutations(sessionId: number, operations: Record<string, unknown>[]): Promise<JobState> {
+    async startMutations(
+        sessionId: number,
+        operations: Record<string, unknown>[],
+        expectedRevision?: number,
+    ): Promise<JobState> {
         if (operations.length === 0) throw new Error('at least one image mutation is required');
         const session = this.get(sessionId);
         const job = await this.client.invoke<never>(
             'images.alter',
             {
                 imageId: session.remoteId,
-                expectedRevision: session.revision,
+                expectedRevision: expectedRevision ?? session.revision,
                 manifest: {
                     inline: {
                         schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,

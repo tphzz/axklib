@@ -4,6 +4,9 @@
     import LayoutControls from '../../lib/components/LayoutControls.svelte';
     import type { InterfaceScaleController, InterfaceScaleState } from '../../lib/interfaceScale';
     import type { WorkspaceMode, WorkspacePresentation } from './contracts';
+    import { objectEditors } from '../object-editor/context';
+    import { editorPaneHeight } from './paneLayout';
+    import Splitter from '../../lib/components/Splitter.svelte';
 
     interface Props {
         mode: WorkspaceMode;
@@ -41,16 +44,25 @@
     }: Props = $props();
     let sidebarOpen = $state(true);
     let lowerOpen = $state(false);
-    let splitRatio = $state(2 / 3);
-    let resizing = $state(false);
+    let splitRatio = $state<number | null>(null);
+    let stageHeight = $state(0);
     let mainStage: HTMLElement;
     let scale = $state<InterfaceScaleState | null>(null);
     let unsubscribe: (() => void) | undefined;
+    const editors = objectEditors();
+    const playback = $derived(editors?.visible ? undefined : presentation.playback);
+    const availableHeight = $derived(Math.max(0, stageHeight - 8 - (playback ? 30 : 0)));
+    const lowerHeight = $derived(editorPaneHeight(availableHeight, splitRatio, presentation.lowerPreferredHeight));
+    const upperHeight = $derived(availableHeight - lowerHeight);
     onMount(() => {
         scale = interfaceScaling?.state() ?? null;
         unsubscribe = interfaceScaling?.subscribe((value) => {
             scale = value;
         });
+        const observer = new ResizeObserver(() => (stageHeight = mainStage.clientHeight));
+        observer.observe(mainStage);
+        stageHeight = mainStage.clientHeight;
+        return () => observer.disconnect();
     });
     onDestroy(() => {
         unsubscribe?.();
@@ -58,12 +70,21 @@
     });
     function resize(clientY: number): void {
         const bounds = mainStage.getBoundingClientRect();
-        splitRatio = Math.min(0.8, Math.max(0.2, (clientY - bounds.top) / Math.max(1, bounds.height)));
+        const logicalY = ((clientY - bounds.top) / Math.max(1, bounds.height)) * stageHeight;
+        splitRatio = Math.max(0, Math.min(1, (logicalY - (playback ? 30 : 0)) / Math.max(1, availableHeight)));
     }
-    function resizeKey(event: KeyboardEvent): void {
-        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-        event.preventDefault();
-        splitRatio = Math.min(0.8, Math.max(0.2, splitRatio + (event.key === 'ArrowDown' ? 0.03 : -0.03)));
+    function resizeKey(key: string): void {
+        splitRatio = Math.max(
+            0,
+            Math.min(
+                1,
+                key === 'Home'
+                    ? 0
+                    : key === 'End'
+                      ? 1
+                      : upperHeight / Math.max(1, availableHeight) + (key === 'ArrowDown' ? 0.03 : -0.03),
+            ),
+        );
     }
 </script>
 
@@ -137,36 +158,20 @@
             class="main-stage"
             data-workspace-background
             class:lower-panel-closed={!lowerOpen || !presentation.lower}
-            class:has-audition-bar={Boolean(presentation.playback)}
-            style:--split-position={`${splitRatio * 100}%`}
+            class:has-audition-bar={Boolean(playback)}
+            style:--split-position={`${upperHeight}px`}
         >
             {@render presentation.content()}
-            {#if presentation.playback}{@render presentation.playback()}{/if}
+            {#if playback}{@render playback()}{/if}
             {#if lowerOpen && presentation.lower}
-                <!-- Svelte does not model the interactive ARIA separator pattern. -->
-                <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <div
-                    class="horizontal-splitter"
-                    class:resizing
-                    role="separator"
-                    aria-label="Resize editor panel"
-                    aria-orientation="horizontal"
-                    tabindex="0"
-                    onpointerdown={(event) => {
-                        resizing = true;
-                        event.currentTarget.setPointerCapture(event.pointerId);
-                        resize(event.clientY);
-                    }}
-                    onpointermove={(event) => {
-                        if (resizing) resize(event.clientY);
-                    }}
-                    onpointerup={() => (resizing = false)}
-                    onpointercancel={() => (resizing = false)}
-                    onkeydown={resizeKey}
-                >
-                    <span></span>
-                </div>
+                <Splitter
+                    orientation="horizontal"
+                    label="Resize editor panel"
+                    value={(upperHeight / Math.max(1, availableHeight)) * 100}
+                    onresize={(event) => resize(event.clientY)}
+                    onstep={resizeKey}
+                    onreset={() => (splitRatio = null)}
+                />
                 {@render presentation.lower()}
             {/if}
         </main>

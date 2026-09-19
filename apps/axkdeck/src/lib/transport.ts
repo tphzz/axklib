@@ -1,4 +1,5 @@
 import type { DiskTreeItem } from './types';
+import type { ObjectEditingTransport } from './objectEditing';
 import type { HardDiskCreationProfile, HardDiskCreationProfileId } from './hardDiskCreation';
 export type * from './hardDiskCreation';
 import type { FilesystemTransport } from './filesystem';
@@ -463,7 +464,12 @@ export interface ImageOpenOptions {
 }
 
 export interface ImageTransport
-    extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport, FloppyTransport {
+    extends
+        ProgramAssignmentCleanupTransport,
+        FilesystemTransport,
+        Su700Transport,
+        FloppyTransport,
+        ObjectEditingTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
@@ -528,6 +534,7 @@ export interface ImageTransport
         sessionId: number,
         objectKeys: readonly string[],
         signal?: AbortSignal,
+        storedPcm?: boolean,
     ): Promise<AuditionBundleDescriptor>;
     readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
     deleteAudition(auditionId: string): Promise<void>;

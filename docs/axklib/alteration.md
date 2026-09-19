@@ -58,7 +58,7 @@ bank layouts with clear pending propagation state are supported. Pending state,
 unresolved or multiply-owned members, and invalid merged values reject the entire
 transaction without publishing a partial change.
 
-`update_sbnk_parameters` applies a non-empty partial
+`update_sbnk_parameters` applies a partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.
 Fields omitted from the update and unrelated opaque bytes are preserved.
 Dependent values are validated against the existing object, not fresh-object
@@ -67,6 +67,15 @@ key when the update omits `root_key`. Derived caches are recomputed from changed
 source values. Sample Bank
 `parameter_overrides` uses this model too, prepares every member update before
 mutation, and leaves the bank's pending-propagation bits clear.
+
+The update can additionally specify `playback_window` with unsigned
+`start_frame` and positive `length_frames`. At least one parameter or a playback
+window is required. Window edits require an ordinary current mono/stereo Sample
+and complete, matching PCM8/PCM16 Wave Data. The resulting playback and loop
+bounds are validated together, including retained loop values. The operation
+updates active channel bounds and their end cache, without changing PCM or an
+inactive channel's bytes. Optional `expected_payload_sha256` is the lowercase
+SHA-256 of the complete source Sample payload; a mismatch rejects the update.
 
 `update_program_parameters` applies [Program-wide and guarded assignment
 parameter patches](program-parameters.md) to a current-layout Program. It

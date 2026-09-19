@@ -352,8 +352,14 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
             } else if (*type == "update_sbnk_parameters" || *type == "update_sample_bank_parameters") {
                 const auto name_field = *type == "update_sbnk_parameters" ? "sample_name" : "sample_bank_name";
+                auto required_row = row;
+                if (*type == "update_sbnk_parameters") {
+                    required_row.erase("playback_window");
+                    required_row.erase("expected_payload_sha256");
+                }
                 if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", name_field, "parameters"}, context);
+                        required_row, {"id", "type", "partition_index", "volume_name", name_field, "parameters"},
+                        context);
                     !valid) {
                     return std::unexpected{valid.error()};
                 }
@@ -363,15 +369,28 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{volume.error()};
                 if (!sample)
                     return std::unexpected{sample.error()};
-                auto parameters =
-                    detail::parse_sample_parameters_json(row["parameters"], context + ".parameters", true,
-                                                         ErrorCode::transaction_rejected, ErrorCategory::transaction);
+                auto parameters = detail::parse_sample_parameters_json(
+                    row["parameters"], context + ".parameters", !row.contains("playback_window"),
+                    ErrorCode::transaction_rejected, ErrorCategory::transaction);
                 if (!parameters)
                     return std::unexpected{parameters.error()};
-                if (*type == "update_sbnk_parameters")
-                    data = UpdateSampleParametersOperation{std::move(selector), std::move(*volume), std::move(*sample),
-                                                           std::move(*parameters)};
-                else
+                if (*type == "update_sbnk_parameters") {
+                    UpdateSampleParametersOperation operation{std::move(selector), std::move(*volume),
+                                                              std::move(*sample), std::move(*parameters)};
+                    if (row.contains("playback_window")) {
+                        auto window = detail::parse_sample_playback_window_json(row["playback_window"]);
+                        if (!window)
+                            return std::unexpected{window.error()};
+                        operation.playback_window = *window;
+                    }
+                    if (row.contains("expected_payload_sha256")) {
+                        auto hash = required_text(row, "expected_payload_sha256", context);
+                        if (!hash)
+                            return std::unexpected{hash.error()};
+                        operation.expected_payload_sha256 = *hash;
+                    }
+                    data = std::move(operation);
+                } else
                     data = UpdateSampleBankParametersOperation{std::move(selector), std::move(*volume),
                                                                std::move(*sample), std::move(*parameters)};
             } else if (*type == "update_wave_data_parameters") {

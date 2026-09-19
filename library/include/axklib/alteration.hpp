@@ -66,6 +66,8 @@ struct UpdateSampleParametersOperation {
     std::string volume_name;
     std::string sample_name;
     SampleParameters parameters;
+    std::optional<SamplePlaybackWindow> playback_window{};
+    std::optional<std::string> expected_payload_sha256{};
 };
 
 struct UpdateSampleBankParametersOperation {

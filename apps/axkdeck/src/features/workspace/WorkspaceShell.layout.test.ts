@@ -78,7 +78,9 @@ describe('WorkspaceShell layout contract', () => {
         expect(sectionHeadingRule).toContain('font-size: 10px');
         expect(sectionHeadingRule).toContain('line-height: 12px');
         expect(sectionHeadingRule).toContain('margin: 0 0 5px');
-        expect(contentRule).toContain('padding: 8px calc(9px + var(--overlay-scrollbar-clearance)) 0 9px');
+        expect(contentRule).toContain(
+            'padding: var(--density-panel-padding) calc(var(--density-panel-padding) + var(--overlay-scrollbar-clearance)) 0 var(--density-panel-padding)',
+        );
         expect(metadataRowRule).not.toContain('border-bottom');
         expect(metadataDividerRule).toContain('border-bottom: 1px solid var(--inspector-row-divider)');
         expect(relationshipsRule).not.toContain('margin: 9px');

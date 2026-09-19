@@ -16,7 +16,7 @@
     "version:check": "node tools/check-versions.mjs",
     "format": "prettier --write \"src/**/*.{ts,svelte}\" vite.config.ts",
     "format:check": "prettier --check \"src/**/*.{ts,svelte}\" vite.config.ts",
-    "test": "vitest run",
+    "test": "node --test tools/svelte-style-loader.test.mjs && vitest run",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json",
     "check:watch": "svelte-check --tsconfig ./tsconfig.app.json --watch",

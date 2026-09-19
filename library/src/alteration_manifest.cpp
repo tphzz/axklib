@@ -335,7 +335,18 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                 } else if constexpr (std::same_as<T, UpdateSampleParametersOperation>) {
                     if (auto valid = require_object_name(operation.sample_name, "sample_name"); !valid)
                         return valid;
-                    if (!detail::has_sample_parameter_values(operation.parameters))
+                    if (operation.expected_payload_sha256 &&
+                        (operation.expected_payload_sha256->size() != 64U ||
+                         !std::ranges::all_of(*operation.expected_payload_sha256,
+                                              [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })))
+                        return std::unexpected{manifest_error("expected_payload_sha256 must be lowercase SHA-256")};
+                    if (operation.playback_window &&
+                        (operation.playback_window->length_frames == 0U ||
+                         static_cast<std::uint64_t>(operation.playback_window->start_frame) +
+                                 operation.playback_window->length_frames >
+                             maximum_wave_data_frames_per_channel))
+                        return std::unexpected{manifest_error("playback_window exceeds the Sample frame bounds")};
+                    if (!operation.playback_window && !detail::has_sample_parameter_values(operation.parameters))
                         return std::unexpected{manifest_error("parameters must contain at least one parameter")};
                     return detail::validate_sample_parameter_fields(operation.parameters);
                 } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {

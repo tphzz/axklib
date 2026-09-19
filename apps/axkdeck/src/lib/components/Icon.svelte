@@ -41,6 +41,11 @@
         | 'trash'
         | 'triangle-alert'
         | 'upload'
+        | 'undo'
+        | 'redo'
+        | 'zoom-in'
+        | 'zoom-out'
+        | 'fit-width'
         | 'waveform';
 
     interface Props {
@@ -68,8 +73,17 @@
 >
     {#if name === 'search'}
         <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+    {:else if name === 'zoom-in' || name === 'zoom-out'}
+        <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3M8 11h6" />
+        {#if name === 'zoom-in'}<path d="M11 8v6" />{/if}
+    {:else if name === 'fit-width'}
+        <path d="M3 4v16M21 4v16M7 8l-4 4 4 4M17 8l4 4-4 4M3 12h18" />
     {:else if name === 'refresh'}
         <path d="M20 6v5h-5M4 18v-5h5" /><path d="M18.5 9A7 7 0 0 0 6 6.5L4 9m2 6a7 7 0 0 0 12.5 2.5L20 15" />
+    {:else if name === 'undo'}
+        <path d="M3 10h11a7 7 0 0 1 0 14M3 10l5-5M3 10l5 5" transform="translate(0 -3)" />
+    {:else if name === 'redo'}
+        <path d="M21 10H10a7 7 0 0 0 0 14M21 10l-5-5M21 10l-5 5" transform="translate(0 -3)" />
     {:else if name === 'disc'}
         <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2" /><path d="M12 3a9 9 0 0 1 9 9" />
     {:else if name === 'eject'}

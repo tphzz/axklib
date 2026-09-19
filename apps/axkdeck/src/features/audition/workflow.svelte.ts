@@ -17,6 +17,7 @@ import type {
 } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
+import type { CachedAudition } from '../../lib/audio/auditionTypes';
 
 export interface LaneQueries {
     primary: string;
@@ -466,6 +467,33 @@ export class AuditionWorkflow {
     stop(): Promise<void> {
         this.cancelSampleBankPlayback();
         return this.controller.stop();
+    }
+
+    async refreshEditorWorkspace(refresh: () => Promise<void>): Promise<void> {
+        const catalog = this.dependencies.catalog;
+        const editorIds = { ...catalog.editorObjectIds };
+        const inspector = catalog.inspectorObjectId;
+        const sample = catalog.selectedSampleId;
+        const volume = catalog.activeVolumeId;
+        await refresh();
+        if (volume && !catalog.activeVolumeId) throw new Error('Workspace content could not be refreshed');
+        if (catalog.activeVolumeId !== volume) return;
+        catalog.editorObjectIds = Object.fromEntries(
+            Object.entries(editorIds).map(([view, id]) => [view, catalog.objectsById.has(id) ? id : '']),
+        ) as typeof editorIds;
+        if (catalog.objectsById.has(inspector)) catalog.inspectorObjectId = inspector;
+        if (catalog.objectsById.has(sample)) catalog.selectedSampleId = sample;
+    }
+
+    playPrepared(
+        sessionId: number,
+        objectId: string,
+        prepare: (context: AudioContext, signal: AbortSignal) => Promise<CachedAudition>,
+    ): Promise<void> {
+        return this.controller.play(sessionId, objectId, prepare);
+    }
+    seekPrepared(frame: number): void {
+        this.controller.seek(frame);
     }
 
     invalidateSession(sessionId: number): Promise<void> {
