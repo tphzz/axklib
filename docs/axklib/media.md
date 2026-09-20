@@ -19,7 +19,7 @@ cross-linked files, root and subdirectory records, duplicate names, and declared
 file sizes. Directory entries use their DOS 8.3 identity; long-filename entries
 are ignored. FAT32, exFAT, filesystem repair, and in-place filesystem
 mutation are unsupported. `axklib create floppy` separately creates the narrow
-fixed-geometry profile documented in [FAT12 Floppy Images](floppy.md).
+fixed-geometry profile documented in [A-Series FAT12 Floppy Images](floppy.md).
 
 ## SU700 profile
 
@@ -37,13 +37,13 @@ references and payload framing; it does not validate every song event or DSP
 parameter. Import does not merge existing volumes, reconstruct divided disk
 sets, or create a new SU700 disk image.
 
-See [SU700 Files](su700.md) for the stored structures and unresolved meanings.
+See [SU700 File Layout And Sample Data](su700.md) for the stored structures and unresolved meanings.
 Filesystem editing remains subject to the allocation and source-write checks
 below, independently of device-specific payload semantics.
 
 ## EX5 disk profile
 
-The separate [EX5 Disk Images](ex5.md) profile provides directory and raw-file access, with guarded
+The separate [EX5 FAT16 Disk Images](ex5.md) profile provides directory and raw-file access, with guarded
 filesystem edits on writable, structurally admitted images. It uses EX5-specific recognition and size
 fields, not generic FAT16 detection. Files remain opaque and are not projected
 into the A-series sampler-object catalog.
@@ -91,7 +91,7 @@ interpreted. A hybrid image can still open through a valid primary ISO9660 tree,
 but names or metadata supplied only by those extensions are outside the API
 contract. `axklib create iso` separately creates a deterministic one-group,
 one-volume image. Partition conversion can place several source volumes in one
-generated group; both profiles are documented in [CD-ROM Images](cdrom.md).
+generated group; both profiles are documented in [A-Series ISO9660 CD-ROM Images](cdrom.md).
 
 ## AXK object directory profile
 
@@ -159,28 +159,18 @@ external format reference; the support boundaries above describe axklib.
 
 ## Format Documentation Map
 
-The public format pages divide the byte contracts by layer:
-
-| Layer or file class | Documentation |
-| --- | --- |
-| SFS partition geometry, allocation, index records and directory entries | [SFS Filesystem](sfs-filesystem.md) |
-| FAT12 boot sector, FAT entries, directory entries, DOS 8.3 names, and generated root filenames | [FAT12 Floppy Images](floppy.md) |
-| EX5 disk descriptor, FAT16 geometry, directories and raw file reads | [EX5 Disk Images](ex5.md) |
-| SU700 control table, native sample chunks and song framing | [SU700 Files](su700.md) |
-| ISO descriptors, both path tables, directory records, raw folder names, `0000` catalogs, group-label files, and generated `Fnnn` names | [CD-ROM Images](cdrom.md) |
-| A3K archive format (external reference) | [A3K Volume Archives](a3k-archive.md); axklib behavior is described under [A3K Archive Profile](#a3k-archive-profile) |
-| Complete `FSFSDEV3SPLX<type>` files and decoded `SMPL`, `SBNK`, `SBAC`, and `PROG` fields | [Sampler Data Structures](sampler-data.md) |
-| Fresh floppy, fresh ISO, and floppy-object-to-ISO manifests | [Writer And Alteration](write.md) |
-| Sampler-facing labels, duplicate disambiguation, and export filenames | [Name, Path, And Export Mapping](names-and-paths.md) |
+The [Formats Overview](formats.md) groups specifications by filesystem,
+device-specific payload, and archive or package format. Use it to find the
+byte-level reference for each device family; this page describes software support.
 
 Format pages specify established encodings and explicitly identify remaining
 unknowns. A file being visible to the container reader does not imply that its
 inner format is decoded or writable. The 257-record `YAMAHA.SYM`
 disk/file/category catalog is decoded and synthesized; other model-specific
 floppy system files remain opaque, as do
-PRF3 layouts other than the documented [System Files](system-files.md). The admitted current
+PRF3 layouts other than the documented [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md). The admitted current
 `SEQU` timeline is documented in
-[Sequence Data And MIDI Conversion](sequences.md). Transfer mode copies only
+[A-Series Sequence Data (SEQU)](sequences.md). Transfer mode copies only
 recognized Yamaha object payloads; it does not silently claim support for
 opaque support-file formats.
 

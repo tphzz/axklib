@@ -180,7 +180,7 @@ versioned `axk-tpdf-pcg32-v1` dither policy. The supported output rates are
 unsupported source rate defaults to 44,100 Hz. Explicit conversion to any
 supported rate uses pinned libsoxr VHQ processing and the same deterministic
 dither policy. See
-[Sampler Data Structures](sampler-data.md) for the generated object fields and
+[A-Series Sampler Object Structures](sampler-data.md) for the generated object fields and
 stored PCM representation.
 
 Audio conversion reports the number of individual channel values outside the
@@ -670,7 +670,7 @@ inside their `sample` and `sample_bank` objects. Format selection is explicit,
 not inferred from neighbors. Overrides are validated against each affected
 object's generation and never cause silent promotion. Axkdeck's audio import
 sends one selected format for every new Sample and its optional bank in the same
-transaction. See [Sample Formats And Device Generations](sample-formats.md).
+transaction. See [A-Series Sample Formats And Generations](sample-formats.md).
 
 Each authored Sample Bank contains 1..127 mono or stereo Samples. Programs admit
 0..999 ordered Sample Bank or standalone Sample assignments with independently
@@ -816,7 +816,7 @@ An `insert_program` object contains a Program `number`, its sampler-visible
 and `0..999` ordered assignments. Each assignment has exactly one `sample_bank`
 or `sample` target and an optional `parameters` object. The Program also accepts
 optional `model` (`A4000` by default, or `A5000`) and Program-wide `parameters`.
-See [Program Parameters](program-parameters.md) for the shared fresh/update
+See [A-Series Program Parameters](program-parameters.md) for the shared fresh/update
 parameter contract.
 
 - Omitted assignment receive settings, or `"parameters":{"receive":"inherit"}`,
@@ -957,13 +957,13 @@ uses a journaled transaction with rollback on failure, then refreshes the
 session. Do not modify the same open image in another process. For EX5 media
 with an admitted declared-capacity mismatch, writes remain restricted to
 physically present, complete clusters; they do not extend the image or silently
-repair its geometry. See [EX5 Disk Images](ex5.md) for the boundary and
+repair its geometry. See [EX5 FAT16 Disk Images](ex5.md) for the boundary and
 [Server Files Operations](server.md#files-inside-an-image) for the HTTP contract.
 
 ## System File Operations
 
 System Files are distinct from ordinary Sample and Program objects. Their
-stored regions and unknown fields are specified in [System Files](system-files.md).
+stored regions and unknown fields are specified in [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md).
 There is no public CLI, HTTP or installed SDK parameter editor or fresh System
 File authoring interface. General raw-file copying does not validate the
 semantic correctness of replacement System data. In particular, ordinary
@@ -973,7 +973,7 @@ templates as though they were independent objects.
 ## Generated Floppy Names
 
 Generated object files occupy the FAT root directory. The geometry follows
-the 1.44 MB profile in [FAT12 Floppy Images](floppy.md). Catalogs are written
+the 1.44 MB profile in [A-Series FAT12 Floppy Images](floppy.md). Catalogs are written
 in deterministic root-directory order; rebuilding a valid existing catalog
 retains its disk-name record and regenerates the file/category records.
 

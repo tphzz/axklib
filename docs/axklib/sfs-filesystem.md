@@ -1,10 +1,10 @@
-# SFS Filesystem
+# SFS Hard Disk Filesystem
 
 Yamaha A-series hard-disk images use an SFS container for partitions, directories,
 object files, and allocation state. File extents contain the
-sampler object payloads described in [Sampler Data Structures](sampler-data.md).
+sampler object payloads described in [A-Series Sampler Object Structures](sampler-data.md).
 SU700 hard disks also use SFS, with a different file organization and payloads
-described in [SU700 Files](su700.md).
+described in [SU700 File Layout And Sample Data](su700.md).
 
 SFS is the hard-disk container family used by `.hda`, `.hds`, and equivalent raw
 hard-disk images. It is not FAT12 and it is not ISO9660. FAT12 floppies and
@@ -444,7 +444,7 @@ A sampler object payload begins with `FSFSDEV3SPLX`; its type is at
 `0x0c..0x0f`. Ordinary A-series directory placement is
 `partition / volume / category / object`, with categories such as PROG, SBAC,
 SBNK, SMPL and SEQU. SFS itself can also store non-sampler files. See
-[Sampler Data Structures](sampler-data.md) for object contents.
+[A-Series Sampler Object Structures](sampler-data.md) for object contents.
 
 ## Structural Consistency
 

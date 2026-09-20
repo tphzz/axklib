@@ -46,7 +46,7 @@ persisted user data requires them.
 The current portable-package reader accepts exactly manifest schema `1.0` and
 rejects unknown or missing fields. All typed package extensions share that one
 schema; the manifest, not the filename, determines the package kind. See
-[Portable Object Packages](portable-packages.md) for the version and target
+[AXK Portable Object Packages](portable-packages.md) for the version and target
 compatibility contract.
 
 SFS package imports reuse waveform objects only inside the destination volume.

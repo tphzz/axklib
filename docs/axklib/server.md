@@ -1104,7 +1104,7 @@ Fresh Sample and Sample Bank alteration specifications accept lowercase
 `storage_format` values `a3000_188` and `a4000_a5000_224`; omission selects the
 later profile. Audio import uses the existing atomic alteration operation,
 passing the batch selection to each new Sample and optional bank, not a separate
-conversion job. See [Sample Formats And Device Generations](sample-formats.md).
+conversion job. See [A-Series Sample Formats And Generations](sample-formats.md).
 `formatConversions` gives read-only target previews with changes and blockers;
 `canConvertFormat` indicates whether the image supports the operation. Execution
 uses `convert_sbnk_format`, the original payload digest and the current image

@@ -1,7 +1,11 @@
-# Sample Formats And Device Generations
+---
+title: A-Series Sample Formats And Generations
+---
 
-A Sample's stored format, its parameter values, the sampler's system version and its
-installed hardware are separate compatibility questions. Choosing a format does
+# A-Series Sample Formats And Generations
+
+An A-series Sample's stored format, its parameter values, the sampler's system
+version and its installed hardware are separate compatibility questions. Choosing a format does
 not certify a complete disk for a particular sampler.
 
 ## Stored Layouts
@@ -15,7 +19,7 @@ The later block consists of a 188-byte prefix followed by a 36-byte extension.
 The common physical prefix is not a universal semantic subset: some ranges are
 wider on A3000, some packed bits change meaning, and some prefix fields stop being
 authoritative on the later generation. File allocation and padding do not select
-the format. See [Sampler Data Structures](sampler-data.md#sample-parameter-window)
+the format. See [A-Series Sampler Object Structures](sampler-data.md#sample-parameter-window)
 for header lengths and byte locations.
 
 Sample Banks store the same generation's parameters, but their object layout
@@ -90,7 +94,7 @@ or sound. Physical playback testing remains distinct from stored-format checks.
 Fresh Sample and Sample Bank specifications accept `storage_format` alongside
 their names and parameters. Both values above are supported; omitting the field
 selects the later profile. Unsupported parameter values reject the operation;
-they do not trigger an implicit conversion. See [Sample Parameter Authoring](sample-parameters.md).
+they do not trigger an implicit conversion. See [A-Series Sample Parameter Authoring](sample-parameters.md).
 
 In axkdeck audio import, the **Sample format** selector applies to every Sample
 and optional new Sample Bank in that batch. Each application launch starts with

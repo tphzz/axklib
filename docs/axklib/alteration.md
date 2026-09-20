@@ -62,7 +62,7 @@ transaction without publishing a partial change.
 Fresh `insert_sbnk` Sample and `insert_sbac` Sample Bank specifications accept
 `storage_format`: `a3000_188` or `a4000_a5000_224`. Omission selects the later
 format. The bank's format does not convert existing members. See
-[Sample Formats And Device Generations](sample-formats.md) for domains and
+[A-Series Sample Formats And Generations](sample-formats.md) for domains and
 hardware distinctions, and [Writer And Alteration](write.md) for specification fields.
 
 `update_sbnk_parameters` applies a partial

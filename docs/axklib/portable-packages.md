@@ -1,7 +1,7 @@
-# Portable Object Packages
+# AXK Portable Object Packages
 
-The axklib portable-package format moves complete Yamaha A-series object graphs
-from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
+The AXK portable-package format is defined by axklib. It moves complete Yamaha
+A-series object graphs from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
 A3K media into portable packages and imports packages into admitted
 writable targets. A package contains original Yamaha object payloads and a
 source-neutral graph. It is not a disk image, a WAV collection, or a general

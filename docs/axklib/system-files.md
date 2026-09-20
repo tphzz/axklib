@@ -1,7 +1,11 @@
-# System Files
+---
+title: A-Series System Files (SYSTEM / SYSTEM2)
+---
 
-SYSTEM and SYSTEM2 store partition-level sampler configuration separately from
-Programs and Volumes. A normal Volume save does not contain this environment.
+# A-Series System Files (SYSTEM / SYSTEM2)
+
+The A-series SYSTEM and SYSTEM2 files store partition-level sampler configuration
+separately from Programs and Volumes. A normal Volume save does not contain this environment.
 These records use the PRF3 type, but the type tag alone does not identify a
 System File: pathname, exact record size and the inner signature also matter.
 

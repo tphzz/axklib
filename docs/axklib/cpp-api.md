@@ -48,7 +48,7 @@ does not read or hash payload bodies. `portable_package::verify()` performs the
 full payload, object-profile, graph-closure, identity, and relocation checks.
 `package_import_plan::create()` fully verifies all packages regardless of prior
 inspection and returns a complete conflict and allocation plan before opening a
-temporary output. See [Portable Object Packages](portable-packages.md) for the
+temporary output. See [AXK Portable Object Packages](portable-packages.md) for the
 schema, target policies, and examples.
 
 Facade classes use PIMPL storage. Raw record, parser, allocation, codec, JSON,

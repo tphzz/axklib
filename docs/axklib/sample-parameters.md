@@ -1,6 +1,6 @@
-# Sample Parameter Authoring
+# A-Series Sample Parameter Authoring
 
-The `parameters` JSON object describes sampler-visible Sample (`SBNK`)
+The `parameters` JSON object describes A-series sampler-visible Sample (`SBNK`)
 settings. The same fields are accepted for fresh Samples, existing-Sample
 updates, existing-bank/member updates, and a fresh Sample Bank's
 `parameter_overrides` object.
@@ -14,7 +14,7 @@ Fresh Sample and Sample Bank specifications accept `storage_format` alongside
 `name`, not inside `parameters` or `parameter_overrides`. Choose `a3000_188` or
 `a4000_a5000_224`; omission selects the latter. Unknown formats and settings
 outside the selected profile reject authoring without automatic conversion.
-See [Sample Formats And Device Generations](sample-formats.md) for the complete
+See [A-Series Sample Formats And Generations](sample-formats.md) for the complete
 storage, system-version and hardware distinction.
 
 Existing Samples retain their stored parameter format on every ordinary edit.

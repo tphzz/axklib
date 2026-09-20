@@ -1,8 +1,12 @@
-# Sequence Data
+---
+title: A-Series Sequence Data (SEQU)
+---
 
-A current Yamaha Sequence is a complete `FSFSDEV3SPLXSEQU` object. This page
+# A-Series Sequence Data (SEQU)
+
+A current A-series Sequence is a complete `FSFSDEV3SPLXSEQU` object. This page
 describes its stored timeline. Package transfer and MIDI conversion are covered
-in [Sequence Transfer And MIDI Conversion](sequence-midi.md).
+in [A-Series Sequence Transfer And MIDI Conversion](sequence-midi.md).
 
 ## Current SEQU Profile
 

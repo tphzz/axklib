@@ -206,5 +206,5 @@ and dependency-safe ordering.
 
 - [CLI Reference](cli.md) lists every public command family and its safety behavior.
 - [Writer And Alteration](write.md) defines image manifest fields and writer profiles.
-- [Portable Object Packages](portable-packages.md) defines roots, destinations, conflicts, and reuse.
+- [AXK Portable Object Packages](portable-packages.md) defines roots, destinations, conflicts, and reuse.
 - [Supported Media Profiles](media.md) distinguishes SFS, Yamaha FAT12, and Yamaha ISO9660 boundaries.

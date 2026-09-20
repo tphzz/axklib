@@ -1,8 +1,12 @@
+---
+title: SU700 Effects Records
+---
+
 # SU700 Effects Records
 
 This reference describes the `Efsn` portion of [SU700 song files](su700.md#ssq-song-storage).
 Track setup, ordinary sample parameters and sequence events are described in
-[Song And Track Records](su700-song.md). Offsets, type IDs and parameter slots
+[SU700 Song And Track Records](su700-song.md). Offsets, type IDs and parameter slots
 below are decimal; multi-byte serialized values are big-endian.
 
 ## Scene Framing

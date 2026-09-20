@@ -1,12 +1,16 @@
-# Sampler Data Structures
+---
+title: A-Series Sampler Object Structures
+---
 
-Yamaha A-series object files share a header across SFS hard disks, FAT12
-floppies, ISO9660 CD-ROMs and A3K volume archives. The container locates each
+# A-Series Sampler Object Structures
+
+Yamaha A-series (A3000/A4000/A5000) object files share a header across SFS hard
+disks, FAT12 floppies, ISO9660 CD-ROMs and A3K volume archives. The container locates each
 file; the object payload defines its type and contents.
 
 This page describes SMPL (Wave Data), SBNK (Sample), SBAC (Sample Bank) and
-PROG (Program). See [System Files](system-files.md) for SYSTEM/SYSTEM2 and
-[Sequence Data](sequences.md) for SEQU. Offsets are hexadecimal and relative
+PROG (Program). See [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md) for SYSTEM/SYSTEM2 and
+[A-Series Sequence Data (SEQU)](sequences.md) for SEQU. Offsets are hexadecimal and relative
 to the object start unless a table specifies another base. Multi-byte numeric
 fields are big-endian unless stated otherwise. Descriptive field names below
 are labels for the byte layout, not an API or report schema.
@@ -68,8 +72,8 @@ the embedded header supplies its sampler object name.
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
 big-endian length and offset fields in the object rather than inferring payload
 boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
-`SEQU` contains a timeline; see [Sequence Data](sequences.md).
-`PRF3` includes SYSTEM/SYSTEM2 files, described in [System Files](system-files.md).
+`SEQU` contains a timeline; see [A-Series Sequence Data (SEQU)](sequences.md).
+`PRF3` includes SYSTEM/SYSTEM2 files, described in [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md).
 Other PRF3 inner formats are unspecified.
 
 ## SMPL: Wave Data Object
@@ -336,7 +340,7 @@ Native controller domains are Device `0..125`, Function `0..21`, Type `0..3`,
 and signed Range `-63..+63`. Later authoritative records extend Device to `126`
 and Function to `36`. Device values above `120` are special selectors, not
 ordinary MIDI controller numbers. Physical prefix reuse does not imply identical
-parameter domains; see [Sample Formats And Device Generations](sample-formats.md).
+parameter domains; see [A-Series Sample Formats And Generations](sample-formats.md).
 
 The following tables give physical parameter offsets. The same parameter
 layout is split across the SBAC prefix and terminal block as described below.
@@ -899,8 +903,8 @@ and unstarred objects.
 
 ## SEQU And PRF3
 
-SEQU contains sequence timing and events; see [Sequence Data](sequences.md).
-PRF3 includes the partition-level [System Files](system-files.md). Other PRF3
+SEQU contains sequence timing and events; see [A-Series Sequence Data (SEQU)](sequences.md).
+PRF3 includes the partition-level [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md). Other PRF3
 inner layouts are unspecified; do not apply the SYSTEM layout based on the
 type tag alone.
 

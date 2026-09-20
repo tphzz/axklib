@@ -1,9 +1,9 @@
-# FAT12 Floppy Images
+# A-Series FAT12 Floppy Images
 
 Yamaha A-series floppy images use a FAT12 container and store
 Yamaha sampler object files in the FAT root directory. The FAT12 layer supplies
 file enumeration and cluster-chain reads. The embedded object payloads use the
-shared sampler object format described in [Sampler Data Structures](sampler-data.md).
+shared sampler object format described in [A-Series Sampler Object Structures](sampler-data.md).
 
 ```mermaid
 flowchart TD
@@ -194,7 +194,7 @@ the embedded header identity. There is no CD-style `0000` category catalog or
 `_DSKNAME` group row on this floppy profile.
 
 Object tags and their inner byte layouts are documented in
-[Sampler Data Structures](sampler-data.md). In particular, `SMPL` waveform
+[A-Series Sampler Object Structures](sampler-data.md). In particular, `SMPL` waveform
 payload boundaries come from the embedded big-endian header fields rather than
 from filename or FAT allocation length.
 

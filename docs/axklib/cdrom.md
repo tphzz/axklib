@@ -1,9 +1,9 @@
-# CD-ROM Images
+# A-Series ISO9660 CD-ROM Images
 
 Yamaha A-series CD-ROM images use ISO9660
 for the outer container and often add a sampler menu layer above the folders that
 hold Yamaha object files. The object payloads use the shared format described in
-[Sampler Data Structures](sampler-data.md).
+[A-Series Sampler Object Structures](sampler-data.md).
 
 CD-ROM volumes are source-load content and do not carry the SFS
 partition-level `PRF3/SYSTEM` or `PRF3/SYSTEM2` operating context. Programs on
