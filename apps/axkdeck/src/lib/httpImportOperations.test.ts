@@ -34,7 +34,7 @@ describe('audioImportRequest', () => {
                     targetSampleRate: 44_100,
                 },
             ],
-            { kind: 'SAMPLES' },
+            { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } },
         );
 
         expect(result.manifest.inline.operations.map((operation) => operation.type)).toEqual([

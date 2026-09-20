@@ -49,7 +49,7 @@ describe.each(['audio', 'midi'] as const)('%s completion recovery', (kind) => {
         workflow.chooseFiles();
         const commit = () =>
             workflow instanceof AudioImportWorkflow
-                ? workflow.commit([], { kind: 'SAMPLES' })
+                ? workflow.commit([], { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } })
                 : workflow.commit([], 'exclude');
         return { workflow, commit, start, waitForJob, refreshSession };
     }

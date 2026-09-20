@@ -36,6 +36,7 @@
       "volume_name": "Imported",
       "sample": {
         "name": "Mono",
+        "storage_format": "a3000_188",
         "waveform_name": "Mono Wave",
         "parameters": {
           "root_key": 60,
@@ -77,6 +78,7 @@
       "volume_name": "Imported",
       "sample": {
         "name": "Stereo",
+        "storage_format": "a3000_188",
         "waveform_name": "Stereo-L",
         "right_waveform_name": "Stereo-R",
         "parameters": {
@@ -100,6 +102,7 @@
       "volume_name": "Imported",
       "sample_bank": {
         "name": "Imported Bank",
+        "storage_format": "a3000_188",
         "member_samples": [
           "Mono",
           "Stereo"

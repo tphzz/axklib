@@ -146,9 +146,10 @@ Result<WaveformSpec> waveform(const Json &value, std::string context, const std:
 }
 
 Result<SampleSpec> sample(const Json &value, std::string context, const std::filesystem::path &base) {
-    if (auto valid = fields(value, context, {"name"},
-                            {"waveform_id", "right_waveform_id", "interleaved_audio_path", "left_waveform_name",
-                             "right_waveform_name", "target_sample_rate", "parameters", "playback_window"});
+    if (auto valid =
+            fields(value, context, {"name"},
+                   {"waveform_id", "right_waveform_id", "interleaved_audio_path", "left_waveform_name",
+                    "right_waveform_name", "target_sample_rate", "parameters", "playback_window", "storage_format"});
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -163,6 +164,10 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
     if (!name)
         return std::unexpected{name.error()};
     SampleSpec result;
+    auto format = detail::parse_sample_storage_format(value, context);
+    if (!format)
+        return std::unexpected{format.error()};
+    result.storage_format = *format;
     result.name = *name;
     const auto optional_text = [&](std::string_view field) -> Result<std::optional<std::string>> {
         if (!value.contains(field))
@@ -213,7 +218,7 @@ Result<SampleSpec> sample(const Json &value, std::string context, const std::fil
         if (!parameters)
             return std::unexpected{parameters.error()};
         result.parameters = std::move(*parameters);
-        if (auto valid = detail::validate_sample_parameters(result.parameters); !valid)
+        if (auto valid = detail::validate_sample_authoring_parameters(result.parameters, result.storage_format); !valid)
             return std::unexpected{valid.error()};
     }
     if ((result.right_waveform_id || result.interleaved_audio_path) &&
@@ -275,7 +280,8 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
     for (std::size_t index = 0; index < sample_banks_json.size(); ++index) {
         const auto sample_bank_context = context + ".sample_banks[" + std::to_string(index) + "]";
         const auto &row = sample_banks_json[index];
-        if (auto valid = fields(row, sample_bank_context, {"name", "member_samples"}, {"parameter_overrides"});
+        if (auto valid =
+                fields(row, sample_bank_context, {"name", "member_samples"}, {"parameter_overrides", "storage_format"});
             !valid) {
             return std::unexpected{valid.error()};
         }
@@ -286,6 +292,10 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             return std::unexpected{manifest_error(context + " has duplicate Sample Bank names")};
         }
         SampleBankSpec sample_bank{*sample_bank_name, {}, {}};
+        auto format = detail::parse_sample_storage_format(row, sample_bank_context);
+        if (!format)
+            return std::unexpected{format.error()};
+        sample_bank.storage_format = *format;
         if (!row["member_samples"].is_array()) {
             return std::unexpected{manifest_error(sample_bank_context + ".member_samples must be an array")};
         }
@@ -328,6 +338,10 @@ Result<VolumeSpec> volume(const Json &value, std::string context, const std::fil
             }
             sample_bank.parameter_overrides = std::move(*overrides);
         }
+        if (auto valid = detail::validate_sample_authoring_parameters(
+                sample_bank.parameter_overrides.value_or(SampleParameters{}), sample_bank.storage_format);
+            !valid)
+            return std::unexpected{valid.error()};
         result.sample_banks.push_back(std::move(sample_bank));
     }
     const auto &programs = value.contains("programs") ? value["programs"] : Json::array();

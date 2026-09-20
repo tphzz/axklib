@@ -310,7 +310,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
                 const std::set<std::string> required{"name", "waveform_name"};
-                const std::set<std::string> optional{"right_waveform_name", "parameters", "playback_window"};
+                const std::set<std::string> optional{"right_waveform_name", "parameters", "playback_window",
+                                                     "storage_format"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -330,6 +331,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!waveform)
                     return std::unexpected{waveform.error()};
                 SampleSpec spec;
+                auto format = detail::parse_sample_storage_format(sample, sample_context);
+                if (!format)
+                    return std::unexpected{format.error()};
+                spec.storage_format = *format;
                 spec.name = std::move(*name);
                 spec.waveform_id = std::move(*waveform);
                 if (sample.contains("playback_window")) {

@@ -105,6 +105,7 @@ nav:
       - TX16W Disk Import: axklib/tx16w-import.md
       - CLI JSON Schemas: axklib/cli-json-schemas.md
       - Sample Parameter Authoring: axklib/sample-parameters.md
+      - Sample Formats And Generations: axklib/sample-formats.md
       - Program Parameters: axklib/program-parameters.md
       - Writer And Alteration: axklib/write.md
   - Distribution:

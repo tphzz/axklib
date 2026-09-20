@@ -308,13 +308,18 @@ for word_index in 0..3:
 
 ### Sample Parameter Window
 
-The extended sample parameter window starts at `0x0a8`, contains 224 bytes, and
-ends at `0x187`. Two current logical object extents occur in real media:
+The Sample parameter window starts at `0x0a8`. Its stored extent depends on the
+header revision, not the allocated file size:
 
-- a `0x164`-byte object ends after parameter offset `0xbb`; and
-- a `0x188`-byte object includes the complete 224-byte parameter window.
+| Stored format | Revision at `0x14` | Length at `0x18` | Length at `0x1c` | Logical object extent |
+| --- | ---: | ---: | ---: | ---: |
+| A3000, 188 parameter bytes | 2 | `0x134` | 0 on fresh objects | `0x164` |
+| A4000/A5000, 224 parameter bytes | 4 | `0x134` | `0x158` | `0x188` |
 
-For `SBNK`, calculate this extent as `0x30 + payload_bytes`.
+For `SBNK`, calculate the extent as `0x30 + length_at_0x18` for revision 2, or
+`0x30 + length_at_0x1c` for revision 4. Native parameters end at `0x163`; the
+later extension occupies `0x164..0x187`. Fresh native objects leave `0x1c..0x2f`
+zero. Unrelated edits preserve existing uninterpreted header bytes.
 Sampler-authored Samples commonly store zero in the generic `header_size` field,
 so `header_size + payload_bytes` is not an SBNK size formula.
 
@@ -327,9 +332,11 @@ its full value. Device, Type and Range copy unchanged. Unrelated edits and
 no-op patches preserve a preexisting mismatch. Short objects have no extended
 copy to project and retain their single controller record array.
 
-Controller record domains are Device `0..126`, Function `0..36`, Type `0..3`,
-and signed Range `-63..+63`. Device values `121..126` are special selectors,
-not ordinary MIDI controller numbers.
+Native controller domains are Device `0..125`, Function `0..21`, Type `0..3`,
+and signed Range `-63..+63`. Later authoritative records extend Device to `126`
+and Function to `36`. Device values above `120` are special selectors, not
+ordinary MIDI controller numbers. Physical prefix reuse does not imply identical
+parameter domains; see [Sample Formats And Device Generations](sample-formats.md).
 
 The following tables give physical parameter offsets. The same parameter
 layout is split across the SBAC prefix and terminal block as described below.
@@ -573,7 +580,7 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x078..0x133` | 188 | bytes | First part of the canonical 224-byte Sample Parameter block. |
+| `0x078..0x133` | 188 | bytes | Native parameter block, or prefix of the later 224-byte block. |
 | `0x090..0x09f` | 16 | 4 x u32be | Linked Programs 001-128 bitmap within that parameter block. |
 | `0x134..0x13f` | 12 | 3 x u32be | Pending Sample Parameter propagation bitmaps. |
 | `0x140..0x143` | 4 | bytes | Reserved; preserve for existing objects. |
@@ -583,7 +590,7 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 | Last `0x24` bytes, layout selector `0x14 >= 4` | 36 | bytes | Final part of the canonical Sample Parameter block. |
 
 The disk layout is not the flat Sample Bank Bulk layout used by the runtime.
-The loader transform reconstructs one canonical 224-byte Sample
+The later-generation loader transform reconstructs one canonical 224-byte Sample
 Parameter block from disk `0x078..0x133` followed by the terminal 36 bytes.
 The serializer applies the inverse transform. For legacy objects with layout
 selector `0x14 < 4`, no terminal block is stored and the loader supplies
@@ -605,6 +612,14 @@ The two layouts also retain their header-length conventions: legacy objects use
 `0x18 = object_size - 0x30`, while current objects use
 `0x18 = object_size - 0x54` and `0x1c = object_size - 0x30`.
 
+Fresh native banks use revision 2, zero `0x1c..0x2f`, and allocate at least eight
+member rows: `object_size = 0x14c + 20 * max(8, member_count)`. Fresh later banks
+use revision 4 and add the 36-byte tail to that size. Empty rows and saved live
+handles are zero. Native common-record bytes `0x6c..0x6e` repeat the first three
+parameter bytes at `0x78..0x7a`; an edit to that controller record maintains both
+copies. Other common-record residue is preserved on existing banks, while fresh
+authoring initializes unused padding deterministically.
+
 SBAC pending-propagation bitmap decoding:
 
 ```text
@@ -620,11 +635,15 @@ number, it copies the
 bank's corresponding Sample Parameter value into each resolved member Sample,
 clears the consumed bit, and marks the Sample Bank dirty. These words are
 therefore pending operation state, not durable per-bank value-enable settings.
-Only P2 `0..88` are actionable. The operation stops after `88`, and there are no
+On the later generation, only P2 `0..88` are actionable. The operation stops after `88`, and there are no
 parameter-table entries for `89..95`; those seven positions are reserved bitmap
 capacity; preserve them when nonzero.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
+
+Do not apply that later P2 parameter numbering to native banks. Parameter updates
+require clear pending state on either generation, validate the bank and each
+member against their own format, and reject the entire update on a conflict.
 
 Bank parameter values and pending propagation bits are separate: storing a
 value in the bank is not equivalent to applying it to every member. Clearing

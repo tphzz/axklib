@@ -5,6 +5,7 @@
 #include <span>
 
 #include "axklib/sample_parameters.hpp"
+#include "axklib/sample_storage.hpp"
 
 namespace axk::detail {
 
@@ -19,6 +20,7 @@ validate_sample_parameter_fields(const SampleParameters &parameters,
 // Validate fresh authoring parameters with the creation defaults applied.
 Result<void> validate_sample_parameters(const SampleParameters &parameters,
                                         SampleParameterGeneration generation = SampleParameterGeneration::a4000_a5000);
+Result<void> validate_sample_authoring_parameters(const SampleParameters &parameters, SampleStorageFormat format);
 // Native blocks contain 188 bytes. Current workspaces contain 224 bytes;
 // prefix-only current objects do not have a canonical controller tail.
 Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &parameters,

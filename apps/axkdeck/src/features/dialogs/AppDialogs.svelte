@@ -514,6 +514,7 @@
         completion={audioImport.completion}
         {transport}
         files={audioImport.request.files}
+        bind:sampleFormat={audioImport.sampleFormat}
         target={audioImport.destination()}
         destinationMode={audioImport.request.destinationMode}
         destinationPartitionIndex={audioImport.request.destinationPartitionIndex}

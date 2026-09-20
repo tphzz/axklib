@@ -17,6 +17,7 @@
 #include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/sample_parameters.hpp"
+#include "axklib/sample_storage.hpp"
 #include "axklib/sampler_model.hpp"
 
 namespace axk {
@@ -77,12 +78,14 @@ struct SampleSpec {
     std::optional<std::uint32_t> target_sample_rate;
     SampleParameters parameters;
     std::optional<SamplePlaybackWindow> playback_window{};
+    SampleStorageFormat storage_format{SampleStorageFormat::a4000_a5000_224};
 };
 
 struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
     std::optional<SampleParameters> parameter_overrides{};
+    SampleStorageFormat storage_format{SampleStorageFormat::a4000_a5000_224};
 };
 
 struct ProgramAssignmentSpec {

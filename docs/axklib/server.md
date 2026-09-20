@@ -1100,6 +1100,11 @@ and object details (null for objects without an A-series Sample format).
 Its HTTP `format` enum is `A3000_188`, `A4000_A5000_224`, or `UNKNOWN`;
 conversion preview `targetFormat` uses the two recognized values. The embedded
 alteration manifest retains its own lowercase `target_format` values.
+Fresh Sample and Sample Bank alteration specifications accept lowercase
+`storage_format` values `a3000_188` and `a4000_a5000_224`; omission selects the
+later profile. Audio import uses the existing atomic alteration operation,
+passing the batch selection to each new Sample and optional bank, not a separate
+conversion job. See [Sample Formats And Device Generations](sample-formats.md).
 `formatConversions` gives read-only target previews with changes and blockers;
 `canConvertFormat` indicates whether the image supports the operation. Execution
 uses `convert_sbnk_format`, the original payload digest and the current image
@@ -1119,8 +1124,8 @@ failure after a confirmed write never resubmits it.
 Draft audition previews playback bounds, loops, pitch, level and pan through
 the desktop audio engine. It is not a hardware synthesis emulator: filters,
 envelopes, LFO, routing and effects remain sampler-playback parameters. Random
-pan previews at center. Destructive PCM operations and A3000 editing are not
-part of this editor.
+pan previews at center. Both recognized Sample storage formats support editing;
+destructive PCM operations are not part of this editor.
 
 Until the first supported public release, the checked-in contract is corrected
 in place and every in-repository consumer is updated with it. Compatibility

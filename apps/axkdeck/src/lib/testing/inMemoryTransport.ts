@@ -1,5 +1,5 @@
 import type {
-    AudioImportGrouping,
+    AudioImportOptions,
     AllocationMapReference,
     AudioImportItem,
     VolumeImportDestination,
@@ -515,9 +515,9 @@ export class InMemoryImageTransport implements ImageTransport {
         sessionId: number,
         target: VolumeImportDestination,
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
     ): Promise<JobState> {
-        return this.invoke('startAudioImport', [sessionId, target, items, grouping]);
+        return this.invoke('startAudioImport', [sessionId, target, items, options]);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {

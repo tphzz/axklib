@@ -637,6 +637,7 @@ Direct and stereo Sample fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required unique ASCII `SBNK` name, at most 16 bytes. |
+| `storage_format` | Optional `a3000_188` or `a4000_a5000_224`; omission selects the latter. Determines framing, defaults and accepted parameter domains, independently of the image container. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
@@ -654,14 +655,22 @@ Sample Bank fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required unique ASCII `SBAC` name, at most 16 bytes. |
+| `storage_format` | Optional `a3000_188` or `a4000_a5000_224`; omission selects the latter. Native banks omit the terminal parameter extension. |
 | `member_samples` | Required array of 1..127 distinct existing Sample names. A Sample can belong to only one authored Sample Bank. |
 | `parameter_overrides` | Optional non-empty [Sample parameter object](sample-parameters.md), applied atomically to every member Sample and stored as the Sample Bank's current parameter state. |
 
-Fresh Sample Banks use the canonical current parameter defaults. Semantic
+Fresh Sample Banks use the selected generation's parameter defaults. Semantic
 overrides are applied immediately to the member Samples, so the three pending
 propagation bitmaps remain clear. Their linked-Program bitmaps are derived from
 the authored Program assignments. Raw pending or relationship-bitmap authoring
 is not exposed.
+
+The same `storage_format` field is accepted by `insert_sbnk` and `insert_sbac`
+inside their `sample` and `sample_bank` objects. Format selection is explicit,
+not inferred from neighbors. Overrides are validated against each affected
+object's generation and never cause silent promotion. Axkdeck's audio import
+sends one selected format for every new Sample and its optional bank in the same
+transaction. See [Sample Formats And Device Generations](sample-formats.md).
 
 Each authored Sample Bank contains 1..127 mono or stereo Samples. Programs admit
 0..999 ordered Sample Bank or standalone Sample assignments with independently

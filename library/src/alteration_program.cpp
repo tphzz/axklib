@@ -461,6 +461,7 @@ Result<OperationReport> insert_sbac(TransactionState &state, OperationContext co
         }
         SampleSpec placeholder;
         placeholder.name = name;
+        placeholder.storage_format = current_sample->storage.format;
         sample_specs.emplace(name, std::move(placeholder));
         member_ids.emplace(name, sample->second);
     }

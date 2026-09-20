@@ -206,6 +206,18 @@ Result<void> parse_controls(const Json &value, std::array<SampleControlParameter
 
 } // namespace
 
+Result<SampleStorageFormat> parse_sample_storage_format(const Json &object, std::string_view context) {
+    if (!object.contains("storage_format"))
+        return SampleStorageFormat::a4000_a5000_224;
+    const auto &value = object["storage_format"];
+    if (value == "a3000_188")
+        return SampleStorageFormat::a3000_188;
+    if (value == "a4000_a5000_224")
+        return SampleStorageFormat::a4000_a5000_224;
+    return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                      std::string{context} + ".storage_format must be a3000_188 or a4000_a5000_224")};
+}
+
 Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::string_view context,
                                                       bool require_nonempty, ErrorCode error_code,
                                                       ErrorCategory error_category) {

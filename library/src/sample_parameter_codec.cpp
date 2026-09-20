@@ -270,6 +270,13 @@ Result<void> validate_sample_parameters(const SampleParameters &value, SamplePar
     return validate_sample_parameter_fields(effective, generation);
 }
 
+Result<void> validate_sample_authoring_parameters(const SampleParameters &value, SampleStorageFormat format) {
+    const auto generation = sample_parameter_generation(format);
+    if (!generation)
+        return std::unexpected{invalid("Sample storage format is unsupported for authoring")};
+    return validate_sample_parameters(value, *generation);
+}
+
 Result<void> validate_sample_parameter_patch(const SampleParameters &value) {
     if (validate_sample_parameter_fields(value, SampleParameterGeneration::a3000))
         return {};

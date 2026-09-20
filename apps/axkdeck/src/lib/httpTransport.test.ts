@@ -2140,7 +2140,7 @@ describe('HttpImageTransport', () => {
                     targetSampleRate: 22_050,
                 },
             ],
-            { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' },
+            { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' } },
         );
 
         expect(job).toMatchObject({ jobId: 2, kind: 'images.alter', status: 'queued' });
@@ -2174,6 +2174,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample: {
                                 name: 'Mono',
+                                storage_format: 'a3000_188',
                                 waveform_name: 'Mono Wave',
                                 parameters: {
                                     root_key: 60,
@@ -2212,6 +2213,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample: {
                                 name: 'Stereo',
+                                storage_format: 'a3000_188',
                                 waveform_name: 'Stereo-L',
                                 right_waveform_name: 'Stereo-R',
                                 parameters: {
@@ -2235,6 +2237,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample_bank: {
                                 name: 'Imported Bank',
+                                storage_format: 'a3000_188',
                                 member_samples: ['Mono', 'Stereo'],
                             },
                         },

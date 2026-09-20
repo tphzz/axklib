@@ -30,11 +30,11 @@ Json fixture() {
     return Json::parse(stream);
 }
 
-bool write_audio(const std::filesystem::path &path, int channels, int subtype) {
+bool write_audio(const std::filesystem::path &path, int channels, int subtype, int container) {
     SF_INFO info{};
     info.channels = channels;
     info.samplerate = 44'100;
-    info.format = SF_FORMAT_WAV | subtype;
+    info.format = container | subtype;
     std::vector<double> samples(64U * static_cast<std::size_t>(channels));
     for (std::size_t index = 0; index < samples.size(); ++index)
         samples[index] = static_cast<double>(static_cast<int>(index % 17U) - 8) / 10.0;
@@ -45,12 +45,13 @@ bool write_audio(const std::filesystem::path &path, int channels, int subtype) {
     return sf_close(file) == 0 && written == 64;
 }
 
-class AudioImportContract : public testing::TestWithParam<std::tuple<bool, bool>> {
+class AudioImportContract : public testing::TestWithParam<std::tuple<bool, bool, bool, int>> {
   protected:
     void SetUp() override {
-        const auto [create_volume, bank] = GetParam();
+        const auto [create_volume, bank, native, container] = GetParam();
         root_ = std::filesystem::temp_directory_path() /
-                ("axklib-audio-import-contract-" + std::to_string(create_volume) + "-" + std::to_string(bank));
+                ("axklib-audio-import-contract-" + std::to_string(create_volume) + "-" + std::to_string(bank) + "-" +
+                 std::to_string(native) + "-" + std::to_string(container));
         std::error_code error;
         std::filesystem::remove_all(root_, error);
         std::filesystem::create_directories(root_ / "audio");
@@ -63,9 +64,15 @@ class AudioImportContract : public testing::TestWithParam<std::tuple<bool, bool>
 };
 
 TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
-    const auto [create_volume, bank] = GetParam();
+    const auto [create_volume, bank, native, container] = GetParam();
     auto document = fixture();
     auto &operations = document["operations"];
+    for (auto &operation : operations) {
+        if (operation["type"] == "insert_sbnk")
+            operation["sample"]["storage_format"] = native ? "a3000_188" : "a4000_a5000_224";
+        if (operation["type"] == "insert_sbac")
+            operation["sample_bank"]["storage_format"] = native ? "a3000_188" : "a4000_a5000_224";
+    }
     for (auto iterator = operations.begin(); iterator != operations.end();) {
         const auto type = iterator->at("type").get<std::string>();
         if ((!create_volume && type == "insert_volume") || (!bank && type == "insert_sbac"))
@@ -73,8 +80,8 @@ TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
         else
             ++iterator;
     }
-    ASSERT_TRUE(write_audio(root_ / "audio/import-0", 1, SF_FORMAT_PCM_16));
-    ASSERT_TRUE(write_audio(root_ / "audio/import-1", 2, SF_FORMAT_PCM_24));
+    ASSERT_TRUE(write_audio(root_ / "audio/import-0", 1, SF_FORMAT_PCM_16, container));
+    ASSERT_TRUE(write_audio(root_ / "audio/import-1", 2, SF_FORMAT_PCM_24, container));
     axk::HdsBuildManifest source_spec{"1.0", 4U * 1024U * 1024U, {}};
     axk::VolumeSpec volume;
     volume.name = create_volume ? "Retained" : "Imported";
@@ -104,6 +111,10 @@ TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
         ASSERT_NE(found, catalog->objects.end());
         const auto *decoded = std::get_if<axk::CurrentSbnk>(&found->object.payload);
         ASSERT_NE(decoded, nullptr);
+        EXPECT_EQ(decoded->storage.format,
+                  native ? axk::SampleStorageFormat::a3000_188 : axk::SampleStorageFormat::a4000_a5000_224);
+        EXPECT_EQ(decoded->raw_parameter_window.size(), native ? 188U : 224U);
+        EXPECT_EQ(decoded->storage.header_revision, native ? 2U : 4U);
         const auto &parameters = sample.at("parameters");
         EXPECT_EQ(decoded->left.root_key, parameters.at("root_key").get<std::uint8_t>());
         EXPECT_EQ(decoded->left.fine_tune_cents, parameters.at("fine_tune_cents").get<std::int8_t>());
@@ -141,6 +152,9 @@ TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
             EXPECT_EQ(wave->format.sample_width_bytes, 2U);
             EXPECT_EQ(wave->format.sample_rate, 44'100U);
         } else if (object.object.header.type == axk::ObjectType::sbac) {
+            const auto &stored_bank = std::get<axk::CurrentSbac>(object.object.payload);
+            EXPECT_EQ(stored_bank.parameter_tail_offset.has_value(), !native);
+            EXPECT_EQ(object.raw_payload.size(), native ? 492U : 528U);
             const auto children = graph.children(object.key);
             EXPECT_EQ(children.size(), 2U);
             for (const auto *link : children) {
@@ -149,9 +163,52 @@ TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
             }
         }
     }
+    Json edit{
+        {"id", "edit-import"}, {"partition_index", 0}, {"volume_name", "Imported"}, {"parameters", {{"level", 82}}}};
+    edit["type"] = bank ? "update_sample_bank_parameters" : "update_sbnk_parameters";
+    edit[bank ? "sample_bank_name" : "sample_name"] = bank ? "Imported Bank" : "Mono";
+    if (!bank) {
+        const auto sample_operation = std::ranges::find_if(
+            operations, [](const auto &operation) { return operation.at("type") == "insert_sbnk"; });
+        edit["sample_name"] = sample_operation->at("sample").at("name");
+    } else {
+        const auto bank_operation = std::ranges::find_if(
+            operations, [](const auto &operation) { return operation.at("type") == "insert_sbac"; });
+        edit["sample_bank_name"] = bank_operation->at("sample_bank").at("name");
+    }
+    const auto edit_manifest =
+        axk::parse_alteration_manifest(Json{{"schema_version", "1.0"}, {"operations", Json::array({edit})}}.dump());
+    ASSERT_TRUE(edit_manifest);
+    const auto edited_path = root_ / "edited.hds";
+    const auto edited = axk::alter_hds(output, *edit_manifest, edited_path);
+    ASSERT_TRUE(edited) << edited.error().message;
+    const auto edited_image = axk::open_image(edited_path);
+    ASSERT_TRUE(edited_image);
+    const auto edited_catalog = axk::build_object_catalog(*edited_image);
+    ASSERT_TRUE(edited_catalog);
+    for (const auto &object : edited_catalog->objects) {
+        if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload)) {
+            EXPECT_EQ(sample->storage.format,
+                      native ? axk::SampleStorageFormat::a3000_188 : axk::SampleStorageFormat::a4000_a5000_224);
+            if (bank || object.object.header.name == edit.at("sample_name").get<std::string>())
+                EXPECT_EQ(sample->sample_level, 82U);
+        } else if (object.object.header.type == axk::ObjectType::smpl) {
+            const auto original = std::ranges::find_if(catalog->objects, [&](const auto &candidate) {
+                return candidate.object.header.type == axk::ObjectType::smpl &&
+                       candidate.object.header.name == object.object.header.name;
+            });
+            ASSERT_NE(original, catalog->objects.end());
+            EXPECT_EQ(object.raw_payload, original->raw_payload);
+        } else if (const auto *stored_bank = std::get_if<axk::CurrentSbac>(&object.object.payload)) {
+            EXPECT_EQ(stored_bank->parameter_tail_offset.has_value(), !native);
+            EXPECT_EQ(object.raw_payload.size(), native ? 492U : 528U);
+        }
+    }
 }
 
-INSTANTIATE_TEST_SUITE_P(VolumeAndGrouping, AudioImportContract, testing::Combine(testing::Bool(), testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(VolumeAndGrouping, AudioImportContract,
+                         testing::Combine(testing::Bool(), testing::Bool(), testing::Bool(),
+                                          testing::Values(SF_FORMAT_WAV, SF_FORMAT_AIFF, SF_FORMAT_FLAC)));
 
 TEST(AudioImportManifest, RejectsObsoleteFlatSampleParameters) {
     auto document = fixture();

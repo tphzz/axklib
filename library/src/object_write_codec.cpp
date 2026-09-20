@@ -188,11 +188,14 @@ Result<void> write_program_link_bitmap(std::span<std::byte> bytes, std::size_t o
     return {};
 }
 
+std::array<std::byte, 0xe0> default_sbac_sample_parameters(SampleStorageFormat format);
+
 Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const LoadedWaveform &left,
                                               const LoadedWaveform *right, bool sample_bank_member,
                                               const std::vector<std::uint8_t> &linked_programs) {
-    if (auto valid = detail::validate_sample_parameters(sample.parameters); !valid)
+    if (auto valid = detail::validate_sample_authoring_parameters(sample.parameters, sample.storage_format); !valid)
         return std::unexpected{valid.error()};
+    const bool native = sample.storage_format == SampleStorageFormat::a3000_188;
     const auto root_key = sample.parameters.root_key.value_or(60U);
     const auto fine_tune = sample.parameters.fine_tune_cents.value_or(0);
     const auto key_low = sample.parameters.key_low.value_or(0U);
@@ -248,7 +251,11 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
             return std::unexpected{checked.error()};
         right_loop = sample.playback_window ? *left_loop : *checked;
     }
-    std::vector<std::byte> result(0x188);
+    std::vector<std::byte> result(native ? 0x164U : 0x188U);
+    if (native) {
+        const auto parameters = default_sbac_sample_parameters(sample.storage_format);
+        std::copy_n(parameters.begin(), 0xbcU, result.begin() + 0xa8U);
+    }
     ObjectPayloadWriter writer{result};
     const auto put_text = [&](std::size_t offset, std::string_view value, std::size_t width) -> Result<void> {
         auto bytes = ascii(value, width);
@@ -266,6 +273,10 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
                                                std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x34},
                                                std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x58}};
     std::ranges::copy(header, result.begin() + 0x10);
+    if (native) {
+        writer.be32(0x14U, 2U);
+        writer.be32(0x1cU, 0U);
+    }
     result[0x30] = std::byte{0x10};
     result[0x31] = std::byte{0x0c};
     if (auto written = put_text(0x32, sample.name, 16); !written)
@@ -376,17 +387,20 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
         std::byte{0x00}, std::byte{0x3e}, std::byte{0x20}, std::byte{0xe1}, std::byte{0xc6},
     };
     std::ranges::copy(eq_coefficients, result.begin() + 0x152);
-    std::ranges::copy(controls, result.begin() + 0x164);
-    result[0x17e] = std::byte{1};
-    result[0x17f] = std::byte{127};
-    result[0x181] = std::byte{127};
-    result[0x183] = std::byte{90};
-    result[0x184] = std::byte{90};
+    if (!native) {
+        std::ranges::copy(controls, result.begin() + 0x164);
+        result[0x17e] = std::byte{1};
+        result[0x17f] = std::byte{127};
+        result[0x181] = std::byte{127};
+        result[0x183] = std::byte{90};
+        result[0x184] = std::byte{90};
+    }
     auto normalized_parameters = sample.parameters;
     normalized_parameters.loop_start_frame = left_loop->start;
     normalized_parameters.loop_length_frames = left_loop->length;
-    if (auto applied =
-            detail::apply_sample_parameters_to_block(std::span{result}.subspan(0xa8U), normalized_parameters);
+    if (auto applied = detail::apply_sample_parameters_to_block(std::span{result}.subspan(0xa8U), normalized_parameters,
+                                                                native ? detail::SampleParameterLayout::a3000
+                                                                       : detail::SampleParameterLayout::a4000_a5000);
         !applied) {
         return std::unexpected{applied.error()};
     }
@@ -395,7 +409,7 @@ Result<std::vector<std::byte>> serialize_sbnk(const SampleSpec &sample, const Lo
     return result;
 }
 
-std::array<std::byte, 0xe0> default_sbac_sample_parameters() {
+std::array<std::byte, 0xe0> default_sbac_sample_parameters(SampleStorageFormat format) {
     std::array<std::byte, 0xe0> result{};
     const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
         result[offset] = static_cast<std::byte>(value >> 8U);
@@ -447,12 +461,21 @@ std::array<std::byte, 0xe0> default_sbac_sample_parameters() {
     result[0xd9] = std::byte{127};
     result[0xdb] = std::byte{90};
     result[0xdc] = std::byte{90};
+    if (format == SampleStorageFormat::a3000_188) {
+        result[0xa5] = std::byte{1};
+        result[0xa6] = std::byte{127};
+        result[0xa8] = std::byte{127};
+    }
     return result;
 }
 
-Result<void> apply_sbac_parameter_overrides(std::array<std::byte, 0xe0> &parameters,
-                                            const SampleParameters &overrides) {
-    if (auto applied = detail::apply_sample_parameters_to_block(parameters, overrides); !applied)
+Result<void> apply_sbac_parameter_overrides(std::array<std::byte, 0xe0> &parameters, const SampleParameters &overrides,
+                                            SampleStorageFormat format) {
+    const bool native = format == SampleStorageFormat::a3000_188;
+    if (auto applied = detail::apply_sample_parameters_to_block(
+            std::span{parameters}.first(native ? 188U : 224U), overrides,
+            native ? detail::SampleParameterLayout::a3000 : detail::SampleParameterLayout::a4000_a5000);
+        !applied)
         return applied;
     const auto put_be16 = [&](std::size_t offset, std::uint16_t value) {
         parameters[offset] = static_cast<std::byte>(value >> 8U);
@@ -479,6 +502,11 @@ Result<void> apply_sbac_parameter_overrides(std::array<std::byte, 0xe0> &paramet
 Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
                                               const std::map<std::string, SampleSpec> &samples,
                                               const std::vector<std::uint8_t> &linked_programs) {
+    if (auto valid = detail::validate_sample_authoring_parameters(
+            sample_bank.parameter_overrides.value_or(SampleParameters{}), sample_bank.storage_format);
+        !valid)
+        return std::unexpected{valid.error()};
+    const bool native = sample_bank.storage_format == SampleStorageFormat::a3000_188;
     const std::set<std::string> unique_members{sample_bank.member_samples.begin(), sample_bank.member_samples.end()};
     if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members ||
         unique_members.size() != sample_bank.member_samples.size()) {
@@ -489,36 +517,40 @@ Result<std::vector<std::byte>> serialize_sbac(const SampleBankSpec &sample_bank,
         return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                           "Sample Bank parameter overrides must not be empty")};
     }
-    constexpr std::size_t minimum_record_size = 0x210U;
     constexpr std::size_t first_member_offset = 0x14cU;
     constexpr std::size_t member_stride = 0x14U;
-    constexpr std::size_t trailing_parameter_bytes = 0x24U;
-    const auto populated_record_size =
-        first_member_offset + sample_bank.member_samples.size() * member_stride + trailing_parameter_bytes;
-    std::vector<std::byte> result(std::max(minimum_record_size, populated_record_size));
+    const auto trailing_parameter_bytes = native ? 0U : 0x24U;
+    const auto capacity = std::max(std::size_t{8}, sample_bank.member_samples.size());
+    std::vector<std::byte> result(first_member_offset + capacity * member_stride + trailing_parameter_bytes);
     ObjectPayloadWriter writer{result};
     std::ranges::transform(std::string_view{"FSFSDEV3SPLX"}, result.begin(),
                            [](char value) { return static_cast<std::byte>(value); });
     std::ranges::transform(std::string_view{"SBAC"}, result.begin() + 0x0c,
                            [](char value) { return static_cast<std::byte>(value); });
-    writer.be32(0x14, 4);
-    writer.be32(0x18, static_cast<std::uint32_t>(result.size() - 0x54U));
-    writer.be32(0x1c, static_cast<std::uint32_t>(result.size() - 0x30U));
+    writer.be32(0x14, native ? 2U : 4U);
+    writer.be32(0x18, static_cast<std::uint32_t>(result.size() - 0x30U - trailing_parameter_bytes));
+    if (!native)
+        writer.be32(0x1c, static_cast<std::uint32_t>(result.size() - 0x30U));
     result[0x30] = std::byte{0x11};
     result[0x31] = std::byte{0x0c};
     auto name = ascii(sample_bank.name, 16);
     if (!name)
         return std::unexpected{name.error()};
     std::ranges::copy(*name, result.begin() + 0x32);
-    auto parameters = default_sbac_sample_parameters();
+    auto parameters = default_sbac_sample_parameters(sample_bank.storage_format);
     if (sample_bank.parameter_overrides) {
-        if (auto applied = apply_sbac_parameter_overrides(parameters, *sample_bank.parameter_overrides); !applied)
+        if (auto applied = apply_sbac_parameter_overrides(parameters, *sample_bank.parameter_overrides,
+                                                          sample_bank.storage_format);
+            !applied)
             return std::unexpected{applied.error()};
     }
     if (auto written = write_program_link_bitmap(parameters, 0x18U, linked_programs); !written)
         return std::unexpected{written.error()};
     std::copy_n(parameters.begin(), 0xbcU, result.begin() + 0x78U);
-    std::copy_n(parameters.begin() + 0xbcU, 0x24U, result.end() - 0x24U);
+    if (native)
+        std::copy_n(parameters.begin(), 3U, result.begin() + 0x6cU);
+    else
+        std::copy_n(parameters.begin() + 0xbcU, 0x24U, result.end() - 0x24U);
     result[0x144] = static_cast<std::byte>(sample_bank.member_samples.size());
     for (std::size_t index = 0; index < sample_bank.member_samples.size(); ++index) {
         const auto found = samples.find(sample_bank.member_samples[index]);
@@ -545,19 +577,32 @@ Result<void> detail::apply_sample_bank_parameters_to_payload(std::vector<std::by
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *bank = std::get_if<CurrentSbac>(&decoded->payload);
-    if (!bank || bank->storage_layout != SbacStorageLayout::current_split_parameter_tail ||
-        !bank->parameter_tail_offset || *bank->parameter_tail_offset + 0x24U != payload.size())
+    if (!bank)
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample Bank parameter update requires a complete layout")};
+    const bool native = bank->storage_layout != SbacStorageLayout::current_split_parameter_tail;
+    if (native &&
+        (decoded->header.unknown_0x14 != 2U || decoded->header.record_size_or_header_used != payload.size() - 0x30U))
+        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                                          "Sample Bank native storage header is unsupported")};
+    if ((!native && (!bank->parameter_tail_offset || *bank->parameter_tail_offset + 0x24U != payload.size())) ||
+        (native && bank->parameter_tail_offset))
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample Bank parameter update requires a current complete layout")};
     if (std::ranges::any_of(bank->pending_parameter_propagation_words, [](auto word) { return word != 0U; }))
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample Bank has pending parameter propagation")};
     auto parameters = bank->raw_sample_parameter_block;
-    if (auto applied = apply_sbac_parameter_overrides(parameters, overrides); !applied)
+    if (auto applied = apply_sbac_parameter_overrides(
+            parameters, overrides, native ? SampleStorageFormat::a3000_188 : SampleStorageFormat::a4000_a5000_224);
+        !applied)
         return applied;
     std::copy_n(parameters.begin(), 0xbcU, payload.begin() + 0x78U);
-    std::copy_n(parameters.begin() + 0xbcU, 0x24U,
-                payload.begin() + static_cast<std::ptrdiff_t>(*bank->parameter_tail_offset));
+    if (!native)
+        std::copy_n(parameters.begin() + 0xbcU, 0x24U,
+                    payload.begin() + static_cast<std::ptrdiff_t>(*bank->parameter_tail_offset));
+    else if (overrides.controls[0].device || overrides.controls[0].function || overrides.controls[0].type)
+        std::copy_n(parameters.begin(), 3U, payload.begin() + 0x6cU);
     return {};
 }
 

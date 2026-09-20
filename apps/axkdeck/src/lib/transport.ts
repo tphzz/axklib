@@ -431,7 +431,7 @@ export interface AudioImportTarget {
     volumeName: string;
 }
 
-export type AudioImportGrouping = { kind: 'SAMPLES' } | { kind: 'SAMPLE_BANK'; sampleBankName: string };
+export type { AudioImportGrouping, AudioImportOptions } from './audioImportOptions';
 
 export interface SampleBankCreation {
     partitionIndex: number;
@@ -559,7 +559,7 @@ export interface ImageTransport
         sessionId: number,
         target: VolumeImportDestination,
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: import('./audioImportOptions').AudioImportOptions,
     ): Promise<JobState>;
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState>;
     startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState>;

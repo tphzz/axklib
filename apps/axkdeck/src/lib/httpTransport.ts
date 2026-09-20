@@ -7,7 +7,7 @@ import {
 import type { components } from './generated/axklibApiV1';
 import type { ObjectParameterEdit, SampleDuplicationRequest, SampleFormatConversionRequest } from './objectEditing';
 import type {
-    AudioImportGrouping,
+    AudioImportOptions,
     AudioImportItem,
     AudioImportCapabilities,
     VolumeImportDestination,
@@ -176,9 +176,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         sessionId: number,
         target: VolumeImportDestination,
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
     ): Promise<JobState> {
-        return this.imports.startAudioImport(sessionId, target, items, grouping);
+        return this.imports.startAudioImport(sessionId, target, items, options);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {

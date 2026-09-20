@@ -3,7 +3,7 @@ import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUp
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
 import type {
     VolumeImportDestination,
-    AudioImportGrouping,
+    AudioImportOptions,
     AudioImportItem,
     AudioImportTarget,
     ImageTransport,
@@ -54,6 +54,7 @@ interface AudioImportDependencies {
 
 export class AudioImportWorkflow {
     request = $state<AudioImportRequest | null>(null);
+    sampleFormat = $state<AudioImportOptions['sampleFormat']>('A3000_188');
     private lastDirectory = $state<DirectoryRef | null>(null);
 
     readonly completion: ImportCompletion;
@@ -117,10 +118,11 @@ export class AudioImportWorkflow {
 
     async commit(
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
         reviewedWarnings: readonly string[] = [],
     ): Promise<boolean> {
         if (this.completion.locked) return false;
+        const { grouping } = options;
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('Audio import target is no longer available');
@@ -132,7 +134,7 @@ export class AudioImportWorkflow {
         try {
             await this.dependencies.invalidateSession(sessionId);
             return await this.completion.run(
-                () => this.dependencies.transport.startAudioImport(sessionId, target, items, grouping),
+                () => this.dependencies.transport.startAudioImport(sessionId, target, items, options),
                 async () => {
                     this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
                     await this.dependencies.refreshSession({

@@ -282,4 +282,81 @@ TEST_F(SampleBankParameterAlteration, RejectsPendingPropagationWithoutDiscarding
     EXPECT_EQ(read_bytes(source), original);
 }
 
+TEST_F(SampleBankParameterAlteration, MixedFormatsValidateInsertionAndUpdatesWithoutPartialPublication) {
+    for (const bool native_bank : {false, true}) {
+        for (const bool insert_bank : {false, true}) {
+            const auto bank_format =
+                native_bank ? axk::SampleStorageFormat::a3000_188 : axk::SampleStorageFormat::a4000_a5000_224;
+            const auto other_format =
+                native_bank ? axk::SampleStorageFormat::a4000_a5000_224 : axk::SampleStorageFormat::a3000_188;
+            axk::VolumeSpec volume;
+            volume.name = "Samples";
+            volume.waveforms.push_back({"wave", "Wave", root / "tone.wav", 60U, {}});
+            axk::SampleSpec member;
+            member.name = "Member A";
+            member.waveform_id = "wave";
+            member.storage_format = bank_format;
+            volume.samples.push_back(member);
+            member.name = "Member B";
+            member.storage_format = other_format;
+            volume.samples.push_back(member);
+            if (!insert_bank) {
+                axk::SampleBankSpec bank{"Bank", {"Member A", "Member B"}};
+                bank.storage_format = bank_format;
+                volume.sample_banks.push_back(bank);
+            }
+            const auto suffix = std::to_string(native_bank) + std::to_string(insert_bank);
+            const auto mixed = root / ("mixed" + suffix + ".hds");
+            ASSERT_TRUE(axk::write_hds_image({"1.0", 4U * 1024U * 1024U, {{"Partition", {volume}}}}, mixed));
+            const auto original = read_bytes(mixed);
+            const auto existing = root / ("existing" + suffix + ".hds");
+            std::filesystem::copy_file(mixed, existing);
+            for (const bool compatible : {false, true}) {
+                const Json parameters = compatible    ? Json{{"level", 82}}
+                                        : native_bank ? Json{{"coarse_tune", 100}}
+                                                      : Json{{"portamento_time", 90}};
+                auto operation = bank_update(parameters);
+                if (insert_bank) {
+                    operation = {{"id", "bank"},
+                                 {"type", "insert_sbac"},
+                                 {"partition_index", 0},
+                                 {"volume_name", "Samples"},
+                                 {"sample_bank",
+                                  {{"name", "Bank"},
+                                   {"member_samples", {"Member A", "Member B"}},
+                                   {"storage_format", axk::sample_storage_format_name(bank_format)},
+                                   {"parameter_overrides", parameters}}}};
+                }
+                const auto parsed = parse_bank_update(operation);
+                ASSERT_TRUE(parsed) << parsed.error().message;
+                const auto destination = root / ("result" + suffix + std::to_string(compatible) + ".hds");
+                const auto result = axk::alter_hds(mixed, *parsed, destination);
+                EXPECT_EQ(read_bytes(mixed), original);
+                if (!compatible) {
+                    ASSERT_FALSE(result);
+                    EXPECT_FALSE(std::filesystem::exists(destination));
+                    EXPECT_FALSE(axk::alter_hds(mixed, *parsed, existing, {}, nullptr, true));
+                    EXPECT_EQ(read_bytes(existing), original);
+                    continue;
+                }
+                ASSERT_TRUE(result) << result.error().message;
+                const auto image = axk::open_image(destination);
+                ASSERT_TRUE(image);
+                const auto catalog = axk::build_object_catalog(*image);
+                ASSERT_TRUE(catalog);
+                for (const auto &object : catalog->objects) {
+                    if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload)) {
+                        EXPECT_EQ(sample->storage.format,
+                                  object.object.header.name == "Member A" ? bank_format : other_format);
+                        EXPECT_EQ(sample->sample_level, 82U);
+                    } else if (const auto *bank = std::get_if<axk::CurrentSbac>(&object.object.payload)) {
+                        EXPECT_EQ(bank->parameter_tail_offset.has_value(), !native_bank);
+                        EXPECT_EQ(bank->raw_sample_parameter_block[0x6e], std::byte{82});
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // namespace

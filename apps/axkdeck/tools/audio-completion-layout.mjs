@@ -16,6 +16,27 @@ try {
         for (const warning of [false, true]) {
             await page.goto(`${base}/tools/layout-fixtures/audio-completion.html${warning ? '?warning' : ''}`);
             await page.getByText(/^Fits/).waitFor();
+            const formats = page.getByRole('group', {name:'Sample format'});
+            const native = formats.getByRole('button', {name:'a3k',exact:true});
+            const later = formats.getByRole('button', {name:'a4k/a5k',exact:true});
+            assert.equal(await native.getAttribute('aria-pressed'), 'true');
+            const before = await page.getByRole('dialog').boundingBox();
+            await later.focus();
+            await page.keyboard.press('Space');
+            assert.equal(await later.getAttribute('aria-pressed'), 'true');
+            assert.deepEqual(await page.getByRole('dialog').boundingBox(), before);
+            const controls = await formats.locator('button').evaluateAll(items => items.map(item => {
+                const style = getComputedStyle(item);
+                const rect = item.getBoundingClientRect();
+                return {height:rect.height, top:rect.top, bottom:rect.bottom, right:rect.right, font:style.fontSize,
+                    sharedFont:style.getPropertyValue('--dialog-table-header-font-size').trim()};
+            }));
+            assert.equal(controls[0].height, controls[1].height);
+            assert.equal(controls[0].top, controls[1].top);
+            assert.equal(controls[0].font, controls[0].sharedFont);
+            assert(controls[1].right <= viewport.width);
+            assert(controls[1].bottom <= viewport.height);
+            await page.screenshot({path:resolve(output,`format-${viewport.width}.png`)});
             const footer = page.locator('.dialog-footer');
             const buttons = footer.locator('button');
             const heights = await buttons.evaluateAll(items => items.map(item => item.getBoundingClientRect().height));

@@ -1,6 +1,6 @@
 import type {
     AudioImportItem,
-    AudioImportGrouping,
+    AudioImportOptions,
     VolumeImportDestination,
     AudioImportTarget,
     SampleBankCreation,
@@ -85,10 +85,10 @@ export class HttpImportOperations {
         sessionId: number,
         target: VolumeImportDestination,
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, grouping));
+        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, options));
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
@@ -181,7 +181,7 @@ export function audioImportRequest(
     expectedRevision: number,
     target: VolumeImportDestination,
     items: AudioImportItem[],
-    grouping: AudioImportGrouping,
+    { grouping, sampleFormat }: AudioImportOptions,
 ): ImportAlterationRequest {
     const operations: Record<string, unknown>[] = [];
     const inputBindings: ImportAlterationRequest['inputBindings'] = [];
@@ -218,6 +218,7 @@ export function audioImportRequest(
             volume_name: target.volumeName,
             sample: {
                 name: item.sampleName,
+                storage_format: sampleFormat.toLowerCase(),
                 waveform_name: item.waveformNames[0],
                 ...(item.waveformNames[1] ? { right_waveform_name: item.waveformNames[1] } : {}),
                 parameters: {
@@ -244,6 +245,7 @@ export function audioImportRequest(
             volume_name: target.volumeName,
             sample_bank: {
                 name: grouping.sampleBankName,
+                storage_format: sampleFormat.toLowerCase(),
                 member_samples: items.map((item) => item.sampleName),
             },
         });

@@ -8,7 +8,14 @@ updates, existing-bank/member updates, and a fresh Sample Bank's
 All fields are optional. An empty fresh Sample `parameters` object selects the
 defaults below. An existing-Sample update or Sample Bank override must contain
 at least one field. Omitted fields in an existing object are preserved. Omitted
-fields in a fresh Sample receive the defaults below.
+fields in a fresh Sample receive the selected stored format's defaults.
+
+Fresh Sample and Sample Bank specifications accept `storage_format` alongside
+`name`, not inside `parameters` or `parameter_overrides`. Choose `a3000_188` or
+`a4000_a5000_224`; omission selects the latter. Unknown formats and settings
+outside the selected profile reject authoring without automatic conversion.
+See [Sample Formats And Device Generations](sample-formats.md) for the complete
+storage, system-version and hardware distinction.
 
 Existing Samples retain their stored parameter format on every ordinary edit.
 `a3000_188` identifies a 188-byte A3000 parameter block, and
@@ -22,8 +29,8 @@ or later-only values in a native block produce separate warnings; they never
 change its format badge. Output destinations requiring A5000 effects are a
 separate model requirement within the later format.
 
-The tables below describe fresh A4000/A5000 authoring. Existing A3000 Samples
-have these differences: coarse tune is `-127..127`, pitch bend type is `0..13`,
+The tables below describe fresh A4000/A5000 authoring. Fresh and existing A3000
+Samples have these differences: coarse tune is `-127..127`, pitch bend type is `0..13`,
 AEG attack mode is `0..1`, controller device is `0..125`, controller function is
 `0..21`, output 1 destination is `0..4`, and output 2 destination is `0..5`.
 Native `velocity_crossfade` is a Boolean, native `portamento_type` is `0..1`,
@@ -31,6 +38,12 @@ and Sample EQ is implicitly Peak/Dip. Independent velocity crossfade widths,
 sample portamento rate/time and shelf EQ require explicit later-format conversion.
 Untouched unsupported values are preserved; edits must use the stored format's
 supported range.
+
+Native fresh defaults are the same semantic defaults except that EQ is implicitly
+Peak/Dip, velocity crossfade is `false` rather than two widths, and portamento is
+Off without separate rate/time fields. Native Main output defaults to StereoOut
+at 127; Assignable output defaults to Off at 127. A3k authoring includes V2-era
+parameter domains and does not certify A3000 V1 compatibility.
 
 `convert_sbnk_format` is a separate, payload-digest-guarded transaction. The
 desktop requires saving or discarding the draft first. Conversion preserves
@@ -203,7 +216,7 @@ is `Cutoff Bias`, Function `5` is `Filter Q/Width`, and Type `1` is
 
 ## Fresh Sample Bank State
 
-A fresh Sample Bank stores its own canonical current-parameter state. Its
+A fresh Sample Bank stores its own selected-generation parameter state. Its
 writable defaults match the tables above except that its unspecialized
 `loop_mode` state is `0` (`-->`). Geometry and topology fields that are derived
 for a Sample are zero or canonical placeholders in the bank state. Two internal
@@ -214,6 +227,10 @@ public input.
 applies exactly those fields to every member Sample. Unspecified fields are not
 propagated, so each member retains its own values. Application is atomic and the
 Sample Bank's pending-propagation bits remain clear.
+Bank overrides must be representable in the bank and every affected member's
+own stored format. A failure rejects the entire transaction; neither bank nor
+member storage is promoted implicitly. Both native prefix-only banks and later
+split-tail banks retain their format during ordinary parameter updates.
 Fresh image creation also derives the Sample Bank's linked-Program bitmap from
 Program assignments. Program insertion and deletion update the same bitmap
 transactionally; callers cannot provide it as raw parameter state.

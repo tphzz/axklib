@@ -53,10 +53,17 @@ change encoding, or admit incomplete/unsupported transfer profiles.
 to an existing Sample Bank and all its members atomically. Its target fields are
 `partition_index`, `volume_name`, and `sample_bank_name`. It uses the same typed
 Sample parameter contract, validates each member's merged values, and preserves
-unrelated object bytes, Wave Data and relationship identities. Current complete
-bank layouts with clear pending propagation state are supported. Pending state,
+unrelated object bytes, Wave Data and relationship identities. Complete native
+revision-2 banks and later split-tail banks with clear pending propagation state
+are supported. Bank and member formats are retained and independently validated. Pending state,
 unresolved or multiply-owned members, and invalid merged values reject the entire
 transaction without publishing a partial change.
+
+Fresh `insert_sbnk` Sample and `insert_sbac` Sample Bank specifications accept
+`storage_format`: `a3000_188` or `a4000_a5000_224`. Omission selects the later
+format. The bank's format does not convert existing members. See
+[Sample Formats And Device Generations](sample-formats.md) for domains and
+hardware distinctions, and [Writer And Alteration](write.md) for specification fields.
 
 `update_sbnk_parameters` applies a partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.

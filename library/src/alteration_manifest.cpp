@@ -81,7 +81,7 @@ bool uses_expanded_mono(const SampleParameters &parameters) {
 Result<void> validate_sample_spec(const SampleSpec &sample) {
     if (auto valid = require_object_name(sample.name, "sample.name"); !valid)
         return valid;
-    if (auto valid = detail::validate_sample_parameters(sample.parameters); !valid)
+    if (auto valid = detail::validate_sample_authoring_parameters(sample.parameters, sample.storage_format); !valid)
         return valid;
     if (!valid_loop_settings(sample.parameters.loop_mode.value_or(AudioSamplerLoopMode::forward_one_shot),
                              sample.parameters.loop_start_frame.value_or(0U),
@@ -115,10 +115,14 @@ Result<void> validate_direct_sample(const SampleSpec &sample) {
 }
 
 Result<void> validate_sample_bank_parameter_overrides(const SampleParameters &overrides) {
-    return detail::validate_sample_parameter_fields(overrides);
+    return detail::validate_sample_parameter_patch(overrides);
 }
 
 Result<void> validate_sample_bank(const SampleBankSpec &sample_bank) {
+    if (auto valid = detail::validate_sample_authoring_parameters(
+            sample_bank.parameter_overrides.value_or(SampleParameters{}), sample_bank.storage_format);
+        !valid)
+        return valid;
     if (auto valid = require_object_name(sample_bank.name, "sample_bank.name"); !valid)
         return valid;
     if (sample_bank.member_samples.empty() || sample_bank.member_samples.size() > maximum_sample_bank_members)
@@ -370,7 +374,7 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         return valid;
                     if (!detail::has_sample_parameter_values(operation.parameters))
                         return std::unexpected{manifest_error("parameters must contain at least one parameter")};
-                    return detail::validate_sample_parameter_fields(operation.parameters);
+                    return detail::validate_sample_parameter_patch(operation.parameters);
                 } else if constexpr (std::same_as<T, ReplaceProgramAssignmentsOperation>) {
                     return detail::validate_program_assignment_replacement(operation);
                 } else if constexpr (std::same_as<T, RetargetSampleWaveDataOperation>) {

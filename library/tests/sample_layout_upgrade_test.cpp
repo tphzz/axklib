@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -31,6 +32,112 @@
 
 namespace {
 using Json = nlohmann::json;
+
+TEST(SampleAuthoringFormat, NativeManifestCreatesAudiblePrefixOnlySample) {
+    const auto manifest = axk::parse_alteration_manifest(R"({"schema_version":"1.0","operations":[
+      {"id":"sample","type":"insert_sbnk","partition_index":0,"volume_name":"Import",
+       "sample":{"name":"Native","waveform_name":"Wave","storage_format":"a3000_188",
+       "parameters":{"coarse_tune":100,"velocity_crossfade":true,"output2_destination":5}}}]})");
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto &sample = std::get<axk::InsertSampleOperation>(manifest->operations.front().data).sample;
+    const auto payload = axk::detail::prepare_sbnk_payload(sample, {"Wave", 0x100U, 44'100U, 400U});
+    ASSERT_TRUE(payload) << payload.error().message;
+    ASSERT_EQ(payload->size(), 0x164U);
+    EXPECT_EQ(axk::inspect_sample_storage(*payload).format, axk::SampleStorageFormat::a3000_188);
+    EXPECT_EQ((*payload)[0x14d], std::byte{1});
+    EXPECT_EQ((*payload)[0x14e], std::byte{127});
+    EXPECT_EQ((*payload)[0x14f], std::byte{5});
+    EXPECT_EQ((*payload)[0x150], std::byte{127});
+    EXPECT_EQ((*payload)[0xd5], std::byte{100});
+    EXPECT_EQ(std::to_integer<unsigned>((*payload)[0xd1]) & 8U, 8U);
+}
+
+TEST(SampleAuthoringFormat, BankHeadersCapacityAndNativeDefaultsAreGenerationSpecific) {
+    for (const auto format : {axk::SampleStorageFormat::a3000_188, axk::SampleStorageFormat::a4000_a5000_224}) {
+        for (const auto count : {1U, 8U, 9U, 127U}) {
+            axk::SampleBankSpec bank;
+            bank.name = "Bank";
+            bank.storage_format = format;
+            std::map<std::string, axk::SampleSpec> samples;
+            for (unsigned index = 0; index < count; ++index) {
+                axk::SampleSpec sample;
+                sample.name = "Sample" + std::to_string(index);
+                sample.storage_format = format;
+                bank.member_samples.push_back(sample.name);
+                samples.emplace(sample.name, sample);
+            }
+            const auto payload = axk::detail::prepare_sbac_payload(bank, samples);
+            ASSERT_TRUE(payload) << payload.error().message;
+            const bool native = format == axk::SampleStorageFormat::a3000_188;
+            ASSERT_EQ(payload->size(), 0x14cU + 20U * std::max(8U, count) + (native ? 0U : 36U));
+            const auto decoded = axk::decode_object(*payload);
+            ASSERT_TRUE(decoded) << decoded.error().message;
+            EXPECT_EQ(decoded->header.unknown_0x14, native ? 2U : 4U);
+            EXPECT_EQ(decoded->header.record_size_or_header_used, payload->size() - (native ? 0x30U : 0x54U));
+            EXPECT_EQ(decoded->header.payload_bytes_0x1c, native ? 0U : payload->size() - 0x30U);
+            const auto &stored = std::get<axk::CurrentSbac>(decoded->payload);
+            EXPECT_EQ(stored.maximum_member_count, std::max(8U, count));
+            EXPECT_EQ(stored.stored_member_count, count);
+            EXPECT_EQ(stored.parameter_tail_offset.has_value(), !native);
+            EXPECT_TRUE(stored.pending_parameter_numbers.empty());
+            for (const auto offset : {0x90U, 0x91U, 0x9fU, 0xa0U, 0x144U + 1U})
+                EXPECT_EQ((*payload)[offset], std::byte{0});
+            if (native) {
+                EXPECT_EQ((*payload)[0x6c], std::byte{0x4a});
+                EXPECT_EQ((*payload)[0x6d], std::byte{4});
+                EXPECT_EQ((*payload)[0x6e], std::byte{1});
+                EXPECT_EQ((*payload)[0x11d], std::byte{1});
+                EXPECT_EQ((*payload)[0x11e], std::byte{127});
+                EXPECT_EQ((*payload)[0x11f], std::byte{0});
+                EXPECT_EQ((*payload)[0x120], std::byte{127});
+                EXPECT_TRUE(std::ranges::all_of(std::span{*payload}.subspan(0x12c, 8),
+                                                [](auto byte) { return byte == std::byte{0}; }));
+            }
+        }
+    }
+}
+
+TEST(SampleAuthoringFormat, RejectsUnknownFormatsAndUnrepresentableSettingsWithoutPromotion) {
+    axk::SampleSpec sample;
+    sample.name = "Native";
+    for (const auto format : {axk::SampleStorageFormat::unknown, static_cast<axk::SampleStorageFormat>(255)}) {
+        sample.storage_format = format;
+        EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 1U, 44'100U, 400U}));
+    }
+    sample.storage_format = axk::SampleStorageFormat::a3000_188;
+    sample.parameters.portamento_time = 90;
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 1U, 44'100U, 400U}));
+    sample.parameters = {};
+    sample.parameters.coarse_tune = 100;
+    EXPECT_TRUE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 1U, 44'100U, 400U}));
+    sample.storage_format = axk::SampleStorageFormat::a4000_a5000_224;
+    EXPECT_FALSE(axk::detail::prepare_sbnk_payload(sample, {"Wave", 1U, 44'100U, 400U}));
+}
+
+TEST(SampleAuthoringFormat, NativeBankEditsPreserveStorageAndRejectLaterFieldsAtomically) {
+    axk::SampleSpec member;
+    member.name = "Member";
+    member.storage_format = axk::SampleStorageFormat::a3000_188;
+    axk::SampleBankSpec bank{"Bank", {"Member"}, {}, axk::SampleStorageFormat::a3000_188};
+    auto payload = axk::detail::prepare_sbac_payload(bank, {{member.name, member}});
+    ASSERT_TRUE(payload);
+    auto expected = *payload;
+    axk::SampleParameters edit;
+    edit.level = 82;
+    expected[0xe6] = std::byte{82};
+    ASSERT_TRUE(axk::detail::apply_sample_bank_parameters_to_payload(*payload, edit));
+    EXPECT_EQ(*payload, expected);
+    edit.portamento_time = 90;
+    EXPECT_FALSE(axk::detail::apply_sample_bank_parameters_to_payload(*payload, edit));
+    EXPECT_EQ(*payload, expected);
+    edit = {};
+    edit.controls[0].device = 20;
+    ASSERT_TRUE(axk::detail::apply_sample_bank_parameters_to_payload(*payload, edit));
+    EXPECT_EQ((*payload)[0x78], std::byte{20});
+    EXPECT_EQ((*payload)[0x6c], std::byte{20});
+    (*payload)[0x134] = std::byte{1};
+    EXPECT_FALSE(axk::detail::apply_sample_bank_parameters_to_payload(*payload, edit));
+}
 
 class SampleLayoutUpgrade : public testing::Test {
   protected:

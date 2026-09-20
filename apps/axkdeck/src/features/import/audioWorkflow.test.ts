@@ -23,7 +23,7 @@ describe('AudioImportWorkflow', () => {
             partitionIndex: 1,
         };
         const loadVolume = vi.fn();
-        const workflow = new AudioImportWorkflow({
+        const dependencies: ConstructorParameters<typeof AudioImportWorkflow>[0] = {
             transport: {} as ImageTransport,
             jobs: {} as JobController,
             picker: new PickerController(() => undefined),
@@ -45,9 +45,16 @@ describe('AudioImportWorkflow', () => {
             selectSample: vi.fn(),
             setStatus: vi.fn(),
             reportTiming: vi.fn(),
-        });
+        };
+        const workflow = new AudioImportWorkflow(dependencies);
 
         workflow.chooseFiles();
+        expect(workflow.sampleFormat).toBe('A3000_188');
+        workflow.sampleFormat = 'A4000_A5000_224';
+        workflow.request = null;
+        workflow.chooseFiles();
+        expect(workflow.sampleFormat).toBe('A4000_A5000_224');
+        expect(new AudioImportWorkflow(dependencies).sampleFormat).toBe('A3000_188');
         workflow.setDestinationPartition(1);
 
         expect(workflow.request).toMatchObject({
