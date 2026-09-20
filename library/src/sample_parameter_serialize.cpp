@@ -59,6 +59,7 @@ nlohmann::json sample_parameters_json(const SampleParameters &value, std::vector
     AXK_FIELD(sample_eq_width_tenths);
     AXK_FIELD(filter_cutoff_distance);
     AXK_FIELD(filter_gain);
+    AXK_FIELD(velocity_crossfade);
     AXK_FIELD(velocity_xfade_high);
     AXK_FIELD(velocity_xfade_low);
     AXK_FIELD(output1_destination);

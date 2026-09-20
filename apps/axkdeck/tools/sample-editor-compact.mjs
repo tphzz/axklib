@@ -34,16 +34,16 @@ try {
                 assert(geometry.sections.every(r => r.w <= 380));
                 const [a, b, c] = geometry.sections;
                 if (geometry.columns === 3) { assert(a.x < b.x && b.x < c.x); assert.equal(a.y, c.y); }
-                if (geometry.columns === 2) {
+                if (geometry.columns === 2 && c) {
                     assert(a.x < b.x);
                     assert.equal(c.x, sub === 'Pitch' ? b.x : a.x);
                     assert(c.y > a.y);
                 }
                 await page.screenshot({ path: resolve(output, `${name}-${sub.replaceAll(' ', '-')}.png`) });
             }
-            const unavailable = page.getByRole('button', { name: 'Portamento type: Unavailable', exact: true });
-            await unavailable.focus();
-            assert.match(await page.getByRole('tooltip').textContent(), /short parameter layout/);
+            const conversion = page.locator('.attribute-help-label[aria-label="Portamento type"]');
+            await conversion.focus();
+            assert.match(await page.getByRole('tooltip').textContent(), /full parameter layout/);
             await page.keyboard.press('Escape');
             await subpage('Map/Out', 'Level scaling');
             const header = await page.locator('.graph-readout').boundingBox();

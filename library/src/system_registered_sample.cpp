@@ -93,11 +93,12 @@ Result<DecodedSystemFile> patch_system_registered_sample(const DecodedSystemFile
     const auto block = std::span{result.system_bulk_bytes}.subspan(native ? 0x1c8U : 0x3ecU, native ? 0xbcU : 0xe0U);
     auto requested = patch;
     if (const auto valid = validate_template_dependencies(
-            block, requested, native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::current);
+            block, requested, native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000);
         !valid)
         return std::unexpected{valid.error()};
     if (const auto written = detail::apply_sample_parameters_to_block(
-            block, requested, native ? detail::SampleParameterLayout::a3000 : detail::SampleParameterLayout::current);
+            block, requested,
+            native ? detail::SampleParameterLayout::a3000 : detail::SampleParameterLayout::a4000_a5000);
         !written)
         return std::unexpected{written.error()};
     if (requested.loop_start_frame) {
@@ -123,7 +124,7 @@ Result<DecodedSampleParameters> decode_system_registered_sample(const DecodedSys
                                           "Registered Sample System File layout is invalid")};
     return decode_sample_parameter_block(
         std::span{file.system_bulk_bytes}.subspan(native ? 0x1c8U : 0x3ecU, native ? 0xbcU : 0xe0U),
-        native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::current);
+        native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000);
 }
 
 } // namespace axk

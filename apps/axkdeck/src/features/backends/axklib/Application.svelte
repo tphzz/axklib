@@ -149,6 +149,8 @@
         setInspectorOpen: (open) => (inspectorOpen = open),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         requestCompanionDisks: (retry) => imageSessionWorkflow.requestCompanionDisks(retry),
+        selection: () => packageExportSelection,
+        setSelection: (selection) => (packageExportSelection = selection),
     });
     catalogHooks.stopPlayback = () => auditionWorkflow.stop();
     catalogHooks.resetPreviews = () => auditionWorkflow.resetPreviewQueue();

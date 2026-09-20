@@ -3,11 +3,17 @@
     import ParameterField from './ParameterField.svelte';
     import type { SampleField } from './fields';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
+    import { parameterBlockReason } from './parameterAvailability';
+    import { blockedGraphParameters } from './formatCapabilities';
     let { document, fields, disabled }: { document: ObjectEditorDocument; fields: SampleField[]; disabled: boolean } =
         $props();
     const blocked = (key: string) => disabled || document.detail!.editing!.blockedParameters.includes(key);
+    const graphBlocked = $derived(blockedGraphParameters(document.detail!.editing!));
     const unavailable = $derived(
-        ['velocity_low', 'velocity_high'].some((key) => !Number.isFinite(document.draft.values[key]) || blocked(key)),
+        disabled ||
+            ['velocity_low', 'velocity_high'].some(
+                (key) => !Number.isFinite(document.draft.values[key]) || graphBlocked.includes(key),
+            ),
     );
 </script>
 
@@ -24,11 +30,12 @@
         onchange={(low, high) => document.draft.patch({ velocity_low: low, velocity_high: high })}
     />
     <div class="velocity-fields">
-        {#each fields as field}
+        {#each fields.filter((field) => field.key !== 'velocity_crossfade' || document.detail!.editing!.sampleFormat.format === 'A3000_188') as field}
             <ParameterField
                 {field}
                 draft={document.draft}
                 unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
+                blockedReason={parameterBlockReason(field.key, document.detail!.editing!)}
                 disabled={blocked(field.key)}
                 slider={field.key.includes('xfade')}
                 oninvalid={(message) => (document.inputErrors = { ...document.inputErrors, [field.key]: message })}

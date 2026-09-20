@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "axklib/bytes.hpp"
+#include "axklib/sample_parameter_rules.hpp"
 
 namespace axk::detail {
 namespace {
@@ -42,10 +43,6 @@ constexpr std::array<std::uint32_t, 13> sample_eq_gain_root_bits{
 
 Error invalid(std::string message) {
     return make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, std::move(message));
-}
-
-template <typename T> bool outside(const std::optional<T> &value, int minimum, int maximum) {
-    return value && (static_cast<int>(*value) < minimum || static_cast<int>(*value) > maximum);
 }
 
 double table_float(std::uint32_t bits) { return static_cast<double>(std::bit_cast<float>(bits)); }
@@ -154,50 +151,6 @@ Result<void> refresh_sample_eq_coefficients(std::span<std::byte> block, bool nat
     return {};
 }
 
-bool invalid_envelope(const SampleFilterEnvelopeParameters &value) {
-    return outside(value.attack_rate, 0, 127) || outside(value.decay_rate, 0, 127) ||
-           outside(value.release_rate, 0, 127) || outside(value.init_level, -127, 127) ||
-           outside(value.attack_level, -127, 127) || outside(value.sustain_level, -127, 127) ||
-           outside(value.release_level, -127, 127) || outside(value.rate_key_scaling, -7, 7) ||
-           outside(value.rate_velocity_sensitivity, -63, 63) ||
-           outside(value.attack_level_velocity_sensitivity, -63, 63) ||
-           outside(value.level_velocity_sensitivity, -63, 63);
-}
-
-bool invalid_envelope(const SamplePitchEnvelopeParameters &value) {
-    return outside(value.attack_rate, 0, 127) || outside(value.decay_rate, 0, 127) ||
-           outside(value.release_rate, 0, 127) || outside(value.init_level, -127, 127) ||
-           outside(value.attack_level, -127, 127) || outside(value.sustain_level, -127, 127) ||
-           outside(value.release_level, -127, 127) || outside(value.rate_key_scaling, -7, 7) ||
-           outside(value.rate_velocity_sensitivity, -63, 63) || outside(value.level_velocity_sensitivity, -63, 63) ||
-           outside(value.range, -63, 63);
-}
-
-bool invalid_envelope(const SampleAmplitudeEnvelopeParameters &value) {
-    return outside(value.attack_rate, 0, 127) || outside(value.decay_rate, 0, 127) ||
-           outside(value.release_rate, 0, 127) || outside(value.sustain_level, 0, 127) ||
-           outside(value.attack_mode, 0, 2) || outside(value.rate_key_scaling, -7, 7) ||
-           outside(value.rate_velocity_sensitivity, -63, 63);
-}
-
-void put_u8(std::span<std::byte> block, std::size_t offset, const std::optional<std::uint8_t> &value) {
-    if (value)
-        block[offset] = static_cast<std::byte>(*value);
-}
-
-void put_s8(std::span<std::byte> block, std::size_t offset, const std::optional<std::int8_t> &value) {
-    if (value)
-        block[offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
-}
-
-void set_masked_bit(std::byte &destination, std::uint8_t mask, const std::optional<bool> &value) {
-    if (!value)
-        return;
-    auto raw = std::to_integer<std::uint8_t>(destination);
-    raw = *value ? static_cast<std::uint8_t>(raw | mask) : static_cast<std::uint8_t>(raw & ~mask);
-    destination = static_cast<std::byte>(raw);
-}
-
 template <typename T> void merge_optional(std::optional<T> &destination, const std::optional<T> &source) {
     if (source)
         destination = source;
@@ -279,62 +232,27 @@ bool has_sample_parameter_values(const SampleParameters &value) {
 }
 
 Result<void> validate_sample_parameter_fields(const SampleParameters &value, SampleParameterGeneration generation) {
-    if (generation != SampleParameterGeneration::a3000 && generation != SampleParameterGeneration::current)
+    if (generation != SampleParameterGeneration::a3000 && generation != SampleParameterGeneration::a4000_a5000)
         return std::unexpected{invalid("Sample parameter generation is unsupported")};
-    const bool native = generation == SampleParameterGeneration::a3000;
-    if (native && (value.sample_eq_type || value.velocity_xfade_high || value.velocity_xfade_low ||
-                   value.portamento_rate || value.portamento_time))
-        return std::unexpected{invalid("Sample parameter is not available in the A3000 layout")};
-    if (!native && value.velocity_crossfade)
-        return std::unexpected{invalid("Velocity crossfade switch is available only in the A3000 layout")};
-    const auto key_low = value.key_low.value_or(0U);
-    const auto key_high = value.key_high.value_or(127U);
-    const auto effective_low = key_low == sampler_original_key_low_limit ? value.root_key : value.key_low;
-    const auto effective_high = key_high == sampler_original_key_high_limit ? value.root_key : value.key_high;
-    const auto inverted = [](const auto &low, const auto &high) { return low && high && *low > *high; };
-    if (outside(value.sample_eq_type, 0, 2) || outside(value.midi_receive_channel, 0, 16) ||
-        outside(value.pitch_bend_type, 0, native ? 13 : 12) || outside(value.pitch_bend_range, 0, 24) ||
-        outside(value.coarse_tune, native ? -127 : -64, native ? 127 : 63) || outside(value.root_key, 0, 127) ||
-        outside(value.fine_tune_cents, -63, 63) || (key_low > 127U && key_low != sampler_original_key_low_limit) ||
-        key_high > sampler_original_key_high_limit || inverted(effective_low, effective_high) ||
-        (value.loop_mode && static_cast<std::uint8_t>(*value.loop_mode) >
-                                static_cast<std::uint8_t>(AudioSamplerLoopMode::reverse_one_shot)) ||
-        outside(value.loop_tempo_hundredths, 8000, 15999) || outside(value.wave_start_velocity_sensitivity, -63, 63) ||
-        outside(value.filter_type, 0, 16) || outside(value.filter_cutoff, 0, 127) ||
-        outside(value.filter_q_width, 0, 31) || outside(value.filter_scaling_break1, 0, 127) ||
-        outside(value.filter_scaling_break2, 0, 127) ||
-        inverted(value.filter_scaling_break1, value.filter_scaling_break2) ||
-        outside(value.filter_scaling_cutoff1, -127, 127) || outside(value.filter_scaling_cutoff2, -127, 127) ||
-        outside(value.filter_velocity_to_cutoff, -63, 68) || outside(value.filter_velocity_to_q_width, -63, 68) ||
-        outside(value.expand_detune, -7, 7) || outside(value.expand_dephase, -63, 63) ||
-        outside(value.expand_width, -63, 63) || outside(value.random_pitch, 0, 63) || outside(value.level, 0, 127) ||
-        outside(value.pan, -64, 63) || outside(value.velocity_low_limit, 0, 127) ||
-        outside(value.velocity_offset, -127, 127) || outside(value.velocity_low, 0, 127) ||
-        outside(value.velocity_high, 0, 127) || inverted(value.velocity_low, value.velocity_high) ||
-        outside(value.level_scaling_break1, 0, 127) || outside(value.level_scaling_break2, 0, 127) ||
-        inverted(value.level_scaling_break1, value.level_scaling_break2) ||
-        outside(value.level_scaling_level1, 0, 127) || outside(value.level_scaling_level2, 0, 127) ||
-        outside(value.velocity_sensitivity, -127, 127) || outside(value.alternate_group, 0, 16) ||
-        outside(value.sample_eq_frequency, 4, 58) || outside(value.sample_eq_gain_db, -12, 12) ||
-        outside(value.sample_eq_width_tenths, 10, 120) || outside(value.filter_cutoff_distance, -63, 63) ||
-        invalid_envelope(value.feg) || invalid_envelope(value.peg) || invalid_envelope(value.aeg) ||
-        outside(value.aeg.attack_mode, 0, native ? 1 : 2) || outside(value.lfo.wave, 0, 3) ||
-        outside(value.lfo.speed, 1, 128) || outside(value.lfo.delay_time, 0, 127) ||
-        outside(value.lfo.cutoff_mod_depth, 0, 127) || outside(value.lfo.pitch_mod_depth, 0, 127) ||
-        outside(value.lfo.amp_mod_depth, 0, 127) || outside(value.filter_gain, -31, 31) ||
-        outside(value.velocity_xfade_high, 0, 127) || outside(value.velocity_xfade_low, 0, 127) ||
-        outside(value.output1_destination, 0, native ? 4 : 12) || outside(value.output1_level, 0, 127) ||
-        outside(value.output2_destination, 0, native ? 5 : 12) || outside(value.output2_level, 0, 127) ||
-        outside(value.portamento_type, 0, native ? 1 : 5) || outside(value.portamento_rate, 1, 127) ||
-        outside(value.portamento_time, 1, 127)) {
-        return std::unexpected{invalid("Sample parameters are outside their supported ranges")};
-    }
-    for (const auto &control : value.controls) {
-        if (outside(control.device, 0, native ? 125 : 126) || outside(control.function, 0, native ? 21 : 36) ||
-            outside(control.type, 0, 3) || outside(control.range, -63, 63)) {
-            return std::unexpected{invalid("Sample controller parameters are outside their supported ranges")};
+    for (const auto &rule : sample_parameter_rules()) {
+        if (const auto requested = rule.get(value)) {
+            const auto location = sample_parameter_location(rule, generation);
+            if (!location)
+                return std::unexpected{invalid(
+                    std::string{rule.key} + " is not stored in this " +
+                    (generation == SampleParameterGeneration::a3000 ? "A3000" : "A4000/A5000") + " Sample format")};
+            if (!sample_parameter_value_allowed(*location, *requested))
+                return std::unexpected{
+                    invalid(std::string{rule.key} + " is outside this Sample format's supported range")};
         }
     }
+    const auto low = value.key_low == sampler_original_key_low_limit ? value.root_key : value.key_low;
+    const auto high = value.key_high == sampler_original_key_high_limit ? value.root_key : value.key_high;
+    const auto inverted = [](const auto &a, const auto &b) { return a && b && *a > *b; };
+    if (inverted(low, high) || inverted(value.velocity_low, value.velocity_high) ||
+        inverted(value.filter_scaling_break1, value.filter_scaling_break2) ||
+        inverted(value.level_scaling_break1, value.level_scaling_break2))
+        return std::unexpected{invalid("Sample parameter range endpoints are inverted")};
     return {};
 }
 
@@ -352,15 +270,19 @@ Result<void> validate_sample_parameters(const SampleParameters &value, SamplePar
     return validate_sample_parameter_fields(effective, generation);
 }
 
+Result<void> validate_sample_parameter_patch(const SampleParameters &value) {
+    if (validate_sample_parameter_fields(value, SampleParameterGeneration::a3000))
+        return {};
+    return validate_sample_parameter_fields(value, SampleParameterGeneration::a4000_a5000);
+}
+
 Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const SampleParameters &value,
                                               SampleParameterLayout layout) {
-    if (layout != SampleParameterLayout::current && layout != SampleParameterLayout::current_prefix_only &&
-        layout != SampleParameterLayout::a3000)
+    if (layout != SampleParameterLayout::a4000_a5000 && layout != SampleParameterLayout::a3000)
         return std::unexpected{invalid("Sample parameter layout is unsupported")};
     const bool native = layout == SampleParameterLayout::a3000;
-    const bool has_controller_tail = layout == SampleParameterLayout::current;
-    if (block.size() < (native ? 0xbcU : sample_parameter_block_size))
-        return std::unexpected{invalid("Sample parameter block is truncated")};
+    if (block.size() != (native ? 0xbcU : sample_parameter_block_size))
+        return std::unexpected{invalid("Sample parameter block has the wrong size")};
     auto effective = value;
     const auto pair = [&](auto &low, auto &high, std::size_t low_offset, std::size_t high_offset) {
         if (low || high) {
@@ -379,161 +301,44 @@ Result<void> apply_sample_parameters_to_block(std::span<std::byte> block, const 
     pair(effective.filter_scaling_break1, effective.filter_scaling_break2, 0x64U, 0x65U);
     pair(effective.level_scaling_break1, effective.level_scaling_break2, 0x74U, 0x75U);
     if (auto valid = validate_sample_parameter_fields(effective, native ? SampleParameterGeneration::a3000
-                                                                        : SampleParameterGeneration::current);
+                                                                        : SampleParameterGeneration::a4000_a5000);
         !valid)
         return valid;
 
-    const auto changes_sample_eq =
-        value.sample_eq_type || value.sample_eq_frequency || value.sample_eq_gain_db || value.sample_eq_width_tenths;
-    auto &mapout = block[0x29U];
-    set_masked_bit(mapout, 0x10U, value.fixed_pitch);
-    set_masked_bit(mapout, 0x04U, value.key_crossfade);
-    set_masked_bit(mapout, 0x02U, value.mono_mode);
-    if (value.sample_eq_type) {
-        const auto preserved = static_cast<std::uint8_t>(std::to_integer<std::uint8_t>(mapout) & 0x3fU);
-        mapout = static_cast<std::byte>(preserved | static_cast<std::uint8_t>(*value.sample_eq_type << 6U));
-    }
-    put_u8(block, 0x2aU, value.midi_receive_channel);
-    put_u8(block, 0x2bU, value.pitch_bend_type);
-    put_u8(block, 0x2cU, value.pitch_bend_range);
-    put_s8(block, 0x2dU, value.coarse_tune);
-    put_u8(block, 0x2eU, value.root_key);
-    put_s8(block, 0x34U, value.fine_tune_cents);
-    put_u8(block, 0x3aU, value.key_high);
-    put_u8(block, 0x3bU, value.key_low);
-    if (value.loop_mode)
-        block[0x3dU] = static_cast<std::byte>(*value.loop_mode);
-    ByteWriter writer{block};
-    if (value.loop_tempo_hundredths) {
-        if (auto written = writer.write_be16(0x3eU, *value.loop_tempo_hundredths); !written)
-            return std::unexpected{written.error()};
-    }
-    if (value.loop_start_frame) {
-        if (auto written = writer.write_be32(0x50U, *value.loop_start_frame); !written)
-            return std::unexpected{written.error()};
-    }
-    if (value.loop_length_frames) {
-        if (auto written = writer.write_be32(0x58U, *value.loop_length_frames); !written)
-            return std::unexpected{written.error()};
-    }
-
-    put_s8(block, 0x60U, value.wave_start_velocity_sensitivity);
-    put_u8(block, 0x61U, value.filter_type);
-    put_u8(block, 0x62U, value.filter_cutoff);
-    put_u8(block, 0x63U, value.filter_q_width);
-    put_u8(block, 0x64U, value.filter_scaling_break1);
-    put_u8(block, 0x65U, value.filter_scaling_break2);
-    put_s8(block, 0x66U, value.filter_scaling_cutoff1);
-    put_s8(block, 0x67U, value.filter_scaling_cutoff2);
-    put_s8(block, 0x68U, value.filter_velocity_to_cutoff);
-    put_s8(block, 0x69U, value.filter_velocity_to_q_width);
-    put_s8(block, 0x6aU, value.expand_detune);
-    put_s8(block, 0x6bU, value.expand_dephase);
-    put_s8(block, 0x6cU, value.expand_width);
-    put_u8(block, 0x6dU, value.random_pitch);
-    put_u8(block, 0x6eU, value.level);
-    put_s8(block, 0x6fU, value.pan);
-    put_u8(block, 0x70U, value.velocity_low_limit);
-    put_s8(block, 0x71U, value.velocity_offset);
-    put_u8(block, 0x72U, value.velocity_high);
-    put_u8(block, 0x73U, value.velocity_low);
-    put_u8(block, 0x74U, value.level_scaling_break1);
-    put_u8(block, 0x75U, value.level_scaling_break2);
-    put_u8(block, 0x76U, value.level_scaling_level1);
-    put_u8(block, 0x77U, value.level_scaling_level2);
-    put_s8(block, 0x78U, value.velocity_sensitivity);
-    put_u8(block, 0x79U, value.alternate_group);
-    put_u8(block, 0x7aU, value.sample_eq_frequency);
-    if (value.sample_eq_gain_db)
-        block[0x7bU] = static_cast<std::byte>(static_cast<std::uint8_t>(*value.sample_eq_gain_db + 64));
-    put_u8(block, 0x7cU, value.sample_eq_width_tenths);
-    if (changes_sample_eq) {
-        if (auto refreshed = refresh_sample_eq_coefficients(block, native); !refreshed)
-            return refreshed;
-    }
-    put_s8(block, 0x7dU, value.filter_cutoff_distance);
-
-    put_u8(block, 0x7eU, value.feg.attack_rate);
-    put_u8(block, 0x7fU, value.feg.decay_rate);
-    put_u8(block, 0x80U, value.feg.release_rate);
-    put_s8(block, 0x81U, value.feg.init_level);
-    put_s8(block, 0x82U, value.feg.attack_level);
-    put_s8(block, 0x83U, value.feg.sustain_level);
-    put_s8(block, 0x84U, value.feg.release_level);
-    put_s8(block, 0x85U, value.feg.rate_key_scaling);
-    put_s8(block, 0x86U, value.feg.rate_velocity_sensitivity);
-    put_s8(block, 0x87U, value.feg.attack_level_velocity_sensitivity);
-    put_s8(block, 0x88U, value.feg.level_velocity_sensitivity);
-    put_u8(block, 0x89U, value.peg.attack_rate);
-    put_u8(block, 0x8aU, value.peg.decay_rate);
-    put_u8(block, 0x8bU, value.peg.release_rate);
-    put_s8(block, 0x8cU, value.peg.init_level);
-    put_s8(block, 0x8dU, value.peg.attack_level);
-    put_s8(block, 0x8eU, value.peg.sustain_level);
-    put_s8(block, 0x8fU, value.peg.release_level);
-    put_s8(block, 0x90U, value.peg.rate_key_scaling);
-    put_s8(block, 0x91U, value.peg.rate_velocity_sensitivity);
-    put_s8(block, 0x92U, value.peg.level_velocity_sensitivity);
-    put_s8(block, 0x93U, value.peg.range);
-    put_u8(block, 0x94U, value.aeg.attack_rate);
-    put_u8(block, 0x95U, value.aeg.decay_rate);
-    put_u8(block, 0x96U, value.aeg.release_rate);
-    put_u8(block, 0x99U, value.aeg.sustain_level);
-    put_u8(block, 0x9bU, value.aeg.attack_mode);
-    put_s8(block, 0x9cU, value.aeg.rate_key_scaling);
-    put_s8(block, 0x9dU, value.aeg.rate_velocity_sensitivity);
-    put_u8(block, 0x9eU, value.lfo.wave);
-    if (value.lfo.speed)
-        block[0x9fU] = static_cast<std::byte>(*value.lfo.speed - 1U);
-    put_u8(block, 0xa0U, value.lfo.delay_time);
-    auto &lfo_flags = block[0xa1U];
-    set_masked_bit(lfo_flags, 0x01U, value.lfo.key_on_sync);
-    set_masked_bit(lfo_flags, 0x02U, value.lfo.cutoff_mod_phase_invert);
-    set_masked_bit(lfo_flags, 0x04U, value.lfo.pitch_mod_phase_invert);
-    put_u8(block, 0xa2U, value.lfo.cutoff_mod_depth);
-    put_u8(block, 0xa3U, value.lfo.pitch_mod_depth);
-    put_u8(block, 0xa4U, value.lfo.amp_mod_depth);
-    put_s8(block, 0xa9U, value.filter_gain);
-
-    for (std::size_t index = 0; index < value.controls.size(); ++index) {
-        const auto offset = index * 4U + (has_controller_tail ? 0xbcU : 0U);
-        const std::array before{block[offset], block[offset + 1U], block[offset + 2U], block[offset + 3U]};
-        put_u8(block, offset, value.controls[index].device);
-        put_u8(block, offset + 1U, value.controls[index].function);
-        put_u8(block, offset + 2U, value.controls[index].type);
-        put_s8(block, offset + 3U, value.controls[index].range);
-        const auto record = block.subspan(offset, 4U);
-        if (has_controller_tail && !std::ranges::equal(before, record)) {
-            const auto prefix = block.subspan(index * 4U, 4U);
-            std::ranges::copy(record, prefix.begin());
-            if (std::to_integer<std::uint8_t>(prefix[1]) > 21U)
-                prefix[1] = std::byte{0};
+    std::array<std::byte, sample_parameter_block_size> storage{};
+    std::ranges::copy(block, storage.begin());
+    const auto candidate = std::span{storage}.first(block.size());
+    const auto generation = native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000;
+    for (const auto &rule : sample_parameter_rules()) {
+        if (const auto requested = rule.get(value)) {
+            if (auto written =
+                    write_sample_parameter_value(candidate, *sample_parameter_location(rule, generation), *requested);
+                !written)
+                return written;
         }
     }
-    if (native) {
-        set_masked_bit(mapout, 0x08U, value.velocity_crossfade);
-        if (value.portamento_type)
-            set_masked_bit(mapout, 0x01U, *value.portamento_type == 1U);
-        put_u8(block, 0xa5U, value.output1_destination);
-        put_u8(block, 0xa6U, value.output1_level);
-        put_u8(block, 0xa7U, value.output2_destination);
-        put_u8(block, 0xa8U, value.output2_level);
-        return {};
+    if (value.sample_eq_type || value.sample_eq_frequency || value.sample_eq_gain_db || value.sample_eq_width_tenths) {
+        if (auto refreshed = refresh_sample_eq_coefficients(candidate, native); !refreshed)
+            return refreshed;
     }
-    put_u8(block, 0xd4U, value.velocity_xfade_high);
-    put_u8(block, 0xd5U, value.velocity_xfade_low);
-    put_u8(block, 0xd6U, value.output1_destination);
-    put_u8(block, 0xd7U, value.output1_level);
-    put_u8(block, 0xd8U, value.output2_destination);
-    put_u8(block, 0xd9U, value.output2_level);
-    put_u8(block, 0xdaU, value.portamento_type);
-    put_u8(block, 0xdbU, value.portamento_rate);
-    put_u8(block, 0xdcU, value.portamento_time);
-    if (value.portamento_type) {
-        const auto raw = std::to_integer<std::uint8_t>(mapout);
-        mapout =
-            *value.portamento_type == 1U ? static_cast<std::byte>(raw | 0x01U) : static_cast<std::byte>(raw & 0xfeU);
+    if (!native) {
+        // Changed later-generation controller records also update their prefix projection.
+        for (std::size_t index = 0; index < value.controls.size(); ++index) {
+            const auto offset = 0xbcU + index * 4U;
+            const auto record = candidate.subspan(offset, 4U);
+            if (!std::ranges::equal(block.subspan(offset, 4U), record)) {
+                const auto prefix = candidate.subspan(index * 4U, 4U);
+                std::ranges::copy(record, prefix.begin());
+                if (std::to_integer<std::uint8_t>(prefix[1]) > 21U)
+                    prefix[1] = std::byte{0};
+            }
+        }
+        if (value.portamento_type) {
+            const auto flags = std::to_integer<std::uint8_t>(candidate[0x29U]);
+            candidate[0x29U] = static_cast<std::byte>((flags & 0xfeU) | (*value.portamento_type == 1U ? 1U : 0U));
+        }
     }
+    std::ranges::copy(candidate, block.begin());
     return {};
 }
 

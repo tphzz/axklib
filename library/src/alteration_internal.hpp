@@ -191,6 +191,15 @@ Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext co
                                     const DeleteSampleOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,
                                     const InsertSampleOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> duplicate_sbnk(TransactionState &state, OperationContext context,
+                                       const DuplicateSampleOperation &operation,
+                                       const CancellationToken &cancellation);
+Result<void> apply_sample_edit(TransactionState &state, MutablePartition &partition,
+                               const UpdateSampleParametersOperation &operation, std::vector<std::byte> &payload,
+                               const CancellationToken &cancellation);
+Result<OperationReport> convert_sbnk_format(TransactionState &state, OperationContext context,
+                                            const ConvertSampleFormatOperation &operation,
+                                            const CancellationToken &cancellation);
 Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
                                                const UpdateSampleParametersOperation &operation,
                                                const CancellationToken &cancellation);

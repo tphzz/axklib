@@ -1,4 +1,5 @@
 import { fireEvent, render, cleanup } from '@testing-library/svelte';
+import { sampleFormatFixture } from '../../../../test/sampleFormatFixture';
 import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SampleEqGraph from './SampleEqGraph.svelte';
@@ -43,7 +44,13 @@ function setup(type = 0, blocked = false, disabled = false) {
     });
     const document = {
         draft,
-        detail: { editing: { blockedParameters: blocked ? ['sample_eq_width_tenths'] : [], eqCoefficients: [] } },
+        detail: {
+            editing: {
+                ...sampleFormatFixture(),
+                blockedParameters: blocked ? ['sample_eq_width_tenths'] : [],
+                eqCoefficients: [],
+            },
+        },
     } as unknown as ObjectEditorDocument;
     const view = render(SampleEqGraph, { document, disabled });
     const handle = view.getByRole('button', { name: /EQ frequency \/ gain/ });

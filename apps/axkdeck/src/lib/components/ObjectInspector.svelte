@@ -1,4 +1,7 @@
 <script lang="ts">
+    import InspectorSection from './InspectorSection.svelte';
+    import { provideInspectorPanels } from '../inspectorPanels.svelte';
+    import SampleFormatDetails from '../../features/object-editor/SampleFormatDetails.svelte';
     import { onDestroy } from 'svelte';
     import { formatSequenceTempo, laterTempoChangeCount } from '../sequenceTempo';
     import { formatStoredSize } from '../formatBytes';
@@ -24,6 +27,8 @@
         onrelationshipnavigate,
         onmetadatacopy,
     }: Props = $props();
+    provideInspectorPanels();
+    const scope = $derived(selection?.kind ?? 'object');
     let copyState = $state<'idle' | 'copying' | 'copied'>('idle');
     let copyRequest = 0;
     let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,14 +124,13 @@
     </div>
 
     <div class="inspector-body">
-        {#if selection?.kind === 'program'}
-            <div class="inspector-content">
+        <div class="inspector-content">
+            {#if selection?.kind === 'program'}
                 <div class="inspector-title">
                     <span>PROG {selection.program.slot}</span>
                     <h3>{selection.program.name}</h3>
                 </div>
-                <section class="inspector-section" aria-labelledby="inspector-properties-heading">
-                    <h4 id="inspector-properties-heading">Properties</h4>
+                <InspectorSection {scope} sectionId="properties" title="Properties">
                     <dl class="metadata-list">
                         <div>
                             <dt>Assignments</dt>
@@ -149,18 +153,15 @@
                             <dd>{formatDependencySize(selection.program.object.sizeWithDependenciesBytes)}</dd>
                         </div>
                     </dl>
-                </section>
-            </div>
-        {:else if selection?.kind === 'sequence'}
-            {@const item = selection.sequence}
-            {@const metadata = item.object.sequence}
-            <div class="inspector-content">
+                </InspectorSection>
+            {:else if selection?.kind === 'sequence'}
+                {@const item = selection.sequence}
+                {@const metadata = item.object.sequence}
                 <div class="inspector-title">
                     <span>Sequence</span>
                     <h3>{item.name}</h3>
                 </div>
-                <section class="inspector-section" aria-labelledby="inspector-properties-heading">
-                    <h4 id="inspector-properties-heading">Properties</h4>
+                <InspectorSection {scope} sectionId="properties" title="Properties">
                     <dl class="metadata-list">
                         <div>
                             <dt>Events</dt>
@@ -217,20 +218,17 @@
                             <dd>{formatStoredSize(item.object.storedSizeBytes)}</dd>
                         </div>
                     </dl>
-                </section>
-            </div>
-        {:else if selection?.kind === 'sample-bank'}
-            {@const displayedMember =
-                selection.memberPreviews.find((member) => member.item.objectId === selection.displayedMemberId) ??
-                selection.memberPreviews[0]}
-            {@const displayedMemberIndex = displayedMember ? selection.memberPreviews.indexOf(displayedMember) : -1}
-            <div class="inspector-content">
+                </InspectorSection>
+            {:else if selection?.kind === 'sample-bank'}
+                {@const displayedMember =
+                    selection.memberPreviews.find((member) => member.item.objectId === selection.displayedMemberId) ??
+                    selection.memberPreviews[0]}
+                {@const displayedMemberIndex = displayedMember ? selection.memberPreviews.indexOf(displayedMember) : -1}
                 <div class="inspector-title">
                     <span>Sample Bank</span>
                     <h3>{selection.item.name}</h3>
                 </div>
-                <section class="inspector-preview inspector-section" aria-labelledby="inspector-preview-heading">
-                    <h4 id="inspector-preview-heading">Preview</h4>
+                <InspectorSection {scope} sectionId="preview" title="Preview" class="inspector-preview">
                     {#if displayedMember}
                         <div class="inspector-bank-sample-heading inspector-inline-heading">
                             <span>Sample {displayedMemberIndex + 1} of {selection.memberPreviews.length}</span>
@@ -245,9 +243,8 @@
                     {:else}
                         <div class="inspector-wave-missing">No Samples</div>
                     {/if}
-                </section>
-                <section class="inspector-section" aria-labelledby="inspector-properties-heading">
-                    <h4 id="inspector-properties-heading">Properties</h4>
+                </InspectorSection>
+                <InspectorSection {scope} sectionId="properties" title="Properties">
                     <dl class="metadata-list">
                         <div>
                             <dt>Samples</dt>
@@ -270,25 +267,21 @@
                             <dd>{formatDependencySize(selection.item.object.sizeWithDependenciesBytes)}</dd>
                         </div>
                     </dl>
-                </section>
-            </div>
-        {:else if selection?.kind === 'sample'}
-            <div class="inspector-content">
+                </InspectorSection>
+            {:else if selection?.kind === 'sample'}
                 <div class="inspector-title">
                     <span>Sample</span>
                     <h3>{selection.item.name}</h3>
                 </div>
-                <section class="inspector-preview inspector-section" aria-labelledby="inspector-preview-heading">
-                    <h4 id="inspector-preview-heading">Preview</h4>
+                <InspectorSection {scope} sectionId="preview" title="Preview" class="inspector-preview">
                     <SampleWaveformStack
                         preview={selection.preview}
                         sampleObjectId={selection.item.objectId}
                         {playingObjectId}
                         {playheadFrame}
                     />
-                </section>
-                <section class="inspector-section" aria-labelledby="inspector-properties-heading">
-                    <h4 id="inspector-properties-heading">Properties</h4>
+                </InspectorSection>
+                <InspectorSection {scope} sectionId="properties" title="Properties">
                     <dl class="metadata-list">
                         <div>
                             <dt>Sample Banks</dt>
@@ -311,14 +304,13 @@
                             <dd>{formatDependencySize(selection.item.object.sizeWithDependenciesBytes)}</dd>
                         </div>
                     </dl>
-                </section>
-            </div>
-        {:else if selection?.kind === 'wave-data'}
-            {@const item = selection.waveData}
-            {@const embeddedContainerName = item.object.embeddedContainerName?.trim() ?? ''}
-            {@const waveEndFrame = item.object.waveStartFrame + item.object.waveLengthFrames}
-            {@const loopEndFrame = (item.object.loopStartFrame ?? 0) + (item.object.loopLengthFrames ?? 0)}
-            {@const timeline: WaveformTimeline = {
+                </InspectorSection>
+            {:else if selection?.kind === 'wave-data'}
+                {@const item = selection.waveData}
+                {@const embeddedContainerName = item.object.embeddedContainerName?.trim() ?? ''}
+                {@const waveEndFrame = item.object.waveStartFrame + item.object.waveLengthFrames}
+                {@const loopEndFrame = (item.object.loopStartFrame ?? 0) + (item.object.loopLengthFrames ?? 0)}
+                {@const timeline: WaveformTimeline = {
                 sampleRate: item.object.sampleRate,
                 storedFrameCount: item.object.storedFrameCount,
                 playbackStartFrame: item.object.waveStartFrame,
@@ -328,13 +320,11 @@
                 displayDurationSeconds:
                     item.object.sampleRate > 0 ? item.object.storedFrameCount / item.object.sampleRate : 0,
             }}
-            <div class="inspector-content">
                 <div class="inspector-title">
                     <span>Wave Data</span>
                     <h3>{item.name}</h3>
                 </div>
-                <section class="inspector-preview inspector-section" aria-labelledby="inspector-preview-heading">
-                    <h4 id="inspector-preview-heading">Preview</h4>
+                <InspectorSection {scope} sectionId="preview" title="Preview" class="inspector-preview">
                     <div class="inspector-wave">
                         <Waveform
                             values={item.waveform}
@@ -345,9 +335,8 @@
                                 : 0}
                         />
                     </div>
-                </section>
-                <section class="inspector-section" aria-labelledby="inspector-properties-heading">
-                    <h4 id="inspector-properties-heading">Properties</h4>
+                </InspectorSection>
+                <InspectorSection {scope} sectionId="properties" title="Properties">
                     <dl class="metadata-list">
                         <div>
                             <dt>Object encoding</dt>
@@ -432,15 +421,22 @@
                             <dd>{formatStoredSize(item.storedSizeBytes)}</dd>
                         </div>
                     </dl>
-                </section>
-            </div>
-        {:else}
-            <div class="inspector-empty">
-                <p class="empty-copy">No object selected</p>
-            </div>
-        {/if}
-        {#if selection}
-            <InspectorRelationships groups={selection.relationships ?? []} onnavigate={onrelationshipnavigate} />
-        {/if}
+                </InspectorSection>
+            {:else}
+                <div class="inspector-empty">
+                    <p class="empty-copy">No object selected</p>
+                </div>
+            {/if}
+            {#if selection}
+                <InspectorRelationships
+                    {scope}
+                    groups={selection.relationships ?? []}
+                    onnavigate={onrelationshipnavigate}
+                />
+            {/if}
+            {#if selection?.kind === 'sample' && selection.item.object.sampleFormat}
+                <SampleFormatDetails format={selection.item.object.sampleFormat} />
+            {/if}
+        </div>
     </div>
 </aside>

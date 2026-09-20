@@ -24,7 +24,7 @@ Object editing is organized independently of backend selection. Shared draft,
 history, save/recovery and exit-confirmation behavior lives in
 `features/object-editor/`; device/object pages and parameter semantics live in
 `features/devices/a-series/sample/`. The editor registry selects the explicit
-server-provided `a4000-a5000/sample` profile. It does not infer a device from a
+server-provided `a-series/sample` profile. It does not infer a device from a
 filename or add device-specific branches to Files mode. Future device profiles
 provide their own field definitions, validation, write mapping and audition.
 
@@ -47,8 +47,8 @@ precise breakpoint controls. Common numeric and choice controls live in the
 object-editor layer, while parameter groupings remain device-specific.
 Shared spacing tokens keep panel padding, section gaps and table cells compact
 without shrinking text or input targets. Form-only pages use left-aligned,
-bounded columns; intermediate widths keep Output routing below Mix and Pitch
-bend below Sample portamento. Entirely unavailable groups use compact columns
+bounded columns; intermediate widths keep Output routing below Mix. Pitch has
+only Tuning and Sample portamento. Entirely unavailable groups use compact columns
 instead of reserving slider-width space. Missing columns wrap rather than stretch
 apart. The identity header reserves dirty-marker space so tabs do not move on edit.
 Collection identities also reserve a compact dirty-marker slot; unsaved edits
@@ -70,8 +70,17 @@ stacked control-group navigation aligned with layout under native WebKitGTK
 page zoom. Choice controls use measured label widths before showing segments;
 otherwise they use a bounded menu. The audition strip reserves stable button
 and status geometry across playback transitions.
-Sample settings keeps source duration alongside sample-rate metadata, rather than
+Sample Info keeps source duration alongside sample-rate metadata, rather than
 in a separate footer. It describes the underlying source, not the trimmed or looped range.
+Loop mode belongs to Waveform after Loop end, never to the audition strip.
+Sample Info separates saved Loop Tempo and Wave Start Velocity Sensitivity from
+local Display & audition preferences and Tools. End Type selects absolute Address
+or Length/Time/Beat relative to each corresponding start; it does not rewrite
+addresses or System settings. Local preferences are shared within an image session
+and survive Sample switches. Calculate uses four beats and octave normalization
+by default, with explicit beat-count and normalization controls.
+MIDI Set owns Pitch bend and Velocity Low Limit/Offset. Mix & Key owns Poly/Mono
+and Velocity sensitivity. Expansion & Velocity precedes Level scaling.
 Editor popups observe their rendered size and keep the edge nearest the field
 anchored as filtering changes the list height. Opening direction stays fixed until
 dismissal; content scrolls within the available space on that side.
@@ -114,6 +123,10 @@ the editing curve. Neither curve is a measured hardware response. The native
 writer's coefficient equations and maintained reference vectors are unchanged.
 These plots do not extend
 audio preview into EQ, filter, envelope or LFO synthesis.
+A transient vertical gain handle follows the filter trace on hover and remains
+keyboard reachable. Its coordinate domain is frozen during a drag; it changes
+only gain, with Shift for finer movement and one undo step. Shared handle help
+appears on hover or focus and names the gestures actually supported by that point.
 EQ uses one frequency/gain handle. Wheel or Alt-drag edits Peak/Dip width;
 normal wheel and Alt+Arrow steps are 0.5, or 0.1 with Shift. Alt-drag uses twice
 the original width sensitivity; Shift-drag reduces pointer sensitivity fourfold.
@@ -129,11 +142,20 @@ only choosing an option changes the draft. Popup placement, dismissal, numeric
 suffix alignment and slider focus treatment are shared across editor controls.
 The Control subpage presents all six assignments as numbered rows with
 Controller, Function, Type and Range columns, retaining distinct accessible
-field names. Missing or unsupported stored values display Unavailable instead
-of disabled placeholder inputs. Read-only per-field API metadata distinguishes
-settings absent from the stored layout from unrecognized stored values; help is
-available on hover and keyboard focus. Stereo-blocked fields retain their values and explain the
-restriction; neither case grants new write capabilities.
+field names. Unsupported values retain their raw value and format warning;
+explicit supported replacements can repair them. Absent fields display
+Unavailable with a format-specific reason. Storage identity (188/224 bytes) is
+independent of parameter assessment and of A5000-only output requirements.
+Generation-aware rules own the native/later field locations and domains used by
+decoding, validation, capability serialization and conversion inspection.
+Ordinary Save retains the stored format. A clean-draft conversion dialog previews
+the separate `convert_sbnk_format` transaction and blocks all known losses.
+Conversion reuses the editor's write-completion/recovery state machine, retaining
+selection, document, navigation and view preferences. The original payload hash
+guards every write. Capability reasons and inactive-mode help are available on
+field-label hover and keyboard focus. True stereo pairs permit scalar expansion
+edits without changing topology; retained expanded/duplicate-source pairs remain
+restricted and explain why.
 
 Position units, zoom, snapping, monitor lead-in, beat-count selection, preview
 note and audition volume are local view settings. Only an explicit tempo

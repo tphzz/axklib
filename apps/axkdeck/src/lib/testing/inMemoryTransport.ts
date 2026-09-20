@@ -370,6 +370,18 @@ export class InMemoryImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.invoke('startObjectParameterEdit', [sessionId, edit]);
     }
+    startSampleDuplication(
+        sessionId: number,
+        edit: import('../objectEditing').SampleDuplicationRequest,
+    ): Promise<JobState> {
+        return this.invoke('startSampleDuplication', [sessionId, edit]);
+    }
+    startSampleFormatConversion(
+        sessionId: number,
+        edit: import('../objectEditing').SampleFormatConversionRequest,
+    ): Promise<JobState> {
+        return this.invoke('startSampleFormatConversion', [sessionId, edit]);
+    }
 
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.invoke('inspectVolumeDeletion', [sessionId, targets]);

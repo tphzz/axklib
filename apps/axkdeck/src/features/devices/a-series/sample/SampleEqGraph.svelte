@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import { blockedGraphParameters } from './formatCapabilities';
     import EqualizerGraph from '../../../object-editor/EqualizerGraph.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
     import Icon from '../../../../lib/components/Icon.svelte';
@@ -17,8 +18,11 @@
     let { document, disabled }: { document: ObjectEditorDocument; disabled: boolean } = $props();
     const keys = ['sample_eq_type', 'sample_eq_frequency', 'sample_eq_gain_db', 'sample_eq_width_tenths'];
     const values = $derived(document.draft.values);
-    const available = $derived(keys.every((key) => Number.isFinite(values[key])));
-    const type = $derived(Number(values.sample_eq_type));
+    const native = $derived(document.detail!.editing!.sampleFormat.format === 'A3000_188');
+    const available = $derived(
+        keys.every((key) => (native && key === 'sample_eq_type') || Number.isFinite(values[key])),
+    );
+    const type = $derived(native ? 0 : Number(values.sample_eq_type));
     const frequency = $derived(Number(values.sample_eq_frequency));
     const gain = $derived(Number(values.sample_eq_gain_db));
     const width = $derived(Number(values.sample_eq_width_tenths));
@@ -41,7 +45,7 @@
             ? Array.from({ length: 401 }, (_, i) => ({ x: i / 400, y: (eqResponse(coefficients, i / 400) + 18) / 36 }))
             : [],
     );
-    const blocked = $derived(document.detail!.editing!.blockedParameters);
+    const blocked = $derived(blockedGraphParameters(document.detail!.editing!));
     let startWidth = 10;
     let wheelTimer: ReturnType<typeof setTimeout> | undefined;
     const canEdit = (key: string) => available && !disabled && !blocked.includes(key);

@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 
+#include "axklib/application/sample_formats.hpp"
 #include "axklib/package_closure.hpp"
 
 namespace {
@@ -253,6 +254,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             item.category_name = object.placement->category_name;
             item.entry_name = object.placement->entry_name;
         }
+        if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload))
+            item.sample_format = sample_format_metadata(*sample);
         if (const auto *waveform = std::get_if<axk::CurrentSmpl>(&object.object.payload)) {
             const auto stored_width = waveform->stored_sample_width_bytes.value;
             item.waveform = WaveformMetadata{

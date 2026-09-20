@@ -13,6 +13,9 @@
         left: number;
         top: number;
         onrename?: () => void;
+        onduplicate?: () => void;
+        onconvert?: () => void;
+        convertLabel?: string;
         onassignsamplebank?: () => void;
         onexportpackage?: () => void;
         onexportwav?: () => void;
@@ -34,6 +37,9 @@
         left,
         top,
         onrename,
+        onduplicate,
+        onconvert,
+        convertLabel = 'Convert Sample format...',
         onassignsamplebank,
         onexportpackage,
         onexportwav,
@@ -58,7 +64,9 @@
         typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
             ? document.activeElement
             : null;
-    const hasMutations = $derived(Boolean(oncreatedirectory || onrename || onassignsamplebank || ondelete));
+    const hasMutations = $derived(
+        Boolean(oncreatedirectory || onrename || onduplicate || onconvert || onassignsamplebank || ondelete),
+    );
     const hasExports = $derived(
         Boolean(onexportpackage || onexportwav || onexportsfz || onexportmidi || onexportfiles),
     );
@@ -225,6 +233,21 @@
     {#if onrename}
         <button type="button" role="menuitem" onmouseenter={() => closeSubmenu(false)} onclick={() => choose(onrename)}
             >Rename…</button
+        >
+    {/if}
+    {#if onconvert}<button
+            class="context-menu-item"
+            type="button"
+            role="menuitem"
+            tabindex="-1"
+            onclick={() => choose(onconvert)}>{convertLabel}</button
+        >{/if}
+    {#if onduplicate}
+        <button
+            type="button"
+            role="menuitem"
+            onmouseenter={() => closeSubmenu(false)}
+            onclick={() => choose(onduplicate)}>Duplicate...</button
         >
     {/if}
     {#if onassignsamplebank}

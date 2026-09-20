@@ -10,7 +10,7 @@ Supported operations are:
 - rename partition;
 - insert, delete, and rename volume;
 - insert, delete, rename, and update metadata on Wave Data (`SMPL`);
-- insert, delete, rename, retarget Wave Data, and update parameters on a Sample (`SBNK`);
+- insert, delete, rename, retarget Wave Data, update parameters, and explicitly convert the stored format of a Sample (`SBNK`);
 - insert, delete, rename, and update parameters on a Sample Bank (`SBAC`);
 - assign selected Samples to an existing Sample Bank (`SBAC`);
 - insert, delete, rename, update parameters, and replace assignments on a Program.
@@ -60,6 +60,8 @@ transaction without publishing a partial change.
 
 `update_sbnk_parameters` applies a partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.
+It retains that Sample's stored 188/224-byte format. Later-only settings on a
+native-format Sample are rejected rather than triggering conversion.
 Fields omitted from the update and unrelated opaque bytes are preserved.
 Dependent values are validated against the existing object, not fresh-object
 defaults. For example, a key limit of `=Orig` uses that Sample's current root
@@ -76,6 +78,44 @@ bounds are validated together, including retained loop values. The operation
 updates active channel bounds and their end cache, without changing PCM or an
 inactive channel's bytes. Optional `expected_payload_sha256` is the lowercase
 SHA-256 of the complete source Sample payload; a mismatch rejects the update.
+
+`convert_sbnk_format` explicitly converts an existing Sample between
+`a3000_188` and `a4000_a5000_224`. It requires a lowercase SHA-256 of the
+complete source payload and rejects stale inputs. For example, one manifest
+operation is:
+
+```json
+{
+  "id": "convert-sample",
+  "type": "convert_sbnk_format",
+  "partition_index": 0,
+  "volume_name": "Strings",
+  "sample_name": "Violin",
+  "target_format": "a4000_a5000_224",
+  "expected_payload_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+```
+
+Replace the example digest with the current payload's digest. Conversion
+preserves the Sample's identity, name, relationships and Wave Data, and commits
+atomically. The planner reports affected fields and rejects unknown formats,
+unsupported values, and changes that would lose parameter information. It does
+not silently clamp values or discard active settings. Both directions are
+subject to these checks; see [Sample Parameters](sample-parameters.md).
+The resulting format identifies storage, not hardware-tested media compatibility.
+
+`duplicate_sbnk` creates a standalone Sample in the source volume, pointing to
+the same Wave Data. It requires `sample_name`, `new_name`, and `parameters`,
+which may be empty. Optional parameter and playback-window edits use the update
+contract above and affect only the copy. The source Sample, Sample Banks,
+Programs, and Wave Data remain unchanged. The copied Sample's bank-membership
+flag and Program-assignment bitmap are cleared; other unmodified payload bytes
+are preserved. Supported sources are complete ordinary current mono/stereo
+Samples with resolvable PCM8/PCM16 Wave Data and matching stereo rates/windows.
+`expected_payload_sha256` guards the source payload. Case-insensitive collisions
+with Sample names or existing Sample Bank/Program target names reject the
+transaction, including unresolved references that would otherwise attach to
+the new Sample. Allocation, validation, and insertion are atomic.
 
 `update_program_parameters` applies [Program-wide and guarded assignment
 parameter patches](program-parameters.md) to a current-layout Program. It

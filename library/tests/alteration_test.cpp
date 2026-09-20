@@ -724,6 +724,7 @@ TEST(AlterationManifest, ParsesLanguageNeutralFixtureIntoTypedVariants) {
         std::string_view{"update_wave_data_parameters"},
         std::string_view{"replace_program_assignments"},
         std::string_view{"retarget_sample_wave_data"},
+        std::string_view{"duplicate_sbnk"},
     };
     ASSERT_EQ(parsed->operations.size(), expected.size());
     for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -2042,6 +2043,7 @@ TEST(Alteration, RejectsSampleBankOverridesAtomicallyWhenAnyMemberCannotApplyThe
     auto mono = source_manifest.partitions[0].volumes[0].samples.front();
     mono.name = "Mono Sample";
     mono.right_waveform_id.reset();
+    source_manifest.partitions[0].volumes[0].samples.front().parameters.key_high = 64U;
     source_manifest.partitions[0].volumes[0].samples.insert(source_manifest.partitions[0].volumes[0].samples.begin(),
                                                             std::move(mono));
     ASSERT_TRUE(axk::write_hds_image(source_manifest, source));
@@ -2050,7 +2052,7 @@ TEST(Alteration, RejectsSampleBankOverridesAtomicallyWhenAnyMemberCannotApplyThe
       "schema_version":"1.0","operations":[
         {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Stereo",
          "sample_bank":{"name":"Invalid","member_samples":["Mono Sample","Stereo Sample"],
-                        "parameter_overrides":{"expand_detune":1}}}
+                        "parameter_overrides":{"key_low":65}}}
       ]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
 
@@ -2296,16 +2298,15 @@ TEST(Alteration, InsertsSampleBankContainingStereoSample) {
     ]})");
     ASSERT_TRUE(manifest) << manifest.error().message;
 
-    const auto invalid_expand = axk::parse_alteration_manifest(R"({
+    const auto stereo_expand = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
       {"id":"insert","type":"insert_sbac","partition_index":0,"volume_name":"Stereo",
-       "sample_bank":{"name":"Invalid Expand","member_samples":["Stereo Sample"],
+       "sample_bank":{"name":"Stereo Expand","member_samples":["Stereo Sample"],
                       "parameter_overrides":{"expand_detune":1}}}
     ]})");
-    ASSERT_TRUE(invalid_expand) << invalid_expand.error().message;
-    const auto invalid_inspection = axk::inspect_hds_alteration(source, *invalid_expand);
-    ASSERT_FALSE(invalid_inspection);
-    EXPECT_EQ(invalid_inspection.error().message, "Sample Bank parameters are invalid for an existing member Sample");
+    ASSERT_TRUE(stereo_expand) << stereo_expand.error().message;
+    const auto expansion_inspection = axk::inspect_hds_alteration(source, *stereo_expand);
+    ASSERT_TRUE(expansion_inspection) << expansion_inspection.error().message;
 
     const auto applied = axk::alter_hds(source, *manifest, output);
     ASSERT_TRUE(applied) << applied.error().message;

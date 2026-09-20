@@ -134,7 +134,7 @@ struct SampleParameters {
     SampleLfoParameters lfo;
     std::optional<std::int8_t> filter_gain;
     std::array<SampleControlParameters, 6> controls;
-    // A3000 switch; current layouts store independent low/high crossfade widths.
+    // A3000 switch; A4000/A5000 layouts store independent low/high crossfade widths.
     std::optional<bool> velocity_crossfade;
     std::optional<std::uint8_t> velocity_xfade_high;
     std::optional<std::uint8_t> velocity_xfade_low;
@@ -147,7 +147,7 @@ struct SampleParameters {
     std::optional<std::uint8_t> portamento_time;
 };
 
-enum class SampleParameterGeneration : std::uint8_t { a3000, current };
+enum class SampleParameterGeneration : std::uint8_t { a3000, a4000_a5000 };
 
 // Stored lane state, including invalid or inactive values. No names or handles
 // are present in a parameter block, so neither lane's activity is inferred.
@@ -165,7 +165,7 @@ struct SampleParameterMemberState {
 };
 
 struct DecodedSampleParameters {
-    SampleParameterGeneration generation{SampleParameterGeneration::current};
+    SampleParameterGeneration generation{SampleParameterGeneration::a4000_a5000};
     SampleParameters parameters;
     std::array<SampleParameterMemberState, 2> members{};
     std::array<std::uint32_t, 4> linked_program_bitmap_words{};
@@ -178,8 +178,7 @@ struct DecodedSampleParameters {
     std::vector<std::byte> raw_bytes;
 };
 
-// Requires exactly 0xbc native or 0xbc/0xe0 current bytes. Short current blocks
-// use prefix controllers and omit extension-only parameters. Scalar leaves outside
+// Requires exactly 188 A3000 or 224 A4000/A5000 bytes. Scalar leaves outside
 // their known domains remain absent; raw bytes and both member lanes are kept.
 // The root/fine-tune/loop-window convenience leaves refer to the first lane;
 // they do not assert equality with the second lane. This is not a write plan.

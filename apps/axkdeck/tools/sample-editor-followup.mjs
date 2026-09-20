@@ -34,14 +34,14 @@ try {
                     await navigate('Map/Out', 'Pitch');
                     const groups = page.locator('.parameter-groups section');
                     const portamento = await groups.nth(1).boundingBox();
-                    const bend = await groups.nth(2).boundingBox();
-                    assert(portamento.width / zoom <= 241, 'unavailable group must not reserve a full control column');
-                    assert(bend.x - portamento.x <= 253 * zoom, 'bend follows compact portamento');
+                    const tuning = await groups.nth(0).boundingBox();
+                    assert.equal(await groups.count(), 2, 'Pitch contains Tuning and Portamento only');
+                    assert(portamento.x - tuning.x - tuning.width <= 13 * zoom, 'Portamento follows Tuning without a gap');
                 } else if (scenario === 'dirty-tabs') {
                     await navigate('Map/Out', 'Pitch');
                     const tabs = async () => page.locator('.navigation [role=tab]').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().x));
                     const before = await tabs();
-                    await set('Pitch bend range', 3);
+                    await set('Coarse tune', 3);
                     assert.deepEqual(await tabs(), before, 'dirty marker must not move the tabs');
                     await page.getByRole('button', { name: 'Undo Sample edit' }).click();
                     assert.deepEqual(await tabs(), before);
@@ -81,14 +81,14 @@ try {
                         }
                     }
                 } else if (scenario === 'settings-metadata') {
-                    await navigate('Trim/Loop', 'Sample settings');
+                    await navigate('Trim/Loop', 'Sample Info');
                     const metadata = page.locator('.source-metadata');
-                    const header = await page.locator('.settings-page .editor-toolbar').boundingBox();
+                    const header = await page.locator('.sample-info .editor-toolbar').boundingBox();
                     const box = await metadata.boundingBox();
                     assert(box.y >= header.y && box.y + box.height <= header.y + header.height, 'metadata uses the existing header row');
                     assert.equal(await page.locator('.settings-summary').count(), 0);
                     const text = await metadata.textContent();
-                    await set('Tempo', 110);
+                    await set('Loop Tempo', 110);
                     assert.equal(await metadata.textContent(), text, 'source duration is informational');
                 } else if (scenario === 'popup-filtering') {
                     await navigate('MIDI/CTRL', 'Control');

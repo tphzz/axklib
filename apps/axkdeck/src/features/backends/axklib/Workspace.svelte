@@ -4,7 +4,7 @@
     import type { LaneQueries } from '../../audition/workflow.svelte';
     import AboutDialog from '../../../lib/components/AboutDialog.svelte';
     import AuditionBar from '../../../lib/components/AuditionBar.svelte';
-    import ContainedObjectWorkspace from '../../../lib/components/ContainedObjectWorkspace.svelte';
+    import SampleCollection from './SampleCollection.svelte';
     import Icon from '../../../lib/components/Icon.svelte';
     import ImageNavigator from '../../../lib/components/ImageNavigator.svelte';
     import ObjectEditor from '../../../lib/components/ObjectEditor.svelte';
@@ -115,6 +115,7 @@
     }: WorkspaceProps = $props();
 
     let mainStage: HTMLElement;
+    let lowerOpen = $state(false);
     let programPresentation = $state<ProgramPresentation>('single');
     let selectedMultiPart = $state<SystemProgramPart | null>(null);
     let observedSessionId = $state<number | null>(null);
@@ -400,7 +401,10 @@
 {/snippet}
 {#snippet deviceContent()}
     {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
-        <ContainedObjectWorkspace
+        <SampleCollection
+            {sessionId}
+            {revision}
+            bind:lowerOpen
             view={workspaceView}
             {sampleBanks}
             samples={workspaceView === 'sample-banks' ? bankMembers : samples}
@@ -637,6 +641,7 @@
         {interfaceScaling}
         {isDesktop}
         bind:inspectorOpen
+        bind:lowerOpen
         imageName={imageLocation?.displayName.split(/[\\/]/).at(-1) ?? ''}
         context={files?.filesystemName ?? ''}
         status={mode === 'device'

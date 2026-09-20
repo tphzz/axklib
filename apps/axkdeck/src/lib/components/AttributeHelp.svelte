@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { getContext, onDestroy } from 'svelte';
+    import { inspectorSectionVisibility } from '../inspectorPanels.svelte';
     import { on } from 'svelte/events';
     import type { Snippet } from 'svelte';
 
@@ -8,14 +9,18 @@
         description,
         contextKey = '',
         children,
+        anchor,
     }: {
         label: string;
         description: string;
         contextKey?: string;
         children?: Snippet;
+        anchor?: HTMLElement;
     } = $props();
     const id = $props.id();
-    let trigger = $state<HTMLButtonElement>();
+    const sectionVisible = getContext<(() => boolean) | undefined>(inspectorSectionVisibility);
+    let internalTrigger = $state<HTMLButtonElement>();
+    const trigger = $derived(anchor ?? internalTrigger);
     let tooltip: HTMLElement | undefined;
     let open = $state(false);
     let pinned = false;
@@ -32,7 +37,7 @@
     }
     function show() {
         cancelTimer();
-        open = true;
+        if (!sectionVisible || sectionVisible()) open = true;
     }
     function enter() {
         cancelTimer();
@@ -83,10 +88,30 @@
     }
 
     $effect(() => {
+        if (sectionVisible && !sectionVisible()) close();
+    });
+    $effect(() => {
         contextKey;
         label;
         description;
         close();
+    });
+    $effect(() => {
+        if (!anchor) return;
+        const release = [
+            on(anchor, 'pointerenter', enter),
+            on(anchor, 'pointerleave', leave),
+            on(anchor, 'focus', show),
+            on(anchor, 'blur', close),
+            on(anchor, 'pointerdown', close),
+        ];
+        return () => release.forEach((remove) => remove());
+    });
+    $effect(() => {
+        if (!anchor) return;
+        if (open) anchor.setAttribute('aria-describedby', id);
+        else anchor.removeAttribute('aria-describedby');
+        return () => anchor?.removeAttribute('aria-describedby');
     });
     $effect(() => {
         if (!open) return;
@@ -141,21 +166,23 @@
 </script>
 
 {#if description}
-    <button
-        type="button"
-        class="attribute-help-label"
-        aria-label={children ? label : undefined}
-        bind:this={trigger}
-        aria-describedby={open ? id : undefined}
-        onpointerenter={enter}
-        onpointerleave={leave}
-        onfocus={show}
-        onblur={() => {
-            if (!pinned) close();
-        }}
-        onclick={toggle}
-        >{#if children}{@render children()}{:else}{label}{/if}</button
-    >
+    {#if !anchor}
+        <button
+            type="button"
+            class="attribute-help-label"
+            aria-label={children ? label : undefined}
+            bind:this={internalTrigger}
+            aria-describedby={open ? id : undefined}
+            onpointerenter={enter}
+            onpointerleave={leave}
+            onfocus={show}
+            onblur={() => {
+                if (!pinned) close();
+            }}
+            onclick={toggle}
+            >{#if children}{@render children()}{:else}{label}{/if}</button
+        >
+    {/if}
     {#if open}
         <div
             {id}

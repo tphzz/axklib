@@ -137,6 +137,103 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('CatalogWorkflow volume snapshots', () => {
+    it('adopts a refreshed scope ID only after loading succeeds, retaining object selections', async () => {
+        const requests = volumeRequests();
+        const { workflow } = workflowHarness(new Map([['refreshed', requests]]), new Map([[0, requests]]));
+        workflow.activeVolumeId = 'previous';
+        workflow.activePartitionIndex = 0;
+        workflow.programs = [{ objectId: 'program', name: 'Old' } as Program];
+        workflow.selectedProgramId = 'program';
+        const before = workflow.programs;
+        const loading = workflow.refreshVolume('previous', 'refreshed', 0);
+        expect(workflow.activeVolumeId).toBe('previous');
+        expect(workflow.programs).toBe(before);
+        resolveVolumeData(requests, programObject('program', '001'), '001: Current');
+        requests.contexts.resolve(context(0));
+        await loading;
+        expect(workflow.activeVolumeId).toBe('refreshed');
+        expect(workflow.selectedProgramId).toBe('program');
+        expect(workflow.programs[0]?.name).toBe('Current');
+    });
+
+    it('does not adopt a refreshed scope ID when loading fails', async () => {
+        const requests = volumeRequests();
+        const { workflow } = workflowHarness(new Map([['refreshed', requests]]), new Map([[0, requests]]));
+        workflow.activeVolumeId = 'previous';
+        workflow.activePartitionIndex = 0;
+        const loading = workflow.refreshVolume('previous', 'refreshed', 0);
+        requests.objects.reject(new Error('Read failed'));
+        await expect(loading).rejects.toThrow('Read failed');
+        expect(workflow.activeVolumeId).toBe('previous');
+    });
+
+    it('keeps current data and the latest selections until a same-volume refresh completes', async () => {
+        const requests = volumeRequests();
+        const { workflow } = workflowHarness(new Map([['volume', requests]]), new Map([[0, requests]]));
+        workflow.activeVolumeId = 'volume';
+        workflow.activePartitionIndex = 0;
+        workflow.programs = [{ objectId: 'program', name: 'Old' } as Program];
+        workflow.selectedProgramId = 'program';
+        workflow.inspectorObjectId = 'deleted';
+        workflow.editorObjectIds.programs = 'program';
+        const before = workflow.programs;
+        const loading = workflow.refreshVolume('volume', 'volume', 0);
+        expect(workflow.programs).toBe(before);
+        expect(workflow.selectedProgramId).toBe('program');
+        workflow.selectedProgramId = '';
+        resolveVolumeData(requests, programObject('program', '001'), '001: Current');
+        requests.contexts.resolve(context(0));
+        await loading;
+        expect(workflow.programs[0]?.name).toBe('Current');
+        expect(workflow.selectedProgramId).toBe('');
+        expect(workflow.inspectorObjectId).toBe('');
+        expect(workflow.editorObjectIds.programs).toBe('program');
+    });
+
+    it('retains the catalog on refresh failure and exposes the failure to Save recovery', async () => {
+        const requests = volumeRequests();
+        const { workflow } = workflowHarness(new Map([['volume', requests]]), new Map([[0, requests]]));
+        workflow.activeVolumeId = 'volume';
+        workflow.activePartitionIndex = 0;
+        workflow.programs = [{ objectId: 'program', name: 'Old' } as Program];
+        workflow.selectedProgramId = 'program';
+        const before = workflow.programs;
+        const loading = workflow.refreshVolume('volume', 'volume', 0);
+        requests.objects.reject(new Error('Read failed'));
+        await expect(loading).rejects.toThrow('Read failed');
+        expect(workflow.programs).toBe(before);
+        expect(workflow.selectedProgramId).toBe('program');
+        expect(workflow.activeVolumeId).toBe('volume');
+    });
+
+    it('rejects a refresh result superseded by ordinary volume navigation', async () => {
+        const old = volumeRequests();
+        const next = volumeRequests();
+        const { workflow } = workflowHarness(
+            new Map([
+                ['old', old],
+                ['next', next],
+            ]),
+            new Map([
+                [0, old],
+                [1, next],
+            ]),
+        );
+        workflow.activeVolumeId = 'old';
+        workflow.activePartitionIndex = 0;
+        const refreshing = workflow.refreshVolume('old', 'old', 0);
+        const navigated = workflow.loadVolume('next', 1);
+        resolveVolumeData(next, programObject('new', '001'), '001: New');
+        next.contexts.resolve(context(1));
+        await navigated;
+        workflow.selectedProgramId = 'new';
+        resolveVolumeData(old, programObject('old', '001'), '001: Old');
+        old.contexts.resolve(context(0));
+        await expect(refreshing).rejects.toThrow('workspace changed');
+        expect(workflow.activeVolumeId).toBe('next');
+        expect(workflow.selectedProgramId).toBe('new');
+        expect(workflow.programs[0]?.name).toBe('New');
+    });
     it('does not expose a new partition context with Programs retained from the previous volume', async () => {
         const requests = volumeRequests();
         const { workflow } = workflowHarness(new Map([['volume-new', requests]]), new Map([[1, requests]]));

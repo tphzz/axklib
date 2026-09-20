@@ -1,10 +1,9 @@
 <script lang="ts">
     import { sampleTabs } from './fields';
-    import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
-    let { document, panelId }: { document: ObjectEditorDocument; panelId: string } = $props();
+    import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
+    let { navigation, panelId }: { navigation: EditorNavigation; panelId: string } = $props();
     function select(id: string) {
-        document.tab = id;
-        document.page = '';
+        navigation.selectTab(id);
     }
 </script>
 
@@ -14,8 +13,8 @@
             role="tab"
             id={`${panelId}-${tab.id}`}
             aria-controls={panelId}
-            aria-selected={document.tab === tab.id}
-            tabindex={document.tab === tab.id ? 0 : -1}
+            aria-selected={navigation.tab === tab.id}
+            tabindex={navigation.tab === tab.id ? 0 : -1}
             onclick={() => select(tab.id)}
             onkeydown={(event) => {
                 let next = index;

@@ -11,6 +11,27 @@ afterAll(() => {
     Element.prototype.scrollIntoView = originalScroll;
 });
 describe('editor choices', () => {
+    it('keeps extension markers separate from option names and includes them in segment measurement', async () => {
+        const marked = [
+            { value: 0, label: 'Ordinary' },
+            { value: 1, label: 'Later value', extended: true, disabled: true, reason: 'Convert first.' },
+        ];
+        const onchange = vi.fn();
+        const view = render(EditorChoice, { label: 'Mode', value: 0, options: marked, segmented: false, onchange });
+        await fireEvent.click(view.getByRole('button', { name: 'Mode' }));
+        const option = view.getByRole('option', { name: 'Later value' });
+        expect(option.querySelector('.editor-option-label .extended-parameter')).not.toBeNull();
+        expect(option.title).toBe('Later value: Convert first.');
+        expect(view.getByRole('option', { name: 'Ordinary' }).querySelector('[data-icon="plus"]')).toBeNull();
+        await fireEvent.click(option);
+        expect(onchange).not.toHaveBeenCalled();
+        await fireEvent.keyDown(view.getByRole('listbox'), { key: 'Escape' });
+        await view.rerender({ segmented: true });
+        expect(
+            view.getByRole('button', { name: 'Mode: Later value' }).querySelector('.extended-parameter'),
+        ).not.toBeNull();
+        expect(view.container.querySelector('.choice-measurement .extended-parameter')).not.toBeNull();
+    });
     it('opens only deliberately and supports selection, Escape and outside dismissal', async () => {
         const onchange = vi.fn();
         const view = render(EditorChoice, { label: 'Output', value: 3, options, onchange });

@@ -57,7 +57,6 @@ describe('WorkspaceShell layout contract', () => {
         const contentRule = rule('.inspector-content');
         const metadataRowRule = rule('.metadata-list div');
         const metadataDividerRule = rule('.metadata-list div:not(:last-child)');
-        const relationshipsRule = rule('.inspector-relationships');
         const relationshipGroupRule = rule('.inspector-relationship-group h5');
         const laterRelationshipGroupRule = rule('.inspector-relationship-group + .inspector-relationship-group');
         const relationshipRowRule = rule('.inspector-relationship-group li');
@@ -77,14 +76,13 @@ describe('WorkspaceShell layout contract', () => {
         expect(sectionRule).not.toContain('padding');
         expect(sectionHeadingRule).toContain('font-size: 10px');
         expect(sectionHeadingRule).toContain('line-height: 12px');
-        expect(sectionHeadingRule).toContain('margin: 0 0 5px');
+        expect(sectionHeadingRule).toContain('margin: 0');
         expect(contentRule).toContain(
-            'padding: var(--density-panel-padding) calc(var(--density-panel-padding) + var(--overlay-scrollbar-clearance)) 0 var(--density-panel-padding)',
+            'padding: var(--density-panel-padding) calc(var(--density-panel-padding) + var(--overlay-scrollbar-clearance)) var(--density-panel-padding) var(--density-panel-padding)',
         );
         expect(metadataRowRule).not.toContain('border-bottom');
         expect(metadataDividerRule).toContain('border-bottom: 1px solid var(--inspector-row-divider)');
-        expect(relationshipsRule).not.toContain('margin: 9px');
-        expect(relationshipsRule).toContain('margin-right: calc(9px + var(--overlay-scrollbar-clearance))');
+        expect(appStyles).not.toMatch(/\.inspector-relationships\s*\{/);
         expect(relationshipGroupRule).toContain('margin: 0 0 2px');
         expect(laterRelationshipGroupRule).toContain('margin-top: 8px');
         expect(relationshipRowRule).not.toContain('border-bottom');

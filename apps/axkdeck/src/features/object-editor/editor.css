@@ -186,6 +186,8 @@
     box-shadow: 0 6px 16px #0008;
 }
 .editor-select-popup [role='option'] {
+    display: flex;
+    align-items: center;
     min-height: 26px;
     padding: 5px 7px;
     cursor: pointer;
@@ -228,9 +230,34 @@
     min-width: 0;
 }
 .field-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
     color: var(--color-text-muted);
     font-size: 10px;
 }
+.editor-option-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 100%;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.editor-option-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.extended-parameter {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    color: var(--color-accent);
+}
+.editor-select-popup [aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 .changed .field-label {
     color: var(--color-accent);
 }

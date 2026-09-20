@@ -13,12 +13,13 @@
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
     import Icon from '../../../../lib/components/Icon.svelte';
     import { parameterBlockReason } from './parameterAvailability';
+    import { blockedGraphParameters } from './formatCapabilities';
     let { document, page, disabled }: { document: ObjectEditorDocument; page: SamplePage; disabled: boolean } =
         $props();
     const view = $derived(sampleView(document));
     const scaling = $derived(page.id.endsWith('-scaling'));
     const graphFields = $derived(page.fields.filter((field) => field.key.includes('_scaling_')));
-    const blocked = $derived(document.detail?.editing?.blockedParameters ?? []);
+    const blocked = $derived(blockedGraphParameters(document.detail!.editing!));
     const groups = $derived(
         scaling
             ? [
@@ -88,7 +89,10 @@
 {/snippet}
 {#snippet fieldControl(field: SampleField)}
     {@const programSpeed = field.key === 'lfo.speed' && document.draft.values['lfo.wave'] === 3}
-    {@const shelfWidth = field.key === 'sample_eq_width_tenths' && document.draft.values.sample_eq_type !== 0}
+    {@const shelfWidth =
+        field.key === 'sample_eq_width_tenths' &&
+        document.detail!.editing!.sampleFormat.format !== 'A3000_188' &&
+        document.draft.values.sample_eq_type !== 0}
     {@const filterInactive =
         page.id === 'filter' &&
         field.key !== 'filter_type' &&
@@ -108,7 +112,7 @@
         draft={document.draft}
         unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
         disabled={disabled || blocked.includes(field.key) || shelfWidth || filterInactive}
-        blockedReason={parameterBlockReason(field.key, blocked)}
+        blockedReason={parameterBlockReason(field.key, document.detail!.editing!)}
         readOnlyText={programSpeed ? 'Program' : undefined}
         oninvalid={(message) => (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
     />

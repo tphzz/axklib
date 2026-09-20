@@ -4,6 +4,7 @@
 #include <sstream>
 
 #include "a_series_sample_editor.hpp"
+#include "axklib/application/sample_formats.hpp"
 #include "axklib/program_parameter_json.hpp"
 
 namespace {
@@ -375,6 +376,8 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         {"header", header_json(snapshot->second.object.header)},
         {"decoded", decoded_json(snapshot->second.object, omissions)},
         {"omissions", std::move(omissions)}};
+    const auto *sample = std::get_if<CurrentSbnk>(&snapshot->second.object.payload);
+    object["sampleFormat"] = sample ? Json(sample_format_metadata(*sample)) : Json(nullptr);
     Json editing = nullptr;
     if (std::holds_alternative<CurrentSbnk>(snapshot->second.object.payload) &&
         media_descriptor.size <= 1024U * 1024U) {

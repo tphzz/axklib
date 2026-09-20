@@ -10,11 +10,38 @@ defaults below. An existing-Sample update or Sample Bank override must contain
 at least one field. Omitted fields in an existing object are preserved. Omitted
 fields in a fresh Sample receive the defaults below.
 
-Existing 356-byte SBNK Samples support updates to their stored parameter prefix,
-including the six prefix controller records, without growing the object. Output
-destinations and levels, extended velocity crossfade, and extended portamento
-settings require the complete parameter extension. Short Sample editor snapshots
-omit these fields; they must not be filled with fresh-Sample defaults.
+Existing Samples retain their stored parameter format on every ordinary edit.
+`a3000_188` identifies a 188-byte A3000 parameter block, and
+`a4000_a5000_224` identifies a 224-byte A4000/A5000 block: the shared 188-byte
+prefix followed by a 36-byte extension. Header lengths, not physical allocation
+or file padding, identify the format. Unsupported headers remain unknown.
+
+The desktop badges `a3k` and `a4k/a5k` describe this stored format, not the
+originating sampler, parameter compatibility, or hardware certification. Invalid
+or later-only values in a native block produce separate warnings; they never
+change its format badge. Output destinations requiring A5000 effects are a
+separate model requirement within the later format.
+
+The tables below describe fresh A4000/A5000 authoring. Existing A3000 Samples
+have these differences: coarse tune is `-127..127`, pitch bend type is `0..13`,
+AEG attack mode is `0..1`, controller device is `0..125`, controller function is
+`0..21`, output 1 destination is `0..4`, and output 2 destination is `0..5`.
+Native `velocity_crossfade` is a Boolean, native `portamento_type` is `0..1`,
+and Sample EQ is implicitly Peak/Dip. Independent velocity crossfade widths,
+sample portamento rate/time and shelf EQ require explicit later-format conversion.
+Untouched unsupported values are preserved; edits must use the stored format's
+supported range.
+
+`convert_sbnk_format` is a separate, payload-digest-guarded transaction. The
+desktop requires saving or discarding the draft first. Conversion preserves
+Sample identity, name, relationships, Wave Data, unrelated bytes and trailing
+padding. Upconversion initializes the extension from native controllers, outputs,
+switches and fixed portamento defaults. The result always becomes `a4k/a5k`.
+Downconversion is blocked unless all authoritative settings can be represented
+without loss: native ranges, Peak/Dip EQ, crossfade widths 0/0 or 5/5, portamento
+type 0/1 and rate/time 90, and no unknown nonzero extension data. Resolve blockers
+manually and save before trying again. No automatic lossy mapping is performed.
+Test authored media on the intended hardware; neither conversion certifies it.
 
 ## General, MIDI, Pitch, And Loop
 
@@ -100,9 +127,13 @@ Width affects Peak/Dip only; the two shelf types use their fixed stored-response
 shape. HiShelv also limits the effective coefficient gain at low frequency
 selections while retaining the requested semantic gain value.
 
-Nonzero `expand_detune` or `expand_dephase` selects the supported expanded-mono
-profile. It is valid only for a Sample with one Wave Data source. Duplicate-
-source expanded mono remains preservation-only and cannot be authored.
+For fresh authoring, nonzero `expand_detune` or `expand_dephase` selects the
+supported one-source expanded-mono profile. Sparse updates also support these
+scalars on an existing true stereo pair with distinct sources and no expanded
+flag: the member bindings, channel windows and pitch values remain unchanged.
+Retained expanded or duplicate-source pairs are not authorized for topology
+changes by these scalar edits. Context-free registered templates retain their
+separate restrictions.
 Sample EQ frequency is a stored selection, not a frequency in hertz. For
 example, raw `30` displays as `630Hz`.
 

@@ -66,14 +66,76 @@
         ],
         "type": "object"
       },
-      "A4000A5000SampleEditor": {
+      "A4000A5000SystemProgramContextAvailable": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "const": "AVAILABLE"
+          },
+          "basicReceive": {
+            "$ref": "#/components/schemas/SystemMidiAddress"
+          },
+          "fileKind": {
+            "const": "SYSTEM2"
+          },
+          "omni": {
+            "type": "boolean"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/SystemProgramPart"
+            },
+            "maxItems": 32,
+            "minItems": 32,
+            "type": "array"
+          },
+          "programChangeEnabled": {
+            "type": "boolean"
+          },
+          "savedProgramMode": {
+            "enum": [
+              "SINGLE",
+              "MULTI"
+            ]
+          },
+          "storageRevision": {
+            "enum": [
+              0,
+              1
+            ],
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fileKind",
+          "availability",
+          "storageRevision",
+          "savedProgramMode",
+          "basicReceive",
+          "omni",
+          "programChangeEnabled",
+          "parts"
+        ],
+        "type": "object"
+      },
+      "ASeriesSampleEditor": {
+        "additionalProperties": false,
+        "properties": {
+          "blockedParameterReasons": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "User-facing reason for each blocked parameter path.",
+            "type": "object"
+          },
           "blockedParameters": {
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "canConvertFormat": {
+            "type": "boolean"
           },
           "canEditPlayback": {
             "type": "boolean"
@@ -92,12 +154,24 @@
             "minItems": 5,
             "type": "array"
           },
+          "formatConversions": {
+            "items": {
+              "$ref": "#/components/schemas/SampleFormatConversionPreview"
+            },
+            "type": "array"
+          },
           "maximumFrames": {
             "minimum": 0,
             "type": "integer"
           },
+          "parameterCapabilities": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SampleParameterCapability"
+            },
+            "type": "object"
+          },
           "parameters": {
-            "$ref": "#/components/schemas/A4000A5000SampleParameters"
+            "$ref": "#/components/schemas/ASeriesSampleParameters"
           },
           "partitionIndex": {
             "maximum": 7,
@@ -112,11 +186,14 @@
             "$ref": "#/components/schemas/SamplePlaybackWindow"
           },
           "profile": {
-            "const": "a4000-a5000/sample",
+            "const": "a-series/sample",
             "type": "string"
           },
           "reason": {
             "type": "string"
+          },
+          "sampleFormat": {
+            "$ref": "#/components/schemas/SampleFormatMetadata"
           },
           "sources": {
             "items": {
@@ -154,8 +231,8 @@
                 },
                 "reason": {
                   "enum": [
-                    "NOT_IN_LAYOUT",
-                    "UNSUPPORTED_VALUE"
+                    "UNSUPPORTED_VALUE",
+                    "FORMAT_UNAVAILABLE"
                   ],
                   "type": "string"
                 }
@@ -183,15 +260,20 @@
           "parameters",
           "eqCoefficients",
           "blockedParameters",
+          "blockedParameterReasons",
           "unavailableParameters",
           "playbackWindow",
           "canEditPlayback",
           "maximumFrames",
-          "sources"
+          "sources",
+          "sampleFormat",
+          "parameterCapabilities",
+          "formatConversions",
+          "canConvertFormat"
         ],
         "type": "object"
       },
-      "A4000A5000SampleParameters": {
+      "ASeriesSampleParameters": {
         "additionalProperties": false,
         "properties": {
           "aeg": {
@@ -500,6 +582,9 @@
           "sample_eq_width_tenths": {
             "type": "integer"
           },
+          "velocity_crossfade": {
+            "type": "boolean"
+          },
           "velocity_high": {
             "type": "integer"
           },
@@ -525,58 +610,6 @@
             "type": "integer"
           }
         },
-        "type": "object"
-      },
-      "A4000A5000SystemProgramContextAvailable": {
-        "additionalProperties": false,
-        "properties": {
-          "availability": {
-            "const": "AVAILABLE"
-          },
-          "basicReceive": {
-            "$ref": "#/components/schemas/SystemMidiAddress"
-          },
-          "fileKind": {
-            "const": "SYSTEM2"
-          },
-          "omni": {
-            "type": "boolean"
-          },
-          "parts": {
-            "items": {
-              "$ref": "#/components/schemas/SystemProgramPart"
-            },
-            "maxItems": 32,
-            "minItems": 32,
-            "type": "array"
-          },
-          "programChangeEnabled": {
-            "type": "boolean"
-          },
-          "savedProgramMode": {
-            "enum": [
-              "SINGLE",
-              "MULTI"
-            ]
-          },
-          "storageRevision": {
-            "enum": [
-              0,
-              1
-            ],
-            "type": "integer"
-          }
-        },
-        "required": [
-          "fileKind",
-          "availability",
-          "storageRevision",
-          "savedProgramMode",
-          "basicReceive",
-          "omni",
-          "programChangeEnabled",
-          "parts"
-        ],
         "type": "object"
       },
       "AlterationAudioImportSummary": {
@@ -727,6 +760,7 @@
               "INSERT_VOLUME",
               "DELETE_SBNK",
               "INSERT_SBNK",
+              "UPDATE_SBNK_PARAMETERS",
               "INSERT_WAVEFORM",
               "DELETE_WAVEFORM",
               "RENAME_WAVEFORM",
@@ -745,17 +779,26 @@
               "RENAME_PARTITION",
               "REPAIR_OBJECT_PLACEMENTS",
               "IMPORT_TX16W_DISK_SET",
-              "CLEAR_PROGRAM_ASSIGNMENTS"
+              "CLEAR_PROGRAM_ASSIGNMENTS",
+              "UPDATE_PROGRAM_PARAMETERS",
+              "UPDATE_SAMPLE_BANK_PARAMETERS",
+              "UPDATE_WAVE_DATA_PARAMETERS",
+              "REPLACE_PROGRAM_ASSIGNMENTS",
+              "RETARGET_SAMPLE_WAVE_DATA",
+              "DUPLICATE_SBNK",
+              "CONVERT_SBNK_FORMAT"
             ],
             "x-axklib-application-enum": {
               "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
               "CLEAR_PROGRAM_ASSIGNMENTS": "clear_program_assignments",
+              "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
               "DELETE_PROGRAM": "delete_program",
               "DELETE_SBAC": "delete_sbac",
               "DELETE_SBNK": "delete_sbnk",
               "DELETE_SEQUENCE": "delete_sequence",
               "DELETE_VOLUME": "delete_volume",
               "DELETE_WAVEFORM": "delete_waveform",
+              "DUPLICATE_SBNK": "duplicate_sbnk",
               "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set",
               "INSERT_PROGRAM": "insert_program",
               "INSERT_SBAC": "insert_sbac",
@@ -770,7 +813,13 @@
               "RENAME_SEQUENCE": "rename_sequence",
               "RENAME_VOLUME": "rename_volume",
               "RENAME_WAVEFORM": "rename_waveform",
-              "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements"
+              "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements",
+              "REPLACE_PROGRAM_ASSIGNMENTS": "replace_program_assignments",
+              "RETARGET_SAMPLE_WAVE_DATA": "retarget_sample_wave_data",
+              "UPDATE_PROGRAM_PARAMETERS": "update_program_parameters",
+              "UPDATE_SAMPLE_BANK_PARAMETERS": "update_sample_bank_parameters",
+              "UPDATE_SBNK_PARAMETERS": "update_sbnk_parameters",
+              "UPDATE_WAVE_DATA_PARAMETERS": "update_wave_data_parameters"
             }
           },
           "volumeName": {
@@ -5394,7 +5443,7 @@
           "editing": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/A4000A5000SampleEditor"
+                "$ref": "#/components/schemas/ASeriesSampleEditor"
               },
               {
                 "type": "null"
@@ -5626,6 +5675,16 @@
             ],
             "type": "string"
           },
+          "sampleFormat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SampleFormatMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scopeKey": {
             "type": "string"
           },
@@ -5660,7 +5719,8 @@
           "descriptor",
           "header",
           "decoded",
-          "omissions"
+          "omissions",
+          "sampleFormat"
         ],
         "type": "object"
       },
@@ -5905,6 +5965,16 @@
           "partitionName": {
             "type": "string"
           },
+          "sampleFormat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SampleFormatMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sequence": {
             "oneOf": [
               {
@@ -5960,7 +6030,8 @@
           "sizeBytes",
           "sizeWithDependenciesBytes",
           "waveform",
-          "sequence"
+          "sequence",
+          "sampleFormat"
         ],
         "type": "object"
       },
@@ -13299,6 +13370,226 @@
         },
         "type": "object"
       },
+      "SampleFormatConversionPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/SampleParameterIssue"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "targetFormat": {
+            "enum": [
+              "A3000_188",
+              "A4000_A5000_224"
+            ],
+            "type": "string",
+            "x-axklib-application-enum": {
+              "A3000_188": "a3000_188",
+              "A4000_A5000_224": "a4000_a5000_224"
+            }
+          }
+        },
+        "required": [
+          "targetFormat",
+          "allowed",
+          "changes",
+          "blockers"
+        ],
+        "type": "object"
+      },
+      "SampleFormatMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "extensionDiffersFromPrefixDefaults": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "format": {
+            "$ref": "#/components/schemas/SampleStorageFormat"
+          },
+          "headerRevision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "laterBodyBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "olderBodyBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parameterBytes": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "parameterIssues": {
+            "items": {
+              "$ref": "#/components/schemas/SampleParameterIssue"
+            },
+            "type": "array"
+          },
+          "requiresA5000": {
+            "type": "boolean"
+          },
+          "structurallyValid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "format",
+          "structurallyValid",
+          "parameterBytes",
+          "headerRevision",
+          "olderBodyBytes",
+          "laterBodyBytes",
+          "diagnostics",
+          "parameterIssues",
+          "requiresA5000",
+          "extensionDiffersFromPrefixDefaults"
+        ],
+        "type": "object"
+      },
+      "SampleParameterCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "a3000": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SampleParameterDomain"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "a4000A5000": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SampleParameterDomain"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "a5000Minimum": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "storedValue": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "valid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "editable",
+          "valid",
+          "reason",
+          "a3000",
+          "a4000A5000",
+          "storedValue",
+          "a5000Minimum"
+        ],
+        "type": "object"
+      },
+      "SampleParameterDomain": {
+        "additionalProperties": false,
+        "properties": {
+          "extraValue": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "mask": {
+            "maximum": 255,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "integer"
+          },
+          "offset": {
+            "maximum": 223,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minimum",
+          "maximum",
+          "extraValue",
+          "offset",
+          "mask"
+        ],
+        "type": "object"
+      },
+      "SampleParameterIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "storedValue": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "message",
+          "storedValue"
+        ],
+        "type": "object"
+      },
       "SamplePlaybackWindow": {
         "additionalProperties": false,
         "properties": {
@@ -13316,6 +13607,19 @@
           "length_frames"
         ],
         "type": "object"
+      },
+      "SampleStorageFormat": {
+        "enum": [
+          "UNKNOWN",
+          "A3000_188",
+          "A4000_A5000_224"
+        ],
+        "type": "string",
+        "x-axklib-application-enum": {
+          "A3000_188": "a3000_188",
+          "A4000_A5000_224": "a4000_a5000_224",
+          "UNKNOWN": "unknown"
+        }
       },
       "SequenceMetadata": {
         "additionalProperties": false,

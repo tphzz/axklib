@@ -239,6 +239,7 @@ export interface SamplerRelationship {
     receiveChannelDisplay: string;
 }
 export interface SamplerObject {
+    sampleFormat?: import('./objectEditing').SampleFormatMetadata | null;
     key: string;
     objectType: string;
     name: string;

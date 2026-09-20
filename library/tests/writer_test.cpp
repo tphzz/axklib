@@ -1560,7 +1560,7 @@ TEST(HdsWriter, AppliesSharedSampleBankParametersAndPreservesUnspecifiedBytes) {
     EXPECT_TRUE(std::ranges::equal(stored_eq, std::span{*payload}.subspan(0x152U, stored_eq.size())));
 }
 
-TEST(HdsWriter, RejectsExtendedOnlyOverrideForShortCurrentSample) {
+TEST(HdsWriter, RejectsConversionOfTruncatedFullSample) {
     axk::SampleSpec sample;
     sample.name = "Short";
     const axk::detail::PreparedWaveformMember member{"Wave", 0x100U, 44'100U, 400U};

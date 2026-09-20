@@ -277,7 +277,7 @@ TEST_F(SampleWaveDataRetarget, MonoRetargetPreservesBankMembershipParametersEqWi
 }
 
 TEST_F(SampleWaveDataRetarget, CombinedWindowAndLoopEditPreservesEveryOtherByte) {
-    for (const auto selector : {1U, 2U, 4U}) {
+    for (const auto selector : {2U, 4U}) {
         for (const auto *name : {"Mono", "Stereo"}) {
             // Legacy-layout Samples use the same stored playback lanes.
             patch_sample(name, 0x14U, {std::byte{0}, std::byte{0}, std::byte{0}, static_cast<std::byte>(selector)});

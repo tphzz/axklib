@@ -67,6 +67,10 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return insert_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleParametersOperation>)
                     return update_sbnk_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ConvertSampleFormatOperation>)
+                    return convert_sbnk_format(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, DuplicateSampleOperation>)
+                    return duplicate_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)
                     return update_sample_bank_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>)

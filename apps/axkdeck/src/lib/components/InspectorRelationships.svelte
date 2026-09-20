@@ -1,16 +1,17 @@
 <script lang="ts">
     import type { InspectorRelationshipGroup } from '../types';
+    import InspectorSection from './InspectorSection.svelte';
 
     interface Props {
         groups: readonly InspectorRelationshipGroup[];
+        scope?: string;
         onnavigate?: (objectId: string, focusTarget: boolean) => void;
     }
 
-    let { groups, onnavigate }: Props = $props();
+    let { groups, onnavigate, scope = 'object' }: Props = $props();
 </script>
 
-<section class="inspector-relationships inspector-section" aria-labelledby="inspector-relationships-heading">
-    <h4 id="inspector-relationships-heading">Relationships</h4>
+<InspectorSection {scope} sectionId="relationships" title="Relationships" class="inspector-relationships">
     {#if groups.length === 0}
         <p class="inspector-relationships-empty">No direct relationships</p>
     {:else}
@@ -44,4 +45,4 @@
             </div>
         {/each}
     {/if}
-</section>
+</InspectorSection>

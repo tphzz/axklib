@@ -33,6 +33,10 @@ describe('InspectorRelationships', () => {
             },
         });
 
+        const heading = screen.getByRole('button', { name: 'Relationships' });
+        expect(heading.getAttribute('aria-expanded')).toBe('false');
+        expect(screen.queryByRole('button', { name: 'Piano Bank =Smp' })).toBeNull();
+        await fireEvent.click(heading);
         const relationship = screen.getByRole('button', { name: 'Piano Bank =Smp' });
         expect(screen.getByTitle('Receive channel').textContent).toBe('=Smp');
         expect(screen.getByTitle('Piano Bank').textContent).toBe('Piano Bank');
@@ -48,8 +52,9 @@ describe('InspectorRelationships', () => {
         expect(screen.queryByRole('button', { name: /Missing Bank/ })).toBeNull();
     });
 
-    it('shows an explicit empty state', () => {
+    it('shows an explicit empty state when expanded', async () => {
         render(InspectorRelationships, { props: { groups: [] } });
+        await fireEvent.click(screen.getByRole('button', { name: 'Relationships' }));
 
         expect(screen.getByText('No direct relationships')).toBeTruthy();
     });

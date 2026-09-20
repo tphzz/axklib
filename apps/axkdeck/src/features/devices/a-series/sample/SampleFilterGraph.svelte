@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { blockedGraphParameters } from './formatCapabilities';
+    import { onDestroy } from 'svelte';
     import FilterGraph from '../../../object-editor/FilterGraph.svelte';
     import type { PlotHandle } from '../../../object-editor/ParameterGraph.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
@@ -21,55 +23,83 @@
         ].every((key) => Number.isFinite(values[key])),
     );
     const stages = $derived(available ? sampleFilterStages(type, cutoff, q, distance) : []);
-    const canEdit = (key: string) =>
-        !disabled && type !== 0 && available && !document.detail!.editing!.blockedParameters.includes(key);
-    const handles = $derived<PlotHandle[]>(
+    const graphBlocked = $derived(blockedGraphParameters(document.detail!.editing!));
+    const canEdit = (key: string) => !disabled && type !== 0 && available && !graphBlocked.includes(key);
+    const handles = $derived<Omit<PlotHandle, 'y'>[]>(
         type === 0 || !available
             ? []
             : [
                   {
                       id: 'cutoff-q',
                       label: 'Filter cutoff / Q',
-                      readout: `${cutoff}, ${q}`,
+                      readout: `${cutoff}, Q / Width ${q}`,
+                      help: 'Drag horizontally for cutoff. Mouse wheel or Alt-drag adjusts Q / Width. Shift gives finer movement. Left/Right adjusts cutoff; Up/Down adjusts Q / Width.',
                       x: cutoff / 127,
-                      y: 0.65 + (q / 31) * 0.28,
                       horizontal: canEdit('filter_cutoff'),
-                      vertical: canEdit('filter_q_width'),
                       disabled: !canEdit('filter_cutoff') && !canEdit('filter_q_width'),
-                  },
-                  {
-                      id: 'gain',
-                      label: 'Filter gain',
-                      readout: String(gain),
-                      x: 0.08,
-                      y: 0.65 + (gain / 31) * 0.2,
-                      vertical: true,
-                      disabled: !canEdit('filter_gain'),
                   },
                   ...(type >= 10
                       ? [
                             {
                                 id: 'distance',
                                 label: 'Cutoff distance',
-                                readout: String(distance),
-                                x: Math.max(0, Math.min(1, (cutoff + distance) / 127)),
-                                y: 0.35,
-                                horizontal: true,
-                                disabled: !canEdit('filter_cutoff_distance'),
+                                readout: `${distance}, Q / Width ${q}`,
+                                help: 'Drag horizontally for cutoff distance. Mouse wheel or Alt-drag adjusts Q / Width. Shift gives finer movement. Left/Right adjusts distance; Up/Down adjusts Q / Width.',
+                                x: (cutoff + distance) / 127,
+                                horizontal: canEdit('filter_cutoff_distance'),
+                                disabled: !canEdit('filter_cutoff_distance') && !canEdit('filter_q_width'),
                             },
                         ]
                       : []),
+                  {
+                      id: 'gain',
+                      label: 'Filter gain',
+                      readout: String(gain),
+                      x: 0.15,
+                      trace: 'filter',
+                      vertical: true,
+                      alternate: false,
+                      disabled: !canEdit('filter_gain'),
+                      help: 'Drag up or down to adjust gain. Shift-drag is four times finer. Up/Down adjusts gain; Home/End selects its limits.',
+                  },
               ],
     );
     function patch(next: Record<string, number>) {
         document.draft.patch(Object.fromEntries(Object.entries(next).filter(([key]) => canEdit(key))));
     }
+    let startQ = 0;
+    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+    function end() {
+        clearTimeout(wheelTimer);
+        wheelTimer = undefined;
+        document.draft.endGesture();
+    }
+    function begin() {
+        if (wheelTimer !== undefined) end();
+        startQ = q;
+        document.draft.beginGesture();
+    }
+    function setQ(value: number) {
+        patch({ filter_q_width: Math.max(0, Math.min(31, Math.round(value))) });
+    }
+    function wheel(id: string, event: WheelEvent) {
+        if (id === 'gain') return;
+        const delta = event.deltaY || (event.shiftKey ? event.deltaX : 0);
+        if (event.ctrlKey || !delta || !canEdit('filter_q_width')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (wheelTimer === undefined) document.draft.beginGesture();
+        clearTimeout(wheelTimer);
+        setQ(q - Math.sign(delta) * (event.shiftKey ? 1 : 3));
+        wheelTimer = setTimeout(end, 180);
+    }
+    onDestroy(end);
 </script>
 
 {#snippet title()}
     <AttributeHelp
         label="Filter"
-        description="Schematic filter response in native parameter values, not a measured frequency response. Q controls resonance, except for band-pass and elimination filters where it controls width. Compound types add a second cutoff. Bypass preserves inactive settings. The graph does not add filtering to audition playback."
+        description="Schematic filter response in native parameter values, not a measured frequency response. Cutoff handles also adjust Q / Width. Hover near the response away from the cutoff handles to adjust gain vertically. Compound types add a second cutoff. Bypass preserves inactive settings. The graph does not add filtering to audition playback."
     />
 {/snippet}
 {#if available}<FilterGraph
@@ -78,35 +108,40 @@
         gain={gain / 31}
         {handles}
         {disabled}
-        onbegin={() => document.draft.beginGesture()}
-        onend={() => document.draft.endGesture()}
-        onchange={(id, x, y) => {
+        onbegin={begin}
+        onend={end}
+        onaltdrag={(_id, delta) => setQ(startQ + delta * 31)}
+        onwheel={wheel}
+        ongainchange={(value) => patch({ filter_gain: Math.max(-31, Math.min(31, Math.round(value * 31))) })}
+        onchange={(id, x) => {
             if (id === 'cutoff-q')
                 patch({
                     filter_cutoff: Math.round(x * 127),
-                    filter_q_width: Math.max(0, Math.min(31, Math.round(((y - 0.65) / 0.28) * 31))),
                 });
-            else if (id === 'gain')
-                patch({ filter_gain: Math.max(-31, Math.min(31, Math.round(((y - 0.65) / 0.2) * 31))) });
             else patch({ filter_cutoff_distance: Math.max(-63, Math.min(63, Math.round(x * 127 - cutoff))) });
         }}
-        onkey={(id, key, shift) => {
+        onkey={(id, key, _shift, alt) => {
+            if (id === 'gain') {
+                if (key === 'Home' || key === 'End' || key === 'ArrowUp' || key === 'ArrowDown')
+                    patch({
+                        filter_gain:
+                            key === 'Home'
+                                ? -31
+                                : key === 'End'
+                                  ? 31
+                                  : Math.max(-31, Math.min(31, gain + (key === 'ArrowUp' ? 1 : -1))),
+                    });
+                return;
+            }
             const parameter =
-                id === 'cutoff-q'
-                    ? ['ArrowLeft', 'ArrowRight'].includes(key)
-                        ? 'filter_cutoff'
-                        : 'filter_q_width'
-                    : id === 'gain'
-                      ? 'filter_gain'
+                alt || ['ArrowUp', 'ArrowDown'].includes(key)
+                    ? 'filter_q_width'
+                    : id === 'cutoff-q'
+                      ? 'filter_cutoff'
                       : 'filter_cutoff_distance';
-            const min = parameter === 'filter_gain' ? -31 : parameter === 'filter_cutoff_distance' ? -63 : 0;
-            const max =
-                parameter === 'filter_gain' || parameter === 'filter_q_width'
-                    ? 31
-                    : parameter === 'filter_cutoff_distance'
-                      ? 63
-                      : 127;
-            const delta = (['ArrowRight', 'ArrowUp'].includes(key) ? 1 : -1) * (shift ? 8 : 1);
+            const min = parameter === 'filter_cutoff_distance' ? -63 : 0;
+            const max = parameter === 'filter_q_width' ? 31 : parameter === 'filter_cutoff_distance' ? 63 : 127;
+            const delta = ['ArrowRight', 'ArrowUp'].includes(key) ? 1 : -1;
             patch({
                 [parameter]:
                     key === 'Home'

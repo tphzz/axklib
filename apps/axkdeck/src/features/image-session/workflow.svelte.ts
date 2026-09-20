@@ -1,4 +1,5 @@
 import { collectVolumes, findPartition, findSourceItem } from './sourceTree';
+import { findRefreshedVolume, refreshVolumeSelection } from './sourceTree';
 import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type {
@@ -30,6 +31,7 @@ import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
 import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
 import { validationStatus } from './validationStatus';
+import { applyOpenedImageMetadata } from './openedImageMetadata';
 
 export type CompanionRetry =
     { kind: 'audition'; objectId: string } | { kind: 'sample-bank'; bankId: string } | ExportCompanionRetry;
@@ -278,10 +280,16 @@ export class ImageSessionWorkflow {
         if (this.location) await this.open(this.location, preferred);
     }
 
-    async refresh(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+    async refresh(
+        preferred?: { partitionIndex: number; volumeName?: string },
+        mode: 'reload' | 'editor' = 'reload',
+    ): Promise<void> {
         if (this.sessionId === null) throw new Error('Image session is no longer available');
+        const sourceId = this.selectedSource.id;
         const opened = await this.controller.refresh();
-        if (opened) await this.applyOpenedImage(opened, preferred);
+        if (mode === 'editor' && (!opened || sourceId !== this.selectedSource.id))
+            throw new Error('The workspace changed during refresh');
+        if (opened) await this.applyOpenedImage(opened, preferred, mode === 'editor');
     }
 
     async maintainLease(): Promise<void> {
@@ -546,43 +554,34 @@ export class ImageSessionWorkflow {
     private async applyOpenedImage(
         opened: OpenedImage,
         preferred?: { partitionIndex: number; volumeName?: string },
+        preserve = false,
     ): Promise<void> {
         const { catalog, mutation, clearExportSelection } = this.requireCollaborators();
-        clearExportSelection();
-        this.integrityDialogOpen = false;
-        this.integrityIssues = [];
-        this.integrityError = '';
-        this.integrityLoading = false;
-        this.companionSources = opened.companionSources;
-        this.floppySet = opened.floppySet;
+        const previous = this.selectedSource;
+        const preferredItem = preserve
+            ? findRefreshedVolume(opened.tree, previous)
+            : preferred
+              ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
+              : null;
+        if (preserve) {
+            if (!preferredItem) throw new Error('The edited volume is no longer available');
+            await catalog.refreshVolume(previous.id, preferredItem.id, preferredItem.partitionIndex ?? null);
+            if (this.sessionId !== opened.sessionId || this.selectedSource.id !== previous.id)
+                throw new Error('The workspace changed during refresh');
+            this.volumeSelection = refreshVolumeSelection(this.volumeSelection, opened.tree);
+        } else clearExportSelection();
+        applyOpenedImageMetadata(this, opened);
         mutation.setCapabilities(opened);
-        this.objectDeletionAvailable = opened.objectDeletionAvailable;
-        this.waveDataCleanupAvailable = opened.waveDataCleanupAvailable;
-        this.programGenerationAvailable = opened.programGenerationAvailable;
-        this.programAssignmentCleanupAvailable = opened.programAssignmentCleanupAvailable;
-        this.packageImportAvailable = opened.packageImportAvailable;
-        this.packageExportAvailable = opened.packageExportAvailable;
-        this.volumePackageExportAvailable = opened.volumePackageExportAvailable;
-        this.volumeFloppyExportAvailable = opened.volumeFloppyExportAvailable;
-        this.audioExportAvailable = opened.audioExportAvailable;
-        this.sequenceExportAvailable = opened.sequenceExportAvailable;
-        this.mediaConversionAvailable = opened.mediaConversionAvailable;
-        this.extentLayoutRepairAvailable = opened.extentLayoutRepairAvailable;
-        this.allocationInspectionAvailable = opened.allocationInspectionAvailable;
-        this.imageFormat = opened.format ?? null;
-        this.revision = opened.revision;
-        this.sourceItems = opened.tree;
-        const preferredItem = preferred
-            ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
-            : null;
         this.selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? this.selectedSource;
-        this.volumeSelection =
-            this.selectedSource.kind === 'volume'
-                ? { items: [this.selectedSource], anchorId: this.selectedSource.id }
-                : emptyVolumeSelection();
-        if (this.selectedSource.kind === 'volume')
-            await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
-        else catalog.clear();
+        if (!preserve) {
+            this.volumeSelection =
+                this.selectedSource.kind === 'volume'
+                    ? { items: [this.selectedSource], anchorId: this.selectedSource.id }
+                    : emptyVolumeSelection();
+            if (this.selectedSource.kind === 'volume')
+                await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
+            else catalog.clear();
+        }
         this.status = validationStatus(opened.validation);
         if (opened.validation.errorCount > 0 || (opened.format === 'ex5-disk' && opened.validation.warningCount > 0))
             await this.showAutomaticIntegrityIssues(opened);

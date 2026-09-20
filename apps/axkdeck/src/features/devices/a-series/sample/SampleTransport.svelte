@@ -4,7 +4,6 @@
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { EditorValues } from '../../../object-editor/draft.svelte';
     import { editorAudio } from '../../../object-editor/audioContext';
-    import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
     import Icon from '../../../../lib/components/Icon.svelte';
     import { loadEditorAudio } from '../../../object-editor/audioSource';
@@ -84,14 +83,6 @@
         });
         return release;
     });
-    function mode(next: number) {
-        const changes: EditorValues = { loop_mode: next };
-        if ([1, 2].includes(next) && Number(document.draft.values.loop_length_frames) === 0) {
-            changes.loop_start_frame = document.draft.values['playback.start_frame']!;
-            changes.loop_length_frames = document.draft.values['playback.length_frames']!;
-        }
-        document.draft.patch(changes);
-    }
     export async function play(monitor = false) {
         if (!audio || disabled || document.validation) return;
         const identity = document.detail!;
@@ -174,26 +165,6 @@
         }}><Icon name="undo" size={13} /></button
     >
     <span class="playhead-readout">{(view.cursor / rate).toFixed(3)} <small>s</small></span>
-    <div class="playback-modes">
-        <EditorChoice
-            label="Playback"
-            segmented={true}
-            value={Number(document.draft.values.loop_mode)}
-            disabled={disabled ||
-                ['loop_mode', 'loop_start_frame', 'loop_length_frames'].some((key) =>
-                    document.detail!.editing!.blockedParameters.includes(key),
-                )}
-            options={[
-                { value: 0, label: 'Forward' },
-                { value: 1, label: 'Loop' },
-                { value: 2, label: 'Until release' },
-                { value: 3, label: 'Reverse' },
-                { value: 4, label: 'One-shot fwd' },
-                { value: 5, label: 'One-shot rev' },
-            ]}
-            onchange={mode}
-        />
-    </div>
     <div class="preview-note">
         <input
             class="editor-control"
@@ -273,16 +244,6 @@
         color: var(--color-text-muted);
         font-size: 10px;
     }
-    .playback-modes {
-        flex: 0 0 auto;
-        min-width: 0;
-    }
-    .playback-modes :global(.editor-choice) {
-        flex: 0 0 auto;
-        white-space: nowrap;
-        font-size: 10px;
-        padding-inline: 6px;
-    }
     .preview-note {
         display: flex;
         align-items: center;
@@ -339,10 +300,6 @@
     :global([data-editor-under~='900']) .sample-transport {
         flex-wrap: wrap;
     }
-    :global([data-editor-under~='900']) .playback-modes {
-        order: 2;
-        flex-basis: 100%;
-    }
     :global([data-editor-under~='900']) .monitor-volume {
         width: 65px;
     }
@@ -353,12 +310,5 @@
     }
     :global([data-editor-under~='500']) .sample-transport {
         gap: 4px;
-    }
-    :global([data-editor-under~='500']) .playback-modes :global(.editor-choice) {
-        flex: 1;
-        white-space: normal;
-        line-height: 13px;
-        height: 30px;
-        padding: 2px 3px;
     }
 </style>

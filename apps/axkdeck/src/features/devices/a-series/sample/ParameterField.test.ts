@@ -5,7 +5,7 @@ import { sampleFields } from './fields';
 import { EditorDraft } from '../../../object-editor/draft.svelte';
 
 it.each([
-    "This Sample's short parameter layout does not store this setting.",
+    'The stored controller selection is not supported and is preserved unchanged.',
     'The stored value is outside the supported range. It is preserved unchanged.',
 ])('explains unavailable values on label and value focus: %s', async (reason) => {
     const field = sampleFields.find((item) => item.key === 'output1_destination')!;

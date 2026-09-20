@@ -1,3 +1,4 @@
+import { sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
 import { ObjectEditorWorkflow } from './workflow.svelte';
@@ -7,7 +8,7 @@ function detail(id = 'sample', revision = 1): ObjectDetail {
         image: { revision },
         object: { id, key: id, name: id },
         editing: {
-            profile: 'a4000-a5000/sample',
+            profile: 'a-series/sample',
             editable: true,
             reason: '',
             payloadSha256: 'a'.repeat(64),
@@ -17,6 +18,8 @@ function detail(id = 'sample', revision = 1): ObjectDetail {
             canEditPlayback: true,
             eqCoefficients: [-15904, 7738, 8192, 15904, -7738],
             blockedParameters: [],
+            blockedParameterReasons: {},
+            ...sampleFormatFixture(),
             unavailableParameters: {},
             partitionIndex: 0,
             volumeName: 'Volume',
@@ -48,7 +51,10 @@ describe('object editor lifecycle', () => {
         await workflow.save(a);
         expect(transport.startObjectParameterEdit.mock.calls[0]![1].operation.parameters).toEqual({ level: 80 });
         expect(a.draft.canUndo).toBe(false);
+        expect(a.draft.dirty).toBe(false);
         expect(b.draft.dirty).toBe(true);
+        expect(workflow.dirtyCount).toBe(1);
+        expect(workflow.locked).toBe(false);
     });
     it('rejects a stale payload even when object identity survived', async () => {
         const { workflow, transport } = setup();
@@ -81,6 +87,9 @@ describe('object editor lifecycle', () => {
         await workflow.recover(a);
         expect(transport.startObjectParameterEdit).toHaveBeenCalledTimes(1);
         expect(a.phase).toBe('editable');
+        expect(a.jobId).toBeNull();
+        expect(a.draft.dirty).toBe(false);
+        expect(workflow.locked).toBe(false);
     });
     it('checks the acknowledged job after transport loss without resubmitting', async () => {
         const { workflow, transport } = setup();
@@ -89,9 +98,15 @@ describe('object editor lifecycle', () => {
         transport.waitForJob.mockRejectedValueOnce(new Error('Offline'));
         await workflow.save(a);
         expect(a.phase).toBe('unconfirmed');
+        expect(workflow.locked).toBe(true);
+        expect(a.draft.dirty).toBe(true);
         await workflow.recover(a);
         expect(transport.startObjectParameterEdit).toHaveBeenCalledTimes(1);
+        expect(transport.waitForJob.mock.calls.map(([jobId]) => jobId)).toEqual([7, 7]);
         expect(a.phase).toBe('editable');
+        expect(a.jobId).toBeNull();
+        expect(a.draft.dirty).toBe(false);
+        expect(workflow.locked).toBe(false);
     });
     it('validates the combined playback and loop draft', async () => {
         const { workflow } = setup();

@@ -72,7 +72,7 @@ function focusableElements(node: HTMLElement): HTMLElement[] {
 }
 
 function initialFocusElement(node: HTMLElement): HTMLElement | null {
-    return node.querySelector<HTMLElement>('[data-dialog-initial-focus]');
+    return node.querySelector<HTMLElement>('[data-dialog-initial-focus]:not(:disabled)');
 }
 
 function focusInitialElement(element: HTMLElement): void {
@@ -118,6 +118,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     };
     node.addEventListener('pointerdown', markInteraction);
     node.addEventListener('input', markInteraction);
+    node.addEventListener('keydown', markInteraction);
     const observer = new MutationObserver(() => {
         if (userInteracted) return;
         const initial = initialFocusElement(node);
@@ -125,7 +126,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
         focusInitialElement(initial);
         observer.disconnect();
     });
-    observer.observe(node, { childList: true, subtree: true });
+    observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
     queueMicrotask(() => {
         if (!node.isConnected) return;
         const initial = initialFocusElement(node);
@@ -146,6 +147,7 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             removeKeydown();
             node.removeEventListener('pointerdown', markInteraction);
             node.removeEventListener('input', markInteraction);
+            node.removeEventListener('keydown', markInteraction);
             observer.disconnect();
             background.forEach(releaseInert);
             releaseScrollbarMode();

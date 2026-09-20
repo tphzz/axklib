@@ -1,3 +1,4 @@
+import { sampleFormatFixture } from '../../../../test/sampleFormatFixture';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
@@ -27,6 +28,8 @@ function setup() {
         detail: {
             editing: {
                 blockedParameters: [],
+                blockedParameterReasons: {},
+                ...sampleFormatFixture(),
                 eqCoefficients: [-16268, 8098, 8171, 16268, -8076],
             },
         },

@@ -14,6 +14,7 @@
 #include "axklib/export.hpp"
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
+#include "axklib/sample_storage.hpp"
 
 namespace axk {
 
@@ -141,6 +142,7 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
+    SampleStorageInfo storage;
     CurrentObjectCommonRecord common;
     std::string sample_name;
     bool right_slot_present{};

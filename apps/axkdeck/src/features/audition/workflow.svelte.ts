@@ -18,6 +18,7 @@ import type {
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { CachedAudition } from '../../lib/audio/auditionTypes';
+import type { PackageExportSelectionState } from '../../lib/objectSelection';
 
 export interface LaneQueries {
     primary: string;
@@ -38,6 +39,8 @@ interface AuditionWorkflowDependencies {
     setInspectorOpen: (open: boolean) => void;
     setStatus: (status: string) => void;
     requestCompanionDisks: (retry: CompanionRetry) => void;
+    selection: () => PackageExportSelectionState;
+    setSelection: (selection: PackageExportSelectionState) => void;
 }
 
 interface AuditionabilityIndex {
@@ -471,18 +474,40 @@ export class AuditionWorkflow {
 
     async refreshEditorWorkspace(refresh: () => Promise<void>): Promise<void> {
         const catalog = this.dependencies.catalog;
-        const editorIds = { ...catalog.editorObjectIds };
-        const inspector = catalog.inspectorObjectId;
-        const sample = catalog.selectedSampleId;
+        const session = this.dependencies.sessionId();
+        const view = this.dependencies.workspaceView();
         const volume = catalog.activeVolumeId;
         await refresh();
         if (volume && !catalog.activeVolumeId) throw new Error('Workspace content could not be refreshed');
-        if (catalog.activeVolumeId !== volume) return;
-        catalog.editorObjectIds = Object.fromEntries(
-            Object.entries(editorIds).map(([view, id]) => [view, catalog.objectsById.has(id) ? id : '']),
-        ) as typeof editorIds;
-        if (catalog.objectsById.has(inspector)) catalog.inspectorObjectId = inspector;
-        if (catalog.objectsById.has(sample)) catalog.selectedSampleId = sample;
+        if (
+            catalog.activeVolumeId !== volume ||
+            this.dependencies.sessionId() !== session ||
+            this.dependencies.workspaceView() !== view
+        )
+            return;
+        const selection = this.dependencies.selection();
+        if (selection.items.length) {
+            const samples = new Map(catalog.samples.map((item) => [item.objectId, item]));
+            const items = selection.items.flatMap((item) => {
+                const current = catalog.objectsById.get(item.objectId);
+                return current && current.objectType === item.kind
+                    ? [
+                          {
+                              ...item,
+                              name: samples.get(item.objectId)?.name ?? current.name,
+                              partitionIndex: current.partitionIndex,
+                              partitionName: current.partitionName,
+                              volumeName: current.volumeName,
+                          },
+                      ]
+                    : [];
+            });
+            const ids = new Set(items.map((item) => item.objectId));
+            this.dependencies.setSelection({
+                items,
+                anchors: Object.fromEntries(Object.entries(selection.anchors).filter(([, id]) => ids.has(id))),
+            });
+        }
     }
 
     playPrepared(

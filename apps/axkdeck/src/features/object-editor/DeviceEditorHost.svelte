@@ -1,12 +1,14 @@
 <script lang="ts">
     import './editor.css';
-    import { onDestroy } from 'svelte';
+    import { onDestroy, untrack } from 'svelte';
     import { measureWidth } from './measureWidth';
     import type { InspectorSelection } from '../../lib/types';
     import { objectEditors } from './context';
     import type { ObjectEditorDocument } from './workflow.svelte';
     import SampleEditor from '../devices/a-series/sample/SampleEditor.svelte';
     import Icon from '../../lib/components/Icon.svelte';
+    import SampleFormatBadge from './SampleFormatBadge.svelte';
+    import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
     import { userFacingMessage } from '../../lib/userFacingMessage';
     import SampleNavigation from '../devices/a-series/sample/SampleNavigation.svelte';
     let { sessionId, selection }: { sessionId: number | null; selection: InspectorSelection } = $props();
@@ -14,6 +16,11 @@
     const panelId = $props.id();
     let document = $state<ObjectEditorDocument | null>(null);
     let message = $state('');
+    const navigation = $derived(document && editors?.navigation(document.detail!.editing!.profile));
+    const sampleId = $derived(selection?.kind === 'sample' ? selection.item.objectId : null);
+    const conversionTitle = $derived(
+        sampleConversionTitle(document?.detail?.editing?.formatConversions[0]?.targetFormat),
+    );
     $effect(() => {
         if (editors) editors.visible = document !== null;
     });
@@ -21,14 +28,13 @@
         if (editors) editors.visible = false;
     });
     $effect(() => {
-        const id = selection?.kind === 'sample' ? selection.item.objectId : null;
+        const id = sampleId;
         const session = sessionId;
         let current = true;
         document = null;
         message = 'Loading Sample parameters';
         if (editors && session !== null && id)
-            void editors
-                .load(session, id)
+            void untrack(() => editors.load(session, id))
                 .then((value) => {
                     if (!current) return;
                     document = value;
@@ -44,16 +50,30 @@
 </script>
 
 <section class="device-editor" aria-label="Sample editor" use:measureWidth={{ scope: 'editor' }}>
-    {#if document && editors}
+    {#if document && editors && navigation}
         <header>
-            <span class="family">A4000/A5000</span>
+            <span class="family">A-series</span>
             <strong
                 class:dirty={document.draft.dirty}
                 title={`${document.detail?.object.name}${document.draft.dirty ? ' (unsaved changes)' : ''}`}
                 >{document.detail?.object.name}</strong
             >
-            <div class="navigation"><SampleNavigation {document} {panelId} /></div>
+            <SampleFormatBadge format={document.detail!.editing!.sampleFormat} />
+            <div class="navigation"><SampleNavigation {navigation} {panelId} /></div>
+            {#if editors.comparison.count > 1}<span
+                    class="family"
+                    role="status"
+                    title={`Editing ${document.detail?.object.name} only`}>{editors.comparison.status}</span
+                >{/if}
             <div class="actions">
+                <button
+                    class="icon-button"
+                    title={conversionTitle}
+                    aria-label={conversionTitle}
+                    disabled={editors.locked}
+                    onclick={() => void editors.openConversion(document!.sessionId, document!.detail!.object.id)}
+                    ><Icon name="refresh" size={14} /></button
+                >
                 <button
                     class="icon-button"
                     title="Undo"
@@ -92,7 +112,12 @@
             </div>
         </header>
         {#key document}
-            {#if selection?.kind === 'sample'}<SampleEditor {document} {panelId} preview={selection.preview} />{/if}
+            {#if selection?.kind === 'sample'}<SampleEditor
+                    {document}
+                    {navigation}
+                    {panelId}
+                    preview={selection.preview}
+                />{/if}
         {/key}
     {:else}<p role="status">{message}</p>{/if}
 </section>

@@ -193,7 +193,7 @@ Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool righ
                              .loop_length_frames = *loop_length};
 }
 
-Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const ObjectHeader &header) {
+Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const ObjectHeader &) {
     if (payload.size() < 0x108U) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "current SBNK member contract requires at least 264 bytes")};
@@ -271,11 +271,8 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     constexpr std::size_t control_bytes = control_count * control_size;
     constexpr std::size_t compatibility_control_offset = 0x0a8U;
     constexpr std::size_t tail_control_offset = 0x164U;
-    constexpr std::size_t object_prefix_size = 0x30U;
-    const auto declared_size = object_prefix_size + static_cast<std::size_t>(header.payload_bytes_0x1c);
-    const auto logical_size =
-        header.payload_bytes_0x1c == 0U ? payload.size() : std::min(payload.size(), declared_size);
-    result.control_record_tail_copy_present = logical_size >= tail_control_offset + control_bytes;
+    result.storage = inspect_sample_storage(payload);
+    result.control_record_tail_copy_present = result.storage.format == SampleStorageFormat::a4000_a5000_224;
     result.control_record_storage_offset =
         result.control_record_tail_copy_present ? tail_control_offset : compatibility_control_offset;
     if (result.control_record_tail_copy_present) {
@@ -321,7 +318,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
             {descriptor.offset, descriptor.width, Verification::corroborated, "current SBNK parameter field"},
         });
     }
-    const auto parameter_end = std::max<std::size_t>(0x0a8U, std::min<std::size_t>(logical_size, 0x188U));
+    const auto parameter_end = 0xa8U + (result.storage.structurally_valid ? *result.storage.parameter_bytes : 0U);
     result.raw_parameter_window.assign(payload.begin() + 0xa8,
                                        payload.begin() + static_cast<std::ptrdiff_t>(parameter_end));
     return result;

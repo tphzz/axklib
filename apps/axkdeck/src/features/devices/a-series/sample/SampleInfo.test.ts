@@ -1,7 +1,8 @@
+import { sampleFormatFixture } from '../../../../test/sampleFormatFixture';
 import { fireEvent, render } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import SampleSettings from './SampleSettings.svelte';
+import SampleInfo from './SampleInfo.svelte';
 import { EditorDraft } from '../../../object-editor/draft.svelte';
 import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
 
@@ -23,11 +24,20 @@ describe('Sample source metadata', () => {
             loop_length_frames: 44100,
         });
         const document = {
+            preferencesScope: {},
             draft,
-            detail: { editing: { maximumFrames: 152076, blockedParameters: [], unavailableParameters: {} } },
+            detail: {
+                editing: {
+                    maximumFrames: 152076,
+                    blockedParameters: [],
+                    blockedParameterReasons: {},
+                    ...sampleFormatFixture(),
+                    unavailableParameters: {},
+                },
+            },
             inputErrors: {},
         } as unknown as ObjectEditorDocument;
-        const view = render(SampleSettings, { document, rate: 44100, disabled: false, onmonitor: vi.fn() });
+        const view = render(SampleInfo, { document, rate: 44100, disabled: false, onmonitor: vi.fn() });
         const duration = view.getByRole('button', { name: 'Source: 3.448 s' });
         expect(duration.closest('.editor-toolbar')?.textContent).toContain('44,100 Hz');
         expect(view.container.querySelector('.settings-summary')).toBeNull();

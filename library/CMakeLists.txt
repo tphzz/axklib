@@ -173,6 +173,9 @@ add_library(
   src/system_file.cpp
   src/system_file_patch.cpp
   src/sample_parameter_decode.cpp
+  src/sample_storage.cpp
+  src/sample_parameter_rules.cpp
+  src/sample_format_conversion.cpp
   src/sample_parameter_codec.cpp
   src/system_registered_program.cpp
   src/system_registered_sample.cpp
@@ -277,6 +280,10 @@ add_library(
   src/alteration_placement.cpp
   src/alteration_sample.cpp
   src/alteration_sample_update.cpp
+  src/alteration_sample_format.cpp
+  src/alteration_manifest_sample_format.cpp
+  src/alteration_sample_duplicate.cpp
+  src/alteration_manifest_duplicate.cpp
   src/alteration_program_parameters.cpp
   src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
@@ -637,9 +644,11 @@ if(BUILD_TESTING)
     tests/fresh_object_graph_test.cpp
     tests/sample_bank_parameter_alteration_test.cpp
     tests/sample_parameter_edit_validation_test.cpp
+    tests/sample_layout_upgrade_test.cpp
     tests/wave_data_parameter_alteration_test.cpp
     tests/program_assignment_replacement_test.cpp
     tests/sample_playback_window_test.cpp
+    tests/sample_duplicate_test.cpp
     tests/sample_wave_data_retarget_test.cpp
     tests/sample_bank_member_growth_test.cpp
     tests/smpl_writer_test.cpp

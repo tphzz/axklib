@@ -6,6 +6,7 @@ const detail: ObjectDetail = {
     schemaVersion: 1,
     image: { imageId: 'image-1', revision: 3, format: 'sfs' },
     object: {
+        sampleFormat: null,
         id: 'SMPL:1',
         key: 'SMPL:1',
         type: 'SMPL',

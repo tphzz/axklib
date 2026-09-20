@@ -1,3 +1,4 @@
+import { sampleFormatFixture } from '../../../../test/sampleFormatFixture';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync } from 'svelte';
@@ -28,10 +29,15 @@ function setup(id: string, blockedParameters: string[] = []) {
         ),
     );
     const document = {
+        preferencesScope: {},
         draft,
         detail: {
             editing: {
                 blockedParameters,
+                blockedParameterReasons: Object.fromEntries(
+                    blockedParameters.map((key) => [key, 'The stereo channels have different stored values.']),
+                ),
+                ...sampleFormatFixture(),
                 unavailableParameters: {},
                 eqCoefficients: [-15904, 7738, 8192, 15904, -7738],
             },

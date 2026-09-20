@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogWorkflow } from '../catalog/workflow.svelte';
-import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
-import type { SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
+import type { ImageTransport, SamplerObject, SamplerRelationship } from '../../lib/transport';
+import type { PackageExportSelectionState } from '../../lib/objectSelection';
+import type { PackageExportObject, SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
 import { AuditionWorkflow } from './workflow.svelte';
 
 function relationship(
@@ -46,6 +47,8 @@ describe('AuditionWorkflow auditionability indexes', () => {
             catalog,
             sessionId: () => 1,
             workspaceView: () => 'sample-banks',
+            selection: () => ({ items: [], anchors: {} }),
+            setSelection: () => undefined,
             setWorkspaceView: () => undefined,
             setInspectorOpen: () => undefined,
             setStatus: () => undefined,
@@ -78,6 +81,8 @@ describe('AuditionWorkflow auditionability indexes', () => {
             catalog,
             sessionId: () => 1,
             workspaceView: () => 'samples',
+            selection: () => ({ items: [], anchors: {} }),
+            setSelection: () => undefined,
             setWorkspaceView: () => undefined,
             setInspectorOpen: () => undefined,
             setStatus: () => undefined,
@@ -121,6 +126,8 @@ describe('AuditionWorkflow auditionability indexes', () => {
             catalog,
             sessionId: () => null,
             workspaceView: () => workspaceView,
+            selection: () => ({ items: [], anchors: {} }),
+            setSelection: () => undefined,
             setWorkspaceView,
             setInspectorOpen,
             setStatus: () => undefined,
@@ -157,6 +164,8 @@ describe('AuditionWorkflow auditionability indexes', () => {
             catalog,
             sessionId: () => null,
             workspaceView: () => 'programs',
+            selection: () => ({ items: [], anchors: {} }),
+            setSelection: () => undefined,
             setWorkspaceView: () => undefined,
             setInspectorOpen: () => undefined,
             setStatus: () => undefined,
@@ -166,6 +175,186 @@ describe('AuditionWorkflow auditionability indexes', () => {
 
         expect(await workflow.navigateToObject('missing')).toBeNull();
         expect(stop).not.toHaveBeenCalled();
+    });
+});
+
+function refreshSample(id: string, name = id): SampleStructureItem {
+    return {
+        id,
+        objectId: id,
+        objectType: 'SBNK',
+        name,
+        membershipLabel: 'Standalone',
+        object: {
+            key: id,
+            name,
+            objectType: 'SBNK',
+            partitionIndex: 0,
+            partitionName: 'Partition',
+            volumeName: 'Volume',
+        } as SamplerObject,
+    };
+}
+
+function sampleSelection(sample: SampleStructureItem): PackageExportObject {
+    return {
+        kind: 'SBNK',
+        objectId: sample.objectId,
+        name: sample.name,
+        typeLabel: 'Sample',
+        partitionIndex: sample.object.partitionIndex,
+        partitionName: sample.object.partitionName,
+        volumeName: sample.object.volumeName,
+    };
+}
+
+function refreshSetup() {
+    const samples = [refreshSample('sample-1', 'Piano'), refreshSample('sample-2', 'Brass')];
+    const catalog = {
+        activeVolumeId: 'volume-1',
+        samples,
+        objectsById: new Map(samples.map((sample) => [sample.objectId, sample.object])),
+        editorObjectIds: {
+            programs: '',
+            sequences: '',
+            'sample-banks': '',
+            samples: 'sample-1',
+            'wave-data': '',
+        },
+        inspectorObjectId: 'sample-1',
+        selectedSampleId: 'sample-1',
+    };
+    const state = {
+        sessionId: 1,
+        view: 'samples' as WorkspaceView,
+        selection: {
+            items: samples.map(sampleSelection),
+            anchors: { retained: 'sample-1', removed: 'sample-2' },
+        } as PackageExportSelectionState,
+    };
+    const setSelection = vi.fn((selection: PackageExportSelectionState) => (state.selection = selection));
+    const workflow = new AuditionWorkflow({
+        transport: {} as ImageTransport,
+        catalog: catalog as unknown as CatalogWorkflow,
+        sessionId: () => state.sessionId,
+        workspaceView: () => state.view,
+        selection: () => state.selection,
+        setSelection,
+        setWorkspaceView: (view) => (state.view = view),
+        setInspectorOpen: () => undefined,
+        setStatus: () => undefined,
+        requestCompanionDisks: () => undefined,
+    });
+    function replaceCatalog(next: SampleStructureItem[]) {
+        catalog.samples = next;
+        catalog.objectsById = new Map(next.map((sample) => [sample.objectId, sample.object]));
+    }
+    return { workflow, catalog, state, setSelection, replaceCatalog };
+}
+
+describe('AuditionWorkflow editor refresh selection', () => {
+    it('retains the selected Samples and rebinds their current names and placement metadata after Save refresh', async () => {
+        const { workflow, catalog, state, replaceCatalog } = refreshSetup();
+        const renamed = refreshSample('sample-1', 'Piano revised');
+        renamed.object.partitionName = 'Current partition';
+        const unchanged = refreshSample('sample-2', 'Brass');
+
+        await workflow.refreshEditorWorkspace(async () => replaceCatalog([renamed, unchanged]));
+
+        expect(state.selection.items).toEqual([sampleSelection(renamed), sampleSelection(unchanged)]);
+        expect(state.selection.anchors).toEqual({ retained: 'sample-1', removed: 'sample-2' });
+        expect(catalog.selectedSampleId).toBe('sample-1');
+        expect(catalog.editorObjectIds.samples).toBe('sample-1');
+        expect(catalog.inspectorObjectId).toBe('sample-1');
+    });
+
+    it('drops deleted Sample identities and anchors without selecting a replacement with the same name', async () => {
+        const { workflow, state, replaceCatalog } = refreshSetup();
+        const surviving = refreshSample('sample-1', 'Piano revised');
+        const replacement = refreshSample('sample-3', 'Brass');
+
+        await workflow.refreshEditorWorkspace(async () => replaceCatalog([surviving, replacement]));
+
+        expect(state.selection.items).toEqual([sampleSelection(surviving)]);
+        expect(state.selection.anchors).toEqual({ retained: 'sample-1' });
+    });
+
+    it.each(['session', 'volume', 'view'] as const)(
+        'does not restore selection after the %s changes during refresh',
+        async (scope) => {
+            const { workflow, catalog, state, setSelection, replaceCatalog } = refreshSetup();
+
+            await workflow.refreshEditorWorkspace(async () => {
+                replaceCatalog([refreshSample('sample-1'), refreshSample('sample-2')]);
+                state.selection = { items: [], anchors: {} };
+                if (scope === 'session') state.sessionId = 2;
+                if (scope === 'volume') catalog.activeVolumeId = 'volume-2';
+                if (scope === 'view') state.view = 'programs';
+            });
+
+            expect(state.selection).toEqual({ items: [], anchors: {} });
+            expect(setSelection).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['non-Sample', 'mixed'] as const)('reconciles a %s selection by current identity', async (kind) => {
+        const { workflow, state, catalog, replaceCatalog } = refreshSetup();
+        const wave: PackageExportObject = {
+            kind: 'SMPL',
+            objectId: 'wave-1',
+            name: 'Wave',
+            typeLabel: 'Wave Data',
+            partitionIndex: 0,
+            partitionName: 'Partition',
+            volumeName: 'Volume',
+        };
+        state.selection.items = kind === 'mixed' ? [state.selection.items[0]!, wave] : [wave];
+
+        await workflow.refreshEditorWorkspace(async () => {
+            replaceCatalog([refreshSample('sample-1')]);
+            catalog.objectsById.set('wave-1', {
+                ...refreshSample('wave-1', 'Wave').object,
+                objectType: 'SMPL',
+            });
+        });
+
+        expect(state.selection.items.map((item) => item.objectId)).toEqual(
+            kind === 'mixed' ? ['sample-1', 'wave-1'] : ['wave-1'],
+        );
+    });
+
+    it('retains surviving Sample selection in the Sample Banks view', async () => {
+        const { workflow, state, replaceCatalog } = refreshSetup();
+        state.view = 'sample-banks';
+
+        await workflow.refreshEditorWorkspace(async () => replaceCatalog([refreshSample('sample-1')]));
+
+        expect(state.selection.items.map((item) => item.objectId)).toEqual(['sample-1']);
+    });
+
+    it('does not overwrite a newer selection made during refresh', async () => {
+        const { workflow, state, replaceCatalog } = refreshSetup();
+        await workflow.refreshEditorWorkspace(async () => {
+            const sample = refreshSample('sample-2');
+            replaceCatalog([refreshSample('sample-1'), sample]);
+            state.selection = { items: [sampleSelection(sample)], anchors: { current: 'sample-2' } };
+        });
+        expect(state.selection.items.map((item) => item.objectId)).toEqual(['sample-2']);
+        expect(state.selection.anchors).toEqual({ current: 'sample-2' });
+    });
+
+    it('propagates refresh failures without restoring the previous selection', async () => {
+        const { workflow, state, setSelection } = refreshSetup();
+
+        await expect(
+            workflow.refreshEditorWorkspace(async () => {
+                state.selection = { items: [], anchors: {} };
+                throw new Error('Refresh unavailable');
+            }),
+        ).rejects.toThrow('Refresh unavailable');
+
+        expect(state.selection).toEqual({ items: [], anchors: {} });
+        expect(setSelection).not.toHaveBeenCalled();
     });
 });
 

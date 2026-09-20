@@ -211,6 +211,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
                                                       ErrorCategory error_category) {
     if (auto valid = fields(value, context,
                             {"fixed_pitch",
+                             "velocity_crossfade",
                              "key_crossfade",
                              "mono_mode",
                              "sample_eq_type",
@@ -337,6 +338,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
     if (auto parsed = boolean_field(value, #member, result.member, context, error_code, error_category); !parsed)      \
         return std::unexpected { parsed.error() }
     AXK_BOOLEAN(fixed_pitch);
+    AXK_BOOLEAN(velocity_crossfade);
     AXK_BOOLEAN(key_crossfade);
     AXK_BOOLEAN(mono_mode);
 #undef AXK_BOOLEAN
@@ -376,7 +378,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
             !parsed)
             return std::unexpected{parsed.error()};
     }
-    if (auto valid = validate_sample_parameter_fields(result); !valid) {
+    if (auto valid = validate_sample_parameter_patch(result); !valid) {
         return std::unexpected{
             invalid(error_code, error_category, std::string{context} + " contains an unsupported parameter value")};
     }

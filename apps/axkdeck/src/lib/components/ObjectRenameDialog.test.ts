@@ -69,7 +69,8 @@ describe('ObjectRenameDialog', () => {
 
         expect((screen.getByLabelText('Sample Bank name') as HTMLInputElement).maxLength).toBe(16);
         expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
-        expect((screen.getByRole('button', { name: 'Renaming' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Rename' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByRole('status').textContent).toContain('Renaming');
         expect(screen.getByRole('alert').textContent).toContain('Rename failed');
     });
 
@@ -113,6 +114,8 @@ describe('ObjectRenameDialog', () => {
         });
 
         const cancelStyle = getComputedStyle(screen.getByRole('button', { name: 'Cancel' }));
+        expect(screen.getByLabelText('Sample name').classList.contains('dialog-field-control')).toBe(true);
+        expect(screen.getByRole('button', { name: 'Rename' }).closest('.dialog-footer-actions')).toBeTruthy();
         const renameStyle = getComputedStyle(screen.getByRole('button', { name: 'Rename' }));
         expect(cancelStyle.height).toBe('30px');
         expect(renameStyle.height).toBe('30px');

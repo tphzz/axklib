@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import { hoverHelp } from '../../lib/components/hoverHelp.svelte';
     let {
         low,
         high,
@@ -74,7 +75,7 @@
                 aria-valuemax={index ? max : high}
                 {disabled}
                 style:top={`${position(value)}%`}
-                title={`${index ? 'High' : 'Low'}: ${value}`}
+                use:hoverHelp={`${index ? 'High' : 'Low'} ${label.toLowerCase()}: ${value}\nDrag vertically or use Up/Down to adjust this boundary. Shift+arrows moves by 8. Home/End selects its limits.`}
                 onpointerdown={(event) => drag(event, index)}
                 onkeydown={(event) => {
                     const step = event.shiftKey ? 8 : 1;

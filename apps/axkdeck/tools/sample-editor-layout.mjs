@@ -39,7 +39,7 @@ try {
                 const context = new AudioContext({sampleRate:44100});
                 try {
                     const entry = await prepareSampleDraft(transport,1,'sample',{
-                        editable:true,blockedParameters:[],maximumFrames:64,canEditPlayback:true,
+                        editable:true,blockedParameters:[],blockedParameterReasons:{},upgradeParameters:[],maximumFrames:64,canEditPlayback:true,
                         parameters:{loop_mode:4,loop_start_frame:0,loop_length_frames:0,root_key:60,level:127,pan:0},
                         playbackWindow:{start_frame:10,length_frames:32}
                     },{'playback.start_frame':10,'playback.length_frames':32,loop_mode:4,loop_start_frame:0,loop_length_frames:0,

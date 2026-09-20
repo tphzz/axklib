@@ -229,7 +229,7 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
 }
 
-TEST(CurrentSbnk, DecodesCompatibilityControllersWhenTheDeclaredObjectEndsBeforeTheTail) {
+TEST(CurrentSbnk, DecodesNativeControllersFromThe188ByteStoredFormat) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
                                                                "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
@@ -239,7 +239,9 @@ TEST(CurrentSbnk, DecodesCompatibilityControllersWhenTheDeclaredObjectEndsBefore
     ASSERT_TRUE(payload);
     payload->resize(0x164U);
     axk::ByteWriter writer{*payload};
-    ASSERT_TRUE(writer.write_be32(0x1cU, 0x134U));
+    ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+    ASSERT_TRUE(writer.write_be32(0x18U, 0x134U));
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0U));
 
     const auto decoded = axk::decode_object(*payload);
 

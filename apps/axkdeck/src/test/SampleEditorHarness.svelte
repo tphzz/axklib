@@ -9,14 +9,26 @@
     import type { ImageSessionWorkflow } from '../features/image-session/workflow.svelte';
     import type { AuditionWorkflow } from '../features/audition/workflow.svelte';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
+    import { sampleFormatFixture } from './sampleFormatFixture';
     import type { ObjectDetail, ImageTransport } from '../lib/transport';
-    import type { ObjectParameterEdit } from '../lib/objectEditing';
+    import type {
+        ObjectParameterEdit,
+        SampleDuplicationRequest,
+        SampleFormatConversionRequest,
+        SampleStorageFormat,
+    } from '../lib/objectEditing';
     import type { InspectorSelection } from '../lib/types';
     let selected = $state('Sample A');
+    let lowerOpen = $state(false);
     let writes = $state(0);
+    let names = $state(['Sample A', 'Sample B', 'Sample C with a very long name that must truncate in narrow panes']);
+    const copies = new Map<string, Record<string, unknown>>();
     let closed = $state(false);
     const workspace = new URLSearchParams(window.location.search).has('workspace');
     const stereo = new URLSearchParams(window.location.search).has('short-stereo');
+    let rejectConversion = new URLSearchParams(window.location.search).has('conversion-lock');
+    let conversionLockPending = false;
+    let storedFormats = $state<Record<string, SampleStorageFormat>>({});
     let parameters: Record<string, unknown> = {};
     const unavailableParameters: Record<string, { reason: string; message: string }> = {};
     for (const field of sampleFields) {
@@ -45,39 +57,42 @@
         velocity_low: 0,
         velocity_high: 127,
     });
-    // Mirror the current 0x164-byte layout, which has no extended parameter tail.
-    if (stereo) {
-        for (const key of [
-            'output1_destination',
-            'output1_level',
-            'output2_destination',
-            'output2_level',
-            'portamento_type',
-            'portamento_rate',
-            'portamento_time',
-            'velocity_xfade_low',
-            'velocity_xfade_high',
-        ]) {
-            delete parameters[key];
-            unavailableParameters[key] = {
-                reason: 'NOT_IN_LAYOUT',
-                message: "This Sample's short parameter layout does not store this setting.",
-            };
+    if (stereo) Object.assign(parameters, { portamento_rate: 90, portamento_time: 90 });
+    const wavBytes = 44 + fixtureFrames * 2;
+    // The server applies nested parameter patches without replacing untouched fields.
+    function patchParameters(target: Record<string, unknown>, patch: Record<string, unknown>) {
+        for (const [key, value] of Object.entries(patch)) {
+            if (value && typeof value === 'object') {
+                const group = (target[key] ??= {}) as Record<string, unknown>;
+                patchParameters(group, value as Record<string, unknown>);
+            } else target[key] = value;
         }
     }
-    const wavBytes = 44 + fixtureFrames * 2;
     function detail(name: string): ObjectDetail {
+        const format = sampleFormatFixture(storedFormats[name] ?? (stereo ? 'A3000_188' : 'A4000_A5000_224'));
+        const currentParameters = structuredClone(
+            copies.get(name) ?? { ...parameters, ...(name === 'Sample B' ? { level: 75, root_key: 64 } : {}) },
+        );
+        for (const [key, capability] of Object.entries(format.parameterCapabilities)) {
+            if (capability.available) continue;
+            const keys = key.split('.');
+            let group = currentParameters;
+            for (const part of keys.slice(0, -1)) group = group[part] as Record<string, unknown>;
+            delete group[keys.at(-1)!];
+        }
         return {
             image: { revision: writes + 1 },
             object: { id: name, key: name, name },
             editing: {
-                profile: 'a4000-a5000/sample',
+                profile: 'a-series/sample',
                 editable: true,
                 reason: '',
                 payloadSha256: 'a'.repeat(64),
-                parameters: structuredClone(parameters),
+                parameters: currentParameters,
                 eqCoefficients: [-15904, 7738, 8192, 15904, -7738],
-                blockedParameters: stereo ? ['expand_detune', 'expand_dephase'] : [],
+                blockedParameters: [],
+                blockedParameterReasons: {},
+                ...format,
                 unavailableParameters,
                 partitionIndex: 0,
                 volumeName: 'Test',
@@ -92,10 +107,41 @@
         objectDetail: async (_: number, id: string) => detail(id),
         startObjectParameterEdit: async (_: number, edit: ObjectParameterEdit) => {
             writes++;
-            Object.assign(parameters, edit.operation.parameters);
+            patchParameters(parameters, edit.operation.parameters);
             return { jobId: 1, kind: 'edit', status: 'queued' };
         },
-        waitForJob: async () => ({ jobId: 1, kind: 'edit', status: 'completed' }),
+        startSampleDuplication: async (_: number, edit: SampleDuplicationRequest) => {
+            writes++;
+            const parameters = detail(edit.operation.sample_name).editing!.parameters;
+            patchParameters(parameters, edit.operation.parameters);
+            copies.set(edit.operation.new_name, parameters);
+            names = [...names, edit.operation.new_name];
+            return { jobId: 1, kind: 'edit', status: 'queued' };
+        },
+        startSampleFormatConversion: async (_: number, edit: SampleFormatConversionRequest) => {
+            if (rejectConversion) {
+                rejectConversion = false;
+                conversionLockPending = true;
+                return { jobId: 1, kind: 'edit', status: 'queued' };
+            }
+            storedFormats[edit.operation.sample_name] =
+                edit.operation.target_format === 'a3000_188' ? 'A3000_188' : 'A4000_A5000_224';
+            writes++;
+            return { jobId: 1, kind: 'edit', status: 'queued' };
+        },
+        waitForJob: async () => {
+            if (conversionLockPending) {
+                conversionLockPending = false;
+                return {
+                    jobId: 1,
+                    kind: 'edit',
+                    status: 'failed',
+                    errorCode: 'entry_in_use',
+                    error: 'close open images and wait for active file operations to finish',
+                };
+            }
+            return { jobId: 1, kind: 'edit', status: 'completed' };
+        },
         prepareAuditionBundle: async () => ({
             auditionId: 'fixture',
             contentSizeBytes: wavBytes * (stereo ? 2 : 1),
@@ -122,7 +168,9 @@
     } as unknown as ImageTransport;
     const imageSession = {
         sessionId: 1,
-        revision: 1,
+        get revision() {
+            return writes + 1;
+        },
         confirmEditorLeave: async () => true,
         refresh: async () => undefined,
         currentSourcePreference: () => undefined,
@@ -175,12 +223,23 @@
     <output aria-label="Closed">{String(closed)}</output>
 </nav>
 {#snippet empty()}{/snippet}
-{#snippet content()}<SampleEditorCollection {selected} {stereo} onselect={(id) => (selected = id)} />{/snippet}
+{#snippet content()}<SampleEditorCollection
+        {selected}
+        {stereo}
+        {names}
+        {storedFormats}
+        revision={writes + 1}
+        onselect={(id) => {
+            selected = id;
+            lowerOpen = true;
+        }}
+    />{/snippet}
 {#snippet editor()}<DeviceEditorHost sessionId={1} {selection} />{/snippet}
 <EditorBoundary {transport} {imageSession} {audition}
     >{#if workspace}<div class="workspace-fixture">
             <WorkspaceShell
                 mode="device"
+                bind:lowerOpen
                 imageName="Sample editor fixture"
                 imageActions={empty}
                 onmodechange={() => {}}

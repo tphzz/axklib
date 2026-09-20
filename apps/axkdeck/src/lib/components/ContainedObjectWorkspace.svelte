@@ -1,5 +1,6 @@
 <script lang="ts">
     import { matchesSearch } from '../auditionVisibility';
+    import { sampleConversionTarget, sampleConversionTitle } from '../sampleFormatLabels';
     import {
         collectionPageStep,
         focusCollectionIndex,
@@ -54,6 +55,8 @@
         stereoSampleIds = new Set<string>(),
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
+        onduplicatesample,
+        onconvertsample,
         sampleBankAssignmentAvailable = false,
         onassignsamplebank = () => undefined,
         objectDeletionAvailable = false,
@@ -167,6 +170,8 @@
     ): void {
         if (
             !objectRenameAvailable &&
+            !onduplicatesample &&
+            !onconvertsample &&
             !sampleBankAssignmentAvailable &&
             !objectDeletionAvailable &&
             !packageExportAvailable &&
@@ -576,6 +581,25 @@
         onclose={() => (objectMenu = null)}
         onrename={objectRenameAvailable && objectMenu.objects.length === 1
             ? () => onrenameobject(objectMenu!.renameTarget)
+            : undefined}
+        onduplicate={view === 'samples' &&
+        onduplicatesample &&
+        objectMenu.objects.length === 1 &&
+        objectMenu.renameTarget.kind === 'sample'
+            ? () => {
+                  const sample = samples.find((item) => item.objectId === objectMenu!.objects[0]!.objectId);
+                  if (sample) onduplicatesample!(sample);
+              }
+            : undefined}
+        convertLabel={`${sampleConversionTitle(sampleConversionTarget(samples.find((item) => item.objectId === objectMenu!.objects[0]?.objectId)?.object.sampleFormat?.format))}...`}
+        onconvert={view === 'samples' &&
+        onconvertsample &&
+        objectMenu.objects.length === 1 &&
+        objectMenu.renameTarget.kind === 'sample'
+            ? () => {
+                  const sample = samples.find((item) => item.objectId === objectMenu!.objects[0]!.objectId);
+                  if (sample) onconvertsample!(sample);
+              }
             : undefined}
         onassignsamplebank={objectMenu.sampleBankAssignmentMembers
             ? () => onassignsamplebank(objectMenu!.sampleBankAssignmentMembers!)

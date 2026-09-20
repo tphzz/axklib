@@ -2,6 +2,7 @@ import type { ObjectDetail } from '../../../../lib/transport';
 import type { ObjectParameterEdit, SampleEditingSnapshot } from '../../../../lib/objectEditing';
 import type { EditorValues } from '../../../object-editor/draft.svelte';
 import { sampleFields } from './fields';
+import { formatField, parameterAllowed } from './formatCapabilities';
 
 export function sampleValues(snapshot: SampleEditingSnapshot): EditorValues {
     const result: EditorValues = {};
@@ -13,6 +14,9 @@ export function sampleValues(snapshot: SampleEditingSnapshot): EditorValues {
         }
     };
     visit(snapshot.parameters);
+    for (const [key, capability] of Object.entries(snapshot.parameterCapabilities))
+        if (capability.available && capability.storedValue !== null && !(key in result))
+            result[key] = capability.storedValue;
     visit(snapshot.playbackWindow, 'playback');
     return result;
 }
@@ -55,10 +59,13 @@ export function sampleEdit(detail: ObjectDetail, changes: EditorValues, values: 
 export function validateSample(values: EditorValues, changes: EditorValues, snapshot: SampleEditingSnapshot): string {
     if (!snapshot.editable) return snapshot.reason;
     for (const key of Object.keys(changes)) {
-        const field = sampleFields.find((candidate) => candidate.key === key);
+        const definition = sampleFields.find((candidate) => candidate.key === key);
+        const field = definition ? formatField(definition, snapshot) : undefined;
         if (!field) return 'This parameter is not editable';
         if (!(key in sampleValues(snapshot))) return `${field.label} is unavailable in this Sample`;
         const value = changes[key]!;
+        if (!key.startsWith('playback.') && !parameterAllowed(snapshot, key, value))
+            return `${field.label}: this value is not supported by the stored Sample format`;
         if (
             field.boolean
                 ? typeof value !== 'boolean'
@@ -69,7 +76,8 @@ export function validateSample(values: EditorValues, changes: EditorValues, snap
                         (value < field.min || value > field.max))
         )
             return `${field.label}: choose a supported value`;
-        if (snapshot.blockedParameters.includes(key)) return `${key} is preserved for this Sample's channel layout`;
+        if (snapshot.blockedParameters.includes(key))
+            return snapshot.blockedParameterReasons[key] || `${field.label} is read-only for this Sample`;
         if (key.startsWith('playback.') && !snapshot.canEditPlayback)
             return 'Playback bounds are preserved for this Sample';
         if (typeof changes[key] === 'number' && !Number.isInteger(changes[key]))
@@ -110,8 +118,8 @@ export function validateSample(values: EditorValues, changes: EditorValues, snap
 }
 
 export const aSeriesSampleAdapter = {
-    profile: 'a4000-a5000/sample',
-    label: 'A4000/A5000',
+    profile: 'a-series/sample',
+    label: 'A-series',
     values: sampleValues,
     edit: sampleEdit,
     validate: validateSample,

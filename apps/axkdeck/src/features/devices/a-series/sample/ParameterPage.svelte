@@ -5,7 +5,7 @@
     import ParameterField from './ParameterField.svelte';
     import VelocityRange from './VelocityRange.svelte';
     import GraphicalSamplePage from './GraphicalSamplePage.svelte';
-    import { parameterBlockReason } from './parameterAvailability';
+    import { parameterBlockReason, parameterInactiveReason } from './parameterAvailability';
     import ControlPage from './ControlPage.svelte';
     import { measureWidth } from '../../../object-editor/measureWidth';
     let { document, page, disabled }: { document: ObjectEditorDocument; page: SamplePage; disabled: boolean } =
@@ -14,7 +14,9 @@
         page.id.endsWith('-scaling') || ['aeg', 'feg', 'peg', 'lfo', 'filter', 'sample-eq'].includes(page.id),
     );
     const blocked = (field: SampleField) =>
-        disabled || (document.detail?.editing?.blockedParameters.includes(field.key) ?? true);
+        disabled ||
+        (document.detail?.editing?.blockedParameters.includes(field.key) ?? true) ||
+        !!parameterInactiveReason(field.key, document.draft.values);
     let width = $state(0);
     const columns = $derived(width >= 984 ? 3 : width >= 652 ? 2 : 1);
     const groups = $derived(pageGroups(page));
@@ -57,10 +59,8 @@
                             draft={document.draft}
                             unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
                             disabled={blocked(field)}
-                            blockedReason={parameterBlockReason(
-                                field.key,
-                                document.detail?.editing?.blockedParameters ?? [],
-                            )}
+                            blockedReason={parameterInactiveReason(field.key, document.draft.values) ||
+                                parameterBlockReason(field.key, document.detail!.editing!)}
                             oninvalid={(message) =>
                                 (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
                         />
@@ -93,11 +93,5 @@
     }
     [data-columns='2'][data-page='mix-key'] section:nth-child(3) {
         grid-column: 1;
-    }
-    [data-columns='2'][data-page='pitch'] section:first-child {
-        grid-row: 1 / 3;
-    }
-    [data-columns='2'][data-page='pitch'] section:nth-child(3) {
-        grid-column: 2;
     }
 </style>

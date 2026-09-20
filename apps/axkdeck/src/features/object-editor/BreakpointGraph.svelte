@@ -5,6 +5,7 @@
     import type { GraphPoint } from './graphTypes';
     import GraphReadout from './GraphReadout.svelte';
     import { graphDrag } from './graphDrag';
+    import { hoverHelp } from '../../lib/components/hoverHelp.svelte';
     let {
         points,
         minY = 0,
@@ -179,6 +180,7 @@
                     disabled={disabled || p.disabled}
                     class:selected={selected === index}
                     aria-label={`${p.label}: ${formatX(p.x)}, ${p.y}`}
+                    use:hoverHelp={`${p.label}: ${formatX(p.x)}, ${p.y}\n${p.movableX ? 'Drag horizontally for the breakpoint and vertically for its value. Left/Right moves the breakpoint; Up/Down adjusts its value.' : 'Drag vertically or use Up/Down to adjust the value.'} Shift-drag is finer; Shift+arrows moves by 8. Home/End selects the value limits.`}
                     style:left={`${px(p.x)}px`}
                     style:top={`${py(p.y)}px`}
                     onpointerenter={() => (readout = index)}

@@ -3,6 +3,7 @@
     import { measureWidth } from './measureWidth';
     import { mountEditorPopup } from './editorPopup';
     import Icon from '../../lib/components/Icon.svelte';
+    import EditorOptionLabel from './EditorOptionLabel.svelte';
     let {
         label,
         value,
@@ -13,7 +14,7 @@
     }: {
         label: string;
         value: number | undefined;
-        options: { value: number; label: string }[];
+        options: { value: number; label: string; disabled?: boolean; reason?: string; extended?: boolean }[];
         disabled?: boolean;
         segmented?: boolean;
         onchange: (value: number) => void;
@@ -59,6 +60,7 @@
         popup?.querySelectorAll('[role=option]')[active]?.scrollIntoView({ block: 'nearest' });
     }
     function select(index: number) {
+        if (disabled || !options[index] || options[index]!.disabled) return;
         onchange(options[index]!.value);
         close(true);
     }
@@ -110,7 +112,7 @@
 
 <div class="choice-control" use:measureWidth={{ scope: 'choice', change: (value) => (width = value) }}>
     <div class="choice-measurement" aria-hidden="true" use:measureLabels>
-        {#each options as option}<span>{option.label}</span>{/each}
+        {#each options as option}<EditorOptionLabel label={option.label} extended={option.extended} />{/each}
     </div>
     {#if showSegments}
         <div class="editor-choices" role="group" aria-label={label}>
@@ -120,8 +122,8 @@
                     class="editor-choice"
                     aria-pressed={value === option.value}
                     aria-label={`${label}: ${option.label}`}
-                    title={option.label}
-                    {disabled}
+                    title={option.reason ? `${option.label}: ${option.reason}` : option.label}
+                    disabled={disabled || option.disabled}
                     onclick={() => onchange(option.value)}
                     onkeydown={(event) => {
                         let next = index;
@@ -131,9 +133,14 @@
                         else if (event.key === 'End') next = options.length - 1;
                         else return;
                         event.preventDefault();
+                        for (let attempt = 0; options[next]!.disabled && attempt < options.length; attempt++)
+                            next =
+                                (next + (event.key === 'ArrowLeft' || event.key === 'End' ? options.length - 1 : 1)) %
+                                options.length;
+                        if (options[next]!.disabled) return;
                         onchange(options[next]!.value);
                         (event.currentTarget.parentElement?.children[next] as HTMLButtonElement)?.focus();
-                    }}>{option.label}</button
+                    }}><EditorOptionLabel label={option.label} extended={option.extended} /></button
                 >
             {/each}
         </div>
@@ -177,12 +184,14 @@
                         role="option"
                         tabindex="-1"
                         aria-selected={option.value === value}
+                        aria-disabled={option.disabled || undefined}
+                        title={option.reason ? `${option.label}: ${option.reason}` : option.label}
                         class:active={active === index}
                         onpointermove={() => (active = index)}
                         onkeydown={key}
                         onclick={() => select(index)}
                     >
-                        {option.label}
+                        <EditorOptionLabel label={option.label} extended={option.extended} />
                     </div>
                 {/each}
             </div>
@@ -206,8 +215,8 @@
         overflow: hidden;
         font-size: 11px;
     }
-    .choice-measurement span {
+    .choice-measurement > :global(.editor-option-label) {
         padding-inline: 7px;
-        white-space: nowrap;
+        max-width: none;
     }
 </style>

@@ -189,6 +189,7 @@ struct ImageObjectItem {
     std::optional<std::uint64_t> size_with_dependencies_bytes;
     std::optional<WaveformMetadata> waveform;
     std::optional<SequenceMetadata> sequence;
+    nlohmann::json sample_format = nullptr;
 };
 
 struct ImageRelationshipItem {

@@ -8,6 +8,28 @@ const options = [
     { value: 121, label: 'Aftertouch' },
 ];
 describe('editor autocomplete', () => {
+    it('keeps a blue extension marker outside the searchable and selected label', async () => {
+        const onchange = vi.fn();
+        const view = render(EditorAutocomplete, {
+            label: 'Function',
+            value: 0,
+            onchange,
+            options: [
+                { value: 0, label: 'Ordinary' },
+                { value: 1, label: 'Later function', extended: true },
+            ],
+        });
+        const input = view.getByRole('combobox') as HTMLInputElement;
+        await fireEvent.input(input, { target: { value: 'Later' } });
+        const option = view.getByRole('option', { name: 'Later function' });
+        expect(option.querySelector('.editor-option-label .extended-parameter')).not.toBeNull();
+        expect(option.title).toBe('Later function');
+        await fireEvent.click(option);
+        expect(onchange).toHaveBeenCalledWith(1);
+        await view.rerender({ value: 1 });
+        expect(input.value).toBe('Later function');
+        expect(view.queryByRole('listbox')).toBeNull();
+    });
     it('clears only the query, filters numeric CCs, selects explicitly, and restores unfinished searches', async () => {
         const onchange = vi.fn();
         const view = render(EditorAutocomplete, { label: 'Controller', value: 1, options, onchange });

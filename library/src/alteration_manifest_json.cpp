@@ -13,9 +13,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "alteration_manifest_duplicate.hpp"
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_program.hpp"
+#include "alteration_manifest_sample_format.hpp"
 #include "alteration_manifest_sequence.hpp"
 #include "alteration_manifest_wave_data.hpp"
 
@@ -151,13 +153,14 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             if (!seen.insert(*id).second)
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
-                *type != "insert_sbnk" && *type != "update_sbnk_parameters" &&
-                *type != "update_sample_bank_parameters" && *type != "insert_waveform" && *type != "delete_waveform" &&
-                *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
-                *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
-                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
-                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
+                *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "duplicate_sbnk" &&
+                *type != "convert_sbnk_format" && *type != "update_sample_bank_parameters" &&
+                *type != "insert_waveform" && *type != "delete_waveform" && *type != "delete_program" &&
+                *type != "insert_program" && *type != "delete_sbac" && *type != "insert_sbac" &&
+                *type != "rename_waveform" && *type != "rename_sbnk" && *type != "assign_sbac_members" &&
+                *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
+                *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
+                *type != "rename_partition" && *type != "repair_object_placements" &&
                 *type != "import_tx16w_disk_set" && *type != "clear_program_assignments" &&
                 *type != "update_program_parameters" && *type != "update_wave_data_parameters" &&
                 *type != "replace_program_assignments" && *type != "retarget_sample_wave_data") {
@@ -350,6 +353,16 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     spec.parameters = std::move(*parameters);
                 }
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
+            } else if (*type == "convert_sbnk_format") {
+                auto operation = detail::parse_sample_format_conversion_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "duplicate_sbnk") {
+                auto operation = detail::parse_sample_duplicate_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
             } else if (*type == "update_sbnk_parameters" || *type == "update_sample_bank_parameters") {
                 const auto name_field = *type == "update_sbnk_parameters" ? "sample_name" : "sample_bank_name";
                 auto required_row = row;

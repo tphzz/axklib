@@ -31,6 +31,8 @@ export interface ContainedObjectWorkspaceProps {
     stereoSampleIds?: ReadonlySet<string>;
     objectRenameAvailable?: boolean;
     onrenameobject?: (target: ObjectRenameTarget) => void;
+    onduplicatesample?: (sample: SampleStructureItem) => void;
+    onconvertsample?: (sample: SampleStructureItem) => void;
     sampleBankAssignmentAvailable?: boolean;
     onassignsamplebank?: (samples: SampleStructureItem[]) => void;
     objectDeletionAvailable?: boolean;

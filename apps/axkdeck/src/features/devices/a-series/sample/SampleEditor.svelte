@@ -1,21 +1,30 @@
 <script lang="ts">
-    import { untrack } from 'svelte';
+    import { setContext, untrack } from 'svelte';
+    import { sampleFormatContext } from './formatCapabilities';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
+    import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
     import type { SampleWaveformPreview } from '../../../../lib/types';
     import { sampleTabs } from './fields';
     import TrimLoop from './TrimLoop.svelte';
-    import SampleSettings from './SampleSettings.svelte';
+    import SampleInfo from './SampleInfo.svelte';
     import SampleTransport from './SampleTransport.svelte';
     import ParameterPage from './ParameterPage.svelte';
     let {
         document: suppliedDocument,
         preview,
         panelId,
-    }: { document: ObjectEditorDocument; preview: SampleWaveformPreview; panelId: string } = $props();
+        navigation,
+    }: {
+        document: ObjectEditorDocument;
+        preview: SampleWaveformPreview;
+        panelId: string;
+        navigation: EditorNavigation;
+    } = $props();
     // The host keys this component by document; cleanup must retain that identity.
     const document = untrack(() => suppliedDocument);
-    const activeTab = $derived(sampleTabs.find((tab) => tab.id === document.tab) ?? sampleTabs[0]!);
-    const activePage = $derived(activeTab.pages.find((page) => page.id === document.page) ?? activeTab.pages[0]!);
+    setContext(sampleFormatContext, () => document.detail!.editing!);
+    const activeTab = $derived(sampleTabs.find((tab) => tab.id === navigation.tab) ?? sampleTabs[0]!);
+    const activePage = $derived(activeTab.pages.find((page) => page.id === navigation.page) ?? activeTab.pages[0]!);
     const disabled = $derived(
         document.phase !== 'editable' || !document.detail?.editing?.editable || !!document.conflict,
     );
@@ -28,7 +37,7 @@
         {#each activeTab.pages as page, index}
             <button
                 aria-pressed={activePage.id === page.id}
-                onclick={() => (document.page = page.id)}
+                onclick={() => (navigation.page = page.id)}
                 onkeydown={(event) => {
                     let next = index;
                     if (event.key === 'ArrowRight') next = (index + 1) % activeTab.pages.length;
@@ -38,7 +47,7 @@
                     else if (event.key === 'End') next = activeTab.pages.length - 1;
                     else return;
                     event.preventDefault();
-                    document.page = activeTab.pages[next]!.id;
+                    navigation.page = activeTab.pages[next]!.id;
                     (event.currentTarget.parentElement?.children[next] as HTMLButtonElement)?.focus();
                 }}>{page.label}</button
             >
@@ -51,8 +60,8 @@
 <div role="tabpanel" id={panelId} aria-labelledby={`${panelId}-${activeTab.id}`} class="sample-panel">
     {#if activePage.id === 'waveform'}
         <TrimLoop {document} {preview} {disabled} onseek={(frame) => transport?.seek(frame)} />
-    {:else if activePage.id === 'sample-settings'}
-        <SampleSettings {document} {rate} {disabled} onmonitor={() => void transport?.play(true)} />
+    {:else if activePage.id === 'sample-info'}
+        <SampleInfo {document} {rate} {disabled} onmonitor={() => void transport?.play(true)} />
     {:else}
         <ParameterPage {document} page={activePage} {disabled} />
     {/if}

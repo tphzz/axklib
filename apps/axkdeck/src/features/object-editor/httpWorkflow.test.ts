@@ -1,4 +1,7 @@
+import { sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, waitFor } from '@testing-library/svelte';
+import SampleFormatDialog from './SampleFormatDialog.svelte';
 import { HttpImageTransport } from '../../lib/httpTransport';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ObjectDetail } from '../../lib/transport';
@@ -9,6 +12,7 @@ function sampleDetail(): ObjectDetail {
         schemaVersion: 1,
         image: { imageId: 'image-1', revision: 1, format: 'sfs' },
         object: {
+            sampleFormat: sampleFormatFixture().sampleFormat,
             id: 'sample-1',
             key: 'SBNK:1',
             type: 'SBNK',
@@ -58,12 +62,14 @@ function sampleDetail(): ObjectDetail {
         },
         relationships: [],
         editing: {
-            profile: 'a4000-a5000/sample',
+            profile: 'a-series/sample',
             editable: true,
             reason: '',
             payloadSha256: 'a'.repeat(64),
             parameters: { level: 100, pan: 0 },
             blockedParameters: [],
+            blockedParameterReasons: {},
+            ...sampleFormatFixture(),
             unavailableParameters: {},
             partitionIndex: 0,
             volumeName: 'Volume',
@@ -81,11 +87,37 @@ function response(data: unknown): Response {
     return Response.json({ data, meta: { requestId: 'editor-test' } });
 }
 
-async function setup(detail: ObjectDetail) {
+async function setup(detail: ObjectDetail, failConversion = false) {
     vi.stubGlobal(
         'fetch',
         vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
             const path = new URL(String(input)).pathname;
+            if (failConversion && path.endsWith('/system/capabilities'))
+                return response({
+                    apiVersion: 'v1',
+                    operations: [
+                        {
+                            id: 'images.alter',
+                            method: 'POST',
+                            route: '/api/v1/image-session-alterations',
+                            implemented: true,
+                        },
+                    ],
+                });
+            if (failConversion && path.endsWith('/image-session-alterations'))
+                return response({ jobId: 'conversion-1', operationId: 'images.alter', state: 'QUEUED' });
+            if (failConversion && path.endsWith('/jobs/conversion-1/events')) return response({ events: [] });
+            if (failConversion && path.endsWith('/jobs/conversion-1'))
+                return response({
+                    jobId: 'conversion-1',
+                    operationId: 'images.alter',
+                    state: 'FAILED',
+                    error: {
+                        code: 'entry_in_use',
+                        message: 'close open images and wait for active file operations to finish',
+                        retryable: true,
+                    },
+                });
             if (path.endsWith('/images') && init?.method === 'POST')
                 return response({
                     jobId: 'open-1',
@@ -122,6 +154,24 @@ async function setup(detail: ObjectDetail) {
 
 describe('Sample editor over HTTP', () => {
     afterEach(() => vi.unstubAllGlobals());
+
+    it('restores dismissal and editing after an HTTP conversion job is rejected by the file lock', async () => {
+        const detail = sampleDetail();
+        const { workflow, sessionId } = await setup(detail, true);
+        await workflow.openConversion(sessionId, 'sample-1');
+        const document = workflow.conversionDocument!;
+        const view = render(SampleFormatDialog, { workflow, document });
+        await fireEvent.click(view.getByRole('button', { name: /^Convert$/ }));
+        await waitFor(() => expect(view.getByRole('status').textContent).toContain('Conversion not started'));
+        expect(workflow.locked).toBe(false);
+        expect(document.jobId).toBeNull();
+        expect(document.conversionTarget).toBeNull();
+        expect(document.detail).toEqual(detail);
+        await fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
+        expect(workflow.conversionDocument).toBeNull();
+        document.draft.set('level', 80);
+        expect(document.canSave).toBe(true);
+    });
 
     it('loads the server snapshot, revalidates and discards through the real transport', async () => {
         const detail = sampleDetail();

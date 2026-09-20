@@ -12,6 +12,7 @@
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sample_storage.hpp"
 #include "axklib/sampler_model.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/tx16w.hpp"
@@ -65,6 +66,24 @@ struct UpdateSampleParametersOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::string sample_name;
+    SampleParameters parameters;
+    std::optional<SamplePlaybackWindow> playback_window{};
+    std::optional<std::string> expected_payload_sha256{};
+};
+
+struct ConvertSampleFormatOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    SampleStorageFormat target_format{SampleStorageFormat::unknown};
+    std::string expected_payload_sha256;
+};
+
+struct DuplicateSampleOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_name;
+    std::string new_name;
     SampleParameters parameters;
     std::optional<SamplePlaybackWindow> playback_window{};
     std::optional<std::string> expected_payload_sha256{};
@@ -245,15 +264,17 @@ struct RetargetSampleWaveDataOperation {
     std::optional<std::string> right_waveform_name{};
 };
 
-using AlterationOperationData = std::variant<
-    DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
-    UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation, RenameWaveformOperation,
-    RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation, AssignSampleBankMembersOperation,
-    RenameSampleBankOperation, DeleteProgramOperation, InsertProgramOperation, RenameProgramOperation,
-    DeleteSequenceOperation, InsertSequenceOperation, RenameSequenceOperation, RenameVolumeOperation,
-    RenamePartitionOperation, RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation,
-    ClearProgramAssignmentsOperation, UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
-    UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation>;
+using AlterationOperationData =
+    std::variant<DeleteVolumeOperation, InsertVolumeOperation, DeleteSampleOperation, InsertSampleOperation,
+                 UpdateSampleParametersOperation, InsertWaveformOperation, DeleteWaveformOperation,
+                 RenameWaveformOperation, RenameSampleOperation, DeleteSampleBankOperation, InsertSampleBankOperation,
+                 AssignSampleBankMembersOperation, RenameSampleBankOperation, DeleteProgramOperation,
+                 InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation, InsertSequenceOperation,
+                 RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
+                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
+                 UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
+                 UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation,
+                 DuplicateSampleOperation, ConvertSampleFormatOperation>;
 
 struct AlterationOperation {
     std::string id;

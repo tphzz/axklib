@@ -1,6 +1,7 @@
 <script lang="ts">
     import { tick } from 'svelte';
     import Icon from '../../lib/components/Icon.svelte';
+    import EditorOptionLabel from './EditorOptionLabel.svelte';
     import { mountEditorPopup } from './editorPopup';
     let {
         label,
@@ -11,7 +12,7 @@
     }: {
         label: string;
         value: number | undefined;
-        options: { value: number; label: string }[];
+        options: { value: number; label: string; disabled?: boolean; reason?: string; extended?: boolean }[];
         disabled?: boolean;
         onchange: (value: number) => void;
     } = $props();
@@ -61,7 +62,7 @@
     }
     function select(index: number) {
         const item = filtered[index];
-        if (!item || disabled) return;
+        if (!item || disabled || item.disabled) return;
         onchange(item.value);
         close();
         input.focus();
@@ -143,13 +144,15 @@
                     role="option"
                     tabindex="-1"
                     aria-selected={item.value === value}
+                    aria-disabled={item.disabled || undefined}
+                    title={item.reason ? `${item.label}: ${item.reason}` : item.label}
                     class:active={active === index}
                     onpointerdown={(event) => event.preventDefault()}
                     onpointermove={() => (active = index)}
                     onclick={() => select(index)}
                     onkeydown={key}
                 >
-                    {item.label}
+                    <EditorOptionLabel label={item.label} extended={item.extended} />
                 </div>
             {:else}<div class="empty" role="status">No matches</div>{/each}
         </div>

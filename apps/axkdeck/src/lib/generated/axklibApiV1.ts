@@ -1835,20 +1835,144 @@ export interface components {
             /** @constant */
             storageRevision: 0;
         };
-        A4000A5000SampleEditor: {
+        A4000A5000SystemProgramContextAvailable: {
+            /** @constant */
+            availability: 'AVAILABLE';
+            basicReceive: components['schemas']['SystemMidiAddress'];
+            /** @constant */
+            fileKind: 'SYSTEM2';
+            omni: boolean;
+            parts: components['schemas']['SystemProgramPart'][];
+            programChangeEnabled: boolean;
+            /** @enum {unknown} */
+            savedProgramMode: 'SINGLE' | 'MULTI';
+            /** @enum {integer} */
+            storageRevision: 0 | 1;
+        };
+        AlterationAudioImportSummary: {
+            /** @description Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded. */
+            clippedSamples: number;
+            ditherAlgorithm: string;
+            outputFrames: number;
+            outputSampleRate: number;
+            /** @enum {integer} */
+            outputSampleWidthBits?: 16;
+            quantized: boolean;
+            resampled: boolean;
+            sampleWidthConverted?: boolean;
+            sourceChannels: number;
+            sourceFormat: string;
+            sourcePath: string;
+            sourceSampleRate: number;
+            /** @enum {integer} */
+            sourceSampleWidthBits?: 8 | 16 | 24 | 32 | 64;
+            sourceSubtype: string;
+            splitStereo: boolean;
+        };
+        AlterationManifestTemplateRequest: components['schemas']['EmptyRequest'];
+        AlterationOperationReport: {
+            allocatedClusters: number;
+            audioImport: components['schemas']['AlterationAudioImportSummary'] | null;
+            freedClusters: number;
+            id: string;
+            insertedSfsIds: number[];
+            objectName: string;
+            partitionIndex: number;
+            placedSfsIds: number[];
+            removedSfsIds: number[];
+            /** @enum {unknown} */
+            type:
+                | 'DELETE_VOLUME'
+                | 'INSERT_VOLUME'
+                | 'DELETE_SBNK'
+                | 'INSERT_SBNK'
+                | 'UPDATE_SBNK_PARAMETERS'
+                | 'INSERT_WAVEFORM'
+                | 'DELETE_WAVEFORM'
+                | 'RENAME_WAVEFORM'
+                | 'RENAME_SBNK'
+                | 'DELETE_SBAC'
+                | 'INSERT_SBAC'
+                | 'ASSIGN_SBAC_MEMBERS'
+                | 'RENAME_SBAC'
+                | 'DELETE_PROGRAM'
+                | 'INSERT_PROGRAM'
+                | 'RENAME_PROGRAM'
+                | 'DELETE_SEQUENCE'
+                | 'INSERT_SEQUENCE'
+                | 'RENAME_SEQUENCE'
+                | 'RENAME_VOLUME'
+                | 'RENAME_PARTITION'
+                | 'REPAIR_OBJECT_PLACEMENTS'
+                | 'IMPORT_TX16W_DISK_SET'
+                | 'CLEAR_PROGRAM_ASSIGNMENTS'
+                | 'UPDATE_PROGRAM_PARAMETERS'
+                | 'UPDATE_SAMPLE_BANK_PARAMETERS'
+                | 'UPDATE_WAVE_DATA_PARAMETERS'
+                | 'REPLACE_PROGRAM_ASSIGNMENTS'
+                | 'RETARGET_SAMPLE_WAVE_DATA'
+                | 'DUPLICATE_SBNK'
+                | 'CONVERT_SBNK_FORMAT';
+            volumeName: string;
+        };
+        AlterationSummary: {
+            allocatedClusters: number;
+            freedClusters: number;
+            operationCount: number;
+        };
+        ApiLimits: {
+            downloadArchiveRetentionSeconds: number;
+            maximumAlterationJournalBytes: number;
+            maximumAuditionBundleBytes: number;
+            maximumConcurrentArchiveDownloads: number;
+            maximumDownloadArchiveBytes: number;
+            maximumDownloadArchiveDepth: number;
+            maximumDownloadArchiveEntries: number;
+            maximumDownloadArchivePathBytes: number;
+            maximumDownloadArchiveTotalBytes: number;
+            maximumDownloadRangeBytes: number;
+            maximumImageSessions: number;
+            maximumJsonBytes: number;
+            maximumJsonContainerItems: number;
+            maximumJsonDepth: number;
+            maximumJsonNodes: number;
+            maximumJsonStringBytes: number;
+            maximumMediaBuildObjectBytes: number;
+            maximumMediaBuildOutputBytes: number;
+            maximumMediaBuildPayloadBytes: number;
+            maximumPageSize: number;
+            maximumQueuedJobs: number;
+            maximumUploadBytes: number;
+            maximumUploadChunkBytes: number;
+            maximumUploads: number;
+            maximumUploadTotalBytes: number;
+            maximumWebsocketDeliveryBytes: number;
+            maximumWebsocketDeliveryEvents: number;
+        };
+        ASeriesSampleEditor: {
+            /** @description User-facing reason for each blocked parameter path. */
+            blockedParameterReasons: {
+                [key: string]: string;
+            };
             blockedParameters: string[];
+            canConvertFormat: boolean;
             canEditPlayback: boolean;
             editable: boolean;
             /** @description Stored Sample EQ Q13 coefficients in b1, b2, b0, -a1, -a2 order. Unrelated edits preserve them. */
             eqCoefficients: number[];
+            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
             maximumFrames: number;
-            parameters: components['schemas']['A4000A5000SampleParameters'];
+            parameterCapabilities: {
+                [key: string]: components['schemas']['SampleParameterCapability'];
+            };
+            parameters: components['schemas']['ASeriesSampleParameters'];
             partitionIndex: number;
             payloadSha256: string;
             playbackWindow: components['schemas']['SamplePlaybackWindow'];
             /** @constant */
-            profile: 'a4000-a5000/sample';
+            profile: 'a-series/sample';
             reason: string;
+            sampleFormat: components['schemas']['SampleFormatMetadata'];
             sources: {
                 frames: number;
                 objectId: string;
@@ -1860,12 +1984,12 @@ export interface components {
                 [key: string]: {
                     message: string;
                     /** @enum {string} */
-                    reason: 'NOT_IN_LAYOUT' | 'UNSUPPORTED_VALUE';
+                    reason: 'UNSUPPORTED_VALUE' | 'FORMAT_UNAVAILABLE';
                 };
             };
             volumeName: string;
         };
-        A4000A5000SampleParameters: {
+        ASeriesSampleParameters: {
             aeg?: {
                 attack_mode?: number;
                 attack_rate?: number;
@@ -1968,6 +2092,7 @@ export interface components {
             sample_eq_gain_db?: number;
             sample_eq_type?: number;
             sample_eq_width_tenths?: number;
+            velocity_crossfade?: boolean;
             velocity_high?: number;
             velocity_low?: number;
             velocity_low_limit?: number;
@@ -1976,112 +2101,6 @@ export interface components {
             velocity_xfade_high?: number;
             velocity_xfade_low?: number;
             wave_start_velocity_sensitivity?: number;
-        };
-        A4000A5000SystemProgramContextAvailable: {
-            /** @constant */
-            availability: 'AVAILABLE';
-            basicReceive: components['schemas']['SystemMidiAddress'];
-            /** @constant */
-            fileKind: 'SYSTEM2';
-            omni: boolean;
-            parts: components['schemas']['SystemProgramPart'][];
-            programChangeEnabled: boolean;
-            /** @enum {unknown} */
-            savedProgramMode: 'SINGLE' | 'MULTI';
-            /** @enum {integer} */
-            storageRevision: 0 | 1;
-        };
-        AlterationAudioImportSummary: {
-            /** @description Individual channel values outside normalized [-1, 1] after resampling and before dither. Full-scale endpoints and quantization-only saturation are excluded. */
-            clippedSamples: number;
-            ditherAlgorithm: string;
-            outputFrames: number;
-            outputSampleRate: number;
-            /** @enum {integer} */
-            outputSampleWidthBits?: 16;
-            quantized: boolean;
-            resampled: boolean;
-            sampleWidthConverted?: boolean;
-            sourceChannels: number;
-            sourceFormat: string;
-            sourcePath: string;
-            sourceSampleRate: number;
-            /** @enum {integer} */
-            sourceSampleWidthBits?: 8 | 16 | 24 | 32 | 64;
-            sourceSubtype: string;
-            splitStereo: boolean;
-        };
-        AlterationManifestTemplateRequest: components['schemas']['EmptyRequest'];
-        AlterationOperationReport: {
-            allocatedClusters: number;
-            audioImport: components['schemas']['AlterationAudioImportSummary'] | null;
-            freedClusters: number;
-            id: string;
-            insertedSfsIds: number[];
-            objectName: string;
-            partitionIndex: number;
-            placedSfsIds: number[];
-            removedSfsIds: number[];
-            /** @enum {unknown} */
-            type:
-                | 'DELETE_VOLUME'
-                | 'INSERT_VOLUME'
-                | 'DELETE_SBNK'
-                | 'INSERT_SBNK'
-                | 'INSERT_WAVEFORM'
-                | 'DELETE_WAVEFORM'
-                | 'RENAME_WAVEFORM'
-                | 'RENAME_SBNK'
-                | 'DELETE_SBAC'
-                | 'INSERT_SBAC'
-                | 'ASSIGN_SBAC_MEMBERS'
-                | 'RENAME_SBAC'
-                | 'DELETE_PROGRAM'
-                | 'INSERT_PROGRAM'
-                | 'RENAME_PROGRAM'
-                | 'DELETE_SEQUENCE'
-                | 'INSERT_SEQUENCE'
-                | 'RENAME_SEQUENCE'
-                | 'RENAME_VOLUME'
-                | 'RENAME_PARTITION'
-                | 'REPAIR_OBJECT_PLACEMENTS'
-                | 'IMPORT_TX16W_DISK_SET'
-                | 'CLEAR_PROGRAM_ASSIGNMENTS';
-            volumeName: string;
-        };
-        AlterationSummary: {
-            allocatedClusters: number;
-            freedClusters: number;
-            operationCount: number;
-        };
-        ApiLimits: {
-            downloadArchiveRetentionSeconds: number;
-            maximumAlterationJournalBytes: number;
-            maximumAuditionBundleBytes: number;
-            maximumConcurrentArchiveDownloads: number;
-            maximumDownloadArchiveBytes: number;
-            maximumDownloadArchiveDepth: number;
-            maximumDownloadArchiveEntries: number;
-            maximumDownloadArchivePathBytes: number;
-            maximumDownloadArchiveTotalBytes: number;
-            maximumDownloadRangeBytes: number;
-            maximumImageSessions: number;
-            maximumJsonBytes: number;
-            maximumJsonContainerItems: number;
-            maximumJsonDepth: number;
-            maximumJsonNodes: number;
-            maximumJsonStringBytes: number;
-            maximumMediaBuildObjectBytes: number;
-            maximumMediaBuildOutputBytes: number;
-            maximumMediaBuildPayloadBytes: number;
-            maximumPageSize: number;
-            maximumQueuedJobs: number;
-            maximumUploadBytes: number;
-            maximumUploadChunkBytes: number;
-            maximumUploads: number;
-            maximumUploadTotalBytes: number;
-            maximumWebsocketDeliveryBytes: number;
-            maximumWebsocketDeliveryEvents: number;
         };
         AudioImportCapabilities: {
             defaultUnsupportedSampleRate: number;
@@ -3066,7 +3085,7 @@ export interface components {
             warnings: components['schemas']['Issue'][];
         };
         ImageObjectDetail: {
-            editing?: components['schemas']['A4000A5000SampleEditor'] | null;
+            editing?: components['schemas']['ASeriesSampleEditor'] | null;
             image: {
                 format: string;
                 imageId: string;
@@ -3120,6 +3139,7 @@ export interface components {
             placementCandidates: components['schemas']['ImageObjectDetailPlacement'][];
             /** @enum {string} */
             placementResolution: 'EXACT' | 'MISSING' | 'AMBIGUOUS';
+            sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             scopeKey: string;
             sfsId: number;
             storedSizeBytes: number;
@@ -3174,6 +3194,7 @@ export interface components {
             name: string;
             partitionIndex: number | null;
             partitionName: string;
+            sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
             sizeBytes: number;
@@ -4744,10 +4765,53 @@ export interface components {
             range?: number;
             type?: number;
         };
+        SampleFormatConversionPreview: {
+            allowed: boolean;
+            blockers: components['schemas']['SampleParameterIssue'][];
+            changes: string[];
+            /** @enum {string} */
+            targetFormat: 'A3000_188' | 'A4000_A5000_224';
+        };
+        SampleFormatMetadata: {
+            diagnostics: string[];
+            extensionDiffersFromPrefixDefaults: boolean | null;
+            format: components['schemas']['SampleStorageFormat'];
+            headerRevision: number;
+            laterBodyBytes: number;
+            olderBodyBytes: number;
+            parameterBytes: number | null;
+            parameterIssues: components['schemas']['SampleParameterIssue'][];
+            requiresA5000: boolean;
+            structurallyValid: boolean;
+        };
+        SampleParameterCapability: {
+            a3000: components['schemas']['SampleParameterDomain'] | null;
+            a4000A5000: components['schemas']['SampleParameterDomain'] | null;
+            a5000Minimum: number | null;
+            available: boolean;
+            editable: boolean;
+            reason: string;
+            storedValue: number | null;
+            valid: boolean;
+        };
+        SampleParameterDomain: {
+            extraValue: number | null;
+            mask: number;
+            maximum: number;
+            minimum: number;
+            offset: number;
+        };
+        SampleParameterIssue: {
+            key: string;
+            message: string;
+            storedValue: number | null;
+        };
         SamplePlaybackWindow: {
             length_frames: number;
             start_frame: number;
         };
+        /** @enum {string} */
+        SampleStorageFormat: 'UNKNOWN' | 'A3000_188' | 'A4000_A5000_224';
         SequenceMetadata: {
             effectiveInitialTempoMicrosecondsPerQuarterNote: number;
             endTick: number;

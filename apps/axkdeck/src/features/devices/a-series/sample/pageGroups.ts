@@ -2,7 +2,7 @@ import type { SamplePage } from './fields';
 
 const groups: Record<string, { title: string; keys: string[] }[]> = {
     'mix-key': [
-        { title: 'Mix', keys: ['level', 'pan'] },
+        { title: 'Mix', keys: ['level', 'pan', 'velocity_sensitivity', 'mono_mode'] },
         { title: 'Key mapping', keys: ['root_key', 'key_low', 'key_high', 'key_crossfade'] },
         {
             title: 'Output routing',
@@ -12,15 +12,18 @@ const groups: Record<string, { title: string; keys: string[] }[]> = {
     pitch: [
         { title: 'Tuning', keys: ['coarse_tune', 'fine_tune_cents', 'fixed_pitch', 'random_pitch'] },
         { title: 'Sample portamento', keys: ['portamento_type', 'portamento_rate', 'portamento_time'] },
-        { title: 'Pitch bend', keys: ['pitch_bend_type', 'pitch_bend_range'] },
     ],
     velocity: [
         { title: 'Expansion', keys: ['expand_detune', 'expand_dephase', 'expand_width'] },
         {
             title: 'Velocity range',
-            keys: ['velocity_low', 'velocity_high', 'velocity_xfade_low', 'velocity_xfade_high'],
+            keys: ['velocity_low', 'velocity_high', 'velocity_crossfade', 'velocity_xfade_low', 'velocity_xfade_high'],
         },
-        { title: 'Velocity response', keys: ['velocity_low_limit', 'velocity_offset', 'velocity_sensitivity'] },
+    ],
+    midi: [
+        { title: 'MIDI Set', keys: ['midi_receive_channel', 'alternate_group'] },
+        { title: 'Pitch bend', keys: ['pitch_bend_type', 'pitch_bend_range'] },
+        { title: 'Velocity', keys: ['velocity_low_limit', 'velocity_offset'] },
     ],
     filter: [
         {

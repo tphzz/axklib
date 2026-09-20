@@ -204,16 +204,31 @@ export class CatalogWorkflow {
     }
 
     async loadVolume(volumeId: string, partitionIndex: number | null = this.activePartitionIndex): Promise<void> {
+        await this.readVolume(volumeId, partitionIndex, false);
+    }
+
+    async refreshVolume(previousVolumeId: string, volumeId: string, partitionIndex: number | null): Promise<void> {
+        if (previousVolumeId !== this.activeVolumeId || partitionIndex !== this.activePartitionIndex)
+            throw new Error('The active volume changed before refresh');
+        await this.readVolume(volumeId, partitionIndex, true);
+    }
+
+    private async readVolume(volumeId: string, partitionIndex: number | null, preserve: boolean): Promise<void> {
         const sessionId = this.dependencies.sessionId();
-        if (sessionId === null) return;
+        if (sessionId === null) {
+            if (preserve) throw new Error('The image session is no longer open');
+            return;
+        }
         this.dependencies.resetCleanup();
         void this.dependencies.stopPlayback();
-        this.dependencies.resetPreviews();
         const generation = ++this.loadGeneration;
-        this.resetLoadedVolumeContent();
-        this.activeVolumeId = volumeId;
-        this.activePartitionIndex = partitionIndex;
-        this.systemProgramContextsLoading = partitionIndex !== null;
+        if (!preserve) {
+            this.dependencies.resetPreviews();
+            this.resetLoadedVolumeContent();
+            this.activeVolumeId = volumeId;
+            this.activePartitionIndex = partitionIndex;
+            this.systemProgramContextsLoading = partitionIndex !== null;
+        }
         this.dependencies.setStatus('Loading volume');
         try {
             const [objects, scopedRelationships, names, contextResult] = await Promise.all([
@@ -222,7 +237,11 @@ export class CatalogWorkflow {
                 this.visibleObjectNames(sessionId, volumeId),
                 this.readSystemProgramContexts(sessionId, partitionIndex),
             ]);
-            if (generation !== this.loadGeneration) return;
+            if (generation !== this.loadGeneration || sessionId !== this.dependencies.sessionId()) {
+                if (preserve) throw new Error('The workspace changed during refresh');
+                return;
+            }
+            this.activeVolumeId = volumeId;
             this.relationships = scopedRelationships;
             this.objectsById = new Map(objects.map((object) => [object.key, object]));
             this.programs = programItems(objects, names);
@@ -235,9 +254,11 @@ export class CatalogWorkflow {
             this.systemProgramContexts = contextResult.contexts;
             this.systemProgramContextsError = contextResult.error;
             this.systemProgramContextsLoading = false;
-            this.clearSelections();
+            if (preserve) this.reconcileSelections();
+            else this.clearSelections();
             this.dependencies.setStatus('Ready');
         } catch (error) {
+            if (preserve) throw error;
             if (generation === this.loadGeneration) {
                 ++this.loadGeneration;
                 this.resetLoadedVolumeContent();
@@ -246,6 +267,28 @@ export class CatalogWorkflow {
                 this.dependencies.setStatus(userFacingMessage(error));
             }
         }
+    }
+
+    private reconcileSelections(): void {
+        for (const key of [
+            'selectedProgramId',
+            'selectedSequenceId',
+            'selectedBankId',
+            'selectedBankMemberId',
+            'selectedSampleId',
+            'selectedBankWaveDataId',
+            'selectedSampleWaveDataId',
+            'selectedWaveDataId',
+            'inspectorObjectId',
+        ] as const) {
+            if (!this.objectsById.has(this[key])) this[key] = '';
+        }
+        for (const view of Object.keys(this.editorObjectIds) as WorkspaceView[]) {
+            if (!this.objectsById.has(this.editorObjectIds[view])) this.editorObjectIds[view] = '';
+        }
+        this.samplePreviewStates = Object.fromEntries(
+            Object.entries(this.samplePreviewStates).filter(([id]) => this.objectsById.has(id)),
+        );
     }
 
     clear(): void {

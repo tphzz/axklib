@@ -3,12 +3,18 @@
     import type { SampleWaveformPreview } from '../../../../lib/types';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import EditorNumber from '../../../object-editor/EditorNumber.svelte';
+    import EditorChoice from '../../../object-editor/EditorChoice.svelte';
+    import type { EditorValues } from '../../../object-editor/draft.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
+    import ParameterLabel from '../../../object-editor/ParameterLabel.svelte';
     import Icon from '../../../../lib/components/Icon.svelte';
     import { editorAudio } from '../../../object-editor/audioContext';
     import { sampleView } from './view.svelte';
     import { clamp, markerBounds, markerValues, moveMarker, nearestCrossing } from './geometry';
+    import { endUnitFrames } from './sampleInfoGeometry';
+    import { sampleFields } from './fields';
     import WaveCanvas from './WaveCanvas.svelte';
+    import { hoverHelp } from '../../../../lib/components/hoverHelp.svelte';
     let {
         document,
         preview,
@@ -30,6 +36,9 @@
     const bounds = $derived(markerBounds(values, frames));
     const lanes = $derived(preview.preview?.lanes ?? []);
     const rate = $derived(lanes[0]?.sampleRate ?? view.source?.sampleRate ?? 44100);
+    const endType = $derived(view.preferences.endType);
+    const endScale = $derived(endUnitFrames(rate, Number(values.loop_tempo_hundredths), endType));
+    const modeField = sampleFields.find((field) => field.key === 'loop_mode')!;
     const start = $derived(view.pan * (frames - frames / view.zoom));
     const end = $derived(start + frames / view.zoom);
     const names = ['Wave start', 'Wave end', 'Loop start', 'Loop end'];
@@ -38,6 +47,14 @@
     const position = (frame: number) => ((frame - start) / (end - start)) * 100;
     const format = (frame: number) =>
         view.units ? `${((frame / rate) * 1000).toFixed(1)}` : Math.round(frame).toLocaleString('en-US');
+    function mode(next: number) {
+        const changes: EditorValues = { loop_mode: next };
+        if ([1, 2].includes(next) && Number(values.loop_length_frames) === 0) {
+            changes.loop_start_frame = values['playback.start_frame']!;
+            changes.loop_length_frames = values['playback.length_frames']!;
+        }
+        document.draft.patch(changes);
+    }
     function blocked(index: number) {
         const snapshot = document.detail!.editing!;
         return (
@@ -184,7 +201,7 @@
                     aria-valuemin={bounds[index]![0]}
                     aria-valuemax={bounds[index]![1]}
                     aria-valuetext={`${Math.round(frame)} samples, ${((frame / rate) * 1000).toFixed(2)} milliseconds`}
-                    title={`${names[index]}: ${Math.round(frame)} samples`}
+                    use:hoverHelp={`${names[index]}: ${Math.round(frame)} samples\nDrag horizontally to move the boundary. Left/Right moves by one sample; Shift+arrows by 1000. Home/End selects its limits. Snap applies to dragging only.`}
                     disabled={blocked(index)}
                     style:left={`${position(frame)}%`}
                     onpointerdown={(event) => drag(event, index)}
@@ -223,10 +240,15 @@
     <div class="marker-fields">
         {#each names as label, index}
             <div class="marker-field" class:loop={index > 1}>
-                <AttributeHelp
+                <ParameterLabel
                     {label}
+                    parameter={keys[index]!}
+                    read={(values) => {
+                        const value = markerValues(values)[index];
+                        return Number.isFinite(value) ? value : undefined;
+                    }}
                     description={index % 2
-                        ? 'End boundary, in samples or milliseconds. Playback length is end minus start.'
+                        ? 'End boundary. Sample Info End Type selects an absolute address, length from its start, time in seconds, or beats at Loop Tempo.'
                         : 'Start position in the stored Wave Data.'}
                 />
                 <div class="marker-value">
@@ -235,9 +257,10 @@
                         value={markers[index]}
                         min={bounds[index]![0]}
                         max={bounds[index]![1]}
-                        scale={view.units ? rate / 1000 : 1}
-                        unit={view.units ? 'ms' : ''}
-                        disabled={blocked(index)}
+                        scale={index % 2 ? (endScale ?? 1) : 1}
+                        offset={index % 2 && endType !== 0 ? markers[index - 1]! : 0}
+                        unit={index % 2 ? ['', 'samples', 's', 'beats'][endType] : ''}
+                        disabled={blocked(index) || (!!(index % 2) && endScale === undefined)}
                         resetValue={markerValues(
                             Object.fromEntries(keys.map((key) => [key, document.draft.baselineValue(key)!])),
                         )[index]}
@@ -259,6 +282,19 @@
                 </div>
             </div>
         {/each}
+        <div class="marker-field loop-mode">
+            <ParameterLabel label="Loop mode" parameter="loop_mode" />
+            <EditorChoice
+                label="Loop mode"
+                value={Number(values.loop_mode)}
+                options={modeField.options!}
+                disabled={disabled ||
+                    ['loop_mode', 'loop_start_frame', 'loop_length_frames'].some((key) =>
+                        document.detail!.editing!.blockedParameters.includes(key),
+                    )}
+                onchange={mode}
+            />
+        </div>
     </div>
     {#if view.loading || view.error}<div role="status" class="editor-meta">
             {view.loading ? 'Loading source audio' : view.error}
@@ -424,7 +460,7 @@
     }
     .marker-fields {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(150px, 1.2fr);
         gap: 12px;
     }
     .marker-field {
@@ -434,6 +470,18 @@
     }
     .marker-field.loop {
         color: var(--editor-loop);
+    }
+    .loop-mode {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        color: var(--color-text-muted);
+    }
+    :global([data-editor-under~='1200']) .marker-fields {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    :global([data-editor-under~='1200']) .loop-mode {
+        grid-column: 1 / -1;
     }
     .marker-value {
         display: flex;

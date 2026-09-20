@@ -39,6 +39,8 @@
             id: 'frequency-gain',
             label: 'EQ frequency / gain',
             readout,
+            help: `Drag horizontally for frequency, vertically for gain. Shift-drag is finer. Left/Right adjusts frequency; Up/Down adjusts gain.${blocked.includes('width') ? '' : ' Mouse wheel or Alt-drag adjusts width; hold Shift for fine width control. Alt+arrows also adjusts width.'}`,
+            alternate: !blocked.includes('width'),
             x: frequency,
             y: (gain + 18) / 36,
             horizontal: !blocked.includes('frequency'),

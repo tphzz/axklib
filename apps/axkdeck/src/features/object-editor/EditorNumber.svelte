@@ -7,6 +7,7 @@
         max = 127,
         step = 1,
         scale = 1,
+        offset = 0,
         unit = '',
         disabled = false,
         slider = true,
@@ -22,6 +23,7 @@
         max?: number;
         step?: number;
         scale?: number;
+        offset?: number;
         unit?: string;
         disabled?: boolean;
         slider?: boolean;
@@ -34,7 +36,9 @@
     let text = $state('');
     let error = $state('');
     const display = (next: number) =>
-        String(Number((next / scale).toFixed(Math.min(6, Math.max(0, Math.ceil(Math.log10(scale / step)))))));
+        String(
+            Number(((next - offset) / scale).toFixed(Math.min(6, Math.max(0, Math.ceil(Math.log10(scale / step)))))),
+        );
     $effect(() => {
         text = value === undefined ? '' : display(value);
     });
@@ -45,9 +49,9 @@
     function edit(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         text = input.value;
-        const next = Math.round((input.valueAsNumber * scale) / step) * step;
+        const next = Math.round((input.valueAsNumber * scale + offset) / step) * step;
         if (!text || !Number.isFinite(next) || next < min || next > max) {
-            invalid(`${label}: enter ${min / scale} to ${max / scale}${unit ? ` ${unit}` : ''}`);
+            invalid(`${label}: enter ${(min - offset) / scale} to ${(max - offset) / scale}${unit ? ` ${unit}` : ''}`);
             return;
         }
         invalid('');
@@ -120,8 +124,8 @@
             aria-label={label}
             aria-invalid={!!error}
             title={error || label}
-            min={min / scale}
-            max={max / scale}
+            min={(min - offset) / scale}
+            max={(max - offset) / scale}
             step={step / scale}
             value={text}
             placeholder="Unavailable"

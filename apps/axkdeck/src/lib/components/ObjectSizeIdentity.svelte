@@ -2,6 +2,7 @@
     import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SamplerObject } from '../transport';
     import Icon from './Icon.svelte';
+    import SampleFormatBadge from '../../features/object-editor/SampleFormatBadge.svelte';
     import { objectEditors } from '../../features/object-editor/context';
 
     interface Props {
@@ -34,6 +35,7 @@
             <Icon name="stereo" size={12} />
         </span>
     {/if}
+    {#if object.sampleFormat}<SampleFormatBadge format={object.sampleFormat} />{/if}
 </span>
 <small class="object-size-secondary" title={tooltip}>
     {metadata ? `${metadata} · ` : ''}{objectSizeSummary(object)}

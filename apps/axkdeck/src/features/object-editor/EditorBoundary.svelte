@@ -6,6 +6,8 @@
     import { ObjectEditorWorkflow } from './workflow.svelte';
     import { provideObjectEditors } from './context';
     import { provideEditorAudio } from './audioContext';
+    import SampleDuplicateDialog from './SampleDuplicateDialog.svelte';
+    import SampleFormatDialog from './SampleFormatDialog.svelte';
     import { modal } from '../../lib/modal';
     import { prepareEditorDraft } from './registry';
     import type { installDesktopEditorGuard } from './desktopGuard';
@@ -23,7 +25,9 @@
     const editors = new ObjectEditorWorkflow({
         transport: untrack(() => transport),
         refresh: () =>
-            audition.refreshEditorWorkspace(() => imageSession.refresh(imageSession.currentSourcePreference())),
+            audition.refreshEditorWorkspace(() =>
+                imageSession.refresh(imageSession.currentSourcePreference(), 'editor'),
+            ),
         stopPlayback: () => {
             void audition.stop();
         },
@@ -71,7 +75,7 @@
             };
         });
     }
-    $effect(() => {
+    $effect.pre(() => {
         const session = imageSession.sessionId;
         const revision = imageSession.revision;
         untrack(() => {
@@ -122,6 +126,8 @@
 </script>
 
 {@render children()}
+{#if editors.duplication.visible}<SampleDuplicateDialog workflow={editors.duplication} />{/if}
+{#if editors.conversionDocument}<SampleFormatDialog workflow={editors} document={editors.conversionDocument} />{/if}
 {#if confirmation}
     <div class="dialog-backdrop dialog-backdrop-top" role="presentation">
         <div

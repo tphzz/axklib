@@ -57,8 +57,8 @@ describe('Sample page contracts', () => {
             expect(fields.toSorted()).toEqual(page.fields.map((field) => field.key).toSorted());
         }
     });
-    it('restores Sample settings without duplicate editable fields', () => {
-        expect(sampleTabs[0]!.pages.map((p) => p.id)).toEqual(['waveform', 'sample-settings']);
+    it('keeps Sample Info without duplicate editable fields', () => {
+        expect(sampleTabs[0]!.pages.map((p) => p.id)).toEqual(['waveform', 'sample-info']);
         expect(new Set(sampleFields.map((f) => f.key)).size).toBe(sampleFields.length);
     });
     it('uses stored MIDI controller function IDs', () => {

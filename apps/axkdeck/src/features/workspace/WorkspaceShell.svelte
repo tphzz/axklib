@@ -19,6 +19,7 @@
         deviceAvailable?: boolean;
         filesAvailable?: boolean;
         inspectorOpen?: boolean;
+        lowerOpen?: boolean;
         interfaceScaling?: InterfaceScaleController | null;
         isDesktop?: boolean;
         onmodechange: (mode: WorkspaceMode) => void;
@@ -36,6 +37,7 @@
         deviceAvailable = true,
         filesAvailable = true,
         inspectorOpen = $bindable(true),
+        lowerOpen = $bindable(false),
         interfaceScaling = null,
         isDesktop = false,
         onmodechange,
@@ -43,7 +45,6 @@
         onconnection = () => undefined,
     }: Props = $props();
     let sidebarOpen = $state(true);
-    let lowerOpen = $state(false);
     let splitRatio = $state<number | null>(null);
     let stageHeight = $state(0);
     let mainStage: HTMLElement;

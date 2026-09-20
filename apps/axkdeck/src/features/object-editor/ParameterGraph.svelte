@@ -11,6 +11,9 @@
         horizontal?: boolean;
         vertical?: boolean;
         unboundedHorizontal?: boolean;
+        help?: string;
+        trace?: string;
+        alternate?: boolean;
     }
     export interface PlotTrace {
         id: string;
@@ -26,6 +29,9 @@
     import GraphFrame from './GraphFrame.svelte';
     import GraphReadout from './GraphReadout.svelte';
     import { graphDrag } from './graphDrag';
+    import { hoverHelp } from '../../lib/components/hoverHelp.svelte';
+    import { tracePosition } from './tracePosition';
+    import Icon from '../../lib/components/Icon.svelte';
     let {
         label,
         traces,
@@ -61,12 +67,44 @@
     } = $props();
     let host: HTMLDivElement;
     let selected = $state('');
+    let focused = $state('');
     let readout = $state('');
     let dragging = $state(false);
     let cancel: (() => void) | undefined;
+    let traceX = $state(0.15);
+    let nearTrace = $state('');
+    const controls = $derived(
+        handles.map((handle) => {
+            const point = handle.trace
+                ? tracePosition(traces.find((trace) => trace.id === handle.trace)?.points ?? [], traceX)
+                : undefined;
+            return point ? { ...handle, ...point } : handle;
+        }),
+    );
+    function hoverTrace(event: PointerEvent) {
+        if (dragging || disabled) return;
+        const bounds = host.getBoundingClientRect();
+        const x = (event.clientX - bounds.left) / bounds.width,
+            y = 1 - (event.clientY - bounds.top) / bounds.height;
+        if (
+            controls.some(
+                (handle) =>
+                    !handle.trace && Math.hypot((handle.x - x) * bounds.width, (handle.y - y) * bounds.height) < 22,
+            )
+        ) {
+            nearTrace = '';
+            return;
+        }
+        const handle = handles.find((item) => item.trace && !item.disabled);
+        const point = handle
+            ? tracePosition(traces.find((trace) => trace.id === handle.trace)?.points ?? [], x)
+            : undefined;
+        nearTrace = point && Math.abs((point.y - y) * bounds.height) < 14 ? handle!.id : '';
+        if (nearTrace) traceX = x;
+    }
     const path = (points: PlotPoint[]) =>
         points.map((p, i) => `${i ? 'L' : 'M'}${p.x * 1000},${(1 - p.y) * 200}`).join(' ');
-    const chosen = $derived(handles.find((item) => item.id === readout));
+    const chosen = $derived(controls.find((item) => item.id === readout));
     function wheelHandle(node: HTMLButtonElement, id: string) {
         return {
             destroy: on(
@@ -80,7 +118,7 @@
         };
     }
     function drag(event: PointerEvent, handle: PlotHandle) {
-        if (disabled || handle.disabled) return;
+        if (disabled || handle.disabled || (event.altKey && handle.alternate === false)) return;
         event.preventDefault();
         cancel?.();
         selected = handle.id;
@@ -89,7 +127,7 @@
         onbegin(handle.id);
         dragging = true;
         readout = handle.id;
-        const alternate = event.altKey && onaltdrag;
+        const alternate = event.altKey && handle.alternate !== false && onaltdrag;
         const bounds = host.getBoundingClientRect();
         cancel = graphDrag(
             event,
@@ -117,7 +155,15 @@
 {/snippet}
 <GraphReadout text={chosen ? `${chosen.label}: ${chosen.readout}` : ''} {title} {tools} />
 <GraphFrame {label} {ticks} {footer}>
-    <div class="parameter-plot" bind:this={host}>
+    <div
+        class="parameter-plot"
+        bind:this={host}
+        role="presentation"
+        onpointermove={hoverTrace}
+        onpointerleave={() => {
+            if (!dragging) nearTrace = '';
+        }}
+    >
         <svg viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true">
             {#each [0, 0.25, 0.5, 0.75, 1] as fraction}
                 <path class="grid" d={`M0 ${fraction * 200}H1000M${fraction * 1000} 0V200`} />
@@ -132,16 +178,21 @@
                 />
             {/each}
         </svg>
-        {#each handles as handle (handle.id)}
+        {#each controls as handle (handle.id)}
             <button
                 type="button"
                 class="plot-handle"
                 class:selected={selected === handle.id}
+                class:trace-handle={!!handle.trace}
+                class:trace-visible={nearTrace === handle.id ||
+                    focused === handle.id ||
+                    (dragging && selected === handle.id)}
                 disabled={disabled || handle.disabled}
                 aria-label={`${handle.label}: ${handle.readout}`}
                 data-handle={handle.id}
                 hidden={handle.x < 0 || handle.x > 1 || handle.y < 0 || handle.y > 1}
                 use:wheelHandle={handle.id}
+                use:hoverHelp={`${handle.label}: ${handle.readout}\n${handle.help ?? 'Drag to adjust. Shift-drag for fine movement. Arrow keys adjust values; Home/End move to the limits.'}`}
                 style:left={`${handle.x * 100}%`}
                 style:top={`${(1 - handle.y) * 100}%`}
                 onpointerenter={() => (readout = handle.id)}
@@ -150,6 +201,7 @@
                 }}
                 onfocus={(event) => {
                     selected = handle.id;
+                    focused = handle.id;
                     if (event.currentTarget.matches(':focus-visible')) readout = handle.id;
                     onselect(handle.id);
                 }}
@@ -163,10 +215,12 @@
                 }}
                 onkeyup={onend}
                 onblur={() => {
+                    focused = '';
                     readout = '';
                     if (!dragging) onend();
                 }}
-            ></button>
+                >{#if handle.trace}<span class="gain-icon"><Icon name="fit-width" size={18} /></span>{/if}</button
+            >
         {/each}
     </div>
 </GraphFrame>
@@ -223,6 +277,29 @@
     .plot-handle.selected {
         background: var(--editor-loop);
         z-index: 1;
+    }
+    .trace-handle {
+        opacity: 0;
+        pointer-events: none;
+        border: 0;
+        border-radius: 2px;
+        width: 20px;
+        height: 24px;
+        cursor: ns-resize;
+        color: var(--editor-loop);
+        font-size: 22px;
+    }
+    .trace-handle.trace-visible,
+    .trace-handle:focus {
+        opacity: 1;
+        pointer-events: auto;
+    }
+    .trace-handle.selected {
+        color: var(--color-panel-deep);
+    }
+    .gain-icon {
+        display: inline-flex;
+        transform: rotate(90deg);
     }
     .plot-axis {
         position: relative;

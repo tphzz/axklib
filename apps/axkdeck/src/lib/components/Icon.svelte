@@ -26,6 +26,7 @@
         | 'panel-bottom'
         | 'panel-right'
         | 'play'
+        | 'plus'
         | 'program-multi'
         | 'program-single'
         | 'refresh'
@@ -71,7 +72,9 @@
     stroke-linejoin="round"
     aria-hidden="true"
 >
-    {#if name === 'search'}
+    {#if name === 'plus'}
+        <path d="M12 5v14M5 12h14" />
+    {:else if name === 'search'}
         <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
     {:else if name === 'zoom-in' || name === 'zoom-out'}
         <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3M8 11h6" />

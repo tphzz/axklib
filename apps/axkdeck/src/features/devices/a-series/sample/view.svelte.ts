@@ -4,13 +4,32 @@ import type { EditorAudioServices } from '../../../object-editor/audioContext';
 import { loadEditorAudio } from '../../../object-editor/audioSource';
 import { userFacingMessage } from '../../../../lib/userFacingMessage';
 
-export class SampleView {
+class SamplePreferences {
     units = $state(0);
+    endType = $state(0);
+    beats = $state(4);
+    normalizeTempo = $state(true);
+    monitorMs = $state(-30);
+}
+const preferences = new WeakMap<object, SamplePreferences>();
+
+export class SampleView {
+    constructor(readonly preferences = new SamplePreferences()) {}
+    get units() {
+        return this.preferences.units;
+    }
+    set units(value: number) {
+        this.preferences.units = value;
+    }
+    get monitorMs() {
+        return this.preferences.monitorMs;
+    }
+    set monitorMs(value: number) {
+        this.preferences.monitorMs = value;
+    }
     zoom = $state(1);
     pan = $state(0);
     snap = $state(false);
-    beats = $state(2);
-    monitorMs = $state(-30);
     note = $state(60);
     volume = $state(65);
     cursor = $state(0);
@@ -74,7 +93,9 @@ const views = new WeakMap<ObjectEditorDocument, SampleView>();
 export function sampleView(document: ObjectEditorDocument): SampleView {
     let view = views.get(document);
     if (!view) {
-        view = new SampleView();
+        const settings = preferences.get(document.preferencesScope) ?? new SamplePreferences();
+        preferences.set(document.preferencesScope, settings);
+        view = new SampleView(settings);
         view.note = Number(document.draft.values.root_key ?? 60);
         views.set(document, view);
     }

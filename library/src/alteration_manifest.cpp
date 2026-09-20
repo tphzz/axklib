@@ -1,5 +1,6 @@
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_program.hpp"
+#include "alteration_manifest_sample_format.hpp"
 #include "alteration_manifest_wave_data.hpp"
 
 #include <algorithm>
@@ -332,9 +333,23 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return require_object_name(operation.sample_name, "sample_name");
                 } else if constexpr (std::same_as<T, InsertSampleOperation>) {
                     return validate_direct_sample(operation.sample);
-                } else if constexpr (std::same_as<T, UpdateSampleParametersOperation>) {
+                } else if constexpr (std::same_as<T, ConvertSampleFormatOperation>) {
+                    return detail::validate_sample_format_conversion(operation);
+                } else if constexpr (std::same_as<T, UpdateSampleParametersOperation> ||
+                                     std::same_as<T, DuplicateSampleOperation>) {
                     if (auto valid = require_object_name(operation.sample_name, "sample_name"); !valid)
                         return valid;
+                    if constexpr (std::same_as<T, DuplicateSampleOperation>) {
+                        if (!std::ranges::all_of(operation.sample_name,
+                                                 [](unsigned char c) { return c >= 32U && c < 127U; }))
+                            return std::unexpected{manifest_error("sample_name must be printable ASCII")};
+                        if (auto valid = require_object_name(operation.new_name, "new_name"); !valid)
+                            return valid;
+                        if (operation.new_name.front() == ' ' || operation.new_name.back() == ' ' ||
+                            !std::ranges::all_of(operation.new_name,
+                                                 [](unsigned char c) { return c >= 32U && c < 127U; }))
+                            return std::unexpected{manifest_error("new_name must be trimmed printable ASCII")};
+                    }
                     if (operation.expected_payload_sha256 &&
                         (operation.expected_payload_sha256->size() != 64U ||
                          !std::ranges::all_of(*operation.expected_payload_sha256,
@@ -346,9 +361,10 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                                  operation.playback_window->length_frames >
                              maximum_wave_data_frames_per_channel))
                         return std::unexpected{manifest_error("playback_window exceeds the Sample frame bounds")};
-                    if (!operation.playback_window && !detail::has_sample_parameter_values(operation.parameters))
-                        return std::unexpected{manifest_error("parameters must contain at least one parameter")};
-                    return detail::validate_sample_parameter_fields(operation.parameters);
+                    if constexpr (std::same_as<T, UpdateSampleParametersOperation>)
+                        if (!operation.playback_window && !detail::has_sample_parameter_values(operation.parameters))
+                            return std::unexpected{manifest_error("parameters must contain at least one parameter")};
+                    return detail::validate_sample_parameter_patch(operation.parameters);
                 } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {
                     if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
                         return valid;

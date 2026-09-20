@@ -1083,17 +1083,30 @@ complete linked Wave Data spans for client-side Sample draft preview; the same
 selection validation and content limits apply. It does not alter stored Samples.
 
 Sample object details may include an `editing` snapshot for the
-`a4000-a5000/sample` profile: revision, payload digest, placement, decoded
+`a-series/sample` profile: revision, payload digest, placement, decoded
 parameters, source frame bounds, and field restrictions. Its read-only
 `eqCoefficients` array contains five signed Q13 values in stored order
-`b1, b2, b0, -a1, -a2`; the desktop uses these for the unchanged EQ response
-rather than regenerating them from nominal controls. The read-only
+`b1, b2, b0, -a1, -a2`; the desktop can show these in an optional response overlay.
+The solid editing curve uses the unquantized parameter response. The read-only
 `unavailableParameters` map uses dotted field paths and supplies a `reason`
-and `message` for each omitted decoded value. `NOT_IN_LAYOUT` identifies fields
-absent from the short parameter layout; `UNSUPPORTED_VALUE` identifies a stored
-value outside the supported domain. Neither classification adds defaults or
-permits rewriting the field. Stereo restrictions remain in `blockedParameters`
-and retain their decoded values. These metadata fields are not mutation inputs.
+and `message` for each omitted decoded value. `UNSUPPORTED_VALUE` identifies a
+stored value outside the supported domain. `parameterCapabilities` supplies its
+raw value and the active format's allowed domain so an explicit valid replacement
+can repair it. Other edits preserve it. `FORMAT_UNAVAILABLE` identifies fields
+not stored in this format; they are not synthesized into editable values.
+`sampleFormat` identifies the stored 188/224-byte format separately from parameter
+warnings and A5000 output requirements. It is also present on collection items
+and object details (null for objects without an A-series Sample format).
+Its HTTP `format` enum is `A3000_188`, `A4000_A5000_224`, or `UNKNOWN`;
+conversion preview `targetFormat` uses the two recognized values. The embedded
+alteration manifest retains its own lowercase `target_format` values.
+`formatConversions` gives read-only target previews with changes and blockers;
+`canConvertFormat` indicates whether the image supports the operation. Execution
+uses `convert_sbnk_format`, the original payload digest and the current image
+revision, and recomputes the same conversion checks. Ordinary Save never changes
+format. Stereo restrictions remain in `blockedParameters`; each has an
+explanation in `blockedParameterReasons` and retains its decoded value. These
+metadata fields are not mutation inputs.
 Unsupported layouts
 return no editor profile. The desktop retains session-only drafts across the
 six Sample editing tabs and object selection. Save applies only the selected

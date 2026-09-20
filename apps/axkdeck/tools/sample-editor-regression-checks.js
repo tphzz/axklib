@@ -45,7 +45,9 @@ window.runSampleEditorRegression = async function () {
     document.querySelector('.audition-button').click(); await settle();
     assert(JSON.stringify(geometry()) === JSON.stringify(initial), 'stopping audition resizes waveform/footer');
     measurements.push({ transport: geometry() });
-    await page('Trim/Loop', 'Sample settings');
+    assert(!document.querySelector('.sample-transport [aria-label="Loop mode"]'), 'Loop mode is not an audition preference');
+    assert(document.querySelector('.waveform-page [aria-label="Loop mode"]'), 'Waveform owns saved Loop mode');
+    await page('Trim/Loop', 'Sample Info');
     const metadata = document.querySelector('.source-metadata');
     assert(metadata?.textContent.includes('Source:'), 'source duration is labelled in header');
     assert(!document.querySelector('.settings-summary'), 'source duration reserves a footer row');
@@ -56,23 +58,21 @@ window.runSampleEditorRegression = async function () {
     await page('Map/Out', 'Pitch');
     const tabs = () => [...document.querySelectorAll('.navigation [role=tab]')].map(node => node.getBoundingClientRect().x);
     const cleanTabs = JSON.stringify(tabs());
-    await input('Pitch bend range', '3');
+    await input('Coarse tune', '3');
     assert(JSON.stringify(tabs()) === cleanTabs, 'dirty marker moves tabs');
     document.querySelector('[aria-label="Undo Sample edit"]').click(); await settle();
     assert(JSON.stringify(tabs()) === cleanTabs, 'undo moves tabs');
     if (location.search.includes('short-stereo')) {
-        const groups = document.querySelector('.parameter-groups');
-        if (groups.dataset.columns === '3') assert(groups.children[1].offsetWidth <= 240, 'unavailable portamento reserves slider space');
-        const unavailable = document.querySelector('[aria-label="Portamento type: Unavailable"]');
-        unavailable.focus(); await settle();
-        assert(document.querySelector('[role=tooltip]')?.textContent.includes('short parameter layout'), 'unavailable help survives keyboard focus scrolling');
-        unavailable.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
-        assert(!document.querySelector('[role=tooltip]'), 'unavailable help closes with Escape');
+        const help = document.querySelector('.attribute-help-label[aria-label="Portamento type"]');
+        help.focus(); await settle();
+        assert(document.querySelector('[role=tooltip]')?.textContent.includes('full parameter layout'), 'short-layout conversion is explained on focus');
+        help.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
+        assert(!document.querySelector('[role=tooltip]'), 'conversion help closes with Escape');
     }
     await page('Map/Out', 'Expansion & Velocity');
     if (location.search.includes('short-stereo')) {
-        assert(document.querySelector('input[aria-label="Detune"]').disabled, 'stereo detune remains blocked');
-        assert(!document.querySelector('input[aria-label="Low crossfade"]'), 'missing crossfade is not an input');
+        assert(!document.querySelector('input[aria-label="Detune"]').disabled, 'true stereo supports scalar detune editing');
+        assert(!document.querySelector('input[aria-label="Low crossfade"]').disabled, 'short-layout crossfade is editable through conversion');
     }
     await page('Map/Out', 'Level scaling');
     const scaling = document.querySelector('.breakpoint-graph button');
@@ -127,6 +127,9 @@ window.runSampleEditorRegression = async function () {
     for (const label of ['Pitch depth', 'Cutoff depth', 'Amplitude depth']) assert(visible(document.querySelector(`input[aria-label="${label}"]`)), `${label} is not reachable`);
     await input('Pitch depth', '70');
     assert(document.querySelector('[data-trace="pitch"],.modulation'), 'LFO trace is rendered');
+    await page('MIDI/CTRL', 'MIDI Set');
+    assert(document.querySelector('input[aria-label="Pitch bend range"]'), 'MIDI Set owns Pitch bend');
+    assert(document.querySelector('input[aria-label="Velocity Offset"]'), 'MIDI Set owns Velocity Offset');
     await page('MIDI/CTRL', 'Control');
     assert(document.querySelectorAll('tbody tr').length === 6, 'MIDI controls are not six rows');
     assert(document.querySelectorAll('[role=combobox]').length === 18, 'MIDI selectors are not all searchable');

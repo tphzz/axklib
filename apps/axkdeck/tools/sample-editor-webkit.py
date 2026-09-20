@@ -16,7 +16,10 @@ parser.add_argument("--zoom", type=float, action="append")
 parser.add_argument("--width", type=int, default=1600)
 parser.add_argument("--height", type=int, default=900)
 parser.add_argument("--workspace", action="store_true")
+parser.add_argument("--conversion-lock", action="store_true")
 parser.add_argument("--checks", type=Path, default=Path(__file__).with_name("sample-editor-regression-checks.js"))
+parser.add_argument("--fixture", default="/tools/layout-fixtures/sample-editor.html")
+parser.add_argument("--checks-function", default="runSampleEditorRegression")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 script = args.checks.read_text()
@@ -65,17 +68,17 @@ def run(zoom, stereo):
         if started or finished:
             return False
         started = True
-        view.evaluate_javascript(script + "\nwindow.runSampleEditorRegression().then(r=>window.__editorResult=r).catch(e=>window.__editorResult={failures:[e.stack]}); void 0;", -1, None, None, None, None, None)
+        view.evaluate_javascript(script + f"\nwindow[{json.dumps(args.checks_function)}]().then(r=>window.__editorResult=r).catch(e=>window.__editorResult={{failures:[e.stack]}}); void 0;", -1, None, None, None, None, None)
         GLib.timeout_add(100, poll)
         return False
 
     def loaded(_obj, event):
-        if event == WebKit2.LoadEvent.FINISHED and "sample-editor.html" in (view.get_uri() or ""):
+        if event == WebKit2.LoadEvent.FINISHED and args.fixture in (view.get_uri() or ""):
             GLib.timeout_add(1000, start)
 
     view.connect("load-changed", loaded)
-    query = "?" + "&".join(name for enabled, name in [(stereo, "short-stereo"), (args.workspace, "workspace")] if enabled)
-    view.load_uri(args.base + "/tools/layout-fixtures/sample-editor.html" + query)
+    query = "?" + "&".join(name for enabled, name in [(stereo, "short-stereo"), (args.workspace, "workspace"), (args.conversion_lock, "conversion-lock")] if enabled)
+    view.load_uri(args.base + args.fixture + query)
     timeout = GLib.timeout_add_seconds(45, lambda: (Gtk.main_quit(), False)[1])
     Gtk.main()
     GLib.source_remove(timeout)

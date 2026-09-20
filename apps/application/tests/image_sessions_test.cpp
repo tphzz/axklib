@@ -1115,7 +1115,7 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     ASSERT_TRUE(detail) << detail.error().message;
     const auto &editing = detail->at("editing");
     ASSERT_FALSE(editing.is_null());
-    EXPECT_EQ(editing.at("profile"), "a4000-a5000/sample");
+    EXPECT_EQ(editing.at("profile"), "a-series/sample");
     EXPECT_EQ(editing.at("editable"), true);
     EXPECT_EQ(editing.at("payloadSha256").get<std::string>().size(), 64U);
     EXPECT_TRUE(editing.at("parameters").contains("level"));
@@ -1768,7 +1768,7 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto detail = sessions.object_detail(opened->image_id, "owner-a", objects->items.front().id);
     ASSERT_TRUE(detail) << detail.error().message;
     ASSERT_FALSE(detail->at("editing").is_null());
-    EXPECT_EQ(detail->at("editing").at("profile"), "a4000-a5000/sample");
+    EXPECT_EQ(detail->at("editing").at("profile"), "a-series/sample");
 
     const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
@@ -1780,7 +1780,7 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
 }
 
-TEST_F(ImageSessionTest, ShortSampleEditorExposesStoredParametersWithoutExtendedDefaults) {
+TEST_F(ImageSessionTest, NativeSampleEditorExposesStoredParametersAndExplicitConversionCapabilities) {
     const auto source = axk::open_media(root_ / "fixture.hds");
     ASSERT_TRUE(source);
     const auto *container = std::get_if<axk::Container>(&source->storage());
@@ -1792,8 +1792,9 @@ TEST_F(ImageSessionTest, ShortSampleEditorExposesStoredParametersWithoutExtended
     ASSERT_NE(sample, catalog->objects.end());
     auto bytes = sample->raw_payload;
     bytes.resize(0x164U);
-    write_be32(bytes, 0x1cU, 0x134U);
-    for (const auto selector : {1U, 2U, 4U}) {
+    write_be32(bytes, 0x18U, 0x134U);
+    write_be32(bytes, 0x1cU, 0U);
+    for (const auto selector : {2U}) {
         write_be32(bytes, 0x14U, selector);
         const auto decoded = axk::decode_object(bytes);
         ASSERT_TRUE(decoded);
@@ -1802,23 +1803,31 @@ TEST_F(ImageSessionTest, ShortSampleEditorExposesStoredParametersWithoutExtended
         const auto editing = axk::app::detail::a_series_sample_editor(snapshot, bytes, true,
                                                                       nlohmann::json::array({{{"frames", 1000U}}}));
         ASSERT_FALSE(editing.is_null()) << selector;
-        EXPECT_EQ(editing.at("profile"), "a4000-a5000/sample");
+        EXPECT_EQ(editing.at("profile"), "a-series/sample");
         EXPECT_EQ(editing.at("editable"), true);
         EXPECT_EQ(editing.at("canEditPlayback"), true);
         const auto *stored_sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
         ASSERT_NE(stored_sample, nullptr);
         const auto stored_parameters = axk::decode_sample_parameter_block(stored_sample->raw_parameter_window,
-                                                                          axk::SampleParameterGeneration::current);
+                                                                          axk::SampleParameterGeneration::a3000);
         ASSERT_TRUE(stored_parameters);
         EXPECT_EQ(editing.at("eqCoefficients"), nlohmann::json(stored_parameters->eq_coefficients));
         EXPECT_TRUE(editing.at("parameters").contains("level"));
         EXPECT_TRUE(editing.at("parameters").contains("controls"));
-        EXPECT_FALSE(editing.at("parameters").contains("output1_destination"));
-        EXPECT_FALSE(editing.at("parameters").contains("portamento_type"));
+        EXPECT_EQ(editing.at("parameters").at("output1_destination"), std::to_integer<unsigned>(bytes[0x14dU]));
+        EXPECT_EQ(editing.at("parameters").at("portamento_type"), std::to_integer<unsigned>(bytes[0xd1U]) & 1U);
+        EXPECT_FALSE(editing.at("parameters").contains("portamento_rate"));
+        EXPECT_FALSE(editing.at("parameters").contains("portamento_time"));
+        EXPECT_EQ(editing.at("sampleFormat").at("format"), "a3000_188");
+        EXPECT_EQ(editing.at("sampleFormat").at("parameterBytes"), 188U);
+        EXPECT_EQ(editing.at("parameterCapabilities").at("portamento_rate").at("available"), false);
+        EXPECT_EQ(editing.at("parameterCapabilities").at("output1_destination").at("editable"), true);
+        EXPECT_EQ(editing.at("formatConversions").at(0).at("targetFormat"), "a4000_a5000_224");
+        EXPECT_EQ(editing.at("blockedParameterReasons").size(), editing.at("blockedParameters").size());
         const auto &unavailable = editing.at("unavailableParameters");
-        EXPECT_EQ(unavailable.at("output1_destination").at("reason"), "NOT_IN_LAYOUT");
-        EXPECT_EQ(unavailable.at("portamento_type").at("reason"), "NOT_IN_LAYOUT");
-        EXPECT_EQ(unavailable.at("velocity_xfade_low").at("reason"), "NOT_IN_LAYOUT");
+        EXPECT_FALSE(unavailable.contains("output1_destination"));
+        EXPECT_FALSE(unavailable.contains("portamento_type"));
+        EXPECT_TRUE(unavailable.contains("velocity_xfade_low"));
         EXPECT_FALSE(unavailable.contains("level"));
 
         auto unsupported = snapshot;
@@ -1829,7 +1838,9 @@ TEST_F(ImageSessionTest, ShortSampleEditorExposesStoredParametersWithoutExtended
         EXPECT_FALSE(unknown.at("parameters").contains("filter_type"));
     }
     write_be32(bytes, 0x14U, 99U);
-    EXPECT_TRUE(axk::app::detail::a_series_sample_editor(*sample, bytes, true, nlohmann::json::array()).is_null());
+    auto unsupported = *sample;
+    unsupported.object = *axk::decode_object(bytes);
+    EXPECT_TRUE(axk::app::detail::a_series_sample_editor(unsupported, bytes, true, nlohmann::json::array()).is_null());
 }
 
 TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWaveDataWindow) {

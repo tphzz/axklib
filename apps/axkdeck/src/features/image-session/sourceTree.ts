@@ -1,4 +1,5 @@
 import type { DiskTreeItem } from '../../lib/types';
+import type { VolumeSelectionState } from '../../lib/volumeSelection';
 
 export function collectVolumes(items: readonly DiskTreeItem[]): DiskTreeItem[] {
     const result: DiskTreeItem[] = [];
@@ -34,4 +35,28 @@ export function findSourceItem(
         if (nested) return nested;
     }
     return null;
+}
+
+export function findRefreshedVolume(items: readonly DiskTreeItem[], previous: DiskTreeItem): DiskTreeItem | null {
+    if (previous.kind !== 'volume') return null;
+    // Content IDs belong to one server snapshot; directory identities survive Sample writes.
+    const matches = collectVolumes(items).filter(
+        (item) =>
+            item.partitionIndex === previous.partitionIndex &&
+            (previous.volumeDirectoryId !== undefined
+                ? item.volumeDirectoryId === previous.volumeDirectoryId
+                : item.name === previous.name),
+    );
+    return matches.length === 1 ? matches[0]! : null;
+}
+
+export function refreshVolumeSelection(
+    selection: VolumeSelectionState,
+    tree: readonly DiskTreeItem[],
+): VolumeSelectionState {
+    const refreshed = selection.items.map((item) => ({ previous: item, current: findRefreshedVolume(tree, item) }));
+    return {
+        items: refreshed.flatMap(({ current }) => (current ? [current] : [])),
+        anchorId: refreshed.find(({ previous }) => previous.id === selection.anchorId)?.current?.id ?? '',
+    };
 }

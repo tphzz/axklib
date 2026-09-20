@@ -8,20 +8,21 @@
 #include <string_view>
 #include <vector>
 
+#include "axklib/application/sample_formats.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/sample_parameter_json.hpp"
+#include "axklib/writer_internal.hpp"
 
 namespace axk::app::detail {
 nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<const std::byte> bytes, bool writable,
                                       const nlohmann::json &sources) {
     const auto *sample = std::get_if<CurrentSbnk>(&snapshot.object.payload);
-    const auto selector = ByteReader{bytes}.be32(0x14U).value_or(0U);
-    if (!sample || bytes.size() < 0x164U || (selector != 1U && selector != 2U && selector != 4U))
+    if (!sample || !sample->storage.structurally_valid)
         return nullptr;
-    const auto decoded =
-        decode_sample_parameter_block(sample->raw_parameter_window, SampleParameterGeneration::current);
+    const auto decoded = decode_sample_parameter_block(sample->raw_parameter_window,
+                                                       *sample_parameter_generation(sample->storage.format));
     if (!decoded)
         return nullptr;
     const auto ordinary = sample->right ? (sample->sample_flags & 2U) == 0U &&
@@ -38,8 +39,10 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
             blocked.push_back("loop_start_frame");
             blocked.push_back("loop_length_frames");
         }
-        blocked.push_back("expand_detune");
-        blocked.push_back("expand_dephase");
+        if ((sample->sample_flags & 6U) != 0U || sample->right->wave_data_name == sample->left.wave_data_name) {
+            blocked.push_back("expand_detune");
+            blocked.push_back("expand_dephase");
+        }
     }
     std::uint64_t frames = maximum_wave_data_frames_per_channel;
     for (const auto &source : sources)
@@ -53,19 +56,23 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
     const auto editable = writable && ordinary && snapshot.placement.has_value() && !sources.empty();
     std::vector<std::string> missing;
     const auto parameters = axk::detail::sample_parameters_json(decoded->parameters, &missing);
-    constexpr std::array<std::string_view, 9> extended_fields{
-        "output1_destination", "output1_level",   "output2_destination", "output2_level",  "velocity_xfade_high",
-        "velocity_xfade_low",  "portamento_type", "portamento_rate",     "portamento_time"};
+    const auto capabilities = sample_parameter_capabilities(*sample);
     auto unavailable = nlohmann::json::object();
     for (const auto &key : missing) {
-        const bool absent = sample->raw_parameter_window.size() == 0xbcU &&
-                            std::ranges::find(extended_fields, key) != extended_fields.end();
+        const auto &capability = capabilities.at(key);
         unavailable[key] = {
-            {"reason", absent ? "NOT_IN_LAYOUT" : "UNSUPPORTED_VALUE"},
-            {"message", absent ? "This Sample's short parameter layout does not store this setting."
-                               : "The stored value is outside the supported range. It is preserved unchanged."}};
+            {"reason", capability.at("available").get<bool>() ? "UNSUPPORTED_VALUE" : "FORMAT_UNAVAILABLE"},
+            {"message", capability.at("reason")}};
     }
-    return {{"profile", "a4000-a5000/sample"},
+    auto blocked_reasons = nlohmann::json::object();
+    for (const auto &key : blocked) {
+        blocked_reasons[key.get<std::string>()] =
+            key == "expand_detune" || key == "expand_dephase"
+                ? "This retained expanded or duplicate-source layout needs a verified topology update. Its expansion "
+                  "values are preserved."
+                : "The stereo channels store different values. A shared edit cannot preserve both channel settings.";
+    }
+    return {{"profile", "a-series/sample"},
             {"editable", editable},
             {"reason", editable ? "" : "This Sample's layout, sources or image do not support editing"},
             {"payloadSha256", package_internal::hex_digest(package_internal::sha256(bytes))},
@@ -75,6 +82,11 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
             {"unavailableParameters", unavailable},
             {"eqCoefficients", decoded->eq_coefficients},
             {"blockedParameters", blocked},
+            {"blockedParameterReasons", blocked_reasons},
+            {"sampleFormat", sample_format_metadata(*sample)},
+            {"parameterCapabilities", capabilities},
+            {"formatConversions", sample_format_conversion_previews(bytes)},
+            {"canConvertFormat", writable && snapshot.placement.has_value()},
             {"playbackWindow",
              {{"start_frame", sample->left.wave_start_frame}, {"length_frames", sample->left.wave_length_frames}}},
             {"canEditPlayback", editable && equal_windows},

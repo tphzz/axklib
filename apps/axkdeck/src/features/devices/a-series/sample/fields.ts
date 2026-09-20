@@ -3,7 +3,8 @@ export interface SampleField {
     label: string;
     min: number;
     max: number;
-    options?: { value: number; label: string }[];
+    options?: { value: number; label: string; extended?: boolean; disabled?: boolean; reason?: string }[];
+    extended?: boolean;
     boolean?: boolean;
     help?: string;
     scale?: number;
@@ -120,7 +121,7 @@ export const sampleTabs: SampleTab[] = [
                     n('playback.length_frames', 'Playback length', 1, 16777216),
                     n('loop_start_frame', 'Loop start', 0, 16777215),
                     n('loop_length_frames', 'Loop length', 0, 16777216),
-                    choice('loop_mode', 'Playback', [
+                    choice('loop_mode', 'Loop mode', [
                         'Forward, no loop',
                         'Forward loop',
                         'Loop until release',
@@ -131,13 +132,13 @@ export const sampleTabs: SampleTab[] = [
                 ],
             },
             {
-                id: 'sample-settings',
-                label: 'Sample settings',
+                id: 'sample-info',
+                label: 'Sample Info',
                 fields: [
-                    { ...n('loop_tempo_hundredths', 'Tempo', 8000, 15999), scale: 100, unit: 'BPM' },
+                    { ...n('loop_tempo_hundredths', 'Loop Tempo', 8000, 15999), scale: 100, unit: 'BPM' },
                     n(
                         'wave_start_velocity_sensitivity',
-                        'Velocity to start',
+                        'Wave Start Velocity Sensitivity',
                         -63,
                         63,
                         '0: Fixed start position\nPositive: Higher velocity moves the start forward\nNegative: Higher velocity moves the start backward',
@@ -155,6 +156,8 @@ export const sampleTabs: SampleTab[] = [
                 label: 'Mix & Key',
                 fields: [
                     n('level', 'Level'),
+                    { ...choice('mono_mode', 'Poly/Mono', ['Poly', 'Mono']), boolean: true },
+                    n('velocity_sensitivity', 'Velocity sensitivity', -127),
                     {
                         ...n('pan', 'Pan', -63, 63, 'Center: 0\nLeft: negative values\nRight: positive values'),
                         special: [{ value: -64, label: 'Random' }],
@@ -177,22 +180,6 @@ export const sampleTabs: SampleTab[] = [
                     { ...n('fine_tune_cents', 'Fine tune', -63, 63), unit: 'ct' },
                     b('fixed_pitch', 'Fixed pitch'),
                     n('random_pitch', 'Random pitch', 0, 63),
-                    choice('pitch_bend_type', 'Pitch bend type', [
-                        'Normal',
-                        'Slow',
-                        'Slow & Reverse',
-                        'Stop',
-                        'Stop & Reverse',
-                        'Up 2 / Down 3',
-                        'Up 2 / Down 4',
-                        'Up 2 / Down 5',
-                        'Up 2 / Down 12',
-                        'Up 3 / Down 2',
-                        'Up 3 / Down 4',
-                        'Up 3 / Down 5',
-                        'Up 3 / Down 12',
-                    ]),
-                    n('pitch_bend_range', 'Pitch bend range', 0, 24),
                     choice('portamento_type', 'Portamento type', [
                         'Off',
                         '=Pgm',
@@ -205,7 +192,6 @@ export const sampleTabs: SampleTab[] = [
                     n('portamento_time', 'Portamento time', 1),
                 ],
             },
-            { id: 'level-scaling', label: 'Level scaling', fields: scaling('level') },
             {
                 id: 'velocity',
                 label: 'Expansion & Velocity',
@@ -215,13 +201,12 @@ export const sampleTabs: SampleTab[] = [
                     n('expand_width', 'Width', -63, 63),
                     n('velocity_low', 'Low velocity'),
                     n('velocity_high', 'High velocity'),
-                    n('velocity_low_limit', 'Velocity limit'),
-                    n('velocity_offset', 'Velocity offset', -127),
-                    n('velocity_sensitivity', 'Velocity sensitivity', -127),
+                    b('velocity_crossfade', 'Velocity crossfade'),
                     n('velocity_xfade_low', 'Low crossfade'),
                     n('velocity_xfade_high', 'High crossfade'),
                 ],
             },
+            { id: 'level-scaling', label: 'Level scaling', fields: scaling('level') },
         ],
     },
     {
@@ -323,14 +308,31 @@ export const sampleTabs: SampleTab[] = [
         pages: [
             {
                 id: 'midi',
-                label: 'MIDI',
+                label: 'MIDI Set',
                 fields: [
                     choice('midi_receive_channel', 'Receive channel', [
                         ...Array.from({ length: 16 }, (_, i) => `A${String(i + 1).padStart(2, '0')}`),
                         'Basic channel',
                     ]),
-                    b('mono_mode', 'Mono mode'),
                     n('alternate_group', 'Alternate group', 0, 16),
+                    choice('pitch_bend_type', 'Pitch bend type', [
+                        'Normal',
+                        'Slow',
+                        'Slow & Reverse',
+                        'Stop',
+                        'Stop & Reverse',
+                        'Up 2 / Down 3',
+                        'Up 2 / Down 4',
+                        'Up 2 / Down 5',
+                        'Up 2 / Down 12',
+                        'Up 3 / Down 2',
+                        'Up 3 / Down 4',
+                        'Up 3 / Down 5',
+                        'Up 3 / Down 12',
+                    ]),
+                    n('pitch_bend_range', 'Pitch bend range', 0, 24),
+                    n('velocity_low_limit', 'Velocity Low Limit'),
+                    n('velocity_offset', 'Velocity Offset', -127),
                 ],
             },
             {

@@ -1,8 +1,14 @@
 #include "axklib/writer_internal.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "axklib/bytes.hpp"
 #include "axklib/object.hpp"
@@ -11,7 +17,6 @@ namespace axk::detail {
 namespace {
 
 constexpr std::size_t parameter_offset = 0xa8U;
-constexpr std::size_t short_parameter_bytes = 0xbcU;
 constexpr std::size_t complete_parameter_bytes = 0xe0U;
 
 Error invalid(std::string message) {
@@ -20,12 +25,6 @@ Error invalid(std::string message) {
 
 std::int8_t signed_byte(const std::vector<std::byte> &payload, std::size_t offset) {
     return static_cast<std::int8_t>(std::to_integer<std::uint8_t>(payload[offset]));
-}
-
-bool requires_extended_tail(const SampleParameters &value) {
-    return value.velocity_xfade_high || value.velocity_xfade_low || value.output1_destination || value.output1_level ||
-           value.output2_destination || value.output2_level || value.portamento_type || value.portamento_rate ||
-           value.portamento_time;
 }
 
 bool valid_loop_window(const CurrentSbnkMember &member, AudioSamplerLoopMode mode, std::uint32_t start,
@@ -55,12 +54,10 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload);
-    if (sample == nullptr || sample->raw_parameter_window.size() < short_parameter_bytes)
-        return std::unexpected{invalid("object is not an editable current Sample")};
-    const auto has_complete_parameters = sample->raw_parameter_window.size() >= complete_parameter_bytes;
-    if (!has_complete_parameters && requires_extended_tail(overrides)) {
-        return std::unexpected{invalid("Sample parameter requires the extended current Sample layout")};
-    }
+    if (sample == nullptr || !sample->storage.structurally_valid)
+        return std::unexpected{invalid("Sample storage format is not recognized for editing")};
+    const auto native = sample->storage.format == SampleStorageFormat::a3000_188;
+    const auto generation = native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000;
 
     SampleParameters effective;
     const auto changes_loop = overrides.loop_mode || overrides.loop_start_frame || overrides.loop_length_frames;
@@ -94,7 +91,7 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
         effective.level_scaling_break2 = std::to_integer<std::uint8_t>(payload[0x11dU]);
     }
     merge_sample_parameters(effective, overrides);
-    if (auto valid = validate_sample_parameters(effective); !valid)
+    if (auto valid = validate_sample_parameters(effective, generation); !valid)
         return std::unexpected{invalid("parameters are invalid for the existing Sample")};
 
     const auto mode = effective.loop_mode.value_or(static_cast<AudioSamplerLoopMode>(sample->loop_mode));
@@ -107,6 +104,7 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     const auto changes_pitch = overrides.root_key || overrides.fine_tune_cents;
     if ((changes_pitch && (sample->left.sample_rate == 0U || (sample->right && sample->right->sample_rate == 0U))) ||
         (changes_expand && sample->right_slot_present &&
+         ((sample->sample_flags & 6U) != 0U || sample->right->wave_data_name == sample->left.wave_data_name) &&
          (effective.expand_detune.value_or(0) != 0 || effective.expand_dephase.value_or(0) != 0)) ||
         (changes_loop &&
          (!valid_loop_window(sample->left, mode, left_loop_start, left_loop_length) ||
@@ -118,9 +116,9 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     const auto stored_parameter_bytes = sample->raw_parameter_window.size();
     std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_offset), stored_parameter_bytes,
                 parameters.begin());
-    if (auto applied = apply_sample_parameters_to_block(
-            parameters, overrides,
-            has_complete_parameters ? SampleParameterLayout::current : SampleParameterLayout::current_prefix_only);
+    if (auto applied = apply_sample_parameters_to_block(std::span{parameters}.first(stored_parameter_bytes), overrides,
+                                                        native ? SampleParameterLayout::a3000
+                                                               : SampleParameterLayout::a4000_a5000);
         !applied)
         return std::unexpected{invalid(applied.error().message)};
     ByteWriter writer{parameters};

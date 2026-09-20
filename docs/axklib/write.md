@@ -732,6 +732,7 @@ Supported operation types:
 | `delete_sbnk` | `volume_name`, `sample_name` |
 | `insert_sbnk` | `volume_name`, `sample` |
 | `update_sbnk_parameters` | `volume_name`, `sample_name`, non-empty `parameters` |
+| `duplicate_sbnk` | `volume_name`, `sample_name`, `new_name`, `parameters` (may be empty); optional `playback_window`, `expected_payload_sha256` |
 | `update_sample_bank_parameters` | `volume_name`, `sample_bank_name`, non-empty `parameters` |
 | `update_wave_data_parameters` | `volume_name`, `waveform_name`, non-empty `parameters` |
 | `retarget_sample_wave_data` | `volume_name`, `sample_name`, `waveform_name`, `expected_payload_sha256`; stereo also requires `right_waveform_name` |
@@ -771,6 +772,14 @@ partial `parameters` object. Unspecified parameters and all unrelated opaque
 bytes are preserved. Derived pitch, loop, topology, and Program-portamento
 caches are recomputed when their source fields change. The complete operation
 is transactional.
+
+`duplicate_sbnk` copies an existing ordinary current mono/stereo Sample within
+its volume, retaining the existing Wave Data references without copying PCM.
+The destination is standalone and has no Program assignments. Its `new_name`
+must be a unique, case-insensitive Sample name of 1-16 printable ASCII characters.
+The optional parameter patch and playback window affect only the copy; `{}`
+copies the stored settings. See [guarded structural edits](alteration.md) for
+layout requirements and preservation rules.
 
 An `insert_sbac` object contains `name` and `member_samples`, an array of
 one to 127 distinct existing Sample names. It may also contain the same

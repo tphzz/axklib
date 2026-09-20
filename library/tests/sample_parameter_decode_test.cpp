@@ -62,7 +62,7 @@ std::vector<std::byte> block(axk::SampleParameterGeneration generation) {
 }
 
 TEST(SampleParameterDecode, RequiresExactExplicitGenerationLayout) {
-    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::current}) {
+    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::a4000_a5000}) {
         auto bytes = block(generation);
         EXPECT_TRUE(axk::decode_sample_parameter_block(bytes, generation));
         bytes.pop_back();
@@ -70,12 +70,12 @@ TEST(SampleParameterDecode, RequiresExactExplicitGenerationLayout) {
         bytes.insert(bytes.end(), 2U, std::byte{});
         EXPECT_FALSE(axk::decode_sample_parameter_block(bytes, generation));
     }
-    EXPECT_FALSE(axk::decode_sample_parameter_block(block(axk::SampleParameterGeneration::current),
+    EXPECT_FALSE(axk::decode_sample_parameter_block(block(axk::SampleParameterGeneration::a4000_a5000),
                                                     static_cast<axk::SampleParameterGeneration>(99)));
 }
 
 TEST(SampleParameterDecode, KeepsBothLanesDerivedWordsAndAllRawBytes) {
-    auto bytes = block(axk::SampleParameterGeneration::current);
+    auto bytes = block(axk::SampleParameterGeneration::a4000_a5000);
     bytes[0x34] = std::byte{0xc1};
     bytes[0x35] = std::byte{63};
     bytes[0x28] = std::byte{0xef};
@@ -91,7 +91,7 @@ TEST(SampleParameterDecode, KeepsBothLanesDerivedWordsAndAllRawBytes) {
         ASSERT_TRUE(writer.write_be16(0xaa + 2U * index, coefficients[index]));
     const auto before = bytes;
 
-    const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
+    const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a4000_a5000);
 
     ASSERT_TRUE(decoded);
     EXPECT_EQ(bytes, before);
@@ -114,34 +114,28 @@ TEST(SampleParameterDecode, KeepsBothLanesDerivedWordsAndAllRawBytes) {
     EXPECT_EQ(decoded->cached_loop_end, 0x98765432U);
 }
 
-TEST(SampleParameterDecode, ShortCurrentBlockUsesPrefixControllersAndOmitsAbsentExtension) {
-    auto bytes = block(axk::SampleParameterGeneration::current);
+TEST(SampleParameterDecode, LaterGenerationRequiresItsExtensionAndNativeRejectsLaterValues) {
+    auto bytes = block(axk::SampleParameterGeneration::a4000_a5000);
     bytes.resize(0xbcU);
     bytes[0] = std::byte{126};
     bytes[1] = std::byte{36};
     bytes[0x6e] = std::byte{97};
-    const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
-    ASSERT_TRUE(decoded);
-    EXPECT_EQ(decoded->raw_bytes, bytes);
-    EXPECT_EQ(decoded->parameters.controls[0].device, 126);
-    EXPECT_EQ(decoded->parameters.controls[0].function, 36);
-    EXPECT_EQ(decoded->parameters.level, 97);
-    EXPECT_FALSE(decoded->controller_copies_match);
-    EXPECT_FALSE(decoded->parameters.output1_destination);
-    EXPECT_FALSE(decoded->parameters.output1_level);
-    EXPECT_FALSE(decoded->parameters.output2_destination);
-    EXPECT_FALSE(decoded->parameters.output2_level);
-    EXPECT_FALSE(decoded->parameters.portamento_type);
-    EXPECT_FALSE(decoded->parameters.portamento_rate);
-    EXPECT_FALSE(decoded->parameters.portamento_time);
-    EXPECT_FALSE(decoded->parameters.velocity_xfade_low);
-    EXPECT_FALSE(decoded->parameters.velocity_xfade_high);
+    const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a4000_a5000);
+    EXPECT_FALSE(decoded);
+    const auto native = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a3000);
+    ASSERT_TRUE(native);
+    EXPECT_EQ(native->raw_bytes, bytes);
+    EXPECT_FALSE(native->parameters.controls[0].device);
+    EXPECT_FALSE(native->parameters.controls[0].function);
+    EXPECT_EQ(native->parameters.level, 97);
+    EXPECT_FALSE(native->parameters.portamento_rate);
+    EXPECT_FALSE(native->parameters.portamento_time);
 }
 
 TEST(SampleParameterDecode, UsesCanonicalControllersAndGenerationSpecificOutputs) {
-    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::current}) {
+    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::a4000_a5000}) {
         auto bytes = block(generation);
-        const auto current = generation == axk::SampleParameterGeneration::current;
+        const auto current = generation == axk::SampleParameterGeneration::a4000_a5000;
         for (std::size_t index = 0; index < 6U; ++index) {
             bytes[index * 4U] = std::byte{125};
             bytes[index * 4U + 1U] = std::byte{21};
@@ -212,7 +206,7 @@ TEST(SampleParameterDecode, RetainsInvalidLeavesWithoutAcceptingAnotherGeneratio
     EXPECT_FALSE(decoded->parameters.output2_destination);
     EXPECT_EQ(decoded->raw_bytes, bytes);
     bytes.resize(0xe0);
-    decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
+    decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a4000_a5000);
     ASSERT_TRUE(decoded);
     EXPECT_FALSE(decoded->parameters.pitch_bend_type);
     EXPECT_FALSE(decoded->parameters.coarse_tune);
@@ -220,7 +214,7 @@ TEST(SampleParameterDecode, RetainsInvalidLeavesWithoutAcceptingAnotherGeneratio
     for (const auto offset :
          {0x2a, 0x2e, 0x34, 0x3a, 0x3b, 0x3d, 0x62, 0x69, 0x6f, 0x7a, 0x7b, 0x7c, 0x85, 0x93, 0x9e, 0x9f, 0xda})
         bytes[static_cast<std::size_t>(offset)] = std::byte{0x80};
-    decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
+    decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a4000_a5000);
     ASSERT_TRUE(decoded);
     const auto &p = decoded->parameters;
     EXPECT_FALSE(p.midi_receive_channel);
@@ -254,7 +248,7 @@ TEST(SampleParameterDecode, RegisteredSampleUsesCorrectBulkOffsetsWithoutMutatio
             file.storage_revision = revision;
             file.system_bulk_bytes.resize(native ? 0x348U : 0xfe0U, std::byte{0xe3});
             const auto bytes =
-                block(native ? axk::SampleParameterGeneration::a3000 : axk::SampleParameterGeneration::current);
+                block(native ? axk::SampleParameterGeneration::a3000 : axk::SampleParameterGeneration::a4000_a5000);
             std::ranges::copy(bytes, file.system_bulk_bytes.begin() + (native ? 0x1c8 : 0x3ec));
             const auto before = file;
             const auto decoded = axk::decode_system_registered_sample(file);
@@ -275,13 +269,13 @@ TEST(SampleParameterDecode, RegisteredSampleUsesCorrectBulkOffsetsWithoutMutatio
 
 TEST(SampleParameterDecode, ReadsEveryAuthoredCommonLeafAtItsStoredOffset) {
     const auto check = [](const axk::SampleParameters &edit, auto read, std::size_t offset, std::uint8_t raw) {
-        auto bytes = block(axk::SampleParameterGeneration::current);
+        auto bytes = block(axk::SampleParameterGeneration::a4000_a5000);
         // Keep retained partners valid while checking individual leaf encodings.
         for (const auto upper : {0x65U, 0x72U, 0x75U})
             bytes[upper] = std::byte{127};
         ASSERT_TRUE(axk::detail::apply_sample_parameters_to_block(bytes, edit));
         EXPECT_EQ(std::to_integer<std::uint8_t>(bytes[offset]), raw);
-        const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::current);
+        const auto decoded = axk::decode_sample_parameter_block(bytes, axk::SampleParameterGeneration::a4000_a5000);
         ASSERT_TRUE(decoded);
         EXPECT_EQ(read(decoded->parameters), read(edit));
         EXPECT_EQ(decoded->raw_bytes, bytes);
@@ -385,7 +379,7 @@ TEST(SampleParameterDecode, ReadsEveryAuthoredCommonLeafAtItsStoredOffset) {
 }
 
 TEST(SampleParameterDecode, PackedFlagsAreIndependentOfUnownedBits) {
-    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::current}) {
+    for (const auto generation : {axk::SampleParameterGeneration::a3000, axk::SampleParameterGeneration::a4000_a5000}) {
         for (unsigned raw = 0; raw <= 255U; ++raw) {
             auto bytes = block(generation);
             bytes[0x29] = static_cast<std::byte>(raw);
