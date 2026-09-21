@@ -16,9 +16,10 @@ pub(crate) fn approve_editor_exit(app: tauri::AppHandle, state: State<'_, Editor
 }
 
 pub(crate) fn handle_exit(app: &tauri::AppHandle, event: tauri::RunEvent) {
-    if let tauri::RunEvent::ExitRequested { api, .. } = event
-        && app.state::<EditorExitGuard>().0.load(Ordering::SeqCst)
-    {
+    let tauri::RunEvent::ExitRequested { api, .. } = event else {
+        return;
+    };
+    if app.state::<EditorExitGuard>().0.load(Ordering::SeqCst) {
         api.prevent_exit();
         if let Err(error) = app.emit_to("main", "editor-exit-requested", ()) {
             log::error!("Could not request confirmation for unsaved editor drafts: {error}");
