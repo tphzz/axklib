@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -206,9 +207,12 @@ TEST_P(AudioImportContract, AppliesFrontendManifestAndPreservesSampleSettings) {
     }
 }
 
+// Keep libsndfile's anonymous enum out of Combine's tuple (MSVC 14.51 C2995).
+constexpr std::array<int, 3> audio_containers{SF_FORMAT_WAV, SF_FORMAT_AIFF, SF_FORMAT_FLAC};
+
 INSTANTIATE_TEST_SUITE_P(VolumeAndGrouping, AudioImportContract,
                          testing::Combine(testing::Bool(), testing::Bool(), testing::Bool(),
-                                          testing::Values(SF_FORMAT_WAV, SF_FORMAT_AIFF, SF_FORMAT_FLAC)));
+                                          testing::ValuesIn(audio_containers)));
 
 TEST(AudioImportManifest, RejectsObsoleteFlatSampleParameters) {
     auto document = fixture();

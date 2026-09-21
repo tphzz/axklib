@@ -68,14 +68,14 @@ Json sample_format_metadata(const CurrentSbac &bank) {
     return format_metadata(bank.storage, bank.raw_sample_parameter_block);
 }
 
-Json sample_parameter_capabilities(const CurrentSbnk &sample) {
+static Json parameter_capabilities(const SampleStorageInfo &storage, std::span<const std::byte> parameters) {
     auto result = Json::object();
-    const bool native = sample.storage.format == SampleStorageFormat::a3000_188;
+    const bool native = storage.format == SampleStorageFormat::a3000_188;
     for (const auto &rule : sample_parameter_rules()) {
-        const auto active = sample.storage.structurally_valid ? (native ? rule.a3000 : rule.a4000_a5000) : std::nullopt;
-        const auto value = active ? read_sample_parameter_value(sample.raw_parameter_window, *active) : std::nullopt;
+        const auto active = storage.structurally_valid ? (native ? rule.a3000 : rule.a4000_a5000) : std::nullopt;
+        const auto value = active ? read_sample_parameter_value(parameters, *active) : std::nullopt;
         const bool valid = value && sample_parameter_value_allowed(*active, *value);
-        const auto reason = !sample.storage.structurally_valid ? "This stored Sample format is not recognized."
+        const auto reason = !storage.structurally_valid ? "This stored Sample format is not recognized."
                             : !active ? (native ? "Convert explicitly to a4k/a5k format to edit this setting."
                                                 : "This A3000 switch is replaced by independent crossfade widths.")
                             : !valid  ? "The stored value is outside this format's supported range. Choose a supported "
@@ -93,6 +93,13 @@ Json sample_parameter_capabilities(const CurrentSbnk &sample) {
                                                  : Json(nullptr)}};
     }
     return result;
+}
+
+Json sample_parameter_capabilities(const CurrentSbnk &sample) {
+    return parameter_capabilities(sample.storage, sample.raw_parameter_window);
+}
+Json sample_parameter_capabilities(const CurrentSbac &bank) {
+    return parameter_capabilities(bank.storage, bank.raw_sample_parameter_block);
 }
 
 Json sample_format_conversion_previews(std::span<const std::byte> payload, bool bank) {

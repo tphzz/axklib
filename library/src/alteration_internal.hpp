@@ -121,6 +121,9 @@ Result<std::vector<CategoryObject>> category_objects(TransactionState &state, Mu
                                                      ObjectType expected_type, const CancellationToken &cancellation);
 Result<void> replace_fixed_object_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                           std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<OperationReport> update_sample_bank_overrides(TransactionState &state, OperationContext context,
+                                                     const UpdateSampleBankOverridesOperation &operation,
+                                                     const CancellationToken &cancellation);
 Result<OperationReport> update_sample_bank_parameters(TransactionState &state, OperationContext context,
                                                       const UpdateSampleBankParametersOperation &operation,
                                                       const CancellationToken &cancellation);

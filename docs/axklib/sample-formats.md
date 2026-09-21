@@ -133,10 +133,11 @@ Member Samples and Wave Data are neither edited nor converted. The dialog
 closes only after the write is confirmed and the workspace has refreshed;
 retrying a failed refresh does not submit a second conversion.
 
-Conversion in either direction is blocked when any pending bank parameter
-operation is stored. Pending operations have generation-specific numbering and
+Conversion in either direction is blocked when any bank override is enabled.
+Override selectors have generation-specific numbering and
 side effects, so copying their flags is not a parameter-preserving conversion.
-The converter does not discard them or run Freeze SampleBank automatically.
+The converter does not clear them or run Freeze SampleBank automatically.
+Use the bank editor to return enabled overrides to sample values before conversion.
 Unknown data and values without an equivalent in the target format also block
 conversion rather than being clamped or reset. See the
 [alteration operation](alteration.md) for programmatic use.

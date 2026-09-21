@@ -19,7 +19,9 @@
     let message = $state('');
     const editing = $derived(document?.detail && objectEditorAdapter(document.detail) ? document.detail.editing : null);
     const navigation = $derived(editing && editors?.navigation(editing.profile));
-    const sampleId = $derived(selection?.kind === 'sample' ? selection.item.objectId : null);
+    const sampleId = $derived(
+        selection?.kind === 'sample' || selection?.kind === 'sample-bank' ? selection.item.objectId : null,
+    );
     const conversionTitle = $derived(
         sampleConversionTitle(document?.detail?.formatConversion?.formatConversions[0]?.targetFormat),
     );
@@ -117,11 +119,11 @@
             </div>
         </header>
         {#key document}
-            {#if selection?.kind === 'sample'}<SampleEditor
+            {#if selection?.kind === 'sample' || selection?.kind === 'sample-bank'}<SampleEditor
                     {document}
                     {navigation}
                     {panelId}
-                    preview={selection.preview}
+                    preview={selection.kind === 'sample' ? selection.preview : undefined}
                 />{/if}
         {/key}
     {:else}<p role="status">{message}</p>{/if}

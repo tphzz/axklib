@@ -1,3 +1,4 @@
+#include "alteration_manifest_bank_overrides.hpp"
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_program.hpp"
 #include "alteration_manifest_sample_format.hpp"
@@ -370,6 +371,8 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         if (!operation.playback_window && !detail::has_sample_parameter_values(operation.parameters))
                             return std::unexpected{manifest_error("parameters must contain at least one parameter")};
                     return detail::validate_sample_parameter_patch(operation.parameters);
+                } else if constexpr (std::same_as<T, UpdateSampleBankOverridesOperation>) {
+                    return detail::validate_bank_overrides_operation(operation);
                 } else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>) {
                     if (auto valid = require_object_name(operation.sample_bank_name, "sample_bank_name"); !valid)
                         return valid;

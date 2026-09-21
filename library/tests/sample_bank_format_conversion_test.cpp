@@ -132,8 +132,8 @@ TEST(SampleBankFormat, PendingOperationRangeDependsOnTheStoredGeneration) {
         const auto decoded = axk::decode_object(bytes);
         ASSERT_TRUE(decoded);
         const auto &bank = std::get<axk::CurrentSbac>(decoded->payload);
-        EXPECT_EQ(bank.pending_parameter_numbers.size(), format == Format::a3000_188 ? 1U : 5U);
-        EXPECT_EQ(bank.reserved_pending_parameter_numbers.size(), format == Format::a3000_188 ? 4U : 0U);
+        EXPECT_EQ(bank.override_selectors.size(), format == Format::a3000_188 ? 1U : 5U);
+        EXPECT_EQ(bank.reserved_override_selectors.size(), format == Format::a3000_188 ? 4U : 0U);
         EXPECT_FALSE(axk::plan_sample_bank_format_conversion(
                          bytes, format == Format::a3000_188 ? Format::a4000_a5000_224 : Format::a3000_188)
                          .allowed());

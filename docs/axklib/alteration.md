@@ -54,10 +54,21 @@ to an existing Sample Bank and all its members atomically. Its target fields are
 `partition_index`, `volume_name`, and `sample_bank_name`. It uses the same typed
 Sample parameter contract, validates each member's merged values, and preserves
 unrelated object bytes, Wave Data and relationship identities. Complete native
-revision-2 banks and later split-tail banks with clear pending propagation state
-are supported. Bank and member formats are retained and independently validated. Pending state,
+revision-2 banks and later split-tail banks with clear override-enable state
+are supported. Bank and member formats are retained and independently validated. Active overrides,
 unresolved or multiply-owned members, and invalid merged values reject the entire
 transaction without publishing a partial change.
+
+`update_sample_bank_overrides` is the reversible, bank-only editing operation.
+It requires `partition_index`, `volume_name`, `sample_bank_name`, lowercase
+`expected_payload_sha256`, `parameters` (possibly empty), and `enable`/`disable`
+arrays of override-unit IDs. The editor snapshot lists each unit's named keys
+and physical selectors. IDs must be supported, unique and disjoint. Values may
+change only in currently enabled or explicitly enabled units. Activation
+validates the complete unit; disabling retains the stored bank values. Unknown
+states and stale digests reject the transaction. Only the bank payload changes;
+members, Wave Data, membership and Program links are preserved. This is not Freeze
+and does not convert any stored format.
 
 Fresh `insert_sbnk` Sample and `insert_sbac` Sample Bank specifications accept
 `storage_format`: `a3000_188` or `a4000_a5000_224`. Omission selects the later
@@ -75,7 +86,8 @@ defaults. For example, a key limit of `=Orig` uses that Sample's current root
 key when the update omits `root_key`. Derived caches are recomputed from changed
 source values. Sample Bank
 `parameter_overrides` uses this model too, prepares every member update before
-mutation, and leaves the bank's pending-propagation bits clear.
+mutation, and leaves the bank's override-enable bits clear. This older authoring
+option is an immediate member update, not a reversible bank-only override.
 
 The update can additionally specify `playback_window` with unsigned
 `start_frame` and positive `length_frames`. At least one parameter or a playback
@@ -117,9 +129,9 @@ Sample Bank. It has the same fields as the example above except for
 Both target formats are supported. The source digest covers the entire bank
 payload, including preserved padding. Bank identity, Program links, member rows
 and capacity remain unchanged; member Samples and Wave Data are never converted
-or edited. Any nonzero pending-propagation word blocks cross-format conversion.
+or edited. Any nonzero override-enable word blocks cross-format conversion.
 Unrepresentable parameters or uninterpreted data also block it. The operation
-does not freeze the bank, reset pending flags, or convert its members implicitly.
+does not freeze the bank, clear overrides, or convert its members implicitly.
 An already matching format is a byte-preserving no-op.
 
 `duplicate_sbnk` creates a standalone Sample in the source volume, pointing to

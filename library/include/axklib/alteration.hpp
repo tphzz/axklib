@@ -12,6 +12,7 @@
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
+#include "axklib/sample_bank_overrides.hpp"
 #include "axklib/sample_storage.hpp"
 #include "axklib/sampler_model.hpp"
 #include "axklib/sequence.hpp"
@@ -95,6 +96,14 @@ struct DuplicateSampleOperation {
     SampleParameters parameters;
     std::optional<SamplePlaybackWindow> playback_window{};
     std::optional<std::string> expected_payload_sha256{};
+};
+
+struct UpdateSampleBankOverridesOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    SampleBankOverrideEdit overrides;
+    std::string expected_payload_sha256;
 };
 
 struct UpdateSampleBankParametersOperation {
@@ -282,7 +291,8 @@ using AlterationOperationData =
                  RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
                  UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
                  UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation,
-                 DuplicateSampleOperation, ConvertSampleFormatOperation, ConvertSampleBankFormatOperation>;
+                 DuplicateSampleOperation, ConvertSampleFormatOperation, ConvertSampleBankFormatOperation,
+                 UpdateSampleBankOverridesOperation>;
 
 struct AlterationOperation {
     std::string id;

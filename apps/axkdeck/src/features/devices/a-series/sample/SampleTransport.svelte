@@ -11,11 +11,15 @@
     import { sampleView } from './view.svelte';
     import { clamp, noteName, sourceFrame } from './geometry';
     import { userFacingMessage } from '../../../../lib/userFacingMessage';
+    import BankPreview from '../bank/BankPreview.svelte';
     let { document, rate, disabled }: { document: ObjectEditorDocument; rate: number; disabled: boolean } = $props();
     const audio = editorAudio();
     const view = $derived(sampleView(document));
+    const bank = $derived(document.detail?.editing?.profile === 'a-series/sample-bank');
+    const sourceDetail = $derived(bank ? document.previewDetail : document.detail);
     $effect(() => {
         document.detail;
+        sourceDetail;
         untrack(() => {
             if (playing || busy) void audio?.audition.stop();
             view.release();
@@ -40,6 +44,7 @@
     const status = $derived(
         document.validation ||
             document.status ||
+            document.previewStatus ||
             (audio?.audition.state?.objectId === document.detail!.object.id ? audio.audition.state.error : '') ||
             (playing ? 'Playing' : busy ? 'Preparing audio' : 'Ready'),
     );
@@ -84,8 +89,9 @@
         return release;
     });
     export async function play(monitor = false) {
-        if (!audio || disabled || document.validation) return;
+        if (!audio || disabled || document.validation || !sourceDetail?.editing) return;
         const identity = document.detail!;
+        const sourceIdentity = sourceDetail;
         const original = document.draft.values;
         const values = { ...original };
         if (monitor) {
@@ -100,7 +106,13 @@
             await audio.audition.playPrepared(document.sessionId, identity.object.id, async (context, signal) => {
                 const source =
                     view.source ??
-                    (await loadEditorAudio(audio.transport, document.sessionId, identity.object.id, context, signal));
+                    (await loadEditorAudio(
+                        audio.transport,
+                        document.sessionId,
+                        sourceIdentity.object.id,
+                        context,
+                        signal,
+                    ));
                 signal.throwIfAborted();
                 view.source = source;
                 view.gain?.disconnect();
@@ -116,17 +128,22 @@
                     outputRate: context.sampleRate,
                     sourceRate: source.sampleRate,
                 };
-                return prepareSampleDraft(
+                const prepared = await prepareSampleDraft(
                     audio.transport,
                     document.sessionId,
-                    identity.object.id,
-                    identity.editing!,
+                    sourceIdentity.object.id,
+                    sourceIdentity.editing!,
                     values,
                     view.note,
                     context,
                     signal,
                     { source, output: view.gain },
                 );
+                return {
+                    ...prepared,
+                    objectId: identity.object.id,
+                    descriptor: { ...prepared.descriptor, objectId: identity.object.id },
+                };
             });
             await tick();
             if (!monitor && playing && run && cursor > run.start && cursor < run.start + run.length) seek(cursor);
@@ -150,15 +167,17 @@
     <button
         class="audition-button"
         aria-label={playing || busy ? 'Stop draft preview' : 'Play draft'}
-        disabled={!playing && !busy && (disabled || !!document.validation)}
+        disabled={!playing && !busy && (disabled || !!document.validation || !sourceDetail?.editing)}
         onclick={() => (playing || busy ? void audio?.audition.stop() : void play())}
         ><Icon name={playing || busy ? 'stop' : 'play'} size={13} /><span>{playing || busy ? 'Stop' : 'Audition'}</span
         ></button
     >
+    {#if bank}<BankPreview {document} onready={() => void play()} />{/if}
     <button
         class="editor-icon"
         aria-label="Return to wave start"
         title="Return to wave start"
+        disabled={!sourceDetail?.editing}
         onclick={() => {
             view.cursor = Number(document.draft.values['playback.start_frame']);
             seek(view.cursor);
@@ -196,7 +215,7 @@
     {#if audio}<label class="autoplay"><input type="checkbox" bind:checked={audio.audition.autoplay} />Autoplay</label
         >{/if}
     <span class="loop-readout editor-meta"
-        >Loop {(Number(document.draft.values.loop_length_frames) / rate).toFixed(3)} s</span
+        >Loop {(Number(document.draft.values.loop_length_frames ?? 0) / rate).toFixed(3)} s</span
     >
     <span class="transport-status" role="status" title={status}>{status}</span>
     <AttributeHelp

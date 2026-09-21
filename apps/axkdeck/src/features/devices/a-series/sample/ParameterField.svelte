@@ -1,5 +1,7 @@
 <script lang="ts">
     import { getContext } from 'svelte';
+    import { BankDraft } from '../bank/draft.svelte';
+    import BankFieldControl from '../bank/BankFieldControl.svelte';
     import ExtendedParameterMarker from '../../../object-editor/ExtendedParameterMarker.svelte';
     import { formatField, sampleFormatContext, type SampleFormatContext } from './formatCapabilities';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
@@ -70,7 +72,9 @@
         />
         {#if field.extended}<ExtendedParameterMarker />{/if}
     </div>
-    {#if unavailable}
+    {#if draft instanceof BankDraft && (draft.unit(field.key) || snapshot?.blockedParameters.includes(field.key))}
+        <BankFieldControl {field} {draft} disabled={locked || !!readOnlyText} {slider} {oninvalid} />
+    {:else if unavailable}
         <span class="parameter-unavailable"
             >{#if help}<AttributeHelp label={`${field.label}: Unavailable`} description={help}
                     >Unavailable</AttributeHelp

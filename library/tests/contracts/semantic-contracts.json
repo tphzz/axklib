@@ -2,7 +2,7 @@
   "schema_version": "2.0",
   "contracts": [
     {
-      "expected_semantic_sha256": "8543f76da6cb3b1c1e4cfd0b061344a5d41cd769b0ee052246bb1b91ef0d1ade",
+      "expected_semantic_sha256": "ed27d20e002a76790ba5109797eb71f691a7380b85dbe431fbfee77a6572a3ff",
       "id": "current-object-read-multi-sbnk-authored",
       "input_path": "tests/fixtures/images/sampler-authored/HD00_512_multi_sbnk_authored.hds",
       "input_sha256": "733b25eb1b9da4b155ec543f48e0c0f3ab5480dbba587ee80fea5df40dfa0d7d",
@@ -10,7 +10,7 @@
       "verification_class": "verified"
     },
     {
-      "expected_semantic_sha256": "e2506c8dab0ba289c7eeba6abf50267d17d26c095935b6a4826c48e7687233af",
+      "expected_semantic_sha256": "8008cf4ff47bade349c8b08564a868a09eaf8d77808e0568da2cdc6738b55ae2",
       "id": "current-object-read-single-sbnk-authored",
       "input_path": "tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds",
       "input_sha256": "9604f208c23360f2b69c78bc7ae94cf9f9c12cf96ffddb3567dfadd8200cc816",

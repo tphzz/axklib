@@ -1113,9 +1113,8 @@ read-only target previews with changes and blockers; `canConvertFormat` indicate
 whether the image, placement and stored layout support conversion, not whether
 each target is free of blockers. Execution uses `convert_sbnk_format` for a
 Sample or `convert_sbac_format` for a bank, the original payload digest and the
-current image revision, and recomputes the same conversion checks. Banks expose
-this capability without an editable parameter profile. Bank conversion leaves
-members untouched and blocks nonzero pending bank operations. Ordinary Save
+current image revision, and recomputes the same conversion checks. Bank conversion leaves
+members untouched and blocks active bank overrides. Ordinary Save
 never changes format. Stereo restrictions remain in `blockedParameters`; each has an
 explanation in `blockedParameterReasons` and retains its decoded value. These
 metadata fields are not mutation inputs.
@@ -1124,6 +1123,16 @@ return no editor profile. The desktop retains session-only drafts across the
 six Sample editing tabs and object selection. Save applies only the selected
 Sample's changed values, after rechecking its identity; Discard reloads that
 Sample. Undo/redo applies to the unsaved draft and resets after Save.
+Banks expose `editing.profile = a-series/sample-bank` and `bankOverrides` with
+generation-specific `units` (`id`, named `keys`, physical `selectors`, and
+`activeSelectors`) plus ordered member names and nullable resolved object IDs.
+The lower-zone bank editor shows `---` for inherited values and `(---)` for
+parameters which cannot be overridden by banks. Editing activates the complete
+unit, using the selected preview member to seed its other fields. Reset returns
+the unit to individual sample values. Preview selection never changes the editing
+target or writes member Samples. Bank Save submits `update_sample_bank_overrides`
+and preserves member payloads, Wave Data and relationships. Unresolved members
+disable their audition, not otherwise valid bank-only editing.
 Image close/replacement and desktop exit request confirmation for unsaved drafts.
 Unconfirmed writes retain their job identity for status recovery; a refresh
 failure after a confirmed write never resubmits it.

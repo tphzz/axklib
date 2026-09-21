@@ -14,6 +14,7 @@
     import Icon from '../../../../lib/components/Icon.svelte';
     import { parameterBlockReason } from './parameterAvailability';
     import { blockedGraphParameters } from './formatCapabilities';
+    import { BankDraft } from '../bank/draft.svelte';
     let { document, page, disabled }: { document: ObjectEditorDocument; page: SamplePage; disabled: boolean } =
         $props();
     const view = $derived(sampleView(document));
@@ -35,6 +36,10 @@
         scaling ? (page.id === 'level-scaling' ? 'Key to level' : 'Key to cutoff') : `${page.label} envelope`,
     );
     function resetGraph() {
+        if (document.draft instanceof BankDraft) {
+            document.draft.resetUnits(graphFields.map((field) => field.key));
+            return;
+        }
         document.draft.patch(
             Object.fromEntries(
                 graphFields
@@ -53,7 +58,10 @@
 </script>
 
 {#snippet graph()}
-    {#if page.id === 'lfo'}<SampleLfoGraph {document} />
+    {#if document.draft instanceof BankDraft && !document.previewDetail}<p class="editor-meta">
+            {document.previewStatus || 'Select a preview sample'}
+        </p>
+    {:else if page.id === 'lfo'}<SampleLfoGraph {document} />
     {:else if page.id === 'sample-eq'}<SampleEqGraph {document} {disabled} />
     {:else if page.id === 'filter'}<SampleFilterGraph {document} {disabled} />
     {:else}
@@ -94,6 +102,7 @@
         document.detail!.editing!.sampleFormat.format !== 'A3000_188' &&
         document.draft.values.sample_eq_type !== 0}
     {@const filterInactive =
+        !(document.draft instanceof BankDraft) &&
         page.id === 'filter' &&
         field.key !== 'filter_type' &&
         (document.draft.values.filter_type === 0 ||

@@ -637,14 +637,15 @@ describe('App panel layout', () => {
         }
     });
 
-    it('does not open the editor for multi-selection, other object tabs, or pending inspection updates', async () => {
+    it('opens the bank editor but not multi-selection, Wave Data, or late inspection updates', async () => {
         await openSampleSelectionFixture();
         const toggle = screen.getByRole('button', { name: 'Editor panel' });
         await fireEvent.click(screen.getByRole('button', { name: 'Inspect Sample A' }), { ctrlKey: true });
         expect(toggle.getAttribute('aria-pressed')).toBe('false');
         await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
         await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Bank' }));
-        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(toggle);
         await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
         await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Wave' }));
         expect(toggle.getAttribute('aria-pressed')).toBe('false');

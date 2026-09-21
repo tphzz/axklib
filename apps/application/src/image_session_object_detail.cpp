@@ -196,9 +196,9 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"parameterTailOffsetBytes",
                  sample_bank->parameter_tail_offset ? Json(*sample_bank->parameter_tail_offset) : Json(nullptr)},
                 {"rawSampleParameterBlockHex", hex(sample_bank->raw_sample_parameter_block)},
-                {"pendingParameterPropagationWords", sample_bank->pending_parameter_propagation_words},
-                {"pendingParameterNumbers", sample_bank->pending_parameter_numbers},
-                {"reservedPendingParameterNumbers", sample_bank->reserved_pending_parameter_numbers},
+                {"overrideEnableWords", sample_bank->override_enable_words},
+                {"overrideSelectors", sample_bank->override_selectors},
+                {"reservedOverrideSelectors", sample_bank->reserved_override_selectors},
                 {"storedMemberCount", sample_bank->stored_member_count},
                 {"effectiveMemberCount", sample_bank->effective_member_count},
                 {"maximumMemberCount", sample_bank->maximum_member_count},
@@ -402,9 +402,8 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
                                        {"frames", member.frame_count},
                                        {"sampleRate", member.sample_rate}});
         }
-        editing = detail::a_series_sample_editor(
-            snapshot->second, *payload, std::ranges::contains(summary->available_operations, "images.alter.objects"),
-            sources);
+        editing = bank ? detail::a_series_bank_editor(snapshot->second, *payload, writable, relationships)
+                       : detail::a_series_sample_editor(snapshot->second, *payload, writable, sources);
     }
     return Json{{"schemaVersion", 1U},
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},

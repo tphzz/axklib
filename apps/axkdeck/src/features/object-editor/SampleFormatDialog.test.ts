@@ -62,9 +62,9 @@ describe('Sample format UI', () => {
                         changes: [],
                         blockers: [
                             {
-                                key: 'pending_parameters',
+                                key: 'active_overrides',
                                 storedValue: null,
-                                message: 'Pending bank operations cannot be converted or discarded.',
+                                message: 'Active bank overrides cannot be converted or discarded.',
                             },
                         ],
                     },
@@ -74,7 +74,7 @@ describe('Sample format UI', () => {
         await waitFor(() =>
             expect((view.getByRole('button', { name: /^Convert$/ }) as HTMLButtonElement).disabled).toBe(true),
         );
-        expect(view.getByText(/Pending bank operations/)).toBeTruthy();
+        expect(view.getByText(/Active bank overrides/)).toBeTruthy();
         expect((view.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
     });
     it('uses one explicit confirmation without technical storage details or a checkbox', async () => {

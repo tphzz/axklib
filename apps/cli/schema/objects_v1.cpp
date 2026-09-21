@@ -127,9 +127,9 @@ OrderedJson decoded_json(const DecodedObject &object) {
                                               ? OrderedJson(*sample_bank->parameter_tail_offset)
                                               : OrderedJson(nullptr)},
                 {"raw_sample_parameter_block_hex", hex(sample_bank->raw_sample_parameter_block)},
-                {"pending_parameter_propagation_words", sample_bank->pending_parameter_propagation_words},
-                {"pending_parameter_numbers", sample_bank->pending_parameter_numbers},
-                {"reserved_pending_parameter_numbers", sample_bank->reserved_pending_parameter_numbers},
+                {"override_enable_words", sample_bank->override_enable_words},
+                {"override_selectors", sample_bank->override_selectors},
+                {"reserved_override_selectors", sample_bank->reserved_override_selectors},
                 {"stored_member_count", sample_bank->stored_member_count},
                 {"effective_member_count", sample_bank->effective_member_count},
                 {"maximum_member_count", sample_bank->maximum_member_count},

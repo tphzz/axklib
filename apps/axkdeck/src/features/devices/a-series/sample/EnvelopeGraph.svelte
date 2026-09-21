@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { BankDraft } from '../bank/draft.svelte';
     import type { Snippet } from 'svelte';
     import ParameterGraph, { type PlotHandle } from '../../../object-editor/ParameterGraph.svelte';
     import type { EditorDraft } from '../../../object-editor/draft.svelte';
@@ -37,7 +38,7 @@
                           {
                               id: String(index),
                               label: index === 4 ? 'Release' : point.label,
-                              readout: `${point.y}${point.rateParameter ? `, ${point.rateParameter.split('.')[1]!.replace('_', ' ')} ${draft.values[point.rateParameter] ?? 'Unavailable'}` : ''}`,
+                              readout: `${point.y}${point.rateParameter ? `, ${point.rateParameter.split('.')[1]!.replace('_', ' ')} ${draft.values[point.rateParameter] ?? 'Unavailable'}` : ''}${draft instanceof BankDraft ? `. ${draft.sourceDescription([point.parameter, point.rateParameter].filter((key): key is string => !!key))}` : ''}`,
                               help: `${canEdit(point.rateParameter) ? 'Drag horizontally to adjust the rate. Left shortens the stage; Right lengthens it. ' : ''}${canEdit(point.parameter) ? 'Drag vertically or use Up/Down to adjust the level. ' : ''}Shift-drag is finer; Shift+arrows moves by 8. Home/End selects the limits.`,
                               x: x(index),
                               y: y(point.y),

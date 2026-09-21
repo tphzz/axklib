@@ -2320,6 +2320,10 @@
       "ASeriesSampleEditor": {
         "type": "object",
         "additionalProperties": false,
+        "oneOf": [
+          {"type": "object", "properties": {"profile": {"const": "a-series/sample"}}},
+          {"type": "object", "required": ["bankOverrides"], "properties": {"profile": {"const": "a-series/sample-bank"}}}
+        ],
         "required": [
           "profile",
           "editable",
@@ -2341,8 +2345,40 @@
         ],
         "properties": {
           "profile": {
-            "type": "string",
-            "const": "a-series/sample"
+            "type": "string"
+          },
+          "bankOverrides": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["units", "members"],
+            "properties": {
+              "units": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "keys", "selectors", "activeSelectors"],
+                  "properties": {
+                    "id": {"type": "integer", "minimum": 0, "maximum": 88},
+                    "keys": {"type": "array", "items": {"type": "string"}},
+                    "selectors": {"type": "array", "items": {"type": "integer"}},
+                    "activeSelectors": {"type": "array", "items": {"type": "integer"}}
+                  }
+                }
+              },
+              "members": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "objectId"],
+                  "properties": {
+                    "name": {"type": "string"},
+                    "objectId": {"type": ["string", "null"]}
+                  }
+                }
+              }
+            }
           },
           "editable": {
             "type": "boolean"
@@ -5294,7 +5330,8 @@
               "RETARGET_SAMPLE_WAVE_DATA",
               "DUPLICATE_SBNK",
               "CONVERT_SBNK_FORMAT",
-              "CONVERT_SBAC_FORMAT"
+              "CONVERT_SBAC_FORMAT",
+              "UPDATE_SAMPLE_BANK_OVERRIDES"
             ],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
@@ -5328,7 +5365,8 @@
               "RETARGET_SAMPLE_WAVE_DATA": "retarget_sample_wave_data",
               "DUPLICATE_SBNK": "duplicate_sbnk",
               "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
-              "CONVERT_SBAC_FORMAT": "convert_sbac_format"
+              "CONVERT_SBAC_FORMAT": "convert_sbac_format",
+              "UPDATE_SAMPLE_BANK_OVERRIDES": "update_sample_bank_overrides"
             }
           },
           "partitionIndex": {

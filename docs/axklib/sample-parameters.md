@@ -226,7 +226,9 @@ public input.
 `parameter_overrides` replaces only the supplied fields in that state and
 applies exactly those fields to every member Sample. Unspecified fields are not
 propagated, so each member retains its own values. Application is atomic and the
-Sample Bank's pending-propagation bits remain clear.
+Sample Bank's override-enable bits remain clear. This authoring option changes
+stored member values; it is distinct from reversible bank-only editing through
+`update_sample_bank_overrides`.
 Bank overrides must be representable in the bank and every affected member's
 own stored format. A failure rejects the entire transaction; neither bank nor
 member storage is promoted implicitly. Both native prefix-only banks and later
@@ -245,7 +247,8 @@ The following object state is deliberately not public authoring input:
 | Per-member sample rate | Derived from each referenced Wave Data object. |
 | Full per-member wave-start addresses and playback lengths | Derived from `playback_window` and its source-dependent defaults when creating or inserting a Sample; nonzero starts are supported. An existing Sample update can explicitly supply `playback_window`, validated jointly with its resulting loops. Otherwise parameter updates and retargeting preserve the stored window. |
 | Pitch, loop-end, Program-portamento, and other playback caches | Recomputed when their public source values change. |
-| Linked Program bitmaps and Sample Bank pending-propagation state | Derived from relationships; pending bits are clear after immediate application. |
+| Linked Program bitmaps | Derived from relationships. |
+| Raw Sample Bank override-enable words | Use the typed bank override operation, never raw masks. Fresh authoring and immediate member updates leave enables clear. |
 | Reserved bytes and opaque packed-bit lanes | Canonical defaults in fresh objects and byte-preserved in existing objects. |
 
 JSON rejects these as unknown fields rather than accepting raw offsets, caches,

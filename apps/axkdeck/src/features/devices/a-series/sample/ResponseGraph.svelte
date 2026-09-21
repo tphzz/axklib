@@ -6,6 +6,7 @@
     import type { SampleEnvelope } from './envelope';
     import type { GraphPoint } from '../../../object-editor/graphTypes';
     import { noteName } from './geometry';
+    import { BankDraft } from '../bank/draft.svelte';
     let {
         draft,
         page,
@@ -31,7 +32,7 @@
         levelKeys.map((parameter, i) => ({
             x: Number(draft.values[`${prefix}_scaling_break${i + 1}`] ?? 0),
             y: Number(draft.values[parameter] ?? 0),
-            label: `Point ${i + 1}`,
+            label: `Point ${i + 1}${draft instanceof BankDraft ? `. ${draft.sourceDescription([parameter, `${prefix}_scaling_break${i + 1}`])}` : ''}`,
             parameter,
             movableX: true,
             disabled:

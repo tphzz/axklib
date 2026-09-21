@@ -38,6 +38,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"duplicate_sbnk"},
         std::string_view{"convert_sbnk_format"},
         std::string_view{"convert_sbac_format"},
+        std::string_view{"update_sample_bank_overrides"},
     };
     return names[operation.index()];
 }

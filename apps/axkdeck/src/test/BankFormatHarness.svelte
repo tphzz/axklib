@@ -53,9 +53,9 @@
             capability.formatConversions[0]!.allowed = false;
             capability.formatConversions[0]!.blockers = [
                 {
-                    key: 'pending_parameters',
+                    key: 'active_overrides',
                     storedValue: null,
-                    message: 'Pending bank parameter operations cannot be converted or discarded.',
+                    message: 'Active bank overrides cannot be converted or discarded.',
                 },
             ];
         }

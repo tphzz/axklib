@@ -1,5 +1,5 @@
 import type { ObjectDetail } from '../../../../lib/transport';
-import type { ObjectParameterEdit, SampleEditingSnapshot } from '../../../../lib/objectEditing';
+import type { SampleParameterEdit, SampleEditingSnapshot } from '../../../../lib/objectEditing';
 import type { EditorValues } from '../../../object-editor/draft.svelte';
 import { sampleFields } from './fields';
 import { formatField, parameterAllowed } from './formatCapabilities';
@@ -21,7 +21,7 @@ export function sampleValues(snapshot: SampleEditingSnapshot): EditorValues {
     return result;
 }
 
-export function sampleEdit(detail: ObjectDetail, changes: EditorValues, values: EditorValues): ObjectParameterEdit {
+export function sampleEdit(detail: ObjectDetail, changes: EditorValues, values: EditorValues): SampleParameterEdit {
     const snapshot = detail.editing!;
     const parameters: Record<string, unknown> = {};
     for (const [path, value] of Object.entries(changes)) {

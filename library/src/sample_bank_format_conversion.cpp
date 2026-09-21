@@ -32,8 +32,8 @@ SampleFormatConversionPlan plan_sample_bank_format_conversion(std::span<const st
         plan.blockers.push_back({"header", "Uninterpreted header data would be changed by conversion.", {}});
     for (std::size_t word = 0; word < 3; ++word) {
         if (*reader.be32(0x134U + word * 4U) != 0U)
-            plan.blockers.push_back({"pending_parameters",
-                                     "This bank has pending parameter operations whose format "
+            plan.blockers.push_back({"active_overrides",
+                                     "This bank has active overrides whose format "
                                      "conversion is not yet supported. They cannot be discarded.",
                                      {}});
     }

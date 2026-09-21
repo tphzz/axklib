@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
+    import { BankDraft } from '../bank/draft.svelte';
     import { blockedGraphParameters } from './formatCapabilities';
     import EqualizerGraph from '../../../object-editor/EqualizerGraph.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
@@ -18,7 +19,11 @@
     let { document, disabled }: { document: ObjectEditorDocument; disabled: boolean } = $props();
     const keys = ['sample_eq_type', 'sample_eq_frequency', 'sample_eq_gain_db', 'sample_eq_width_tenths'];
     const values = $derived(document.draft.values);
-    const native = $derived(document.detail!.editing!.sampleFormat.format === 'A3000_188');
+    const inherited = $derived(
+        document.draft instanceof BankDraft && !document.draft.isOverridden('sample_eq_frequency'),
+    );
+    const sourceSnapshot = $derived(inherited ? document.previewDetail?.editing : document.detail!.editing);
+    const native = $derived(sourceSnapshot?.sampleFormat.format === 'A3000_188');
     const available = $derived(
         keys.every((key) => (native && key === 'sample_eq_type') || Number.isFinite(values[key])),
     );
@@ -26,11 +31,11 @@
     const frequency = $derived(Number(values.sample_eq_frequency));
     const gain = $derived(Number(values.sample_eq_gain_db));
     const width = $derived(Number(values.sample_eq_width_tenths));
-    const dirty = $derived(keys.some((key) => values[key] !== document.draft.baselineValue(key)));
+    const dirty = $derived(!inherited && keys.some((key) => key in document.draft.changes));
     let showCoefficients = $state(false);
     const parameters = $derived(available ? eqParameterCoefficients(type, frequency, gain, width) : []);
     const calculated = $derived(available ? eqCoefficients(type, frequency, gain, width) : []);
-    const stored = $derived(document.detail!.editing!.eqCoefficients);
+    const stored = $derived(sourceSnapshot?.eqCoefficients);
     const coefficients = $derived(dirty ? calculated : stored);
     const points = $derived(
         available
@@ -111,7 +116,7 @@
         {tools}
         frequency={eqFrequencyPosition(frequency)}
         {gain}
-        readout={`${eqFrequencyLabel(frequency)}, ${gain} dB${type === 0 ? `, width ${width / 10}` : ''}${eqEffectiveGain(type, frequency, gain) !== gain ? ` (effective ${eqEffectiveGain(type, frequency, gain)} dB)` : ''}`}
+        readout={`${eqFrequencyLabel(frequency)}, ${gain} dB${type === 0 ? `, width ${width / 10}` : ''}${eqEffectiveGain(type, frequency, gain) !== gain ? ` (effective ${eqEffectiveGain(type, frequency, gain)} dB)` : ''}${document.draft instanceof BankDraft ? `. ${document.draft.sourceDescription(['sample_eq_frequency'])}` : ''}`}
         {disabled}
         blocked={[
             ...(!canEdit('sample_eq_frequency') ? ['frequency'] : []),

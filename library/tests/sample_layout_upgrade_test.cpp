@@ -79,7 +79,7 @@ TEST(SampleAuthoringFormat, BankHeadersCapacityAndNativeDefaultsAreGenerationSpe
             EXPECT_EQ(stored.maximum_member_count, std::max(8U, count));
             EXPECT_EQ(stored.stored_member_count, count);
             EXPECT_EQ(stored.parameter_tail_offset.has_value(), !native);
-            EXPECT_TRUE(stored.pending_parameter_numbers.empty());
+            EXPECT_TRUE(stored.override_selectors.empty());
             for (const auto offset : {0x90U, 0x91U, 0x9fU, 0xa0U, 0x144U + 1U})
                 EXPECT_EQ((*payload)[offset], std::byte{0});
             if (native) {

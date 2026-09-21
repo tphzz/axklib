@@ -75,6 +75,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return duplicate_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)
                     return update_sample_bank_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateSampleBankOverridesOperation>)
+                    return update_sample_bank_overrides(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>)
                     return update_wave_data_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertWaveformOperation>)

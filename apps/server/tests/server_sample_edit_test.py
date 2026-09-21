@@ -212,7 +212,8 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         bank = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["name"] == "Format bank")
         bank_path = f"{base}/objects/{bank['id']}"
         bank_detail = get(bank_path)
-        assert bank_detail["editing"] is None
+        assert bank_detail["editing"]["profile"] == "a-series/sample-bank"
+        assert bank_detail["editing"]["bankOverrides"]["members"] == [{"name": sample["name"], "objectId": sample["id"]}]
         members = {item["id"]: get(f"{base}/objects/{item['id']}")["formatConversion"]["payloadSha256"]
                    for item in after if item["type"] == "SBNK"}
         def relationship_values(snapshot: Any) -> Any:
@@ -233,7 +234,26 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             assert bank_detail["object"]["id"] == bank["id"]
             assert bank_detail["object"]["sampleFormat"]["format"] == target.upper()
             assert relationship_values(bank_detail) == relationships
-            assert bank_detail["editing"] is None
+            assert bank_detail["editing"]["profile"] == "a-series/sample-bank"
+            editing = bank_detail["editing"]
+            units = {unit["id"]: unit for unit in editing["bankOverrides"]["units"]}
+            assert units[65]["keys"] == ["aeg.attack_rate", "aeg.decay_rate", "aeg.release_rate"]
+            assert units[49]["selectors"] == ([49, 50, 51] if target == "a3000_188" else [49, 50, 51, 85])
+            assert "root_key" in editing["blockedParameters"]
+            for active in (True, False):
+                change = {"id": f"overrides-{target}-{active}", "type": "update_sample_bank_overrides",
+                          "partition_index": editing["partitionIndex"], "volume_name": editing["volumeName"],
+                          "sample_bank_name": bank["name"], "expected_payload_sha256": editing["payloadSha256"],
+                          "parameters": {"level": 81} if active else {},
+                          "enable": [33] if active else [], "disable": [] if active else [33]}
+                alter(bank_detail, change)
+                bank_detail = get(bank_path)
+                editing = bank_detail["editing"]
+                assert editing["editable"] and editing["parameters"]["level"] == 81
+                assert next(unit for unit in editing["bankOverrides"]["units"] if unit["id"] == 33)["activeSelectors"] == ([33] if active else [])
+                assert relationship_values(bank_detail) == relationships
+                for member, digest in members.items():
+                    assert get(f"{base}/objects/{member}")["editing"]["payloadSha256"] == digest
             for member, digest in members.items():
                 assert get(f"{base}/objects/{member}")["formatConversion"]["payloadSha256"] == digest
             refreshed = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["id"] == bank["id"])

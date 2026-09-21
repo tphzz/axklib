@@ -118,6 +118,11 @@ export class SampleDuplication {
             source.draft.changes,
             source.draft.values,
         );
+        if (edit.operation.type !== 'update_sbnk_parameters') {
+            this.phase = 'editable';
+            this.message = 'Only Samples can be duplicated here';
+            return;
+        }
         this.submittedName = this.name.trim();
         this.phase = 'writing';
         this.message = 'Duplicating Sample';

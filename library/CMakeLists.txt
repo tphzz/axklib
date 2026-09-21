@@ -179,6 +179,7 @@ add_library(
   src/sample_format_conversion.cpp
   src/sample_bank_format_conversion.cpp
   src/sample_parameter_codec.cpp
+  src/sample_bank_overrides.cpp
   src/system_registered_program.cpp
   src/system_registered_sample.cpp
   src/system_recording.cpp
@@ -270,6 +271,8 @@ add_library(
   src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
   src/alteration_sample_bank_parameters.cpp
+  src/alteration_sample_bank_overrides.cpp
+  src/alteration_manifest_bank_overrides.cpp
   src/alteration_wave_data_parameters.cpp
   src/alteration_manifest_program_replacement.cpp
   src/alteration_program_replacement.cpp
@@ -650,6 +653,7 @@ if(BUILD_TESTING)
     tests/sample_parameter_edit_validation_test.cpp
     tests/sample_layout_upgrade_test.cpp
     tests/sample_bank_format_conversion_test.cpp
+    tests/sample_bank_overrides_test.cpp
     tests/wave_data_parameter_alteration_test.cpp
     tests/program_assignment_replacement_test.cpp
     tests/sample_playback_window_test.cpp

@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { Snippet } from 'svelte';
+    import { getContext, type Snippet } from 'svelte';
+    import { editorScrollContext, rememberEditorScroll, type EditorScroll } from './editorScroll';
     import { measureWidth } from './measureWidth';
     import { graphLayout, graphSplitRatio } from './graphLayout.svelte';
     import Splitter from '../../lib/components/Splitter.svelte';
     let { graph, controls, label }: { graph: Snippet; controls: Snippet; label: string } = $props();
     let host: HTMLDivElement;
+    const scroll = getContext<(() => EditorScroll) | undefined>(editorScrollContext);
     let width = $state(0);
     const ratio = $derived(graphSplitRatio(graphLayout.ratio, width - 8));
     function resize(event: PointerEvent) {
@@ -39,7 +41,13 @@
                 );
             }}
         />{/if}
-    <div class="graph-controls" use:measureWidth={{ scope: 'controls' }} role="group" aria-label={`${label} controls`}>
+    <div
+        class="graph-controls"
+        use:measureWidth={{ scope: 'controls' }}
+        use:rememberEditorScroll={scroll ? { ...scroll(), key: `${scroll().key}:controls` } : undefined}
+        role="group"
+        aria-label={`${label} controls`}
+    >
         {@render controls()}
     </div>
 </div>

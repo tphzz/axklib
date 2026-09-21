@@ -584,9 +584,10 @@ Result<void> detail::apply_sample_bank_parameters_to_payload(std::vector<std::by
     if (!bank->storage.structurally_valid)
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample Bank storage header is unsupported")};
-    if (std::ranges::any_of(bank->pending_parameter_propagation_words, [](auto word) { return word != 0U; }))
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample Bank has pending parameter propagation")};
+    if (std::ranges::any_of(bank->override_enable_words, [](auto word) { return word != 0U; }))
+        return std::unexpected{
+            make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                       "Sample Bank has active overrides; use bank-only editing or clear them first")};
     auto parameters = bank->raw_sample_parameter_block;
     if (auto applied = apply_sbac_parameter_overrides(
             parameters, overrides, native ? SampleStorageFormat::a3000_188 : SampleStorageFormat::a4000_a5000_224);

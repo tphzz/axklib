@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { onDestroy, untrack } from 'svelte';
     import { AuditionController, type AuditionState } from '../lib/audio/auditionController';
     import { fixtureFrames, fixtureRate, fixtureWave, fixtureBins } from './sampleEditorAudio';
     import DeviceEditorHost from '../features/object-editor/DeviceEditorHost.svelte';
@@ -18,7 +18,10 @@
         SampleStorageFormat,
     } from '../lib/objectEditing';
     import type { InspectorSelection } from '../lib/types';
-    let selected = $state('Sample A');
+    import { bankEditorUnits } from './bankEditorFixture';
+    let { bank = false }: { bank?: boolean } = $props();
+    let selected = $state(untrack(() => (bank ? 'Bank A' : 'Sample A')));
+    const bankOverrides = new Map<string, Set<number>>();
     let lowerOpen = $state(false);
     let writes = $state(0);
     let names = $state(['Sample A', 'Sample B', 'Sample C with a very long name that must truncate in narrow panes']);
@@ -69,10 +72,20 @@
         }
     }
     function detail(name: string): ObjectDetail {
-        const format = sampleFormatFixture(storedFormats[name] ?? (stereo ? 'A3000_188' : 'A4000_A5000_224'));
+        const isBank = bank && name.startsWith('Bank');
+        const format = sampleFormatFixture(
+            storedFormats[name] ?? ((bank && !isBank ? name === 'Member A' : stereo) ? 'A3000_188' : 'A4000_A5000_224'),
+        );
         const currentParameters = structuredClone(
             copies.get(name) ?? { ...parameters, ...(name === 'Sample B' ? { level: 75, root_key: 64 } : {}) },
         );
+        if (bank && !isBank) {
+            Object.assign(currentParameters, {
+                level: name === 'Member A' ? 60 : 90,
+                sample_eq_type: name === 'Member A' ? 0 : 2,
+            });
+            Object.assign(currentParameters.aeg as object, { attack_rate: 90, decay_rate: 91, release_rate: 92 });
+        }
         for (const [key, capability] of Object.entries(format.parameterCapabilities)) {
             if (capability.available) continue;
             const keys = key.split('.');
@@ -82,16 +95,27 @@
         }
         return {
             image: { revision: writes + 1 },
-            object: { id: name, key: name, name },
+            object: { id: name, key: name, name, type: isBank ? 'SBAC' : 'SBNK' },
             formatConversion: sampleConversionFixture(format.sampleFormat.format, { volumeName: 'Test' }),
             editing: {
-                profile: 'a-series/sample',
+                profile: isBank ? 'a-series/sample-bank' : 'a-series/sample',
                 editable: true,
                 reason: '',
                 payloadSha256: 'a'.repeat(64),
                 parameters: currentParameters,
                 eqCoefficients: [-15904, 7738, 8192, 15904, -7738],
-                blockedParameters: [],
+                blockedParameters: isBank
+                    ? [
+                          'root_key',
+                          'fine_tune_cents',
+                          'key_low',
+                          'key_high',
+                          'loop_mode',
+                          'loop_tempo_hundredths',
+                          'loop_start_frame',
+                          'loop_length_frames',
+                      ]
+                    : [],
                 blockedParameterReasons: {},
                 ...format,
                 unavailableParameters,
@@ -101,6 +125,21 @@
                 canEditPlayback: true,
                 maximumFrames: fixtureFrames,
                 sources: [],
+                ...(isBank
+                    ? {
+                          bankOverrides: {
+                              units: bankEditorUnits(
+                                  format.sampleFormat.format === 'A3000_188',
+                                  bankOverrides.get(name) ?? new Set(),
+                              ),
+                              members: [
+                                  { name: 'Member A', objectId: 'Member A' },
+                                  { name: 'Member B', objectId: 'Member B' },
+                                  { name: 'Missing member', objectId: null },
+                              ],
+                          },
+                      }
+                    : {}),
             },
         } as unknown as ObjectDetail;
     }
@@ -108,7 +147,16 @@
         objectDetail: async (_: number, id: string) => detail(id),
         startObjectParameterEdit: async (_: number, edit: ObjectParameterEdit) => {
             writes++;
-            patchParameters(parameters, edit.operation.parameters);
+            if (edit.operation.type === 'update_sample_bank_overrides') {
+                const name = edit.operation.sample_bank_name;
+                const stored = copies.get(name) ?? structuredClone(parameters);
+                patchParameters(stored, edit.operation.parameters);
+                copies.set(name, stored);
+                const enabled = bankOverrides.get(name) ?? new Set<number>();
+                edit.operation.enable.forEach((id) => enabled.add(id));
+                edit.operation.disable.forEach((id) => enabled.delete(id));
+                bankOverrides.set(name, enabled);
+            } else patchParameters(parameters, edit.operation.parameters);
             return { jobId: 1, kind: 'edit', status: 'queued' };
         },
         startSampleDuplication: async (_: number, edit: SampleDuplicationRequest) => {
@@ -198,7 +246,7 @@
         refreshEditorWorkspace: async (refresh: () => Promise<void>) => refresh(),
     } as unknown as AuditionWorkflow;
     const selection = $derived({
-        kind: 'sample',
+        kind: bank ? 'sample-bank' : 'sample',
         item: { objectId: selected },
         preview: {
             preview: {
@@ -214,8 +262,8 @@
 </script>
 
 <nav>
-    <button onclick={() => (selected = 'Sample A')}>Select A</button><button onclick={() => (selected = 'Sample B')}
-        >Select B</button
+    <button onclick={() => (selected = bank ? 'Bank A' : 'Sample A')}>Select A</button><button
+        onclick={() => (selected = bank ? 'Bank B' : 'Sample B')}>Select B</button
     ><output aria-label="Write count">{writes}</output>
     <button
         onclick={async () => {

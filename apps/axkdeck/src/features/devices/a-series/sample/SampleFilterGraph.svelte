@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { BankDraft } from '../bank/draft.svelte';
     import { blockedGraphParameters } from './formatCapabilities';
     import { onDestroy } from 'svelte';
     import FilterGraph from '../../../object-editor/FilterGraph.svelte';
@@ -25,6 +26,8 @@
     const stages = $derived(available ? sampleFilterStages(type, cutoff, q, distance) : []);
     const graphBlocked = $derived(blockedGraphParameters(document.detail!.editing!));
     const canEdit = (key: string) => !disabled && type !== 0 && available && !graphBlocked.includes(key);
+    const origin = (keys: string[]) =>
+        document.draft instanceof BankDraft ? `. ${document.draft.sourceDescription(keys)}` : '';
     const handles = $derived<Omit<PlotHandle, 'y'>[]>(
         type === 0 || !available
             ? []
@@ -32,7 +35,7 @@
                   {
                       id: 'cutoff-q',
                       label: 'Filter cutoff / Q',
-                      readout: `${cutoff}, Q / Width ${q}`,
+                      readout: `${cutoff}, Q / Width ${q}${origin(['filter_cutoff', 'filter_q_width'])}`,
                       help: 'Drag horizontally for cutoff. Mouse wheel or Alt-drag adjusts Q / Width. Shift gives finer movement. Left/Right adjusts cutoff; Up/Down adjusts Q / Width.',
                       x: cutoff / 127,
                       horizontal: canEdit('filter_cutoff'),
@@ -43,7 +46,7 @@
                             {
                                 id: 'distance',
                                 label: 'Cutoff distance',
-                                readout: `${distance}, Q / Width ${q}`,
+                                readout: `${distance}, Q / Width ${q}${origin(['filter_cutoff_distance', 'filter_q_width'])}`,
                                 help: 'Drag horizontally for cutoff distance. Mouse wheel or Alt-drag adjusts Q / Width. Shift gives finer movement. Left/Right adjusts distance; Up/Down adjusts Q / Width.',
                                 x: (cutoff + distance) / 127,
                                 horizontal: canEdit('filter_cutoff_distance'),
@@ -54,7 +57,7 @@
                   {
                       id: 'gain',
                       label: 'Filter gain',
-                      readout: String(gain),
+                      readout: `${gain}${origin(['filter_gain'])}`,
                       x: 0.15,
                       trace: 'filter',
                       vertical: true,

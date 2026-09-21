@@ -90,7 +90,7 @@ describe('graphical Sample controls', () => {
         const { draft, view } = setup('level-scaling');
         flushSync(() => {
             const { level_scaling_break2: _missing, ...values } = draft.values;
-            draft.values = values;
+            draft.storedValues = values;
         });
         expect((view.getByRole('button', { name: /^Point 1:/ }) as HTMLButtonElement).disabled).toBe(true);
         expect((view.getByRole('button', { name: /^Point 2:/ }) as HTMLButtonElement).disabled).toBe(true);

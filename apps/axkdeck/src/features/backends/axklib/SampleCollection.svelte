@@ -93,6 +93,10 @@
 <ContainedObjectWorkspace
     {...props}
     onsampleselect={select}
+    onsamplebankselect={(item) => {
+        lowerOpen = true;
+        props.onsamplebankselect(item);
+    }}
     onselectionchange={selectionChanged}
     onduplicatesample={props.view === 'samples' && props.objectRenameAvailable && editors ? duplicate : undefined}
     onconvertsample={editors && sessionId !== null

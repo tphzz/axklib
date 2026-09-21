@@ -665,9 +665,9 @@ Sample Bank fields:
 | `parameter_overrides` | Optional non-empty [Sample parameter object](sample-parameters.md), applied atomically to every member Sample and stored as the Sample Bank's current parameter state. |
 
 Fresh Sample Banks use the selected generation's parameter defaults. Semantic
-overrides are applied immediately to the member Samples, so the three pending
-propagation bitmaps remain clear. Their linked-Program bitmaps are derived from
-the authored Program assignments. Raw pending or relationship-bitmap authoring
+overrides are applied immediately to the member Samples, so the three override-enable
+bitmaps remain clear. Their linked-Program bitmaps are derived from
+the authored Program assignments. Raw override or relationship-bitmap authoring
 is not exposed.
 
 The same `storage_format` field is accepted by `insert_sbnk` and `insert_sbac`
@@ -799,7 +799,7 @@ An `insert_sbac` object contains `name` and `member_samples`, an array of
 one to 127 distinct existing Sample names. It may also contain the same
 non-empty semantic `parameter_overrides` object accepted by authored Sample
 Banks. The overrides are applied immediately to every member Sample and stored
-as the bank's current parameter state; raw pending propagation state cannot be
+as the bank's current parameter state; raw override-enable words cannot be
 authored. Samples may be mono, stereo, or single-source expanded mono. If a
 member already belongs to another Sample Bank, the transaction removes that
 membership and moves the Sample into the new bank; the source bank remains with

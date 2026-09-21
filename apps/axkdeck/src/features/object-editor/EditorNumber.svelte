@@ -12,6 +12,7 @@
         disabled = false,
         slider = true,
         resetValue,
+        inherited = false,
         onchange,
         onbegin = () => {},
         onend = () => {},
@@ -28,6 +29,7 @@
         disabled?: boolean;
         slider?: boolean;
         resetValue?: number;
+        inherited?: boolean;
         onchange: (value: number) => void;
         onbegin?: () => void;
         onend?: () => void;
@@ -40,7 +42,7 @@
             Number(((next - offset) / scale).toFixed(Math.min(6, Math.max(0, Math.ceil(Math.log10(scale / step)))))),
         );
     $effect(() => {
-        text = value === undefined ? '' : display(value);
+        text = inherited || value === undefined ? '' : display(value);
     });
     function invalid(message: string) {
         error = message;
@@ -65,7 +67,7 @@
     function finish() {
         onend();
         if (error) {
-            text = value === undefined ? '' : display(value);
+            text = inherited || value === undefined ? '' : display(value);
             invalid('');
         }
     }
@@ -75,7 +77,7 @@
     });
 </script>
 
-<div class="editor-number" class:bipolar={min < 0 && max > 0}>
+<div class="editor-number" class:bipolar={min < 0 && max > 0} class:inherited>
     {#if slider}
         <input
             class="editor-slider"
@@ -128,7 +130,7 @@
             max={(max - offset) / scale}
             step={step / scale}
             value={text}
-            placeholder="Unavailable"
+            placeholder={inherited ? '---' : 'Unavailable'}
             disabled={disabled || value === undefined}
             oninput={edit}
             onblur={finish}

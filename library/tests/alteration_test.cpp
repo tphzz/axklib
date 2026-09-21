@@ -2015,8 +2015,8 @@ TEST(Alteration, AppliesSampleBankOverridesToMembersAndClearsPendingState) {
     const auto *decoded_bank = std::get_if<axk::CurrentSbac>(&bank->object.payload);
     ASSERT_NE(decoded_bank, nullptr);
     ASSERT_EQ(decoded_bank->slots.size(), 2U);
-    EXPECT_TRUE(decoded_bank->pending_parameter_numbers.empty());
-    EXPECT_TRUE(decoded_bank->reserved_pending_parameter_numbers.empty());
+    EXPECT_TRUE(decoded_bank->override_selectors.empty());
+    EXPECT_TRUE(decoded_bank->reserved_override_selectors.empty());
     EXPECT_EQ(bank->raw_payload[0xdaU], std::byte{91});
     EXPECT_EQ(bank->raw_payload[0xf6U], std::byte{73});
     EXPECT_EQ(bank->raw_payload[0x117U], std::byte{87});

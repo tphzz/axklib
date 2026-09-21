@@ -328,7 +328,7 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     constexpr std::size_t parameter_prefix_offset = 0x78U;
     constexpr std::size_t parameter_prefix_size = 0xbcU;
     constexpr std::size_t parameter_tail_size = 0x24U;
-    constexpr std::size_t pending_parameter_bitmap_offset = 0x134U;
+    constexpr std::size_t override_bitmap_offset = 0x134U;
     constexpr std::size_t member_count_offset = 0x144U;
     constexpr std::size_t first_member_offset = 0x14cU;
     constexpr std::size_t member_size = 0x14U;
@@ -363,20 +363,20 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
         std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(*result.parameter_tail_offset), parameter_tail_size,
                     result.raw_sample_parameter_block.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_size));
     }
-    for (std::size_t word_index = 0; word_index < result.pending_parameter_propagation_words.size(); ++word_index) {
-        const auto word = reader.be32(pending_parameter_bitmap_offset + word_index * 4U);
+    for (std::size_t word_index = 0; word_index < result.override_enable_words.size(); ++word_index) {
+        const auto word = reader.be32(override_bitmap_offset + word_index * 4U);
         if (!word) {
             return std::unexpected{word.error()};
         }
-        result.pending_parameter_propagation_words[word_index] = *word;
+        result.override_enable_words[word_index] = *word;
         for (std::uint8_t bit = 0; bit < 32U; ++bit) {
             if ((*word & (std::uint32_t{1} << bit)) == 0) {
                 continue;
             }
             const auto number = static_cast<std::uint8_t>(word_index * 32U + bit);
             (number <= (result.storage.format == SampleStorageFormat::a3000_188 ? 84U : 88U)
-                 ? result.pending_parameter_numbers
-                 : result.reserved_pending_parameter_numbers)
+                 ? result.override_selectors
+                 : result.reserved_override_selectors)
                 .push_back(number);
         }
     }

@@ -1913,7 +1913,8 @@ export interface components {
                 | 'RETARGET_SAMPLE_WAVE_DATA'
                 | 'DUPLICATE_SBNK'
                 | 'CONVERT_SBNK_FORMAT'
-                | 'CONVERT_SBAC_FORMAT';
+                | 'CONVERT_SBAC_FORMAT'
+                | 'UPDATE_SAMPLE_BANK_OVERRIDES';
             volumeName: string;
         };
         AlterationSummary: {
@@ -1951,6 +1952,18 @@ export interface components {
             maximumWebsocketDeliveryEvents: number;
         };
         ASeriesSampleEditor: {
+            bankOverrides?: {
+                members: {
+                    name: string;
+                    objectId: string | null;
+                }[];
+                units: {
+                    activeSelectors: number[];
+                    id: number;
+                    keys: string[];
+                    selectors: number[];
+                }[];
+            };
             /** @description User-facing reason for each blocked parameter path. */
             blockedParameterReasons: {
                 [key: string]: string;
@@ -1968,8 +1981,7 @@ export interface components {
             partitionIndex: number;
             payloadSha256: string;
             playbackWindow: components['schemas']['SamplePlaybackWindow'];
-            /** @constant */
-            profile: 'a-series/sample';
+            profile: string;
             reason: string;
             sampleFormat: components['schemas']['SampleFormatMetadata'];
             sources: {
@@ -1987,7 +1999,16 @@ export interface components {
                 };
             };
             volumeName: string;
-        };
+        } & (
+            | {
+                  /** @constant */
+                  profile?: 'a-series/sample';
+              }
+            | {
+                  /** @constant */
+                  profile?: 'a-series/sample-bank';
+              }
+        );
         ASeriesSampleParameters: {
             aeg?: {
                 attack_mode?: number;

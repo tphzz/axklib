@@ -3,6 +3,7 @@
     import { sampleFormatContext } from './formatCapabilities';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
+    import { editorScrollContext, rememberEditorScroll } from '../../../object-editor/editorScroll';
     import type { SampleWaveformPreview } from '../../../../lib/types';
     import { sampleTabs } from './fields';
     import TrimLoop from './TrimLoop.svelte';
@@ -16,19 +17,31 @@
         navigation,
     }: {
         document: ObjectEditorDocument;
-        preview: SampleWaveformPreview;
+        preview?: SampleWaveformPreview;
         panelId: string;
         navigation: EditorNavigation;
     } = $props();
     // The host keys this component by document; cleanup must retain that identity.
     const document = untrack(() => suppliedDocument);
     setContext(sampleFormatContext, () => document.detail!.editing!);
-    const activeTab = $derived(sampleTabs.find((tab) => tab.id === navigation.tab) ?? sampleTabs[0]!);
+    const bank = $derived(document.detail!.editing!.profile === 'a-series/sample-bank');
+    const tabs = $derived(
+        bank
+            ? sampleTabs.map((tab) => ({ ...tab, pages: tab.pages.filter((page) => page.id !== 'waveform') }))
+            : sampleTabs,
+    );
+    const activeTab = $derived(tabs.find((tab) => tab.id === navigation.tab) ?? tabs[0]!);
     const activePage = $derived(activeTab.pages.find((page) => page.id === navigation.page) ?? activeTab.pages[0]!);
+    const scroll = $derived({ positions: navigation.scrollPositions, key: activePage.id });
+    setContext(editorScrollContext, () => scroll);
     const disabled = $derived(
         document.phase !== 'editable' || !document.detail?.editing?.editable || !!document.conflict,
     );
-    const rate = $derived(preview.preview?.lanes[0]?.sampleRate ?? 44100);
+    const rate = $derived(
+        bank
+            ? (document.previewDetail?.editing?.sources[0]?.sampleRate ?? 44100)
+            : (preview?.preview?.lanes[0]?.sampleRate ?? 44100),
+    );
     let transport: SampleTransport;
 </script>
 
@@ -57,9 +70,24 @@
         >{activeTab.label} · {activeTab.pages.indexOf(activePage) + 1} / {activeTab.pages.length}</span
     >
 </div>
-<div role="tabpanel" id={panelId} aria-labelledby={`${panelId}-${activeTab.id}`} class="sample-panel">
-    {#if activePage.id === 'waveform'}
+<div
+    role="tabpanel"
+    id={panelId}
+    aria-labelledby={`${panelId}-${activeTab.id}`}
+    class="sample-panel"
+    use:rememberEditorScroll={scroll}
+>
+    {#if activePage.id === 'waveform' && preview}
         <TrimLoop {document} {preview} {disabled} onseek={(frame) => transport?.seek(frame)} />
+    {:else if activePage.id === 'sample-info' && bank}
+        <ParameterPage
+            {document}
+            page={{
+                ...activePage,
+                fields: activePage.fields.filter((field) => field.key === 'wave_start_velocity_sensitivity'),
+            }}
+            {disabled}
+        />
     {:else if activePage.id === 'sample-info'}
         <SampleInfo {document} {rate} {disabled} onmonitor={() => void transport?.play(true)} />
     {:else}

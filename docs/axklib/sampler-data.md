@@ -586,7 +586,7 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 | --- | ---: | --- | --- |
 | `0x078..0x133` | 188 | bytes | Native parameter block, or prefix of the later 224-byte block. |
 | `0x090..0x09f` | 16 | 4 x u32be | Linked Programs 001-128 bitmap within that parameter block. |
-| `0x134..0x13f` | 12 | 3 x u32be | Pending Sample Parameter propagation bitmaps. |
+| `0x134..0x13f` | 12 | 3 x u32be | Persistent Sample Parameter override-enable bitmaps. |
 | `0x140..0x143` | 4 | bytes | Reserved; preserve for existing objects. |
 | `0x144` | 1 | u8 | Stored member count. |
 | `0x145..0x14b` | 7 | bytes | Reserved; preserve for existing objects. |
@@ -627,21 +627,25 @@ parameter bytes at `0x78..0x7a`; an edit to that controller record maintains bot
 copies. Other common-record residue is preserved on existing banks, while fresh
 authoring initializes unused padding deterministically.
 
-SBAC pending-propagation bitmap decoding:
+SBAC override-enable bitmap decoding:
 
 ```text
 for word_index in 0..2:
     base_p2 = word_index * 32
     for bit in 0..31:
         if word & (1 << bit):
-            pending_sample_parameter_p2 = base_p2 + bit
+            override_selectors = base_p2 + bit
 ```
 
-The `Freeze SampleBank` operation consumes these bits. For every marked P2
-number, it copies the
-bank's corresponding Sample Parameter value into each resolved member Sample,
-clears the consumed bit, and marks the Sample Bank dirty. These words are
-therefore pending operation state, not durable per-bank value-enable settings.
+The sampler uses these bits during playback to overlay enabled bank values on a
+temporary copy of a member's parameters. The member's stored values remain
+unchanged. Clearing an enable bit restores use of the member's own value;
+it does not erase the retained bank value. These are persistent override enables,
+not a queue of unfinished writes.
+
+The separate `Freeze SampleBank` operation copies enabled values into resolved
+member Samples and clears the consumed bits. Ordinary bank editing and saving
+must not perform Freeze.
 The native A3000 V2 loop stops after P2 `84`; the later loop stops after `88`.
 Some positions within those bounds are skipped or have different effects.
 On the later generation, there are no
@@ -650,9 +654,17 @@ capacity; preserve them when nonzero.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
 
-Do not apply that later P2 parameter numbering to native banks. Parameter updates
-require clear pending state on either generation, validate the bank and each
-member against their own format, and reject the entire update on a conflict.
+Do not apply that later P2 parameter numbering to native banks. Reversible
+`update_sample_bank_overrides` validates the bank's format and changes only its
+payload. Envelope rates, envelope levels, pairs of scaling parameters and the
+complete controller matrix have shared enables. Sample EQ is treated as one
+unit: selectors 49/50/51 on A3000 and 49/50/51/85 on A4000/A5000. Existing partial
+EQ masks are preserved by unrelated edits; an EQ edit activates its whole unit.
+Unsupported enable states remain read-only.
+
+The distinct, immediate member-wide `update_sample_bank_parameters` operation
+requires clear override state, validates the bank and each member against their
+own format, and rejects the entire update on a conflict.
 Explicit format conversion also requires all three words to be zero, but does
 not propagate any parameter into member Samples. It adds or removes only the
 terminal 36-byte block, translates the authoritative parameter fields, updates
@@ -660,9 +672,10 @@ the revision/lengths and synchronizes the native common-record alias. Member
 rows stay at `0x14c`, and the complete row capacity and trailing padding are
 preserved. See [Sample Formats And Generations](sample-formats.md#sample-bank-conversion).
 
-Bank parameter values and pending propagation bits are separate: storing a
-value in the bank is not equivalent to applying it to every member. Clearing
-pending bits without applying their values discards the pending operation.
+Bank parameter values and enables are separate. Flag-only activation preserves
+the retained values and coefficient vector. A value edit regenerates only the
+dependent caches, including the complete Sample EQ coefficient vector. The
+reserved word at `0x140` is never an override input.
 
 The four linked-Program words use the same bit numbering as the Sample bitmap:
 bit zero of the first big-endian word is Program 001. They represent

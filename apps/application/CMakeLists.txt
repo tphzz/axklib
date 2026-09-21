@@ -43,6 +43,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/image_session_system_program_contexts.cpp
                                    src/image_session_object_detail.cpp src/image_session_object_reader.cpp src/image_session_open.cpp
                                    src/a_series_sample_editor.cpp
+                                   src/a_series_bank_editor.cpp
                                    src/sample_formats.cpp
                                    src/image_session_directory.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
@@ -111,7 +112,7 @@ if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
-                                       tests/content_id_test.cpp tests/image_allocation_map_test.cpp
+                                       tests/a_series_bank_editor_test.cpp tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
                                        tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp

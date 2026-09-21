@@ -1,4 +1,5 @@
 import { EditorDraft } from './draft.svelte';
+import { BankDraft } from '../devices/a-series/bank/draft.svelte';
 import { EditorNavigation } from './navigation.svelte';
 import { EditorComparison } from './comparison.svelte';
 import { SampleDuplication } from './duplication.svelte';
@@ -11,6 +12,9 @@ import type { SampleStorageFormat } from '../../lib/objectEditing';
 
 export class ObjectEditorDocument {
     detail = $state.raw<ObjectDetail>();
+    previewMemberId = $state<string | null | undefined>(undefined);
+    previewDetail = $state.raw<ObjectDetail | null>(null);
+    previewStatus = $state('');
     draft: EditorDraft;
     conflict = $state('');
     status = $state('');
@@ -25,13 +29,20 @@ export class ObjectEditorDocument {
         readonly preferencesScope: object = {},
     ) {
         this.detail = detail;
-        this.draft = new EditorDraft(objectEditorAdapter(detail)?.values(detail.editing!) ?? {});
+        const values = objectEditorAdapter(detail)?.values(detail.editing!) ?? {};
+        this.draft = detail.editing?.bankOverrides
+            ? new BankDraft(values, detail.editing.bankOverrides.units)
+            : new EditorDraft(values);
     }
     get validation(): string {
         return (
             this.conflict ||
             Object.values(this.inputErrors).find(Boolean) ||
-            objectEditorAdapter(this.detail!)?.validate(this.draft.values, this.draft.changes, this.detail!.editing!) ||
+            objectEditorAdapter(this.detail!)?.validate(
+                this.draft.storedValues,
+                this.draft.changes,
+                this.detail!.editing!,
+            ) ||
             ''
         );
     }
@@ -61,6 +72,7 @@ export class ObjectEditorWorkflow {
     private conversionOpenRequest = 0;
     private navigations = new Map<string, EditorNavigation>();
     private preferenceScopes = new Map<number, object>();
+    private memberCache = new Map<string, Promise<ObjectDetail>>();
     readonly comparison: EditorComparison;
     readonly duplication: SampleDuplication;
     constructor(private readonly dependencies: Dependencies) {
@@ -97,6 +109,17 @@ export class ObjectEditorWorkflow {
     }
     stop(): void {
         this.dependencies.stopPlayback();
+    }
+    loadMember(sessionId: number, revision: number, id: string): Promise<ObjectDetail> {
+        const key = `${sessionId}:${revision}:${id}`;
+        let request = this.memberCache.get(key);
+        if (!request) {
+            if (this.memberCache.size >= 64) this.memberCache.delete(this.memberCache.keys().next().value!);
+            request = this.dependencies.transport.objectDetail(sessionId, id);
+            this.memberCache.set(key, request);
+            void request.catch(() => this.memberCache.delete(key));
+        }
+        return request;
     }
     find(sessionId: number, objectId: string): ObjectEditorDocument | undefined {
         return this.documents.find((item) => item.sessionId === sessionId && item.detail?.object.id === objectId);
@@ -166,6 +189,8 @@ export class ObjectEditorWorkflow {
         const adapter = objectEditorAdapter(detail);
         if (!adapter && !detail.formatConversion) throw new Error('This object is no longer available');
         document.detail = detail;
+        if (document.draft instanceof BankDraft && detail.editing?.bankOverrides)
+            document.draft.units = detail.editing.bankOverrides.units;
         document.draft.accept(adapter?.values(detail.editing!) ?? {});
         document.conflict = '';
         document.status = '';
@@ -174,7 +199,7 @@ export class ObjectEditorWorkflow {
     async save(document: ObjectEditorDocument): Promise<void> {
         if (!document.canSave || this.locked) return;
         document.phase = 'saving';
-        document.status = 'Checking Sample';
+        document.status = `Checking ${document.noun}`;
         this.dependencies.stopPlayback();
         try {
             if (!(await this.check(document)) || document.validation) {
@@ -191,7 +216,7 @@ export class ObjectEditorWorkflow {
         const edit = objectEditorAdapter(document.detail!)!.edit(
             document.detail!,
             document.draft.changes,
-            document.draft.values,
+            document.draft.storedValues,
         );
         await this.submit(document, () =>
             this.dependencies.transport.startObjectParameterEdit(document.sessionId, edit),
@@ -199,7 +224,7 @@ export class ObjectEditorWorkflow {
     }
     conversionReason(document: ObjectEditorDocument): string {
         return document.draft.dirty
-            ? 'Save or discard this Sample draft before converting.'
+            ? `Save or discard this ${document.noun} draft before converting.`
             : document.conflict ||
                   (!document.detail?.formatConversion?.canConvertFormat
                       ? document.detail?.formatConversion?.reason || 'This object cannot be converted in this image.'
@@ -215,7 +240,7 @@ export class ObjectEditorWorkflow {
         try {
             const document = await this.load(sessionId, id);
             if (!document?.detail?.formatConversion || !current()) return;
-            if (document.detail.object.type === 'SBAC') {
+            if (document.detail.object.type === 'SBAC' && !document.draft.dirty) {
                 const detail = await this.dependencies.transport.objectDetail(sessionId, id);
                 if (!current()) return;
                 this.acceptReload(document, detail);
@@ -278,7 +303,8 @@ export class ObjectEditorWorkflow {
     }
     private async submit(document: ObjectEditorDocument, start: () => Promise<JobState>): Promise<void> {
         try {
-            document.status = document.writeKind === 'conversion' ? `Converting ${document.noun}` : 'Saving Sample';
+            document.status =
+                document.writeKind === 'conversion' ? `Converting ${document.noun}` : `Saving ${document.noun}`;
             const job = await start();
             document.jobId = job.jobId;
             await this.accept(document, await this.dependencies.transport.waitForJob(job.jobId, () => undefined));
@@ -321,6 +347,7 @@ export class ObjectEditorWorkflow {
         this.duplication.close();
         this.conversionDocument = null;
         this.loading.clear();
+        this.memberCache.clear();
         this.documents = [];
     }
     private async accept(document: ObjectEditorDocument, job: JobState): Promise<void> {
@@ -362,7 +389,7 @@ export class ObjectEditorWorkflow {
     }
     private async finish(document: ObjectEditorDocument): Promise<void> {
         document.phase = 'saving';
-        const completed = document.writeKind === 'conversion' ? `${document.noun} converted` : 'Sample saved';
+        const completed = document.writeKind === 'conversion' ? `${document.noun} converted` : `${document.noun} saved`;
         document.status = `${completed}; refreshing workspace`;
         let stage = 'workspace refresh';
         try {
@@ -383,9 +410,11 @@ export class ObjectEditorWorkflow {
             if (document.conversionTarget && detail.formatConversion?.sampleFormat.format !== document.conversionTarget)
                 throw new Error('The refreshed object does not have the confirmed target format');
             document.detail = detail;
+            if (document.draft instanceof BankDraft && detail.editing?.bankOverrides)
+                document.draft.units = detail.editing.bankOverrides.units;
             document.draft.accept(adapter?.values(detail.editing!) ?? {});
             document.conflict = '';
-            document.status = 'Sample saved';
+            document.status = `${document.noun} saved`;
             document.jobId = null;
             document.phase = 'editable';
             if (document.writeKind === 'conversion') {

@@ -1297,7 +1297,7 @@ TEST(HdsWriter, DirectSampleBankPreparationSupportsOneToOneHundredTwentySevenUni
     ASSERT_EQ(sample_bank->slots.size(), 127U);
     EXPECT_EQ(sample_bank->stored_member_count, 127U);
     EXPECT_EQ(sample_bank->effective_member_count, 127U);
-    EXPECT_EQ(sample_bank->pending_parameter_propagation_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
+    EXPECT_EQ(sample_bank->override_enable_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
     EXPECT_TRUE(std::ranges::all_of(
         sample_bank->slots, [](const auto &slot) { return slot.active && slot.transient_member_pointer == 0U; }));
     EXPECT_EQ(sample_bank->slots.front().name, "Sample 1");
@@ -1419,8 +1419,8 @@ TEST(HdsWriter, SerializesCanonicalSampleBankDefaultsAndSemanticOverrides) {
     ASSERT_TRUE(decoded) << decoded.error().message;
     const auto *bank = std::get_if<axk::CurrentSbac>(&decoded->payload);
     ASSERT_NE(bank, nullptr);
-    EXPECT_TRUE(bank->pending_parameter_numbers.empty());
-    EXPECT_TRUE(bank->reserved_pending_parameter_numbers.empty());
+    EXPECT_TRUE(bank->override_selectors.empty());
+    EXPECT_TRUE(bank->reserved_override_selectors.empty());
 }
 
 TEST(HdsWriter, SerializesSharedParametersIntoSampleBankState) {

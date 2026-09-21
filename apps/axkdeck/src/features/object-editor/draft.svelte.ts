@@ -2,7 +2,10 @@ export type EditorValue = number | boolean;
 export type EditorValues = Record<string, EditorValue>;
 
 export class EditorDraft {
-    values = $state.raw<EditorValues>({});
+    storedValues = $state.raw<EditorValues>({});
+    get values(): EditorValues {
+        return this.storedValues;
+    }
     private baseline: EditorValues;
     private past = $state.raw<EditorValues[]>([]);
     private future = $state.raw<EditorValues[]>([]);
@@ -10,10 +13,12 @@ export class EditorDraft {
 
     constructor(values: EditorValues) {
         this.baseline = { ...values };
-        this.values = { ...values };
+        this.storedValues = { ...values };
     }
     get changes(): EditorValues {
-        return Object.fromEntries(Object.entries(this.values).filter(([key, value]) => this.baseline[key] !== value));
+        return Object.fromEntries(
+            Object.entries(this.storedValues).filter(([key, value]) => this.baseline[key] !== value),
+        );
     }
     get dirty(): boolean {
         return Object.keys(this.changes).length > 0;
@@ -28,23 +33,20 @@ export class EditorDraft {
         return this.baseline[key];
     }
     patch(values: EditorValues): void {
-        if (!Object.entries(values).some(([key, value]) => this.values[key] !== value)) return;
-        if (!this.gesture) this.past = [...this.past.slice(-99), this.values];
+        if (!Object.entries(values).some(([key, value]) => this.storedValues[key] !== value)) return;
+        if (!this.gesture) this.past = [...this.past.slice(-99), this.storedValues];
         this.future = [];
-        this.values = { ...this.values, ...values };
+        this.storedValues = { ...this.storedValues, ...values };
     }
     set(key: string, value: EditorValue): void {
-        if (this.values[key] === value) return;
-        if (!this.gesture) this.past = [...this.past.slice(-99), this.values];
-        this.future = [];
-        this.values = { ...this.values, [key]: value };
+        this.patch({ [key]: value });
     }
     beginGesture(): void {
         if (this.gesture) return;
-        this.gesture = this.values;
+        this.gesture = this.storedValues;
     }
     endGesture(): void {
-        if (this.gesture && Object.keys(this.values).some((key) => this.values[key] !== this.gesture![key]))
+        if (this.gesture && Object.keys(this.storedValues).some((key) => this.storedValues[key] !== this.gesture![key]))
             this.past = [...this.past.slice(-99), this.gesture];
         this.gesture = null;
     }
@@ -52,23 +54,23 @@ export class EditorDraft {
         this.endGesture();
         const value = this.past.at(-1);
         if (!value) return;
-        this.future = [...this.future, this.values];
+        this.future = [...this.future, this.storedValues];
         this.past = this.past.slice(0, -1);
-        this.values = value;
+        this.storedValues = value;
     }
     redo(): void {
         const value = this.future.at(-1);
         if (!value) return;
-        this.past = [...this.past, this.values];
+        this.past = [...this.past, this.storedValues];
         this.future = this.future.slice(0, -1);
-        this.values = value;
+        this.storedValues = value;
     }
     discard(): void {
         this.accept(this.baseline);
     }
     accept(values: EditorValues): void {
         this.baseline = { ...values };
-        this.values = { ...values };
+        this.storedValues = { ...values };
         this.past = [];
         this.future = [];
         this.gesture = null;
