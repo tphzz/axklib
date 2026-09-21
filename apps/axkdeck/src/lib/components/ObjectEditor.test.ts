@@ -402,6 +402,7 @@ describe('ObjectEditor', () => {
             props: {
                 selection: {
                     kind: 'sample-bank',
+                    unresolvedMemberCount: 0,
                     item: bank,
                     members: [],
                     memberPreviews: [],

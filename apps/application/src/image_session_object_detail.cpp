@@ -378,23 +378,30 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         {"omissions", std::move(omissions)}};
     const auto *sample = std::get_if<CurrentSbnk>(&snapshot->second.object.payload);
     object["sampleFormat"] = sample ? Json(sample_format_metadata(*sample)) : Json(nullptr);
+    const auto *bank = std::get_if<CurrentSbac>(&snapshot->second.object.payload);
+    if (bank)
+        object["sampleFormat"] = sample_format_metadata(*bank);
     Json editing = nullptr;
-    if (std::holds_alternative<CurrentSbnk>(snapshot->second.object.payload) &&
-        media_descriptor.size <= 1024U * 1024U) {
+    Json conversion = nullptr;
+    if ((sample || bank) && media_descriptor.size <= 1024U * 1024U) {
         // Session catalogs retain decoded metadata, not necessarily the original object bytes.
         const auto payload = implementation_->read_object_range(**session, object_id, 0U,
                                                                 static_cast<std::size_t>(media_descriptor.size), {});
         if (!payload)
             return std::unexpected(payload.error());
+        const bool writable = std::ranges::contains(summary->available_operations, "images.alter.objects");
+        conversion = object_format_conversion(snapshot->second, *payload, writable);
         Json sources = Json::array();
-        const auto pcm =
-            implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm);
-        if (pcm)
-            for (const auto &member : pcm->members)
-                sources.push_back({{"objectId", member.object_id},
-                                   {"role", member.role},
-                                   {"frames", member.frame_count},
-                                   {"sampleRate", member.sample_rate}});
+        if (sample) {
+            const auto pcm =
+                implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm);
+            if (pcm)
+                for (const auto &member : pcm->members)
+                    sources.push_back({{"objectId", member.object_id},
+                                       {"role", member.role},
+                                       {"frames", member.frame_count},
+                                       {"sampleRate", member.sample_rate}});
+        }
         editing = detail::a_series_sample_editor(
             snapshot->second, *payload, std::ranges::contains(summary->available_operations, "images.alter.objects"),
             sources);
@@ -403,5 +410,6 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},
                 {"object", std::move(object)},
                 {"editing", std::move(editing)},
+                {"formatConversion", std::move(conversion)},
                 {"relationships", std::move(relationships)}};
 }

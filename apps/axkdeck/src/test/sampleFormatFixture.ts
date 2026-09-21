@@ -1,9 +1,9 @@
-import type { SampleEditingSnapshot, SampleStorageFormat } from '../lib/objectEditing';
+import type { SampleEditingSnapshot, SampleStorageFormat, ObjectFormatConversionSnapshot } from '../lib/objectEditing';
 import { sampleFields } from '../features/devices/a-series/sample/fields';
 
 export function sampleFormatFixture(
     format: SampleStorageFormat = 'A4000_A5000_224',
-): Pick<SampleEditingSnapshot, 'sampleFormat' | 'parameterCapabilities' | 'formatConversions' | 'canConvertFormat'> {
+): Pick<SampleEditingSnapshot, 'sampleFormat' | 'parameterCapabilities'> {
     const native = format === 'A3000_188';
     const capabilities: SampleEditingSnapshot['parameterCapabilities'] = {};
     for (const field of sampleFields) {
@@ -65,14 +65,28 @@ export function sampleFormatFixture(
             extensionDiffersFromPrefixDefaults: native ? null : false,
         },
         parameterCapabilities: capabilities,
+    };
+}
+
+export function sampleConversionFixture(
+    format: SampleStorageFormat = 'A4000_A5000_224',
+    overrides: Partial<ObjectFormatConversionSnapshot> = {},
+): ObjectFormatConversionSnapshot {
+    return {
+        payloadSha256: 'a'.repeat(64),
+        partitionIndex: 0,
+        volumeName: 'Volume',
+        reason: '',
+        sampleFormat: sampleFormatFixture(format).sampleFormat,
         canConvertFormat: true,
         formatConversions: [
             {
-                targetFormat: native ? 'A4000_A5000_224' : 'A3000_188',
+                targetFormat: format === 'A3000_188' ? 'A4000_A5000_224' : 'A3000_188',
                 allowed: true,
                 changes: ['Keep the Sample identity and Wave Data unchanged.'],
                 blockers: [],
             },
         ],
+        ...overrides,
     };
 }

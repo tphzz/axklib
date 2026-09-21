@@ -1,4 +1,4 @@
-import { sampleFormatFixture } from '../../test/sampleFormatFixture';
+import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import SampleFormatDialog from './SampleFormatDialog.svelte';
@@ -61,6 +61,7 @@ function sampleDetail(): ObjectDetail {
             decoded: { kind: 'sample' },
         },
         relationships: [],
+        formatConversion: sampleConversionFixture(),
         editing: {
             profile: 'a-series/sample',
             editable: true,
@@ -202,6 +203,7 @@ describe('Sample editor over HTTP', () => {
                 detail.editing!.editable = false;
                 detail.editing!.reason = 'Image is read-only';
             }
+            if (kind !== 'read-only') detail.formatConversion = null;
             const { workflow, sessionId } = await setup(detail);
             const document = await workflow.load(sessionId, 'sample-1');
             if (kind !== 'read-only') expect(document).toBeNull();

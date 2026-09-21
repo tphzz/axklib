@@ -202,6 +202,7 @@ describe('ObjectInspector', () => {
             props: {
                 selection: {
                     kind: 'sample-bank',
+                    unresolvedMemberCount: 0,
                     item: {
                         id: bankObject.key,
                         objectId: bankObject.key,
@@ -296,6 +297,7 @@ describe('ObjectInspector', () => {
             props: {
                 selection: {
                     kind: 'sample-bank',
+                    unresolvedMemberCount: 0,
                     item,
                     members: [first, second],
                     memberPreviews,
@@ -313,6 +315,7 @@ describe('ObjectInspector', () => {
         await rerender({
             selection: {
                 kind: 'sample-bank',
+                unresolvedMemberCount: 0,
                 item,
                 members: [first, second],
                 memberPreviews,
@@ -330,6 +333,7 @@ describe('ObjectInspector', () => {
         await rerender({
             selection: {
                 kind: 'sample-bank',
+                unresolvedMemberCount: 0,
                 item,
                 members: [first, second],
                 memberPreviews,
@@ -365,6 +369,7 @@ describe('ObjectInspector', () => {
             props: {
                 selection: {
                     kind: 'sample-bank',
+                    unresolvedMemberCount: 0,
                     item,
                     members: [],
                     memberPreviews: [],
@@ -378,6 +383,7 @@ describe('ObjectInspector', () => {
         await rerender({
             selection: {
                 kind: 'sample-bank',
+                unresolvedMemberCount: 0,
                 item,
                 members: [sample],
                 memberPreviews: [samplePreview(sample, [], 'idle')],

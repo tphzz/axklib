@@ -95,7 +95,7 @@
     onsampleselect={select}
     onselectionchange={selectionChanged}
     onduplicatesample={props.view === 'samples' && props.objectRenameAvailable && editors ? duplicate : undefined}
-    onconvertsample={props.view === 'samples' && editors && sessionId !== null
+    onconvertsample={editors && sessionId !== null
         ? (sample) => {
               void editors.openConversion(sessionId!, sample.objectId);
           }

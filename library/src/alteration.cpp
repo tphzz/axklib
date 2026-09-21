@@ -69,6 +69,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return update_sbnk_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, ConvertSampleFormatOperation>)
                     return convert_sbnk_format(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ConvertSampleBankFormatOperation>)
+                    return convert_sbac_format(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DuplicateSampleOperation>)
                     return duplicate_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)

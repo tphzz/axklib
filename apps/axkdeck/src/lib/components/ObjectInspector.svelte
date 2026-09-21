@@ -434,8 +434,13 @@
                     onnavigate={onrelationshipnavigate}
                 />
             {/if}
-            {#if selection?.kind === 'sample' && selection.item.object.sampleFormat}
-                <SampleFormatDetails format={selection.item.object.sampleFormat} />
+            {#if (selection?.kind === 'sample' || selection?.kind === 'sample-bank') && selection.item.object.sampleFormat}
+                <SampleFormatDetails
+                    format={selection.item.object.sampleFormat}
+                    bank={selection.kind === 'sample-bank'}
+                    members={selection.kind === 'sample-bank' ? selection.members : []}
+                    unresolved={selection.kind === 'sample-bank' ? selection.unresolvedMemberCount : 0}
+                />
             {/if}
         </div>
     </div>

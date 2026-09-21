@@ -581,14 +581,9 @@ Result<void> detail::apply_sample_bank_parameters_to_payload(std::vector<std::by
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample Bank parameter update requires a complete layout")};
     const bool native = bank->storage_layout != SbacStorageLayout::current_split_parameter_tail;
-    if (native &&
-        (decoded->header.unknown_0x14 != 2U || decoded->header.record_size_or_header_used != payload.size() - 0x30U))
+    if (!bank->storage.structurally_valid)
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample Bank native storage header is unsupported")};
-    if ((!native && (!bank->parameter_tail_offset || *bank->parameter_tail_offset + 0x24U != payload.size())) ||
-        (native && bank->parameter_tail_offset))
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Sample Bank parameter update requires a current complete layout")};
+                                          "Sample Bank storage header is unsupported")};
     if (std::ranges::any_of(bank->pending_parameter_propagation_words, [](auto word) { return word != 0U; }))
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
                                           "Sample Bank has pending parameter propagation")};

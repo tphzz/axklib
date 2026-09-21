@@ -2250,6 +2250,7 @@ TEST(AlterationInternal, AppendsLegacySampleBankMembersWithoutCreatingCurrentPar
     ASSERT_TRUE(writer.write_be32(0x14U, 2U));
     ASSERT_TRUE(writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x30U)));
     ASSERT_TRUE(writer.write_be32(0x1cU, 0U));
+    payload[0x30U] = std::byte{0x11};
     payload[0x144U] = std::byte{1};
     ASSERT_TRUE(writer.write_ascii_field(slot_base, 16U, "Legacy One", std::byte{' '}));
     ASSERT_TRUE(writer.write_be32(slot_base + 0x10U, 0x1234'5678U));

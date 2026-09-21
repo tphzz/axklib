@@ -591,13 +591,14 @@
                   if (sample) onduplicatesample!(sample);
               }
             : undefined}
-        convertLabel={`${sampleConversionTitle(sampleConversionTarget(samples.find((item) => item.objectId === objectMenu!.objects[0]?.objectId)?.object.sampleFormat?.format))}...`}
-        onconvert={view === 'samples' &&
-        onconvertsample &&
+        convertLabel={`${sampleConversionTitle(sampleConversionTarget([...sampleBanks, ...samples].find((item) => item.objectId === objectMenu!.objects[0]?.objectId)?.object.sampleFormat?.format), objectMenu.renameTarget.kind === 'sample-bank')}...`}
+        onconvert={onconvertsample &&
         objectMenu.objects.length === 1 &&
-        objectMenu.renameTarget.kind === 'sample'
+        (objectMenu.renameTarget.kind === 'sample' || objectMenu.renameTarget.kind === 'sample-bank')
             ? () => {
-                  const sample = samples.find((item) => item.objectId === objectMenu!.objects[0]!.objectId);
+                  const sample = [...sampleBanks, ...samples].find(
+                      (item) => item.objectId === objectMenu!.objects[0]!.objectId,
+                  );
                   if (sample) onconvertsample!(sample);
               }
             : undefined}

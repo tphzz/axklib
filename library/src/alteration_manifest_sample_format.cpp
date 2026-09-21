@@ -14,6 +14,12 @@ Error invalid(std::string message) {
 }
 } // namespace
 
+Result<void> validate_sample_format_conversion(const ConvertSampleBankFormatOperation &operation) {
+    return validate_sample_format_conversion(
+        ConvertSampleFormatOperation{operation.partition, operation.volume_name, operation.sample_bank_name,
+                                     operation.target_format, operation.expected_payload_sha256});
+}
+
 Result<void> validate_sample_format_conversion(const ConvertSampleFormatOperation &operation) {
     if (operation.target_format != SampleStorageFormat::a3000_188 &&
         operation.target_format != SampleStorageFormat::a4000_a5000_224)
@@ -47,5 +53,19 @@ Result<ConvertSampleFormatOperation> parse_sample_format_conversion_json(const n
     if (const auto valid = validate_sample_format_conversion(result); !valid)
         return std::unexpected{valid.error()};
     return result;
+}
+
+Result<ConvertSampleBankFormatOperation> parse_sample_bank_format_conversion_json(const nlohmann::json &value,
+                                                                                  PartitionSelector selector) {
+    if (!value.is_object() || !value.contains("sample_bank_name") || value.contains("sample_name"))
+        return std::unexpected{invalid("convert_sbac_format requires sample_bank_name, not sample_name")};
+    auto fields = value;
+    fields["sample_name"] = fields["sample_bank_name"];
+    fields.erase("sample_bank_name");
+    const auto parsed = parse_sample_format_conversion_json(fields, std::move(selector));
+    if (!parsed)
+        return std::unexpected{parsed.error()};
+    return ConvertSampleBankFormatOperation{parsed->partition, parsed->volume_name, parsed->sample_name,
+                                            parsed->target_format, parsed->expected_payload_sha256};
 }
 } // namespace axk::detail

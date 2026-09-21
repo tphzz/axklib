@@ -1,23 +1,25 @@
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { describe, expect, it, vi } from 'vitest';
-import { sampleFormatFixture } from '../../test/sampleFormatFixture';
+import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import type { ObjectDetail } from '../../lib/transport';
 import type { SampleStorageFormat } from '../../lib/objectEditing';
 import { ObjectEditorWorkflow } from './workflow.svelte';
 import SampleFormatDialog from './SampleFormatDialog.svelte';
 import SampleFormatBadge from './SampleFormatBadge.svelte';
 
-async function setup(dirty = false, allowed = true, source: SampleStorageFormat = 'A3000_188') {
+async function setup(dirty = false, allowed = true, source: SampleStorageFormat = 'A3000_188', bank = false) {
     const format = sampleFormatFixture(source);
-    format.formatConversions[0]!.allowed = allowed;
+    const conversion = sampleConversionFixture(source);
+    conversion.formatConversions[0]!.allowed = allowed;
     if (!allowed)
-        format.formatConversions[0]!.blockers = [
+        conversion.formatConversions[0]!.blockers = [
             { key: 'coarse_tune', storedValue: 100, message: 'Outside the target range.' },
         ];
     const detail = {
         image: { revision: 1 },
-        object: { id: 'sample', key: 'sample', name: 'Sample' },
+        object: { id: 'sample', key: 'sample', name: 'Sample', type: bank ? 'SBAC' : 'SBNK' },
+        formatConversion: conversion,
         editing: {
             ...format,
             profile: 'a-series/sample',
@@ -25,10 +27,11 @@ async function setup(dirty = false, allowed = true, source: SampleStorageFormat 
             playbackWindow: { start_frame: 0, length_frames: 100 },
         },
     } as unknown as ObjectDetail;
+    if (bank) detail.editing = null;
     const transport = {
         objectDetail: vi.fn().mockResolvedValue(detail),
         startObjectParameterEdit: vi.fn(),
-        startSampleFormatConversion: vi.fn(),
+        startObjectFormatConversion: vi.fn(),
         waitForJob: vi.fn(),
     };
     const workflow = new ObjectEditorWorkflow({
@@ -43,6 +46,37 @@ async function setup(dirty = false, allowed = true, source: SampleStorageFormat 
     return { workflow, document, transport, view: render(SampleFormatDialog, { workflow, document }) };
 }
 describe('Sample format UI', () => {
+    it('names the bank target and keeps pending-operation blockers visible with dismissal available', async () => {
+        const { view, document } = await setup(false, true, 'A3000_188', true);
+        expect(view.getByRole('dialog', { name: 'Convert to a4k/a5k sample bank format' }).textContent).toContain(
+            'Member Samples and Wave Data are not converted or edited',
+        );
+        document.detail = {
+            ...document.detail!,
+            formatConversion: {
+                ...document.detail!.formatConversion!,
+                formatConversions: [
+                    {
+                        targetFormat: 'A4000_A5000_224',
+                        allowed: false,
+                        changes: [],
+                        blockers: [
+                            {
+                                key: 'pending_parameters',
+                                storedValue: null,
+                                message: 'Pending bank operations cannot be converted or discarded.',
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        await waitFor(() =>
+            expect((view.getByRole('button', { name: /^Convert$/ }) as HTMLButtonElement).disabled).toBe(true),
+        );
+        expect(view.getByText(/Pending bank operations/)).toBeTruthy();
+        expect((view.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(false);
+    });
     it('uses one explicit confirmation without technical storage details or a checkbox', async () => {
         const { view, workflow } = await setup();
         const submit = vi.spyOn(workflow, 'convert').mockResolvedValue();
@@ -76,9 +110,9 @@ describe('Sample format UI', () => {
         const { view, workflow, document, transport } = await setup();
         const message = 'close open images and wait for active file operations to finish';
         if (stage === 'submission')
-            transport.startSampleFormatConversion.mockRejectedValue(new AxklibApiError('entry_in_use', message, 409));
+            transport.startObjectFormatConversion.mockRejectedValue(new AxklibApiError('entry_in_use', message, 409));
         else {
-            transport.startSampleFormatConversion.mockResolvedValue({ jobId: 42, status: 'queued' });
+            transport.startObjectFormatConversion.mockResolvedValue({ jobId: 42, status: 'queued' });
             transport.waitForJob.mockResolvedValue({
                 jobId: 42,
                 status: 'failed',
@@ -98,7 +132,7 @@ describe('Sample format UI', () => {
     });
     it.each(['Close', 'Escape'])('allows %s after a confirmed conversion failure', async (action) => {
         const { view, workflow, document, transport } = await setup();
-        transport.startSampleFormatConversion.mockResolvedValue({ jobId: 42, status: 'queued' });
+        transport.startObjectFormatConversion.mockResolvedValue({ jobId: 42, status: 'queued' });
         transport.waitForJob.mockResolvedValue({
             jobId: 42,
             status: 'failed',

@@ -25,23 +25,27 @@ export class ObjectEditorDocument {
         readonly preferencesScope: object = {},
     ) {
         this.detail = detail;
-        this.draft = new EditorDraft(objectEditorAdapter(detail)!.values(detail.editing!));
+        this.draft = new EditorDraft(objectEditorAdapter(detail)?.values(detail.editing!) ?? {});
     }
     get validation(): string {
         return (
             this.conflict ||
             Object.values(this.inputErrors).find(Boolean) ||
-            objectEditorAdapter(this.detail!)!.validate(this.draft.values, this.draft.changes, this.detail!.editing!)
+            objectEditorAdapter(this.detail!)?.validate(this.draft.values, this.draft.changes, this.detail!.editing!) ||
+            ''
         );
     }
     get canSave(): boolean {
-        return this.phase === 'editable' && this.draft.dirty && !this.validation;
+        return !!objectEditorAdapter(this.detail!) && this.phase === 'editable' && this.draft.dirty && !this.validation;
+    }
+    get noun(): string {
+        return this.detail?.object.type === 'SBAC' ? 'Sample Bank' : 'Sample';
     }
 }
 
 type Dependencies = {
     transport: Pick<ImageTransport, 'objectDetail' | 'startObjectParameterEdit' | 'waitForJob'> &
-        Partial<Pick<ImageTransport, 'startSampleDuplication' | 'startSampleFormatConversion'>>;
+        Partial<Pick<ImageTransport, 'startSampleDuplication' | 'startObjectFormatConversion'>>;
     refresh: () => Promise<void>;
     stopPlayback: () => void;
     status: (message: string) => void;
@@ -54,6 +58,7 @@ export class ObjectEditorWorkflow {
     conversionDocument = $state.raw<ObjectEditorDocument | null>(null);
     private loading = new Map<string, Promise<ObjectEditorDocument | null>>();
     private generation = 0;
+    private conversionOpenRequest = 0;
     private navigations = new Map<string, EditorNavigation>();
     private preferenceScopes = new Map<number, object>();
     readonly comparison: EditorComparison;
@@ -107,7 +112,7 @@ export class ObjectEditorWorkflow {
             .objectDetail(sessionId, objectId)
             .then((detail) => {
                 if (generation !== this.generation) return null;
-                if (!objectEditorAdapter(detail)) return null;
+                if (!objectEditorAdapter(detail) && !detail.formatConversion) return null;
                 const scope = this.preferenceScopes.get(sessionId) ?? {};
                 this.preferenceScopes.set(sessionId, scope);
                 const document = new ObjectEditorDocument(sessionId, detail, scope);
@@ -124,13 +129,16 @@ export class ObjectEditorWorkflow {
         const current = await this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id);
         const old = document.detail!;
         if (
-            !objectEditorAdapter(current) ||
+            (!objectEditorAdapter(current) && !current.formatConversion) ||
             current.object.key !== old.object.key ||
+            current.object.type !== old.object.type ||
             current.editing?.payloadSha256 !== old.editing?.payloadSha256 ||
+            current.formatConversion?.payloadSha256 !== old.formatConversion?.payloadSha256 ||
             current.editing?.volumeName !== old.editing?.volumeName ||
+            current.formatConversion?.volumeName !== old.formatConversion?.volumeName ||
             current.object.name !== old.object.name
         ) {
-            document.conflict = 'This Sample changed outside the editor. Discard the draft to reload it.';
+            document.conflict = `This ${document.noun} changed outside the editor. ${old.object.type === 'SBAC' ? 'Close and reopen conversion to reload it.' : 'Discard the draft to reload it.'}`;
             return false;
         }
         document.detail = current;
@@ -149,11 +157,16 @@ export class ObjectEditorWorkflow {
     }
     async discard(document: ObjectEditorDocument): Promise<void> {
         if (document.phase !== 'editable') return;
+        const generation = this.generation;
         const detail = await this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id);
+        if (generation !== this.generation || document.phase !== 'editable') return;
+        this.acceptReload(document, detail);
+    }
+    private acceptReload(document: ObjectEditorDocument, detail: ObjectDetail): void {
         const adapter = objectEditorAdapter(detail);
-        if (!adapter) throw new Error('This object no longer supports this editor');
+        if (!adapter && !detail.formatConversion) throw new Error('This object is no longer available');
         document.detail = detail;
-        document.draft.accept(adapter.values(detail.editing!));
+        document.draft.accept(adapter?.values(detail.editing!) ?? {});
         document.conflict = '';
         document.status = '';
         this.dependencies.stopPlayback();
@@ -188,38 +201,49 @@ export class ObjectEditorWorkflow {
         return document.draft.dirty
             ? 'Save or discard this Sample draft before converting.'
             : document.conflict ||
-                  (!document.detail?.editing?.canConvertFormat
-                      ? 'This Sample cannot be converted in this image.'
-                      : !this.dependencies.transport.startSampleFormatConversion
-                        ? 'Sample conversion is unavailable.'
+                  (!document.detail?.formatConversion?.canConvertFormat
+                      ? document.detail?.formatConversion?.reason || 'This object cannot be converted in this image.'
+                      : !this.dependencies.transport.startObjectFormatConversion
+                        ? 'Format conversion is unavailable.'
                         : '');
     }
     async openConversion(sessionId: number, id: string): Promise<void> {
         if (this.locked) return;
+        const request = ++this.conversionOpenRequest;
+        const generation = this.generation;
+        const current = () => request === this.conversionOpenRequest && generation === this.generation && !this.locked;
         try {
             const document = await this.load(sessionId, id);
-            if (document && !this.locked) {
-                this.conversionDocument = document;
-                document.status = '';
+            if (!document?.detail?.formatConversion || !current()) return;
+            if (document.detail.object.type === 'SBAC') {
+                const detail = await this.dependencies.transport.objectDetail(sessionId, id);
+                if (!current()) return;
+                this.acceptReload(document, detail);
             }
+            if (!document.detail?.formatConversion) return;
+            this.conversionDocument = document;
+            document.status = '';
         } catch (error) {
-            this.dependencies.status(userFacingMessage(error));
+            if (current()) this.dependencies.status(userFacingMessage(error));
         }
     }
     closeConversion(): void {
-        if (this.conversionDocument?.phase === 'editable') this.conversionDocument = null;
+        if (!this.conversionDocument || this.conversionDocument.phase === 'editable') {
+            this.conversionOpenRequest++;
+            this.conversionDocument = null;
+        }
     }
     async convert(document: ObjectEditorDocument, target: Exclude<SampleStorageFormat, 'UNKNOWN'>): Promise<void> {
         if (this.locked || this.conversionReason(document)) return;
         document.phase = 'saving';
-        document.status = 'Checking Sample format';
+        document.status = `Checking ${document.noun} format`;
         this.dependencies.stopPlayback();
         try {
             if (!(await this.check(document))) {
                 document.phase = 'editable';
                 return;
             }
-            const snapshot = document.detail!.editing!;
+            const snapshot = document.detail!.formatConversion!;
             const preview = snapshot.formatConversions.find((item) => item.targetFormat === target);
             if (this.conversionReason(document) || !preview?.allowed) {
                 document.phase = 'editable';
@@ -235,17 +259,18 @@ export class ObjectEditorWorkflow {
         document.writeKind = 'conversion';
         document.conversionTarget = target;
         const detail = document.detail!;
-        const snapshot = detail.editing!;
+        const snapshot = detail.formatConversion!;
         await this.submit(document, () =>
-            this.dependencies.transport.startSampleFormatConversion!(document.sessionId, {
+            this.dependencies.transport.startObjectFormatConversion!(document.sessionId, {
                 expectedRevision: detail.image.revision,
                 operation: {
                     id: 'sample-format',
-                    type: 'convert_sbnk_format',
+                    ...(detail.object.type === 'SBAC'
+                        ? { type: 'convert_sbac_format' as const, sample_bank_name: detail.object.name }
+                        : { type: 'convert_sbnk_format' as const, sample_name: detail.object.name }),
                     target_format: target === 'A3000_188' ? 'a3000_188' : 'a4000_a5000_224',
                     partition_index: snapshot.partitionIndex,
                     volume_name: snapshot.volumeName,
-                    sample_name: detail.object.name,
                     expected_payload_sha256: snapshot.payloadSha256,
                 },
             }),
@@ -253,7 +278,7 @@ export class ObjectEditorWorkflow {
     }
     private async submit(document: ObjectEditorDocument, start: () => Promise<JobState>): Promise<void> {
         try {
-            document.status = document.writeKind === 'conversion' ? 'Converting Sample' : 'Saving Sample';
+            document.status = document.writeKind === 'conversion' ? `Converting ${document.noun}` : 'Saving Sample';
             const job = await start();
             document.jobId = job.jobId;
             await this.accept(document, await this.dependencies.transport.waitForJob(job.jobId, () => undefined));
@@ -289,6 +314,7 @@ export class ObjectEditorWorkflow {
     }
     clear(): void {
         this.generation++;
+        this.conversionOpenRequest++;
         this.navigations.clear();
         this.preferenceScopes.clear();
         this.comparison.clear();
@@ -336,33 +362,39 @@ export class ObjectEditorWorkflow {
     }
     private async finish(document: ObjectEditorDocument): Promise<void> {
         document.phase = 'saving';
-        const completed = document.writeKind === 'conversion' ? 'Sample converted' : 'Sample saved';
+        const completed = document.writeKind === 'conversion' ? `${document.noun} converted` : 'Sample saved';
         document.status = `${completed}; refreshing workspace`;
         let stage = 'workspace refresh';
         try {
             await this.dependencies.refresh();
-            stage = 'sample verification';
+            stage = 'object verification';
             const detail = await this.dependencies.transport.objectDetail(
                 document.sessionId,
                 document.detail!.object.id,
             );
             const adapter = objectEditorAdapter(detail);
-            if (!adapter) throw new Error('Saved Sample is not available');
-            if (document.conversionTarget && detail.editing?.sampleFormat.format !== document.conversionTarget)
-                throw new Error('The refreshed Sample does not have the confirmed target format');
+            if (!adapter && !detail.formatConversion) throw new Error('Saved object is not available');
+            if (
+                detail.object.key !== document.detail!.object.key ||
+                detail.object.type !== document.detail!.object.type ||
+                detail.object.name !== document.detail!.object.name
+            )
+                throw new Error('The refreshed object does not match the saved identity');
+            if (document.conversionTarget && detail.formatConversion?.sampleFormat.format !== document.conversionTarget)
+                throw new Error('The refreshed object does not have the confirmed target format');
             document.detail = detail;
-            document.draft.accept(adapter.values(detail.editing!));
+            document.draft.accept(adapter?.values(detail.editing!) ?? {});
             document.conflict = '';
             document.status = 'Sample saved';
             document.jobId = null;
             document.phase = 'editable';
             if (document.writeKind === 'conversion') {
-                document.status = 'Sample format converted';
+                document.status = `${document.noun} format converted`;
                 if (this.conversionDocument === document) this.conversionDocument = null;
             }
             document.conversionTarget = null;
             this.dependencies.status(
-                `${document.writeKind === 'conversion' ? 'Converted' : 'Saved'} Sample ${detail.object.name}`,
+                `${document.writeKind === 'conversion' ? 'Converted' : 'Saved'} ${document.noun} ${detail.object.name}`,
             );
         } catch (error) {
             document.phase = 'refresh-failed';

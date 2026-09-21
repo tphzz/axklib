@@ -4,6 +4,7 @@
     import { measureWidth } from './measureWidth';
     import type { InspectorSelection } from '../../lib/types';
     import { objectEditors } from './context';
+    import { objectEditorAdapter } from './registry';
     import type { ObjectEditorDocument } from './workflow.svelte';
     import SampleEditor from '../devices/a-series/sample/SampleEditor.svelte';
     import Icon from '../../lib/components/Icon.svelte';
@@ -16,13 +17,14 @@
     const panelId = $props.id();
     let document = $state<ObjectEditorDocument | null>(null);
     let message = $state('');
-    const navigation = $derived(document && editors?.navigation(document.detail!.editing!.profile));
+    const editing = $derived(document?.detail && objectEditorAdapter(document.detail) ? document.detail.editing : null);
+    const navigation = $derived(editing && editors?.navigation(editing.profile));
     const sampleId = $derived(selection?.kind === 'sample' ? selection.item.objectId : null);
     const conversionTitle = $derived(
-        sampleConversionTitle(document?.detail?.editing?.formatConversions[0]?.targetFormat),
+        sampleConversionTitle(document?.detail?.formatConversion?.formatConversions[0]?.targetFormat),
     );
     $effect(() => {
-        if (editors) editors.visible = document !== null;
+        if (editors) editors.visible = !!navigation;
     });
     onDestroy(() => {
         if (editors) editors.visible = false;
@@ -38,7 +40,10 @@
                 .then((value) => {
                     if (!current) return;
                     document = value;
-                    message = value ? '' : 'Editing is not available for this Sample format';
+                    message =
+                        value?.detail && objectEditorAdapter(value.detail)
+                            ? ''
+                            : 'Editing is not available for this Sample format';
                 })
                 .catch((error) => {
                     if (current) message = userFacingMessage(error);
@@ -70,7 +75,7 @@
                     class="icon-button"
                     title={conversionTitle}
                     aria-label={conversionTitle}
-                    disabled={editors.locked}
+                    disabled={editors.locked || !document.detail?.formatConversion}
                     onclick={() => void editors.openConversion(document!.sessionId, document!.detail!.object.id)}
                     ><Icon name="refresh" size={14} /></button
                 >

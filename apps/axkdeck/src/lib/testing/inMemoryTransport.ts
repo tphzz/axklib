@@ -376,11 +376,11 @@ export class InMemoryImageTransport implements ImageTransport {
     ): Promise<JobState> {
         return this.invoke('startSampleDuplication', [sessionId, edit]);
     }
-    startSampleFormatConversion(
+    startObjectFormatConversion(
         sessionId: number,
-        edit: import('../objectEditing').SampleFormatConversionRequest,
+        edit: import('../objectEditing').ObjectFormatConversionRequest,
     ): Promise<JobState> {
-        return this.invoke('startSampleFormatConversion', [sessionId, edit]);
+        return this.invoke('startObjectFormatConversion', [sessionId, edit]);
     }
 
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {

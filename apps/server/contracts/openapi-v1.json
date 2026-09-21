@@ -134,9 +134,6 @@
             },
             "type": "array"
           },
-          "canConvertFormat": {
-            "type": "boolean"
-          },
           "canEditPlayback": {
             "type": "boolean"
           },
@@ -152,12 +149,6 @@
             },
             "maxItems": 5,
             "minItems": 5,
-            "type": "array"
-          },
-          "formatConversions": {
-            "items": {
-              "$ref": "#/components/schemas/SampleFormatConversionPreview"
-            },
             "type": "array"
           },
           "maximumFrames": {
@@ -267,9 +258,7 @@
           "maximumFrames",
           "sources",
           "sampleFormat",
-          "parameterCapabilities",
-          "formatConversions",
-          "canConvertFormat"
+          "parameterCapabilities"
         ],
         "type": "object"
       },
@@ -786,11 +775,13 @@
               "REPLACE_PROGRAM_ASSIGNMENTS",
               "RETARGET_SAMPLE_WAVE_DATA",
               "DUPLICATE_SBNK",
-              "CONVERT_SBNK_FORMAT"
+              "CONVERT_SBNK_FORMAT",
+              "CONVERT_SBAC_FORMAT"
             ],
             "x-axklib-application-enum": {
               "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
               "CLEAR_PROGRAM_ASSIGNMENTS": "clear_program_assignments",
+              "CONVERT_SBAC_FORMAT": "convert_sbac_format",
               "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
               "DELETE_PROGRAM": "delete_program",
               "DELETE_SBAC": "delete_sbac",
@@ -5444,6 +5435,16 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ASeriesSampleEditor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "formatConversion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObjectFormatConversion"
               },
               {
                 "type": "null"
@@ -11299,6 +11300,48 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "ObjectFormatConversion": {
+        "additionalProperties": false,
+        "properties": {
+          "canConvertFormat": {
+            "type": "boolean"
+          },
+          "formatConversions": {
+            "items": {
+              "$ref": "#/components/schemas/SampleFormatConversionPreview"
+            },
+            "type": "array"
+          },
+          "partitionIndex": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payloadSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "sampleFormat": {
+            "$ref": "#/components/schemas/SampleFormatMetadata"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "sampleFormat",
+          "canConvertFormat",
+          "formatConversions",
+          "reason"
         ],
         "type": "object"
       },

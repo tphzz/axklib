@@ -1,4 +1,4 @@
-import { sampleFormatFixture } from '../../test/sampleFormatFixture';
+import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
@@ -11,6 +11,7 @@ function detail(id: string): ObjectDetail {
     return {
         image: { revision: 1 },
         object: { id, key: id, name: `Sample ${id}` },
+        formatConversion: sampleConversionFixture(),
         editing: {
             profile: 'a-series/sample',
             editable: true,
@@ -58,6 +59,31 @@ function setup() {
 }
 
 describe('Sample editor workspace navigation', () => {
+    it('does not mount parameter controls for a conversion-only Sample with an unknown layout', async () => {
+        const unsupported = detail('unknown');
+        unsupported.editing = null;
+        unsupported.formatConversion = sampleConversionFixture('UNKNOWN', {
+            canConvertFormat: false,
+            reason: 'Unknown stored format',
+        });
+        const transport = {
+            objectDetail: vi.fn().mockResolvedValue(unsupported),
+            startObjectParameterEdit: vi.fn(),
+            waitForJob: vi.fn(),
+        };
+        const workflow = new ObjectEditorWorkflow({
+            transport,
+            refresh: vi.fn(),
+            stopPlayback: vi.fn(),
+            status: vi.fn(),
+        });
+        const view = render(DeviceEditorHostHarness, { workflow, sample: 'unknown' });
+        expect(await view.findByText('Editing is not available for this Sample format')).toBeTruthy();
+        expect(view.queryByRole('tab')).toBeNull();
+        expect(workflow.visible).toBe(false);
+        await workflow.openConversion(1, 'unknown');
+        expect(workflow.conversionDocument?.detail?.formatConversion?.canConvertFormat).toBe(false);
+    });
     it('does not remount the editor when the active document receives refreshed metadata', async () => {
         const { view, workflow } = setup();
         await fireEvent.click(await view.findByRole('tab', { name: 'Map/Out' }));

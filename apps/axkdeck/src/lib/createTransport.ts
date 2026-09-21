@@ -269,7 +269,7 @@ class UnavailableTransport implements ImageTransport {
     startSampleDuplication(): Promise<JobState> {
         return this.unavailable();
     }
-    startSampleFormatConversion(): Promise<JobState> {
+    startObjectFormatConversion(): Promise<JobState> {
         return this.unavailable();
     }
     inspectVolumeDeletion(): Promise<VolumeDeletionInspection> {

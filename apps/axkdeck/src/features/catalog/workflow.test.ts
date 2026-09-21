@@ -5,9 +5,10 @@ import type {
     ObjectPage,
     RelationshipPage,
     SamplerObject,
+    SamplerRelationship,
     SystemProgramContexts,
 } from '../../lib/transport';
-import type { Program } from '../../lib/types';
+import type { Program, SampleStructureItem } from '../../lib/types';
 import { CatalogWorkflow } from './workflow.svelte';
 
 interface Deferred<T> {
@@ -137,6 +138,48 @@ async function flushPromises(): Promise<void> {
 }
 
 describe('CatalogWorkflow volume snapshots', () => {
+    it('counts unresolved bank references, not their expanded candidate rows', () => {
+        const { workflow } = workflowHarness(new Map(), new Map());
+        const item = (id: string, objectType: 'SBAC' | 'SBNK'): SampleStructureItem => ({
+            id,
+            objectId: id,
+            name: id,
+            objectType,
+            object: { ...programObject(id, id), objectType },
+        });
+        workflow.sampleBanks = [item('bank', 'SBAC')];
+        workflow.samples = [item('known', 'SBNK')];
+        const edge = (id: string, values: Partial<SamplerRelationship> = {}): SamplerRelationship => ({
+            id,
+            sourceObjectId: 'bank',
+            relationshipType: 'SBAC_SLOT_TO_SBNK',
+            quality: 'KNOWN',
+            targetObjectId: 'known',
+            candidateObjectIds: [],
+            basis: 'test',
+            notes: [],
+            assignmentName: '',
+            assignmentState: '',
+            receiveChannelDisplay: '',
+            ...values,
+        });
+        workflow.relationships = [
+            edge('resolved'),
+            edge('ambiguous', {
+                targetObjectId: undefined,
+                candidateObjectIds: ['candidate1', 'candidate2'],
+                quality: 'UNKNOWN',
+            }),
+        ];
+        const selection = workflow.selectionForObject('bank');
+        expect(selection?.kind).toBe('sample-bank');
+        if (selection?.kind !== 'sample-bank') throw new Error('Expected bank');
+        expect(selection.members.map((member) => member.objectId)).toEqual(['known']);
+        expect(selection.relationships?.find((group) => group.objectType === 'SBNK')?.items).toHaveLength(3);
+        expect(selection.unresolvedMemberCount).toBe(1);
+        workflow.relationships = [...workflow.relationships, edge('missing', { targetObjectId: 'missing' })];
+        expect(workflow.selectionForObject('bank')).toMatchObject({ unresolvedMemberCount: 2 });
+    });
     it('adopts a refreshed scope ID only after loading succeeds, retaining object selections', async () => {
         const requests = volumeRequests();
         const { workflow } = workflowHarness(new Map([['refreshed', requests]]), new Map([[0, requests]]));

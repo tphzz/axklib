@@ -4,7 +4,7 @@ import type { ApiContentItem, ApiImageSummary, ApiObjectItem } from '../../lib/h
 import type { SampleStorageFormat } from '../../lib/objectEditing';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ObjectDetail } from '../../lib/transport';
-import { sampleFormatFixture } from '../../test/sampleFormatFixture';
+import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { CatalogWorkflow } from '../catalog/workflow.svelte';
 import { PickerController } from '../dialogs/picker';
 import { ImageSessionWorkflow } from '../image-session/workflow.svelte';
@@ -75,6 +75,7 @@ function detail(format: KnownFormat, revision: number, level: number): ObjectDet
             decoded: { kind: 'sample' },
         },
         relationships: [],
+        formatConversion: sampleConversionFixture(format, { payloadSha256: String(revision).repeat(64) }),
         editing: {
             profile: 'a-series/sample',
             editable: true,

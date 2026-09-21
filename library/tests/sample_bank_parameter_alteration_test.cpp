@@ -17,6 +17,8 @@
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/sample_format_conversion.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -84,6 +86,7 @@ class SampleBankParameterAlteration : public testing::Test {
         volume.samples.push_back(member);
         volume.sample_banks.push_back({"Bank", {"Member A", "Member B"}});
         volume.programs.push_back({1U, "Direct", {{"SBNK", "Direct", {.receive = axk::ProgramReceiveInherit{}}}}});
+        volume.programs.push_back({2U, "BankProg", {{"SBAC", "Bank", {}}}});
         const axk::HdsBuildManifest build{"1.0", 4U * 1024U * 1024U, {{"Partition", {volume}}}};
         const auto written = axk::write_hds_image(build, source);
         ASSERT_TRUE(written) << written.error().message;
@@ -128,6 +131,75 @@ TEST(SampleBankParameterManifest, AcceptsSparseValuesAndRejectsEmptyUnknownAndIn
     missing = bank_update();
     missing["sample_bank_name"] = "";
     EXPECT_FALSE(parse_bank_update(missing));
+}
+
+Json bank_conversion(const axk::ObjectSnapshot &bank, std::string_view target) {
+    return {{"id", "bank-format"},
+            {"type", "convert_sbac_format"},
+            {"partition_index", 0},
+            {"volume_name", "Samples"},
+            {"sample_bank_name", "Bank"},
+            {"target_format", target},
+            {"expected_payload_sha256",
+             axk::package_internal::hex_digest(axk::package_internal::sha256(bank.raw_payload))}};
+}
+
+TEST_F(SampleBankParameterAlteration, FormatRoundTripPreservesIdentityMembersAndUnrelatedPayloads) {
+    auto current_path = source;
+    for (const auto target : {axk::SampleStorageFormat::a3000_188, axk::SampleStorageFormat::a4000_a5000_224}) {
+        const auto image = axk::open_image(current_path);
+        ASSERT_TRUE(image);
+        const auto before = axk::build_object_catalog(*image);
+        ASSERT_TRUE(before);
+        const auto bank = std::ranges::find_if(
+            before->objects, [](const auto &item) { return item.object.header.type == axk::ObjectType::sbac; });
+        ASSERT_NE(bank, before->objects.end());
+        const auto plan = axk::plan_sample_bank_format_conversion(bank->raw_payload, target);
+        ASSERT_TRUE(plan.allowed()) << plan.blockers.front().message;
+        const auto operation = bank_conversion(*bank, axk::sample_storage_format_name(target));
+        const auto manifest = parse_bank_update(operation);
+        ASSERT_TRUE(manifest) << manifest.error().message;
+        auto wrong_name = operation;
+        wrong_name["sample_name"] = wrong_name["sample_bank_name"];
+        wrong_name.erase("sample_bank_name");
+        EXPECT_FALSE(parse_bank_update(wrong_name));
+        const auto destination = root / (std::string{axk::sample_storage_format_name(target)} + ".hds");
+        const auto original = read_bytes(current_path);
+        const auto result = axk::alter_hds(current_path, *manifest, destination);
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(read_bytes(current_path), original);
+        const auto reopened = axk::open_image(destination);
+        ASSERT_TRUE(reopened);
+        const auto after = axk::build_object_catalog(*reopened);
+        ASSERT_TRUE(after);
+        ASSERT_EQ(after->objects.size(), before->objects.size());
+        for (const auto &old : before->objects) {
+            const auto found = std::ranges::find(after->objects, old.key, &axk::ObjectSnapshot::key);
+            ASSERT_NE(found, after->objects.end());
+            EXPECT_EQ(found->sfs_id, old.sfs_id);
+            EXPECT_EQ(found->object.header.name, old.object.header.name);
+            EXPECT_EQ(found->raw_payload, old.key == bank->key ? plan.converted_payload : old.raw_payload);
+        }
+        const auto saved = read_bytes(destination);
+        const auto rejected = axk::alter_hds(destination, *manifest, current_path, {}, nullptr, true);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, axk::ErrorCode::transaction_stale);
+        EXPECT_EQ(read_bytes(current_path), original);
+        EXPECT_EQ(read_bytes(destination), saved);
+        auto later_failure = *manifest;
+        auto invalid =
+            axk::ConvertSampleBankFormatOperation{axk::PartitionIndex{0U}, "Samples", "Missing", target,
+                                                  operation.at("expected_payload_sha256").get<std::string>()};
+        later_failure.operations.push_back({"missing-bank", std::move(invalid)});
+        EXPECT_FALSE(axk::alter_hds(current_path, later_failure, destination, {}, nullptr, true));
+        EXPECT_EQ(read_bytes(destination), saved);
+        EXPECT_EQ(read_bytes(current_path), original);
+        axk::CancellationSource cancellation;
+        cancellation.cancel();
+        EXPECT_FALSE(axk::alter_hds(current_path, *manifest, destination, cancellation.token(), nullptr, true));
+        EXPECT_EQ(read_bytes(destination), saved);
+        current_path = destination;
+    }
 }
 
 TEST_F(SampleBankParameterAlteration, ChangesBankAndEveryMemberLevelWhilePreservingAllOtherPayloadBytes) {

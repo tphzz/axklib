@@ -1912,7 +1912,8 @@ export interface components {
                 | 'REPLACE_PROGRAM_ASSIGNMENTS'
                 | 'RETARGET_SAMPLE_WAVE_DATA'
                 | 'DUPLICATE_SBNK'
-                | 'CONVERT_SBNK_FORMAT';
+                | 'CONVERT_SBNK_FORMAT'
+                | 'CONVERT_SBAC_FORMAT';
             volumeName: string;
         };
         AlterationSummary: {
@@ -1955,12 +1956,10 @@ export interface components {
                 [key: string]: string;
             };
             blockedParameters: string[];
-            canConvertFormat: boolean;
             canEditPlayback: boolean;
             editable: boolean;
             /** @description Stored Sample EQ Q13 coefficients in b1, b2, b0, -a1, -a2 order. Unrelated edits preserve them. */
             eqCoefficients: number[];
-            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
             maximumFrames: number;
             parameterCapabilities: {
                 [key: string]: components['schemas']['SampleParameterCapability'];
@@ -3086,6 +3085,7 @@ export interface components {
         };
         ImageObjectDetail: {
             editing?: components['schemas']['ASeriesSampleEditor'] | null;
+            formatConversion?: components['schemas']['ObjectFormatConversion'] | null;
             image: {
                 format: string;
                 imageId: string;
@@ -4315,6 +4315,15 @@ export interface components {
         };
         MidiInspectionRequest: {
             source: components['schemas']['InputRef'];
+        };
+        ObjectFormatConversion: {
+            canConvertFormat: boolean;
+            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
+            partitionIndex: number;
+            payloadSha256: string;
+            reason: string;
+            sampleFormat: components['schemas']['SampleFormatMetadata'];
+            volumeName: string;
         };
         ObjectsRequest: {
             destination: components['schemas']['DirectoryRef'];

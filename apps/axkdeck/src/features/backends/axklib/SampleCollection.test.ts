@@ -1,4 +1,4 @@
-import { sampleFormatFixture } from '../../../test/sampleFormatFixture';
+import { sampleConversionFixture, sampleFormatFixture } from '../../../test/sampleFormatFixture';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail, SamplerObject } from '../../../lib/transport';
@@ -41,6 +41,7 @@ function setup(initiallySelected = ['A', 'B'], format: SampleStorageFormat = 'A3
                 ({
                     image: { revision: 1 },
                     object: { id, key: id, name: `Sample ${id}` },
+                    formatConversion: sampleConversionFixture(format),
                     editing: {
                         profile: 'a-series/sample',
                         editable: true,
@@ -63,7 +64,7 @@ function setup(initiallySelected = ['A', 'B'], format: SampleStorageFormat = 'A3
         ),
         startObjectParameterEdit: vi.fn().mockResolvedValue({ jobId: 7, status: 'queued' }),
         startSampleDuplication: vi.fn().mockResolvedValue({ jobId: 8, status: 'queued' }),
-        startSampleFormatConversion: vi.fn(),
+        startObjectFormatConversion: vi.fn(),
         waitForJob: vi.fn().mockResolvedValue({ jobId: 8, status: 'completed' }),
     };
     const workflow = new ObjectEditorWorkflow({
@@ -118,7 +119,7 @@ describe('Sample collection Duplicate context action', () => {
         await fireEvent.click(action);
         await waitFor(() => expect(workflow.conversionDocument?.detail?.object.id).toBe('A'));
         expect(view.queryByRole('menu')).toBeNull();
-        expect(transport.startSampleFormatConversion).not.toHaveBeenCalled();
+        expect(transport.startObjectFormatConversion).not.toHaveBeenCalled();
         expect(view.getByLabelText('Selected Samples').textContent).toBe('A');
     });
 

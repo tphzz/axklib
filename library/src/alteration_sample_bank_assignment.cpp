@@ -91,17 +91,24 @@ Result<void> append_sbac_members_to_payload(std::vector<std::byte> &payload, con
     if (payload.size() < existing_slot_end)
         return std::unexpected{transaction_error("Target Sample Bank slot table is truncated")};
 
+    const auto storage = inspect_sample_bank_storage(payload);
+    if (!storage.structurally_valid)
+        return std::unexpected{transaction_error("Target Sample Bank storage format is unsupported")};
+    auto logical_end =
+        static_cast<std::size_t>(storage.header_revision == 2U ? storage.older_body_bytes : storage.later_body_bytes) +
+        0x30U;
+
     std::size_t member_region_end{};
     if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
         if (!sample_bank.parameter_tail_offset ||
-            *sample_bank.parameter_tail_offset + trailing_parameter_bytes != payload.size()) {
+            *sample_bank.parameter_tail_offset + trailing_parameter_bytes != logical_end) {
             return std::unexpected{transaction_error("Target Sample Bank parameter tail is unreadable")};
         }
         member_region_end = *sample_bank.parameter_tail_offset;
     } else {
         if (sample_bank.parameter_tail_offset)
             return std::unexpected{transaction_error("Target Sample Bank legacy layout is inconsistent")};
-        member_region_end = payload.size();
+        member_region_end = logical_end;
     }
     if (member_region_end < slot_base || (member_region_end - slot_base) % slot_size != 0U)
         return std::unexpected{transaction_error("Target Sample Bank member capacity is not row-aligned")};
@@ -110,21 +117,18 @@ Result<void> append_sbac_members_to_payload(std::vector<std::byte> &payload, con
 
     if (final_count > sample_bank.maximum_member_count) {
         const auto added_rows = final_count - sample_bank.maximum_member_count;
-        if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
-            payload.insert(payload.begin() + static_cast<std::ptrdiff_t>(member_region_end), added_rows * slot_size,
-                           std::byte{});
-        } else {
-            payload.resize(payload.size() + added_rows * slot_size);
-        }
+        payload.insert(payload.begin() + static_cast<std::ptrdiff_t>(member_region_end), added_rows * slot_size,
+                       std::byte{});
+        logical_end += added_rows * slot_size;
     }
 
     ByteWriter writer{payload};
     if (sample_bank.storage_layout == SbacStorageLayout::current_split_parameter_tail) {
-        if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x54U)); !written)
+        if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(logical_end - 0x54U)); !written)
             return std::unexpected{written.error()};
-        if (auto written = writer.write_be32(0x1cU, static_cast<std::uint32_t>(payload.size() - 0x30U)); !written)
+        if (auto written = writer.write_be32(0x1cU, static_cast<std::uint32_t>(logical_end - 0x30U)); !written)
             return std::unexpected{written.error()};
-    } else if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(payload.size() - 0x30U)); !written) {
+    } else if (auto written = writer.write_be32(0x18U, static_cast<std::uint32_t>(logical_end - 0x30U)); !written) {
         return std::unexpected{written.error()};
     }
     payload[0x144U] = static_cast<std::byte>(final_count);

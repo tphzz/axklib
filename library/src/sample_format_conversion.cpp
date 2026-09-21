@@ -89,6 +89,27 @@ std::vector<std::byte> downgrade(SampleFormatConversionPlan &plan, std::span<con
 }
 } // namespace
 
+std::vector<std::byte> detail::convert_sample_parameter_block(SampleFormatConversionPlan &plan,
+                                                              std::span<const std::byte> block) {
+    const bool native = plan.source.format == SampleStorageFormat::a3000_188;
+    assess(plan, block, native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000);
+    if (!native)
+        return downgrade(plan, block);
+    if ((std::to_integer<std::uint8_t>(block[0x29U]) & 0xc0U) != 0U)
+        blocked(plan, "sample_eq_type", "Retained A3000 flag bits would select a different EQ interpretation.");
+    const auto extended = detail::extend_sample_parameter_prefix(block);
+    if (!extended) {
+        blocked(plan, "parameters", extended.error().message);
+        return {};
+    }
+    assess(plan, *extended, SampleParameterGeneration::a4000_a5000);
+    plan.changes = {"Store a 224-byte A4000/A5000 parameter block with a 36-byte extension.",
+                    "Preserve the 188-byte prefix and initialize controllers, outputs, crossfades and portamento.",
+                    "The Sample becomes a4k/a5k format even if no later-only settings are used.",
+                    "Keep the Sample identity, name, relationships and Wave Data unchanged."};
+    return *extended;
+}
+
 SampleFormatConversionPlan plan_sample_format_conversion(std::span<const std::byte> payload,
                                                          SampleStorageFormat target) {
     SampleFormatConversionPlan plan;
@@ -106,26 +127,10 @@ SampleFormatConversionPlan plan_sample_format_conversion(std::span<const std::by
     }
     const auto native = plan.source.format == SampleStorageFormat::a3000_188;
     const auto block = payload.subspan(0xa8U, *plan.source.parameter_bytes);
-    assess(plan, block, native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000);
     const auto header_reserved = payload.subspan(0x1cU, native ? 4U : 0U);
     if (std::ranges::any_of(header_reserved, [](std::byte value) { return value != std::byte{0}; }))
         blocked(plan, "header", "Uninterpreted header data would be changed by conversion.");
-    std::vector<std::byte> converted;
-    if (native) {
-        if ((std::to_integer<std::uint8_t>(block[0x29U]) & 0xc0U) != 0U)
-            blocked(plan, "sample_eq_type", "Retained A3000 flag bits would select a different EQ interpretation.");
-        const auto extended = detail::extend_sample_parameter_prefix(block);
-        if (extended) {
-            converted = *extended;
-            assess(plan, converted, SampleParameterGeneration::a4000_a5000);
-        }
-        plan.changes = {"Store a 224-byte A4000/A5000 parameter block with a 36-byte extension.",
-                        "Preserve the 188-byte prefix and initialize controllers, outputs, crossfades and portamento.",
-                        "The Sample becomes a4k/a5k format even if no later-only settings are used.",
-                        "Keep the Sample identity, name, relationships and Wave Data unchanged."};
-    } else {
-        converted = downgrade(plan, block);
-    }
+    const auto converted = detail::convert_sample_parameter_block(plan, block);
     if (!plan.blockers.empty())
         return plan;
     plan.converted_payload.assign(payload.begin(), payload.begin() + 0xa8U);

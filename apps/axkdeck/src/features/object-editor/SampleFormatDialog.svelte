@@ -5,10 +5,12 @@
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
     import type { ObjectEditorWorkflow, ObjectEditorDocument } from './workflow.svelte';
     let { workflow, document }: { workflow: ObjectEditorWorkflow; document: ObjectEditorDocument } = $props();
-    const snapshot = $derived(document.detail!.editing!);
+    const snapshot = $derived(document.detail!.formatConversion!);
+    const bank = $derived(document.detail!.object.type === 'SBAC');
+    const noun = $derived(bank ? 'sample bank' : 'sample');
     const preview = $derived(snapshot.formatConversions[0]);
     const target = $derived(preview?.targetFormat);
-    const title = $derived(sampleConversionTitle(target));
+    const title = $derived(sampleConversionTitle(target, bank));
     const reason = $derived(workflow.conversionReason(document));
     const locked = $derived(document.phase !== 'editable');
     const recovery = $derived(
@@ -46,12 +48,16 @@
                 <strong>{document.detail!.object.name}</strong><SampleFormatBadge format={snapshot.sampleFormat} />
                 <p>
                     {target === 'A3000_188'
-                        ? 'The sample becomes a3k format. Any incompatible settings must be changed and saved first so the conversion preserves your parameters.'
+                        ? `The ${noun} becomes a3k format. Any incompatible settings must be changed and saved first so the conversion preserves your parameters.`
                         : target === 'A4000_A5000_224'
-                          ? 'The sample becomes a4k/a5k format, even if no a4k/a5k-specific settings are used.'
+                          ? `The ${noun} becomes a4k/a5k format, even if no a4k/a5k-specific settings are used.`
                           : 'Conversion is unavailable for this sample format.'}
                 </p>
-                <p>The sample's name, relationships and Wave Data remain unchanged.</p>
+                <p>
+                    {bank
+                        ? "The bank's name, Program links and member rows remain unchanged. Member Samples and Wave Data are not converted or edited."
+                        : "The sample's name, relationships and Wave Data remain unchanged."}
+                </p>
             </div>
             <div class="format-results">
                 {#each preview?.blockers ?? [] as issue}<p class="format-blocker">

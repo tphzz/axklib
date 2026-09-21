@@ -144,6 +144,7 @@ export class CatalogWorkflow {
         const bank = this.sampleBanks.find((item) => item.objectId === objectId);
         if (bank) {
             const members = this.membersForBank(bank.objectId);
+            const memberIds = new Set(members.map((member) => member.objectId));
             const displayedMemberId = members.some((member) => member.objectId === displayedBankMemberId)
                 ? displayedBankMemberId
                 : (members[0]?.objectId ?? '');
@@ -151,6 +152,12 @@ export class CatalogWorkflow {
                 kind: 'sample-bank',
                 item: bank,
                 members,
+                unresolvedMemberCount: this.relationships.filter(
+                    (relationship) =>
+                        relationship.sourceObjectId === bank.objectId &&
+                        relationship.relationshipType === 'SBAC_SLOT_TO_SBNK' &&
+                        (!isConfirmedRelationship(relationship) || !memberIds.has(relationship.targetObjectId ?? '')),
+                ).length,
                 memberPreviews: members.map((member) => this.sampleWaveformPreview(member)),
                 displayedMemberId,
                 relationships,

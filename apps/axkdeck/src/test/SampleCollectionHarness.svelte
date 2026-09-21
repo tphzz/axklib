@@ -9,6 +9,7 @@
     let {
         workflow,
         samples,
+        sampleBanks = [],
         initiallySelected = ['A', 'B'],
         initiallyActive = 'A',
         mutationsAvailable = true,
@@ -16,6 +17,7 @@
     }: {
         workflow: ObjectEditorWorkflow;
         samples: SampleStructureItem[];
+        sampleBanks?: SampleStructureItem[];
         initiallySelected?: string[];
         initiallyActive?: string;
         mutationsAvailable?: boolean;
@@ -24,13 +26,13 @@
     provideObjectEditors(untrack(() => workflow));
     let selection = $state<PackageExportSelectionState>(
         untrack(() => ({
-            items: samples
+            items: [...sampleBanks, ...samples]
                 .filter((sample) => initiallySelected.includes(sample.objectId))
                 .map((sample) => ({
-                    kind: 'SBNK',
+                    kind: sample.objectType,
                     objectId: sample.objectId,
                     name: sample.name,
-                    typeLabel: 'Sample',
+                    typeLabel: sample.objectType === 'SBAC' ? 'Sample Bank' : 'Sample',
                     partitionIndex: sample.object.partitionIndex,
                     partitionName: sample.object.partitionName,
                     volumeName: sample.object.volumeName,
@@ -52,7 +54,7 @@
     bind:lowerOpen
     {view}
     {samples}
-    sampleBanks={[]}
+    {sampleBanks}
     waveData={[]}
     activeSampleBankId=""
     {activeSampleId}

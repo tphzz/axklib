@@ -591,19 +591,21 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 | `0x144` | 1 | u8 | Stored member count. |
 | `0x145..0x14b` | 7 | bytes | Reserved; preserve for existing objects. |
 | `0x14c + n*0x14` | 20 each | rows | Member rows, followed by any preallocated blank-row capacity. |
-| Last `0x24` bytes, layout selector `0x14 >= 4` | 36 | bytes | Final part of the canonical Sample Parameter block. |
+| Last `0x24` logical bytes, revision 4 | 36 | bytes | Final part of the canonical Sample Parameter block; precedes any allocation padding. |
 
 The disk layout is not the flat Sample Bank Bulk layout used by the runtime.
 The later-generation loader transform reconstructs one canonical 224-byte Sample
 Parameter block from disk `0x078..0x133` followed by the terminal 36 bytes.
-The serializer applies the inverse transform. For legacy objects with layout
-selector `0x14 < 4`, no terminal block is stored and the loader supplies
-zero/default bytes for that final 36-byte portion. Offsets `0x040..0x11f` and
+The serializer applies the inverse transform. For native revision-2 objects,
+no terminal block is stored. The later loader initializes it from the native
+controllers, outputs, Boolean crossfade and portamento switch, with rate/time
+defaults of 90. Offsets `0x040..0x11f` and
 `0x120..0x12b` describe the normalized runtime/Bulk representation, not the
 physical SBAC object.
 
-The member region ends at the object size for a legacy SBAC and at
-`object_size - 0x24` for the current split-tail layout. Its complete-row
+The member region ends at the logical object size for a native SBAC and at
+`logical_object_size - 0x24` for the later split-tail layout. Allocation padding
+is not a member row or parameter tail. Its complete-row
 capacity is therefore:
 
 ```text
@@ -612,7 +614,8 @@ member_capacity = (member_region_end - 0x14c) / 0x14
 
 Current-layout mutation inserts additional rows before the terminal parameter
 bytes. Legacy mutation extends the row region without creating a terminal tail.
-The two layouts also retain their header-length conventions: legacy objects use
+The two layouts also retain their header-length conventions (`object_size` here
+means logical size): native objects use
 `0x18 = object_size - 0x30`, while current objects use
 `0x18 = object_size - 0x54` and `0x1c = object_size - 0x30`.
 
@@ -639,7 +642,9 @@ number, it copies the
 bank's corresponding Sample Parameter value into each resolved member Sample,
 clears the consumed bit, and marks the Sample Bank dirty. These words are
 therefore pending operation state, not durable per-bank value-enable settings.
-On the later generation, only P2 `0..88` are actionable. The operation stops after `88`, and there are no
+The native A3000 V2 loop stops after P2 `84`; the later loop stops after `88`.
+Some positions within those bounds are skipped or have different effects.
+On the later generation, there are no
 parameter-table entries for `89..95`; those seven positions are reserved bitmap
 capacity; preserve them when nonzero.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
@@ -648,6 +653,12 @@ zero.
 Do not apply that later P2 parameter numbering to native banks. Parameter updates
 require clear pending state on either generation, validate the bank and each
 member against their own format, and reject the entire update on a conflict.
+Explicit format conversion also requires all three words to be zero, but does
+not propagate any parameter into member Samples. It adds or removes only the
+terminal 36-byte block, translates the authoritative parameter fields, updates
+the revision/lengths and synchronizes the native common-record alias. Member
+rows stay at `0x14c`, and the complete row capacity and trailing padding are
+preserved. See [Sample Formats And Generations](sample-formats.md#sample-bank-conversion).
 
 Bank parameter values and pending propagation bits are separate: storing a
 value in the bank is not equivalent to applying it to every member. Clearing

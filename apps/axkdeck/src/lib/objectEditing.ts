@@ -18,17 +18,20 @@ export interface ObjectParameterEdit {
 export interface ObjectEditingTransport {
     startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState>;
     startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState>;
-    startSampleFormatConversion(sessionId: number, edit: SampleFormatConversionRequest): Promise<JobState>;
+    startObjectFormatConversion(sessionId: number, edit: ObjectFormatConversionRequest): Promise<JobState>;
 }
 
 export type SampleStorageFormat = components['schemas']['SampleStorageFormat'];
 export type SampleFormatMetadata = components['schemas']['SampleFormatMetadata'];
-export interface SampleFormatConversionRequest {
+export type ObjectFormatConversionSnapshot = components['schemas']['ObjectFormatConversion'];
+export interface ObjectFormatConversionRequest {
     expectedRevision: number;
-    operation: Omit<ObjectParameterEdit['operation'], 'type' | 'parameters' | 'playback_window'> & {
-        type: 'convert_sbnk_format';
+    operation: Omit<ObjectParameterEdit['operation'], 'type' | 'parameters' | 'playback_window' | 'sample_name'> & {
         target_format: Lowercase<Exclude<SampleStorageFormat, 'UNKNOWN'>>;
-    };
+    } & (
+            | { type: 'convert_sbnk_format'; sample_name: string }
+            | { type: 'convert_sbac_format'; sample_bank_name: string }
+        );
 }
 
 export interface SampleDuplicationRequest {

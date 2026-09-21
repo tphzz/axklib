@@ -23,5 +23,7 @@ struct SampleFormatConversionPlan {
 
 AXK_API SampleFormatConversionPlan plan_sample_format_conversion(std::span<const std::byte> payload,
                                                                  SampleStorageFormat target);
+AXK_API SampleFormatConversionPlan plan_sample_bank_format_conversion(std::span<const std::byte> payload,
+                                                                      SampleStorageFormat target);
 
 } // namespace axk

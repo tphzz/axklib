@@ -337,7 +337,8 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                     return require_object_name(operation.sample_name, "sample_name");
                 } else if constexpr (std::same_as<T, InsertSampleOperation>) {
                     return validate_direct_sample(operation.sample);
-                } else if constexpr (std::same_as<T, ConvertSampleFormatOperation>) {
+                } else if constexpr (std::same_as<T, ConvertSampleFormatOperation> ||
+                                     std::same_as<T, ConvertSampleBankFormatOperation>) {
                     return detail::validate_sample_format_conversion(operation);
                 } else if constexpr (std::same_as<T, UpdateSampleParametersOperation> ||
                                      std::same_as<T, DuplicateSampleOperation>) {

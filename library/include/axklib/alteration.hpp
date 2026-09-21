@@ -79,6 +79,14 @@ struct ConvertSampleFormatOperation {
     std::string expected_payload_sha256;
 };
 
+struct ConvertSampleBankFormatOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::string sample_bank_name;
+    SampleStorageFormat target_format{SampleStorageFormat::unknown};
+    std::string expected_payload_sha256;
+};
+
 struct DuplicateSampleOperation {
     PartitionSelector partition;
     std::string volume_name;
@@ -274,7 +282,7 @@ using AlterationOperationData =
                  RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
                  UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
                  UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation,
-                 DuplicateSampleOperation, ConvertSampleFormatOperation>;
+                 DuplicateSampleOperation, ConvertSampleFormatOperation, ConvertSampleBankFormatOperation>;
 
 struct AlterationOperation {
     std::string id;

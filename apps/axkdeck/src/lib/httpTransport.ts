@@ -5,7 +5,7 @@ import {
     type DownloadArchiveSnapshot,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
-import type { ObjectParameterEdit, SampleDuplicationRequest, SampleFormatConversionRequest } from './objectEditing';
+import type { ObjectParameterEdit, SampleDuplicationRequest, ObjectFormatConversionRequest } from './objectEditing';
 import type {
     AudioImportOptions,
     AudioImportItem,
@@ -358,7 +358,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState> {
         return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
     }
-    startSampleFormatConversion(sessionId: number, edit: SampleFormatConversionRequest): Promise<JobState> {
+    startObjectFormatConversion(sessionId: number, edit: ObjectFormatConversionRequest): Promise<JobState> {
         return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
     }
 

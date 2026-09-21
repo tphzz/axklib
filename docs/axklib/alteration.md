@@ -111,6 +111,17 @@ not silently clamp values or discard active settings. Both directions are
 subject to these checks; see [Sample Parameters](sample-parameters.md).
 The resulting format identifies storage, not hardware-tested media compatibility.
 
+`convert_sbac_format` performs the corresponding explicit operation on one
+Sample Bank. It has the same fields as the example above except for
+`"type": "convert_sbac_format"` and `sample_bank_name` instead of `sample_name`.
+Both target formats are supported. The source digest covers the entire bank
+payload, including preserved padding. Bank identity, Program links, member rows
+and capacity remain unchanged; member Samples and Wave Data are never converted
+or edited. Any nonzero pending-propagation word blocks cross-format conversion.
+Unrepresentable parameters or uninterpreted data also block it. The operation
+does not freeze the bank, reset pending flags, or convert its members implicitly.
+An already matching format is a byte-preserving no-op.
+
 `duplicate_sbnk` creates a standalone Sample in the source volume, pointing to
 the same Wave Data. It requires `sample_name`, `new_name`, and `parameters`,
 which may be empty. Optional parameter and playback-window edits use the update

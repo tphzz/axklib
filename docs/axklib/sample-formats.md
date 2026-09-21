@@ -26,6 +26,9 @@ Sample Banks store the same generation's parameters, but their object layout
 also contains a member table. Native banks have a prefix-only parameter block;
 later banks place the additional 36 bytes after that table. Their total object
 size therefore depends on member capacity, not only parameter-block length.
+Bank identification requires a recognized revision and consistent declared
+lengths, member count and complete row capacity. Allocation padding is excluded
+from those lengths. Unknown or malformed layouts are not assigned a generation.
 
 ## Parameter Differences
 
@@ -89,6 +92,12 @@ therefore does not promise V1 playback compatibility. Matching filter names or
 selectors between generations does not establish identical DSP response, timing
 or sound. Physical playback testing remains distinct from stored-format checks.
 
+A5000 system 1.50 can save native-format Samples and Sample Banks in the later
+stored format: this occurred in the bank-conversion load/save checks. Loading
+does not itself rewrite the source objects on disk. Recheck stored formats after
+a hardware save when authoring A3000 media; successful playback on an A5000 does
+not establish A3000 compatibility or bit-exact audio preservation.
+
 ## Authoring And Editing
 
 Fresh Sample and Sample Bank specifications accept `storage_format` alongside
@@ -109,3 +118,25 @@ an equivalent in the other generation. Conversion checks representation and
 blocks loss; it does not certify hardware compatibility or change other objects
 in the image. For A3000 media authoring, select native format and test the complete
 media on the intended system version and installed hardware.
+
+## Sample Bank Conversion
+
+A bank's badge describes its own stored parameters, not those of its members.
+The bank inspector shows member Sample formats separately, including unknown
+formats and unresolved references. A later-format bank can contain native-format
+Samples, and converting the bank does not convert those Samples.
+
+Select one bank and choose **Convert to a3k sample bank format...** or
+**Convert to a4k/a5k sample bank format...**. Conversion preserves the bank's
+identity, name, Program links, complete member rows and unused row capacity.
+Member Samples and Wave Data are neither edited nor converted. The dialog
+closes only after the write is confirmed and the workspace has refreshed;
+retrying a failed refresh does not submit a second conversion.
+
+Conversion in either direction is blocked when any pending bank parameter
+operation is stored. Pending operations have generation-specific numbering and
+side effects, so copying their flags is not a parameter-preserving conversion.
+The converter does not discard them or run Freeze SampleBank automatically.
+Unknown data and values without an equivalent in the target format also block
+conversion rather than being clamped or reset. See the
+[alteration operation](alteration.md) for programmatic use.

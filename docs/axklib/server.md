@@ -1096,7 +1096,7 @@ can repair it. Other edits preserve it. `FORMAT_UNAVAILABLE` identifies fields
 not stored in this format; they are not synthesized into editable values.
 `sampleFormat` identifies the stored 188/224-byte format separately from parameter
 warnings and A5000 output requirements. It is also present on collection items
-and object details (null for objects without an A-series Sample format).
+and object details for both Samples and Sample Banks (null for other objects).
 Its HTTP `format` enum is `A3000_188`, `A4000_A5000_224`, or `UNKNOWN`;
 conversion preview `targetFormat` uses the two recognized values. The embedded
 alteration manifest retains its own lowercase `target_format` values.
@@ -1105,11 +1105,17 @@ Fresh Sample and Sample Bank alteration specifications accept lowercase
 later profile. Audio import uses the existing atomic alteration operation,
 passing the batch selection to each new Sample and optional bank, not a separate
 conversion job. See [A-Series Sample Formats And Generations](sample-formats.md).
-`formatConversions` gives read-only target previews with changes and blockers;
-`canConvertFormat` indicates whether the image supports the operation. Execution
-uses `convert_sbnk_format`, the original payload digest and the current image
-revision, and recomputes the same conversion checks. Ordinary Save never changes
-format. Stereo restrictions remain in `blockedParameters`; each has an
+The nullable root `formatConversion` capability is separate from `editing`.
+It includes `payloadSha256`, `partitionIndex`, `volumeName`, `sampleFormat`,
+`canConvertFormat`, `reason` and `formatConversions`. The last field gives
+read-only target previews with changes and blockers; `canConvertFormat` indicates
+whether the image, placement and stored layout support conversion, not whether
+each target is free of blockers. Execution uses `convert_sbnk_format` for a
+Sample or `convert_sbac_format` for a bank, the original payload digest and the
+current image revision, and recomputes the same conversion checks. Banks expose
+this capability without an editable parameter profile. Bank conversion leaves
+members untouched and blocks nonzero pending bank operations. Ordinary Save
+never changes format. Stereo restrictions remain in `blockedParameters`; each has an
 explanation in `blockedParameterReasons` and retains its decoded value. These
 metadata fields are not mutation inputs.
 Unsupported layouts

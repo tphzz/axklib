@@ -154,13 +154,13 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
                 *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "duplicate_sbnk" &&
-                *type != "convert_sbnk_format" && *type != "update_sample_bank_parameters" &&
-                *type != "insert_waveform" && *type != "delete_waveform" && *type != "delete_program" &&
-                *type != "insert_program" && *type != "delete_sbac" && *type != "insert_sbac" &&
-                *type != "rename_waveform" && *type != "rename_sbnk" && *type != "assign_sbac_members" &&
-                *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
-                *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
-                *type != "rename_partition" && *type != "repair_object_placements" &&
+                *type != "convert_sbnk_format" && *type != "convert_sbac_format" &&
+                *type != "update_sample_bank_parameters" && *type != "insert_waveform" && *type != "delete_waveform" &&
+                *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
+                *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
+                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
+                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
+                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
                 *type != "import_tx16w_disk_set" && *type != "clear_program_assignments" &&
                 *type != "update_program_parameters" && *type != "update_wave_data_parameters" &&
                 *type != "replace_program_assignments" && *type != "retarget_sample_wave_data") {
@@ -360,6 +360,11 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
             } else if (*type == "convert_sbnk_format") {
                 auto operation = detail::parse_sample_format_conversion_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "convert_sbac_format") {
+                auto operation = detail::parse_sample_bank_format_conversion_json(row, std::move(selector));
                 if (!operation)
                     return std::unexpected{operation.error()};
                 data = std::move(*operation);

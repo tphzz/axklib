@@ -90,7 +90,8 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             detail["editing"]["sampleFormat"],
         ):
             assert metadata["format"] == "A4000_A5000_224", metadata
-        assert detail["editing"]["formatConversions"][0]["targetFormat"] == "A3000_188"
+        assert detail["formatConversion"]["formatConversions"][0]["targetFormat"] == "A3000_188"
+        assert "formatConversions" not in detail["editing"]
 
         def operation(
             snapshot: Any, identity: str, kind: str, level: int
@@ -184,7 +185,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         assert get(copied_path)["editing"]["payloadSha256"] == copied_detail["editing"]["payloadSha256"]
         assert request(port, TOKEN, "DELETE", f"/api/v1/images/{competing['imageId']}").status == 200
         for target, byte_count in (("a3000_188", 188), ("a4000_a5000_224", 224)):
-            preview = copied_detail["editing"]["formatConversions"][0]
+            preview = copied_detail["formatConversion"]["formatConversions"][0]
             assert preview["allowed"] and preview["targetFormat"] == target.upper(), preview
             conversion = operation(copied_detail, f"convert-{target}", "convert_sbnk_format", 42)
             del conversion["parameters"]
@@ -202,6 +203,41 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             assert refreshed["sampleFormat"]["format"] == target.upper(), refreshed
         alter(copied_detail, operation(copied_detail, "save-converted", "update_sbnk_parameters", 43))
         assert get(copied_path)["editing"]["parameters"]["level"] == 43
+        current_sample = get(detail_path)
+        alter(current_sample, {"id": "insert-format-bank", "type": "insert_sbac",
+                              "partition_index": current_sample["editing"]["partitionIndex"],
+                              "volume_name": current_sample["editing"]["volumeName"],
+                              "sample_bank": {"name": "Format bank", "member_samples": [sample["name"]],
+                                              "storage_format": "a4000_a5000_224"}})
+        bank = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["name"] == "Format bank")
+        bank_path = f"{base}/objects/{bank['id']}"
+        bank_detail = get(bank_path)
+        assert bank_detail["editing"] is None
+        members = {item["id"]: get(f"{base}/objects/{item['id']}")["formatConversion"]["payloadSha256"]
+                   for item in after if item["type"] == "SBNK"}
+        def relationship_values(snapshot: Any) -> Any:
+            # Relationship IDs are revision-scoped; object identities and edge values must persist.
+            return [{key: value for key, value in edge.items() if key != "id"} for edge in snapshot["relationships"]]
+
+        relationships = relationship_values(bank_detail)
+        for target in ("a3000_188", "a4000_a5000_224"):
+            capability = bank_detail["formatConversion"]
+            assert capability["canConvertFormat"], capability
+            assert capability["formatConversions"][0]["allowed"], capability
+            change = {"id": f"bank-{target}", "type": "convert_sbac_format",
+                      "partition_index": capability["partitionIndex"], "volume_name": capability["volumeName"],
+                      "sample_bank_name": bank["name"], "target_format": target,
+                      "expected_payload_sha256": capability["payloadSha256"]}
+            alter(bank_detail, change)
+            bank_detail = get(bank_path)
+            assert bank_detail["object"]["id"] == bank["id"]
+            assert bank_detail["object"]["sampleFormat"]["format"] == target.upper()
+            assert relationship_values(bank_detail) == relationships
+            assert bank_detail["editing"] is None
+            for member, digest in members.items():
+                assert get(f"{base}/objects/{member}")["formatConversion"]["payloadSha256"] == digest
+            refreshed = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["id"] == bank["id"])
+            assert refreshed["sampleFormat"]["format"] == target.upper()
         closed = request(port, TOKEN, "DELETE", base)
         assert closed.status == 200 and closed.json()["data"]["closed"] is True, (
             closed.content

@@ -338,20 +338,27 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     }
     const ByteReader reader{payload};
     CurrentSbac result;
+    result.storage = inspect_sample_bank_storage(payload);
     const auto common = decode_current_common_record(payload);
     if (!common)
         return std::unexpected{common.error()};
     result.common = *common;
     std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_offset), parameter_prefix_size,
                 result.raw_sample_parameter_block.begin());
-    auto member_region_end = payload.size();
+    const auto logical_end =
+        result.storage.structurally_valid
+            ? static_cast<std::size_t>(result.storage.header_revision == 2U ? result.storage.older_body_bytes
+                                                                            : result.storage.later_body_bytes) +
+                  0x30U
+            : payload.size();
+    auto member_region_end = logical_end;
     if (header.unknown_0x14 >= 4U) {
         if (payload.size() < first_member_offset + parameter_tail_size) {
             return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                               "current SBAC payload is too short for its split parameter tail")};
         }
         result.storage_layout = SbacStorageLayout::current_split_parameter_tail;
-        result.parameter_tail_offset = payload.size() - parameter_tail_size;
+        result.parameter_tail_offset = logical_end - parameter_tail_size;
         member_region_end = *result.parameter_tail_offset;
         std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(*result.parameter_tail_offset), parameter_tail_size,
                     result.raw_sample_parameter_block.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_size));
@@ -367,7 +374,9 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
                 continue;
             }
             const auto number = static_cast<std::uint8_t>(word_index * 32U + bit);
-            (number <= 88U ? result.pending_parameter_numbers : result.reserved_pending_parameter_numbers)
+            (number <= (result.storage.format == SampleStorageFormat::a3000_188 ? 84U : 88U)
+                 ? result.pending_parameter_numbers
+                 : result.reserved_pending_parameter_numbers)
                 .push_back(number);
         }
     }

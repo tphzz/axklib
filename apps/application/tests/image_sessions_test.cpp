@@ -1822,7 +1822,7 @@ TEST_F(ImageSessionTest, NativeSampleEditorExposesStoredParametersAndExplicitCon
         EXPECT_EQ(editing.at("sampleFormat").at("parameterBytes"), 188U);
         EXPECT_EQ(editing.at("parameterCapabilities").at("portamento_rate").at("available"), false);
         EXPECT_EQ(editing.at("parameterCapabilities").at("output1_destination").at("editable"), true);
-        EXPECT_EQ(editing.at("formatConversions").at(0).at("targetFormat"), "a4000_a5000_224");
+        EXPECT_FALSE(editing.contains("formatConversions"));
         EXPECT_EQ(editing.at("blockedParameterReasons").size(), editing.at("blockedParameters").size());
         const auto &unavailable = editing.at("unavailableParameters");
         EXPECT_FALSE(unavailable.contains("output1_destination"));

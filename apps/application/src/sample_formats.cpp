@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include "axklib/package_archive.hpp"
 #include "axklib/sample_format_conversion.hpp"
 #include "axklib/sample_format_conversion_internal.hpp"
 
@@ -26,18 +27,15 @@ Json domain(const std::optional<SampleParameterLocation> &location) {
             {"offset", location->offset},
             {"mask", location->mask}};
 }
-} // namespace
-
-Json sample_format_metadata(const CurrentSbnk &sample) {
-    const auto &storage = sample.storage;
+Json format_metadata(const SampleStorageInfo &storage, std::span<const std::byte> block) {
     auto issues = Json::array();
     bool a5000 = false;
     Json extension_differs = nullptr;
     if (storage.structurally_valid) {
         const auto generation = sample_parameter_generation(storage.format);
-        issues = issues_json(assess_sample_parameter_block(sample.raw_parameter_window, *generation));
+        block = block.first(*storage.parameter_bytes);
+        issues = issues_json(assess_sample_parameter_block(block, *generation));
         if (storage.format == SampleStorageFormat::a4000_a5000_224) {
-            const auto block = std::span{sample.raw_parameter_window};
             for (const auto &rule : sample_parameter_rules())
                 if (rule.a4000_a5000 && rule.a4000_a5000->a5000_minimum) {
                     const auto value = read_sample_parameter_value(block, *rule.a4000_a5000);
@@ -59,6 +57,15 @@ Json sample_format_metadata(const CurrentSbnk &sample) {
             {"parameterIssues", issues},
             {"requiresA5000", a5000},
             {"extensionDiffersFromPrefixDefaults", extension_differs}};
+}
+} // namespace
+
+Json sample_format_metadata(const CurrentSbnk &sample) {
+    return format_metadata(sample.storage, sample.raw_parameter_window);
+}
+
+Json sample_format_metadata(const CurrentSbac &bank) {
+    return format_metadata(bank.storage, bank.raw_sample_parameter_block);
 }
 
 Json sample_parameter_capabilities(const CurrentSbnk &sample) {
@@ -88,18 +95,35 @@ Json sample_parameter_capabilities(const CurrentSbnk &sample) {
     return result;
 }
 
-Json sample_format_conversion_previews(std::span<const std::byte> payload) {
+Json sample_format_conversion_previews(std::span<const std::byte> payload, bool bank) {
     auto result = Json::array();
-    const auto source = inspect_sample_storage(payload).format;
+    const auto source = (bank ? inspect_sample_bank_storage(payload) : inspect_sample_storage(payload)).format;
     for (const auto target : {SampleStorageFormat::a3000_188, SampleStorageFormat::a4000_a5000_224}) {
         if (target == source)
             continue;
-        const auto plan = plan_sample_format_conversion(payload, target);
+        const auto plan =
+            bank ? plan_sample_bank_format_conversion(payload, target) : plan_sample_format_conversion(payload, target);
         result.push_back({{"targetFormat", sample_storage_format_name(target)},
                           {"allowed", plan.allowed()},
                           {"changes", plan.changes},
                           {"blockers", issues_json(plan.blockers)}});
     }
     return result;
+}
+
+Json object_format_conversion(const ObjectSnapshot &snapshot, std::span<const std::byte> payload, bool writable) {
+    const auto *bank = std::get_if<CurrentSbac>(&snapshot.object.payload);
+    const auto *sample = std::get_if<CurrentSbnk>(&snapshot.object.payload);
+    if (!bank && !sample)
+        return nullptr;
+    const auto &storage = bank ? bank->storage : sample->storage;
+    const bool supported = writable && snapshot.placement.has_value() && storage.structurally_valid;
+    return {{"payloadSha256", package_internal::hex_digest(package_internal::sha256(payload))},
+            {"partitionIndex", snapshot.partition.value},
+            {"volumeName", snapshot.placement ? snapshot.placement->volume_name : ""},
+            {"sampleFormat", bank ? sample_format_metadata(*bank) : sample_format_metadata(*sample)},
+            {"canConvertFormat", supported},
+            {"reason", supported ? "" : "This object's storage format or image does not support conversion."},
+            {"formatConversions", sample_format_conversion_previews(payload, bank != nullptr)}};
 }
 } // namespace axk::app

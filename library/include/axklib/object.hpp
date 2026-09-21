@@ -189,6 +189,7 @@ enum class SbacStorageLayout : std::uint8_t {
 
 struct CurrentSbac {
     CurrentObjectCommonRecord common;
+    SampleStorageInfo storage;
     SbacStorageLayout storage_layout{SbacStorageLayout::legacy_without_parameter_tail};
     std::optional<std::size_t> parameter_tail_offset;
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};

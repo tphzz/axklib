@@ -7,7 +7,9 @@ export class InspectorPanels {
     private collapsed = $state<Record<string, boolean>>({});
 
     expanded(scope: string, sectionId: string): boolean {
-        const defaultCollapsed = sectionId === 'relationships' || (scope === 'sample' && sectionId === 'stored-format');
+        const defaultCollapsed =
+            sectionId === 'relationships' ||
+            ((scope === 'sample' || scope === 'sample-bank') && sectionId === 'stored-format');
         return !(this.collapsed[`${scope}:${sectionId}`] ?? defaultCollapsed);
     }
 

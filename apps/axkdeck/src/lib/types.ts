@@ -196,6 +196,7 @@ export type InspectorSelection =
           kind: 'sample-bank';
           item: SampleStructureItem;
           members: SampleStructureItem[];
+          unresolvedMemberCount: number;
           memberPreviews: SampleWaveformPreview[];
           displayedMemberId: string;
           relationships?: InspectorRelationshipGroup[];

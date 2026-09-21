@@ -34,7 +34,9 @@ struct SampleParameterBlocks {
 
 AXK_API std::string_view sample_storage_format_name(SampleStorageFormat format);
 AXK_API SampleStorageInfo inspect_sample_storage(std::span<const std::byte> payload);
+AXK_API SampleStorageInfo inspect_sample_bank_storage(std::span<const std::byte> payload);
 AXK_API Result<SampleParameterBlocks> read_sample_parameter_blocks(std::span<const std::byte> payload);
+AXK_API Result<SampleParameterBlocks> read_sample_bank_parameter_blocks(std::span<const std::byte> payload);
 AXK_API std::optional<SampleParameterGeneration> sample_parameter_generation(SampleStorageFormat format);
 
 } // namespace axk

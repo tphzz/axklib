@@ -85,8 +85,6 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
             {"blockedParameterReasons", blocked_reasons},
             {"sampleFormat", sample_format_metadata(*sample)},
             {"parameterCapabilities", capabilities},
-            {"formatConversions", sample_format_conversion_previews(bytes)},
-            {"canConvertFormat", writable && snapshot.placement.has_value()},
             {"playbackWindow",
              {{"start_frame", sample->left.wave_start_frame}, {"length_frames", sample->left.wave_length_frames}}},
             {"canEditPlayback", editable && equal_windows},

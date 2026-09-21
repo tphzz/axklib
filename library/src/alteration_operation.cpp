@@ -37,6 +37,7 @@ std::string_view operation_type_name(const AlterationOperationData &operation) n
         std::string_view{"retarget_sample_wave_data"},
         std::string_view{"duplicate_sbnk"},
         std::string_view{"convert_sbnk_format"},
+        std::string_view{"convert_sbac_format"},
     };
     return names[operation.index()];
 }

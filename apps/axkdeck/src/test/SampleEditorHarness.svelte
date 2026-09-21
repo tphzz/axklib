@@ -9,12 +9,12 @@
     import type { ImageSessionWorkflow } from '../features/image-session/workflow.svelte';
     import type { AuditionWorkflow } from '../features/audition/workflow.svelte';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
-    import { sampleFormatFixture } from './sampleFormatFixture';
+    import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
     import type { ObjectDetail, ImageTransport } from '../lib/transport';
     import type {
         ObjectParameterEdit,
         SampleDuplicationRequest,
-        SampleFormatConversionRequest,
+        ObjectFormatConversionRequest,
         SampleStorageFormat,
     } from '../lib/objectEditing';
     import type { InspectorSelection } from '../lib/types';
@@ -83,6 +83,7 @@
         return {
             image: { revision: writes + 1 },
             object: { id: name, key: name, name },
+            formatConversion: sampleConversionFixture(format.sampleFormat.format, { volumeName: 'Test' }),
             editing: {
                 profile: 'a-series/sample',
                 editable: true,
@@ -118,7 +119,8 @@
             names = [...names, edit.operation.new_name];
             return { jobId: 1, kind: 'edit', status: 'queued' };
         },
-        startSampleFormatConversion: async (_: number, edit: SampleFormatConversionRequest) => {
+        startObjectFormatConversion: async (_: number, edit: ObjectFormatConversionRequest) => {
+            if (edit.operation.type !== 'convert_sbnk_format') throw new Error('Expected a Sample conversion');
             if (rejectConversion) {
                 rejectConversion = false;
                 conversionLockPending = true;

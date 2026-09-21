@@ -2337,9 +2337,7 @@
           "maximumFrames",
           "sources",
           "sampleFormat",
-          "parameterCapabilities",
-          "formatConversions",
-          "canConvertFormat"
+          "parameterCapabilities"
         ],
         "properties": {
           "profile": {
@@ -2460,6 +2458,39 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/SampleParameterCapability"
             }
+          }
+        }
+      },
+      "ObjectFormatConversion": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "sampleFormat",
+          "canConvertFormat",
+          "formatConversions",
+          "reason"
+        ],
+        "properties": {
+          "payloadSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "partitionIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 7
+          },
+          "volumeName": {
+            "type": "string"
+          },
+          "sampleFormat": {
+            "$ref": "#/components/schemas/SampleFormatMetadata"
+          },
+          "canConvertFormat": {
+            "type": "boolean"
           },
           "formatConversions": {
             "type": "array",
@@ -2467,30 +2498,77 @@
               "$ref": "#/components/schemas/SampleFormatConversionPreview"
             }
           },
-          "canConvertFormat": {
-            "type": "boolean"
+          "reason": {
+            "type": "string"
           }
         }
       },
       "ImageObjectDetail": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["schemaVersion", "image", "object", "relationships"],
+        "required": [
+          "schemaVersion",
+          "image",
+          "object",
+          "relationships"
+        ],
         "properties": {
-          "schemaVersion": {"type": "integer", "const": 1},
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1
+          },
           "image": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["imageId", "revision", "format"],
+            "required": [
+              "imageId",
+              "revision",
+              "format"
+            ],
             "properties": {
-              "imageId": {"type": "string", "minLength": 1},
-              "revision": {"type": "integer", "minimum": 1},
-              "format": {"type": "string", "minLength": 1}
+              "imageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "format": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
-          "object": {"$ref": "#/components/schemas/ImageObjectDetailObject"},
-          "editing": {"oneOf": [{"$ref": "#/components/schemas/ASeriesSampleEditor"}, {"type": "null"}]},
-          "relationships": {"type": "array", "items": {"$ref": "#/components/schemas/ImageObjectDetailRelationship"}}
+          "object": {
+            "$ref": "#/components/schemas/ImageObjectDetailObject"
+          },
+          "editing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ASeriesSampleEditor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "relationships": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageObjectDetailRelationship"
+            }
+          },
+          "formatConversion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObjectFormatConversion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         }
       },
       "ImageObjectDetailResponse": {
@@ -5215,7 +5293,8 @@
               "REPLACE_PROGRAM_ASSIGNMENTS",
               "RETARGET_SAMPLE_WAVE_DATA",
               "DUPLICATE_SBNK",
-              "CONVERT_SBNK_FORMAT"
+              "CONVERT_SBNK_FORMAT",
+              "CONVERT_SBAC_FORMAT"
             ],
             "x-axklib-application-enum": {
               "DELETE_VOLUME": "delete_volume",
@@ -5248,7 +5327,8 @@
               "REPLACE_PROGRAM_ASSIGNMENTS": "replace_program_assignments",
               "RETARGET_SAMPLE_WAVE_DATA": "retarget_sample_wave_data",
               "DUPLICATE_SBNK": "duplicate_sbnk",
-              "CONVERT_SBNK_FORMAT": "convert_sbnk_format"
+              "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
+              "CONVERT_SBAC_FORMAT": "convert_sbac_format"
             }
           },
           "partitionIndex": {
