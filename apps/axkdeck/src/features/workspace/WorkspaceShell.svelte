@@ -2,6 +2,7 @@
     import { onDestroy, onMount, type Snippet } from 'svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import LayoutControls from '../../lib/components/LayoutControls.svelte';
+    import { useASeriesPreferences } from '../../lib/aSeriesPreferences.svelte';
     import type { InterfaceScaleController, InterfaceScaleState } from '../../lib/interfaceScale';
     import type { WorkspaceMode, WorkspacePresentation } from './contracts';
     import { objectEditors } from '../object-editor/context';
@@ -50,12 +51,18 @@
     let mainStage: HTMLElement;
     let scale = $state<InterfaceScaleState | null>(null);
     let unsubscribe: (() => void) | undefined;
+    const preferences = useASeriesPreferences();
+    let preferencesOpen = $state(false);
+    let preferencesReady = $state(false);
     const editors = objectEditors();
     const playback = $derived(editors?.visible ? undefined : presentation.playback);
     const availableHeight = $derived(Math.max(0, stageHeight - 8 - (playback ? 30 : 0)));
     const lowerHeight = $derived(editorPaneHeight(availableHeight, splitRatio, presentation.lowerPreferredHeight));
     const upperHeight = $derived(availableHeight - lowerHeight);
     onMount(() => {
+        void preferences.ready.then(() => {
+            preferencesReady = true;
+        });
         scale = interfaceScaling?.state() ?? null;
         unsubscribe = interfaceScaling?.subscribe((value) => {
             scale = value;
@@ -110,6 +117,14 @@
                     aria-label="Server connection settings"
                     onclick={onconnection}><Icon name="server" size={17} /></button
                 >{/if}
+            <button
+                class="icon-button"
+                type="button"
+                aria-label="Preferences"
+                title="Preferences"
+                disabled={!preferencesReady}
+                onclick={() => (preferencesOpen = true)}><Icon name="settings" size={17} /></button
+            >
             <LayoutControls
                 libraryOpen={sidebarOpen}
                 editorOpen={lowerOpen && Boolean(presentation.lower)}
@@ -184,6 +199,17 @@
         <span><span class="status-dot"></span>{status}</span><span class="ml-auto">{count}</span>
     </footer>
 </div>
+
+<!-- Keep fixed overlays outside the filtered header's containing block. -->
+{#if preferencesOpen}
+    {#await import('../../lib/components/PreferencesDialog.svelte') then module}
+        <module.default
+            {preferences}
+            oncancel={() => (preferencesOpen = false)}
+            onsaved={() => (preferencesOpen = false)}
+        />
+    {/await}
+{/if}
 
 <style>
     .modular-shell {

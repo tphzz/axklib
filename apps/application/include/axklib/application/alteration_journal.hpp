@@ -18,7 +18,7 @@
 namespace axk::app {
 
 inline constexpr std::uint64_t default_maximum_alteration_journal_bytes =
-    2ULL * 2'147'483'648ULL + 64ULL * 1024ULL * 1024ULL;
+    2ULL * 8'589'934'592ULL + 64ULL * 1024ULL * 1024ULL;
 
 // Owned small metadata or a borrowed range of an immutable, shared input.
 // Reader-backed bytes are frozen in the journal before the target is modified.

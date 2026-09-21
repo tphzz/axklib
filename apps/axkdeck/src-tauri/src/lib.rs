@@ -1,3 +1,4 @@
+mod a_series_preferences;
 mod allocation_inspector;
 mod desktop_preferences;
 mod directory_tar;
@@ -489,8 +490,8 @@ pub fn run() {
             let settings_path = settings_paths.axkdeck_settings;
             setup_startup.record(StartupMilestone::PreferencesLoadStarted);
             let preferences = DesktopPreferencesStore::load(settings_path.clone()).unwrap_or_else(|error| {
-                log::warn!("axkdeck settings are unavailable and will be reset on the next update: {error}");
-                DesktopPreferencesStore::empty(settings_path)
+                log::warn!("axkdeck settings are unavailable; the settings file will remain unchanged: {error}");
+                DesktopPreferencesStore::unavailable(settings_path, error)
             });
             setup_startup.record(StartupMilestone::PreferencesLoadCompleted);
             app.manage(Mutex::new(preferences));
@@ -556,6 +557,8 @@ pub fn run() {
             desktop_build_info,
             desktop_interface_scale_mode,
             set_desktop_interface_scale_mode,
+            a_series_preferences::desktop_preferred_a_series_generation,
+            a_series_preferences::set_desktop_preferred_a_series_generation,
             open_allocation_inspector,
             save_allocation_map_json
         ]);

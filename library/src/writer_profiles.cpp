@@ -40,6 +40,10 @@ std::string_view hds_creation_profile_id(HdsCreationProfileId id) {
     switch (id) {
     case HdsCreationProfileId::floppy_scale:
         return "floppy-scale";
+    case HdsCreationProfileId::hds_128_mib:
+        return "hds-128-mib";
+    case HdsCreationProfileId::hds_256_mib:
+        return "hds-256-mib";
     case HdsCreationProfileId::cd_r_650:
         return "cd-r-650";
     case HdsCreationProfileId::cd_r_700:
@@ -48,14 +52,19 @@ std::string_view hds_creation_profile_id(HdsCreationProfileId id) {
         return "hds-1-gib";
     case HdsCreationProfileId::hds_2_gib:
         return "hds-2-gib";
+    case HdsCreationProfileId::hds_4_gib:
+        return "hds-4-gib";
+    case HdsCreationProfileId::hds_8_gib:
+        return "hds-8-gib";
     }
     return {};
 }
 
 Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id) {
-    constexpr std::array ids{HdsCreationProfileId::floppy_scale, HdsCreationProfileId::cd_r_650,
-                             HdsCreationProfileId::cd_r_700, HdsCreationProfileId::hds_1_gib,
-                             HdsCreationProfileId::hds_2_gib};
+    constexpr std::array ids{
+        HdsCreationProfileId::floppy_scale, HdsCreationProfileId::hds_128_mib, HdsCreationProfileId::hds_256_mib,
+        HdsCreationProfileId::hds_4_gib,    HdsCreationProfileId::hds_8_gib,   HdsCreationProfileId::cd_r_650,
+        HdsCreationProfileId::cd_r_700,     HdsCreationProfileId::hds_1_gib,   HdsCreationProfileId::hds_2_gib};
     const auto found = std::ranges::find(ids, id, hds_creation_profile_id);
     if (found == ids.end())
         return std::unexpected{profile_error("unknown HDS creation profile")};
@@ -66,10 +75,14 @@ const std::vector<HdsCreationProfile> &hds_creation_profiles() {
     static const auto profiles = [] {
         constexpr std::array definitions{
             std::tuple{HdsCreationProfileId::floppy_scale, 1'474'560ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::hds_128_mib, 134'217'728ULL, std::uint8_t{1}},
+            std::tuple{HdsCreationProfileId::hds_256_mib, 268'435'456ULL, std::uint8_t{1}},
             std::tuple{HdsCreationProfileId::cd_r_650, 333'000ULL * 2'048ULL, std::uint8_t{1}},
             std::tuple{HdsCreationProfileId::cd_r_700, 360'000ULL * 2'048ULL, std::uint8_t{1}},
             std::tuple{HdsCreationProfileId::hds_1_gib, 1'073'741'824ULL, std::uint8_t{1}},
             std::tuple{HdsCreationProfileId::hds_2_gib, 2'147'483'648ULL, std::uint8_t{2}},
+            std::tuple{HdsCreationProfileId::hds_4_gib, 4'294'967'296ULL, std::uint8_t{4}},
+            std::tuple{HdsCreationProfileId::hds_8_gib, 8'589'934'592ULL, std::uint8_t{8}},
         };
         std::vector<HdsCreationProfile> result;
         for (const auto &[id, size_bytes, default_partition_count] : definitions) {

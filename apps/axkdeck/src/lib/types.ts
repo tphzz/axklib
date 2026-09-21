@@ -95,6 +95,7 @@ export interface SampleStructureItem {
 }
 
 export interface SampleBankAssignmentOption {
+    sampleFormat?: import('./objectEditing').SampleFormatMetadata | null;
     objectId: string;
     name: string;
     memberCount: number;

@@ -10,6 +10,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -425,14 +426,54 @@ TEST_F(WriteOperationsTest, PublishesTypedHardDiskCreationProfiles) {
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("schemaVersion"), "1.0");
     const auto &profiles = result->at("profiles");
-    ASSERT_EQ(profiles.size(), 5U);
-    EXPECT_EQ(profiles[0].at("profileId"), "FLOPPY_SCALE");
-    EXPECT_EQ(profiles[0].at("sizeBytes"), 1'474'560U);
-    EXPECT_EQ(profiles[0].at("defaultPartitionCount"), 1U);
-    EXPECT_EQ(profiles[0].at("partitionOptions").size(), 1U);
-    EXPECT_EQ(profiles[4].at("profileId"), "HDS_2_GIB");
-    EXPECT_EQ(profiles[4].at("defaultPartitionCount"), 2U);
-    EXPECT_EQ(profiles[4].at("partitionOptions").size(), 7U);
+    const std::array expected{
+        std::tuple{"FLOPPY_SCALE", 1'474'560ULL, 1U, 1U},  std::tuple{"HDS_128_MIB", 134'217'728ULL, 1U, 8U},
+        std::tuple{"HDS_256_MIB", 268'435'456ULL, 1U, 8U}, std::tuple{"CD_R_650", 681'984'000ULL, 1U, 8U},
+        std::tuple{"CD_R_700", 737'280'000ULL, 1U, 8U},    std::tuple{"HDS_1_GIB", 1'073'741'824ULL, 1U, 8U},
+        std::tuple{"HDS_2_GIB", 2'147'483'648ULL, 2U, 8U}, std::tuple{"HDS_4_GIB", 4'294'967'296ULL, 4U, 8U},
+        std::tuple{"HDS_8_GIB", 8'589'934'592ULL, 8U, 8U},
+    };
+    ASSERT_EQ(profiles.size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const auto &[id, size, default_count, maximum_count] = expected[index];
+        SCOPED_TRACE(id);
+        const auto &profile = profiles[index];
+        EXPECT_EQ(profile.at("profileId"), id);
+        EXPECT_EQ(profile.at("sizeBytes"), size);
+        EXPECT_EQ(profile.at("defaultPartitionCount"), default_count);
+        const auto &options = profile.at("partitionOptions");
+        ASSERT_EQ(options.size(), maximum_count - default_count + 1U);
+        for (std::size_t option = 0; option < options.size(); ++option)
+            EXPECT_EQ(options[option].at("partitionCount"), default_count + option);
+    }
+}
+
+TEST_F(WriteOperationsTest, NewHardDiskProfilesPlanOnlyAdmittedCountsWithoutWritingImages) {
+    const std::array cases{
+        std::tuple{"HDS_128_MIB", 134'217'728ULL, 1U},
+        std::tuple{"HDS_256_MIB", 268'435'456ULL, 1U},
+        std::tuple{"HDS_4_GIB", 4'294'967'296ULL, 4U},
+        std::tuple{"HDS_8_GIB", 8'589'934'592ULL, 8U},
+    };
+    for (const auto &[id, size, minimum_count] : cases) {
+        for (unsigned count = 0U; count <= 9U; ++count) {
+            const auto filename = std::string{id} + '-' + std::to_string(count) + ".hds";
+            SCOPED_TRACE(filename);
+            const auto planned = registry_.invoke(
+                "create.hds.plan", {{"profileId", id}, {"partitionCount", count}, {"output", file_ref(filename)}},
+                context());
+            EXPECT_FALSE(std::filesystem::exists(root_ / filename));
+            if (count < minimum_count || count > 8U) {
+                EXPECT_FALSE(planned);
+                continue;
+            }
+            ASSERT_TRUE(planned) << planned.error().message;
+            EXPECT_EQ(planned->at("kind"), "HDS");
+            EXPECT_EQ(planned->at("summary").at("sizeBytes"), size);
+            EXPECT_EQ(planned->at("summary").at("partitionCount"), count);
+            EXPECT_FALSE(planned->at("planToken").get<std::string>().empty());
+        }
+    }
 }
 
 TEST_F(WriteOperationsTest, TypedHardDiskPlanUsesTheExistingAtomicBuildLifecycle) {

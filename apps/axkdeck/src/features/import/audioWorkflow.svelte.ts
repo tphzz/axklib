@@ -20,6 +20,7 @@ import {
 } from './packageDestinations';
 import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 import { ImportCompletion } from './importCompletion.svelte';
+import { generationSampleFormat, type ASeriesGeneration } from '../../lib/aSeriesPreferences.svelte';
 
 export interface AudioImportRequest {
     files: (ClientUploadSource | FileLocation)[];
@@ -29,6 +30,7 @@ export interface AudioImportRequest {
 }
 
 interface AudioImportDependencies {
+    preferredASeriesGeneration?: () => ASeriesGeneration;
     transport: ImageTransport;
     jobs: JobController;
     picker: PickerController;
@@ -248,6 +250,7 @@ export class AudioImportWorkflow {
         selected: DiskTreeItem | null,
     ): AudioImportRequest {
         this.completion.reset();
+        this.sampleFormat = generationSampleFormat(this.dependencies.preferredASeriesGeneration?.() ?? 'A3000');
         const initial = selected ? initialImportDestination(selected) : null;
         const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
         return {

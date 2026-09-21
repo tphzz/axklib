@@ -3,7 +3,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::a_series_preferences::ASeriesGeneration;
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+#[path = "desktop_preferences_generation_tests.rs"]
+mod generation_tests;
 
 const SETTINGS_SCHEMA_VERSION: u32 = 1;
 
@@ -43,6 +48,8 @@ struct DesktopPreferences {
     schema_version: u32,
     appearance: AppearanceSettings,
     last_used_directories: LastUsedDirectories,
+    #[serde(default)]
+    preferred_a_series_generation: ASeriesGeneration,
 }
 
 impl Default for DesktopPreferences {
@@ -51,6 +58,7 @@ impl Default for DesktopPreferences {
             schema_version: SETTINGS_SCHEMA_VERSION,
             appearance: AppearanceSettings::default(),
             last_used_directories: LastUsedDirectories::default(),
+            preferred_a_series_generation: ASeriesGeneration::default(),
         }
     }
 }
@@ -58,6 +66,7 @@ impl Default for DesktopPreferences {
 pub struct DesktopPreferencesStore {
     document_path: PathBuf,
     preferences: DesktopPreferences,
+    load_error: Option<String>,
 }
 
 impl DesktopPreferencesStore {
@@ -79,6 +88,7 @@ impl DesktopPreferencesStore {
         Ok(Self {
             document_path,
             preferences,
+            load_error: None,
         })
     }
 
@@ -86,7 +96,35 @@ impl DesktopPreferencesStore {
         Self {
             document_path,
             preferences: DesktopPreferences::default(),
+            load_error: None,
         }
+    }
+
+    pub fn unavailable(document_path: PathBuf, error: String) -> Self {
+        Self {
+            load_error: Some(error),
+            ..Self::empty(document_path)
+        }
+    }
+
+    pub fn preferred_a_series_generation(&self) -> Result<ASeriesGeneration, String> {
+        if let Some(error) = &self.load_error {
+            return Err(error.clone());
+        }
+        Ok(self.preferences.preferred_a_series_generation)
+    }
+
+    pub fn set_preferred_a_series_generation(
+        &mut self,
+        generation: ASeriesGeneration,
+    ) -> Result<(), String> {
+        let previous = self.preferences.preferred_a_series_generation;
+        self.preferences.preferred_a_series_generation = generation;
+        if let Err(error) = self.persist() {
+            self.preferences.preferred_a_series_generation = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn interface_scale_mode(&self) -> InterfaceScaleMode {
@@ -179,6 +217,9 @@ impl DesktopPreferencesStore {
     }
 
     fn persist(&self) -> Result<(), String> {
+        if let Some(error) = &self.load_error {
+            return Err(error.clone());
+        }
         let mut encoded = serde_json::to_vec_pretty(&self.preferences)
             .map_err(|error| format!("encode axkdeck settings: {error}"))?;
         encoded.push(b'\n');
@@ -249,7 +290,7 @@ mod tests {
 
     use super::{DesktopPreferencesStore, InterfaceScaleMode};
 
-    fn temporary_directory(name: &str) -> PathBuf {
+    pub(super) fn temporary_directory(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock")

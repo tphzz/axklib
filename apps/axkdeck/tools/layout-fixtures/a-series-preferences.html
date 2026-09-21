@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>A-Series preferences regression</title>
+    </head>
+    <body>
+        <div id="app"></div>
+        <script type="module">
+            import { mount } from 'svelte';
+            import '../../src/app.css';
+            import Harness from '../../src/test/ASeriesPreferencesHarness.svelte';
+            mount(Harness, { target: document.getElementById('app') });
+        </script>
+    </body>
+</html>

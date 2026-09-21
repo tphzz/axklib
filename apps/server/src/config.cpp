@@ -13,6 +13,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/writer.hpp"
 #include "environment.hpp"
@@ -552,8 +553,9 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
         return std::unexpected(argument_error("event ticket limits are invalid"));
     }
     if (config.maximum_alteration_journal_bytes == 0U ||
-        config.maximum_alteration_journal_bytes > 8ULL * 1024ULL * 1024ULL * 1024ULL) {
-        return std::unexpected(argument_error("alteration journal byte limit must be between 1 byte and 8 GiB"));
+        config.maximum_alteration_journal_bytes > axk::app::default_maximum_alteration_journal_bytes) {
+        return std::unexpected(
+            argument_error("alteration journal byte limit must be between 1 byte and 16 GiB + 64 MiB"));
     }
     if (config.maximum_upload_bytes == 0U || config.maximum_upload_total_bytes < config.maximum_upload_bytes ||
         config.maximum_uploads == 0U || config.maximum_uploads > 10000U || config.maximum_upload_chunk_bytes == 0U ||

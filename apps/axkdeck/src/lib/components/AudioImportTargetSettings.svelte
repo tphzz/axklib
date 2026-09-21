@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { AudioImportGrouping, AudioImportOptions } from '../audioImportOptions';
+    import SampleFormatControl from './SampleFormatControl.svelte';
 
     let {
         mode = $bindable(),
@@ -14,10 +15,6 @@
         error: string;
         disabled: boolean;
     } = $props();
-    const formats: { value: AudioImportOptions['sampleFormat']; label: string }[] = [
-        { value: 'A3000_188', label: 'a3k' },
-        { value: 'A4000_A5000_224', label: 'a4k/a5k' },
-    ];
 </script>
 
 <div class="import-target-settings">
@@ -27,16 +24,7 @@
         <option value="SAMPLE_BANK">Import as Samples in a Sample Bank</option>
     </select>
     <span id="audio-import-format-label">Sample format</span>
-    <div class="dialog-segmented-control" role="group" aria-labelledby="audio-import-format-label">
-        {#each formats as choice}
-            <button
-                type="button"
-                aria-pressed={sampleFormat === choice.value}
-                {disabled}
-                onclick={() => (sampleFormat = choice.value)}>{choice.label}</button
-            >
-        {/each}
-    </div>
+    <SampleFormatControl bind:value={sampleFormat} label="Sample format" {disabled} />
     {#if mode === 'SAMPLE_BANK'}
         <label for="audio-import-sample-bank-name">Sample Bank name</label>
         <input
@@ -80,7 +68,7 @@
         .import-target-settings {
             grid-template-columns: max-content minmax(0, 1fr);
         }
-        .dialog-segmented-control {
+        :global(.dialog-segmented-control) {
             justify-self: start;
         }
         .field-error {

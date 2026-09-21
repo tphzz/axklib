@@ -429,7 +429,7 @@ TEST(BuildManifestTemplate, PublishesAtomicallyAndRequiresExplicitOverwrite) {
 
 TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
     for (std::uint8_t count = 1; count <= 8; ++count) {
-        axk::HdsBuildManifest value{"1.0", count == 1 ? axk::minimum_hds_size : axk::maximum_hds_size, {}};
+        axk::HdsBuildManifest value{"1.0", count == 1 ? axk::minimum_hds_size : 2'147'483'648ULL, {}};
         for (std::uint8_t index = 0; index < count; ++index) {
             axk::VolumeSpec volume;
             volume.name = "V";
@@ -443,32 +443,25 @@ TEST(HdsGeometry, CoversEveryPartitionCountAtOneAndTwoGiBBoundaries) {
 
 TEST(HdsCreationProfiles, PublishExactCapacitiesDefaultsAndAdmittedPartitionCounts) {
     const auto &profiles = axk::hds_creation_profiles();
-    ASSERT_EQ(profiles.size(), 5U);
-    EXPECT_EQ(axk::hds_creation_profile_id(profiles[0].id), "floppy-scale");
-    EXPECT_EQ(profiles[0].size_bytes, 1'474'560U);
-    EXPECT_EQ(profiles[0].default_partition_count, 1U);
-    ASSERT_EQ(profiles[0].partition_options.size(), 1U);
-    EXPECT_EQ(profiles[0].partition_options[0].partition_count, 1U);
-
-    EXPECT_EQ(axk::hds_creation_profile_id(profiles[1].id), "cd-r-650");
-    EXPECT_EQ(profiles[1].size_bytes, 681'984'000U);
-    EXPECT_EQ(axk::hds_creation_profile_id(profiles[2].id), "cd-r-700");
-    EXPECT_EQ(profiles[2].size_bytes, 737'280'000U);
-    EXPECT_EQ(axk::hds_creation_profile_id(profiles[3].id), "hds-1-gib");
-    EXPECT_EQ(profiles[3].size_bytes, 1'073'741'824U);
-    for (std::size_t index = 1; index <= 3; ++index) {
-        EXPECT_EQ(profiles[index].default_partition_count, 1U);
-        ASSERT_EQ(profiles[index].partition_options.size(), 8U);
-        for (std::size_t option = 0; option < 8U; ++option)
-            EXPECT_EQ(profiles[index].partition_options[option].partition_count, option + 1U);
+    const std::array expected{
+        std::tuple{"floppy-scale", 1'474'560ULL, 1U, 1U, 1U},  std::tuple{"hds-128-mib", 134'217'728ULL, 1U, 1U, 8U},
+        std::tuple{"hds-256-mib", 268'435'456ULL, 1U, 1U, 8U}, std::tuple{"cd-r-650", 681'984'000ULL, 1U, 1U, 8U},
+        std::tuple{"cd-r-700", 737'280'000ULL, 1U, 1U, 8U},    std::tuple{"hds-1-gib", 1'073'741'824ULL, 1U, 1U, 8U},
+        std::tuple{"hds-2-gib", 2'147'483'648ULL, 2U, 2U, 8U}, std::tuple{"hds-4-gib", 4'294'967'296ULL, 4U, 4U, 8U},
+        std::tuple{"hds-8-gib", 8'589'934'592ULL, 8U, 8U, 8U},
+    };
+    ASSERT_EQ(profiles.size(), expected.size());
+    for (const auto &[id, size, default_count, minimum_count, maximum_count] : expected) {
+        SCOPED_TRACE(id);
+        const auto profile = std::ranges::find_if(
+            profiles, [id](const auto &item) { return axk::hds_creation_profile_id(item.id) == id; });
+        ASSERT_NE(profile, profiles.end());
+        EXPECT_EQ(profile->size_bytes, size);
+        EXPECT_EQ(profile->default_partition_count, default_count);
+        ASSERT_EQ(profile->partition_options.size(), maximum_count - minimum_count + 1U);
+        for (std::size_t index = 0; index < profile->partition_options.size(); ++index)
+            EXPECT_EQ(profile->partition_options[index].partition_count, minimum_count + index);
     }
-
-    EXPECT_EQ(axk::hds_creation_profile_id(profiles[4].id), "hds-2-gib");
-    EXPECT_EQ(profiles[4].size_bytes, 2'147'483'648U);
-    EXPECT_EQ(profiles[4].default_partition_count, 2U);
-    ASSERT_EQ(profiles[4].partition_options.size(), 7U);
-    for (std::size_t option = 0; option < 7U; ++option)
-        EXPECT_EQ(profiles[4].partition_options[option].partition_count, option + 2U);
 
     for (const auto &profile : profiles) {
         const auto parsed = axk::parse_hds_creation_profile_id(axk::hds_creation_profile_id(profile.id));

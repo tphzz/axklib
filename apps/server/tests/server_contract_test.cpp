@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/alteration.hpp"
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/server/contract.hpp"
 #include "axklib/server/server.hpp"
@@ -512,6 +513,8 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(bins->at("schema").at("maximum"), 4096);
 
     const auto &limits = document.at("components").at("schemas").at("ApiLimits");
+    EXPECT_EQ(limits.at("properties").at("maximumAlterationJournalBytes").at("maximum"),
+              axk::app::default_maximum_alteration_journal_bytes);
     for (const auto name : {"maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes",
                             "maximumConcurrentArchiveDownloads", "maximumMediaBuildObjectBytes",
                             "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumUploads"}) {
@@ -1028,6 +1031,28 @@ TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
     misspelled.erase("writable");
     misspelled["writeable"] = false;
     EXPECT_FALSE(validator.validate("WorkspaceCreateRequest", misspelled));
+}
+
+TEST(ServerContract, HardDiskCreationPlansAcceptExpandedProfileIdsAndBoundPartitionCounts) {
+    axk::server::OpenApiValidator validator;
+    const std::array cases{
+        std::pair{"HDS_128_MIB", 1U},
+        std::pair{"HDS_256_MIB", 1U},
+        std::pair{"HDS_4_GIB", 4U},
+        std::pair{"HDS_8_GIB", 8U},
+    };
+    for (const auto &[id, count] : cases) {
+        SCOPED_TRACE(id);
+        const auto request = nlohmann::json{{"profileId", id}, {"partitionCount", count}, {"output", file_ref()}};
+        EXPECT_TRUE(validator.validate("HardDiskCreationPlanRequest", request));
+        for (const auto invalid_count : {0U, 9U}) {
+            auto invalid = request;
+            invalid["partitionCount"] = invalid_count;
+            EXPECT_FALSE(validator.validate("HardDiskCreationPlanRequest", invalid));
+        }
+    }
+    EXPECT_FALSE(validator.validate("HardDiskCreationPlanRequest",
+                                    {{"profileId", "HDS_16_GIB"}, {"partitionCount", 8U}, {"output", file_ref()}}));
 }
 
 TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas) {

@@ -434,6 +434,7 @@ export interface AudioImportTarget {
 export type { AudioImportGrouping, AudioImportOptions } from './audioImportOptions';
 
 export interface SampleBankCreation {
+    sampleFormat: import('./aSeriesPreferences.svelte').KnownSampleFormat;
     partitionIndex: number;
     volumeName: string;
     sampleBankName: string;

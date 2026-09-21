@@ -12,8 +12,14 @@ import type {
     WorkspaceView,
 } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import {
+    initialBankSampleFormat,
+    type KnownSampleFormat,
+    type ASeriesGeneration,
+} from '../../lib/aSeriesPreferences.svelte';
 
 interface SampleBankAssignmentDependencies {
+    preferredASeriesGeneration?: () => ASeriesGeneration;
     transport: ImageTransport;
     jobs: JobController;
     catalog: CatalogWorkflow;
@@ -27,9 +33,11 @@ interface SampleBankAssignmentDependencies {
     reportTiming: (operation: string, started: number, itemCount: number) => void;
 }
 
-export type SampleBankAssignmentTarget = { mode: 'new'; name: string } | { mode: 'existing'; bankObjectId: string };
+export type SampleBankAssignmentTarget =
+    { mode: 'new'; name: string; sampleFormat: KnownSampleFormat } | { mode: 'existing'; bankObjectId: string };
 
 export interface SampleBankAssignmentRequest {
+    initialSampleFormat: KnownSampleFormat;
     samples: SampleStructureItem[];
     options: SampleBankAssignmentOption[];
     blockers: SampleBankAssignmentBlocker[];
@@ -76,6 +84,7 @@ export class SampleBankAssignmentWorkflow {
             return {
                 objectId: bank.objectId,
                 name: bank.name,
+                sampleFormat: bank.object.sampleFormat,
                 memberCount: memberIds.size,
                 selectedMemberCount,
                 movedSampleCount,
@@ -84,6 +93,10 @@ export class SampleBankAssignmentWorkflow {
             };
         });
         this.request = {
+            initialSampleFormat: initialBankSampleFormat(
+                samples.map((sample) => sample.object.sampleFormat?.format),
+                this.dependencies.preferredASeriesGeneration?.() ?? 'A3000',
+            ),
             samples: [...samples],
             options,
             blockers: this.directProgramBlockers(samples, selectedIds),
@@ -139,6 +152,7 @@ export class SampleBankAssignmentWorkflow {
                         ? this.dependencies.transport.startSampleBankCreation(sessionId, {
                               ...preferred,
                               sampleBankName: name,
+                              sampleFormat: target.sampleFormat,
                               sampleNames: request.samples.map((sample) => sample.name),
                           })
                         : this.dependencies.transport.startSampleBankAssignment(sessionId, {

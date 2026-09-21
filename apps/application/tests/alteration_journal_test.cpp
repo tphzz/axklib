@@ -271,7 +271,71 @@ TEST(AlterationJournalStoreTest, QuarantinesAnUnexpectedExceptionUntilRecovery) 
 
 TEST(AlterationJournalStoreTest, DefaultLimitCoversTheSupportedImageBoundary) {
     constexpr auto metadata_allowance = 64ULL * 1024ULL * 1024ULL;
-    EXPECT_GE(axk::app::default_maximum_alteration_journal_bytes, axk::maximum_hds_size * 2U + metadata_allowance);
+    constexpr auto maximum_image_bytes = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+    EXPECT_EQ(axk::maximum_hds_size, maximum_image_bytes);
+    EXPECT_EQ(axk::app::default_maximum_alteration_journal_bytes, maximum_image_bytes * 2U + metadata_allowance);
+}
+
+TEST(AlterationJournalStoreTest, AppliesAndRecoversTinyPatchesAboveFourGiB) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-high-offset-test";
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{root};
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    const auto path = root / "workspace/image.hds";
+    constexpr std::uint64_t image_size = 8ULL * 1024ULL * 1024ULL * 1024ULL;
+    constexpr std::uint64_t patch_offset = 7ULL * 1024ULL * 1024ULL * 1024ULL + 123U;
+    {
+        std::ofstream image{path, std::ios::binary};
+        image.seekp(static_cast<std::streamoff>(image_size - 1U));
+        image.put('\0');
+        image.seekp(static_cast<std::streamoff>(patch_offset));
+        image.write("AB", 2);
+        ASSERT_TRUE(image);
+    }
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox) << sandbox.error().message;
+    const auto read_patch = [&]() {
+        std::ifstream image{path, std::ios::binary};
+        image.seekg(static_cast<std::streamoff>(patch_offset));
+        std::string bytes(2U, '\0');
+        image.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        EXPECT_TRUE(image);
+        return bytes;
+    };
+    {
+        auto target = sandbox->open_mutation({"workspace", "image.hds"});
+        ASSERT_TRUE(target) << target.error().message;
+        const std::array patches{axk::app::AlterationJournalPatch{
+            patch_offset, {std::byte{'A'}, std::byte{'B'}}, {std::byte{'C'}, std::byte{'D'}}}};
+        axk::app::AlterationJournalStore store{root / "journals"};
+        const auto applied = store.apply(*target, image_size, patches);
+        ASSERT_TRUE(applied) << applied.error().message;
+        EXPECT_TRUE(journal_state_empty(root / "journals"));
+    }
+    EXPECT_EQ(read_patch(), "CD");
+    axk::app::AlterationJournalStore interrupted{
+        root / "journals", axk::app::default_maximum_alteration_journal_bytes,
+        [](std::string_view phase, std::size_t index) { return phase == "after-patch-chunk" && index == 0U; }, 1U};
+    {
+        auto target = sandbox->open_mutation({"workspace", "image.hds"});
+        ASSERT_TRUE(target) << target.error().message;
+        const std::array patches{axk::app::AlterationJournalPatch{
+            patch_offset, {std::byte{'C'}, std::byte{'D'}}, {std::byte{'E'}, std::byte{'F'}}}};
+        EXPECT_FALSE(interrupted.apply(*target, image_size, patches));
+    }
+    EXPECT_EQ(read_patch(), "ED");
+    const auto recovered = interrupted.recover(*sandbox);
+    ASSERT_TRUE(recovered) << recovered.error().message;
+    EXPECT_EQ(read_patch(), "CD");
+    EXPECT_EQ(std::filesystem::file_size(path), image_size);
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
 }
 
 TEST(AlterationJournalStoreTest, ReportsExactCapacityBeforeWritingTheTarget) {

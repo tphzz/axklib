@@ -643,6 +643,8 @@ if(BUILD_TESTING)
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/hds_capacity_test.cpp
+    tests/partition_name_test.cpp
     tests/fresh_object_graph_test.cpp
     tests/sample_bank_parameter_alteration_test.cpp
     tests/sample_parameter_edit_validation_test.cpp

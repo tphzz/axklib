@@ -240,6 +240,7 @@
 {/if}
 {#if mutation.sampleBankAssignmentRequest}
     <AssignSampleBankDialog
+        initialSampleFormat={mutation.sampleBankAssignmentRequest.initialSampleFormat}
         volumeName={mutation.sampleBankAssignmentRequest.volumeName}
         sampleCount={mutation.sampleBankAssignmentRequest.samples.length}
         assignedSampleCount={mutation.sampleBankAssignmentRequest.assignedSampleCount}

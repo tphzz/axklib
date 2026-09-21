@@ -12,6 +12,7 @@ import { prepareServerConnection, prepareStartup } from './lib/startupCoordinato
 import { frontendStartup, type StartupView } from './lib/startupDiagnostics';
 import { revealAfterInterfaceScale, waitForVisibleScaleCommit } from './lib/startupVisibility';
 import { createTauriInterfaceScaleAdapter, showCurrentTauriWindow } from './lib/tauriInterfaceScale';
+import { ASeriesPreferences } from './lib/aSeriesPreferences.svelte';
 
 type ServerConnection = NonNullable<Window['__AXKLIB_SERVER__']>;
 type AppModule = typeof import('./App.svelte');
@@ -42,6 +43,14 @@ async function connectServer(restartLocal: boolean): Promise<ServerConnection | 
 
 async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const isDesktop = '__TAURI_INTERNALS__' in window;
+    const aSeriesPreferences = new ASeriesPreferences(
+        isDesktop
+            ? {
+                  load: () => invoke('desktop_preferred_a_series_generation'),
+                  save: (generation) => invoke('set_desktop_preferred_a_series_generation', { generation }),
+              }
+            : undefined,
+    );
     let interfaceScaling: InterfaceScaleController | null = null;
     let warningOpen = true;
     let shellStatus: 'starting' | 'unavailable' = 'starting';
@@ -149,7 +158,12 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
                         return module;
                     }),
             );
-            [prepared] = await Promise.all([workspaceReady, diagnosticsReady, interfaceScalingReady]);
+            [prepared] = await Promise.all([
+                workspaceReady,
+                diagnosticsReady,
+                interfaceScalingReady,
+                aSeriesPreferences.ready,
+            ]);
         } catch (error) {
             shellStatus = 'unavailable';
             shellMessage = `The application workspace could not be loaded: ${String(error)}`;
@@ -167,6 +181,7 @@ async function bootstrap(mountTarget: HTMLElement): Promise<void> {
             target: mountTarget,
             props: {
                 interfaceScaling,
+                aSeriesPreferences,
                 initialExperimentalWarningOpen: warningOpen,
                 openConnectionSettingsOnStart: openSettings,
             },

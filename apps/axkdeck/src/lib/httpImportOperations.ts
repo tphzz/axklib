@@ -269,6 +269,7 @@ export function sampleBankCreationRequest(
                 volume_name: creation.volumeName,
                 sample_bank: {
                     name: creation.sampleBankName,
+                    storage_format: creation.sampleFormat === 'A3000_188' ? 'a3000_188' : 'a4000_a5000_224',
                     member_samples: creation.sampleNames,
                 },
             },

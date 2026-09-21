@@ -624,9 +624,10 @@ the temporary file is resized or published. These values are reported by
 In-place image mutations are protected by an `AXKJNL02` alteration journal.
 The journal stores both the original and replacement bytes for every changed
 extent, so its exact size is approximately twice the changed payload plus
-metadata. `maximumAlterationJournalBytes` defaults to 4,362,076,160 bytes,
-which covers a complete rewrite at the supported 2 GiB image boundary plus
-64 MiB of metadata, and may be configured up to 8 GiB. Journal publication,
+metadata. `maximumAlterationJournalBytes` defaults to 17,246,978,048 bytes,
+which covers a complete rewrite at the supported 8 GiB image boundary plus
+64 MiB of metadata. This is also the maximum configurable value; lower positive
+limits remain available. Journal publication,
 application and recovery use bounded streaming I/O; the configured limit is a
 storage and admission bound, not a request to allocate that amount of memory. Before
 mutating an image, the server verifies both the exact encoded journal size and

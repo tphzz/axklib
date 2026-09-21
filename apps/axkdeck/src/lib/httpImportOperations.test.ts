@@ -98,13 +98,17 @@ describe('sequenceImportRequest', () => {
 });
 
 describe('sampleBankCreationRequest', () => {
-    it('creates one ordered Sample Bank insertion without input bindings', () => {
+    it.each([
+        { sampleFormat: 'A3000_188' as const, storedFormat: 'a3000_188' },
+        { sampleFormat: 'A4000_A5000_224' as const, storedFormat: 'a4000_a5000_224' },
+    ])('creates an explicit $storedFormat Sample Bank without input bindings', ({ sampleFormat, storedFormat }) => {
         expect(
             sampleBankCreationRequest('image-1', 4, {
                 partitionIndex: 2,
                 volumeName: 'Keys',
                 sampleBankName: 'Layered Keys',
                 sampleNames: ['Piano 2', 'Piano 10'],
+                sampleFormat,
             }),
         ).toEqual({
             imageId: 'image-1',
@@ -121,6 +125,7 @@ describe('sampleBankCreationRequest', () => {
                             sample_bank: {
                                 name: 'Layered Keys',
                                 member_samples: ['Piano 2', 'Piano 10'],
+                                storage_format: storedFormat,
                             },
                         },
                     ],

@@ -45,6 +45,7 @@
         type PackageExportSelectionState,
     } from '../../../lib/objectSelection';
     import { userFacingMessage } from '../../../lib/userFacingMessage';
+    import { useASeriesPreferences } from '../../../lib/aSeriesPreferences.svelte';
     import type {
         InspectorSelection,
         PackageExportObject,
@@ -58,6 +59,7 @@
         openConnectionSettingsOnStart = false,
     }: AppProps = $props();
     const transport = createTransport();
+    const preferences = useASeriesPreferences();
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
     let experimentalWarningAcknowledged = $state(false);
@@ -155,6 +157,7 @@
     catalogHooks.stopPlayback = () => auditionWorkflow.stop();
     catalogHooks.resetPreviews = () => auditionWorkflow.resetPreviewQueue();
     const mutationWorkflow = new MutationWorkflow({
+        preferredASeriesGeneration: () => preferences.generation,
         transport,
         jobs: jobController,
         catalog,
@@ -240,6 +243,7 @@
     });
     catalogHooks.resetCleanup = () => deletionWorkflow.resetCleanup();
     const audioImportWorkflow = new AudioImportWorkflow({
+        preferredASeriesGeneration: () => preferences.generation,
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -415,17 +419,7 @@
         catalog.selectedBankMemberId ? catalog.waveDataForSample(catalog.selectedBankMemberId) : [],
     );
     const sampleWaveData = $derived(selectedSample ? catalog.waveDataForSample(selectedSample.objectId) : []);
-    const activeCollectionObjectId = $derived(
-        workspaceView === 'programs'
-            ? catalog.selectedProgramId
-            : workspaceView === 'sample-banks'
-              ? catalog.selectedBankId
-              : workspaceView === 'samples'
-                ? catalog.selectedSampleId
-                : workspaceView === 'wave-data'
-                  ? catalog.selectedWaveDataId
-                  : catalog.selectedSequenceId,
-    );
+    const activeCollectionObjectId = $derived(catalog.selectedObjectId(workspaceView));
     const inspectorSelection = $derived.by<InspectorSelection>(() =>
         catalog.selectionForObject(catalog.inspectorObjectId, auditionWorkflow.sampleBankPreviewMemberId),
     );

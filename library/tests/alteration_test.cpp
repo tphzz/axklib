@@ -1527,7 +1527,7 @@ TEST(Alteration, RenamePartitionChangesOnlySelectedMirroredHeaderName) {
     const auto alteration = axk::parse_alteration_manifest(R"({
       "schema_version":"1.0","operations":[
         {"id":"rename","type":"rename_partition","partition_index":1,
-         "partition_name":"PARTITION 2    1","new_partition_name":"Samples"}
+         "partition_name":"PARTITION 2","new_partition_name":"Samples"}
       ]})");
     ASSERT_TRUE(alteration) << alteration.error().message;
     const auto applied = axk::alter_hds(source, *alteration, output);

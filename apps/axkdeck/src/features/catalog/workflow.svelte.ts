@@ -71,6 +71,21 @@ export class CatalogWorkflow {
 
     constructor(private readonly dependencies: CatalogWorkflowDependencies) {}
 
+    selectedObjectId(view: WorkspaceView): string {
+        switch (view) {
+            case 'programs':
+                return this.selectedProgramId;
+            case 'sample-banks':
+                return this.selectedBankId;
+            case 'samples':
+                return this.selectedSampleId;
+            case 'wave-data':
+                return this.selectedWaveDataId;
+            case 'sequences':
+                return this.selectedSequenceId;
+        }
+    }
+
     membersForBank(bankId: string): SampleStructureItem[] {
         return orderedSamplesForBank(bankId, this.relationships, this.samples);
     }

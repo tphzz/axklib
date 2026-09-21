@@ -84,9 +84,11 @@ vi.mock('./lib/desktopBuildInfo', () => ({
 
 import App from './App.svelte';
 import { AuditionController } from './lib/audio/auditionController';
+import { ASeriesPreferences } from './lib/aSeriesPreferences.svelte';
+import type { AppProps } from './appProps';
 
-function renderAcknowledgedApp() {
-    const rendered = render(App);
+function renderAcknowledgedApp(props: AppProps = {}) {
+    const rendered = render(App, { props });
     flushSync(() => screen.getByRole('button', { name: 'I understand' }).click());
     return rendered;
 }
@@ -101,7 +103,7 @@ async function chooseNestedImage(buttonName: 'Open image' | 'Open another image'
     await fireEvent.click(await within(picker).findByText('nested.hds'));
 }
 
-async function openSampleSelectionFixture() {
+async function openSampleSelectionFixture(props: AppProps = {}) {
     const volume = { id: 'volume-1', name: 'Selection', kind: 'volume', childCount: 0, partitionIndex: 0 };
     const objects = [
         ['sample-a', 'SBNK', 'Sample A'],
@@ -140,7 +142,7 @@ async function openSampleSelectionFixture() {
         parameters: {},
         editing: null,
     }));
-    renderAcknowledgedApp();
+    renderAcknowledgedApp(props);
     await chooseNestedImage();
     await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
     await screen.findByRole('button', { name: 'Inspect Sample A' });
@@ -148,6 +150,75 @@ async function openSampleSelectionFixture() {
 }
 
 describe('App panel layout', () => {
+    it('shares saved A-Series preferences with the next audio import and unknown-format bank assignment', async () => {
+        let finishLoading!: (generation: 'A4000_A5000') => void;
+        const save = vi.fn().mockResolvedValue(undefined);
+        const preferences = new ASeriesPreferences({
+            load: () =>
+                new Promise((resolve) => {
+                    finishLoading = resolve;
+                }),
+            save,
+        });
+        finishLoading('A4000_A5000');
+        await preferences.ready;
+        mocks.openImage.mockResolvedValue({ ...(await mocks.openImage()), packageImportAvailable: true });
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'audio' },
+            uploadKind: 'AUDIO',
+            displayName: 'take.wav',
+        });
+        await openSampleSelectionFixture({ aSeriesPreferences: preferences });
+
+        const cancelDialog = async (dialog: HTMLElement) => {
+            await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+            await waitFor(() => expect(dialog.isConnected).toBe(false));
+        };
+
+        const openImport = async () => {
+            const drop = new Event('drop', { bubbles: true, cancelable: true });
+            Object.defineProperty(drop, 'dataTransfer', {
+                value: { types: ['Files'], files: [new File(['audio'], 'take.wav', { type: 'audio/wav' })] },
+            });
+            window.dispatchEvent(drop);
+            const dialog = await screen.findByRole('dialog', { name: 'Import audio' }, { timeout: 5000 });
+            await waitFor(() =>
+                expect((within(dialog).getByRole('button', { name: 'a3k' }) as HTMLButtonElement).disabled).toBe(false),
+            );
+            return dialog;
+        };
+        let dialog = await openImport();
+        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'a3k' }));
+        await cancelDialog(dialog);
+        expect(preferences.generation).toBe('A4000_A5000');
+        dialog = await openImport();
+        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        await cancelDialog(dialog);
+
+        const openBank = async () => {
+            const sample = screen.getByRole('button', { name: 'Inspect Sample A' });
+            await fireEvent.click(sample);
+            await fireEvent.contextMenu(sample);
+            await fireEvent.click(screen.getByRole('menuitem', { name: /Assign to Sample Bank/ }));
+            return screen.findByRole('dialog', { name: 'Assign to Sample Bank' });
+        };
+        dialog = await openBank();
+        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        await cancelDialog(dialog);
+        await fireEvent.click(screen.getByRole('button', { name: 'Preferences' }));
+        dialog = await screen.findByRole('dialog', { name: 'Preferences' });
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'a3k' }));
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Preferences' })).toBeNull());
+        expect(save).toHaveBeenCalledWith('A3000');
+        dialog = await openImport();
+        expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
+        await cancelDialog(dialog);
+        dialog = await openBank();
+        expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
+    });
     beforeEach(() => {
         delete window.__AXKLIB_SERVER__;
         mocks.filesystem.mockReset().mockResolvedValue({

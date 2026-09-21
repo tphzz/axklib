@@ -85,13 +85,18 @@ specifies the image capacity and available partition counts:
 | Profile ID | Image size | Default partitions | Available partitions |
 | --- | ---: | ---: | --- |
 | `floppy-scale` | 1,474,560 bytes | 1 | 1 |
+| `hds-128-mib` | 134,217,728 bytes | 1 | 1 through 8 |
+| `hds-256-mib` | 268,435,456 bytes | 1 | 1 through 8 |
 | `cd-r-650` | 681,984,000 bytes | 1 | 1 through 8 |
 | `cd-r-700` | 737,280,000 bytes | 1 | 1 through 8 |
 | `hds-1-gib` | 1,073,741,824 bytes | 1 | 1 through 8 |
 | `hds-2-gib` | 2,147,483,648 bytes | 2 | 2 through 8 |
+| `hds-4-gib` | 4,294,967,296 bytes | 4 | 4 through 8 |
+| `hds-8-gib` | 8,589,934,592 bytes | 8 | 8 |
 
 Every partition starts without volumes. The 2 GiB profile does not offer one
-partition because one SFS partition cannot represent that capacity. Callers
+partition because one SFS partition cannot represent that capacity. Likewise,
+4 GiB requires at least four partitions and 8 GiB requires eight. Callers
 must use the published options instead of inferring valid partition counts
 from the total byte size. Add a named volume explicitly before authoring or
 importing sampler objects.
@@ -585,7 +590,7 @@ Top-level HDS fields:
 | Field | Rule |
 | --- | --- |
 | `schema_version` | Required; the only accepted value is `"1.0"`. |
-| `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
+| `size_bytes` | Required integer from 1 MiB through 8 GiB, divisible by 512. The starter uses 512 MiB. |
 | `partitions` | Required array containing `1..8` partition objects. |
 
 HDS partition and volume fields:
@@ -1159,13 +1164,25 @@ for the input manifest.
 ## A-Series Formatted Layout
 
 Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
-The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+The writer accepts 512-byte-aligned images from 1 MiB through 8 GiB with one
 through eight equal partition slots. Given `N` partitions, `total_sectors` is
 `size_bytes / 512`, the slot span is
 `min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
 `3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
 must have at least 2045 partition sectors. Division remainder and capacity past
 the 1 GiB slot-span cap remain unused at the end of the image.
+
+The general manifest deliberately permits fewer partitions with an unused tail;
+quick creation profiles omit those wasteful choices. The [A3000 Version 2
+upgrade manual](https://usa.yamaha.com/files/download/other_assets/9/328709/A3000V2E.pdf)
+documents disks up to 8 GB and partitions up to 1 GB. This does
+not establish A3000 Version 1 support. Container capacity does not determine
+whether its Samples or Sample Banks use a3k or a4k/a5k parameter storage.
+
+Empty large images are written with bounded metadata buffers and may be sparse
+when supported by the host filesystem. Object authoring retains prepared object
+payloads in memory, so dense manifests need memory proportional to their content;
+the empty-image memory regression is not a bound for densely populated images.
 
 The non-logical tail of an allocated extent is storage padding; it is not
 part of the file's logical contents.

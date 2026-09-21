@@ -25,6 +25,7 @@ import {
 } from './sampleBankAssignmentWorkflow.svelte';
 
 interface MutationWorkflowDependencies {
+    preferredASeriesGeneration?: () => import('../../lib/aSeriesPreferences.svelte').ASeriesGeneration;
     transport: ImageTransport;
     jobs: JobController;
     catalog: CatalogWorkflow;

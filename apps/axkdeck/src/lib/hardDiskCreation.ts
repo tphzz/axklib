@@ -1,4 +1,5 @@
-export type HardDiskCreationProfileId = 'FLOPPY_SCALE' | 'CD_R_650' | 'CD_R_700' | 'HDS_1_GIB' | 'HDS_2_GIB';
+import type { components } from './generated/axklibApiV1';
+export type HardDiskCreationProfileId = components['schemas']['HardDiskCreationProfile']['profileId'];
 
 export interface HardDiskCreationPartitionOption {
     partitionCount: number;

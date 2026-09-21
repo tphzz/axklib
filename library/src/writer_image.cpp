@@ -458,13 +458,10 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write HDS transfer token")};
         std::vector<std::byte> header(1024);
         std::ranges::transform(magic, header.begin(), [](char value) { return static_cast<std::byte>(value); });
-        auto name =
-            ascii(manifest.partitions[partition_index].name, geometry.index > 0 && geometries->size() > 1 ? 15U : 16U);
+        auto name = ascii(manifest.partitions[partition_index].name, 16U);
         if (!name)
             return std::unexpected{name.error()};
         std::ranges::copy(*name, header.begin() + 0x40);
-        if (geometry.index > 0 && geometries->size() > 1)
-            header[0x4f] = static_cast<std::byte>('0' + geometry.index);
         ByteWriter header_writer{header};
         if (auto written = header_writer.write_be32(0x80, 2); !written)
             return std::unexpected{written.error()};

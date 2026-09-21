@@ -64,6 +64,6 @@ int main() {
                   << " KiB: " << measured_memory_bytes / kibibyte << " KiB\n";
         return 4;
     }
-    std::cout << "2 GiB / 8-partition inventory memory: " << measured_memory_bytes / kibibyte << " KiB\n";
+    std::cout << "8 GiB / 8-partition inventory memory: " << measured_memory_bytes / kibibyte << " KiB\n";
     return 0;
 }

@@ -6,10 +6,24 @@ import { resolve } from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { SampleFormatMetadata } from '../objectEditing';
 import AssignSampleBankDialog from './AssignSampleBankDialog.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 const dialogSource = readFileSync(resolve(process.cwd(), 'src/lib/components/AssignSampleBankDialog.svelte'), 'utf8');
+
+const nativeFormat: SampleFormatMetadata = {
+    format: 'A3000_188',
+    structurallyValid: true,
+    headerRevision: 2,
+    parameterBytes: 188,
+    olderBodyBytes: 300,
+    laterBodyBytes: 0,
+    extensionDiffersFromPrefixDefaults: null,
+    requiresA5000: false,
+    parameterIssues: [],
+    diagnostics: [],
+};
 
 const options = [
     {
@@ -20,6 +34,7 @@ const options = [
         movedSampleCount: 2,
         reassignedSampleCount: 1,
         finalMemberCount: 14,
+        sampleFormat: nativeFormat,
     },
     {
         objectId: 'bank-10',
@@ -46,6 +61,102 @@ async function chooseExisting(): Promise<void> {
 }
 
 describe('AssignSampleBankDialog', () => {
+    it.each([
+        { initialSampleFormat: 'A3000_188' as const, label: 'a3k' },
+        { initialSampleFormat: 'A4000_A5000_224' as const, label: 'a4k/a5k' },
+    ])('submits the initial $label format with A3k first', async ({ initialSampleFormat, label }) => {
+        const onsubmit = vi.fn();
+        render(AssignSampleBankDialog, {
+            props: {
+                volumeName: 'Samples',
+                sampleCount: 1,
+                assignedSampleCount: 0,
+                initialSampleFormat,
+                options: [],
+                blockers: [],
+                busy: false,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit,
+            },
+        });
+
+        const choices = screen
+            .getAllByRole('button')
+            .filter((button) => /^(a3k|a4k\/a5k)$/.test(button.textContent?.trim() ?? ''));
+        expect(choices.map((choice) => choice.textContent?.trim())).toEqual(['a3k', 'a4k/a5k']);
+        expect(screen.getByRole('button', { name: label }).getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByRole('button', { name: label }).closest('.dialog-segmented-control')).not.toBeNull();
+        await fireEvent.input(screen.getByRole('textbox', { name: 'Sample Bank name' }), {
+            target: { value: 'New Bank' },
+        });
+        await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
+
+        expect(onsubmit).toHaveBeenCalledWith({ mode: 'new', name: 'New Bank', sampleFormat: initialSampleFormat });
+    });
+
+    it('retains a format override across target mode changes and leaves an existing bank unchanged', async () => {
+        const onsubmit = vi.fn();
+        render(AssignSampleBankDialog, {
+            props: {
+                volumeName: 'Samples',
+                sampleCount: 3,
+                assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
+                options,
+                blockers: [],
+                busy: false,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit,
+            },
+        });
+
+        await fireEvent.input(screen.getByRole('textbox', { name: 'Sample Bank name' }), {
+            target: { value: 'New Bank' },
+        });
+        await fireEvent.click(screen.getByRole('button', { name: 'a4k/a5k' }));
+        await chooseExisting();
+        expect(screen.queryByRole('button', { name: 'a3k' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'a4k/a5k' })).toBeNull();
+        await fireEvent.input(screen.getByRole('combobox', { name: 'Sample Bank' }), {
+            target: { value: 'Bank 2' },
+        });
+        await fireEvent.click(screen.getByRole('option', { name: /Bank 2.*12 members/ }));
+        expect(screen.getByLabelText(/a3k: stored 188-byte parameter block/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /convert/i })).toBeNull();
+        await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
+        expect(onsubmit).toHaveBeenLastCalledWith({ mode: 'existing', bankObjectId: 'bank-2' });
+
+        await fireEvent.click(screen.getByRole('button', { name: 'New' }));
+        expect(screen.getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
+        expect(onsubmit).toHaveBeenLastCalledWith({ mode: 'new', name: 'New Bank', sampleFormat: 'A4000_A5000_224' });
+    });
+
+    it.each([
+        { busy: true, blockers: [] },
+        { busy: false, blockers: [{ sampleName: 'Direct Sample', programName: '001: Lead' }] },
+    ])('disables both format choices while the operation is unavailable ($busy, $blockers)', ({ busy, blockers }) => {
+        render(AssignSampleBankDialog, {
+            props: {
+                volumeName: 'Samples',
+                sampleCount: 1,
+                assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
+                options,
+                blockers,
+                busy,
+                error: '',
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+
+        expect((screen.getByRole('button', { name: 'a3k' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'a4k/a5k' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
     it('defaults to New, preserves both drafts across mode changes, and submits a tagged target', async () => {
         const onsubmit = vi.fn();
         render(AssignSampleBankDialog, {
@@ -53,6 +164,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 2,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -82,7 +194,7 @@ describe('AssignSampleBankDialog', () => {
         await fireEvent.click(screen.getByRole('button', { name: 'New' }));
         expect((screen.getByRole('textbox', { name: 'Sample Bank name' }) as HTMLInputElement).value).toBe('Layered');
         await fireEvent.click(screen.getByRole('button', { name: 'Assign to Sample Bank' }));
-        expect(onsubmit).toHaveBeenCalledWith({ mode: 'new', name: 'Layered' });
+        expect(onsubmit).toHaveBeenCalledWith({ mode: 'new', name: 'Layered', sampleFormat: 'A3000_188' });
     });
 
     it('disables Existing when the volume has no Sample Banks', () => {
@@ -91,6 +203,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 1,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options: [],
                 blockers: [],
                 busy: false,
@@ -111,6 +224,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -197,6 +311,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 1,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -228,6 +343,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -281,6 +397,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -309,6 +426,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [],
                 busy: false,
@@ -333,6 +451,7 @@ describe('AssignSampleBankDialog', () => {
                 volumeName: 'Samples',
                 sampleCount: 3,
                 assignedSampleCount: 0,
+                initialSampleFormat: 'A3000_188',
                 options,
                 blockers: [{ sampleName: 'Direct Sample', programName: '001: Lead' }],
                 busy: false,

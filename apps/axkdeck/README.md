@@ -397,6 +397,7 @@ that path explicitly when it starts the sidecar.
 ```json
 {
   "schemaVersion": 1,
+  "preferredASeriesGeneration": "A3000",
   "appearance": {
     "interfaceScaleMode": "auto"
   },
@@ -415,6 +416,21 @@ It uses its own `tphzz/axklib-server/workspaces.json` configuration path unless
 earlier unreleased filenames and locations are not read or migrated. Logs,
 WebView profile/cache data, protected credentials, and sidecar operational
 state remain in their platform-specific application locations.
+
+The Preferences button beside interface scale opens the A-Series settings.
+**Preferred A-Series generation** accepts `A3000` (a3k, the initial default)
+or `A4000_A5000` (a4k/a5k). It is a local desktop preference even when using a
+remote server. Saving preserves interface scale and export directories. Failed
+saves leave the published preference unchanged; malformed or unreadable settings
+are reported and never replaced by fallback defaults.
+
+Each fresh audio import starts from this preference. Its format can be changed
+for that operation without changing Preferences. When assigning Samples to a new
+Sample Bank, the highest known generation among the selected Samples takes
+precedence; the preference is used only if no selected format is known. Existing
+Sample Banks display their stored format and are not converted by assignment.
+Package imports, duplication, edits, explicit conversions and other sampler
+families retain their existing format rules.
 
 ### Diagnostics
 

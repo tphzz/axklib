@@ -2516,13 +2516,31 @@ export interface components {
             overwrite: boolean;
             partitionCount: number;
             /** @enum {unknown} */
-            profileId: 'FLOPPY_SCALE' | 'CD_R_650' | 'CD_R_700' | 'HDS_1_GIB' | 'HDS_2_GIB';
+            profileId:
+                | 'FLOPPY_SCALE'
+                | 'HDS_128_MIB'
+                | 'HDS_256_MIB'
+                | 'CD_R_650'
+                | 'CD_R_700'
+                | 'HDS_1_GIB'
+                | 'HDS_2_GIB'
+                | 'HDS_4_GIB'
+                | 'HDS_8_GIB';
         };
         HardDiskCreationProfile: {
             defaultPartitionCount: number;
             partitionOptions: components['schemas']['HardDiskCreationPartitionOption'][];
             /** @enum {unknown} */
-            profileId: 'FLOPPY_SCALE' | 'CD_R_650' | 'CD_R_700' | 'HDS_1_GIB' | 'HDS_2_GIB';
+            profileId:
+                | 'FLOPPY_SCALE'
+                | 'HDS_128_MIB'
+                | 'HDS_256_MIB'
+                | 'CD_R_650'
+                | 'CD_R_700'
+                | 'HDS_1_GIB'
+                | 'HDS_2_GIB'
+                | 'HDS_4_GIB'
+                | 'HDS_8_GIB';
             sizeBytes: number;
         };
         HardDiskCreationProfiles: {

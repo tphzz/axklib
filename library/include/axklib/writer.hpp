@@ -24,7 +24,7 @@ namespace axk {
 
 inline constexpr std::string_view build_manifest_schema_version = "1.0";
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
-inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
+inline constexpr std::uint64_t maximum_hds_size = 8'589'934'592;
 inline constexpr std::uint64_t formatted_floppy_size_bytes = 1'474'560;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
 inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum_wave_data_frames_per_channel;
@@ -262,7 +262,17 @@ struct HdsBuildPlanSummary {
     std::vector<PartitionGeometry> partitions;
 };
 
-enum class HdsCreationProfileId : std::uint8_t { floppy_scale, cd_r_650, cd_r_700, hds_1_gib, hds_2_gib };
+enum class HdsCreationProfileId : std::uint8_t {
+    floppy_scale,
+    hds_128_mib,
+    hds_256_mib,
+    cd_r_650,
+    cd_r_700,
+    hds_1_gib,
+    hds_2_gib,
+    hds_4_gib,
+    hds_8_gib
+};
 
 struct HdsCreationPartitionOption {
     std::uint8_t partition_count{};

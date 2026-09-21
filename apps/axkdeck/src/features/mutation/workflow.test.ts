@@ -122,13 +122,14 @@ describe('MutationWorkflow', () => {
         workflow.requestSampleBankAssignment(samples);
         expect(workflow.sampleBankAssignmentRequest?.samples).toEqual(samples);
         expect(workflow.sampleBankAssignmentRequest?.options).toEqual([]);
-        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'Layered' });
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'Layered', sampleFormat: 'A3000_188' });
 
         expect(startSampleBankCreation).toHaveBeenCalledWith(7, {
             partitionIndex: 0,
             volumeName: 'Samples',
             sampleBankName: 'Layered',
             sampleNames: ['Sample 2', 'Sample 10'],
+            sampleFormat: 'A3000_188',
         });
         expect(setWorkspaceView).toHaveBeenCalledWith('sample-banks');
         expect(clearSelection).toHaveBeenCalledOnce();
@@ -286,7 +287,7 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([
             { sampleName: 'Direct Sample', programName: '001: Lead' },
         ]);
-        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'New Bank' });
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'New Bank', sampleFormat: 'A3000_188' });
         await workflow.submitSampleBankAssignment({ mode: 'existing', bankObjectId: 'bank-1' });
         expect(startSampleBankCreation).not.toHaveBeenCalled();
         expect(startSampleBankAssignment).not.toHaveBeenCalled();
