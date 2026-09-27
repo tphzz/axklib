@@ -193,6 +193,8 @@ struct CurrentSbac {
     SbacStorageLayout storage_layout{SbacStorageLayout::legacy_without_parameter_tail};
     std::optional<std::size_t> parameter_tail_offset;
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};
+    std::array<std::uint32_t, 4> linked_program_bitmap_words{};
+    std::vector<std::uint8_t> linked_program_numbers;
     std::array<std::uint32_t, 3> override_enable_words{};
     std::vector<std::uint8_t> override_selectors;
     std::vector<std::uint8_t> reserved_override_selectors;

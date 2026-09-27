@@ -1271,7 +1271,7 @@ describe('App panel layout', () => {
 
         await chooseNestedImage();
 
-        const dialog = await screen.findByRole('dialog', { name: 'Image integrity' });
+        const dialog = await screen.findByRole('dialog', { name: 'Disk integrity' });
         expect(within(dialog).getByText('Alteration is disabled for this image')).toBeTruthy();
         expect(within(dialog).getByText(/Browsing and export remain available/)).toBeTruthy();
         expect(mocks.validationIssues).toHaveBeenCalledWith(17);

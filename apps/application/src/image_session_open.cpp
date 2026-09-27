@@ -455,24 +455,26 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     }
     for (const auto &issue : media->validation_issues())
         append_validation(issue.code, "warning", issue.message, issue.sampler_path, std::nullopt);
-    if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
-        const auto report = axk::validate_semantics(*sfs, inventory->catalog, graph);
-        for (const auto &issue : report.issues) {
-            std::string severity;
-            switch (issue.severity) {
-            case axk::ValidationSeverity::info:
-                severity = "info";
-                break;
-            case axk::ValidationSeverity::warning:
-                severity = "warning";
-                break;
-            case axk::ValidationSeverity::error:
-                severity = "error";
-                break;
-            }
-            append_validation(issue.code, std::move(severity), issue.message, issue.sampler_path,
-                              issue.object_key.empty() ? std::nullopt : mapped_id(object_ids, issue.object_key));
+    const auto validation = [&] {
+        if (const auto *sfs = std::get_if<axk::Container>(&media->storage()))
+            return axk::validate_semantics(*sfs, inventory->catalog, graph).issues;
+        return axk::validate_program_bitmaps(inventory->catalog, graph);
+    }();
+    for (const auto &issue : validation) {
+        std::string severity;
+        switch (issue.severity) {
+        case axk::ValidationSeverity::info:
+            severity = "info";
+            break;
+        case axk::ValidationSeverity::warning:
+            severity = "warning";
+            break;
+        case axk::ValidationSeverity::error:
+            severity = "error";
+            break;
         }
+        append_validation(issue.code, std::move(severity), issue.message, issue.sampler_path,
+                          issue.object_key.empty() ? std::nullopt : mapped_id(object_ids, issue.object_key));
     }
     for (auto &object : inventory->catalog.objects) {
         const auto identifier = object_ids.at(object.key);

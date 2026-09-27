@@ -424,8 +424,13 @@ export class DeletionWorkflow {
     ): Promise<void> {
         const message = userFacingMessage(error);
         this.dependencies.setStatus(message);
+        let refreshError = '';
         if (this.dependencies.sessionId() === sessionId) {
-            await this.dependencies.refreshSession(preferred).catch(() => undefined);
+            try {
+                await this.dependencies.refreshSession(preferred);
+            } catch (error) {
+                refreshError = userFacingMessage(error);
+            }
         }
         if (
             generation !== this.objectGeneration ||
@@ -433,6 +438,12 @@ export class DeletionWorkflow {
             this.dependencies.sessionId() !== sessionId
         )
             return;
+        if (refreshError) {
+            const failure = `${message} Refresh failed: ${refreshError}`;
+            this.objectRequest = { ...request, inspection: null, busy: false, loading: false, error: failure };
+            this.dependencies.setStatus(failure);
+            return;
+        }
         this.objectRequest = {
             ...request,
             busy: false,
@@ -446,11 +457,17 @@ export class DeletionWorkflow {
             deletionRequestKey(this.objectRequest?.targets ?? []) === deletionRequestKey(request.targets)
         ) {
             const current = this.objectRequest;
-            if (current)
+            if (current) {
+                const blockers = current.inspection?.blockers.map((blocker) => blocker.message).join(' ');
+                const failure = blockers
+                    ? `${message} ${blockers}`
+                    : current.error || `${message} The image has been refreshed; review the deletion again.`;
                 this.objectRequest = {
                     ...current,
-                    error: `${message} The image has been refreshed; review the deletion again.`,
+                    error: failure,
                 };
+                this.dependencies.setStatus(failure);
+            }
         }
     }
 

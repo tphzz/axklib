@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -15,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
 #include "axklib/utf8.hpp"
 
@@ -136,30 +138,11 @@ std::pair<std::string, std::string> ambiguous_relationship_message(const axk::Re
     if (row.type.starts_with("SBNK_") && row.type.ends_with("_TO_SMPL"))
         return {"Sample (SBNK) link has multiple possible Wave Data (SMPL) targets.",
                 "Inspect candidate Wave Data objects before treating this Sample link as exact."};
-    if (row.basis.starts_with("sbnk-program-link-bitmap-")) {
-        std::string message;
-        if (row.basis.find("disambiguates-ambiguous-direct-assignment") != std::string::npos)
-            message =
-                "Sample (SBNK) Program-link bitmap points to one Program from an ambiguous direct-assignment set.";
-        else if (row.basis.find("known-direct-assignment-missing-bitmap") != std::string::npos)
-            message = "Known direct Program assignment is missing from the Sample (SBNK) Program-link bitmap.";
-        else if (row.basis.find("nondefault-flag-direct-assignment-without-bitmap") != std::string::npos)
-            message = "Nondefault direct Program assignment is missing from the Sample (SBNK) Program-link bitmap.";
-        else
-            message = "Sample (SBNK) Program-link bitmap differs from resolved direct Program assignments.";
-        return {std::move(message), "Use this as bitmap consistency data only; do not treat it as Program content loss "
-                                    "unless another public rule proves the bitmap is authoritative."};
-    }
-    if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG")
-        return {"Sample (SBNK) Program-link bitmap maps to multiple possible Program slots.",
-                "Use this as bitmap consistency data only until the Program target is disambiguated."};
     return {"Relationship has ambiguous candidate targets.",
             "Inspect candidate set before using for authoritative placement."};
 }
 
 std::string tentative_relationship_code(const axk::Relationship &row) {
-    if (row.basis.starts_with("sbnk-program-link-bitmap-"))
-        return "REL_PROGRAM_LINK_BITMAP_DIAGNOSTIC";
     if (row.basis == "sbnk-member-cache-only-name-mismatch")
         return "REL_SBNK_MEMBER_CACHE_DIAGNOSTIC";
     return "REL_AMBIGUOUS_TARGET";
@@ -288,6 +271,8 @@ std::vector<axk::ReportRow> validate_media_details(const ValidationSource &sourc
     for (const auto &row : source.graph.relationships) {
         if (covered_relationships.contains(row.key))
             continue;
+        if (row.type == "SBNK_PROGRAM_BITMAP_TO_PROG" || row.type == "SBAC_PROGRAM_BITMAP_TO_PROG")
+            continue;
         if (row.quality == axk::RelationshipQuality::tentative) {
             auto [message, next_check] = ambiguous_relationship_message(row);
             issues.push_back(media_validation_issue(
@@ -301,6 +286,14 @@ std::vector<axk::ReportRow> validate_media_details(const ValidationSource &sourc
                 relationship_issue_path(source, row), public_object_key(source, row.source_key), "Unknown", row.basis,
                 std::move(next_check)));
         }
+    }
+    for (const auto &issue : axk::validate_program_bitmaps(source.catalog, source.graph)) {
+        issues.push_back(media_validation_issue(
+            source, "warning", issue.code, issue.message, "relationship",
+            media_object_report_path(source, issue.object_key), public_object_key(source, issue.object_key), "Known",
+            "program-link bitmap cross-check",
+            "Compare the stored Program links with the resolved assignments in this volume. "
+            "Affected mutations are blocked; checking integrity does not change the image."));
     }
     std::ranges::sort(issues, {}, [](const axk::ReportRow &row) {
         const auto value = [&](std::string_view key) -> std::string {

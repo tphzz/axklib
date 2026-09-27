@@ -94,6 +94,10 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
         notes = "Validated standalone assignment rows support SBNK+0x0c0..0x0cf as four big-endian program-link "
                 "bitmap words for direct PROG->SBNK/sample assignments. PROG->SBAC assignments are reported "
                 "separately as indirection and are not expected to set child SBNK bits.";
+    } else if (row.type == "SBAC_PROGRAM_BITMAP_TO_PROG") {
+        raw_fields = "SBAC+0x090..0x09f";
+        notes = "Four big-endian Program-link bitmap words identify direct PROG->SBAC assignments. "
+                "They do not imply direct Program assignment of the bank's member Samples.";
     } else if (row.assignment_index) {
         raw_fields = std::format("PROG assignment {} at 0x{:03x}", *row.assignment_index,
                                  0x120U + static_cast<unsigned int>(*row.assignment_index) * 0x38U);
@@ -101,7 +105,7 @@ axk::ReportRow relationship_report_row(const LoadedSource &source, const axk::Re
     std::string diagnostic;
     if (row.basis == "assignment-stored-missing-local-target")
         diagnostic = "stored-program-row-missing-target";
-    else if (row.basis.starts_with("sbnk-program-link-bitmap-"))
+    else if (row.basis.starts_with("sbnk-program-link-bitmap-") || row.basis.starts_with("sbac-program-link-bitmap-"))
         diagnostic = "program-link-bitmap";
     else if (row.quality == axk::RelationshipQuality::tentative)
         diagnostic = row.basis == "sbnk-member-cache-only-name-mismatch" ? "sbnk-member-cache" : "ambiguous-target";
@@ -354,19 +358,23 @@ std::vector<axk::ReportRow> sbac_detail_rows(std::span<const LoadedSource> sourc
 std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sources,
                                                const axk::app::OperationContext &context) {
     static constexpr std::string_view notes =
-        "Validated standalone assignment rows support SBNK+0x0c0..0x0cf as four big-endian program-link bitmap "
-        "words for direct PROG->SBNK/sample assignments. PROG->SBAC assignments are reported separately as "
-        "indirection and are not expected to set child SBNK bits.";
+        "Four big-endian Program-link bitmap words describe direct assignments to this object: "
+        "SBNK+0x0c0..0x0cf for Samples and SBAC+0x090..0x09f for Sample Banks. "
+        "Programs reaching a Sample through a Sample Bank do not set the child Sample's bits.";
     std::vector<axk::ReportRow> rows;
     for (const auto &source : sources) {
         const auto display_path = source_display_path(source.source, context);
         for (const auto &comparison : source.graph.bitmap_comparisons) {
-            const auto *item = catalog_object(source, comparison.sbnk_key);
+            const auto *item = catalog_object(source, comparison.object_key);
             if (item == nullptr)
                 continue;
             const auto *sample = std::get_if<axk::CurrentSbnk>(&item->object.payload);
-            if (sample == nullptr)
+            const auto *bank = std::get_if<axk::CurrentSbac>(&item->object.payload);
+            if (sample == nullptr && bank == nullptr)
                 continue;
+            const auto &words =
+                sample != nullptr ? sample->linked_program_bitmap_words : bank->linked_program_bitmap_words;
+            const auto assignment_type = sample != nullptr ? "PROG_ASSIGNMENT_TO_SBNK" : "PROG_ASSIGNMENT_TO_SBAC";
             const auto *object = media_object(source, item->key);
             const bool sfs = source.media.kind() == axk::MediaKind::sfs;
             const bool fat = source.media.kind() == axk::MediaKind::fat12_floppy;
@@ -374,9 +382,9 @@ std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sou
             std::vector<std::string> ambiguous_programs;
             std::vector<std::string> ambiguous_details;
             for (const auto &relation : source.graph.relationships) {
-                if (relation.type != "PROG_ASSIGNMENT_TO_SBNK" || !relation.assignment_index)
+                if (relation.type != assignment_type || !relation.assignment_index)
                     continue;
-                const auto direct = relation.target_key && *relation.target_key == item->key;
+                const auto direct = axk::is_effective_program_assignment(relation) && *relation.target_key == item->key;
                 const auto ambiguous =
                     relation.quality == axk::RelationshipQuality::tentative &&
                     std::ranges::find(relation.candidate_keys, item->key) != relation.candidate_keys.end();
@@ -411,22 +419,19 @@ std::vector<axk::ReportRow> bitmap_detail_rows(std::span<const LoadedSource> sou
                 {"image", display_path},
                 {"container_kind", info_media_kind_name(source.media.kind())},
                 {"scope_key", public_scope_key(source, *item, display_path)},
-                {"sbnk_object_key", public_object_key(source, item->key)},
-                {"sbnk_partition_index", optional_unsigned(sfs, item->partition.value)},
-                {"sbnk_sfs_id", optional_unsigned(sfs, item->sfs_id.value)},
-                {"sbnk_fat_file", fat && object != nullptr ? object->logical_path : ""},
-                {"sbnk_payload_offset",
-                 optional_unsigned(sfs || object != nullptr,
-                                   sfs ? sfs_payload_offset(source, *item) : object->data_offset)},
-                {"sbnk_name", item->object.header.name},
-                {"linked_programs_001_032_bitmap_0x0c0",
-                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[0])},
-                {"linked_programs_033_064_bitmap_0x0c4",
-                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[1])},
-                {"linked_programs_065_096_bitmap_0x0c8",
-                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[2])},
-                {"linked_programs_097_128_bitmap_0x0cc",
-                 static_cast<std::uint64_t>(sample->linked_program_bitmap_words[3])},
+                {"object_key", public_object_key(source, item->key)},
+                {"object_type", object_type_name(comparison.object_type)},
+                {"partition_index", optional_unsigned(sfs, item->partition.value)},
+                {"sfs_id", optional_unsigned(sfs, item->sfs_id.value)},
+                {"fat_file", fat && object != nullptr ? object->logical_path : ""},
+                {"payload_offset", optional_unsigned(sfs || object != nullptr,
+                                                     sfs ? sfs_payload_offset(source, *item) : object->data_offset)},
+                {"object_name", item->object.header.name},
+                {"program_bitmap_offset", static_cast<std::uint64_t>(sample != nullptr ? 0xc0U : 0x90U)},
+                {"linked_programs_001_032_bitmap", static_cast<std::uint64_t>(words[0])},
+                {"linked_programs_033_064_bitmap", static_cast<std::uint64_t>(words[1])},
+                {"linked_programs_065_096_bitmap", static_cast<std::uint64_t>(words[2])},
+                {"linked_programs_097_128_bitmap", static_cast<std::uint64_t>(words[3])},
                 {"bitmap_programs", joined_programs(comparison.bitmap_programs)},
                 {"direct_prog_assignment_programs", joined_programs(comparison.direct_assignment_programs)},
                 {"direct_prog_assignment_details", joined_strings(direct_details)},

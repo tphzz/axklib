@@ -200,7 +200,7 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
         return std::unexpected(written.error());
     if (auto written = append_report("current_prog_ignored_reserved_or_tail", ignored_rows); !written)
         return std::unexpected(written.error());
-    if (auto written = append_report("current_sbnk_program_bitmap_crosscheck", bitmap_rows); !written)
+    if (auto written = append_report("current_program_bitmap_crosscheck", bitmap_rows); !written)
         return std::unexpected(written.error());
     if (auto written = append_report("load_errors", load_errors); !written)
         return std::unexpected(written.error());
@@ -244,8 +244,8 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
              "current_prog_assignment_links.json",
              "current_prog_ignored_reserved_or_tail.csv",
              "current_prog_ignored_reserved_or_tail.json",
-             "current_sbnk_program_bitmap_crosscheck.csv",
-             "current_sbnk_program_bitmap_crosscheck.json",
+             "current_program_bitmap_crosscheck.csv",
+             "current_program_bitmap_crosscheck.json",
              "load_errors.csv",
              "load_errors.json",
              "relationship_summary.json",
@@ -253,7 +253,7 @@ axk::app::Result<Json> execute_relationships(const axk::app::Sandbox &sandbox, c
              "_schemas/current_sbac_sbnk_links.schema.json",
              "_schemas/current_prog_assignment_links.schema.json",
              "_schemas/current_prog_ignored_reserved_or_tail.schema.json",
-             "_schemas/current_sbnk_program_bitmap_crosscheck.schema.json",
+             "_schemas/current_program_bitmap_crosscheck.schema.json",
              "_schemas/load_errors.schema.json",
              "_schemas/relationship_summary.schema.json",
              "_schemas/schema_index.json",

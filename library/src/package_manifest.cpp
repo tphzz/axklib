@@ -103,7 +103,9 @@ void package_internal::bind_manifest_relocations(PortablePackage &package) {
                      (edge.role == "PROG_ASSIGNMENT_TO_SBAC" || edge.role == "PROG_ASSIGNMENT_TO_SBNK") &&
                      relocation.offset == 0x130U + edge.ordinal * 0x38U) ||
                     (relocation.role == "SBNK_PROGRAM_BITMAP" && edge.target_node_id == node.node_id &&
-                     edge.role == "PROG_ASSIGNMENT_TO_SBNK");
+                     edge.role == "PROG_ASSIGNMENT_TO_SBNK") ||
+                    (relocation.role == "SBAC_PROGRAM_BITMAP" && edge.target_node_id == node.node_id &&
+                     edge.role == "PROG_ASSIGNMENT_TO_SBAC");
                 if (binds)
                     relocation.edge_ids.push_back(edge.edge_id);
             }

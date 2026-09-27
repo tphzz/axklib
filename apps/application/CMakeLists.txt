@@ -115,6 +115,7 @@ if(BUILD_TESTING)
                                        tests/a_series_bank_editor_test.cpp tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
+                                       tests/program_bitmap_reporting_test.cpp
                                        tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
                                        tests/filesystem_edit_operations_test.cpp
                                        tests/filesystem_fat_edit_test.cpp

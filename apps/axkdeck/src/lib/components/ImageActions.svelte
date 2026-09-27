@@ -113,7 +113,7 @@
                         onintegrity();
                     }}
                 >
-                    <Icon name="info" size={14} /> Image integrity...
+                    <Icon name="info" size={14} /> Disk integrity...
                 </button>
                 <button
                     type="button"

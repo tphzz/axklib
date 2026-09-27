@@ -578,7 +578,7 @@ TEST_F(FileOperationsTest, CoverageWritesCanonicalRelationshipsSummaryAndLoadErr
     EXPECT_EQ(summary.at("relationship_count"), 9U);
     EXPECT_EQ(summary.at("known_relationship_count"), 9U);
     EXPECT_EQ(summary.at("sbac_sbnk_row_count"), 1U);
-    EXPECT_EQ(summary.at("sbnk_bitmap_row_count"), 8U);
+    EXPECT_EQ(summary.at("program_bitmap_row_count"), 9U);
     EXPECT_EQ(summary.at("load_error_count"), 0U);
 }
 
@@ -600,9 +600,9 @@ TEST_F(FileOperationsTest, RelationshipsWritesCanonicalAndSpecializedReportFamil
     ASSERT_EQ(links.size(), 1U);
     EXPECT_EQ(links.front().at("sbac_name"), "New SmpBank");
     EXPECT_EQ(links.front().at("matched_sbnk_name"), "_NewSample");
-    std::ifstream bitmap_input{root_ / "reports" / "relationships" / "current_sbnk_program_bitmap_crosscheck.json"};
+    std::ifstream bitmap_input{root_ / "reports" / "relationships" / "current_program_bitmap_crosscheck.json"};
     const auto bitmaps = nlohmann::json::parse(bitmap_input);
-    EXPECT_EQ(bitmaps.size(), 8U);
+    EXPECT_EQ(bitmaps.size(), 9U);
 }
 
 TEST_F(FileOperationsTest, CorpusAuditWritesCanonicalArtifactsAndRetainsPerSourceFailures) {

@@ -684,6 +684,13 @@ both the Program row and the target Sample Bank bitmap; unrelated edits
 preserve the words. Software transaction guarantees are described in
 [Writer And Alteration](write.md).
 
+Integrity checks compare these words with direct Program assignments in the
+same scope, separately from the Sample bitmap. A bank assignment does not set
+its member Samples' direct-Program bits. A mismatch reports the object name
+and the stored and expected Program numbers. Deletion of an implicated Program
+is blocked during inspection, before a mutation is submitted. These checks
+diagnose inconsistencies; they do not rewrite the stored links.
+
 SBAC slot row layout, stride `0x14`:
 
 | Row offset | Size | Type | Field |

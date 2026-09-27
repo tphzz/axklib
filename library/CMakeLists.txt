@@ -139,6 +139,7 @@ add_library(
   src/package_import_program_slots.cpp
   src/package_program_adjustment.cpp
   src/package_import_sfs.cpp
+  src/package_import_program_links.cpp
   src/package_import_sfs_capacity.cpp
   src/package_import_support.cpp
   src/package_manifest.cpp
@@ -615,6 +616,9 @@ if(BUILD_TESTING)
     tests/program_parameter_bounds_test.cpp
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
+        tests/package_program_links_test.cpp
+        tests/package_program_source_load_test.cpp
+    tests/program_bitmap_integrity_test.cpp
     tests/package_test.cpp
     tests/package_graph_test.cpp
     tests/floppy_import_test.cpp

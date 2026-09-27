@@ -91,7 +91,7 @@ describe('ImageNavigator', () => {
         expect(onclose).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Image integrity...' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Disk integrity...' }));
         expect(onintegrity).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));

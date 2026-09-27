@@ -116,7 +116,7 @@ TEST(RelationshipGraph, MatchesMaintainedFixtureCountsAndSamplerHierarchy) {
                                                row.quality == axk::RelationshipQuality::known;
                                     }),
               1);
-    ASSERT_EQ(graph.bitmap_comparisons.size(), 8U);
+    ASSERT_EQ(graph.bitmap_comparisons.size(), 9U);
     EXPECT_TRUE(std::ranges::all_of(graph.bitmap_comparisons, [](const auto &row) { return row.status == "match"; }));
 
     const auto tree = axk::build_content_tree(*container, *catalog, graph);

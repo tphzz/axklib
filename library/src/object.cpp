@@ -15,6 +15,21 @@ namespace {
 
 constexpr std::string_view object_magic{"FSFSDEV3SPLX"};
 
+Result<void> decode_program_bitmap(const ByteReader &reader, std::size_t offset, std::array<std::uint32_t, 4> &words,
+                                   std::vector<std::uint8_t> &numbers) {
+    for (std::size_t index = 0; index < words.size(); ++index) {
+        const auto word = reader.be32(offset + index * 4U);
+        if (!word)
+            return std::unexpected{word.error()};
+        words[index] = *word;
+        for (std::uint8_t bit = 0; bit < 32U; ++bit) {
+            if ((*word & (std::uint32_t{1} << bit)) != 0U)
+                numbers.push_back(static_cast<std::uint8_t>(index * 32U + bit + 1U));
+        }
+    }
+    return {};
+}
+
 bool begins_with(std::span<const std::byte> bytes, std::string_view value) {
     return bytes.size() >= value.size() &&
            std::equal(value.begin(), value.end(), bytes.begin(), [](char left, std::byte right) {
@@ -227,18 +242,10 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     } else {
         result.right_link_role = "unused-nonzero";
     }
-    for (std::size_t word_index = 0; word_index < result.linked_program_bitmap_words.size(); ++word_index) {
-        const auto word = reader.be32(0xc0U + word_index * 4U);
-        if (!word) {
-            return std::unexpected{word.error()};
-        }
-        result.linked_program_bitmap_words[word_index] = *word;
-        for (std::uint8_t bit = 0; bit < 32U; ++bit) {
-            if ((*word & (std::uint32_t{1} << bit)) != 0) {
-                result.linked_program_numbers.push_back(static_cast<std::uint8_t>(word_index * 32U + bit + 1U));
-            }
-        }
-    }
+    if (auto links =
+            decode_program_bitmap(reader, 0xc0U, result.linked_program_bitmap_words, result.linked_program_numbers);
+        !links)
+        return std::unexpected{links.error()};
     const auto sample_flags = reader.u8(0xd0);
     const auto mapout_flags = reader.u8(0xd1);
     const auto key_high = reader.u8(0xe2);
@@ -339,6 +346,10 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     const ByteReader reader{payload};
     CurrentSbac result;
     result.storage = inspect_sample_bank_storage(payload);
+    if (auto links =
+            decode_program_bitmap(reader, 0x90U, result.linked_program_bitmap_words, result.linked_program_numbers);
+        !links)
+        return std::unexpected{links.error()};
     const auto common = decode_current_common_record(payload);
     if (!common)
         return std::unexpected{common.error()};

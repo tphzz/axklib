@@ -3,7 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/catalog.hpp"
@@ -37,7 +39,8 @@ struct Relationship {
 };
 
 struct BitmapComparison {
-    std::string sbnk_key;
+    std::string object_key;
+    ObjectType object_type{ObjectType::unknown};
     std::vector<std::uint8_t> bitmap_programs;
     std::vector<std::uint8_t> direct_assignment_programs;
     std::vector<std::uint8_t> indirect_assignment_programs;
@@ -56,6 +59,8 @@ struct RelationshipGraph {
 };
 
 AXK_API RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog);
+AXK_API RelationshipGraph build_relationship_graph(std::span<const ObjectSnapshot *const> objects);
+AXK_API std::string program_bitmap_mismatch_message(const BitmapComparison &comparison, std::string_view name);
 AXK_API std::string_view relationship_quality_name(RelationshipQuality quality) noexcept;
 AXK_API std::string_view assignment_state_name(AssignmentState state) noexcept;
 [[nodiscard]] AXK_API bool is_program_assignment_row(const Relationship &relationship) noexcept;
