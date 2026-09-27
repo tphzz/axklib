@@ -160,6 +160,16 @@ See the official
 [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/#macos)
 for the Xcode installation options.
 
+Release builds keep build-time Rust dependencies (including procedural macros)
+unstripped. This avoids a
+[Rust/LLVM Mach-O stripping defect](https://github.com/rust-lang/rust/issues/157750)
+that macOS 27 can expose as `E0463: can't find crate` for a macro such as
+`zerofrom_derive`, even after debug tests pass. The override is in `Cargo.toml`
+and covers both architecture slices and the universal build. Keep it while using
+Rust 1.85; the shipped application remains optimized and stripped. A failed
+workflow must be started on a ref containing this fix; rerunning an older run
+uses its original commit.
+
 ### Windows
 
 Windows builds require the Microsoft C++ Build Tools and Microsoft Edge
