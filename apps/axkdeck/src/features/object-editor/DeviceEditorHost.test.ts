@@ -84,7 +84,7 @@ function setup(initialPreview?: SampleWaveformPreview, audio?: EditorAudioServic
 }
 
 describe('Sample editor workspace navigation', () => {
-    it('keeps identity accessible without visible header text and groups format with conversion', async () => {
+    it('keeps identity accessible and conversion available without repeating the format badge', async () => {
         const { view, workflow } = setup();
         await view.findByRole('tab', { name: 'Trim/Loop' });
         const header = view.container.querySelector('.device-editor header')!;
@@ -92,7 +92,7 @@ describe('Sample editor workspace navigation', () => {
         expect(header.textContent).not.toContain('Sample A');
         expect(view.getByRole('group', { name: 'Sample: Sample A' })).toBeTruthy();
         const actions = header.querySelector('.actions')!;
-        expect(actions.querySelector('.format-badge')?.textContent).toBe('a4k/a5k');
+        expect(header.querySelector('.format-badge')).toBeNull();
         expect(within(actions as HTMLElement).getByRole('button', { name: /Convert to a3k/ })).toBeTruthy();
 
         await act(() => workflow.find(1, 'A')!.draft.set('level', 99));
@@ -123,7 +123,7 @@ describe('Sample editor workspace navigation', () => {
             await view.findByRole('group', { name: 'Sample Bank: Long Bank Name' });
             const header = view.container.querySelector('.device-editor header')!;
             expect(header.textContent).not.toContain('Long Bank Name');
-            expect(header.querySelector('.format-badge')?.textContent).toBe(format === 'A3000_188' ? 'a3k' : 'a4k/a5k');
+            expect(header.querySelector('.format-badge')).toBeNull();
             await fireEvent.click(view.getByRole('button', { name: /Convert to/ }));
             expect(workflow.conversionDocument).toBe(workflow.find(1, 'bank'));
             workflow.conversionDocument = null;

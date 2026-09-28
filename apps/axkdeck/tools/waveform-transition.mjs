@@ -7,7 +7,7 @@ import { createServer } from 'vite';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const output = resolve(process.argv[2] ?? '../../../build/logs/sample-editor/00027/waveform-transition');
 await mkdir(output, { recursive: true });
-const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: true } });
+const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false } });
 let browser;
 let port;
 const results = [];
@@ -54,7 +54,7 @@ async function geometry(page) {
             header: box(host.querySelector('header')),
             panel: box(host.querySelector('[role="tabpanel"]')),
             ...Object.fromEntries([...host.querySelectorAll('[role="tab"]')].map((tab) => [`tab-${tab.textContent}`, box(tab)])),
-            badgeSlot: box(host.querySelector('.format-slot')),
+            actions: box(host.querySelector('.actions')),
         };
     });
 }
@@ -184,10 +184,12 @@ try {
             const header = page.locator('.device-editor header');
             assert(!await header.locator('strong, .family').count(), 'Redundant header identity is still visible');
             const tabBox = await page.getByRole('tab', { name: 'Trim/Loop', exact: true }).boundingBox();
-            assert.equal(tabBox.x, headerBefore.host[0] + 8, 'Tabs must start at the content inset');
+            const stripBox = await page.getByRole('tablist', { name: 'Sample parameter tabs' }).boundingBox();
+            assert.equal(stripBox.x, headerBefore.host[0] + 8, 'Tab strip must start at the content inset');
             const actionBox = await header.locator('.actions').boundingBox();
-            if (width < 850) assert(actionBox.y >= tabBox.y + tabBox.height, 'Narrow tabs must be in the first row');
-            else assert(actionBox.y < tabBox.y + tabBox.height, 'Wide header must remain one row');
+            assert(actionBox.y < tabBox.y + tabBox.height, 'Actions must remain beside tabs at every width');
+            assert.equal(headerBefore.header[3], 32, 'Header stays compact');
+            assert.equal(await header.locator('.format-badge').count(), 0, 'No redundant format badge');
             await page.getByRole('button', { name: 'Compare', exact: true }).click();
             await frame(page);
             sameGeometry(headerBefore, await geometry(page), 'Comparison status');
@@ -199,7 +201,11 @@ try {
             await page.getByRole('button', { name: 'Complete load', exact: true }).click();
             await page.getByRole('group', { name: 'Sample: Envelope Sample', exact: true }).waitFor();
             await page.getByRole('button', { name: 'Compare', exact: true }).click();
-            const fixedHeader = Object.fromEntries(Object.entries(headerBefore).filter(([key]) => key !== 'panel'));
+            // Sample and Bank profiles remember navigation independently. Start
+            // both on Trim/Loop, then verify Bank-to-Bank retention on EG too.
+            await page.getByRole('tab', { name: 'Trim/Loop', exact: true }).click();
+            await frame(page);
+            let fixedHeader = Object.fromEntries(Object.entries(await geometry(page)).filter(([key]) => key !== 'panel'));
             for (const [id, name, format] of [['E', 'B', 'a3k'], ['F', 'Long Bank Name', 'a4k/a5k']]) {
                 await page.getByRole('button', { name: `Select ${id}`, exact: true }).click();
                 await page.locator('.device-editor[aria-busy="true"]').waitFor();
@@ -208,8 +214,10 @@ try {
                 await page.getByRole('group', { name: `Sample Bank: ${name}`, exact: true }).waitFor();
                 await frame(page);
                 sameGeometry(fixedHeader, await geometry(page), 'Completed Bank');
-                assert.equal((await header.locator('.format-badge').textContent()).trim(), format);
+                assert.equal(await header.locator('.format-badge').count(), 0, `No redundant ${format} Bank badge`);
                 await page.getByRole('tab', { name: 'EG', exact: true }).click();
+                await frame(page);
+                fixedHeader = Object.fromEntries(Object.entries(await geometry(page)).filter(([key]) => key !== 'panel'));
             }
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Horizontal viewport overflow');
             assert.deepEqual(errors, []);

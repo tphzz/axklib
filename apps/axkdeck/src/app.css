@@ -2992,6 +2992,8 @@ input:focus-visible {
 }
 
 .object-editor {
+  display: flex;
+  flex-direction: column;
   background: var(--color-bg-deep);
 }
 
@@ -3295,52 +3297,9 @@ input:focus-visible {
   line-height: 9px;
 }
 
-.editor-header {
-  display: flex;
-  height: 34px;
-  min-height: 34px;
-  align-items: stretch;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.editor-tabs {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: stretch;
-  overflow-x: auto;
-}
-
-.editor-tabs button {
-  position: relative;
-  min-width: max-content;
-  padding: 0 12px;
-  color: var(--color-text-muted);
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font-size: 10px;
-}
-
-.editor-tabs button:hover,
-.editor-tabs button[aria-selected='true'] {
-  color: var(--color-text-strong);
-  background: rgb(255 255 255 / 2%);
-}
-
-.editor-tabs button[aria-selected='true']::after {
-  position: absolute;
-  right: 8px;
-  bottom: 0;
-  left: 8px;
-  height: 2px;
-  background: var(--color-accent);
-  content: '';
-}
-
 .editor-panel {
   min-height: 0;
-  height: calc(100% - 34px);
+  flex: 1;
   overflow: hidden;
 }
 

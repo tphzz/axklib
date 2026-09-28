@@ -9,7 +9,7 @@
     import type { ObjectEditorDocument } from './workflow.svelte';
     import SampleEditor from '../devices/a-series/sample/SampleEditor.svelte';
     import Icon from '../../lib/components/Icon.svelte';
-    import SampleFormatBadge from './SampleFormatBadge.svelte';
+    import EditorHeader from '../../lib/components/EditorHeader.svelte';
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
     import { userFacingMessage } from '../../lib/userFacingMessage';
     import SampleNavigation from '../devices/a-series/sample/SampleNavigation.svelte';
@@ -111,6 +111,7 @@
     use:measureWidth={{ scope: 'editor', change: (value) => (width = value) }}
 >
     {#if document && editors && navigation}
+        {@const current = document}
         <div
             class="editor-content"
             role="group"
@@ -118,65 +119,63 @@
             use:inertEditor={inactive}
             aria-hidden={inactive ? 'true' : undefined}
         >
-            <header>
-                <div class="navigation"><SampleNavigation {navigation} {panelId} /></div>
-                <div class="header-tools">
+            <EditorHeader>
+                <SampleNavigation {navigation} {panelId} />
+                {#snippet status()}
                     {#if editors.comparison.count > 1}<span
                             class="comparison"
                             role="status"
-                            title={`Editing ${document.detail?.object.name} only`}>{editors.comparison.status}</span
+                            title={`Editing ${current.detail?.object.name} only`}>{editors.comparison.status}</span
                         >{/if}
+                {/snippet}
+                {#snippet tools()}
                     <div class="actions">
-                        <span class="format-slot"
-                            ><SampleFormatBadge format={document.detail!.editing!.sampleFormat} /></span
-                        >
                         <button
                             class="icon-button"
                             title={conversionTitle}
                             aria-label={conversionTitle}
-                            disabled={editors.locked || !document.detail?.formatConversion}
-                            onclick={() =>
-                                void editors.openConversion(document!.sessionId, document!.detail!.object.id)}
+                            disabled={editors.locked || !current.detail?.formatConversion}
+                            onclick={() => void editors.openConversion(current.sessionId, current.detail!.object.id)}
                             ><Icon name="refresh" size={14} /></button
                         >
                         <button
                             class="icon-button"
                             title="Undo"
                             aria-label="Undo Sample edit"
-                            disabled={!document.draft.canUndo || document.phase !== 'editable'}
-                            onclick={() => document?.draft.undo()}><Icon name="undo" size={14} /></button
+                            disabled={!current.draft.canUndo || current.phase !== 'editable'}
+                            onclick={() => current.draft.undo()}><Icon name="undo" size={14} /></button
                         >
                         <button
                             class="icon-button"
                             title="Redo"
                             aria-label="Redo Sample edit"
-                            disabled={!document.draft.canRedo || document.phase !== 'editable'}
-                            onclick={() => document?.draft.redo()}><Icon name="redo" size={14} /></button
+                            disabled={!current.draft.canRedo || current.phase !== 'editable'}
+                            onclick={() => current.draft.redo()}><Icon name="redo" size={14} /></button
                         >
                         <button
                             class="editor-action"
-                            disabled={(!document.draft.dirty && !document.conflict) || document.phase !== 'editable'}
+                            disabled={(!current.draft.dirty && !current.conflict) || current.phase !== 'editable'}
                             onclick={() =>
-                                void editors.discard(document!).catch((error) => {
-                                    document!.status = userFacingMessage(error);
+                                void editors.discard(current).catch((error) => {
+                                    current.status = userFacingMessage(error);
                                 })}>Discard</button
                         >
-                        {#if document.phase === 'refresh-failed' || (document.phase === 'unconfirmed' && document.jobId !== null)}
-                            <button class="editor-action" onclick={() => void editors.recover(document!)}
-                                ><Icon name="refresh" size={14} />{document.phase === 'refresh-failed'
+                        {#if current.phase === 'refresh-failed' || (current.phase === 'unconfirmed' && current.jobId !== null)}
+                            <button class="editor-action" onclick={() => void editors.recover(current)}
+                                ><Icon name="refresh" size={14} />{current.phase === 'refresh-failed'
                                     ? 'Refresh'
                                     : 'Check status'}</button
                             >
                         {:else}
                             <button
                                 class="editor-action save"
-                                disabled={!document.canSave || editors.locked}
-                                onclick={() => void editors.save(document!)}><Icon name="save" size={14} />Save</button
+                                disabled={!current.canSave || editors.locked}
+                                onclick={() => void editors.save(current)}><Icon name="save" size={14} />Save</button
                             >
                         {/if}
                     </div>
-                </div>
-            </header>
+                {/snippet}
+            </EditorHeader>
             {#key document}
                 <SampleEditor {document} {navigation} {panelId} preview={displayedPreview} {inactive} />
             {/key}
@@ -214,21 +213,12 @@
         background: var(--color-panel-raised);
         color: var(--color-text-muted);
     }
-    header {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
-        align-items: center;
-        gap: 8px;
-        padding: 0 8px;
-        border-bottom: 1px solid var(--color-border);
-        flex: 0 0 auto;
-        min-height: 38px;
-    }
     .comparison,
     p {
         color: var(--color-text-muted);
     }
     .comparison {
+        display: block;
         min-width: 0;
         max-width: 140px;
         overflow: hidden;
@@ -236,35 +226,12 @@
         font-size: 10px;
         white-space: nowrap;
     }
-    .navigation {
-        min-width: 0;
-    }
-    .header-tools {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-    }
-    .format-slot {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex: 0 0 48px;
-    }
     .actions {
         display: flex;
         flex: 0 0 auto;
         align-items: center;
         gap: 5px;
         margin-left: auto;
-        padding-block: 4px;
-    }
-    :global([data-editor-under~='850']) .header-tools {
-        border-top: 1px solid var(--color-border);
-    }
-    :global([data-editor-under~='850']) header {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 0 8px;
     }
     .editor-action {
         display: inline-flex;
@@ -272,8 +239,9 @@
         gap: 6px;
         border: 1px solid var(--color-border);
         border-radius: 4px;
-        padding: 4px 9px;
-        height: 28px;
+        padding: 0 9px;
+        height: var(--density-control);
+        font-size: 11px;
         white-space: nowrap;
     }
     .save {

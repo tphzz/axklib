@@ -10,6 +10,8 @@
     import SampleInfo from './SampleInfo.svelte';
     import SampleTransport from './SampleTransport.svelte';
     import ParameterPage from './ParameterPage.svelte';
+    import EditorHeader from '../../../../lib/components/EditorHeader.svelte';
+    import EditorTabs from '../../../../lib/components/EditorTabs.svelte';
     let {
         document: suppliedDocument,
         preview,
@@ -48,29 +50,20 @@
 </script>
 
 <div class="sample-pages" role="group" aria-label={`${activeTab.label} pages`}>
-    <nav aria-label="Sample subpages">
-        {#each activeTab.pages as page, index}
-            <button
-                aria-pressed={activePage.id === page.id}
-                onclick={() => (navigation.page = page.id)}
-                onkeydown={(event) => {
-                    let next = index;
-                    if (event.key === 'ArrowRight') next = (index + 1) % activeTab.pages.length;
-                    else if (event.key === 'ArrowLeft')
-                        next = (index + activeTab.pages.length - 1) % activeTab.pages.length;
-                    else if (event.key === 'Home') next = 0;
-                    else if (event.key === 'End') next = activeTab.pages.length - 1;
-                    else return;
-                    event.preventDefault();
-                    navigation.page = activeTab.pages[next]!.id;
-                    (event.currentTarget.parentElement?.children[next] as HTMLButtonElement)?.focus();
-                }}>{page.label}</button
+    <EditorHeader secondary>
+        <EditorTabs
+            secondary
+            tabs={activeTab.pages}
+            active={activePage.id}
+            onselect={(id) => (navigation.page = id)}
+            label="Sample subpages"
+        />
+        {#snippet tools()}
+            <span class="editor-meta"
+                >{activeTab.label} · {activeTab.pages.indexOf(activePage) + 1} / {activeTab.pages.length}</span
             >
-        {/each}
-    </nav>
-    <span class="editor-meta"
-        >{activeTab.label} · {activeTab.pages.indexOf(activePage) + 1} / {activeTab.pages.length}</span
-    >
+        {/snippet}
+    </EditorHeader>
 </div>
 <div
     role="tabpanel"
@@ -105,45 +98,8 @@
 
 <style>
     .sample-pages {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex: 0 0 30px;
-        min-height: 30px;
-        padding: 0 8px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    nav {
-        display: flex;
-        align-items: center;
-        gap: 3px;
+        flex: 0 0 auto;
         min-width: 0;
-        overflow-x: auto;
-        scrollbar-width: none;
-    }
-    nav::-webkit-scrollbar {
-        display: none;
-    }
-    button {
-        border: 1px solid transparent;
-        background: transparent;
-        padding: 3px 9px;
-        white-space: nowrap;
-        color: var(--color-text-muted);
-        font-size: 11px;
-        border-radius: 3px;
-    }
-    button[aria-pressed='true'] {
-        border-color: var(--color-accent);
-        color: var(--color-text);
-        background: var(--color-panel-raised);
-    }
-    button:focus-visible {
-        outline: 1px solid var(--color-accent);
-    }
-    .sample-pages > span {
-        margin-left: auto;
-        white-space: nowrap;
     }
     .sample-panel {
         flex: 1;
@@ -151,7 +107,7 @@
         overflow: auto;
         padding: var(--density-panel-padding, 6px);
     }
-    :global([data-editor-under~='650']) .sample-pages > span {
+    :global([data-editor-under~='650']) .editor-meta {
         display: none;
     }
     :global([data-editor-under~='650']) .sample-panel {

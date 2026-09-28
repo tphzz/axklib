@@ -190,7 +190,7 @@ window.runSampleEditorRegression = async function () {
     assert(modal.querySelector('.primary-button').disabled, 'dirty conversion cannot submit');
     await click('.dialog-footer button', 'Cancel');
     await click('.device-editor button', 'Save');
-    assert(document.querySelector('.device-editor .format-badge').textContent === source, 'ordinary save retains format');
+    assert(document.querySelector('[aria-label="Inspect Sample A"] .format-badge').textContent === source, 'ordinary save retains format');
     const panel = document.querySelector('.sample-panel');
     await click(`[aria-label="Convert to ${target} sample format"]`);
     modal = document.querySelector('[role=dialog]');
@@ -218,7 +218,8 @@ window.runSampleEditorRegression = async function () {
     }
     assert(!document.querySelector('[role=dialog]'), 'confirmed conversion closes');
     assert(document.querySelector('.sample-panel') === panel, 'conversion retains editor document and page');
-    assert(document.querySelector('.device-editor .format-badge').textContent === target, 'editor badge reflects new storage');
+    assert(!document.querySelector('.device-editor header .format-badge'), 'editor does not repeat the collection format badge');
+    assert(document.querySelector(`.device-editor [aria-label="Convert to ${source} sample format"]`), 'conversion action reflects new storage');
     const row = document.querySelector('[aria-label="Inspect Sample A"]');
     assert(row.querySelector('.format-badge').textContent === target, 'collection badge refreshes');
     assert(document.querySelector('[aria-label="Inspect Sample B"] .format-badge').textContent === source, 'other Sample format is unchanged');
