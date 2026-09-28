@@ -1,6 +1,7 @@
 mod a_series_preferences;
 mod allocation_inspector;
 mod desktop_preferences;
+mod diagnostic_logs;
 mod directory_tar;
 #[cfg(test)]
 mod directory_tar_tests;
@@ -477,6 +478,7 @@ pub fn run() {
                 .path()
                 .app_log_dir()
                 .map_err(|error| format!("resolve application log directory: {error}"))?;
+            app.manage(diagnostic_logs::LogState::new(log_directory.clone()));
             let application_data_directory = app
                 .path()
                 .app_local_data_dir()
@@ -513,6 +515,7 @@ pub fn run() {
             setup_startup.record(StartupMilestone::TauriSetupCompleted);
             Ok(())
         })
+        .on_window_event(diagnostic_logs::window_event)
         .on_page_load(move |webview, payload| {
             if webview.label() != "main" {
                 return;
@@ -527,6 +530,10 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            diagnostic_logs::open_diagnostic_logs,
+            diagnostic_logs::read_diagnostic_logs,
+            diagnostic_logs::clear_diagnostic_log_view,
+            diagnostic_logs::save_diagnostic_logs,
             editor_exit::set_editor_exit_guard,
             editor_exit::approve_editor_exit,
             complete_startup,

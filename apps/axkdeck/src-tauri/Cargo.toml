@@ -29,6 +29,7 @@ tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2.5.1"
 tauri-plugin-log = "2"
+time = { version = "=0.3.45", features = ["parsing", "macros"] }
 url = "2.5.7"
 
 [target.'cfg(unix)'.dependencies]

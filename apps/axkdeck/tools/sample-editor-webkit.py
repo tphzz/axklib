@@ -20,6 +20,7 @@ parser.add_argument("--conversion-lock", action="store_true")
 parser.add_argument("--checks", type=Path, default=Path(__file__).with_name("sample-editor-regression-checks.js"))
 parser.add_argument("--fixture", default="/tools/layout-fixtures/sample-editor.html")
 parser.add_argument("--checks-function", default="runSampleEditorRegression")
+parser.add_argument("--init-script", type=Path)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 script = args.checks.read_text()
@@ -31,7 +32,13 @@ def run(zoom, stereo):
     name = f"webkit-{args.width}-{args.height}-{zoom}-{'stereo' if stereo else 'mono'}{'-workspace' if args.workspace else ''}"
     win = Gtk.OffscreenWindow()
     win.set_default_size(args.width, args.height)
-    view = WebKit2.WebView()
+    content = WebKit2.UserContentManager()
+    if args.init_script:
+        content.add_script(WebKit2.UserScript.new(
+            args.init_script.read_text(), WebKit2.UserContentInjectedFrames.TOP_FRAME,
+            WebKit2.UserScriptInjectionTime.START, None, None,
+        ))
+    view = WebKit2.WebView.new_with_user_content_manager(content)
     view.get_settings().set_media_playback_requires_user_gesture(False)
     view.get_settings().set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.NEVER)
     view.set_zoom_level(zoom)
@@ -77,7 +84,7 @@ def run(zoom, stereo):
             GLib.timeout_add(1000, start)
 
     view.connect("load-changed", loaded)
-    query = "?" + "&".join(name for enabled, name in [(stereo, "short-stereo"), (args.workspace, "workspace"), (args.conversion_lock, "conversion-lock")] if enabled)
+    query = ("&" if "?" in args.fixture else "?") + "&".join(name for enabled, name in [(stereo, "short-stereo"), (args.workspace, "workspace"), (args.conversion_lock, "conversion-lock")] if enabled)
     view.load_uri(args.base + args.fixture + query)
     timeout = GLib.timeout_add_seconds(45, lambda: (Gtk.main_quit(), False)[1])
     Gtk.main()

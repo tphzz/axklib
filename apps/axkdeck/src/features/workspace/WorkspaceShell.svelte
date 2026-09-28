@@ -8,6 +8,7 @@
     import { objectEditors } from '../object-editor/context';
     import { editorPaneHeight } from './paneLayout';
     import Splitter from '../../lib/components/Splitter.svelte';
+    import OpenLogsButton from '../diagnostics/OpenLogsButton.svelte';
 
     interface Props {
         mode: WorkspaceMode;
@@ -197,6 +198,7 @@
         </div>{/if}
     <footer class="status-bar">
         <span><span class="status-dot"></span>{status}</span><span class="ml-auto">{count}</span>
+        {#if isDesktop}<OpenLogsButton />{/if}
     </footer>
 </div>
 

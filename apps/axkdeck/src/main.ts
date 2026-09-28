@@ -43,6 +43,20 @@ async function connectServer(restartLocal: boolean): Promise<ServerConnection | 
 
 async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const isDesktop = '__TAURI_INTERNALS__' in window;
+    if (new URLSearchParams(window.location.search).get('view') === 'logs') {
+        try {
+            const { startLogsView } = await import('./features/diagnostics/bootstrap');
+            await startLogsView(mountTarget, isDesktop);
+        } catch (error) {
+            reportError('Logs startup failed', error);
+            mountTarget.textContent = `The Logs window could not be loaded: ${String(error)}`;
+            document.documentElement.removeAttribute('data-interface-scale-pending');
+            if (isDesktop) {
+                await showCurrentTauriWindow().catch((reason) => reportError('Show Logs window failed', reason));
+            }
+        }
+        return;
+    }
     const aSeriesPreferences = new ASeriesPreferences(
         isDesktop
             ? {

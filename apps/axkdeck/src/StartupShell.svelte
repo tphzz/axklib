@@ -1,5 +1,6 @@
 <script lang="ts">
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
+    import OpenLogsButton from './features/diagnostics/OpenLogsButton.svelte';
 
     interface Props {
         status?: 'starting' | 'unavailable';
@@ -64,6 +65,7 @@
         <span class:startup-failed={status === 'unavailable'}></span>{status === 'starting'
             ? 'Starting services...'
             : 'Service unavailable'}
+        {#if '__TAURI_INTERNALS__' in window}<div class="startup-logs"><OpenLogsButton /></div>{/if}
     </footer>
 </div>
 
@@ -196,5 +198,10 @@
     }
     footer span.startup-failed {
         background: var(--color-danger);
+    }
+    .startup-logs {
+        display: flex;
+        min-width: 0;
+        margin-left: auto;
     }
 </style>
