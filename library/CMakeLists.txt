@@ -294,6 +294,7 @@ add_library(
   src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
+  src/alteration_record_layout.cpp
   src/alteration_tx16w.cpp
   src/alteration_validation.cpp
   src/alteration_volume.cpp
@@ -583,6 +584,7 @@ if(BUILD_TESTING)
     axk_core_tests
     tests/bytes_test.cpp
     tests/alteration_test.cpp
+    tests/alteration_record_resize_test.cpp
     tests/program_parameter_alteration_test.cpp
     tests/audio_import_test.cpp
     tests/audio_import_contract_test.cpp

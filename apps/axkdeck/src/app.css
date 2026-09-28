@@ -2270,7 +2270,10 @@ input:focus-visible {
 
 .deletion-footer-summary {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  flex: 1;
   min-width: 0;
+  height: 42px;
   margin: 0;
   line-height: 1.35;
 }
@@ -2286,6 +2289,20 @@ input:focus-visible {
 .deletion-footer-summary span {
   color: var(--color-text-muted);
   font-size: var(--dialog-metadata-font-size);
+}
+
+.deletion-footer-detail {
+  min-height: 0;
+  overflow: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.deletion-footer-error strong,
+.deletion-footer-error span {
+  color: var(--color-danger);
 }
 
 .object-deletion-actions {

@@ -57,6 +57,7 @@ struct TransactionState {
     std::optional<PartitionObjectSet> approved_volume_deletion_batch;
     std::map<std::uint8_t, MutablePartition> partitions;
     std::vector<OperationReport> reports;
+    std::uint64_t resized_record_freed_clusters{};
 };
 
 struct OperationContext {
@@ -108,6 +109,12 @@ Result<void> set_root_payload(TransactionState &state, MutablePartition &partiti
                               const CancellationToken &cancellation);
 Result<void> replace_record_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                     std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<std::vector<std::byte>> encode_changed_record_index(const MutablePartition::InsertedRecord &record,
+                                                           std::span<const Extent> extents, std::size_t size);
+Result<std::vector<std::byte>> continuation_list_bytes(const MutablePartition::InsertedRecord &record,
+                                                       std::size_t list_index);
+Result<std::uint64_t> shrink_record_extents(MutablePartition &partition, MutablePartition::InsertedRecord &record,
+                                            std::size_t size);
 Result<SfsId> unique_directory_child(TransactionState &state, MutablePartition &partition, SfsId directory,
                                      std::string_view name, const CancellationToken &cancellation);
 Result<SfsId> volume_category(TransactionState &state, MutablePartition &partition, std::string_view volume_name,

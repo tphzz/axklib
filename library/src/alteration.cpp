@@ -54,6 +54,7 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
         const auto &typed_operation = manifest.operations[operation_index];
         const auto operation_type = operation_type_name(typed_operation.data);
         const OperationContext context{typed_operation.id, operation_type};
+        const auto previously_reclaimed = state.resized_record_freed_clusters;
         auto report = std::visit(
             [&](const auto &operation) -> Result<OperationReport> {
                 using T = std::decay_t<decltype(operation)>;
@@ -127,6 +128,7 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
             typed_operation.data);
         if (!report)
             return std::unexpected{report.error()};
+        report->freed_clusters += state.resized_record_freed_clusters - previously_reclaimed;
         state.reports.push_back(std::move(*report));
         if (progress) {
             progress->report({ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(),

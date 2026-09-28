@@ -103,6 +103,35 @@ async function openWorkflow(workflow: DeletionWorkflow): Promise<void> {
 }
 
 describe('DeletionWorkflow integrity blockers', () => {
+    it('exposes the failure immediately and retains it throughout delayed refresh and reinspection', async () => {
+        const { workflow, inspectObjectDeletion, startObjectDeletion, waitForJob, refreshSession } = createWorkflow();
+        await openWorkflow(workflow);
+        let finishRefresh!: () => void;
+        let finishReinspect!: (value: ObjectDeletionInspection) => void;
+        const refresh = new Promise<void>((resolve) => (finishRefresh = resolve));
+        const reinspect = new Promise<ObjectDeletionInspection>((resolve) => (finishReinspect = resolve));
+        refreshSession.mockReturnValueOnce(refresh);
+        inspectObjectDeletion.mockResolvedValueOnce(inspection()).mockReturnValueOnce(reinspect);
+        const error = 'SFS extent byte total cannot equal the logical record payload size';
+        waitForJob.mockResolvedValueOnce({ jobId: 41, status: 'failed', error });
+        const submit = workflow.submitObjects();
+        await vi.waitFor(() => expect(refreshSession).toHaveBeenCalledTimes(1));
+        expect(workflow.objectRequest?.error).toContain(error);
+        expect(workflow.objectRequest?.busy).toBe(false);
+        expect(workflow.objectRequest?.loading).toBe(true);
+        finishRefresh();
+        await vi.waitFor(() => expect(inspectObjectDeletion).toHaveBeenCalledTimes(3));
+        expect(workflow.objectRequest?.error).toContain(error);
+        await workflow.submitObjects();
+        expect(startObjectDeletion).toHaveBeenCalledTimes(1);
+        finishReinspect(inspection());
+        await submit;
+        expect(workflow.objectRequest?.error).toContain(error);
+        expect(workflow.objectRequest?.loading).toBe(false);
+        expect(startObjectDeletion).toHaveBeenCalledTimes(1);
+        workflow.dispose();
+    });
+
     it('does not submit a job when the initial inspection contains an integrity blocker', async () => {
         const { workflow, inspectObjectDeletion, startObjectDeletion } = createWorkflow();
         inspectObjectDeletion.mockResolvedValue(inspection(true));

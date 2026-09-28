@@ -93,11 +93,9 @@
             : `Review deletion of ${targetImpacts.length} selected objects`,
     );
     const deletionButtonLabel = $derived(
-        busy
-            ? 'Deleting…'
-            : blockedTargets.length > 0
-              ? `Delete ${selectedObjectCount} eligible ${selectedObjectCount === 1 ? 'object' : 'objects'}`
-              : `Delete ${selectedObjectCount} ${selectedObjectCount === 1 ? 'object' : 'objects'}`,
+        blockedTargets.length > 0
+            ? `Delete ${selectedObjectCount} eligible ${selectedObjectCount === 1 ? 'object' : 'objects'}`
+            : `Delete ${selectedObjectCount} ${selectedObjectCount === 1 ? 'object' : 'objects'}`,
     );
 
     $effect(() => {
@@ -467,13 +465,30 @@
                     </section>
                 {/if}
             {/if}
-
-            {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
         </div>
 
         <footer class="dialog-footer object-deletion-footer">
-            <p class="deletion-footer-summary" aria-live="polite">
-                {#if inspection?.canApply}
+            <div
+                class="dialog-footer-status deletion-footer-summary"
+                class:deletion-footer-error={Boolean(error)}
+                role={error ? 'alert' : 'status'}
+            >
+                {#if error}
+                    <strong>Deletion failed</strong>
+                    <!-- svelte-ignore a11y_no_noninteractive_tabindex (The bounded error region must support keyboard scrolling.) -->
+                    <span
+                        class="deletion-footer-detail"
+                        role="region"
+                        aria-label="Deletion failure details"
+                        tabindex="0">{error}</span
+                    >
+                {:else if busy}
+                    <strong>Deleting {selectedObjectCount} {selectedObjectCount === 1 ? 'object' : 'objects'}</strong>
+                    <span>Waiting for completion and image refresh.</span>
+                {:else if loading}
+                    <strong>Inspecting deletion</strong>
+                    <span>Calculating affected objects and storage.</span>
+                {:else if inspection?.canApply}
                     <strong
                         >{selectedObjectCount}
                         {selectedObjectCount === 1 ? 'object' : 'objects'} will be deleted</strong
@@ -494,8 +509,8 @@
                     <strong>Inspecting deletion</strong>
                     <span>Calculating affected objects and storage.</span>
                 {/if}
-            </p>
-            <div class="object-deletion-actions">
+            </div>
+            <div class="dialog-footer-actions object-deletion-actions">
                 <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
                 <button class="danger-button" type="button" disabled={!canConfirm} onclick={onconfirm}>
                     {deletionButtonLabel}

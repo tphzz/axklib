@@ -111,17 +111,7 @@ Result<std::vector<detail::AlterationPatch>> collect_patches(const TransactionSt
             if (changed.capacity_expanded) {
                 if (auto normalized = normalize_extent_byte_counts(extents, changed.payload.size()); !normalized)
                     return std::unexpected{normalized.error()};
-                const ByteReader current_index{raw_index};
-                const auto tail = current_index.be16(0x46U);
-                if (!tail)
-                    return std::unexpected{tail.error()};
-                detail::PreparedRecord prepared;
-                prepared.kind = changed.payload_kind == PayloadKind::directory ? detail::RecordKind::directory
-                                                                               : detail::RecordKind::object;
-                prepared.tail = *tail;
-                auto encoded = detail::encode_sfs_index_record(prepared, extents,
-                                                               static_cast<std::uint32_t>(changed.payload.size()),
-                                                               changed.continuation_clusters);
+                auto encoded = encode_changed_record_index(changed, extents, changed.payload.size());
                 if (!encoded)
                     return std::unexpected{encoded.error()};
                 raw_index = std::move(*encoded);

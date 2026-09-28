@@ -1510,7 +1510,8 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Deleting…' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Delete 2 objects' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByText('Waiting for completion and image refresh.')).toBeTruthy();
         finishRefresh?.({ ...opened, validation: { ...opened.validation, objectCount: 0 } });
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
         expect(screen.queryByText('Piano C3')).toBeNull();

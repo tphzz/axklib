@@ -78,6 +78,45 @@ const inspection: ObjectDeletionInspection = {
 };
 
 describe('ObjectDeletionDialog', () => {
+    it('keeps the complete failure in the footer instead of below the relationship list', () => {
+        const error = 'SFS extent byte total cannot equal the logical record payload size';
+        const { container } = render(ObjectDeletionDialog, {
+            props: {
+                inspection,
+                loading: true,
+                busy: false,
+                error,
+                onselectionchange: vi.fn(),
+                onselectall: vi.fn(),
+                oncancel: vi.fn(),
+                onconfirm: vi.fn(),
+            },
+        });
+        const alert = screen.getByRole('alert');
+        expect(alert.closest('.dialog-footer')).not.toBeNull();
+        expect(alert.textContent).toContain(error);
+        expect(container.querySelector('.object-deletion-content [role="alert"]')).toBeNull();
+        expect(screen.queryByText(/1 object will be deleted/)).toBeNull();
+        expect(screen.getByRole('button', { name: 'Delete 1 object' }).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('shows progress in the footer without changing the deletion action label', () => {
+        const { container } = render(ObjectDeletionDialog, {
+            props: {
+                inspection,
+                loading: false,
+                busy: true,
+                error: '',
+                onselectionchange: vi.fn(),
+                onselectall: vi.fn(),
+                oncancel: vi.fn(),
+                onconfirm: vi.fn(),
+            },
+        });
+        expect(container.querySelector('.dialog-footer [role="status"]')?.textContent).toContain('Deleting');
+        expect(screen.getByRole('button', { name: 'Delete 1 object' }).hasAttribute('disabled')).toBe(true);
+    });
+
     it('separates the requested deletion from conservative optional cleanup', async () => {
         const onselectionchange = vi.fn();
         const onselectall = vi.fn();

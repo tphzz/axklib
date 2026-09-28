@@ -242,47 +242,25 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
     if (payload.size() > capacity) {
         return std::unexpected{transaction_error("record payload growth exceeds its current extent capacity")};
     }
-    if (target->capacity_expanded) {
+    if (const auto checked = cancellation.check(); !checked)
+        return std::unexpected{checked.error()};
+    const bool shrinking = payload.size() < target->payload.size();
+    if (shrinking) {
+        auto freed = shrink_record_extents(partition, *target, payload.size());
+        if (!freed)
+            return std::unexpected{freed.error()};
+        state.resized_record_freed_clusters += *freed;
+    }
+    if (target->capacity_expanded && !shrinking) {
         target->payload = std::move(payload);
         return {};
     }
-    if (target->extents.size() > 4U) {
-        if (auto normalized = normalize_extent_byte_counts(target->extents, payload.size()); !normalized)
-            return std::unexpected{normalized.error()};
-        const ByteReader current_index{target->raw_index};
-        const auto tail = current_index.be16(0x46U);
-        if (!tail)
-            return std::unexpected{tail.error()};
-        detail::PreparedRecord prepared;
-        prepared.kind =
-            target->payload_kind == PayloadKind::directory ? detail::RecordKind::directory : detail::RecordKind::object;
-        prepared.tail = *tail;
-        auto encoded = detail::encode_sfs_index_record(
-            prepared, target->extents, static_cast<std::uint32_t>(payload.size()), target->continuation_clusters);
-        if (!encoded)
-            return std::unexpected{encoded.error()};
-        target->raw_index = std::move(*encoded);
-        target->payload = std::move(payload);
-        return {};
-    }
-    ByteWriter writer{target->raw_index};
-    if (auto written = writer.write_be32(6U, static_cast<std::uint32_t>(payload.size())); !written)
-        return std::unexpected{written.error()};
-    if (target->extents.size() <= 4U) {
-        const auto byte_counts =
-            detail::plan_extent_byte_counts(target->extents, static_cast<std::uint32_t>(payload.size()));
-        if (!byte_counts)
-            return std::unexpected{transaction_error(byte_counts.error().message)};
-        for (std::size_t index = 0; index < target->extents.size(); ++index) {
-            target->extents[index].byte_count = (*byte_counts)[index];
-            if (auto written = writer.write_be32(0x12U + index * 12U, (*byte_counts)[index]); !written)
-                return std::unexpected{written.error()};
-        }
-    }
-    if (target->extents.size() == 1U) {
-        if (auto written = writer.write_be32(0x12U, static_cast<std::uint32_t>(payload.size())); !written)
-            return std::unexpected{written.error()};
-    }
+    if (auto normalized = normalize_extent_byte_counts(target->extents, payload.size()); !normalized)
+        return std::unexpected{normalized.error()};
+    auto encoded = encode_changed_record_index(*target, target->extents, payload.size());
+    if (!encoded)
+        return std::unexpected{encoded.error()};
+    ByteWriter writer{*encoded};
     if (id.value == 1U) {
         const auto entries = parse_directory(payload, id);
         if (!entries)
@@ -290,6 +268,8 @@ Result<void> replace_record_payload(TransactionState &state, MutablePartition &p
         if (auto written = writer.write_be16(0x46U, static_cast<std::uint16_t>(entries->size() - 2U)); !written)
             return std::unexpected{written.error()};
     }
+    target->raw_index = std::move(*encoded);
+    target->capacity_expanded = false;
     target->payload = std::move(payload);
     return {};
 }
