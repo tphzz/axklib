@@ -15,6 +15,7 @@
     let { document, rate, disabled }: { document: ObjectEditorDocument; rate: number; disabled: boolean } = $props();
     const audio = editorAudio();
     const view = $derived(sampleView(document));
+    let playbackRequest = 0;
     const bank = $derived(document.detail?.editing?.profile === 'a-series/sample-bank');
     const sourceDetail = $derived(bank ? document.previewDetail : document.detail);
     $effect(() => {
@@ -23,6 +24,7 @@
         untrack(() => {
             if (playing || busy) void audio?.audition.stop();
             view.release();
+            resetCursor();
         });
     });
     let run = $state.raw<{
@@ -41,13 +43,37 @@
     const busy = $derived(
         audio?.audition.state?.objectId === document.detail!.object.id && audio.audition.state.status === 'preparing',
     );
+    const playbackValidation = $derived(
+        document.detail?.editing?.editable === false && !document.draft.dirty
+            ? document.conflict || Object.values(document.inputErrors ?? {}).find(Boolean) || ''
+            : document.validation,
+    );
     const status = $derived(
-        document.validation ||
+        playbackValidation ||
             document.status ||
             document.previewStatus ||
             (audio?.audition.state?.objectId === document.detail!.object.id ? audio.audition.state.error : '') ||
             (playing ? 'Playing' : busy ? 'Preparing audio' : 'Ready'),
     );
+    function playbackOrigin() {
+        const values = document.draft.values;
+        return (
+            Number(values['playback.start_frame'] ?? 0) +
+            ([3, 5].includes(Number(values.loop_mode)) ? Math.max(0, Number(values['playback.length_frames']) - 1) : 0)
+        );
+    }
+    function resetCursor() {
+        playbackRequest += 1;
+        view.cursor = playbackOrigin();
+        run = undefined;
+    }
+    const idleOrigin = $derived(playbackOrigin());
+    $effect(() => {
+        const frame = idleOrigin;
+        untrack(() => {
+            if (!playing && !busy && !run) view.cursor = frame;
+        });
+    });
     $effect(() => {
         if (playing && run)
             view.cursor = sourceFrame(
@@ -59,18 +85,20 @@
                 run.length,
                 false,
             );
+        else if (run && !busy) resetCursor();
     });
     $effect(() => {
         if (view.gain) view.gain.gain.value = view.volume / 100;
     });
     $effect(() => {
         if (run && (disabled || document.draft.values !== run.values)) {
-            run = undefined;
+            resetCursor();
             if (playing || busy) void audio?.audition.stop();
         }
     });
     $effect(() => {
         const release = on(window, 'keydown', (event) => {
+            if (disabled) return;
             if (
                 (event.target as HTMLElement)?.closest(
                     'input,select,textarea,button,[role=slider],[role=listbox],[role=dialog]',
@@ -89,7 +117,8 @@
         return release;
     });
     export async function play(monitor = false) {
-        if (!audio || disabled || document.validation || !sourceDetail?.editing) return;
+        if (!audio || disabled || playbackValidation || !sourceDetail?.editing) return;
+        const request = ++playbackRequest;
         const identity = document.detail!;
         const sourceIdentity = sourceDetail;
         const original = document.draft.values;
@@ -146,9 +175,24 @@
                 };
             });
             await tick();
-            if (!monitor && playing && run && cursor > run.start && cursor < run.start + run.length) seek(cursor);
+            if (
+                request !== playbackRequest ||
+                disabled ||
+                document.detail !== identity ||
+                sourceDetail !== sourceIdentity
+            )
+                return;
+            if (
+                !monitor &&
+                playing &&
+                run &&
+                cursor !== playbackOrigin() &&
+                cursor >= run.start &&
+                cursor < run.start + run.length
+            )
+                seek(cursor);
         } catch (error) {
-            document.status = userFacingMessage(error);
+            if (request === playbackRequest && document.detail === identity) document.status = userFacingMessage(error);
         }
     }
     export function seek(frame: number) {
@@ -158,6 +202,7 @@
             );
     }
     onDestroy(() => {
+        playbackRequest += 1;
         if (playing || busy) void audio?.audition.stop();
         view.release();
     });
@@ -167,7 +212,7 @@
     <button
         class="audition-button"
         aria-label={playing || busy ? 'Stop draft preview' : 'Play draft'}
-        disabled={!playing && !busy && (disabled || !!document.validation || !sourceDetail?.editing)}
+        disabled={!playing && !busy && (disabled || !!playbackValidation || !sourceDetail?.editing)}
         onclick={() => (playing || busy ? void audio?.audition.stop() : void play())}
         ><Icon name={playing || busy ? 'stop' : 'play'} size={13} /><span>{playing || busy ? 'Stop' : 'Audition'}</span
         ></button

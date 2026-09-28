@@ -108,9 +108,12 @@ export function validateSample(values: EditorValues, changes: EditorValues, snap
             return 'Playback must fit inside the stored Wave Data';
         const empty = n('loop_length_frames') === 0;
         if (
-            empty
+            (touched('loop_start_frame', 'loop_length_frames') ||
+                [1, 2].includes(n('loop_mode')) ||
+                (!empty && touched('playback.start_frame', 'playback.length_frames'))) &&
+            (empty
                 ? loopStart !== 0 || [1, 2].includes(n('loop_mode'))
-                : n('loop_length_frames') < 0 || loopStart < start || loopEnd > end
+                : n('loop_length_frames') < 0 || loopStart < start || loopEnd > end)
         )
             return 'Loop bounds must fit inside playback; repeating modes require a non-empty loop';
     }

@@ -1,7 +1,6 @@
 import type { ImageTransport } from '../../../../lib/transport';
 import type { CachedAudition } from '../../../../lib/audio/auditionTypes';
 import type { EditorValues } from '../../../object-editor/draft.svelte';
-import { validateSample } from './adapter';
 import type { SampleEditingSnapshot } from '../../../../lib/objectEditing';
 import { loadEditorAudio, type EditorAudioSource } from '../../../object-editor/audioSource';
 
@@ -39,21 +38,50 @@ export async function prepareSampleDraft(
     signal: AbortSignal,
     options: { source?: EditorAudioSource; output?: AudioNode } = {},
 ): Promise<CachedAudition> {
-    const geometry = Object.fromEntries(
-        ['loop_mode', 'loop_start_frame', 'loop_length_frames'].map((key) => [key, values[key]!]),
-    );
-    const error = validateSample(values, geometry, snapshot);
-    if (error) throw new Error(error);
+    const repeating = [1, 2].includes(Number(values.loop_mode));
+    const required = [
+        'root_key',
+        'fine_tune_cents',
+        'playback.start_frame',
+        'playback.length_frames',
+        ...(repeating ? ['loop_start_frame', 'loop_length_frames'] : []),
+    ];
+    if (required.some((key) => snapshot.blockedParameters.includes(key)))
+        throw new Error('Draft preview cannot combine the different stereo channel playback settings');
     if (!Number.isInteger(note) || note < 0 || note > 127) throw new Error('Preview note must be between 0 and 127');
     const audio = options.source ?? (await loadEditorAudio(transport, sessionId, objectId, context, signal));
     {
         const rate = audio.sampleRate;
         const plan = draftPlaybackPlan(values, rate, context.sampleRate, note);
+        if (!Number.isInteger(plan.loopMode) || plan.loopMode < 0 || plan.loopMode > 5)
+            throw new Error('Preview loop mode is invalid');
+        const loopStart = Number(values.loop_start_frame);
+        const loopLength = Number(values.loop_length_frames);
+        if (
+            repeating &&
+            (!Number.isSafeInteger(loopStart) ||
+                !Number.isSafeInteger(loopLength) ||
+                loopStart < plan.start ||
+                loopLength <= 0 ||
+                loopStart + loopLength > plan.start + plan.length ||
+                !Number.isInteger(plan.loopStart) ||
+                !Number.isInteger(plan.loopLength) ||
+                plan.loopStart < 0 ||
+                plan.loopLength <= 0 ||
+                plan.loopStart + plan.loopLength > plan.frames)
+        )
+            throw new Error('Repeating playback requires a nonempty loop inside the playback window');
         const fullFrames = Math.max(...audio.lanes.map((lane) => lane.length));
         const workingBytes = fullFrames * 16 + plan.frames * 16;
         if (!Number.isSafeInteger(plan.frames) || plan.frames < 1 || workingBytes > 128 * 1024 * 1024)
             throw new Error('Draft audio exceeds the 128 MiB preview working limit');
-        if (plan.start < 0 || plan.length < 1 || audio.lanes.some((lane) => plan.start + plan.length > lane.length))
+        if (
+            !Number.isSafeInteger(plan.start) ||
+            !Number.isSafeInteger(plan.length) ||
+            plan.start < 0 ||
+            plan.length < 1 ||
+            audio.lanes.some((lane) => plan.start + plan.length > lane.length)
+        )
             throw new Error('Draft playback exceeds the stored Wave Data');
         signal.throwIfAborted();
         const input = context.createBuffer(audio.lanes.length, fullFrames, rate);
@@ -90,8 +118,8 @@ export async function prepareSampleDraft(
                 wavSizeBytes: 0,
                 loopMode: plan.loopMode,
                 loopModeLabel: String(plan.loopMode),
-                loopStartFrame: plan.loopStart,
-                loopLengthFrames: plan.loopLength,
+                loopStartFrame: repeating ? plan.loopStart : 0,
+                loopLengthFrames: repeating ? plan.loopLength : 0,
                 warnings: [],
             },
         };

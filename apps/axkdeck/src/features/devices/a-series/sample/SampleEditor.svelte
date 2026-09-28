@@ -15,11 +15,13 @@
         preview,
         panelId,
         navigation,
+        inactive = false,
     }: {
         document: ObjectEditorDocument;
         preview?: SampleWaveformPreview;
         panelId: string;
         navigation: EditorNavigation;
+        inactive?: boolean;
     } = $props();
     // The host keys this component by document; cleanup must retain that identity.
     const document = untrack(() => suppliedDocument);
@@ -35,7 +37,7 @@
     const scroll = $derived({ positions: navigation.scrollPositions, key: activePage.id });
     setContext(editorScrollContext, () => scroll);
     const disabled = $derived(
-        document.phase !== 'editable' || !document.detail?.editing?.editable || !!document.conflict,
+        inactive || document.phase !== 'editable' || !document.detail?.editing?.editable || !!document.conflict,
     );
     const rate = $derived(
         bank
@@ -77,7 +79,7 @@
     class="sample-panel"
     use:rememberEditorScroll={scroll}
 >
-    {#if activePage.id === 'waveform' && preview}
+    {#if activePage.id === 'waveform'}
         <TrimLoop {document} {preview} {disabled} onseek={(frame) => transport?.seek(frame)} />
     {:else if activePage.id === 'sample-info' && bank}
         <ParameterPage
@@ -94,7 +96,12 @@
         <ParameterPage {document} page={activePage} {disabled} />
     {/if}
 </div>
-<SampleTransport bind:this={transport} {document} {rate} {disabled} />
+<SampleTransport
+    bind:this={transport}
+    {document}
+    {rate}
+    disabled={inactive || document.phase !== 'editable' || !!document.conflict}
+/>
 
 <style>
     .sample-pages {

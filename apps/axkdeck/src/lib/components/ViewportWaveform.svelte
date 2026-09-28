@@ -43,7 +43,7 @@
         values: readonly WaveformBin[];
         timeline: WaveformTimeline;
         playheadRatio?: number;
-        onvisible?: () => void;
+        onvisible?: (bins: number) => void;
     }
 
     let { values, timeline, playheadRatio = 0, onvisible = () => undefined }: Props = $props();
@@ -52,18 +52,18 @@
 
     onMount(() => {
         if (typeof IntersectionObserver === 'undefined') {
-            onvisible();
+            onvisible(1024);
             return;
         }
         return observeNearViewport(host, (nextVisible) => {
             visible = nextVisible;
-            if (visible) onvisible();
+            if (visible) onvisible(1024);
         });
     });
 </script>
 
 <div class="viewport-waveform" bind:this={host}>
     {#if visible}
-        <Waveform {values} {timeline} {playheadRatio} />
+        <Waveform {values} {timeline} {playheadRatio} onresolution={onvisible} />
     {/if}
 </div>

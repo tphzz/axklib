@@ -8,6 +8,7 @@
     import { parameterBlockReason, parameterInactiveReason } from './parameterAvailability';
     import ControlPage from './ControlPage.svelte';
     import { measureWidth } from '../../../object-editor/measureWidth';
+    import { initialEditorWidth } from '../../../object-editor/editorWidth';
     import { BankDraft } from '../bank/draft.svelte';
     let { document, page, disabled }: { document: ObjectEditorDocument; page: SamplePage; disabled: boolean } =
         $props();
@@ -18,7 +19,7 @@
         disabled ||
         (document.detail?.editing?.blockedParameters.includes(field.key) ?? true) ||
         (!(document.draft instanceof BankDraft) && !!parameterInactiveReason(field.key, document.draft.values));
-    let width = $state(0);
+    let width = $state(initialEditorWidth());
     const columns = $derived(width >= 984 ? 3 : width >= 652 ? 2 : 1);
     const groups = $derived(pageGroups(page));
     const tracks = $derived(

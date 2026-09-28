@@ -411,6 +411,7 @@ struct ImageWaveformPreviewLane {
     std::string role;
     std::string source_object_id;
     std::uint32_t sample_rate{};
+    std::uint16_t sample_width_bytes{};
     std::uint64_t stored_frame_count{};
     std::uint64_t playback_start_frame{};
     std::uint64_t playback_length_frames{};

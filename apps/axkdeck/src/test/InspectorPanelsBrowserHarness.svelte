@@ -33,6 +33,7 @@
                     sourceObjectId: waveData.objectKey,
                     sampleRate: 44100,
                     storedFrameCount: 44100,
+                    sampleWidthBytes: 2,
                     playbackStartFrame: 0,
                     playbackLengthFrames: 44100,
                     loopStartFrame: 11025,

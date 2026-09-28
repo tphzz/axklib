@@ -6487,6 +6487,13 @@
             "minimum": 1,
             "type": "integer"
           },
+          "sampleWidthBytes": {
+            "enum": [
+              1,
+              2
+            ],
+            "type": "integer"
+          },
           "sourceObjectId": {
             "minLength": 1,
             "type": "string"
@@ -6500,6 +6507,7 @@
           "role",
           "sourceObjectId",
           "sampleRate",
+          "sampleWidthBytes",
           "storedFrameCount",
           "playbackStartFrame",
           "playbackLengthFrames",

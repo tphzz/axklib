@@ -29,15 +29,31 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
                                               sample->left.wave_data_name != sample->right->wave_data_name
                                         : (sample->sample_flags & 2U) != 0U;
     auto blocked = nlohmann::json::array();
+    const auto equal_windows =
+        !sample->right || (sample->left.wave_start_frame == sample->right->wave_start_frame &&
+                           sample->left.wave_length_frames == sample->right->wave_length_frames &&
+                           sample->left.sample_rate == sample->right->sample_rate);
+    const auto common_window_valid =
+        equal_windows && sample->left.wave_length_frames > 0U && sample->left.sample_rate > 0U && !sources.empty() &&
+        std::ranges::all_of(sources, [&](const auto &source) {
+            return static_cast<std::uint64_t>(sample->left.wave_start_frame) + sample->left.wave_length_frames <=
+                   source.at("frames").template get<std::uint64_t>();
+        });
     if (sample->right) {
         if (sample->left.root_key != sample->right->root_key)
             blocked.push_back("root_key");
         if (sample->left.fine_tune_cents != sample->right->fine_tune_cents)
             blocked.push_back("fine_tune_cents");
-        if (sample->left.loop_start_frame != sample->right->loop_start_frame ||
-            sample->left.loop_length_frames != sample->right->loop_length_frames) {
+        const auto empty_loops = sample->left.loop_length_frames == 0U && sample->right->loop_length_frames == 0U;
+        if ((!empty_loops || !common_window_valid) &&
+            (sample->left.loop_start_frame != sample->right->loop_start_frame ||
+             sample->left.loop_length_frames != sample->right->loop_length_frames)) {
             blocked.push_back("loop_start_frame");
             blocked.push_back("loop_length_frames");
+        }
+        if (!equal_windows) {
+            blocked.push_back("playback.start_frame");
+            blocked.push_back("playback.length_frames");
         }
         if ((sample->sample_flags & 6U) != 0U || sample->right->wave_data_name == sample->left.wave_data_name) {
             blocked.push_back("expand_detune");
@@ -49,10 +65,6 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
         frames = std::min(frames, source.at("frames").get<std::uint64_t>());
     if (sources.empty())
         frames = 0;
-    const auto equal_windows =
-        !sample->right || (sample->left.wave_start_frame == sample->right->wave_start_frame &&
-                           sample->left.wave_length_frames == sample->right->wave_length_frames &&
-                           sample->left.sample_rate == sample->right->sample_rate);
     const auto editable = writable && ordinary && snapshot.placement.has_value() && !sources.empty();
     std::vector<std::string> missing;
     const auto parameters = axk::detail::sample_parameters_json(decoded->parameters, &missing);

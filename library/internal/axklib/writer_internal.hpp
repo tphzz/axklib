@@ -167,7 +167,8 @@ Result<std::vector<std::byte>> prepare_sbac_payload(const SampleBankSpec &sample
                                                     const std::vector<std::uint8_t> &linked_programs = {});
 std::uint16_t sample_pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cents, std::uint32_t sample_rate);
 SampleSpec apply_sample_bank_parameter_overrides(const SampleSpec &sample, const SampleParameters &overrides);
-Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &parameters);
+Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &parameters,
+                                                bool playback_window_changed = false);
 Result<void> validate_wave_data_parameters(const WaveDataParameters &parameters);
 Result<void> apply_wave_data_parameters_to_payload(std::vector<std::byte> &payload,
                                                    const WaveDataParameters &parameters);

@@ -71,7 +71,7 @@ export class AuditionWorkflow {
     private readonly controller: AuditionController;
     private pendingObjectId = '';
     private sampleBankPlaybackGeneration = 0;
-    private readonly previewQueue: { target: PreviewTarget; generation: number }[] = [];
+    private readonly previewQueue: { target: PreviewTarget; generation: number; bins: number }[] = [];
     private readonly previewPending = new Set<string>();
     private readonly previewFailed = new Set<string>();
     private previewInflight = 0;
@@ -253,24 +253,28 @@ export class AuditionWorkflow {
         this.dependencies.catalog.samplePreviewStates = {};
     }
 
-    requestWaveformPreview(item: WaveDataItem): void {
+    requestWaveformPreview(item: WaveDataItem, bins = 1024): void {
         const sessionId = this.dependencies.sessionId();
+        const requestKey = `${item.objectKey}/${bins}`;
         if (
             sessionId === null ||
-            item.previewState === 'ready' ||
-            this.previewPending.has(item.objectKey) ||
+            (item.previewState === 'ready' && item.waveform.length >= Math.min(bins, item.object.storedFrameCount)) ||
+            this.previewPending.has(requestKey) ||
             this.previewFailed.has(item.objectKey)
         ) {
             return;
         }
-        this.previewPending.add(item.objectKey);
+        this.previewPending.add(requestKey);
         const catalog = this.dependencies.catalog;
         catalog.waveData = catalog.waveData.map((candidate) =>
-            candidate.id === item.id ? { ...candidate, previewState: 'loading' } : candidate,
+            candidate.id === item.id && candidate.previewState !== 'ready'
+                ? { ...candidate, previewState: 'loading' }
+                : candidate,
         );
         this.previewQueue.push({
             target: { kind: 'wave-data', objectId: item.objectKey, itemId: item.id },
             generation: this.previewGeneration,
+            bins,
         });
         this.drainPreviewQueue();
     }
@@ -294,6 +298,7 @@ export class AuditionWorkflow {
         this.previewQueue.push({
             target: { kind: 'sample', objectId: item.objectId },
             generation: this.previewGeneration,
+            bins: 1024,
         });
         this.drainPreviewQueue();
     }
@@ -605,10 +610,10 @@ export class AuditionWorkflow {
             if (sessionId === null) return;
             const queued = this.previewQueue.shift();
             if (!queued) return;
-            const { target, generation } = queued;
+            const { target, generation, bins } = queued;
             this.previewInflight += 1;
             void this.dependencies.transport
-                .preview(sessionId, target.objectId, 1024)
+                .preview(sessionId, target.objectId, bins)
                 .then((preview) => {
                     if (this.dependencies.sessionId() !== sessionId || this.previewGeneration !== generation) return;
                     const catalog = this.dependencies.catalog;
@@ -618,7 +623,7 @@ export class AuditionWorkflow {
                             throw new Error('Wave Data preview did not return its physical waveform lane');
                         }
                         catalog.waveData = catalog.waveData.map((candidate) =>
-                            candidate.id === target.itemId
+                            candidate.id === target.itemId && candidate.waveform.length <= lane.bins.length
                                 ? { ...candidate, waveform: lane.bins, previewState: 'ready' }
                                 : candidate,
                         );
@@ -635,7 +640,9 @@ export class AuditionWorkflow {
                     const catalog = this.dependencies.catalog;
                     if (target.kind === 'wave-data') {
                         catalog.waveData = catalog.waveData.map((candidate) =>
-                            candidate.id === target.itemId ? { ...candidate, previewState: 'failed' } : candidate,
+                            candidate.id === target.itemId && candidate.previewState !== 'ready'
+                                ? { ...candidate, previewState: 'failed' }
+                                : candidate,
                         );
                     } else {
                         catalog.samplePreviewStates = {
@@ -646,7 +653,10 @@ export class AuditionWorkflow {
                     this.dependencies.setStatus(userFacingMessage(error));
                 })
                 .finally(() => {
-                    if (this.previewGeneration === generation) this.previewPending.delete(target.objectId);
+                    if (this.previewGeneration === generation)
+                        this.previewPending.delete(
+                            target.kind === 'wave-data' ? `${target.objectId}/${bins}` : target.objectId,
+                        );
                     this.previewInflight -= 1;
                     this.drainPreviewQueue();
                 });

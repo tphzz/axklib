@@ -2,6 +2,8 @@
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../../../../lib/types';
     import { waveformPixelColumns } from '../../../../lib/waveformCanvas';
+    import { observeCanvas } from '../../../../lib/observeCanvas';
+    import { previewBinCount } from '../../../../lib/waveformPreview';
     let {
         bins,
         pcm,
@@ -10,6 +12,7 @@
         end = frames,
         markers = [],
         overview = false,
+        onresolution,
     }: {
         bins: readonly WaveformBin[];
         pcm?: Float32Array;
@@ -18,11 +21,12 @@
         end?: number;
         markers?: number[];
         overview?: boolean;
+        onresolution?: (bins: number) => void;
     } = $props();
     let canvas: HTMLCanvasElement;
-    let size = $state({ width: 1, height: 1 });
+    let size = $state({ width: 1, height: 1, ratio: 1 });
     const columns = $derived.by(() => {
-        const count = Math.max(1, Math.round(size.width));
+        const count = Math.max(1, Math.round(size.width * size.ratio));
         if (!pcm)
             return bins.slice(
                 Math.floor((start / frames) * bins.length),
@@ -47,9 +51,13 @@
         if (!canvas) return;
         const context = canvas.getContext('2d');
         if (!context) return;
-        const ratio = window.devicePixelRatio || 1;
-        canvas.width = Math.max(1, Math.round(size.width * ratio));
-        canvas.height = Math.max(1, Math.round(size.height * ratio));
+        const ratio = size.ratio;
+        const width = Math.max(1, Math.round(size.width * ratio));
+        const height = Math.max(1, Math.round(size.height * ratio));
+        const inset = overview ? 0 : Math.round(9 * ratio);
+        if (canvas.width !== width) canvas.width = width;
+        if (canvas.height !== height) canvas.height = height;
+        context.clearRect(0, 0, width, height);
         const styles = getComputedStyle(canvas);
         const wave = styles.getPropertyValue('--editor-wave').trim() || '#7eafc8';
         const loop = styles.getPropertyValue('--editor-loop').trim() || '#9ce1ba';
@@ -59,13 +67,13 @@
             1,
             size.width,
             canvas.width,
-            canvas.height - (overview ? 0 : 18 * ratio),
+            Math.max(1, canvas.height - 2 * inset),
         );
         for (const column of pixelColumns) {
             const frame = start + (column.x / canvas.width) * (end - start);
             context.globalAlpha = !overview && (frame < waveStart || frame >= waveEnd) ? 0.23 : 0.85;
             context.fillStyle = !overview && frame >= loopStart && frame < loopEnd ? loop : wave;
-            context.fillRect(column.x, column.y + (overview ? 0 : 9 * ratio), column.width, column.height);
+            context.fillRect(column.x, column.y + inset, column.width, column.height);
         }
         context.globalAlpha = 0.3;
         context.fillStyle = wave;
@@ -80,12 +88,10 @@
     onMount(() => {
         const measure = () => {
             const box = canvas.getBoundingClientRect();
-            size = { width: box.width, height: box.height };
+            size = { width: box.width, height: box.height, ratio: window.devicePixelRatio || 1 };
+            onresolution?.(previewBinCount(box.width, size.ratio));
         };
-        const observer = new ResizeObserver(measure);
-        observer.observe(canvas);
-        measure();
-        return () => observer.disconnect();
+        return observeCanvas(canvas, measure);
     });
 </script>
 

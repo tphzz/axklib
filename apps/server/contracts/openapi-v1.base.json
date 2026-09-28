@@ -1343,12 +1343,13 @@
       "ImagePreviewLane": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["role", "sourceObjectId", "sampleRate", "storedFrameCount", "playbackStartFrame", "playbackLengthFrames", "loopStartFrame", "loopLengthFrames", "bins"],
+        "required": ["role", "sourceObjectId", "sampleRate", "sampleWidthBytes", "storedFrameCount", "playbackStartFrame", "playbackLengthFrames", "loopStartFrame", "loopLengthFrames", "bins"],
         "properties": {
           "role": {"enum": ["MONO", "LEFT", "RIGHT"]},
           "sourceObjectId": {"type": "string", "minLength": 1},
           "sampleRate": {"type": "integer", "minimum": 1, "maximum": 4294967295},
           "storedFrameCount": {"type": "integer", "minimum": 1},
+          "sampleWidthBytes": {"type": "integer", "enum": [1, 2]},
           "playbackStartFrame": {"type": "integer", "minimum": 0},
           "playbackLengthFrames": {"type": "integer", "minimum": 1},
           "loopStartFrame": {"type": "integer", "minimum": 0},

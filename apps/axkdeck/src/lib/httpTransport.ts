@@ -5,6 +5,7 @@ import {
     type DownloadArchiveSnapshot,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { normalizeWaveformPreview } from './waveformPreview';
 import type { ObjectParameterEdit, SampleDuplicationRequest, ObjectFormatConversionRequest } from './objectEditing';
 import type {
     AudioImportOptions,
@@ -421,10 +422,12 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imageSessions.startProgramGeneration(sessionId, contentScopeId, programs);
     }
 
-    preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
+    async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
         const session = this.imageSessions.get(sessionId);
         const query = new URLSearchParams({ objectId: objectKey, bins: String(binCount) });
-        return this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`);
+        return normalizeWaveformPreview(
+            await this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`),
+        );
     }
 
     async prepareAuditionBundle(

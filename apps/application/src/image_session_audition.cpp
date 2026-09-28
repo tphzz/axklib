@@ -22,6 +22,7 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
         ImageWaveformPreviewLane lane{.role = member.role,
                                       .source_object_id = member.object_id,
                                       .sample_rate = member.sample_rate,
+                                      .sample_width_bytes = member.output_width,
                                       .stored_frame_count = member.stored_frame_count,
                                       .playback_start_frame = member.playback_start_frame,
                                       .playback_length_frames = member.playback_length_frames,

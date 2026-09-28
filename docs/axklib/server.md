@@ -1068,8 +1068,11 @@ snapshots, and directory changes between requests may change the available entri
 identifier. A Wave Data preview returns one `MONO` lane over its physical PCM
 extent. A Sample preview applies its member start and length fields and returns
 one `LEFT` lane plus an optional `RIGHT` lane. Each lane identifies its source
-Wave Data and its own frame count; the response-level frame count is the
-playback timeline used for audition and playhead positioning.
+Wave Data, stored frame count and playback window. Its `sampleWidthBytes` is
+the decoded PCM width (1 or 2 bytes), and envelope minima/maxima use signed
+PCM units. Normalize by 128 or 32768 respectively for full-scale rendering;
+do not peak-normalize each lane independently. This preserves relative stereo
+levels and keeps the envelope consistent with decoded audition audio.
 
 `auditions.prepare` accepts up to 256 ordered, unique Sample or Wave Data object
 identifiers. It validates the complete selection before retaining one bounded

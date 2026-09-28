@@ -15,6 +15,8 @@
     import { sampleFields } from './fields';
     import WaveCanvas from './WaveCanvas.svelte';
     import { hoverHelp } from '../../../../lib/components/hoverHelp.svelte';
+    import type { PreviewEnvelope, ObjectDetail } from '../../../../lib/transport';
+    import { userFacingMessage } from '../../../../lib/userFacingMessage';
     let {
         document,
         preview,
@@ -22,7 +24,7 @@
         onseek = () => {},
     }: {
         document: ObjectEditorDocument;
-        preview: SampleWaveformPreview;
+        preview?: SampleWaveformPreview;
         disabled: boolean;
         onseek?: (frame: number) => void;
     } = $props();
@@ -30,11 +32,58 @@
     const view = $derived(sampleView(document));
     let host = $state<HTMLDivElement>();
     let width = $state(800);
+    let previewBins = $state(1024);
+    let detailedPreview = $state.raw<{ detail: ObjectDetail; envelope: PreviewEnvelope }>();
+    let previewLoading = $state(false);
+    let failedPreview = $state.raw<{ detail: ObjectDetail; bins: number }>();
+    let mounted = true;
+    onDestroy(() => {
+        mounted = false;
+    });
     const frames = $derived(Math.max(1, document.detail!.editing!.maximumFrames));
     const values = $derived(document.draft.values);
     const markers = $derived(markerValues(values));
     const bounds = $derived(markerBounds(values, frames));
-    const lanes = $derived(preview.preview?.lanes ?? []);
+    const lanes = $derived.by(() => {
+        const base = preview?.preview?.lanes ?? [];
+        const detailed = detailedPreview?.detail === document.detail ? detailedPreview?.envelope.lanes : undefined;
+        return detailed && !base.some((lane, index) => lane.bins.length > (detailed[index]?.bins.length ?? 0))
+            ? detailed
+            : base;
+    });
+    $effect(() => {
+        const detail = document.detail;
+        const count = previewBins;
+        if (
+            !audio ||
+            !detail ||
+            previewLoading ||
+            (failedPreview?.detail === detail && failedPreview.bins === count) ||
+            !lanes.length ||
+            lanes.every((lane) => lane.bins.length >= Math.min(count, lane.storedFrameCount))
+        )
+            return;
+        const timer = setTimeout(() => {
+            previewLoading = true;
+            void audio.transport
+                .preview(document.sessionId, detail.object.id, count)
+                .then((envelope) => {
+                    if (mounted && detail === document.detail) detailedPreview = { detail, envelope };
+                })
+                .catch((error) => {
+                    if (mounted && detail === document.detail) {
+                        failedPreview = { detail, bins: count };
+                        view.error = userFacingMessage(error);
+                    }
+                })
+                .finally(() => {
+                    if (mounted) previewLoading = false;
+                });
+        }, 100);
+        return () => {
+            clearTimeout(timer);
+        };
+    });
     const rate = $derived(lanes[0]?.sampleRate ?? view.source?.sampleRate ?? 44100);
     const endType = $derived(view.preferences.endType);
     const endScale = $derived(endUnitFrames(rate, Number(values.loop_tempo_hundredths), endType));
@@ -158,6 +207,7 @@
                         {start}
                         {end}
                         {markers}
+                        onresolution={(bins) => (previewBins = bins)}
                     />
                 </div>
             {/each}
@@ -296,19 +346,30 @@
             />
         </div>
     </div>
-    {#if view.loading || view.error}<div role="status" class="editor-meta">
+    {#if view.loading || view.error}<div role="status" class="wave-status editor-meta">
             {view.loading ? 'Loading source audio' : view.error}
         </div>{/if}
 </section>
 
 <style>
     .waveform-page {
+        position: relative;
         display: flex;
         flex-direction: column;
         min-height: 192px;
         height: 100%;
         gap: 4px;
         min-width: 0;
+    }
+    .wave-status {
+        position: absolute;
+        top: 32px;
+        left: 8px;
+        right: 8px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        pointer-events: none;
     }
     .zoom {
         min-width: 20px;

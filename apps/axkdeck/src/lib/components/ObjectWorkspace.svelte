@@ -34,7 +34,7 @@
         onquerychange: (value: string) => void;
         onprogramselect: (program: Program) => void;
         onwavedataselect: (item: WaveDataItem) => void;
-        onpreviewrequest?: (item: WaveDataItem) => void;
+        onpreviewrequest?: (item: WaveDataItem, bins: number) => void;
         onplay?: (item: WaveDataItem) => void;
         onprefetch?: (item: WaveDataItem) => void;
         onstop?: () => void;
@@ -410,7 +410,7 @@
                         <ViewportWaveform
                             values={item.waveform}
                             {timeline}
-                            onvisible={() => onpreviewrequest(item)}
+                            onvisible={(bins) => onpreviewrequest(item, bins)}
                             playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
                                 ? waveformPlayheadRatio(timeline, playheadFrame, item.object.sampleRate)
                                 : 0}

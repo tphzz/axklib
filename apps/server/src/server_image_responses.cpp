@@ -363,6 +363,7 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
                          {"sourceObjectId", lane.source_object_id},
                          {"sampleRate", lane.sample_rate},
                          {"storedFrameCount", lane.stored_frame_count},
+                         {"sampleWidthBytes", lane.sample_width_bytes},
                          {"playbackStartFrame", lane.playback_start_frame},
                          {"playbackLengthFrames", lane.playback_length_frames},
                          {"loopStartFrame", lane.loop_start_frame},

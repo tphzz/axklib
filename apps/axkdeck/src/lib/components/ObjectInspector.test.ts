@@ -83,6 +83,7 @@ function samplePreview(
                           sourceObjectId: entry.waveData.objectKey,
                           sampleRate: entry.waveData.object.sampleRate,
                           storedFrameCount: entry.waveData.object.storedFrameCount,
+                          sampleWidthBytes: 2,
                           playbackStartFrame: entry.waveData.object.waveStartFrame,
                           playbackLengthFrames: entry.waveData.object.waveLengthFrames,
                           loopStartFrame: entry.waveData.object.loopStartFrame ?? 0,

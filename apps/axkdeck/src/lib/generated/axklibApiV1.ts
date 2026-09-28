@@ -3322,6 +3322,8 @@ export interface components {
             /** @enum {unknown} */
             role: 'MONO' | 'LEFT' | 'RIGHT';
             sampleRate: number;
+            /** @enum {integer} */
+            sampleWidthBytes: 1 | 2;
             sourceObjectId: string;
             storedFrameCount: number;
         };

@@ -30,6 +30,7 @@ describe('waveformPixelColumns', () => {
         }
         expect(columns.every((column) => Number.isInteger(column.x) && Number.isInteger(column.width))).toBe(true);
         expect(columns.every((column) => column.width >= 1)).toBe(true);
+        expect(columns).toHaveLength(pixelWidth);
     });
 
     it('limits columns to the waveform content ratio', () => {
@@ -38,5 +39,10 @@ describe('waveformPixelColumns', () => {
 
         expect(lastColumn).toBeDefined();
         expect(lastColumn!.x + lastColumn!.width).toBe(3);
+    });
+
+    it('uses full scale rather than amplifying quiet waveforms', () => {
+        const columns = waveformPixelColumns([{ minimum: -0.25, maximum: 0.25 }], 1, 4, 8, 100);
+        expect(columns.every((column) => column.y === 38 && column.height === 25)).toBe(true);
     });
 });

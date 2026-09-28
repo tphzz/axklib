@@ -1,9 +1,11 @@
 import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
-import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
+import { act, fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
+import type { SampleWaveformPreview } from '../../lib/types';
 import DeviceEditorHostHarness from '../../test/DeviceEditorHostHarness.svelte';
 import { ObjectEditorWorkflow } from './workflow.svelte';
+import type { EditorAudioServices } from './audioContext';
 
 beforeEach(() => vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null));
 
@@ -43,7 +45,30 @@ function detail(id: string): ObjectDetail {
     } as unknown as ObjectDetail;
 }
 
-function setup() {
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: Error) => void;
+    const promise = new Promise<T>((yes, no) => {
+        resolve = yes;
+        reject = no;
+    });
+    return { promise, resolve, reject };
+}
+
+function preview(id: string): SampleWaveformPreview {
+    return {
+        previewState: 'ready',
+        preview: {
+            lanes: ['left', 'right'].map((role) => ({
+                role: `${id} ${role}`,
+                sampleRate: 44100,
+                bins: [{ minimum: -0.5, maximum: 0.5 }],
+            })),
+        },
+    } as unknown as SampleWaveformPreview;
+}
+
+function setup(initialPreview?: SampleWaveformPreview, audio?: EditorAudioServices) {
     const transport = {
         objectDetail: vi.fn(async (_: number, id: string) => detail(id)),
         startObjectParameterEdit: vi.fn().mockResolvedValue({ jobId: 7, status: 'queued' }),
@@ -55,10 +80,160 @@ function setup() {
         stopPlayback: vi.fn(),
         status: vi.fn(),
     });
-    return { workflow, transport, view: render(DeviceEditorHostHarness, { workflow }) };
+    return { workflow, transport, view: render(DeviceEditorHostHarness, { workflow, preview: initialPreview, audio }) };
 }
 
 describe('Sample editor workspace navigation', () => {
+    it('retains the outgoing editor and waveform inertly until the next document and preview can swap together', async () => {
+        const { view, transport, workflow } = setup(preview('A'));
+        await view.findByText('Sample A', { selector: 'strong' });
+        const panel = view.getByRole('tabpanel');
+        const waveform = view.getByRole('region', { name: 'Waveform editor' });
+        const pending = deferred<ObjectDetail>();
+        transport.objectDetail.mockImplementationOnce(() => pending.promise);
+
+        await view.rerender({ sample: 'B', preview: preview('B') });
+
+        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(panel.isConnected).toBe(true);
+        expect(waveform.isConnected).toBe(true);
+        expect(view.getByText('A left')).toBeTruthy();
+        expect(view.queryByText('B left')).toBeNull();
+        expect(view.queryByText('Sample B', { selector: 'strong' })).toBeNull();
+        expect(panel.closest('[inert]')).not.toBeNull();
+        expect(view.getByRole('region', { name: 'Sample editor' }).getAttribute('aria-busy')).toBe('true');
+        const status = view.getAllByRole('status').find((element) => !element.closest('[inert]'));
+        expect(status?.textContent).toMatch(/loading/i);
+        expect(workflow.visible).toBe(true);
+
+        pending.resolve(detail('B'));
+        await view.findByText('Sample B', { selector: 'strong' });
+        expect(view.queryByText('Sample A', { selector: 'strong' })).toBeNull();
+        expect(view.queryByText('A left')).toBeNull();
+        expect(view.getByText('B left')).toBeTruthy();
+        expect(view.getByRole('tabpanel').closest('[inert]')).toBeNull();
+        expect(view.getByRole('region', { name: 'Sample editor' }).getAttribute('aria-busy')).not.toBe('true');
+    });
+
+    it('keeps the active tab, subpage, and outgoing controls mounted while a replacement loads', async () => {
+        const { view, transport } = setup();
+        await fireEvent.click(await view.findByRole('tab', { name: 'Map/Out' }));
+        await fireEvent.click(view.getByRole('button', { name: 'Pitch' }));
+        const panel = view.getByRole('tabpanel');
+        const input = view.getByRole('spinbutton', { name: 'Coarse tune' });
+        const pending = deferred<ObjectDetail>();
+        transport.objectDetail.mockImplementationOnce(() => pending.promise);
+
+        await view.rerender({ sample: 'B' });
+        expect(input.isConnected).toBe(true);
+        expect(panel.isConnected).toBe(true);
+        expect(input.closest('[inert]')).not.toBeNull();
+        pending.resolve(detail('B'));
+
+        await view.findByText('Sample B', { selector: 'strong' });
+        expect(view.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');
+        expect(view.getByRole('button', { name: 'Pitch' }).getAttribute('aria-pressed')).toBe('true');
+        expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('-2');
+    });
+
+    it('blocks the outgoing transport window shortcut while a replacement is loading or has failed', async () => {
+        const playPrepared = vi.fn().mockResolvedValue(undefined);
+        const audio: EditorAudioServices = {
+            transport: {} as EditorAudioServices['transport'],
+            audition: {
+                state: { objectId: null, status: 'idle', playheadFrame: 0 },
+                autoplay: false,
+                playPrepared,
+                seekPrepared: vi.fn(),
+                stop: vi.fn().mockResolvedValue(undefined),
+            },
+        };
+        const { view, transport } = setup(undefined, audio);
+        await view.findByText('Sample A', { selector: 'strong' });
+        await fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+        expect(playPrepared).toHaveBeenCalledOnce();
+        playPrepared.mockClear();
+        const pending = deferred<ObjectDetail>();
+        transport.objectDetail.mockImplementationOnce(() => pending.promise);
+        await view.rerender({ sample: 'B' });
+
+        await fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+        expect(playPrepared).not.toHaveBeenCalled();
+        pending.reject(new Error('Selected Sample unavailable'));
+        await view.findByText('Selected Sample unavailable');
+        await fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+        expect(playPrepared).not.toHaveBeenCalled();
+    });
+
+    it('waits for a pending waveform after parameters resolve and accepts the latest matching preview atomically', async () => {
+        const { view, workflow } = setup(preview('A'));
+        await view.findByText('Sample A', { selector: 'strong' });
+        const panel = view.getByRole('tabpanel');
+        await view.rerender({
+            sample: 'B',
+            preview: { ...preview('B'), previewState: 'loading', preview: null },
+        });
+        await waitFor(() => expect(workflow.find(1, 'B')).toBeDefined());
+
+        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(view.getByText('A left')).toBeTruthy();
+        expect(panel.isConnected).toBe(true);
+        expect(panel.closest('[inert]')).not.toBeNull();
+        await view.rerender({ preview: preview('B ready') });
+
+        await view.findByText('Sample B', { selector: 'strong' });
+        expect(view.getByText('B ready left')).toBeTruthy();
+        expect(view.queryByText('A left')).toBeNull();
+        expect(view.getByRole('tabpanel').closest('[inert]')).toBeNull();
+    });
+
+    it.each(['resolve', 'reject'] as const)('ignores a stale %s after a newer selection finishes', async (outcome) => {
+        const { view, transport } = setup(preview('A'));
+        await view.findByText('Sample A', { selector: 'strong' });
+        const stale = deferred<ObjectDetail>();
+        const current = deferred<ObjectDetail>();
+        transport.objectDetail
+            .mockImplementationOnce(() => stale.promise)
+            .mockImplementationOnce(() => current.promise);
+
+        await view.rerender({ sample: 'B', preview: preview('B') });
+        await view.rerender({ sample: 'C', preview: preview('C') });
+        current.resolve(detail('C'));
+        await view.findByText('Sample C', { selector: 'strong' });
+        await act(async () => {
+            if (outcome === 'resolve') stale.resolve(detail('B'));
+            else stale.reject(new Error('Stale Sample B failure'));
+            await stale.promise.catch(() => undefined);
+        });
+        await waitFor(() => expect(transport.objectDetail).toHaveBeenCalledTimes(3));
+
+        expect(view.getByText('Sample C', { selector: 'strong' })).toBeTruthy();
+        expect(view.getByText('C left')).toBeTruthy();
+        expect(view.queryByText('B left')).toBeNull();
+        expect(view.queryByText('Sample B', { selector: 'strong' })).toBeNull();
+        expect(view.queryByText('Stale Sample B failure')).toBeNull();
+    });
+
+    it('reports a failed replacement while preserving the outgoing editor as non-interactive context', async () => {
+        const { view, transport } = setup(preview('A'));
+        await view.findByText('Sample A', { selector: 'strong' });
+        const panel = view.getByRole('tabpanel');
+        const pending = deferred<ObjectDetail>();
+        transport.objectDetail.mockImplementationOnce(() => pending.promise);
+        await view.rerender({ sample: 'B', preview: preview('B') });
+        pending.reject(new Error('Sample B parameters could not be loaded'));
+
+        const error = await view.findByText('Sample B parameters could not be loaded');
+        expect(error.closest('[role="status"], [role="alert"]')).not.toBeNull();
+        expect(error.closest('[inert]')).toBeNull();
+        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(view.getByText('A left')).toBeTruthy();
+        expect(view.queryByText('B left')).toBeNull();
+        expect(panel.isConnected).toBe(true);
+        expect(panel.closest('[inert]')).not.toBeNull();
+        expect(view.getByRole('region', { name: 'Sample editor' }).getAttribute('aria-busy')).not.toBe('true');
+    });
+
     it('does not mount parameter controls for a conversion-only Sample with an unknown layout', async () => {
         const unsupported = detail('unknown');
         unsupported.editing = null;

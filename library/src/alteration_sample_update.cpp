@@ -85,15 +85,12 @@ Result<void> set_window(TransactionState &state, MutablePartition &partition,
 Result<void> apply_sample_edit(TransactionState &state, MutablePartition &partition,
                                const UpdateSampleParametersOperation &operation, std::vector<std::byte> &payload,
                                const CancellationToken &cancellation) {
-    auto parameters = operation.parameters;
     if (operation.playback_window) {
         if (auto updated = set_window(state, partition, operation, payload, cancellation); !updated)
             return updated;
-        // Validate retained as well as changed loops against the candidate window.
-        if (!parameters.loop_mode)
-            parameters.loop_mode = static_cast<AudioSamplerLoopMode>(std::to_integer<std::uint8_t>(payload[0xe5U]));
     }
-    return detail::apply_sample_parameters_to_payload(payload, parameters);
+    return detail::apply_sample_parameters_to_payload(payload, operation.parameters,
+                                                      operation.playback_window.has_value());
 }
 
 Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,

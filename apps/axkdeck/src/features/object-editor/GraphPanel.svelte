@@ -3,11 +3,12 @@
     import { editorScrollContext, rememberEditorScroll, type EditorScroll } from './editorScroll';
     import { measureWidth } from './measureWidth';
     import { graphLayout, graphSplitRatio } from './graphLayout.svelte';
+    import { initialEditorWidth } from './editorWidth';
     import Splitter from '../../lib/components/Splitter.svelte';
     let { graph, controls, label }: { graph: Snippet; controls: Snippet; label: string } = $props();
     let host: HTMLDivElement;
     const scroll = getContext<(() => EditorScroll) | undefined>(editorScrollContext);
-    let width = $state(0);
+    let width = $state(initialEditorWidth());
     const ratio = $derived(graphSplitRatio(graphLayout.ratio, width - 8));
     function resize(event: PointerEvent) {
         const rect = host.getBoundingClientRect();

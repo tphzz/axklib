@@ -161,6 +161,7 @@
     }
 
     function selectSingleProgram(program: Program): void {
+        lowerOpen = true;
         selectedMultiPart = null;
         audition.selectProgram(program);
     }
@@ -169,6 +170,7 @@
         selectedMultiPart = part;
         clearSelection();
         if (program) {
+            lowerOpen = true;
             audition.selectProgram(program);
             return;
         }
@@ -182,6 +184,7 @@
         const view = await audition.navigateToObject(objectId);
         if (!view) return;
         if (view === 'programs') {
+            lowerOpen = true;
             programPresentation = 'single';
             selectedMultiPart = null;
         }
@@ -511,7 +514,7 @@
             onquerychange={(value) => audition.updateLaneQuery(workspaceView, 'primary', value)}
             onprogramselect={selectSingleProgram}
             onwavedataselect={(item: WaveDataItem) => void audition.selectWaveData(item)}
-            onpreviewrequest={(item) => audition.requestWaveformPreview(item)}
+            onpreviewrequest={(item, bins) => audition.requestWaveformPreview(item, bins)}
             onplay={(item) => void audition.playWaveData(item)}
             onprefetch={(item) => audition.prefetchObject(item.objectKey)}
             onstop={() => void audition.stop()}

@@ -49,7 +49,8 @@ std::uint16_t sample_pitch_word(std::uint8_t root_key, std::int8_t fine_tune_cen
     return static_cast<std::uint16_t>(static_cast<int>(root) - rate - fine_tune_cents);
 }
 
-Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &overrides) {
+Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload, const SampleParameters &overrides,
+                                                bool playback_window_changed) {
     auto decoded = decode_object(payload);
     if (!decoded)
         return std::unexpected{decoded.error()};
@@ -60,7 +61,9 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
     const auto generation = native ? SampleParameterGeneration::a3000 : SampleParameterGeneration::a4000_a5000;
 
     SampleParameters effective;
-    const auto changes_loop = overrides.loop_mode || overrides.loop_start_frame || overrides.loop_length_frames;
+    const auto changes_loop =
+        playback_window_changed || overrides.loop_mode || overrides.loop_start_frame || overrides.loop_length_frames;
+    const auto edits_loop_bounds = overrides.loop_start_frame || overrides.loop_length_frames;
     const auto changes_expand = overrides.expand_detune || overrides.expand_dephase || overrides.expand_width;
     // A targeted edit validates its dependencies, not unrelated retained parameter state.
     if (overrides.root_key || overrides.key_low || overrides.key_high) {
@@ -101,14 +104,19 @@ Result<void> apply_sample_parameters_to_payload(std::vector<std::byte> &payload,
         overrides.loop_start_frame.value_or(sample->right ? sample->right->loop_start_frame : 0U);
     const auto right_loop_length =
         overrides.loop_length_frames.value_or(sample->right ? sample->right->loop_length_frames : 0U);
+    const auto valid_loop = [&](const CurrentSbnkMember &member, std::uint32_t start, std::uint32_t length) {
+        const auto repeating =
+            mode == AudioSamplerLoopMode::forward_loop || mode == AudioSamplerLoopMode::forward_loop_release;
+        return !(edits_loop_bounds || repeating || (playback_window_changed && length != 0U)) ||
+               valid_loop_window(member, mode, start, length);
+    };
     const auto changes_pitch = overrides.root_key || overrides.fine_tune_cents;
     if ((changes_pitch && (sample->left.sample_rate == 0U || (sample->right && sample->right->sample_rate == 0U))) ||
         (changes_expand && sample->right_slot_present &&
          ((sample->sample_flags & 6U) != 0U || sample->right->wave_data_name == sample->left.wave_data_name) &&
          (effective.expand_detune.value_or(0) != 0 || effective.expand_dephase.value_or(0) != 0)) ||
-        (changes_loop &&
-         (!valid_loop_window(sample->left, mode, left_loop_start, left_loop_length) ||
-          (sample->right && !valid_loop_window(*sample->right, mode, right_loop_start, right_loop_length))))) {
+        (changes_loop && (!valid_loop(sample->left, left_loop_start, left_loop_length) ||
+                          (sample->right && !valid_loop(*sample->right, right_loop_start, right_loop_length))))) {
         return std::unexpected{invalid("parameters are invalid for the existing Sample")};
     }
 
