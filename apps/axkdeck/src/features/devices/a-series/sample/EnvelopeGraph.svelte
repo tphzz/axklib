@@ -22,6 +22,7 @@
         title?: Snippet;
     } = $props();
     const min = $derived(kind === 'aeg' ? 0 : -127);
+    let selected = $state('');
     const points = $derived(sampleEnvelope(kind, draft.values));
     const total = $derived(envelopeDurations(kind, draft.values).reduce((sum, duration) => sum + duration, 32));
     const viewport = $derived(envelopeViewport(draft, kind, total));
@@ -51,6 +52,23 @@
             )
             .filter((handle) => handle.horizontal || handle.vertical || handle.disabled),
     );
+    $effect(() => {
+        const current = handles.find((handle) => handle.id === selected);
+        const available = handles.find((handle) => !handle.disabled);
+        if (!current || (current.disabled && available)) selected = available?.id ?? handles[0]?.id ?? '';
+    });
+    function select(id: string) {
+        const point = points[Number(id)]!;
+        onselect(point.parameter ?? point.rateParameter!);
+    }
+    function selectStage(event: Event) {
+        const id = (event.currentTarget as HTMLSelectElement).value;
+        const handle = handles.find((handle) => handle.id === id && !handle.disabled);
+        if (!handle) return;
+        selected = id;
+        if (handle.x > 1) viewport.fit(total);
+        select(id);
+    }
     function begin() {
         draft.beginGesture();
     }
@@ -72,6 +90,18 @@
 </script>
 
 {#snippet tools()}
+    <select
+        class="envelope-stage"
+        aria-label="Envelope stage"
+        title="Envelope stage"
+        value={selected}
+        disabled={disabled || !handles.some((handle) => !handle.disabled)}
+        onchange={selectStage}
+    >
+        {#each handles as handle (handle.id)}
+            <option value={handle.id} disabled={handle.disabled}>{handle.label}</option>
+        {/each}
+    </select>
     <button
         class="editor-icon"
         aria-label="Zoom envelope out"
@@ -101,6 +131,8 @@
     traces={[{ id: 'envelope', points: points.map((point, index) => ({ x: x(index), y: y(point.y) })) }]}
     {handles}
     {disabled}
+    bind:selected
+    retainReadout
     axis={[
         { x: 0, label: 'Note on' },
         { x: 1, label: 'Relative time' },
@@ -108,10 +140,7 @@
     onbegin={begin}
     onend={end}
     onchange={change}
-    onselect={(id) => {
-        const point = points[Number(id)]!;
-        onselect(point.parameter ?? point.rateParameter!);
-    }}
+    onselect={select}
     onkey={(id, key, shift) => {
         const handle = handles.find((item) => item.id === id)!;
         const point = points[Number(id)]!;
@@ -129,3 +158,22 @@
         );
     }}
 />
+
+<style>
+    .envelope-stage {
+        width: 88px;
+        height: 22px;
+        padding: 0 4px;
+        border: 1px solid var(--color-border);
+        border-radius: 3px;
+        background: var(--color-panel-deep);
+        color: var(--color-text);
+        font: inherit;
+        font-size: 11px;
+        color-scheme: dark;
+    }
+    .envelope-stage:focus-visible {
+        outline: 1px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+</style>

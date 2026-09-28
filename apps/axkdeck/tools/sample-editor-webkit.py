@@ -6,8 +6,9 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
 gi.require_version("WebKit2", "4.1")
-from gi.repository import GLib, Gtk, WebKit2  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("base")
@@ -21,6 +22,7 @@ parser.add_argument("--checks", type=Path, default=Path(__file__).with_name("sam
 parser.add_argument("--fixture", default="/tools/layout-fixtures/sample-editor.html")
 parser.add_argument("--checks-function", default="runSampleEditorRegression")
 parser.add_argument("--init-script", type=Path)
+parser.add_argument("--focused", action="store_true", help="Use a focused window for native keyboard-focus styling")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 script = args.checks.read_text()
@@ -30,7 +32,7 @@ results = []
 
 def run(zoom, stereo):
     name = f"webkit-{args.width}-{args.height}-{zoom}-{'stereo' if stereo else 'mono'}{'-workspace' if args.workspace else ''}"
-    win = Gtk.OffscreenWindow()
+    win = Gtk.Window(title="axkdeck browser regression") if args.focused else Gtk.OffscreenWindow()
     win.set_default_size(args.width, args.height)
     content = WebKit2.UserContentManager()
     if args.init_script:
@@ -60,7 +62,12 @@ def run(zoom, stereo):
             outcome["failures"] = [str(error)]
         finished = True
         try:
-            win.get_pixbuf().savev(str(args.output / f"{name}.png"), "png", [], [])
+            if args.focused:
+                window = win.get_window()
+                pixbuf = Gdk.pixbuf_get_from_window(window, 0, 0, window.get_width(), window.get_height())
+            else:
+                pixbuf = win.get_pixbuf()
+            pixbuf.savev(str(args.output / f"{name}.png"), "png", [], [])
         except Exception as error:
             outcome["failures"].append(f"Snapshot: {error}")
         Gtk.main_quit()
@@ -70,13 +77,26 @@ def run(zoom, stereo):
             view.evaluate_javascript("JSON.stringify(window.__editorResult ?? null)", -1, None, None, None, evaluated, None)
         return False
 
+    def start_checks():
+        if finished:
+            return False
+        if args.focused:
+            Gtk.test_widget_send_key(view, Gdk.KEY_Tab, Gdk.ModifierType(0))
+        view.evaluate_javascript(script + f"\nwindow[{json.dumps(args.checks_function)}]().then(r=>window.__editorResult=r).catch(e=>window.__editorResult={{failures:[e.stack]}}); void 0;", -1, None, None, None, None, None)
+        GLib.timeout_add(100, poll)
+        return False
+
     def start():
         nonlocal started
         if started or finished:
             return False
         started = True
-        view.evaluate_javascript(script + f"\nwindow[{json.dumps(args.checks_function)}]().then(r=>window.__editorResult=r).catch(e=>window.__editorResult={{failures:[e.stack]}}); void 0;", -1, None, None, None, None, None)
-        GLib.timeout_add(100, poll)
+        if args.focused:
+            win.present()
+            view.grab_focus()
+            GLib.timeout_add(200, start_checks)
+        else:
+            start_checks()
         return False
 
     def loaded(_obj, event):

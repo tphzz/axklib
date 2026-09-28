@@ -1,6 +1,6 @@
 <script lang="ts">
     import ObjectEditor from '../lib/components/ObjectEditor.svelte';
-    import type { InspectorSelection } from '../lib/types';
+    import type { InspectorSelection, ProgramSampleSelectRow } from '../lib/types';
     import type { ObjectDetail } from '../lib/transport';
     import { ObjectEditorWorkflow } from '../features/object-editor/workflow.svelte';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
@@ -11,13 +11,24 @@
     const workspace = new URLSearchParams(location.search).has('workspace');
     let later = $state(false);
     let comparison = $state(false);
+    let populated = $state(false);
     const sample = $derived(later ? 'sample-later' : 'sample');
     const bank = $derived(later ? 'bank-later' : 'bank');
-    const program = {
+    const assignment: ProgramSampleSelectRow = {
+        id: 'assignment',
+        targetType: 'SBNK',
+        targetName: 'Assigned Sample',
+        navigable: true,
+        assigned: true,
+        receiveChannelDisplays: ['=Smp'],
+        sourceLoad: false,
+        relationships: [],
+    };
+    const program = $derived({
         kind: 'program',
         item: { objectId: 'program', name: 'Program' },
-        sampleSelect: { assigned: [], all: [] },
-    } as unknown as InspectorSelection;
+        sampleSelect: { assigned: populated ? [assignment] : [], all: populated ? [assignment] : [] },
+    } as unknown as InspectorSelection);
 
     function detail(id: string): ObjectDetail {
         const isBank = id.startsWith('bank');
@@ -82,6 +93,7 @@
 </script>
 
 <nav aria-label="Fixture controls">
+    <button onclick={() => (populated = !populated)}>Toggle assignments</button>
     <button onclick={() => (later = !later)}>Change objects</button>
     <button onclick={() => phase('editable')}>Dirty</button>
     <button onclick={() => phase('saving')}>Saving</button>

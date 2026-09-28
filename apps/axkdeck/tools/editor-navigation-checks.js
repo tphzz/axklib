@@ -1,6 +1,7 @@
 window.runEditorNavigationChecks = async () => {
     const failures = [];
     const geometries = [];
+    const surfaces = [];
     const check = (value, message) => { if (!value) failures.push(message); };
     const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const controls = document.querySelector('nav[aria-label="Fixture controls"]');
@@ -63,6 +64,43 @@ window.runEditorNavigationChecks = async () => {
         }
     }
     inspect('clean');
+    function effectiveBackground(node) {
+        for (let current = node; current; current = current.parentElement) {
+            const color = getComputedStyle(current).backgroundColor;
+            if (color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') return color;
+        }
+        return 'transparent';
+    }
+    function inspectSurfaces(label) {
+        const hosts = [...document.querySelectorAll('[data-editor-fixture]')];
+        const expected = getComputedStyle(hosts[1].querySelector('.device-editor')).backgroundColor;
+        check(expected !== 'transparent' && expected !== 'rgba(0, 0, 0, 0)', `${label}: sample panel needs an opaque surface`);
+        for (const host of hosts) {
+            const kind = host.dataset.editorFixture;
+            const nodes = kind === 'program'
+                ? host.querySelectorAll('.editor-panel, .collection-toolbar, .editor-body, .assignment-table, .assignment-header, .assignment-table > button, .empty-copy, .editor-canvas')
+                : host.querySelectorAll('.device-editor, .sample-panel');
+            check(nodes.length > 0, `${label}: ${kind} content surfaces missing`);
+            for (const node of nodes) {
+                const actual = effectiveBackground(node);
+                check(actual === expected, `${label}: ${kind} ${node.className} background ${actual} differs from sample panel ${expected}`);
+                surfaces.push({ label, kind, className: node.className, background: actual });
+            }
+        }
+    }
+    inspectSurfaces('empty assignments');
+    await click('Toggle assignments');
+    check(document.querySelectorAll('.assignment-table > button').length === 1, 'Populated assignment fixture missing');
+    inspectSurfaces('populated assignments');
+    await click('Toggle assignments');
+    const programTabs = boxes()[0].tabs;
+    for (const button of [...programTabs.querySelectorAll('[role="tab"]')].slice(1)) {
+        button.click();
+        await frame();
+        inspectSurfaces(`Program ${button.textContent.trim()}`);
+    }
+    programTabs.querySelector('[role="tab"]').click();
+    await frame();
     for (const label of ['Comparison', 'Dirty', 'Saving', 'Refresh recovery', 'Status recovery', 'Dirty', 'Change objects']) {
         await click(label);
         inspect(label);
@@ -96,5 +134,5 @@ window.runEditorNavigationChecks = async () => {
         check(Math.abs(parseFloat(getComputedStyle(row).height) - 28) <= 0.01, `${kind}: secondary overflow changed row height`);
     }
     check(document.documentElement.scrollWidth <= document.documentElement.clientWidth, 'Horizontal viewport overflow');
-    return { failures, geometries };
+    return { failures, geometries, surfaces };
 };

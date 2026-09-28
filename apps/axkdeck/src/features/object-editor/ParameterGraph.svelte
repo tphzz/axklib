@@ -48,6 +48,8 @@
         title,
         onaltdrag,
         onwheel,
+        selected = $bindable(''),
+        retainReadout = false,
     }: {
         label: string;
         traces: PlotTrace[];
@@ -64,9 +66,10 @@
         title?: Snippet;
         onaltdrag?: (id: string, delta: number) => void;
         onwheel?: (id: string, event: WheelEvent) => void;
+        selected?: string;
+        retainReadout?: boolean;
     } = $props();
     let host: HTMLDivElement;
-    let selected = $state('');
     let focused = $state('');
     let readout = $state('');
     let dragging = $state(false);
@@ -104,7 +107,7 @@
     }
     const path = (points: PlotPoint[]) =>
         points.map((p, i) => `${i ? 'L' : 'M'}${p.x * 1000},${(1 - p.y) * 200}`).join(' ');
-    const chosen = $derived(controls.find((item) => item.id === readout));
+    const chosen = $derived(controls.find((item) => item.id === (readout || (retainReadout ? selected : ''))));
     function wheelHandle(node: HTMLButtonElement, id: string) {
         return {
             destroy: on(
@@ -183,12 +186,14 @@
                 type="button"
                 class="plot-handle"
                 class:selected={selected === handle.id}
+                class:dragging={dragging && selected === handle.id}
                 class:trace-handle={!!handle.trace}
                 class:trace-visible={nearTrace === handle.id ||
                     focused === handle.id ||
                     (dragging && selected === handle.id)}
                 disabled={disabled || handle.disabled}
                 aria-label={`${handle.label}: ${handle.readout}`}
+                aria-pressed={selected === handle.id}
                 data-handle={handle.id}
                 hidden={handle.x < 0 || handle.x > 1 || handle.y < 0 || handle.y > 1}
                 use:wheelHandle={handle.id}
@@ -277,6 +282,12 @@
     .plot-handle.selected {
         background: var(--editor-loop);
         z-index: 1;
+    }
+    .plot-handle:not(:disabled):hover,
+    .plot-handle:not(:disabled):focus-visible,
+    .plot-handle.dragging {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 1px;
     }
     .trace-handle {
         opacity: 0;

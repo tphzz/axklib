@@ -2994,7 +2994,7 @@ input:focus-visible {
 .object-editor {
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-deep);
+  background: var(--color-panel);
 }
 
 .multi-part-editor-context {
