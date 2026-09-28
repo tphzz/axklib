@@ -33,7 +33,7 @@ window.runBankEditorChecks = async function () {
     check(!button('Save').disabled, 'Changing inherited value enables Save');
     labelled('Next preview sample').click(); await settle();
     check(field('Level').value === '81', 'Preview change cannot change bank override');
-    check(document.querySelector('.device-editor strong').textContent === 'Bank A', 'Preview never changes editing target');
+    check(document.querySelector('.editor-content').getAttribute('aria-label').startsWith('Sample Bank: Bank A'), 'Preview never changes editing target');
     labelled('Use sample values for Level').click(); await settle();
     check(field('Level').value === '' && button('Save').disabled, 'Clearing a new override returns clean inherited state');
     await change('Level', 82); button('Save').click(); await settle();

@@ -10,6 +10,7 @@
         workflow,
         sessionId = 1,
         sample = 'A',
+        kind = 'sample',
         visible = true,
         preview = { preview: { lanes: [] } } as unknown as SampleWaveformPreview,
         audio,
@@ -17,6 +18,7 @@
         workflow: ObjectEditorWorkflow;
         sessionId?: number;
         sample?: string;
+        kind?: 'sample' | 'sample-bank';
         visible?: boolean;
         preview?: SampleWaveformPreview;
         audio?: EditorAudioServices;
@@ -26,7 +28,7 @@
         if (audio) provideEditorAudio(audio);
     });
     const selection = $derived({
-        kind: 'sample',
+        kind,
         item: { objectId: sample },
         preview,
     } as unknown as InspectorSelection);

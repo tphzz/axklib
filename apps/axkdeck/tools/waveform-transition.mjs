@@ -17,7 +17,7 @@ const stop = async () => {
     await browser?.close();
     await server.close();
 };
-const deadline = setTimeout(() => void stop(), 150000);
+const deadline = setTimeout(() => void stop(), 240000);
 const onSignal = () => void stop();
 process.once('SIGINT', onSignal);
 process.once('SIGTERM', onSignal);
@@ -53,6 +53,8 @@ async function geometry(page) {
             host: box(host),
             header: box(host.querySelector('header')),
             panel: box(host.querySelector('[role="tabpanel"]')),
+            ...Object.fromEntries([...host.querySelectorAll('[role="tab"]')].map((tab) => [`tab-${tab.textContent}`, box(tab)])),
+            badgeSlot: box(host.querySelector('.format-slot')),
         };
     });
 }
@@ -67,8 +69,8 @@ try {
     await server.listen();
     port = server.httpServer.address().port;
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
-    for (const width of [390, 800, 1600]) for (const dpr of [1, 1.25, 1.5, 2]) {
-        if (interrupted) throw new Error('Browser regression interrupted or exceeded 150 seconds');
+    for (const width of [390, 800, 849, 850, 1600]) for (const dpr of [1, 1.25, 1.5, 2]) {
+        if (interrupted) throw new Error('Browser regression interrupted or exceeded 240 seconds');
         const page = await browser.newPage({ viewport: { width, height: 800 }, deviceScaleFactor: dpr });
         page.setDefaultTimeout(10000);
         const errors = [];
@@ -76,7 +78,7 @@ try {
         const name = `${width}-dpr-${dpr}`;
         try {
             await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/waveform-transition.html`);
-            await page.locator('.device-editor strong').filter({ hasText: 'Sample A' }).waitFor();
+            await page.getByRole('group', { name: 'Sample: A', exact: true }).waitFor();
             await frame(page);
             const binPixels = {};
             for (const testId of ['amplitude-plot', 'amplitude-overview']) {
@@ -102,7 +104,7 @@ try {
                 const record = () => {
                     const host = document.querySelector('.device-editor');
                     window.transitionFrames.push({
-                        name: host?.querySelector('strong')?.textContent.trim() ?? '',
+                        name: host?.querySelector('.editor-content')?.getAttribute('aria-label') ?? '',
                         preview: [...(host?.querySelectorAll('.lane-role') ?? [])].map((node) => node.textContent.trim()),
                         panel: Boolean(host?.querySelector('[role="tabpanel"]')),
                     });
@@ -118,14 +120,14 @@ try {
             sameGeometry(before, await geometry(page), 'Pending waveform');
             await page.screenshot({ path: resolve(output, `${name}-pending.png`) });
             await page.getByRole('button', { name: 'Complete load', exact: true }).click();
-            await page.locator('.device-editor strong').filter({ hasText: 'Sample B' }).waitFor();
+            await page.getByRole('group', { name: 'Sample: Long Sample Name', exact: true }).waitFor();
             await frame(page);
             const frames = await page.evaluate(() => { window.observeTransition = false; return window.transitionFrames; });
             assert(frames.length >= 3);
             for (const value of frames) {
                 assert(value.panel, 'A rendered frame lost the editor panel');
-                assert(['Sample A', 'Sample B'].includes(value.name), 'A rendered frame lost the document name');
-                assert.deepEqual(value.preview, value.name === 'Sample A' ? ['A left', 'A right'] : ['B left', 'B right'], 'A rendered frame mixed document and waveform identities');
+                assert(['Sample: A', 'Sample: Long Sample Name'].includes(value.name), 'A rendered frame lost the document name');
+                assert.deepEqual(value.preview, value.name === 'Sample: A' ? ['A left', 'A right'] : ['B left', 'B right'], 'A rendered frame mixed document and waveform identities');
             }
             sameGeometry(before, await geometry(page), 'Completed waveform');
             await page.getByRole('tab', { name: 'Map/Out', exact: true }).click();
@@ -138,7 +140,7 @@ try {
             assert(await page.evaluate(() => { window.retainedInput.focus(); return document.activeElement !== window.retainedInput; }), 'Pending controls must not accept focus');
             sameGeometry(pitchBefore, await geometry(page), 'Pending Pitch');
             await page.getByRole('button', { name: 'Complete load', exact: true }).click();
-            await page.locator('.device-editor strong').filter({ hasText: 'Sample C' }).waitFor();
+            await page.getByRole('group', { name: 'Sample: C', exact: true }).waitFor();
             assert.equal(await page.getByRole('tab', { name: 'Map/Out', exact: true }).getAttribute('aria-selected'), 'true');
             assert.equal(await page.getByRole('button', { name: 'Pitch', exact: true }).getAttribute('aria-pressed'), 'true');
             sameGeometry(pitchBefore, await geometry(page), 'Completed Pitch');
@@ -171,13 +173,44 @@ try {
             await frame(page);
             assert(await page.evaluate(() => window.retainedGraph.isConnected));
             await page.getByRole('button', { name: 'Complete load', exact: true }).click();
-            await page.locator('.device-editor strong').filter({ hasText: 'Sample D' }).waitFor();
+            await page.getByRole('group', { name: 'Sample: Envelope Sample', exact: true }).waitFor();
             await frame(page);
             const graphFrames = await page.evaluate(() => { window.observeGraph = false; return window.graphFrames; });
             assert(graphFrames.length >= 3);
             assert(graphBefore.fields.length > 0, 'EG parameter layout was not exercised');
             graphFrames.forEach((value) => assert.deepEqual(value, graphBefore, 'EG graph or parameter layout changed during a Sample transition'));
             assert.equal(await page.getByRole('tab', { name: 'EG', exact: true }).getAttribute('aria-selected'), 'true');
+            const headerBefore = await geometry(page);
+            const header = page.locator('.device-editor header');
+            assert(!await header.locator('strong, .family').count(), 'Redundant header identity is still visible');
+            const tabBox = await page.getByRole('tab', { name: 'Trim/Loop', exact: true }).boundingBox();
+            assert.equal(tabBox.x, headerBefore.host[0] + 8, 'Tabs must start at the content inset');
+            const actionBox = await header.locator('.actions').boundingBox();
+            if (width < 850) assert(actionBox.y >= tabBox.y + tabBox.height, 'Narrow tabs must be in the first row');
+            else assert(actionBox.y < tabBox.y + tabBox.height, 'Wide header must remain one row');
+            await page.getByRole('button', { name: 'Compare', exact: true }).click();
+            await frame(page);
+            sameGeometry(headerBefore, await geometry(page), 'Comparison status');
+            assert.equal(await header.locator('.comparison').getAttribute('title'), 'Editing Envelope Sample only');
+            await page.getByRole('button', { name: 'Edit', exact: true }).click();
+            await page.getByRole('group', { name: 'Sample: Envelope Sample (unsaved changes)', exact: true }).waitFor();
+            sameGeometry(headerBefore, await geometry(page), 'Dirty Sample');
+            await page.getByRole('button', { name: 'Discard', exact: true }).click();
+            await page.getByRole('button', { name: 'Complete load', exact: true }).click();
+            await page.getByRole('group', { name: 'Sample: Envelope Sample', exact: true }).waitFor();
+            await page.getByRole('button', { name: 'Compare', exact: true }).click();
+            const fixedHeader = Object.fromEntries(Object.entries(headerBefore).filter(([key]) => key !== 'panel'));
+            for (const [id, name, format] of [['E', 'B', 'a3k'], ['F', 'Long Bank Name', 'a4k/a5k']]) {
+                await page.getByRole('button', { name: `Select ${id}`, exact: true }).click();
+                await page.locator('.device-editor[aria-busy="true"]').waitFor();
+                sameGeometry(fixedHeader, await geometry(page), 'Pending Bank');
+                await page.getByRole('button', { name: 'Complete load', exact: true }).click();
+                await page.getByRole('group', { name: `Sample Bank: ${name}`, exact: true }).waitFor();
+                await frame(page);
+                sameGeometry(fixedHeader, await geometry(page), 'Completed Bank');
+                assert.equal((await header.locator('.format-badge').textContent()).trim(), format);
+                await page.getByRole('tab', { name: 'EG', exact: true }).click();
+            }
             assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Horizontal viewport overflow');
             assert.deepEqual(errors, []);
             results.push({ name, passed: true, binPixels, transitionFrames: frames.length, graphFrames: graphFrames.length });

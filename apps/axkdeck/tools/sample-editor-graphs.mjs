@@ -123,7 +123,7 @@ try {
             await save.waitFor();
             assert(Math.abs((await page.locator('.device-editor').boundingBox()).height - resizedDock.height) < 1);
             await page.getByRole('button', { name: 'Select B', exact: true }).click();
-            await page.waitForFunction(() => document.querySelector('.device-editor header strong')?.textContent === 'Sample B');
+            await page.getByRole('group', { name: 'Sample: Sample B', exact: true }).waitFor();
             assert(Math.abs((await page.locator('.device-editor').boundingBox()).height - resizedDock.height) < 1, 'selection changes preserve the manual pane height');
         }
         const footer = await page.locator('.sample-transport').boundingBox();

@@ -111,65 +111,70 @@
     use:measureWidth={{ scope: 'editor', change: (value) => (width = value) }}
 >
     {#if document && editors && navigation}
-        <div class="editor-content" use:inertEditor={inactive} aria-hidden={inactive ? 'true' : undefined}>
+        <div
+            class="editor-content"
+            role="group"
+            aria-label={`${document.noun}: ${document.detail?.object.name}${document.draft.dirty ? ' (unsaved changes)' : ''}`}
+            use:inertEditor={inactive}
+            aria-hidden={inactive ? 'true' : undefined}
+        >
             <header>
-                <span class="family">A-series</span>
-                <strong
-                    class:dirty={document.draft.dirty}
-                    title={`${document.detail?.object.name}${document.draft.dirty ? ' (unsaved changes)' : ''}`}
-                    >{document.detail?.object.name}</strong
-                >
-                <SampleFormatBadge format={document.detail!.editing!.sampleFormat} />
                 <div class="navigation"><SampleNavigation {navigation} {panelId} /></div>
-                {#if editors.comparison.count > 1}<span
-                        class="family"
-                        role="status"
-                        title={`Editing ${document.detail?.object.name} only`}>{editors.comparison.status}</span
-                    >{/if}
-                <div class="actions">
-                    <button
-                        class="icon-button"
-                        title={conversionTitle}
-                        aria-label={conversionTitle}
-                        disabled={editors.locked || !document.detail?.formatConversion}
-                        onclick={() => void editors.openConversion(document!.sessionId, document!.detail!.object.id)}
-                        ><Icon name="refresh" size={14} /></button
-                    >
-                    <button
-                        class="icon-button"
-                        title="Undo"
-                        aria-label="Undo Sample edit"
-                        disabled={!document.draft.canUndo || document.phase !== 'editable'}
-                        onclick={() => document?.draft.undo()}><Icon name="undo" size={14} /></button
-                    >
-                    <button
-                        class="icon-button"
-                        title="Redo"
-                        aria-label="Redo Sample edit"
-                        disabled={!document.draft.canRedo || document.phase !== 'editable'}
-                        onclick={() => document?.draft.redo()}><Icon name="redo" size={14} /></button
-                    >
-                    <button
-                        class="editor-action"
-                        disabled={(!document.draft.dirty && !document.conflict) || document.phase !== 'editable'}
-                        onclick={() =>
-                            void editors.discard(document!).catch((error) => {
-                                document!.status = userFacingMessage(error);
-                            })}>Discard</button
-                    >
-                    {#if document.phase === 'refresh-failed' || (document.phase === 'unconfirmed' && document.jobId !== null)}
-                        <button class="editor-action" onclick={() => void editors.recover(document!)}
-                            ><Icon name="refresh" size={14} />{document.phase === 'refresh-failed'
-                                ? 'Refresh'
-                                : 'Check status'}</button
+                <div class="header-tools">
+                    {#if editors.comparison.count > 1}<span
+                            class="comparison"
+                            role="status"
+                            title={`Editing ${document.detail?.object.name} only`}>{editors.comparison.status}</span
+                        >{/if}
+                    <div class="actions">
+                        <span class="format-slot"
+                            ><SampleFormatBadge format={document.detail!.editing!.sampleFormat} /></span
                         >
-                    {:else}
                         <button
-                            class="editor-action save"
-                            disabled={!document.canSave || editors.locked}
-                            onclick={() => void editors.save(document!)}><Icon name="save" size={14} />Save</button
+                            class="icon-button"
+                            title={conversionTitle}
+                            aria-label={conversionTitle}
+                            disabled={editors.locked || !document.detail?.formatConversion}
+                            onclick={() =>
+                                void editors.openConversion(document!.sessionId, document!.detail!.object.id)}
+                            ><Icon name="refresh" size={14} /></button
                         >
-                    {/if}
+                        <button
+                            class="icon-button"
+                            title="Undo"
+                            aria-label="Undo Sample edit"
+                            disabled={!document.draft.canUndo || document.phase !== 'editable'}
+                            onclick={() => document?.draft.undo()}><Icon name="undo" size={14} /></button
+                        >
+                        <button
+                            class="icon-button"
+                            title="Redo"
+                            aria-label="Redo Sample edit"
+                            disabled={!document.draft.canRedo || document.phase !== 'editable'}
+                            onclick={() => document?.draft.redo()}><Icon name="redo" size={14} /></button
+                        >
+                        <button
+                            class="editor-action"
+                            disabled={(!document.draft.dirty && !document.conflict) || document.phase !== 'editable'}
+                            onclick={() =>
+                                void editors.discard(document!).catch((error) => {
+                                    document!.status = userFacingMessage(error);
+                                })}>Discard</button
+                        >
+                        {#if document.phase === 'refresh-failed' || (document.phase === 'unconfirmed' && document.jobId !== null)}
+                            <button class="editor-action" onclick={() => void editors.recover(document!)}
+                                ><Icon name="refresh" size={14} />{document.phase === 'refresh-failed'
+                                    ? 'Refresh'
+                                    : 'Check status'}</button
+                            >
+                        {:else}
+                            <button
+                                class="editor-action save"
+                                disabled={!document.canSave || editors.locked}
+                                onclick={() => void editors.save(document!)}><Icon name="save" size={14} />Save</button
+                            >
+                        {/if}
+                    </div>
                 </div>
             </header>
             {#key document}
@@ -210,8 +215,8 @@
         color: var(--color-text-muted);
     }
     header {
-        display: flex;
-        flex-wrap: wrap;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
         gap: 8px;
         padding: 0 8px;
@@ -219,59 +224,47 @@
         flex: 0 0 auto;
         min-height: 38px;
     }
-    strong {
-        position: relative;
-        padding-right: 12px;
-        max-width: 200px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    strong::after {
-        content: '*';
-        position: absolute;
-        right: 0;
-        width: 8px;
-        visibility: hidden;
-    }
-    strong.dirty::after {
-        visibility: visible;
-    }
-    .family,
+    .comparison,
     p {
         color: var(--color-text-muted);
     }
-    .family {
+    .comparison {
+        min-width: 0;
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
         font-size: 10px;
         white-space: nowrap;
     }
     .navigation {
-        flex: 1;
         min-width: 0;
+    }
+    .header-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+    .format-slot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 48px;
     }
     .actions {
         display: flex;
+        flex: 0 0 auto;
         align-items: center;
         gap: 5px;
         margin-left: auto;
         padding-block: 4px;
     }
-    :global([data-editor-under~='850']) .navigation {
-        order: 1;
-        flex-basis: 100%;
+    :global([data-editor-under~='850']) .header-tools {
         border-top: 1px solid var(--color-border);
     }
     :global([data-editor-under~='850']) header {
+        grid-template-columns: minmax(0, 1fr);
         gap: 0 8px;
-    }
-    :global([data-editor-under~='500']) strong {
-        max-width: 120px;
-    }
-    :global([data-editor-under~='500']) header {
-        gap: 5px;
-    }
-    :global([data-editor-under~='500']) .family {
-        display: none;
     }
     .editor-action {
         display: inline-flex;

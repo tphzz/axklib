@@ -63,7 +63,7 @@ describe('Hardware-aligned Sample editor workflow', () => {
         expect(view.getByLabelText('Write count').textContent).toBe('0');
 
         await fireEvent.click(view.getByRole('button', { name: 'Select B' }));
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: 'Sample: Sample B' });
         const second = within(view.getByRole('tabpanel'));
         expect(view.getByRole('button', { name: 'Sample Info' }).getAttribute('aria-pressed')).toBe('true');
         expect(second.getByRole('button', { name: /end type: length/i }).getAttribute('aria-pressed')).toBe('true');

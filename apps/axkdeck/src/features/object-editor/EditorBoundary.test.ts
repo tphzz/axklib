@@ -130,7 +130,7 @@ describe('Sample save and exit lifecycle', () => {
             for (const [index, value] of ['3', '7'].entries()) {
                 let field = view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement;
                 await fireEvent.input(field, { target: { value } });
-                expect(view.getByText('Sample', { selector: 'strong' }).classList.contains('dirty')).toBe(true);
+                expect(view.getByRole('group', { name: 'Sample: Sample (unsaved changes)' })).toBeTruthy();
                 await fireEvent.click(view.getByRole('button', { name: 'Save' }));
                 await waitFor(() => expect(transport.waitForJob).toHaveBeenCalledTimes(index + 1));
                 expect(field.disabled).toBe(true);
@@ -142,7 +142,7 @@ describe('Sample save and exit lifecycle', () => {
                     expect(field.disabled).toBe(false);
                 });
                 expect(field.value).toBe(value);
-                expect(view.getByText('Sample', { selector: 'strong' }).classList.contains('dirty')).toBe(false);
+                expect(view.getByRole('group', { name: 'Sample: Sample' })).toBeTruthy();
                 expect(view.queryByRole('button', { name: 'Check status' })).toBeNull();
                 expect((view.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
                 expect(view.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');

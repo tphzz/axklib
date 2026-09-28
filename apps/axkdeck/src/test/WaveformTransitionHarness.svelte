@@ -6,6 +6,7 @@
     import DeviceEditorHostHarness from './DeviceEditorHostHarness.svelte';
     import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
+    import { bankEditorUnits } from './bankEditorFixture';
 
     const frames = 16384;
     const bins = Array.from({ length: 256 }, () => ({ minimum: -0.25, maximum: 0.25 }));
@@ -14,8 +15,20 @@
     let selected = $state('A');
     let waiting = $state(false);
     const pending = new Map<string, (value: ObjectDetail) => void>();
+    const names: Record<string, string> = {
+        A: 'A',
+        B: 'Long Sample Name',
+        C: 'C',
+        D: 'Envelope Sample',
+        E: 'B',
+        F: 'Long Bank Name',
+    };
+    const bank = $derived(selected === 'E' || selected === 'F');
 
     function detail(id: string): ObjectDetail {
+        const bank = id === 'E' || id === 'F';
+        const native = ['A', 'C', 'E'].includes(id);
+        const format = native ? 'A3000_188' : 'A4000_A5000_224';
         const parameters: Record<string, unknown> = {};
         for (const field of sampleFields) {
             if (field.key.startsWith('playback.')) continue;
@@ -26,10 +39,11 @@
         }
         return {
             image: { revision: 1 },
-            object: { id, key: id, name: `Sample ${id}`, type: 'SBNK' },
-            formatConversion: sampleConversionFixture(),
+            object: { id, key: id, name: names[id], type: bank ? 'SBAC' : 'SBNK' },
+            formatConversion: sampleConversionFixture(format),
             editing: {
-                profile: 'a-series/sample',
+                profile: bank ? 'a-series/sample-bank' : 'a-series/sample',
+                ...(bank ? { bankOverrides: { units: bankEditorUnits(native, new Set()), members: [] } } : {}),
                 editable: true,
                 reason: '',
                 payloadSha256: 'a'.repeat(64),
@@ -51,7 +65,7 @@
                 eqCoefficients: [-15904, 7738, 8192, 15904, -7738],
                 blockedParameters: [],
                 blockedParameterReasons: {},
-                ...sampleFormatFixture(),
+                ...sampleFormatFixture(format),
                 unavailableParameters: {},
                 partitionIndex: 0,
                 volumeName: 'Volume',
@@ -94,6 +108,19 @@
     <button onclick={() => (selected = 'B')}>Select B</button>
     <button onclick={() => (selected = 'C')}>Select C</button>
     <button onclick={() => (selected = 'D')}>Select D</button>
+    <button onclick={() => (selected = 'E')}>Select E</button>
+    <button onclick={() => (selected = 'F')}>Select F</button>
+    <button
+        onclick={() => {
+            workflow.comparison.entries = workflow.comparison.count
+                ? []
+                : [
+                      { id: 'A', name: names.A!, values: { level: 100 } },
+                      { id: 'D', name: names.D!, error: 'Unavailable comparison fixture' },
+                  ];
+        }}>Compare</button
+    >
+    <button onclick={() => workflow.find(1, selected)?.draft.set('level', 99)}>Edit</button>
     <button
         disabled={!waiting}
         onclick={() => {
@@ -110,7 +137,7 @@
     <WaveCanvas {bins} pcm={native ? samples : undefined} {frames} overview />
 </div>
 <main>
-    <DeviceEditorHostHarness {workflow} sample={selected} {preview} />
+    <DeviceEditorHostHarness {workflow} sample={selected} {preview} kind={bank ? 'sample-bank' : 'sample'} />
 </main>
 
 <style>
@@ -121,7 +148,8 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        height: 40px;
+        flex-wrap: wrap;
+        min-height: 40px;
         padding: 4px 8px;
     }
     nav button {

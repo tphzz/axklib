@@ -84,9 +84,70 @@ function setup(initialPreview?: SampleWaveformPreview, audio?: EditorAudioServic
 }
 
 describe('Sample editor workspace navigation', () => {
+    it('keeps identity accessible without visible header text and groups format with conversion', async () => {
+        const { view, workflow } = setup();
+        await view.findByRole('tab', { name: 'Trim/Loop' });
+        const header = view.container.querySelector('.device-editor header')!;
+        expect(header.textContent).not.toContain('A-series');
+        expect(header.textContent).not.toContain('Sample A');
+        expect(view.getByRole('group', { name: 'Sample: Sample A' })).toBeTruthy();
+        const actions = header.querySelector('.actions')!;
+        expect(actions.querySelector('.format-badge')?.textContent).toBe('a4k/a5k');
+        expect(within(actions as HTMLElement).getByRole('button', { name: /Convert to a3k/ })).toBeTruthy();
+
+        await act(() => workflow.find(1, 'A')!.draft.set('level', 99));
+        expect(view.getByRole('group', { name: 'Sample: Sample A (unsaved changes)' })).toBeTruthy();
+        expect(header.textContent).not.toContain('Sample A');
+        expect((view.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
+        await fireEvent.click(view.getByRole('button', { name: 'Discard' }));
+        await view.findByRole('group', { name: 'Sample: Sample A' });
+    });
+
+    it.each(['A3000_188', 'A4000_A5000_224'] as const)(
+        'retains Bank identity, format controls and recovery actions without a visible name (%s)',
+        async (format) => {
+            const { view, transport, workflow } = setup();
+            await view.findByRole('tab', { name: 'Trim/Loop' });
+            const bank = detail('bank');
+            bank.object.name = 'Long Bank Name';
+            bank.object.type = 'SBAC';
+            bank.editing!.profile = 'a-series/sample-bank';
+            bank.editing!.bankOverrides = {
+                units: [{ id: 33, keys: ['level'], selectors: [33], activeSelectors: [33] }],
+                members: [],
+            };
+            Object.assign(bank.editing!, sampleFormatFixture(format));
+            bank.formatConversion = sampleConversionFixture(format);
+            transport.objectDetail.mockResolvedValue(bank);
+            await view.rerender({ sample: 'bank', kind: 'sample-bank' });
+            await view.findByRole('group', { name: 'Sample Bank: Long Bank Name' });
+            const header = view.container.querySelector('.device-editor header')!;
+            expect(header.textContent).not.toContain('Long Bank Name');
+            expect(header.querySelector('.format-badge')?.textContent).toBe(format === 'A3000_188' ? 'a3k' : 'a4k/a5k');
+            await fireEvent.click(view.getByRole('button', { name: /Convert to/ }));
+            expect(workflow.conversionDocument).toBe(workflow.find(1, 'bank'));
+            workflow.conversionDocument = null;
+            const document = workflow.find(1, 'bank')!;
+            await act(() => document.draft.set('level', 99));
+            expect(view.getByRole('group', { name: 'Sample Bank: Long Bank Name (unsaved changes)' })).toBeTruthy();
+            const recover = vi.spyOn(workflow, 'recover').mockResolvedValue(undefined);
+            await act(() => {
+                document.phase = 'refresh-failed';
+            });
+            await fireEvent.click(view.getByRole('button', { name: 'Refresh' }));
+            expect(recover).toHaveBeenCalledWith(document);
+            await act(() => {
+                document.phase = 'unconfirmed';
+                document.jobId = 7;
+            });
+            await fireEvent.click(view.getByRole('button', { name: 'Check status' }));
+            expect(recover).toHaveBeenCalledTimes(2);
+        },
+    );
+
     it('retains the outgoing editor and waveform inertly until the next document and preview can swap together', async () => {
         const { view, transport, workflow } = setup(preview('A'));
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         const panel = view.getByRole('tabpanel');
         const waveform = view.getByRole('region', { name: 'Waveform editor' });
         const pending = deferred<ObjectDetail>();
@@ -94,12 +155,12 @@ describe('Sample editor workspace navigation', () => {
 
         await view.rerender({ sample: 'B', preview: preview('B') });
 
-        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample A"]')).toBeTruthy();
         expect(panel.isConnected).toBe(true);
         expect(waveform.isConnected).toBe(true);
         expect(view.getByText('A left')).toBeTruthy();
         expect(view.queryByText('B left')).toBeNull();
-        expect(view.queryByText('Sample B', { selector: 'strong' })).toBeNull();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample B"]')).toBeNull();
         expect(panel.closest('[inert]')).not.toBeNull();
         expect(view.getByRole('region', { name: 'Sample editor' }).getAttribute('aria-busy')).toBe('true');
         const status = view.getAllByRole('status').find((element) => !element.closest('[inert]'));
@@ -107,8 +168,8 @@ describe('Sample editor workspace navigation', () => {
         expect(workflow.visible).toBe(true);
 
         pending.resolve(detail('B'));
-        await view.findByText('Sample B', { selector: 'strong' });
-        expect(view.queryByText('Sample A', { selector: 'strong' })).toBeNull();
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample A"]')).toBeNull();
         expect(view.queryByText('A left')).toBeNull();
         expect(view.getByText('B left')).toBeTruthy();
         expect(view.getByRole('tabpanel').closest('[inert]')).toBeNull();
@@ -130,7 +191,7 @@ describe('Sample editor workspace navigation', () => {
         expect(input.closest('[inert]')).not.toBeNull();
         pending.resolve(detail('B'));
 
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect(view.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');
         expect(view.getByRole('button', { name: 'Pitch' }).getAttribute('aria-pressed')).toBe('true');
         expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('-2');
@@ -149,7 +210,7 @@ describe('Sample editor workspace navigation', () => {
             },
         };
         const { view, transport } = setup(undefined, audio);
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         await fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
         expect(playPrepared).toHaveBeenCalledOnce();
         playPrepared.mockClear();
@@ -167,7 +228,7 @@ describe('Sample editor workspace navigation', () => {
 
     it('waits for a pending waveform after parameters resolve and accepts the latest matching preview atomically', async () => {
         const { view, workflow } = setup(preview('A'));
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         const panel = view.getByRole('tabpanel');
         await view.rerender({
             sample: 'B',
@@ -175,13 +236,13 @@ describe('Sample editor workspace navigation', () => {
         });
         await waitFor(() => expect(workflow.find(1, 'B')).toBeDefined());
 
-        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample A"]')).toBeTruthy();
         expect(view.getByText('A left')).toBeTruthy();
         expect(panel.isConnected).toBe(true);
         expect(panel.closest('[inert]')).not.toBeNull();
         await view.rerender({ preview: preview('B ready') });
 
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect(view.getByText('B ready left')).toBeTruthy();
         expect(view.queryByText('A left')).toBeNull();
         expect(view.getByRole('tabpanel').closest('[inert]')).toBeNull();
@@ -189,7 +250,7 @@ describe('Sample editor workspace navigation', () => {
 
     it.each(['resolve', 'reject'] as const)('ignores a stale %s after a newer selection finishes', async (outcome) => {
         const { view, transport } = setup(preview('A'));
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         const stale = deferred<ObjectDetail>();
         const current = deferred<ObjectDetail>();
         transport.objectDetail
@@ -199,7 +260,7 @@ describe('Sample editor workspace navigation', () => {
         await view.rerender({ sample: 'B', preview: preview('B') });
         await view.rerender({ sample: 'C', preview: preview('C') });
         current.resolve(detail('C'));
-        await view.findByText('Sample C', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample C(?: \(unsaved changes\))?$/ });
         await act(async () => {
             if (outcome === 'resolve') stale.resolve(detail('B'));
             else stale.reject(new Error('Stale Sample B failure'));
@@ -207,16 +268,16 @@ describe('Sample editor workspace navigation', () => {
         });
         await waitFor(() => expect(transport.objectDetail).toHaveBeenCalledTimes(3));
 
-        expect(view.getByText('Sample C', { selector: 'strong' })).toBeTruthy();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample C"]')).toBeTruthy();
         expect(view.getByText('C left')).toBeTruthy();
         expect(view.queryByText('B left')).toBeNull();
-        expect(view.queryByText('Sample B', { selector: 'strong' })).toBeNull();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample B"]')).toBeNull();
         expect(view.queryByText('Stale Sample B failure')).toBeNull();
     });
 
     it('reports a failed replacement while preserving the outgoing editor as non-interactive context', async () => {
         const { view, transport } = setup(preview('A'));
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         const panel = view.getByRole('tabpanel');
         const pending = deferred<ObjectDetail>();
         transport.objectDetail.mockImplementationOnce(() => pending.promise);
@@ -226,7 +287,7 @@ describe('Sample editor workspace navigation', () => {
         const error = await view.findByText('Sample B parameters could not be loaded');
         expect(error.closest('[role="status"], [role="alert"]')).not.toBeNull();
         expect(error.closest('[inert]')).toBeNull();
-        expect(view.getByText('Sample A', { selector: 'strong' })).toBeTruthy();
+        expect(view.container.querySelector('.editor-content[aria-label^="Sample: Sample A"]')).toBeTruthy();
         expect(view.getByText('A left')).toBeTruthy();
         expect(view.queryByText('B left')).toBeNull();
         expect(panel.isConnected).toBe(true);
@@ -281,7 +342,7 @@ describe('Sample editor workspace navigation', () => {
         });
 
         await view.rerender({ sample: 'B' });
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect(view.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');
         expect(view.getByRole('button', { name: 'Pitch' }).getAttribute('aria-pressed')).toBe('true');
         const tuneB = view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement;
@@ -290,13 +351,13 @@ describe('Sample editor workspace navigation', () => {
         await fireEvent.input(tuneB, { target: { value: '-10' } });
 
         await view.rerender({ sample: 'A' });
-        await view.findByText('Sample A', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample A(?: \(unsaved changes\))?$/ });
         expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('12');
         await fireEvent.click(view.getByRole('button', { name: 'Undo Sample edit' }));
         expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('3');
 
         await view.rerender({ sample: 'B' });
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('-10');
         await fireEvent.click(view.getByRole('button', { name: 'Discard' }));
         await waitFor(() =>
@@ -319,7 +380,7 @@ describe('Sample editor workspace navigation', () => {
         await view.rerender({ visible: false });
         expect(view.queryByRole('region', { name: 'Sample editor' })).toBeNull();
         await view.rerender({ visible: true, sample: 'B' });
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect(view.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');
         expect(view.getByRole('button', { name: 'Pitch' }).getAttribute('aria-pressed')).toBe('true');
     });
@@ -331,7 +392,7 @@ describe('Sample editor workspace navigation', () => {
         await view.rerender({ visible: false });
         workflow.clear();
         await view.rerender({ visible: true, sessionId: 2, sample: 'B' });
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect(view.getByRole('tab', { name: 'Trim/Loop' }).getAttribute('aria-selected')).toBe('true');
         expect(view.getByRole('button', { name: 'Waveform' }).getAttribute('aria-pressed')).toBe('true');
     });
@@ -366,7 +427,7 @@ describe('Sample editor workspace navigation', () => {
         expect(label.getAttribute('data-different')).toBe('true');
 
         await view.rerender({ sample: 'B' });
-        await view.findByText('Sample B', { selector: 'strong' });
+        await view.findByRole('group', { name: /^Sample: Sample B(?: \(unsaved changes\))?$/ });
         expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('-2');
         expect((view.getByRole('button', { name: 'Undo Sample edit' }) as HTMLButtonElement).disabled).toBe(true);
         expect(view.getByText('Comparing 2 Samples').getAttribute('title')).toBe('Editing Sample B only');
