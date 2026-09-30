@@ -185,8 +185,11 @@ TEST_F(VolumeCapacityScan, MissingPcmExtentIsRejectedWithoutReadingPcm) {
     {
         std::fstream file{source, std::ios::binary | std::ios::in | std::ios::out};
         file.seekp(static_cast<std::streamoff>(offset));
-        const std::array<char, 4> invalid_extent{0x7f, -1, -1, -1};
-        file.write(invalid_extent.data(), invalid_extent.size());
+        std::array<std::byte, 4> invalid_extent{};
+        ASSERT_TRUE(axk::ByteWriter{invalid_extent}.write_be32(0U, 0x7fffffffU));
+        file.write(reinterpret_cast<const char *>(invalid_extent.data()),
+                   static_cast<std::streamsize>(invalid_extent.size()));
+        ASSERT_TRUE(file);
     }
     const auto image = axk::open_image(source).value();
     const auto report = axk::inspect_volume_capacity(image, {0U}, volume_id);
