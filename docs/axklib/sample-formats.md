@@ -106,11 +106,20 @@ selects the later profile. Unsupported parameter values reject the operation;
 they do not trigger an implicit conversion. See [A-Series Sample Parameter Authoring](sample-parameters.md).
 
 In axkdeck audio import, the **Sample format** selector applies to every Sample
-and optional new Sample Bank in that batch. Each application launch starts with
-**a3k**; subsequent batches remember the latest choice for that session only.
-Import different formats in separate batches. Choosing the format does not alter
-the imported PCM, sample rate, names or mappings. Existing packaged objects
-retain their stored format instead of inheriting this audio-import preference.
+and optional new Sample Bank in that batch. Each fresh import starts from the
+persisted **Preferred A-Series generation** in Preferences, initially **a3k**.
+Changing the format for one import does not change the preference. Import
+different formats in separate batches. Choosing the format does not alter the
+imported PCM, sample rate, names or mappings. Existing packaged objects retain
+their stored format instead of inheriting this audio-import preference.
+
+When assigning selected Samples to a new Sample Bank, the suggested bank format
+is the highest known generation in the selection: **a4k/a5k** if any selected
+Sample uses it, otherwise **a3k**. The preference is used only when none of the
+selected formats is known. The bank format can be changed before creation.
+Assigning to an existing bank preserves its stored format; neither creating nor
+selecting a bank implicitly converts its member Samples. The sampler load target
+is a separate [capacity setting](volume-capacity.md), not a stored object format.
 
 The `a3k` and `a4k/a5k` badges identify stored format. Ordinary editing preserves
 it. Explicit conversion changes that identity even when all parameters also have

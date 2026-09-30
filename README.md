@@ -50,7 +50,14 @@ EX5 and SU700 access does not include sound editing, audition, or conversion
 to A-series object packages. Readable media are not necessarily writable; see
 the [supported media profiles](docs/axklib/media.md) for format-specific limits.
 
-Axkdeck is experimental software. Keep a backup before changing an image.
+Read and write support has been exercised on Yamaha A4000 and A5000 hardware,
+including loading and auditioning generated media and save/reload checks.
+Automated testing also covers a broad collection of real hard-disk images,
+floppy images (`.ima`), unpacked floppy directories, and CD-ROM images.
+Compatibility is documented by media type and operation.
+
+Axkdeck is actively developed pre-release software. Keep an untouched backup
+before changing an image, and work on copies of irreplaceable media.
 Writes require a writable source and safe allocation metadata; images with
 unsafe allocation remain available for browsing and export of readable content.
 
@@ -64,25 +71,40 @@ unsafe allocation remain available for browsing and export of readable content.
   parent and volume context.
 - Audition individual Samples, Sample Banks, and their playable audio directly
   from the desktop, with waveform playback windows and loop boundaries visible.
-- Edit supported A4000/A5000 Samples in six device-specific parameter tabs,
+- Edit supported A3000 and A4000/A5000 Samples in six device-specific parameter tabs,
   with draggable playback/loop markers, session-only drafts, undo/redo and
   explicit Save. Draft audition previews bounds, pitch, level and pan;
   it does not emulate sampler filters, envelopes or effects.
+- Edit Sample Bank overrides without rewriting member Sample parameters;
+  settings without a bank override use each member's own values.
+- Explicitly convert supported Samples and Sample Banks between `a3k` and
+  `a4k/a5k` formats, with checks that reject settings that cannot be represented.
+  Converting a bank does not convert its member Samples. See
+  [Sample and Sample Bank formats](docs/axklib/sample-formats.md).
 
 ### Import And Organize
 
 - Import WAV, FLAC, and AIFF files as Samples or collect them into a new Sample
-  Bank, including compatible WAV sampler metadata and loops.
+  Bank, choosing `a3k` or `a4k/a5k` format and retaining compatible WAV sampler
+  metadata and loops.
 - Import A-series floppy images or unpacked disk folders directly into a
   writable A-series SFS image, including companion sets, without intermediate packages.
 - Create Sample Banks from selected Samples or relink existing Samples to a
-  chosen Sample Bank.
+  chosen Sample Bank. A new bank's suggested format follows the highest
+  generation in the selection and can be overridden.
 - Import portable Program or volume packages with dependency planning, Program
   slot suggestions, conflict checking, and SFS record-capacity feedback.
 - Batch-import volume packages into a partition using their placement hints.
 - Create and rename volumes, rename sampler objects, and clean up unused Wave Data.
 - Generate simple Programs for otherwise unreferenced Sample Banks and Samples
   so they can be played immediately on compatible A-series instruments.
+
+Inspect each volume's parameter-memory and shared object-slot requirements for
+A3000 V2 and A4000/A5000. Imports check the resulting volume against the selected
+sampler load target and block volumes that exceed its limits before writing.
+This checks a clean full-volume load, not waveform RAM or merging into existing
+sampler memory; see [Volume Load Capacity](docs/axklib/volume-capacity.md).
+Floppy and package source pickers remember their last-used directories.
 
 ### Work With Files
 
@@ -114,14 +136,38 @@ Device-mode object operations when those relationships need to be maintained.
   transitions cannot be preserved. See [SFZ export](docs/axklib/sfz.md).
 - Batch-export every volume in a partition as packages or as per-volume floppy
   sets.
-- Create formatted A-series multi-partition HDS images and 1.44 MB floppy images.
+- Create formatted A-series HDS images up to 8 GiB with valid partition
+  combinations, including 128 and 256 MiB sizes for smaller test images, or
+  blank 1.44 MB floppy images. See [image authoring](docs/axklib/write.md)
+  for size and compatibility limits.
 - Export A-series multi-floppy sets and ISO9660 CD-ROM images. EX5 and SU700
   formatted-image creation is not offered.
 - Insert, delete, rename, and repair supported image content through planned,
   transactional alterations with rollback protection.
 
+### Preferences And Diagnostics
+
+- Save a **Preferred A-Series generation** in Preferences to preselect audio
+  import and sampler load targets; each operation can override the suggestion.
+- Open **Logs...** in the status bar to view Application and bundled local-server
+  logs, filter by source, minimum level and search, copy text selections, or
+  save the filtered view or all retained logs. Remote-server logs are not included.
+
 See the [axkdeck development guide](apps/axkdeck/README.md) when building the
 desktop application from source.
+
+## Local And Remote Use
+
+`axklib` handles media formats and image operations, `axklib-server` exposes
+those capabilities through an API, and axkdeck provides the desktop interface.
+Normal desktop use includes a bundled local server. This separation also allows
+axkdeck to work with images on a separately configured remote host, such as a
+Raspberry Pi used for PiSCSI, without first copying whole images to the desktop.
+
+This is remote image access, not PiSCSI hardware control or live editing of disks
+mounted by a sampler. See [server configuration](docs/axklib/server.md#configuration)
+and the [Raspberry Pi deployment profile](docs/axklib/server.md#low-concurrency-deployment-profile)
+for authentication, network security and resource requirements.
 
 ## Downloads
 
