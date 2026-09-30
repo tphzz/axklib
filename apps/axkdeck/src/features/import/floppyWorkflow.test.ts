@@ -204,6 +204,8 @@ describe('floppy import', () => {
         await workflow.chooseFiles(volume);
         expect(choose).toHaveBeenCalledWith({
             parentDialog: 'floppy-import',
+            initialDirectory: null,
+            ondirectorychange: expect.any(Function),
         });
         expect(workflow.request).toMatchObject({ volumeName: 'Existing', mode: 'existing' });
         expect(workflow.request?.inspection?.complete).toBe(true);

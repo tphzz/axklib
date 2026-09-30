@@ -1,5 +1,5 @@
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
-import type { ClientUploadLocation, FileLocation, DirectoryLocation } from '../../lib/storageLocations';
+import type { ClientUploadLocation, FileLocation, DirectoryLocation, DirectoryRef } from '../../lib/storageLocations';
 import type { FloppyInspection, FloppyInputLocation } from '../../lib/floppyImport';
 import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
@@ -56,6 +56,7 @@ export class FloppyImportWorkflow {
     private nextId = 0;
     private controller: AbortController | null = null;
     private inspectionJob: number | null = null;
+    private lastDirectory: DirectoryRef | null = null;
     constructor(private readonly dependencies: Dependencies) {
         this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
     }
@@ -113,16 +114,24 @@ export class FloppyImportWorkflow {
     async chooseWorkspace(closeOnCancel = false): Promise<void> {
         const request = this.request;
         if (!request || this.busy || this.completion.locked) return;
+        let browsing = true;
         try {
             const selection = await this.dependencies.picker.chooseFloppySources({
                 parentDialog: 'floppy-import',
+                initialDirectory: this.lastDirectory,
+                ondirectorychange: (directory) => {
+                    if (browsing && this.request === request) this.lastDirectory = directory;
+                },
             });
+            browsing = false;
             if (this.request !== request) return;
             const files = Array.isArray(selection) ? selection : selection ? [selection] : null;
             if (files?.length) await this.add(files);
             else if (closeOnCancel && !request.members.length) await this.close();
         } catch (error) {
             if (this.request === request) request.error = userFacingMessage(error);
+        } finally {
+            browsing = false;
         }
     }
     async add(files: FloppySource[]): Promise<void> {
