@@ -1,5 +1,7 @@
 #pragma once
 
+#include "axklib/volume_capacity.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -529,6 +531,12 @@ AXK_API Result<PackageImportPlan> plan_package_import(std::shared_ptr<const Rand
 AXK_AUDIO_API Result<PackageImportReport>
 apply_package_import(const std::filesystem::path &target_path, std::span<const PortablePackage> packages,
                      const PackageImportPlan &plan, const std::filesystem::path &output_path, bool overwrite = false,
-                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
+                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                     const VolumeCapacityPolicy &capacity_policy = {});
+
+AXK_AUDIO_API Result<VolumeCapacityAdmission>
+inspect_package_import_capacity(const std::filesystem::path &target_path, std::span<const PortablePackage> packages,
+                                const PackageImportPlan &plan, const VolumeCapacityPolicy &policy = {},
+                                const CancellationToken &cancellation = {});
 
 } // namespace axk

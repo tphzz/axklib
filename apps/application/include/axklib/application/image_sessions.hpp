@@ -23,6 +23,7 @@
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/types.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::app {
 
@@ -487,6 +488,10 @@ class ImageSessionManager {
                                                                 const CompanionSelection &selection,
                                                                 const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
+    [[nodiscard]] Result<VolumeCapacityReport> volume_capacity(std::string_view image_id, std::string_view owner_id,
+                                                               std::uint64_t expected_revision,
+                                                               std::string_view content_scope_id,
+                                                               const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageFilesystemPage> filesystem(std::string_view image_id, std::string_view owner_id,
                                                          std::uint64_t expected_revision,
                                                          const ImageFilesystemQuery &query = {});

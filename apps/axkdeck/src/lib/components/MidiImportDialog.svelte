@@ -20,6 +20,7 @@
     } from '../transport';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
@@ -289,6 +290,7 @@
             </button>
         </header>
         <div class="midi-import-destination">
+            <ImportCapacityControl review={completion.capacity} disabled={busy} />
             <ImportDestinationChooser
                 mode={destinationMode}
                 partitionIndex={destinationPartitionIndex}
@@ -404,7 +406,8 @@
         </div>
         <footer class="dialog-footer">
             <span class="dialog-footer-status" role="status" title={completion.message || generalError}
-                >{completion.message ||
+                >{(completion.capacity.busy ? completion.capacity.message : '') ||
+                    completion.message ||
                     generalError ||
                     (ready ? 'Ready to import' : files.length ? 'Checking MIDI files' : 'Choose MIDI files')}</span
             >

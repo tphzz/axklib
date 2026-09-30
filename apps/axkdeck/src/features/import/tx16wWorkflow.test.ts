@@ -5,6 +5,7 @@ import type { AudioImportTarget, ImageTransport, Tx16wImportInspection } from '.
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import type { JobController } from '../jobs/actions';
 import { collectTx16wVolumeOptions, Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
+import { inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 
 const target = { partitionIndex: 0, volumeName: 'Imported' };
 const diskSource: ClientUploadSource = {
@@ -108,7 +109,9 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.commit();
 
         expect(invalidateSession).toHaveBeenCalledWith(12);
-        expect(startTx16wDiskSetImport).toHaveBeenCalledWith(12, [upload], target, 'HIERARCHY');
+        expect(startTx16wDiskSetImport).toHaveBeenCalledWith(12, [upload], target, 'HIERARCHY', {
+            target: 'A3000',
+        });
         expect(selectWorkspace).toHaveBeenCalledWith('programs');
         expect(refreshSession).toHaveBeenCalledWith(target);
         expect(releaseClientUpload).toHaveBeenCalledWith(upload);
@@ -249,7 +252,7 @@ function createWorkflow(
         runJob?: (start: () => Promise<unknown>) => Promise<unknown>;
     } = {},
 ): Tx16wImportWorkflow {
-    const transport = operations as ImageTransport;
+    const transport = { inspectImportCapacity: vi.fn(inspectFitsCapacity), ...operations } as ImageTransport;
     return new Tx16wImportWorkflow({
         transport,
         jobs: {

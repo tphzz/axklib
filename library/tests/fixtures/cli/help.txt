@@ -8,6 +8,7 @@ OPTIONS:
           --version           Display program version information and exit
 
 SUBCOMMANDS:
+  capacity                    inspect sampler load capacity
   info                        summarize supported axklib containers
   objects                     decode current sampler objects as JSON
   relationships               resolve sampler object links as JSON

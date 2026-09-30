@@ -15,6 +15,55 @@ to the object start unless a table specifies another base. Multi-byte numeric
 fields are big-endian unless stated otherwise. Descriptive field names below
 are labels for the byte layout, not an API or report schema.
 
+## Sampler Memory Versus Disk Capacity
+
+Parameter memory holds runtime Sample, Sample Bank, Program, Wave Data metadata
+and Sequence objects. PCM audio uses separate Wave Memory. Free space in a disk
+image therefore does not mean that its entire volume can be loaded by a sampler.
+
+| Sampler profile | Shared parameter heap | Shared runtime object descriptors |
+| --- | ---: | ---: |
+| A3000 V2 | 512 KiB | 1,024 |
+| A4000/A5000, inspected versions 1.07 and 1.50 | 768 KiB | 2,048 |
+
+These are pool totals, not bytes available for an imported volume or maximum
+Sample counts. Default Programs already occupy part of both pools. A mono Sample
+and its Wave Data use separate descriptors; stereo may use two Wave Data objects.
+Banks, Programs and Sequences also consume the same pools. Large Sequences can
+exhaust parameter memory while the Sample count remains small.
+On A5000 version 1.50, native volume loading uses the combined error
+`Param memory full or too many samples` for either byte or descriptor exhaustion;
+the message does not identify a separate global Sample-count limit.
+
+Stored object size is not exact runtime memory demand. Older-format objects can
+be expanded when loaded on a later sampler, unused physical Program/Bank rows
+can remain allocated, replacements can temporarily coexist, and shared Bank
+references can cause additional Sample copies. A completed Wipe does not remove
+the default Program reservation. The 127-member Bank limit, 999-row Program
+limit and MIDI Sample-number range are not interchangeable with a volume-wide
+Sample limit.
+
+Authoring checks the prepared final volume's load capacity as well as disk
+allocation and relationships. A clean native load replay reports `FITS` with resident
+and peak demand. A proven limit reports `DOES_NOT_FIT` and blocks authoring.
+Unsupported behavior and malformed structures return inspection errors, not a
+third status. Available lower bounds are explicitly minima. Neither capacity
+failures nor inspection errors can be overridden.
+
+The baseline is uninterrupted power-on initialization without boot auto-load,
+a completed Wipe, then full VOLUME/LOAD, without concurrent CD-R authoring.
+Wipe retains Programs; an EEPROM-configured boot auto-load or earlier RAM edits
+do not establish this baseline. A3000 V2 reserves 87,720 bytes and 129 shared
+slots; A4000/A5000 reserve 111,280 bytes and 130 slots. The analyzer accounts for
+physical assignment capacity, replacement overlap, descriptor allocation order,
+temporary Wave metadata, membership copies and cleanup, mixed target selectors,
+and stored object names, rather than treating final unique-object totals as a
+safe peak. Missing Wave Data follows the native known-skip path with a warning.
+`FITS` proves capacity, not compatible playback. The selected load
+target is independent of stored Sample/Bank format, installed PCM RAM and disk
+space. A3000 V1 and merge-loading into existing sampler RAM are outside this
+check. See [Volume Load Capacity](volume-capacity.md) for controls and API use.
+
 ## Shared Object Header
 
 Supported current object payloads begin with:

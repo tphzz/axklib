@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 import { floppySelection, floppyVolumeName } from './floppySelection';
 import type { FloppyInspection } from '../../lib/floppyImport';
@@ -48,6 +49,7 @@ export const inspection: FloppyInspection = {
     ],
 };
 const plan: ImageSessionPackageImportPlan = {
+    capacity: fitsCapacity,
     schemaVersion: '1.0',
     imageId: 'image',
     revision: 1,

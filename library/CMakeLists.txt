@@ -102,6 +102,11 @@ add_library(
   src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
+  src/volume_capacity.cpp
+  src/volume_capacity_replay.cpp
+  src/volume_capacity_scan.cpp
+  src/capacity_admission.cpp
+  src/capacity_filesystem.cpp
   src/error.cpp
   src/effects.cpp
   src/export_paths.cpp
@@ -593,6 +598,8 @@ if(BUILD_TESTING)
     tests/audio_export_wav_source_test.cpp
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
+  tests/volume_capacity_test.cpp
+  tests/volume_capacity_scan_test.cpp
     tests/deletion_test.cpp
     tests/effects_test.cpp
     tests/file_publication_test.cpp

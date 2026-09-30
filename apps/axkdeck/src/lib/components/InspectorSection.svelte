@@ -11,6 +11,8 @@
         children,
         class: className = '',
         regionLabel = title,
+        defaultExpanded,
+        stateKey = '',
     }: {
         scope: string;
         sectionId: string;
@@ -19,17 +21,19 @@
         children: Snippet;
         class?: string;
         regionLabel?: string;
+        defaultExpanded?: boolean;
+        stateKey?: string;
     } = $props();
     const panels = provideInspectorPanels();
     const id = $props.id();
-    const expanded = $derived(panels.expanded(scope, sectionId));
+    const expanded = $derived(panels.expanded(scope, sectionId, defaultExpanded, stateKey));
     let trigger: HTMLButtonElement;
     let body: HTMLDivElement;
     setContext(inspectorSectionVisibility, () => expanded);
 
     function toggle() {
         if (expanded && body?.contains(document.activeElement)) trigger.focus();
-        panels.setExpanded(scope, sectionId, !expanded);
+        panels.setExpanded(scope, sectionId, !expanded, stateKey);
     }
 </script>
 

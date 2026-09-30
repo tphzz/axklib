@@ -10,8 +10,15 @@
 #include "axklib/sampler_model.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/system_file_parameters.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::detail {
+
+[[nodiscard]] Result<VolumeCapacityAdmission>
+inspect_filesystem_capacity(std::shared_ptr<const RandomAccessReader> source,
+                            std::shared_ptr<const RandomAccessReader> preview, PartitionIndex partition,
+                            std::span<const FilesystemEdit> edits, const VolumeCapacityPolicy &policy,
+                            const CancellationToken &cancellation = {});
 
 [[nodiscard]] Result<void> inspect_sfs_file_edit_support(const Container &container, PartitionIndex partition);
 [[nodiscard]] Result<void> inspect_fat_file_edit_support(std::shared_ptr<const RandomAccessReader> source,

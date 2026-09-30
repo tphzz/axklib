@@ -1193,7 +1193,10 @@ TEST_F(SfsFiles, ReplacesSamplerAuthoredLargePayloadsWithoutChangingOtherRecords
         }
         ASSERT_FALSE(replacements.empty());
         const auto output = folder / std::format("large-source-{}.hds", image_number++);
-        const auto written = axk::write_sfs_file_edits(input, output, partition.index, replacements);
+        const auto capacity = axk::inspect_sfs_file_edit_capacity(input, partition.index, replacements);
+        ASSERT_TRUE(capacity) << capacity.error().message;
+        const auto written = axk::write_sfs_file_edits(input, output, partition.index, replacements, {}, nullptr,
+                                                       {axk::ASeriesLoadTarget::a4000_a5000});
         ASSERT_TRUE(written) << written.error().message;
         EXPECT_EQ(digest(input), before);
         const auto changed = axk::open_image(output).value();

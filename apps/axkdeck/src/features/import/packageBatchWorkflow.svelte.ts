@@ -406,6 +406,11 @@ export class PackageBatchImportWorkflow {
         this.request = { ...request, status: 'applying', error: '' };
         this.dependencies.setStatus(`Importing ${selectedItems.length} packages`);
         try {
+            const capacityPolicy = await this.completion.capacity.review(async () => request.plan!.capacity);
+            if (!capacityPolicy) {
+                this.request = { ...request, status: 'ready' };
+                return;
+            }
             await this.dependencies.invalidateSession(sessionId);
             await this.completion.run(
                 () => this.dependencies.transport.startImagePackageImport(request.plan!.planToken),
@@ -589,6 +594,7 @@ export class PackageBatchImportWorkflow {
             arguments_.programSlotAssignments,
             replacePlanToken,
             arguments_.opaqueSequenceDecisions,
+            this.completion.capacity.policy(),
         );
         if (generation !== this.generation || !this.request) {
             await this.releasePlan(plan);

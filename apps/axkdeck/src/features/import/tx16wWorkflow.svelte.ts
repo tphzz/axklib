@@ -184,9 +184,21 @@ export class Tx16wImportWorkflow {
         request.error = '';
         this.dependencies.setStatus('Importing TX16W disk set');
         try {
+            const policy = await this.completion.capacity.review((policy) =>
+                this.dependencies.transport.inspectImportCapacity(
+                    sessionId,
+                    { kind: 'TX16W', target, sources, importMode },
+                    policy,
+                ),
+            );
+            if (!policy) {
+                request.status = 'ready';
+                return;
+            }
             await this.dependencies.invalidateSession(sessionId);
             await this.completion.run(
-                () => this.dependencies.transport.startTx16wDiskSetImport(sessionId, sources, target, importMode),
+                () =>
+                    this.dependencies.transport.startTx16wDiskSetImport(sessionId, sources, target, importMode, policy),
                 async () => {
                     this.dependencies.selectWorkspace('programs');
                     await this.dependencies.refreshSession(target);

@@ -54,6 +54,8 @@ struct SessionPackagePlanRecord {
     std::shared_ptr<const VerifiedPackageSet> package_set;
     axk::PackageImportPlan plan;
     bool claimed{};
+    VolumeCapacityPolicy capacity_policy;
+    VolumeCapacityAdmission capacity;
 };
 
 struct SessionPackageOperationState {

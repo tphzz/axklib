@@ -331,11 +331,14 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
         if (!bound)
             return bound;
     }
-    if (!registry.is_implemented("images.placement.repair")) {
+    for (const auto operation : {"images.placement.repair", "images.placement.repair.prepare"}) {
+        if (registry.is_implemented(operation))
+            continue;
         auto bound = registry.bind(
-            "images.placement.repair",
-            [&images, alter_session = std::move(alteration_handler)](const Json &input,
-                                                                     const OperationContext &context) -> Result<Json> {
+            operation,
+            [&images, alter_session = alteration_handler,
+             prepare_only = std::string_view{operation}.ends_with(".prepare")](
+                const Json &input, const OperationContext &context) -> Result<Json> {
                 auto request = parse_placement_request(input);
                 if (!request)
                     return std::unexpected(request.error());
@@ -351,11 +354,15 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                     return std::unexpected(operation_error("placement_repair_unavailable",
                                                            "the selected scope has no safely repairable objects"));
                 }
-                auto altered = alter_session({{"imageId", request->image_id},
-                                              {"expectedRevision", request->revision},
-                                              {"manifest", {{"inline", repair_manifest(*plan)}}},
-                                              {"inputBindings", Json::array()}},
-                                             context);
+                Json mutation{{"imageId", request->image_id},
+                              {"expectedRevision", request->revision},
+                              {"manifest", {{"inline", repair_manifest(*plan)}}},
+                              {"inputBindings", Json::array()}};
+                if (input.contains("capacityPolicy"))
+                    mutation["capacityPolicy"] = input.at("capacityPolicy");
+                if (prepare_only)
+                    return mutation;
+                auto altered = alter_session(mutation, context);
                 if (!altered)
                     return std::unexpected(altered.error());
                 return altered;

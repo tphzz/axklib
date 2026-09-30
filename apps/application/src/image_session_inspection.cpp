@@ -24,6 +24,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
     };
     if ((*session)->format == "sfs" || (*session)->format == "iso9660")
         available_operations.emplace_back("images.volume_package_export");
+    if ((*session)->format == "sfs")
+        available_operations.emplace_back("images.volume_capacity.inspect");
     if ((*session)->format == "sfs" && (*session)->source.kind == ImageSourceKind::file) {
         available_operations.emplace_back("images.volume_floppy_export");
         available_operations.emplace_back("images.media_conversion");

@@ -63,10 +63,10 @@ void bytes_patch(State &state, std::uint64_t offset, std::vector<std::byte> byte
 [[nodiscard]] Result<void> validate(const Container &container, PartitionIndex partition);
 
 using PrepareEdits = std::function<Result<detail::PreparedFilesystemEdits>(std::shared_ptr<const RandomAccessReader>)>;
-[[nodiscard]] Result<PublicationOutcome> publish(const std::filesystem::path &source,
-                                                 const std::filesystem::path &destination, PartitionIndex partition,
-                                                 std::span<const std::shared_ptr<const RandomAccessReader>> inputs,
-                                                 const PrepareEdits &prepare, const CancellationToken &cancellation,
-                                                 ProgressSink *progress);
+[[nodiscard]] Result<PublicationOutcome>
+publish(const std::filesystem::path &source, const std::filesystem::path &destination, PartitionIndex partition,
+        std::span<const std::shared_ptr<const RandomAccessReader>> inputs, const PrepareEdits &prepare,
+        const CancellationToken &cancellation, ProgressSink *progress,
+        const std::function<Result<void>(const std::filesystem::path &)> &admit = {});
 
 } // namespace axk::sfs_files

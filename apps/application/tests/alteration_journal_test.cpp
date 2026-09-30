@@ -624,4 +624,40 @@ TEST(AlterationJournalStoreTest, RemovesAnOrphanCommitMarkerDuringRecovery) {
     std::filesystem::remove_all(root, error);
 }
 
+TEST(AlterationJournalStoreTest, FrozenAdmissionRefusesWithoutAnyTargetWriteAndCleansTheJournal) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-journal-admission-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root / "workspace");
+    std::ofstream(root / "workspace/image.hds", std::ios::binary) << "0123456789";
+    auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
+    ASSERT_TRUE(sandbox);
+    auto target = sandbox->open_mutation({"workspace", "image.hds"});
+    ASSERT_TRUE(target);
+    auto input = std::make_shared<BoundedJournalReader>(2U, std::byte{'X'});
+    const std::array patches{axk::app::AlterationJournalPatch{2U, axk::app::AlterationJournalBytes{*target, 2U, 2U},
+                                                              axk::app::AlterationJournalBytes{input, 0U, 2U}}};
+    axk::app::AlterationJournalStore store{root / "journals"};
+    bool inspected{};
+    const auto result =
+        store.apply(*target, 10U, patches, {}, {}, {},
+                    [&](std::shared_ptr<const axk::RandomAccessReader> frozen) -> axk::app::Result<void> {
+                        inspected = true;
+                        std::array<std::byte, 10> bytes{};
+                        EXPECT_TRUE(frozen->read_exact_at(0U, bytes));
+                        EXPECT_EQ(bytes[2], std::byte{'X'});
+                        EXPECT_EQ(bytes[3], std::byte{'X'});
+                        EXPECT_EQ(input->bytes_read, 2U);
+                        EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+                        return std::unexpected{axk::app::Error{"volume_capacity_rejected", "No capacity"}};
+                    });
+    EXPECT_TRUE(inspected);
+    EXPECT_FALSE(result);
+    EXPECT_EQ(read_text(root / "workspace/image.hds"), "0123456789");
+    EXPECT_TRUE(store.storage_ready());
+    EXPECT_TRUE(journal_state_empty(root / "journals"));
+    target = {};
+    std::filesystem::remove_all(root, error);
+}
+
 } // namespace

@@ -22,6 +22,8 @@
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/filesystem_edit.hpp"
+#include "axklib/filesystem_transaction.hpp"
+#include "axklib/io.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/writer.hpp"
 
@@ -161,8 +163,17 @@ class SampleDuplicate : public testing::Test {
             axk::PutFilesystemFile{{"Samples", object.placement->category_name, object.placement->entry_name},
                                    std::make_shared<axk::MemoryReader>(std::move(payload)),
                                    axk::FileConflict::replace}};
-        const auto replaced = axk::write_sfs_file_edits(source, path, axk::PartitionIndex{0}, edits);
+        // This helper deliberately creates dangling-reference fixtures; normal authoring must reject them.
+        const auto replaced =
+            axk::detail::prepare_sfs_file_edits(axk::FileReader::open(source).value(), axk::PartitionIndex{0}, edits);
         ASSERT_TRUE(replaced) << replaced.error().message;
+        std::vector<std::byte> bytes(static_cast<std::size_t>(replaced->preview->size()));
+        ASSERT_TRUE(replaced->preview->read_exact_at(0U, bytes));
+        {
+            std::ofstream stream{path, std::ios::binary};
+            stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            ASSERT_TRUE(stream);
+        }
         source = path;
         const auto objects = catalog(source);
         ASSERT_TRUE(objects) << objects.error().message;

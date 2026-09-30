@@ -12,6 +12,112 @@ import { modal } from './modal';
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 describe('modal', () => {
+    it('does not let a synchronously closed nested Escape dismiss its parent as well', async () => {
+        const parent = document.createElement('div');
+        const child = document.createElement('div');
+        const trigger = document.createElement('button');
+        parent.append(trigger, child);
+        document.body.append(parent);
+        const onescape = vi.fn();
+        const first = modal(parent, { onescape });
+        const second = modal(child, { onescape: () => second.destroy() });
+        try {
+            child.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+            expect(onescape).not.toHaveBeenCalled();
+            await Promise.resolve();
+            expect(document.activeElement).toBe(trigger);
+        } finally {
+            second.destroy();
+            first.destroy();
+            parent.remove();
+        }
+    });
+    it('layers the newest child above a raised parent and restores the original layer', () => {
+        const parent = document.createElement('div');
+        parent.className = 'dialog-backdrop dialog-backdrop-raised';
+        const child = document.createElement('div');
+        child.className = 'dialog-backdrop';
+        child.style.setProperty('--modal-layer', '17', 'important');
+        document.body.append(parent, child);
+        const first = modal(parent);
+        const second = modal(child);
+        try {
+            expect(parent.style.getPropertyValue('--modal-layer')).toBe('50');
+            expect(Number(child.style.getPropertyValue('--modal-layer'))).toBeGreaterThan(
+                Number(parent.style.getPropertyValue('--modal-layer')),
+            );
+        } finally {
+            second.destroy();
+            first.destroy();
+            expect(child.style.getPropertyValue('--modal-layer')).toBe('17');
+            expect(child.style.getPropertyPriority('--modal-layer')).toBe('important');
+            parent.remove();
+            child.remove();
+        }
+    });
+
+    it('releases an old inert ancestor and prevents background observers from stealing child focus', async () => {
+        const host = document.createElement('div');
+        const parent = document.createElement('div');
+        const input = document.createElement('input');
+        input.dataset.dialogInitialFocus = 'select';
+        input.disabled = true;
+        parent.append(input);
+        document.body.append(host, parent);
+        const first = modal(parent);
+        const child = document.createElement('div');
+        const button = document.createElement('button');
+        child.append(button);
+        host.append(child);
+        const second = modal(child);
+        try {
+            await Promise.resolve();
+            expect(host.inert).toBeFalsy();
+            expect(document.activeElement).toBe(button);
+            input.disabled = false;
+            await Promise.resolve();
+            expect(document.activeElement).toBe(button);
+        } finally {
+            second.destroy();
+            first.destroy();
+            parent.remove();
+            host.remove();
+        }
+    });
+
+    it('keeps top focus when an underlying modal is destroyed out of order', async () => {
+        const existing = document.createElement('div');
+        existing.inert = true;
+        const nodes = Array.from({ length: 3 }, () => {
+            const node = document.createElement('div');
+            node.append(document.createElement('button'));
+            return node;
+        });
+        document.body.append(existing, ...nodes);
+        const actions = [];
+        for (const node of nodes) {
+            actions.push(modal(node));
+            await Promise.resolve();
+        }
+        try {
+            await Promise.resolve();
+            const focused = nodes[2].firstElementChild;
+            expect(document.activeElement).toBe(focused);
+            actions[0].destroy();
+            nodes[0].remove();
+            expect(document.activeElement).toBe(focused);
+            expect(nodes[1].inert).toBe(true);
+            actions[1].destroy();
+            nodes[1].remove();
+            expect(document.activeElement).toBe(focused);
+        } finally {
+            actions[2].destroy();
+            expect(existing.inert).toBe(true);
+            existing.remove();
+            nodes.forEach((node) => node.remove());
+        }
+    });
+
     it('lets an expanded destination chooser consume Escape before dismissing its dialog', async () => {
         const dialog = document.createElement('div');
         document.body.append(dialog);

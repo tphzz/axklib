@@ -108,16 +108,26 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             }
 
         def alter(snapshot: Any, change: dict[str, Any]) -> Any:
+            body = {
+                "imageId": image_id,
+                "expectedRevision": snapshot["image"]["revision"],
+                "manifest": {
+                    "inline": {"schema_version": "1.0", "operations": [change]}
+                },
+                "inputBindings": [],
+                "capacityPolicy": {
+                    "target": "A4000_A5000",
+                },
+            }
+            response = request(
+                port, TOKEN, "POST", "/api/v1/image-session-alteration-inspections", body
+            )
+            assert response.status == 200, response.content
+            capacity = response.json()["data"]["capacity"]
+            assert capacity["allowed"], capacity
             result = job(
                 "/api/v1/image-session-alterations",
-                {
-                    "imageId": image_id,
-                    "expectedRevision": snapshot["image"]["revision"],
-                    "manifest": {
-                        "inline": {"schema_version": "1.0", "operations": [change]}
-                    },
-                    "inputBindings": [],
-                },
+                body,
                 change["id"],
             )
             assert result["applied"] is True, result

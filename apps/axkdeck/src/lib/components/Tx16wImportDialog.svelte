@@ -6,6 +6,7 @@
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
 
     interface Props {
@@ -116,6 +117,7 @@
         </header>
 
         <div class="tx16w-destination">
+            <ImportCapacityControl review={completion.capacity} disabled={busy} />
             <ImportDestinationChooser
                 mode="existing"
                 {partitionIndex}
@@ -292,7 +294,8 @@
 
         <footer class="dialog-footer">
             <span class="dialog-footer-status" role="status"
-                >{completion.message ||
+                >{(completion.capacity.busy ? completion.capacity.message : '') ||
+                    completion.message ||
                     request.error ||
                     (busy
                         ? 'Inspecting disk set'

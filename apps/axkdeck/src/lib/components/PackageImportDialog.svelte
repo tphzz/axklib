@@ -12,6 +12,7 @@
     import ImportPlanReview from './ImportPlanReview.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
 
     interface Props {
@@ -97,7 +98,16 @@
 
     const busy = $derived(status === 'loading' || status === 'planning' || status === 'applying');
     const locked = $derived(completion.phase !== 'refresh-failed' && (completion.locked || status === 'applying'));
-    const canImport = $derived(status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges);
+    const canImport = $derived(
+        !locked &&
+            !busy &&
+            status === 'ready' &&
+            Boolean(plan?.valid) &&
+            !hasUnvalidatedChanges &&
+            !!plan &&
+            plan.capacity.target === completion.capacity.target &&
+            plan.capacity.allowed,
+    );
     const importDisabledReason = $derived(
         canImport
             ? ''
@@ -222,6 +232,12 @@
                     {/if}
                 </section>
 
+                <ImportCapacityControl
+                    review={completion.capacity}
+                    admission={plan?.capacity}
+                    disabled={busy || locked}
+                    onchange={onreplan}
+                />
                 <ImportDestinationChooser
                     mode={destinationMode}
                     partitionIndex={destinationPartitionIndex}

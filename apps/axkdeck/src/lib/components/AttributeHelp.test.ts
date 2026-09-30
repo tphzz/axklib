@@ -119,4 +119,41 @@ describe('Attribute label help', () => {
         expect(view.getByText('Type')).toBeTruthy();
         expect(view.queryByRole('button')).toBeNull();
     });
+
+    it('supports delayed external help without retaining pointer-selected focus', async () => {
+        vi.useFakeTimers();
+        const anchor = document.createElement('button');
+        document.body.appendChild(anchor);
+        const focusVisible = vi.spyOn(anchor, 'matches').mockReturnValue(false);
+        const view = render(AttributeHelp, {
+            props: {
+                label: 'Volume',
+                description: 'Capacity',
+                anchor,
+                preferredWidth: 360,
+                hoverDelay: 500,
+                focusVisibleOnly: true,
+            },
+        });
+        try {
+            await act(() => anchor.focus());
+            expect(view.queryByRole('tooltip')).toBeNull();
+            await fireEvent.pointerEnter(anchor);
+            await act(() => vi.advanceTimersByTime(499));
+            expect(view.queryByRole('tooltip')).toBeNull();
+            await act(() => vi.advanceTimersByTime(1));
+            expect(view.getByRole('tooltip').style.width).toBe('360px');
+            await fireEvent.pointerLeave(anchor);
+            await act(() => vi.advanceTimersByTime(150));
+            expect(view.queryByRole('tooltip')).toBeNull();
+            focusVisible.mockReturnValue(true);
+            await fireEvent.focus(anchor);
+            expect(view.getByRole('tooltip')).toBeTruthy();
+            await fireEvent.pointerDown(anchor);
+            expect(view.queryByRole('tooltip')).toBeNull();
+        } finally {
+            view.unmount();
+            anchor.remove();
+        }
+    });
 });

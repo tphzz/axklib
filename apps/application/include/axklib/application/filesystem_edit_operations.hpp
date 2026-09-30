@@ -12,6 +12,7 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/uploads.hpp"
 #include "axklib/filesystem_edit.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::app {
 
@@ -36,6 +37,7 @@ struct FilesystemInputVerification {
 apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id,
                        std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
                        std::span<const FilesystemEdit> edits, const CancellationToken &cancellation = {},
-                       ProgressSink *progress = nullptr, const FilesystemInputVerification &input_verification = {});
+                       ProgressSink *progress = nullptr, const FilesystemInputVerification &input_verification = {},
+                       const VolumeCapacityPolicy &capacity_policy = {});
 
 } // namespace axk::app

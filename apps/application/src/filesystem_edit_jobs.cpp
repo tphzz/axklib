@@ -11,6 +11,8 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/su700_import_operations.hpp"
+#include "axklib/application/volume_capacity.hpp"
+#include "axklib/filesystem_transaction.hpp"
 #include "filesystem_image_inputs.hpp"
 #include "filesystem_inputs.hpp"
 
@@ -33,143 +35,179 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
     auto image_inputs = std::make_shared<FilesystemImageInputs>(sandbox, uploads);
     if (auto registered = bind_filesystem_image_inputs(registry, image_inputs); !registered)
         return registered;
-    auto bound = registry.bind(
-        "images.filesystem.edit",
-        [&sandbox, &uploads, &images, &journals, image_inputs](const Json &input,
-                                                               const OperationContext &context) -> Result<Json> {
-            try {
-                if (!input.at("acknowledgeDeviceRelationships").get<bool>())
-                    return std::unexpected(
-                        Error{"invalid_request", "Confirm that raw changes may break sampler relationships"});
-                const auto image_id = input.at("imageId").get<std::string>();
-                const auto &revision_value = input.at("expectedRevision");
-                if (!revision_value.is_number_integer() || revision_value < 1)
-                    return std::unexpected(Error{"invalid_request", "A positive expectedRevision is required"});
-                const auto revision = revision_value.get<std::uint64_t>();
-                const auto &rows = input.at("edits");
-                if (!rows.is_array() || rows.empty() || rows.size() > 10000U)
-                    return std::unexpected(Error{"invalid_request", "Choose between 1 and 10000 filesystem changes"});
-                std::vector<std::pair<filesystem_inputs::OpenedInput, Json>> inputs;
-                std::map<std::string, std::size_t> input_indices;
-                std::map<std::string, FilesystemImageLease> image_leases;
-                std::vector<ImageFilesystemEdit> requests;
-                for (const auto &row : rows) {
-                    if (auto checked = context.cancellation.check(); !checked)
-                        return std::unexpected(Error{"operation_cancelled", "Filesystem editing was cancelled"});
-                    const auto kind = row.at("kind").get<std::string>();
-                    if (kind == "DELETE") {
-                        requests.emplace_back(RemoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
-                                                                         row.at("recursive").get<bool>()});
-                    } else if (kind == "MOVE") {
-                        requests.emplace_back(
-                            MoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
-                                                     row.at("destinationParentEntryId").get<std::string>()});
-                    } else if (kind == "RENAME") {
-                        requests.emplace_back(RenameImageFilesystemEntry{row.at("entryId").get<std::string>(),
-                                                                         row.at("newName").get<std::string>()});
-                    } else if (kind == "CREATE_DIRECTORY" || kind == "PUT_FILE") {
-                        const auto parent = row.at("parentEntryId").get<std::string>();
-                        const auto path = row.at("relativePath").get<FilesystemPath>();
-                        if (kind == "CREATE_DIRECTORY")
-                            requests.emplace_back(CreateImageFilesystemDirectory{parent, path});
-                        else {
-                            const auto conflict = row.value("conflict", std::string{"SKIP"});
-                            if (conflict != "SKIP" && conflict != "REPLACE")
-                                return std::unexpected(
-                                    Error{"invalid_request", "Choose SKIP or REPLACE for file conflicts"});
-                            const auto &expected = row.at("expectedSource");
-                            const auto key = row.at("source").dump();
-                            auto found = input_indices.find(key);
-                            if (found == input_indices.end()) {
-                                const auto &source = row.at("source");
-                                auto open_source = [&]() -> Result<filesystem_inputs::OpenedInput> {
-                                    if (!source.contains("imageEntryRef"))
-                                        return filesystem_inputs::open(source, context.owner_id, sandbox, uploads);
-                                    if (source.size() != 1U)
-                                        return std::unexpected(
-                                            Error{"invalid_request", "Choose exactly one import source"});
-                                    const auto &ref = source.at("imageEntryRef");
-                                    const auto token = ref.at("inspectionToken").get<std::string>();
-                                    if (!image_leases.contains(token)) {
-                                        auto lease = image_inputs->lease(token, context.owner_id);
-                                        if (!lease)
-                                            return std::unexpected(lease.error());
-                                        if (auto verified = lease->verify(context.cancellation); !verified)
-                                            return std::unexpected(verified.error());
-                                        image_leases.emplace(token, std::move(*lease));
-                                    }
-                                    return image_leases.at(token).open(ref.at("entryId").get<std::string>());
-                                };
-                                auto file = open_source();
-                                if (!file)
-                                    return std::unexpected(file.error());
-                                if (auto checked = file->verify(expected, context.cancellation); !checked)
-                                    return std::unexpected(checked.error());
-                                found = input_indices.emplace(key, inputs.size()).first;
-                                inputs.emplace_back(std::move(*file), expected);
-                            } else if (inputs[found->second].second != expected) {
-                                return std::unexpected(Error{"filesystem_input_changed",
-                                                             "Repeated source has conflicting reviewed snapshots"});
-                            }
-                            requests.emplace_back(PutImageFilesystemFile{
-                                parent, path, inputs[found->second].first.reader,
-                                conflict == "SKIP" ? FileConflict::skip : FileConflict::replace});
+    const auto edit = [&sandbox, &uploads, &images, &journals,
+                       image_inputs](const Json &input, const OperationContext &context, bool execute) -> Result<Json> {
+        try {
+            const auto policy = capacity_policy(input);
+            if (!policy)
+                return std::unexpected{policy.error()};
+            if (!input.at("acknowledgeDeviceRelationships").get<bool>())
+                return std::unexpected(
+                    Error{"invalid_request", "Confirm that raw changes may break sampler relationships"});
+            const auto image_id = input.at("imageId").get<std::string>();
+            const auto &revision_value = input.at("expectedRevision");
+            if (!revision_value.is_number_integer() || revision_value < 1)
+                return std::unexpected(Error{"invalid_request", "A positive expectedRevision is required"});
+            const auto revision = revision_value.get<std::uint64_t>();
+            const auto &rows = input.at("edits");
+            if (!rows.is_array() || rows.empty() || rows.size() > 10000U)
+                return std::unexpected(Error{"invalid_request", "Choose between 1 and 10000 filesystem changes"});
+            std::vector<std::pair<filesystem_inputs::OpenedInput, Json>> inputs;
+            std::map<std::string, std::size_t> input_indices;
+            std::map<std::string, FilesystemImageLease> image_leases;
+            std::vector<ImageFilesystemEdit> requests;
+            for (const auto &row : rows) {
+                if (auto checked = context.cancellation.check(); !checked)
+                    return std::unexpected(Error{"operation_cancelled", "Filesystem editing was cancelled"});
+                const auto kind = row.at("kind").get<std::string>();
+                if (kind == "DELETE") {
+                    requests.emplace_back(RemoveImageFilesystemEntry{row.at("entryId").get<std::string>(),
+                                                                     row.at("recursive").get<bool>()});
+                } else if (kind == "MOVE") {
+                    requests.emplace_back(MoveImageFilesystemEntry{
+                        row.at("entryId").get<std::string>(), row.at("destinationParentEntryId").get<std::string>()});
+                } else if (kind == "RENAME") {
+                    requests.emplace_back(RenameImageFilesystemEntry{row.at("entryId").get<std::string>(),
+                                                                     row.at("newName").get<std::string>()});
+                } else if (kind == "CREATE_DIRECTORY" || kind == "PUT_FILE") {
+                    const auto parent = row.at("parentEntryId").get<std::string>();
+                    const auto path = row.at("relativePath").get<FilesystemPath>();
+                    if (kind == "CREATE_DIRECTORY")
+                        requests.emplace_back(CreateImageFilesystemDirectory{parent, path});
+                    else {
+                        const auto conflict = row.value("conflict", std::string{"SKIP"});
+                        if (conflict != "SKIP" && conflict != "REPLACE")
+                            return std::unexpected(
+                                Error{"invalid_request", "Choose SKIP or REPLACE for file conflicts"});
+                        const auto &expected = row.at("expectedSource");
+                        const auto key = row.at("source").dump();
+                        auto found = input_indices.find(key);
+                        if (found == input_indices.end()) {
+                            const auto &source = row.at("source");
+                            auto open_source = [&]() -> Result<filesystem_inputs::OpenedInput> {
+                                if (!source.contains("imageEntryRef"))
+                                    return filesystem_inputs::open(source, context.owner_id, sandbox, uploads);
+                                if (source.size() != 1U)
+                                    return std::unexpected(
+                                        Error{"invalid_request", "Choose exactly one import source"});
+                                const auto &ref = source.at("imageEntryRef");
+                                const auto token = ref.at("inspectionToken").get<std::string>();
+                                if (!image_leases.contains(token)) {
+                                    auto lease = image_inputs->lease(token, context.owner_id);
+                                    if (!lease)
+                                        return std::unexpected(lease.error());
+                                    if (auto verified = lease->verify(context.cancellation); !verified)
+                                        return std::unexpected(verified.error());
+                                    image_leases.emplace(token, std::move(*lease));
+                                }
+                                return image_leases.at(token).open(ref.at("entryId").get<std::string>());
+                            };
+                            auto file = open_source();
+                            if (!file)
+                                return std::unexpected(file.error());
+                            if (auto checked = file->verify(expected, context.cancellation); !checked)
+                                return std::unexpected(checked.error());
+                            found = input_indices.emplace(key, inputs.size()).first;
+                            inputs.emplace_back(std::move(*file), expected);
+                        } else if (inputs[found->second].second != expected) {
+                            return std::unexpected(Error{"filesystem_input_changed",
+                                                         "Repeated source has conflicting reviewed snapshots"});
                         }
-                    } else
-                        return std::unexpected(Error{"invalid_request", "Unknown filesystem edit kind"});
+                        requests.emplace_back(
+                            PutImageFilesystemFile{parent, path, inputs[found->second].first.reader,
+                                                   conflict == "SKIP" ? FileConflict::skip : FileConflict::replace});
+                    }
+                } else
+                    return std::unexpected(Error{"invalid_request", "Unknown filesystem edit kind"});
+            }
+            auto resolved = images.resolve_filesystem_edits(image_id, context.owner_id, revision, requests);
+            if (!resolved)
+                return std::unexpected(resolved.error());
+            const auto validate_inputs = [&]() -> Result<void> {
+                for (const auto &[token, lease] : image_leases) {
+                    static_cast<void>(token);
+                    if (auto checked = lease.verify(context.cancellation); !checked)
+                        return checked;
                 }
-                auto resolved = images.resolve_filesystem_edits(image_id, context.owner_id, revision, requests);
-                if (!resolved)
-                    return std::unexpected(resolved.error());
-                const auto validate_inputs = [&]() -> Result<void> {
-                    for (const auto &[token, lease] : image_leases) {
-                        static_cast<void>(token);
-                        if (auto checked = lease.verify(context.cancellation); !checked)
-                            return checked;
-                    }
-                    for (const auto &[file, expected] : inputs) {
-                        if (auto checked = file.verify(expected, context.cancellation); !checked)
-                            return checked;
-                    }
-                    return {};
-                };
-                FilesystemInputVerification verification{{}, validate_inputs};
                 for (const auto &[file, expected] : inputs) {
-                    static_cast<void>(expected);
-                    verification.reviewed_readers.push_back(file.reader);
+                    if (auto checked = file.verify(expected, context.cancellation); !checked)
+                        return checked;
                 }
-                auto result =
-                    apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, resolved->partition,
-                                           resolved->edits, context.cancellation, context.progress, verification);
-                if (!result)
-                    return std::unexpected(result.error());
-                // The relationship notice was acknowledged before execution, not produced by this write.
-                return Json{{"imageId", result->image_id}, {"revision", result->revision}, {"warnings", Json::array()}};
-            } catch (const Json::exception &) {
-                return std::unexpected(Error{"invalid_request", "Filesystem edit request is incomplete or malformed"});
+                return {};
+            };
+            FilesystemInputVerification verification{{}, validate_inputs};
+            for (const auto &[file, expected] : inputs) {
+                static_cast<void>(expected);
+                verification.reviewed_readers.push_back(file.reader);
             }
-        });
-    if (!bound)
-        return bound;
-    return registry.bind_path_accesses(
-        "images.filesystem.edit", [](const Json &input, const OperationContext &) -> Result<std::vector<PathAccess>> {
-            try {
-                std::vector<PathAccess> accesses;
-                for (const auto &edit : input.at("edits")) {
-                    if (edit.value("kind", std::string{}) != "PUT_FILE")
-                        continue;
-                    const auto &source = edit.at("source");
-                    if (source.contains("fileRef")) {
-                        const auto &ref = source.at("fileRef");
-                        accesses.push_back(
-                            {{ref.at("rootId").get<std::string>(), ref.at("relativePath").get<std::string>()},
-                             PathAccessMode::shared});
+            if (!execute) {
+                const auto session = images.begin_read(image_id, context.owner_id, revision);
+                if (!session)
+                    return std::unexpected{session.error()};
+                VolumeCapacityAdmission capacity;
+                capacity.target = policy->target;
+                if (session->media->kind() == MediaKind::sfs) {
+                    const auto prepared = axk::detail::prepare_sfs_file_edits(session->reader, resolved->partition,
+                                                                              resolved->edits, context.cancellation);
+                    if (!prepared)
+                        return std::unexpected{Error{"filesystem_edit_failed", prepared.error().message}};
+                    const auto inspected = axk::detail::inspect_filesystem_capacity(
+                        session->reader, prepared->preview, resolved->partition, resolved->edits, *policy,
+                        context.cancellation);
+                    if (!inspected)
+                        return std::unexpected{Error{"filesystem_edit_failed", inspected.error().message}};
+                    capacity = *inspected;
+                }
+                if (const auto verified = validate_inputs(); !verified)
+                    return std::unexpected{verified.error()};
+                if (const auto unchanged = session->verify_source_unchanged(); !unchanged)
+                    return std::unexpected{unchanged.error()};
+                return Json{
+                    {"imageId", image_id}, {"revision", revision}, {"capacity", capacity_admission_json(capacity)}};
+            }
+            auto result =
+                apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, resolved->partition,
+                                       resolved->edits, context.cancellation, context.progress, verification, *policy);
+            if (!result)
+                return std::unexpected(result.error());
+            // The relationship notice was acknowledged before execution, not produced by this write.
+            return Json{{"imageId", result->image_id}, {"revision", result->revision}, {"warnings", Json::array()}};
+        } catch (const Json::exception &) {
+            return std::unexpected(Error{"invalid_request", "Filesystem edit request is incomplete or malformed"});
+        }
+    };
+    for (const bool execute : {false, true}) {
+        const std::string operation = execute ? "images.filesystem.edit" : "images.filesystem.edit.inspect";
+        if (const auto bound = registry.bind(operation,
+                                             [edit, execute](const Json &input, const OperationContext &context) {
+                                                 return edit(input, context, execute);
+                                             });
+            !bound)
+            return bound;
+        if (const auto paths = registry.bind_path_accesses(
+                operation,
+                [](const Json &input, const OperationContext &) -> Result<std::vector<PathAccess>> {
+                    try {
+                        std::vector<PathAccess> accesses;
+                        for (const auto &wire_edit : input.at("edits")) {
+                            if (wire_edit.value("kind", std::string{}) != "PUT_FILE")
+                                continue;
+                            const auto &source = wire_edit.at("source");
+                            if (source.contains("fileRef")) {
+                                const auto &ref = source.at("fileRef");
+                                accesses.push_back(
+                                    {{ref.at("rootId").get<std::string>(), ref.at("relativePath").get<std::string>()},
+                                     PathAccessMode::shared});
+                            }
+                        }
+                        return accesses;
+                    } catch (const Json::exception &) {
+                        return std::unexpected(Error{"invalid_request", "Filesystem input reference is malformed"});
                     }
-                }
-                return accesses;
-            } catch (const Json::exception &) {
-                return std::unexpected(Error{"invalid_request", "Filesystem input reference is malformed"});
-            }
-        });
+                });
+            !paths)
+            return paths;
+    }
+    return {};
 }
 } // namespace axk::app

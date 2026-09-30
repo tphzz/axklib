@@ -65,11 +65,11 @@ class AlterationJournalStore {
 
     [[nodiscard]] bool storage_ready() const noexcept;
     [[nodiscard]] Result<void> recover(const Sandbox &sandbox);
-    [[nodiscard]] Result<void> apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
-                                     std::span<const AlterationJournalPatch> patches,
-                                     const CancellationToken &cancellation = {},
-                                     const std::function<Result<void>()> &validate = {},
-                                     const std::function<void()> &on_rollback_verified = {});
+    [[nodiscard]] Result<void>
+    apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
+          std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation = {},
+          const std::function<Result<void>()> &validate = {}, const std::function<void()> &on_rollback_verified = {},
+          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {});
 
   private:
     std::filesystem::path directory_;

@@ -311,7 +311,7 @@
     </div>
 
     {#if adding && (local || selectedPath)}
-        <div class="dialog-backdrop dialog-backdrop-raised workspace-confirm-backdrop" role="presentation">
+        <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
             <div
                 class="dialog-shell workspace-confirm-dialog"
                 role="dialog"
@@ -352,9 +352,6 @@
 <style>
     .workspace-dialog {
         width: min(560px, calc(100vw - 32px));
-    }
-    .workspace-confirm-backdrop {
-        z-index: 90;
     }
     .workspace-confirm-dialog {
         width: min(400px, calc(100vw - 32px));

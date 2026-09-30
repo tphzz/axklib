@@ -13,6 +13,8 @@ import type { InputFileLocation } from '../../lib/storageLocations';
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
 import type { JobState } from '../../lib/transport';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { FilesystemWriteRejected } from '../../lib/filesystem';
+import { ImportCapacityReview } from '../import/importCapacityReview.svelte';
 import { normalizeFilesystemName, validFilesystemName } from './nameValidation';
 import {
     fileSources,
@@ -42,6 +44,10 @@ type Phase =
     | 'refresh-failed';
 
 export class FilesImportWorkflow {
+    readonly capacity = new ImportCapacityReview();
+    get capacityAvailable(): boolean {
+        return !!this.mutations?.inspectCapacity;
+    }
     target = $state<FilesystemEntry | null>(null);
     rows = $state<FilesImportRow[]>([]);
     phase = $state<Phase>('choosing');
@@ -61,12 +67,14 @@ export class FilesImportWorkflow {
     constructor(private readonly setStatus: (message: string) => void = () => undefined) {}
 
     get busy(): boolean {
-        return ['picking', 'scanning', 'uploading', 'inspecting', 'writing', 'refreshing', 'checking'].includes(
-            this.phase,
+        return (
+            this.capacity.busy ||
+            ['picking', 'scanning', 'uploading', 'inspecting', 'writing', 'refreshing', 'checking'].includes(this.phase)
         );
     }
     get canDismiss(): boolean {
         return (
+            !this.capacity.busy &&
             !['refreshing', 'checking', 'unconfirmed'].includes(this.phase) &&
             !(this.phase === 'writing' && (this.jobId === null || this.cancelling))
         );
@@ -124,6 +132,7 @@ export class FilesImportWorkflow {
         )
             return false;
         this.target = { ...target };
+        this.capacity.reset();
         this.capabilities = { ...capabilities };
         this.revision = revision;
         this.imports = imports;
@@ -364,6 +373,19 @@ export class FilesImportWorkflow {
         if (!observe && !this.canSubmit) return;
         const generation = this.generation;
         const jobId = this.jobId;
+        let capacityPolicy: import('../../lib/importCapacity').CapacityPolicy | undefined;
+        if (!observe && this.mutations.inspectCapacity) {
+            try {
+                const reviewed = await this.capacity.review((policy) =>
+                    this.mutations.inspectCapacity!(this.revision, importEdits(this.target!.id, this.rows), policy),
+                );
+                if (!reviewed) return;
+                capacityPolicy = reviewed;
+            } catch (error) {
+                this.message = userFacingMessage(error);
+                return;
+            }
+        }
         this.phase = observe ? 'checking' : 'writing';
         this.message = observe ? 'Checking status' : 'Importing';
         this.cancelling = false;
@@ -375,6 +397,7 @@ export class FilesImportWorkflow {
                       this.revision,
                       importEdits(this.target.id, this.rows),
                       this.update(generation, true),
+                      capacityPolicy,
                   );
             if (!this.current(generation)) {
                 if (['completed', 'failed', 'cancelled'].includes(job.status)) await this.release();
@@ -389,8 +412,11 @@ export class FilesImportWorkflow {
             }
         } catch (error) {
             if (this.current(generation)) {
-                this.phase = 'unconfirmed';
-                this.message = `Write outcome unconfirmed. ${userFacingMessage(error)}`;
+                this.phase = error instanceof FilesystemWriteRejected ? 'write-failed' : 'unconfirmed';
+                this.message =
+                    error instanceof FilesystemWriteRejected
+                        ? userFacingMessage(error)
+                        : `Write outcome unconfirmed. ${userFacingMessage(error)}`;
             }
         } finally {
             if (this.current(generation)) this.cancelling = false;

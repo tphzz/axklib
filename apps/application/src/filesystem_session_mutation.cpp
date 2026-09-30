@@ -24,7 +24,8 @@ struct MutationGuard {
 Result<ImageSessionSummary> apply_session_filesystem_mutation(
     ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id, std::string_view owner_id,
     std::uint64_t expected_revision, PartitionIndex partition, const SessionFilesystemPlanner &prepare,
-    const std::function<Result<void>()> &verify_inputs, const CancellationToken &cancellation, ProgressSink *progress) {
+    const std::function<Result<void>()> &verify_inputs, const CancellationToken &cancellation, ProgressSink *progress,
+    const SessionFilesystemAdmitter &admit) {
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(write_operations_internal::core_error(checked.error()));
     auto mutation = images.begin_filesystem_mutation(image_id, owner_id, expected_revision, partition);
@@ -61,9 +62,17 @@ Result<ImageSessionSummary> apply_session_filesystem_mutation(
     if (progress)
         progress->report({ProgressPhase::publishing, 0U, 1U, "Committing filesystem changes", std::nullopt});
     bool rollback_verified{};
+    const auto admit_frozen = [&](std::shared_ptr<const RandomAccessReader> preview) -> Result<void> {
+        if (verify_inputs) {
+            if (auto verified = verify_inputs(); !verified)
+                return verified;
+        }
+        return admit ? admit(*mutation, std::move(preview)) : Result<void>{};
+    };
     guard.invalidate_session = true;
-    if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, cancellation, validate,
-                                      [&] { rollback_verified = true; });
+    if (auto applied = journals.apply(
+            mutation->target, prepared->image_size_bytes, patches, cancellation, validate,
+            [&] { rollback_verified = true; }, admit_frozen);
         !applied) {
         refreshed.reset();
         guard.invalidate_session = !journals.storage_ready() || rollback_verified;

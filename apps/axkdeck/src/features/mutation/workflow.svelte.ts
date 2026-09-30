@@ -18,6 +18,7 @@ import type {
     WorkspaceView,
 } from '../../lib/types';
 import { userFacingMessage } from '../../lib/userFacingMessage';
+import { VolumeActionExecution } from './volumeActionExecution.svelte';
 import {
     SampleBankAssignmentWorkflow,
     type SampleBankAssignmentRequest,
@@ -58,13 +59,13 @@ export class MutationWorkflow {
     private volumeActionGeneration = 0;
     private placementRepairGeneration = 0;
     private readonly sampleBankAssignment: SampleBankAssignmentWorkflow;
+    private readonly volumeExecution: VolumeActionExecution;
     volumeAvailable = $state(false);
     partitionAvailable = $state(false);
     objectRenameAvailable = $state(false);
     volumeAction = $state<{ items: DiskTreeItem[]; action: ImageTreeAction } | null>(null);
-    volumeActionBusy = $state(false);
-    volumeActionPhase = $state<'idle' | 'checking' | 'submitting'>('idle');
-    volumeActionError = $state('');
+    private volumeInspectionBusy = $state(false);
+    private volumeInspectionError = $state('');
     volumeDeletionInspection = $state<VolumeDeletionInspection | null>(null);
     placementRepairRequest = $state<{
         item: DiskTreeItem;
@@ -81,10 +82,34 @@ export class MutationWorkflow {
         error: string;
     } | null>(null);
     constructor(private readonly dependencies: MutationWorkflowDependencies) {
+        this.volumeExecution = new VolumeActionExecution(dependencies.transport, dependencies.jobs);
         this.sampleBankAssignment = new SampleBankAssignmentWorkflow({
             ...dependencies,
             available: () => this.objectRenameAvailable,
         });
+    }
+
+    get volumeActionBusy(): boolean {
+        return this.volumeInspectionBusy || this.volumeExecution.busy;
+    }
+    get volumeActionLocked(): boolean {
+        return this.volumeInspectionBusy || this.volumeExecution.locked;
+    }
+    get volumeActionCanDismiss(): boolean {
+        return !this.volumeInspectionBusy && this.volumeExecution.canDismiss;
+    }
+    get volumeActionPhase() {
+        return this.volumeInspectionBusy ? ('checking' as const) : this.volumeExecution.phase;
+    }
+    get volumeActionError(): string {
+        return this.volumeInspectionError || this.volumeExecution.error;
+    }
+    get volumeActionRecovery() {
+        return this.volumeExecution.recovery;
+    }
+    async recoverVolumeAction(): Promise<void> {
+        await this.volumeExecution.recover();
+        if (this.volumeActionError) this.dependencies.setStatus(this.volumeActionError);
     }
 
     get sampleBankAssignmentRequest(): SampleBankAssignmentRequest | null {
@@ -102,13 +127,15 @@ export class MutationWorkflow {
     }
 
     requestVolumeAction(item: DiskTreeItem, action: ImageTreeAction): boolean {
+        if (!this.volumeActionCanDismiss) return false;
         if (action === 'repair-placement') return this.requestPlacementRepair(item);
         const partitionAction = action === 'rename-partition';
         if (partitionAction && (!this.partitionAvailable || item.kind !== 'partition')) return false;
         if (!partitionAction && !this.volumeAvailable) return false;
         if (action === 'add-volume' && item.kind !== 'partition') return false;
         if ((action === 'rename-volume' || action === 'delete-volume') && item.kind !== 'volume') return false;
-        this.volumeActionError = '';
+        this.volumeExecution.reset();
+        this.volumeInspectionError = '';
         this.volumeDeletionInspection = null;
         const request = { items: [item], action };
         const generation = ++this.volumeActionGeneration;
@@ -118,6 +145,7 @@ export class MutationWorkflow {
     }
 
     requestVolumeDeletion(items: DiskTreeItem[]): boolean {
+        if (!this.volumeActionCanDismiss) return false;
         if (!this.volumeAvailable || items.length === 0) return false;
         const uniqueItems = new Map<string, DiskTreeItem>();
         for (const item of items) {
@@ -125,7 +153,8 @@ export class MutationWorkflow {
             uniqueItems.set(`${item.partitionIndex}\0${item.name}`, item);
         }
         if (uniqueItems.size !== items.length) return false;
-        this.volumeActionError = '';
+        this.volumeExecution.reset();
+        this.volumeInspectionError = '';
         this.volumeDeletionInspection = null;
         const request = { items: [...items], action: 'delete-volume' as const };
         const generation = ++this.volumeActionGeneration;
@@ -152,11 +181,11 @@ export class MutationWorkflow {
     }
 
     cancelVolumeAction(): void {
-        if (!this.volumeActionBusy) {
+        if (this.volumeActionCanDismiss) {
             ++this.volumeActionGeneration;
             this.volumeAction = null;
             this.volumeDeletionInspection = null;
-            this.volumeActionPhase = 'idle';
+            this.volumeExecution.reset();
         }
     }
 
@@ -239,9 +268,9 @@ export class MutationWorkflow {
         this.partitionAvailable = false;
         this.objectRenameAvailable = false;
         this.volumeAction = null;
-        this.volumeActionBusy = false;
-        this.volumeActionPhase = 'idle';
-        this.volumeActionError = '';
+        this.volumeInspectionBusy = false;
+        this.volumeExecution.reset();
+        this.volumeInspectionError = '';
         this.volumeDeletionInspection = null;
         ++this.placementRepairGeneration;
         this.placementRepairRequest = null;
@@ -250,14 +279,13 @@ export class MutationWorkflow {
     }
 
     async submitVolumeAction(name: string): Promise<void> {
-        if (!this.volumeAction || !this.dependencies.imageOpen()) return;
+        if (!this.volumeAction || this.volumeActionLocked || !this.dependencies.imageOpen()) return;
         const requested = this.volumeAction;
         if (requested.action === 'delete-volume' && !this.volumeDeletionInspection?.canDelete) return;
         const primaryItem = requested.items[0];
         if (!primaryItem) return;
         const partitionIndex = primaryItem.partitionIndex;
         if (partitionIndex === undefined) return;
-        const previousVolumeName = primaryItem.kind === 'volume' ? primaryItem.name : undefined;
         const volumeMutations: VolumeMutation[] =
             requested.action === 'add-volume'
                 ? [{ kind: 'add', partitionIndex, volumeName: name }]
@@ -289,55 +317,46 @@ export class MutationWorkflow {
         const preferredVolumeName =
             requested.action === 'add-volume' || requested.action === 'rename-volume' ? name : undefined;
 
-        this.volumeActionBusy = true;
-        this.volumeActionPhase = 'submitting';
-        this.volumeActionError = '';
-        this.dependencies.setStatus(
+        this.volumeInspectionError = '';
+        const writingStatus =
             requested.action === 'add-volume'
                 ? 'Adding volume'
                 : requested.action === 'delete-volume'
                   ? `Deleting ${requested.items.length} ${requested.items.length === 1 ? 'volume' : 'volumes'}`
                   : requested.action === 'rename-partition'
                     ? 'Renaming partition'
-                    : 'Renaming volume',
-        );
+                    : 'Renaming volume';
+        this.dependencies.setStatus('Checking image change');
         const sessionId = this.dependencies.sessionId();
         if (sessionId === null) {
-            this.volumeActionError = 'Image session is no longer available';
-            this.volumeActionBusy = false;
+            this.volumeInspectionError = 'Image session is no longer available';
             return;
         }
         const started = performance.now();
-        try {
-            await this.dependencies.audition.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
-                () =>
-                    partitionMutation
-                        ? this.dependencies.transport.startPartitionMutation(sessionId, partitionMutation)
-                        : this.dependencies.transport.startVolumeMutations(sessionId, volumeMutations),
-                (update) => {
-                    if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
-                },
-            );
-            if (completed.status !== 'completed') {
-                throw new Error(completed.error ?? 'Image change did not complete');
-            }
-            ++this.volumeActionGeneration;
-            this.volumeAction = null;
-            await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
-            this.dependencies.reportTiming(requested.action, started, requested.items.length);
-        } catch (error) {
-            this.volumeActionError = userFacingMessage(error);
+        const generation = this.volumeActionGeneration;
+        await this.volumeExecution.run(
+            async () => {
+                await this.dependencies.audition.invalidateSession(sessionId);
+                return partitionMutation
+                    ? this.dependencies.transport.startPartitionMutation(sessionId, partitionMutation)
+                    : this.dependencies.transport.startVolumeMutations(sessionId, volumeMutations);
+            },
+            async () => {
+                if (!this.isCurrentVolumeAction(generation)) return;
+                await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
+                if (!this.isCurrentVolumeAction(generation)) return;
+                ++this.volumeActionGeneration;
+                this.volumeAction = null;
+                this.dependencies.reportTiming(requested.action, started, requested.items.length);
+            },
+            (update) => {
+                if (this.isCurrentVolumeAction(generation) && update.progress?.label)
+                    this.dependencies.setStatus(update.progress.label);
+            },
+            () => this.dependencies.setStatus(writingStatus),
+        );
+        if (this.isCurrentVolumeAction(generation) && this.volumeActionError)
             this.dependencies.setStatus(this.volumeActionError);
-            if (this.dependencies.sessionId() !== null) {
-                await this.dependencies
-                    .refreshSession({ partitionIndex, volumeName: previousVolumeName })
-                    .catch(() => undefined);
-            }
-        } finally {
-            this.volumeActionBusy = false;
-            this.volumeActionPhase = 'idle';
-        }
     }
 
     private async inspectVolumeDeletion(
@@ -347,12 +366,11 @@ export class MutationWorkflow {
         const sessionId = this.dependencies.sessionId();
         if (sessionId === null) {
             if (this.isCurrentVolumeAction(generation)) {
-                this.volumeActionError = 'Image session is no longer available';
+                this.volumeInspectionError = 'Image session is no longer available';
             }
             return;
         }
-        this.volumeActionBusy = true;
-        this.volumeActionPhase = 'checking';
+        this.volumeInspectionBusy = true;
         this.dependencies.setStatus('Checking volume relationships');
         try {
             const inspection = await this.dependencies.transport.inspectVolumeDeletion(
@@ -365,13 +383,12 @@ export class MutationWorkflow {
             if (this.isCurrentVolumeAction(generation)) this.volumeDeletionInspection = inspection;
         } catch (error) {
             if (this.isCurrentVolumeAction(generation)) {
-                this.volumeActionError = userFacingMessage(error);
+                this.volumeInspectionError = userFacingMessage(error);
                 this.dependencies.setStatus(this.volumeActionError);
             }
         } finally {
             if (this.isCurrentVolumeAction(generation)) {
-                this.volumeActionBusy = false;
-                this.volumeActionPhase = 'idle';
+                this.volumeInspectionBusy = false;
             }
         }
     }

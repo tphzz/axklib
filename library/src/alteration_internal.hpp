@@ -58,6 +58,10 @@ struct TransactionState {
     std::map<std::uint8_t, MutablePartition> partitions;
     std::vector<OperationReport> reports;
     std::uint64_t resized_record_freed_clusters{};
+    bool object_payload_grew{};
+    bool load_references_added{};
+    PartitionObjectSet capacity_affected_volumes{};
+    std::map<std::pair<PartitionIndex, SfsId>, SfsId> object_target_volumes{};
 };
 
 struct OperationContext {
@@ -71,6 +75,9 @@ struct ExpectedObjectPlacement {
     std::string volume_name;
     bool preserve_payload{};
 };
+
+Result<void> remember_object_targets(TransactionState &state, const OperationReport &report,
+                                     const CancellationToken &cancellation);
 
 struct ParsedDirectoryEntry {
     LinkId raw_link_id;

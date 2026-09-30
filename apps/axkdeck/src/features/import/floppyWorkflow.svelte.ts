@@ -274,6 +274,7 @@ export class FloppyImportWorkflow {
         try {
             for (let pass = 0; pass < 2; pass++) {
                 const plan = await this.dependencies.transport.planFloppyImport(session, {
+                    capacityPolicy: this.completion.capacity.policy(),
                     inspectionToken: token,
                     selectedObjectKeys: r.selected,
                     destination,
@@ -335,6 +336,11 @@ export class FloppyImportWorkflow {
         r.status = 'applying';
         r.error = '';
         try {
+            const capacityPolicy = await this.completion.capacity.review(async () => r.plan!.capacity);
+            if (!capacityPolicy) {
+                r.status = 'ready';
+                return;
+            }
             await this.dependencies.invalidateSession(session);
             if (this.request !== r || this.dependencies.sessionId() !== session) return;
             await this.completion.run(

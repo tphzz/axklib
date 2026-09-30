@@ -134,9 +134,17 @@ export class AudioImportWorkflow {
         const started = performance.now();
         this.dependencies.setStatus('Importing audio');
         try {
+            const policy = await this.completion.capacity.review((policy) =>
+                this.dependencies.transport.inspectImportCapacity(
+                    sessionId,
+                    { kind: 'AUDIO', target, items, options },
+                    policy,
+                ),
+            );
+            if (!policy) return false;
             await this.dependencies.invalidateSession(sessionId);
             return await this.completion.run(
-                () => this.dependencies.transport.startAudioImport(sessionId, target, items, options),
+                () => this.dependencies.transport.startAudioImport(sessionId, target, items, options, policy),
                 async () => {
                     this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
                     await this.dependencies.refreshSession({

@@ -65,6 +65,7 @@ import type {
     Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
+    VolumeCapacityInspection,
     VolumeDeletionTarget,
     WaveDataOrphanInspection,
 } from '../transport';
@@ -135,6 +136,13 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
+    inspectImportCapacity(
+        sessionId: number,
+        request: import('../importCapacity').CapacityImport,
+        policy: import('../importCapacity').CapacityPolicy,
+    ): Promise<import('../importCapacity').CapacityAdmission> {
+        return this.invoke('inspectImportCapacity', [sessionId, request, policy]);
+    }
     startFloppyInspection(sources: import('../floppyImport').FloppyInputLocation[]): Promise<JobState> {
         return this.invoke('startFloppyInspection', [sources]);
     }
@@ -206,8 +214,9 @@ export class InMemoryImageTransport implements ImageTransport {
         sessionId: number,
         expectedRevision: number,
         edits: import('../filesystem').FilesystemEdit[],
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.invoke('startFilesystemEdits', [sessionId, expectedRevision, edits]);
+        return this.invoke('startFilesystemEdits', [sessionId, expectedRevision, edits, policy]);
     }
     readonly storageMode: ImageTransport['storageMode'];
     readonly connectionMode: ImageTransport['connectionMode'];
@@ -386,6 +395,9 @@ export class InMemoryImageTransport implements ImageTransport {
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.invoke('inspectVolumeDeletion', [sessionId, targets]);
     }
+    inspectVolumeCapacity(sessionId: number, contentScopeId: string): Promise<VolumeCapacityInspection> {
+        return this.invoke('inspectVolumeCapacity', [sessionId, contentScopeId]);
+    }
 
     inspectPlacement(
         sessionId: number,
@@ -516,8 +528,9 @@ export class InMemoryImageTransport implements ImageTransport {
         target: VolumeImportDestination,
         items: AudioImportItem[],
         options: AudioImportOptions,
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.invoke('startAudioImport', [sessionId, target, items, options]);
+        return this.invoke('startAudioImport', [sessionId, target, items, options, policy]);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
@@ -533,8 +546,9 @@ export class InMemoryImageTransport implements ImageTransport {
         target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy]);
+        return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy, policy]);
     }
 
     startTx16wDiskSetImport(
@@ -542,8 +556,9 @@ export class InMemoryImageTransport implements ImageTransport {
         sources: InputFileLocation[],
         target: AudioImportTarget,
         importMode: Tx16wImportMode,
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.invoke('startTx16wDiskSetImport', [sessionId, sources, target, importMode]);
+        return this.invoke('startTx16wDiskSetImport', [sessionId, sources, target, importMode, policy]);
     }
 
     startImageSequenceExport(
@@ -594,8 +609,9 @@ export class InMemoryImageTransport implements ImageTransport {
         packages: InputFileLocation[],
         destinations: PackageImportDestination[],
         overwrite: boolean,
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<PackageImportPlan> {
-        return this.invoke('planPackageImport', [target, output, packages, destinations, overwrite]);
+        return this.invoke('planPackageImport', [target, output, packages, destinations, overwrite, policy]);
     }
 
     startPackageImport(planToken: string): Promise<JobState> {
@@ -610,6 +626,7 @@ export class InMemoryImageTransport implements ImageTransport {
         programSlotAssignments?: PackageProgramSlotAssignment[],
         replacePlanToken?: string,
         opaqueSequenceDecisions?: PackageOpaqueSequenceDecision[],
+        policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<ImageSessionPackageImportPlan> {
         return this.invoke('planImagePackageImport', [
             sessionId,
@@ -619,6 +636,7 @@ export class InMemoryImageTransport implements ImageTransport {
             programSlotAssignments,
             replacePlanToken,
             opaqueSequenceDecisions,
+            policy,
         ]);
     }
 

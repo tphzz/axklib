@@ -53,7 +53,7 @@ describe('Files mutation binding', () => {
         const edits = [{ kind: 'DELETE' as const, entryId: 'file', recursive: false }];
         const update = vi.fn();
         await driver.execute(8, edits, update);
-        expect(transport.startFilesystemEdits).toHaveBeenCalledWith(3, 8, edits);
+        expect(transport.startFilesystemEdits).toHaveBeenCalledWith(3, 8, edits, undefined);
         expect(invalidateSession).toHaveBeenCalledWith(3);
         expect(update).toHaveBeenCalledWith(job);
         await driver.refresh();

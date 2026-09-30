@@ -3,10 +3,11 @@
 #include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/operation_registry.hpp"
+#include "axklib/application/volume_capacity.hpp"
 
 axk::app::Result<void> axk::app::bind_image_session_operations(OperationRegistry &registry,
                                                                ImageSessionManager &images) {
-    return registry.bind(
+    const auto bound = registry.bind(
         "images.open",
         [&images](const nlohmann::json &input, const OperationContext &context) -> Result<nlohmann::json> {
             const auto source = input.find("source");
@@ -20,4 +21,7 @@ axk::app::Result<void> axk::app::bind_image_session_operations(OperationRegistry
                 return std::unexpected(opened.error());
             return image_session_summary_json(*opened);
         });
+    if (!bound)
+        return bound;
+    return bind_volume_capacity_operations(registry, images);
 }

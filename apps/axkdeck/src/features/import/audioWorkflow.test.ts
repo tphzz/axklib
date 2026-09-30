@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 import { ASeriesPreferences, type ASeriesGeneration } from '../../lib/aSeriesPreferences.svelte';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ImageTransport } from '../../lib/transport';
@@ -27,7 +28,12 @@ function createWorkflow(preferredASeriesGeneration?: () => ASeriesGeneration) {
     const loadVolume = vi.fn().mockResolvedValue(undefined);
     const startAudioImport = vi.fn().mockResolvedValue({ jobId: 41, status: 'queued' });
     const waitForJob = vi.fn().mockResolvedValue({ jobId: 41, status: 'completed' });
-    const transport = { startAudioImport, waitForJob, cancelJob: vi.fn() } as unknown as ImageTransport;
+    const transport = {
+        inspectImportCapacity: inspectFitsCapacity,
+        startAudioImport,
+        waitForJob,
+        cancelJob: vi.fn(),
+    } as unknown as ImageTransport;
     const picker = new PickerController(() => undefined);
     const workflow = new AudioImportWorkflow({
         transport,

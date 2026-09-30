@@ -7,6 +7,7 @@
     import type { FloppyImportWorkflow } from '../../features/import/floppyWorkflow.svelte';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportPlanReview from './ImportPlanReview.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
     let { workflow }: { workflow: FloppyImportWorkflow } = $props();
@@ -33,7 +34,13 @@
             r.selected.length > 0 &&
             !!importDestination(r.mode, r.partitionIndex, r.volumeName),
     );
-    const ready = $derived(!controlsDisabled && r?.plan?.valid && !r.dirty);
+    const ready = $derived(
+        !controlsDisabled &&
+            r?.plan?.valid &&
+            !r.dirty &&
+            r.plan.capacity.target === workflow.completion.capacity.target &&
+            r.plan.capacity.allowed,
+    );
     const status = $derived(
         workflow.completion.message ||
             r?.error ||
@@ -165,6 +172,12 @@
                                 >
                             </div>{/each}
                     </div>
+                    <ImportCapacityControl
+                        review={workflow.completion.capacity}
+                        admission={r.plan?.capacity}
+                        disabled={controlsDisabled}
+                        onchange={() => void workflow.review()}
+                    />
                     <ImportDestinationChooser
                         mode={r.mode}
                         partitionIndex={r.partitionIndex}

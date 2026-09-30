@@ -8,6 +8,7 @@
     import { DeletionWorkflow } from '../../../features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from '../../../features/dialogs/picker';
     import PickerDialogHost from '../../../features/dialogs/PickerDialogHost.svelte';
+    import MutationCapacityDialog from '../../../lib/components/MutationCapacityDialog.svelte';
     import { hasOpenAppDialog } from '../../../features/dialogs/visibility';
     import ClientFileInputs from '../../../features/file-operations/ClientFileInputs.svelte';
     import { DirectComputerWorkflow } from '../../../features/file-operations/directComputerWorkflow';
@@ -36,7 +37,7 @@
     import ImageIntegrityDialog from '../../../lib/components/ImageIntegrityDialog.svelte';
     import ImageOpenProgressDialog from '../../../lib/components/ImageOpenProgressDialog.svelte';
     import WorkspaceGuard from '../../../lib/components/WorkspaceGuard.svelte';
-    import { createTransport } from '../../../lib/createTransport';
+    import { createCapacityConnection } from './capacityConnection';
     import type { RemoteServerSettingsView } from '../../../lib/serverSettings';
     import { reportMutationTiming } from '../../../lib/diagnostics';
     import {
@@ -58,8 +59,8 @@
         initialExperimentalWarningOpen = true,
         openConnectionSettingsOnStart = false,
     }: AppProps = $props();
-    const transport = createTransport();
     const preferences = useASeriesPreferences();
+    const { transport, capacity: mutationCapacity } = createCapacityConnection(preferences);
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
     let experimentalWarningAcknowledged = $state(false);
@@ -80,6 +81,7 @@
     const packagePickerHistory = new PackagePickerHistory();
     const imageSessionWorkflow = new ImageSessionWorkflow(transport, pickerController);
     const fileBindings = createFilesystemBindings({
+        imageFormat: () => imageSessionWorkflow.imageFormat,
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -360,6 +362,7 @@
     const sequences = $derived(catalog.sequences);
 
     onDestroy(() => {
+        mutationCapacity.dispose();
         exportWorkflow.dispose();
         volumePackageExportWorkflow.dispose();
         volumeFloppyExportWorkflow.dispose();
@@ -628,6 +631,7 @@
 <WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
 
 {#if !experimentalWarningOpen}
+    <MutationCapacityDialog workflow={mutationCapacity} />
     <PickerDialogHost
         {transport}
         request={pickerRequest}

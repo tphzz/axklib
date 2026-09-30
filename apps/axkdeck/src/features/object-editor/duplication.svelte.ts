@@ -1,4 +1,5 @@
 import { AxklibApiError } from '../../lib/httpErrors';
+import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import type { ImageTransport, JobState } from '../../lib/transport';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { objectEditorAdapter } from './registry';
@@ -141,10 +142,11 @@ export class SampleDuplication {
         } catch (error) {
             if (
                 this.jobId === null &&
-                error instanceof AxklibApiError &&
-                error.status >= 400 &&
-                error.status < 500 &&
-                error.status !== 408
+                (error instanceof CapacityWriteRejected ||
+                    (error instanceof AxklibApiError &&
+                        error.status >= 400 &&
+                        error.status < 500 &&
+                        error.status !== 408))
             ) {
                 this.phase = 'editable';
                 this.message = userFacingMessage(error);

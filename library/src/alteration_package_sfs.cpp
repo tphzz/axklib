@@ -221,6 +221,8 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         report.object_name = object.destination_name;
         report.inserted_sfs_ids = {SfsId{*object.target_sfs_id}};
         report.allocated_clusters = allocated->second;
+        if (const auto remembered = remember_object_targets(state, report, cancellation); !remembered)
+            return std::unexpected{remembered.error()};
         state.reports.push_back(std::move(report));
         ++completed;
         if (progress) {

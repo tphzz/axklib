@@ -19,6 +19,13 @@ struct InfoRequest {
     bool show_default_programs{};
 };
 
+struct VolumeCapacityRequest {
+    std::filesystem::path source;
+    std::uint8_t partition_index{};
+    std::string volume_name;
+    bool pretty{};
+};
+
 struct InventoryRequest {
     std::vector<std::filesystem::path> paths;
     std::filesystem::path output_directory;

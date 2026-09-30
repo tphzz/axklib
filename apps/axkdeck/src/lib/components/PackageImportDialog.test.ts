@@ -57,6 +57,7 @@ const inspection: PackageInspection = {
 
 function plan(valid = true): ImageSessionPackageImportPlan {
     return {
+        capacity: { target: 'A3000', reports: [], allowed: true },
         schemaVersion: '1.0',
         imageId: 'image-1',
         revision: 2,

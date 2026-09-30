@@ -6,15 +6,18 @@ export const inspectorSectionVisibility = Symbol('inspector-section-visibility')
 export class InspectorPanels {
     private collapsed = $state<Record<string, boolean>>({});
 
-    expanded(scope: string, sectionId: string): boolean {
+    expanded(scope: string, sectionId: string, defaultExpanded?: boolean, stateKey = ''): boolean {
         const defaultCollapsed =
             sectionId === 'relationships' ||
             ((scope === 'sample' || scope === 'sample-bank') && sectionId === 'stored-format');
-        return !(this.collapsed[`${scope}:${sectionId}`] ?? defaultCollapsed);
+        return !(
+            this.collapsed[`${scope}:${sectionId}:${stateKey}`] ??
+            (defaultExpanded === undefined ? defaultCollapsed : !defaultExpanded)
+        );
     }
 
-    setExpanded(scope: string, sectionId: string, expanded: boolean): void {
-        this.collapsed[`${scope}:${sectionId}`] = !expanded;
+    setExpanded(scope: string, sectionId: string, expanded: boolean, stateKey = ''): void {
+        this.collapsed[`${scope}:${sectionId}:${stateKey}`] = !expanded;
     }
 }
 

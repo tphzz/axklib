@@ -1342,7 +1342,7 @@ input:focus-visible {
 
 .dialog-backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--modal-layer, 50);
   display: grid;
   place-items: center;
   inset: 0;
@@ -1350,11 +1350,11 @@ input:focus-visible {
 }
 
 .dialog-backdrop-raised {
-  z-index: 60;
+  z-index: var(--modal-layer, 60);
 }
 
 .dialog-backdrop-top {
-  z-index: 80;
+  z-index: var(--modal-layer, 80);
 }
 
 .storage-picker-backdrop {

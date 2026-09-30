@@ -2,19 +2,37 @@
     import type { VolumeDeletionInspection } from '../transport';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
     import { modal } from '../modal';
+    import type { VolumeActionPhase } from '../../features/mutation/volumeActionExecution.svelte';
 
     interface Props {
         action: ImageTreeAction;
         items: DiskTreeItem[];
         busy: boolean;
-        phase: 'idle' | 'checking' | 'submitting';
+        phase: VolumeActionPhase;
+        locked?: boolean;
+        canDismiss?: boolean;
+        recovery?: 'check' | 'refresh' | null;
+        onrecover?: () => void;
         error: string;
         deletionInspection: VolumeDeletionInspection | null;
         oncancel: () => void;
         onsubmit: (name: string) => void;
     }
 
-    let { action, items, busy, phase, error, deletionInspection, oncancel, onsubmit }: Props = $props();
+    let {
+        action,
+        items,
+        busy,
+        phase,
+        locked = busy,
+        canDismiss = !busy,
+        recovery = null,
+        onrecover = () => {},
+        error,
+        deletionInspection,
+        oncancel,
+        onsubmit,
+    }: Props = $props();
     let value = $state('');
     let initialized = false;
     const item = $derived(items[0]!);
@@ -49,26 +67,35 @@
     );
     const subject = $derived(action === 'rename-partition' ? 'Partition' : 'Volume');
     const submitLabel = $derived(
-        busy
-            ? action === 'add-volume'
-                ? 'Adding'
-                : action === 'rename-volume' || action === 'rename-partition'
-                  ? 'Renaming'
-                  : deletingMultiple
-                    ? `Deleting ${items.length} volumes`
-                    : 'Deleting'
-            : action === 'add-volume'
-              ? 'Add'
-              : action === 'rename-volume' || action === 'rename-partition'
-                ? 'Rename'
-                : 'Delete permanently',
+        action === 'add-volume'
+            ? 'Add'
+            : action === 'rename-volume' || action === 'rename-partition'
+              ? 'Rename'
+              : 'Delete permanently',
+    );
+    const status = $derived(
+        phase === 'checking'
+            ? action === 'delete-volume'
+                ? 'Checking object relationships...'
+                : 'Checking sampler capacity...'
+            : phase === 'submitting'
+              ? action === 'add-volume'
+                  ? 'Adding volume...'
+                  : action === 'delete-volume'
+                    ? 'Deleting volumes...'
+                    : 'Renaming...'
+              : phase === 'refreshing'
+                ? 'Refreshing workspace...'
+                : phase === 'checking-status'
+                  ? 'Checking change status...'
+                  : '',
     );
     const trimmedValue = $derived(value.trim());
     const nameValid = $derived(
         trimmedValue.length > 0 && trimmedValue.length <= 16 && /^[\x20-\x7e]+$/.test(trimmedValue),
     );
     const canSubmit = $derived(
-        !busy &&
+        !locked &&
             (action === 'delete-volume'
                 ? deletionInspection?.canDelete === true
                 : nameValid &&
@@ -86,12 +113,16 @@
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        use:modal={{ onescape: oncancel }}
+        use:modal={{
+            onescape: () => {
+                if (canDismiss) oncancel();
+            },
+        }}
     >
         <form class="volume-action-form" onsubmit={submit}>
             <header class="dialog-header">
                 <h2>{title}</h2>
-                <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+                <button class="icon-button" type="button" aria-label="Close" disabled={!canDismiss} onclick={oncancel}
                     >×</button
                 >
             </header>
@@ -117,9 +148,7 @@
                         <p>The volume and all objects it contains will be destroyed.</p>
                     {/if}
                     <p>This action cannot be undone.</p>
-                    {#if phase === 'checking' && !deletionInspection}
-                        <p role="status">Checking object relationships…</p>
-                    {:else if deletionInspection && !deletionInspection.canDelete}
+                    {#if deletionInspection && !deletionInspection.canDelete}
                         <p class="dialog-error" role="alert">
                             A known object relationship crosses the volume boundary. Repair object placement from the
                             volume or partition context menu, then retry deletion.
@@ -132,7 +161,7 @@
                             class="dialog-field-control"
                             bind:value
                             data-dialog-initial-focus={action.startsWith('rename-') ? 'select' : 'caret'}
-                            disabled={busy}
+                            disabled={locked}
                             maxlength="16"
                             autocomplete="off"
                             aria-label={`${subject} name`}
@@ -142,23 +171,46 @@
                         <p class="field-help field-help-error">Use 1–16 printable ASCII characters.</p>
                     {/if}
                 {/if}
-                {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
             <footer class="dialog-footer">
-                <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>Cancel</button>
-                <button
-                    class={action === 'delete-volume' ? 'danger-button' : 'primary-button'}
-                    type="submit"
-                    disabled={!canSubmit}
+                <p
+                    class="dialog-footer-status"
+                    class:dialog-error={Boolean(error)}
+                    role={error ? 'alert' : 'status'}
+                    title={error || status}
                 >
-                    {submitLabel}
-                </button>
+                    {error || status}
+                </p>
+                <div class="dialog-footer-actions">
+                    <button class="secondary-button" type="button" disabled={!canDismiss} onclick={oncancel}
+                        >{phase === 'refresh-failed' ? 'Done' : 'Cancel'}</button
+                    >
+                    {#if recovery}
+                        <button class="primary-button" type="button" disabled={busy} onclick={onrecover}
+                            >{recovery === 'check' ? 'Check status' : 'Refresh'}</button
+                        >
+                    {:else}<button
+                            class={action === 'delete-volume' ? 'danger-button' : 'primary-button'}
+                            type="submit"
+                            disabled={!canSubmit}
+                        >
+                            {submitLabel}
+                        </button>{/if}
+                </div>
             </footer>
         </form>
     </div>
 </div>
 
 <style>
+    .dialog-backdrop {
+        padding: 16px;
+    }
+
+    .volume-action-dialog {
+        width: min(430px, 100%);
+    }
+
     .volume-deletion-targets {
         max-height: 12rem;
         overflow: auto;

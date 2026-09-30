@@ -50,10 +50,26 @@ Result<void> validate_written(const std::filesystem::path &path, PartitionIndex 
 }
 } // namespace
 
+Result<VolumeCapacityAdmission> inspect_sfs_file_edit_capacity(const std::filesystem::path &source_path,
+                                                               PartitionIndex partition,
+                                                               std::span<const FilesystemEdit> edits,
+                                                               const VolumeCapacityPolicy &capacity_policy,
+                                                               const CancellationToken &cancellation) {
+    const auto source = FileReader::open(source_path);
+    if (!source)
+        return std::unexpected{source.error()};
+    const auto prepared = detail::prepare_sfs_file_edits(*source, partition, edits, cancellation);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return detail::inspect_filesystem_capacity(*source, prepared->preview, partition, edits, capacity_policy,
+                                               cancellation);
+}
+
 Result<PublicationOutcome> write_sfs_file_edits(const std::filesystem::path &source_path,
                                                 const std::filesystem::path &destination, PartitionIndex partition,
                                                 std::span<const FilesystemEdit> edits,
-                                                const CancellationToken &cancellation, ProgressSink *progress) {
+                                                const CancellationToken &cancellation, ProgressSink *progress,
+                                                const VolumeCapacityPolicy &capacity_policy) {
     std::vector<std::shared_ptr<const RandomAccessReader>> inputs;
     for (const auto &edit : edits) {
         if (const auto *put = std::get_if<PutFilesystemFile>(&edit); put && put->contents)
@@ -64,14 +80,28 @@ Result<PublicationOutcome> write_sfs_file_edits(const std::filesystem::path &sou
         [&](std::shared_ptr<const RandomAccessReader> source) {
             return detail::prepare_sfs_file_edits(std::move(source), partition, edits, cancellation);
         },
-        cancellation, progress);
+        cancellation, progress,
+        [&](const std::filesystem::path &frozen_path) -> Result<void> {
+            const auto source = FileReader::open(source_path);
+            const auto frozen = FileReader::open(frozen_path);
+            if (!source)
+                return std::unexpected{source.error()};
+            if (!frozen)
+                return std::unexpected{frozen.error()};
+            const auto capacity =
+                detail::inspect_filesystem_capacity(*source, *frozen, partition, edits, capacity_policy, cancellation);
+            if (!capacity)
+                return std::unexpected{capacity.error()};
+            return enforce_volume_capacity_admission(*capacity, capacity_policy);
+        });
 }
 
 Result<PublicationOutcome> sfs_files::publish(const std::filesystem::path &source_path,
                                               const std::filesystem::path &destination, PartitionIndex partition,
                                               std::span<const std::shared_ptr<const RandomAccessReader>> inputs,
                                               const PrepareEdits &prepare, const CancellationToken &cancellation,
-                                              ProgressSink *progress) {
+                                              ProgressSink *progress,
+                                              const std::function<Result<void>(const std::filesystem::path &)> &admit) {
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     auto source = FileReader::open(source_path);
@@ -127,6 +157,9 @@ Result<PublicationOutcome> sfs_files::publish(const std::filesystem::path &sourc
     }
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
+    if (admit)
+        if (auto admitted = admit(publication->path()); !admitted)
+            return std::unexpected{admitted.error()};
     return publication->publish(detail::PublicationMode::create_only);
 }
 } // namespace axk

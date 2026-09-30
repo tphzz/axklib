@@ -1,5 +1,7 @@
 #pragma once
 
+#include "axklib/volume_capacity.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -462,10 +464,12 @@ AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::
                                                          const AudioImportOptions &options);
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const RandomAccessReader &reader,
                                                          const AudioImportOptions &options);
-AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
-                                                         const std::filesystem::path &output_path,
-                                                         bool overwrite = false,
-                                                         const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenImageLayout>
+write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path, bool overwrite = false,
+                const CancellationToken &cancellation = {}, const VolumeCapacityPolicy &capacity_policy = {});
+AXK_AUDIO_API Result<VolumeCapacityAdmission>
+inspect_hds_build_capacity(const HdsBuildManifest &manifest, const VolumeCapacityPolicy &capacity_policy = {},
+                           const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
                                                           const std::filesystem::path &output_path,
                                                           bool overwrite = false,

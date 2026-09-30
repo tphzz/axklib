@@ -113,6 +113,7 @@ nav:
       - A-Series Sample Parameter Authoring: axklib/sample-parameters.md
       - A-Series Program Parameters: axklib/program-parameters.md
       - Writer And Alteration: axklib/write.md
+      - A-Series Volume Load Capacity: axklib/volume-capacity.md
   - Distribution:
       - Compatibility: axklib/compatibility.md
       - Versioning And Build Identity: axklib/versioning.md

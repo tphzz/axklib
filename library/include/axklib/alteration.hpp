@@ -18,6 +18,7 @@
 #include "axklib/sequence.hpp"
 #include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
+#include "axklib/volume_capacity.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk {
@@ -354,19 +355,20 @@ struct AlterationResult {
 struct AlterationInspection {
     std::filesystem::path source_path;
     std::vector<OperationReport> operations;
+    VolumeCapacityAdmission capacity;
 };
 
 AXK_AUDIO_API Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                                                                    const std::filesystem::path &base_directory = {});
 AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::filesystem::path &path);
-AXK_AUDIO_API Result<AlterationResult> alter_hds(const std::filesystem::path &source_path,
-                                                 const AlterationManifest &manifest,
-                                                 const std::filesystem::path &output_path,
-                                                 const CancellationToken &cancellation = {},
-                                                 ProgressSink *progress = nullptr, bool overwrite = false);
+AXK_AUDIO_API Result<AlterationResult>
+alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
+          const std::filesystem::path &output_path, const CancellationToken &cancellation = {},
+          ProgressSink *progress = nullptr, bool overwrite = false, const VolumeCapacityPolicy &capacity_policy = {});
 AXK_AUDIO_API Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
                                                                   const AlterationManifest &manifest,
                                                                   const CancellationToken &cancellation = {},
-                                                                  ProgressSink *progress = nullptr);
+                                                                  ProgressSink *progress = nullptr,
+                                                                  const VolumeCapacityPolicy &capacity_policy = {});
 
 } // namespace axk

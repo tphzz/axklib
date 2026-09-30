@@ -1,4 +1,5 @@
 import type { components } from './generated/axklibApiV1';
+import type { CapacityPolicy } from './importCapacity';
 import type { FloppyPlanRequest, FloppyInputLocation } from './floppyImport';
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { HttpImageSessions } from './httpImageSessions';
@@ -83,6 +84,7 @@ export class HttpPackageOperations {
         packages: InputFileLocation[],
         destinations: PackageImportDestination[],
         overwrite: boolean,
+        policy?: CapacityPolicy,
     ): Promise<PackageImportPlan> {
         const result = await this.client.invoke<PackageImportPlan>('package.plan_import', {
             target: serverFile(target).reference,
@@ -92,6 +94,7 @@ export class HttpPackageOperations {
             renames: [],
             programSlotAssignments: [],
             overwrite,
+            ...(policy ? { capacityPolicy: policy } : {}),
         });
         if (this.jobs.isJob(result)) throw new Error('package import planning unexpectedly returned a job');
         return result;
@@ -115,6 +118,7 @@ export class HttpPackageOperations {
         programSlotAssignments: PackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
         opaqueSequenceDecisions: PackageOpaqueSequenceDecision[] = [],
+        policy?: CapacityPolicy,
     ): Promise<ImageSessionPackageImportPlan> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
@@ -125,6 +129,7 @@ export class HttpPackageOperations {
             renames,
             programSlotAssignments,
             opaqueSequenceDecisions,
+            ...(policy ? { capacityPolicy: policy } : {}),
             ...(replacePlanToken ? { replacePlanToken } : {}),
         });
         if (this.jobs.isJob(result)) throw new Error('image package import planning unexpectedly returned a job');

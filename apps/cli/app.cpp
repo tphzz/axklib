@@ -114,6 +114,14 @@ int axk::cli::run(int argc, char **argv) {
     app.set_version_flag("--version", version_report(registry));
 
     axk::cli::InfoRequest info_request;
+    axk::cli::VolumeCapacityRequest capacity_request;
+    auto *capacity = app.add_subcommand("capacity", "inspect sampler load capacity")->require_subcommand(1);
+    auto *volume_capacity = capacity->add_subcommand("volume", "inspect an A-Series SFS volume");
+    volume_capacity->add_option("source", capacity_request.source, "input image")->required();
+    volume_capacity->add_option("--partition", capacity_request.partition_index, "zero-based partition index")
+        ->check(CLI::Range(0, 7));
+    volume_capacity->add_option("--volume", capacity_request.volume_name, "exact volume name")->required();
+    volume_capacity->add_flag("--pretty", capacity_request.pretty, "indent JSON");
     auto *info = app.add_subcommand("info", "summarize supported axklib containers");
     info->add_option("paths", info_request.paths, "input files or directories")->required()->expected(1, -1);
     info->add_flag("--strict", info_request.strict, "stop after the first load error");
@@ -299,6 +307,8 @@ int axk::cli::run(int argc, char **argv) {
         return run_relationships_request(relationships_request);
     if (*inventory)
         return run_inventory_request(inventory_request);
+    if (*volume_capacity)
+        return run_volume_capacity(capacity_request);
     if (*coverage)
         return run_coverage_request(coverage_request);
     if (*corpus_audit)

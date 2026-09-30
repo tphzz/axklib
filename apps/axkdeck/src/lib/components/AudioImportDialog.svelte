@@ -25,6 +25,7 @@
     import type { AudioImportRow } from './audioImportDialogTypes';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
@@ -501,6 +502,7 @@
             </button>
         </header>
         <div class="audio-import-body">
+            <ImportCapacityControl review={completion.capacity} disabled={busy} />
             <ImportDestinationChooser
                 mode={destinationMode}
                 partitionIndex={destinationPartitionIndex}
@@ -566,8 +568,12 @@
             {/if}
         </div>
         <footer class="dialog-footer">
-            <span class="dialog-footer-status" role="status" title={completion.message || generalError}
-                >{completion.message ||
+            <span
+                class="dialog-footer-status"
+                role="status"
+                title={completion.capacity.message || completion.message || generalError}
+                >{(completion.capacity.busy ? completion.capacity.message : '') ||
+                    completion.message ||
                     generalError ||
                     (ready ? 'Ready to import' : files.length ? 'Checking audio files' : 'Choose audio files')}</span
             >

@@ -424,7 +424,10 @@ TEST_F(ProgramAssignmentReplacement, ExhaustedImageAllocationRollsBackGrowthAndA
     filling.schema_version = "1.0";
     filling.operations.push_back({"fill", axk::InsertWaveformOperation{axk::PartitionIndex{0}, "Programs", waveform}});
     const auto filled = root / "filled.hds";
-    const auto inserted = axk::alter_hds(source, filling, filled);
+    const auto capacity = axk::inspect_hds_alteration(source, filling);
+    ASSERT_TRUE(capacity) << capacity.error().message;
+    const auto inserted =
+        axk::alter_hds(source, filling, filled, {}, nullptr, false, {axk::ASeriesLoadTarget::a4000_a5000});
     ASSERT_TRUE(inserted) << inserted.error().message;
     {
         const auto image = axk::open_image(filled);

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
@@ -12,6 +13,7 @@ describe.each(['audio', 'midi'] as const)('%s completion recovery', (kind) => {
         const start = vi.fn().mockResolvedValue({ jobId: 41, status: 'queued' });
         const waitForJob = vi.fn().mockResolvedValue({ jobId: 41, status: 'completed' });
         const transport = {
+            inspectImportCapacity: inspectFitsCapacity,
             startAudioImport: start,
             startSequenceImport: start,
             waitForJob,

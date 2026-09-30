@@ -65,6 +65,8 @@ Result<OperationReport> replace_program_assignments(TransactionState &state, Ope
     auto new_targets = assignment_targets(state, partition, operation.volume_name, *replacement, cancellation);
     if (!new_targets)
         return std::unexpected{new_targets.error()};
+    state.load_references_added =
+        std::ranges::any_of(*new_targets, [&](SfsId target) { return !old_targets->contains(target); });
     for (const auto type : {ObjectType::sbnk, ObjectType::sbac}) {
         const bool sample = type == ObjectType::sbnk;
         auto objects =

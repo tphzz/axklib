@@ -325,7 +325,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 72U);
+    EXPECT_EQ(entries.size(), 77U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -654,6 +654,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"programSlotPlacements", placements},
         {"allocation", nlohmann::json::array()},
         {"sfsIndexCapacity", nlohmann::json::array()},
+        {"capacity", {{"target", "A4000_A5000"}, {"reports", nlohmann::json::array()}, {"allowed", true}}},
     };
     const auto wire_plan = validator.wire_value("PackageImportPlan", application_plan);
     ASSERT_TRUE(validator.validate("PackageImportPlan", wire_plan));
@@ -683,6 +684,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     application_session_result.erase("opaqueSequences");
     application_session_result.erase("conflicts");
     application_session_result.erase("sfsIndexCapacity");
+    application_session_result.erase("capacity");
     application_session_result["imageId"] = "image-1";
     application_session_result["revision"] = 2U;
     application_session_result["objectCount"] = 4U;
@@ -1031,6 +1033,22 @@ TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
     misspelled.erase("writable");
     misspelled["writeable"] = false;
     EXPECT_FALSE(validator.validate("WorkspaceCreateRequest", misspelled));
+}
+
+TEST(ServerContract, CapacityContractsRejectObsoleteApprovalFields) {
+    axk::server::OpenApiValidator validator;
+    nlohmann::json policy{{"target", "A3000"}};
+    EXPECT_TRUE(validator.validate("VolumeCapacityPolicy", policy));
+    policy["acknowledgedReviewId"] = nullptr;
+    EXPECT_FALSE(validator.validate("VolumeCapacityPolicy", policy));
+    nlohmann::json request{{"planToken", "retained-token"}};
+    EXPECT_TRUE(validator.validate("PackageImportRequest", request));
+    request["capacityReviewId"] = nullptr;
+    EXPECT_FALSE(validator.validate("PackageImportRequest", request));
+    nlohmann::json admission{{"target", "A3000"}, {"reports", nlohmann::json::array()}, {"allowed", true}};
+    EXPECT_TRUE(validator.validate("VolumeCapacityAdmission", admission));
+    admission["reviewId"] = "obsolete";
+    EXPECT_FALSE(validator.validate("VolumeCapacityAdmission", admission));
 }
 
 TEST(ServerContract, HardDiskCreationPlansAcceptExpandedProfileIdsAndBoundPartitionCounts) {

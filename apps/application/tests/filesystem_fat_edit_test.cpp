@@ -379,8 +379,8 @@ TEST_P(FatFilesystemEdits, DelegatesReviewedInputsButRetainsDefaultDigestChecks)
     changed = axk::app::apply_filesystem_edits(*sessions, journals, second->image_id, "owner", second->revision,
                                                partition, first, {}, nullptr, verified);
     ASSERT_TRUE(changed) << changed.error().message;
-    EXPECT_EQ(verification_count, 1U);
-    EXPECT_EQ(default_bytes, input->bytes_read + 2U * input->size());
+    EXPECT_EQ(verification_count, 2U);
+    EXPECT_EQ(default_bytes, input->bytes_read + 3U * input->size());
     EXPECT_GE(input->bytes_read, input->size());
     const auto invalid =
         axk::app::apply_filesystem_edits(*sessions, journals, second->image_id, "owner", changed->revision, partition,

@@ -37,6 +37,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
                                    src/image_filesystem_attributes.cpp
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
+                                   src/image_session_volume_capacity.cpp src/volume_capacity.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
                                    src/image_session_program_generation.cpp
                                    src/image_session_program_assignment_cleanup.cpp
@@ -51,6 +52,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/jobs_support.cpp
                                    src/operation_registry.cpp src/operation_registry_names.cpp
                                    src/operation_registry_program_assignments.cpp
+                                   src/operation_registry_capacity.cpp
                                    src/package_filename.cpp src/package_operations.cpp
                                    src/package_operations_support.cpp src/session_package_import_plan.cpp
                                    src/session_package_operations.cpp

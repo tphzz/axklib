@@ -184,17 +184,33 @@ describe('App panel layout', () => {
             window.dispatchEvent(drop);
             const dialog = await screen.findByRole('dialog', { name: 'Import audio' }, { timeout: 5000 });
             await waitFor(() =>
-                expect((within(dialog).getByRole('button', { name: 'a3k' }) as HTMLButtonElement).disabled).toBe(false),
+                expect(
+                    (
+                        within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', {
+                            name: 'a3k',
+                        }) as HTMLButtonElement
+                    ).disabled,
+                ).toBe(false),
             );
             return dialog;
         };
         let dialog = await openImport();
-        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
-        await fireEvent.click(within(dialog).getByRole('button', { name: 'a3k' }));
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a4k/a5k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
+        await fireEvent.click(
+            within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', { name: 'a3k' }),
+        );
         await cancelDialog(dialog);
         expect(preferences.generation).toBe('A4000_A5000');
         dialog = await openImport();
-        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a4k/a5k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
         await cancelDialog(dialog);
 
         const openBank = async () => {
@@ -214,7 +230,11 @@ describe('App panel layout', () => {
         await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Preferences' })).toBeNull());
         expect(save).toHaveBeenCalledWith('A3000');
         dialog = await openImport();
-        expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a3k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
         await cancelDialog(dialog);
         dialog = await openBank();
         expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
@@ -1826,6 +1846,7 @@ describe('App panel layout', () => {
             issues: [],
         });
         mocks.planImagePackageImport.mockResolvedValue({
+            capacity: { target: 'A3000', reports: [], allowed: true },
             schemaVersion: '1.0',
             imageId: 'image-1',
             revision: 1,
@@ -1916,6 +1937,7 @@ describe('App panel layout', () => {
                 [],
                 undefined,
                 [],
+                { target: 'A3000' },
             ),
         );
         expect(await screen.findByText('Ready to import')).toBeTruthy();

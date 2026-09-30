@@ -258,6 +258,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
                                                                       "images.audio_export",
                                                                       "images.sequence_export",
                                                                       "images.volume_package_export",
+                                                                      "images.volume_capacity.inspect",
                                                                       "images.volume_floppy_export",
                                                                       "images.media_conversion",
                                                                       "images.alter.volumes",
@@ -321,6 +322,36 @@ TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, "image_source_changed");
+}
+
+TEST_F(ImageSessionTest, VolumeCapacityRequiresOwnedCurrentPhysicalVolumeAndRejectsStaleCache) {
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(roots);
+    ASSERT_FALSE(roots->items.empty());
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes);
+    const auto volume = std::ranges::find_if(volumes->items, [](const auto &item) { return item.kind == "volume"; });
+    ASSERT_NE(volume, volumes->items.end());
+    const auto first = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_TRUE(first) << first.error().message;
+    ASSERT_EQ(first->profiles.size(), 2U);
+    const auto cached = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_TRUE(cached);
+    EXPECT_EQ(first->volume_directory, cached->volume_directory);
+    EXPECT_EQ(first->profiles[1].minimum_resident_bytes, cached->profiles[1].minimum_resident_bytes);
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-b", opened->revision, volume->id));
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision + 1U, volume->id));
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, roots->items.front().id));
+    const auto fixture = root_ / "fixture.hds";
+    const auto previous = std::filesystem::last_write_time(fixture);
+    patch_sample_cached_reference(fixture, 0x12345678U);
+    std::filesystem::last_write_time(fixture, previous + std::chrono::seconds{1});
+    const auto stale = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_source_changed");
 }
 
 TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation) {

@@ -1,5 +1,8 @@
 <script lang="ts">
     import { tick } from 'svelte';
+    import { useVolumeCapacity } from '../volumeCapacity.svelte';
+    import VolumeCapacityTooltip from './VolumeCapacityTooltip.svelte';
+    import AttributeHelp from './AttributeHelp.svelte';
     import { formatAllocationBytes } from '../allocationInspector';
     import { hasDisallowedNavigationModifier, linearNavigationIndex } from '../collectionNavigation';
     import { formatStoredSize } from '../formatBytes';
@@ -61,7 +64,9 @@
     let totalCount = $state(0);
     let loading = $state(false);
     let loadError = $state('');
+    let selectButton = $state<HTMLButtonElement>();
     let initialized = false;
+    const capacity = useVolumeCapacity();
     const selected = $derived(item.kind === 'volume' ? selectedVolumeIds.includes(item.id) : selectedId === item.id);
     const hasChildren = $derived(item.kind !== 'volume' && totalCount > 0);
     const loadCompletePartition = $derived(samplerOrderingEnabled && item.kind === 'partition');
@@ -84,14 +89,6 @@
     );
     const capacityLevel = $derived(usedPercent >= 90 ? 'critical' : usedPercent >= 80 ? 'warning' : 'normal');
     const partitionTooltipId = $derived(`partition-capacity-${item.id}`);
-    const volumeTooltipId = $derived(`volume-size-${item.id}`);
-    const tooltipId = $derived(
-        loadCompletePartition
-            ? partitionTooltipId
-            : item.kind === 'volume' && item.sizeBytes !== undefined
-              ? volumeTooltipId
-              : undefined,
-    );
     const partitionVolumeText = $derived(`${item.childCount} ${item.childCount === 1 ? 'volume' : 'volumes'}`);
     const partitionCapacityText = $derived(
         partitionCapacity
@@ -282,14 +279,24 @@
         <div class="tree-item-stack">
             <button
                 class="tree-item-select"
+                bind:this={selectButton}
                 type="button"
                 aria-current={selectedId === item.id ? 'true' : undefined}
                 aria-pressed={item.kind === 'volume' ? selected : undefined}
-                aria-describedby={tooltipId}
+                aria-describedby={loadCompletePartition ? partitionTooltipId : undefined}
                 data-tree-id={item.id}
                 data-tree-kind={item.kind}
                 data-tree-parent-id={parentId}
-                onclick={(event) => onselect(item, selectionMode(event))}
+                onclick={(event) => {
+                    capacity?.selectVolume(item);
+                    onselect(item, selectionMode(event));
+                }}
+                onpointerenter={() => {
+                    if (item.kind === 'volume') void capacity?.inspect(item.id);
+                }}
+                onfocus={() => {
+                    if (item.kind === 'volume') void capacity?.inspect(item.id);
+                }}
                 ondblclick={() => {
                     if (item.kind === 'partition') void toggle();
                 }}
@@ -329,10 +336,20 @@
                     <span>{partitionCapacityText}</span>
                     {#if partitionSpaceText}<span>{partitionSpaceText}</span>{/if}
                 </span>
-            {:else if item.kind === 'volume' && item.sizeBytes !== undefined}
-                <span id={volumeTooltipId} class="tree-item-tooltip" role="tooltip">
-                    <span>Size: {formatStoredSize(item.sizeBytes)}</span>
-                </span>
+            {:else if item.kind === 'volume' && (item.sizeBytes !== undefined || capacity?.enabled)}
+                <AttributeHelp
+                    label={item.name}
+                    anchor={selectButton}
+                    contextKey={capacity?.inspectionKey(item.id) ?? item.id}
+                    preferredWidth={360}
+                    hoverDelay={500}
+                    focusVisibleOnly
+                >
+                    {#snippet content()}
+                        {#if item.sizeBytes !== undefined}<span>Size: {formatStoredSize(item.sizeBytes)}</span>{/if}
+                        {#if capacity?.enabled}<VolumeCapacityTooltip state={capacity.state(item.id)} />{/if}
+                    {/snippet}
+                </AttributeHelp>
             {/if}
         </div>
     </div>

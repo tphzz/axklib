@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/secure_random.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
 #include "axklib/package_import_planning.hpp"
@@ -137,6 +138,9 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             auto import_request = parse_import_request(input);
             if (!import_request)
                 return Result<Json>{std::unexpected(import_request.error())};
+            const auto policy = capacity_policy(input);
+            if (!policy)
+                return Result<Json>{std::unexpected(policy.error())};
 
             auto retained_sources = package_plan_internal::retain_sources(inputs, context.owner_id, sandbox, uploads);
             if (!retained_sources)
@@ -159,19 +163,29 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             auto plan = axk::plan_package_import(target_path, packages, *import_request, context.cancellation);
             if (!plan)
                 return Result<Json>{std::unexpected(core_error(plan.error(), target->relative_path))};
+            axk::VolumeCapacityAdmission capacity;
+            capacity.target = policy->target;
+            if (plan->valid() && plan->target_kind == axk::MediaKind::sfs) {
+                const auto inspected =
+                    axk::inspect_package_import_capacity(target_path, packages, *plan, *policy, context.cancellation);
+                if (!inspected)
+                    return Result<Json>{std::unexpected(core_error(inspected.error(), target->relative_path))};
+                capacity = *inspected;
+            }
 
             const auto now = Clock::now();
             auto token = axk::app::secure_random_hex(24U);
             if (!token)
                 return Result<Json>{std::unexpected(token.error())};
-            auto record = std::make_shared<PackagePlanRecord>(
-                PackagePlanRecord{*token, context.owner_id, now + state->retention, *target, *output, *output_path,
-                                  overwrite, std::move(inputs), std::move(retained_sources->upload_leases),
-                                  retained_sources->source_bytes, std::move(*plan), false});
+            auto record = std::make_shared<PackagePlanRecord>(PackagePlanRecord{
+                *token, context.owner_id, now + state->retention, *target, *output, *output_path, overwrite,
+                std::move(inputs), std::move(retained_sources->upload_leases), retained_sources->source_bytes,
+                std::move(*plan), false, *policy, std::move(capacity)});
             if (auto stored = admission->commit(record); !stored)
                 return Result<Json>{std::unexpected(stored.error())};
-            return Result<Json>{
-                plan_json(record->plan, *token, static_cast<std::uint64_t>(state->retention.count() * 60))};
+            auto result = plan_json(record->plan, *token, static_cast<std::uint64_t>(state->retention.count() * 60));
+            result["capacity"] = capacity_admission_json(record->capacity);
+            return Result<Json>{std::move(result)};
         });
         if (!bound)
             return bound;
@@ -179,6 +193,8 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
     if (!registry.is_implemented("package.import")) {
         auto bound = registry.bind("package.import", [state, &sandbox, &uploads](const Json &input,
                                                                                  const OperationContext &context) {
+            if (!input.is_object() || input.size() != 1U)
+                return Result<Json>{std::unexpected(operation_error("invalid_request", "Only planToken is accepted"))};
             std::string token;
             try {
                 token = input.at("planToken").get<std::string>();
@@ -189,6 +205,9 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             if (!claim)
                 return Result<Json>{std::unexpected(claim.error())};
             const auto record = claim->record();
+            auto policy = record->capacity_policy;
+            if (const auto admitted = axk::enforce_volume_capacity_admission(record->capacity, policy); !admitted)
+                return Result<Json>{std::unexpected(core_error(admitted.error()))};
             if (!record->plan.valid()) {
                 claim->consume();
                 return Result<Json>{std::unexpected(
@@ -233,8 +252,16 @@ axk::app::Result<void> axk::app::bind_package_operations(OperationRegistry &regi
             if (auto staged = write_reader(target_path, *target_file->reader); !staged)
                 return Result<Json>{std::unexpected(staged.error())};
             const auto staged_output = *staging_directory / output_path->filename();
+            if (record->plan.target_kind == axk::MediaKind::sfs) {
+                const auto current = axk::inspect_package_import_capacity(target_path, packages, record->plan, policy,
+                                                                          context.cancellation);
+                if (!current)
+                    return Result<Json>{std::unexpected(core_error(current.error()))};
+                if (const auto admitted = axk::enforce_volume_capacity_admission(*current, policy); !admitted)
+                    return Result<Json>{std::unexpected(core_error(admitted.error()))};
+            }
             auto report = axk::apply_package_import(target_path, packages, record->plan, staged_output, false,
-                                                    context.cancellation, context.progress);
+                                                    context.cancellation, context.progress, policy);
             if (!report)
                 return Result<Json>{std::unexpected(core_error(report.error(), record->output.relative_path))};
             auto staged_reader = axk::FileReader::open(staged_output);

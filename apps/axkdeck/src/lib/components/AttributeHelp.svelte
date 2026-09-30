@@ -6,16 +6,24 @@
 
     let {
         label,
-        description,
+        description = '',
         contextKey = '',
         children,
         anchor,
+        content,
+        preferredWidth = 320,
+        hoverDelay = 400,
+        focusVisibleOnly = false,
     }: {
         label: string;
-        description: string;
+        description?: string;
         contextKey?: string;
         children?: Snippet;
         anchor?: HTMLElement;
+        content?: Snippet;
+        preferredWidth?: number;
+        hoverDelay?: number;
+        focusVisibleOnly?: boolean;
     } = $props();
     const id = $props.id();
     const sectionVisible = getContext<(() => boolean) | undefined>(inspectorSectionVisibility);
@@ -41,11 +49,17 @@
     }
     function enter() {
         cancelTimer();
-        if (!open) timer = setTimeout(show, 400);
+        if (!open) timer = setTimeout(show, hoverDelay);
+    }
+    function keyboardFocused() {
+        return document.activeElement === trigger && (!focusVisibleOnly || trigger.matches(':focus-visible'));
+    }
+    function focus() {
+        if (!focusVisibleOnly || trigger?.matches(':focus-visible')) show();
     }
     function leave() {
         cancelTimer();
-        if (!pinned && document.activeElement !== trigger) timer = setTimeout(close, 150);
+        if (!pinned && !keyboardFocused()) timer = setTimeout(close, 150);
     }
     function toggle() {
         if (pinned) close();
@@ -64,7 +78,7 @@
         const anchorScale = trigger.offsetWidth ? anchor.width / trigger.offsetWidth : 1;
         const scale = anchorScale || 1;
         node.style.zoom = String(scale / (bodyScale || 1));
-        node.style.width = `${Math.min(320, (window.innerWidth - 16) / scale)}px`;
+        node.style.width = `${Math.min(preferredWidth, (window.innerWidth - 16) / scale)}px`;
         node.style.maxHeight = `${(window.innerHeight - 16) / scale}px`;
         const bounds = node.getBoundingClientRect();
         const left = Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8));
@@ -79,8 +93,11 @@
         tooltip = node;
         document.body.appendChild(node);
         positionTooltip(node);
+        const observer = new ResizeObserver(() => positionTooltip(node));
+        observer.observe(node);
         return {
             destroy() {
+                observer.disconnect();
                 node.remove();
                 tooltip = undefined;
             },
@@ -101,7 +118,7 @@
         const release = [
             on(anchor, 'pointerenter', enter),
             on(anchor, 'pointerleave', leave),
-            on(anchor, 'focus', show),
+            on(anchor, 'focus', focus),
             on(anchor, 'blur', close),
             on(anchor, 'pointerdown', close),
         ];
@@ -154,7 +171,7 @@
                 'scroll',
                 (event) => {
                     if (event.target === tooltip) return;
-                    if (document.activeElement === trigger && tooltip) positionTooltip(tooltip);
+                    if (keyboardFocused() && tooltip) positionTooltip(tooltip);
                     else close();
                 },
                 { capture: true },
@@ -165,7 +182,7 @@
     onDestroy(cancelTimer);
 </script>
 
-{#if description}
+{#if description || content}
     {#if !anchor}
         <button
             type="button"
@@ -175,7 +192,7 @@
             aria-describedby={open ? id : undefined}
             onpointerenter={enter}
             onpointerleave={leave}
-            onfocus={show}
+            onfocus={focus}
             onblur={() => {
                 if (!pinned) close();
             }}
@@ -188,11 +205,12 @@
             {id}
             role="tooltip"
             class="attribute-help-tooltip"
+            class:rich={!!content}
             use:mountTooltip
             onpointerenter={cancelTimer}
             onpointerleave={leave}
         >
-            {description}
+            {#if content}{@render content()}{:else}{description}{/if}
         </div>
     {/if}
 {:else}{label}{/if}
@@ -227,5 +245,8 @@
         white-space: pre-line;
         overflow-wrap: anywhere;
         overflow: auto;
+    }
+    .attribute-help-tooltip.rich {
+        white-space: normal;
     }
 </style>

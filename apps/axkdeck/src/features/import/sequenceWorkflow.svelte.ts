@@ -127,9 +127,24 @@ export class SequenceImportWorkflow {
         const started = performance.now();
         this.dependencies.setStatus('Importing MIDI');
         try {
+            const policy = await this.completion.capacity.review((policy) =>
+                this.dependencies.transport.inspectImportCapacity(
+                    sessionId,
+                    { kind: 'SEQUENCE', target, items, systemExclusivePolicy },
+                    policy,
+                ),
+            );
+            if (!policy) return false;
             await this.dependencies.invalidateSession(sessionId);
             return await this.completion.run(
-                () => this.dependencies.transport.startSequenceImport(sessionId, target, items, systemExclusivePolicy),
+                () =>
+                    this.dependencies.transport.startSequenceImport(
+                        sessionId,
+                        target,
+                        items,
+                        systemExclusivePolicy,
+                        policy,
+                    ),
                 async () => {
                     this.dependencies.selectWorkspace('sequences');
                     await this.dependencies.refreshSession({

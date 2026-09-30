@@ -204,6 +204,7 @@ Result<OperationReport> assign_sbac_members(TransactionState &state, OperationCo
     }
     if (appended_names.empty())
         return std::unexpected{transaction_error("All selected Samples already belong to the target Sample Bank")};
+    state.load_references_added = true;
     if (target_bank->slots.size() + appended_names.size() > maximum_sample_bank_members)
         return std::unexpected{transaction_error("Target Sample Bank would exceed 127 Samples")};
 

@@ -16,6 +16,7 @@
     import ImportSourceChoice from './ImportSourceChoice.svelte';
     import PackageBatchConflictControls from './PackageBatchConflictControls.svelte';
     import PackageBatchDestinationChooser from './PackageBatchDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import PackageBatchItemsTable from './PackageBatchItemsTable.svelte';
 
     const renameConflictCodes = new Set([
@@ -135,7 +136,16 @@
             : null;
     });
     const canImport = $derived(
-        status === 'ready' && Boolean(plan?.valid) && !hasUnvalidatedChanges && selectedCount > 0 && !error,
+        !locked &&
+            !busy &&
+            status === 'ready' &&
+            Boolean(plan?.valid) &&
+            !hasUnvalidatedChanges &&
+            selectedCount > 0 &&
+            !error &&
+            !!plan &&
+            plan.capacity.target === completion.capacity.target &&
+            plan.capacity.allowed,
     );
     const summaries = $derived(displayPlan?.packages ?? []);
     const totalObjects = $derived(
@@ -277,6 +287,12 @@
                         >{/if}
                 </section>
 
+                <ImportCapacityControl
+                    review={completion.capacity}
+                    admission={plan?.capacity}
+                    disabled={busy || locked}
+                    onchange={() => void onreplan()}
+                />
                 <PackageBatchDestinationChooser
                     strategy={destinationStrategy}
                     mode={destinationMode}

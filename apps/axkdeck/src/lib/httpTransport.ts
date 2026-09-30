@@ -61,6 +61,7 @@ import type {
     Tx16wImportInspection,
     Tx16wImportMode,
     VolumeDeletionInspection,
+    VolumeCapacityInspection,
     VolumeDeletionTarget,
     VolumeMutation,
     ConnectionMode,
@@ -82,6 +83,7 @@ import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpPackageTransport } from './httpPackageTransport';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
+import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
 import { HttpJobController } from './httpJobController';
 import { HttpPackageOperations } from './httpPackageOperations';
 import type { ApiAlterationInspection, ApiWritePlan } from './httpTransportModels';
@@ -98,6 +100,13 @@ import {
 } from './httpTransportWire';
 type HttpImageTransportConnection = AxklibApiConnection & { mode: Exclude<ConnectionMode, 'unavailable'> };
 export class HttpImageTransport extends HttpPackageTransport implements ImageTransport {
+    inspectImportCapacity(
+        sessionId: number,
+        request: import('./importCapacity').CapacityImport,
+        policy: import('./importCapacity').CapacityPolicy,
+    ) {
+        return this.imports.inspectCapacity(sessionId, request, policy);
+    }
     readonly storageMode = 'server' as const;
     readonly connectionMode: Exclude<ConnectionMode, 'unavailable'>;
     readonly supportsClientUploads = true;
@@ -106,10 +115,10 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     private readonly imports: HttpImportOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
 
-    constructor(connection: HttpImageTransportConnection) {
+    constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
         const client = new AxklibHttpApiClient(connection);
         const jobs = new HttpJobController(client);
-        const imageSessions = new HttpImageSessions(client, jobs);
+        const imageSessions = new HttpImageSessions(client, jobs, new HttpCapacityGate(client, jobs, capacityReviewer));
         super(imageSessions, new HttpPackageOperations(client, jobs, imageSessions));
         this.client = client;
         this.jobs = jobs;
@@ -178,8 +187,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         target: VolumeImportDestination,
         items: AudioImportItem[],
         options: AudioImportOptions,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startAudioImport(sessionId, target, items, options);
+        return this.imports.startAudioImport(sessionId, target, items, options, policy);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
@@ -193,8 +203,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy);
+        return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy, policy);
     }
 
     startTx16wDiskSetImport(
@@ -202,8 +213,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         sources: InputFileLocation[],
         target: AudioImportTarget,
         importMode: Tx16wImportMode,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode);
+        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode, policy);
     }
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = serverFile(location);
@@ -244,8 +256,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         packages: InputFileLocation[],
         destinations: PackageImportDestination[],
         overwrite: boolean,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<PackageImportPlan> {
-        return this.packages.planImport(target, output, packages, destinations, overwrite);
+        return this.packages.planImport(target, output, packages, destinations, overwrite, policy);
     }
     startPackageImport(planToken: string): Promise<JobState> {
         return this.packages.startImport(planToken);
@@ -365,6 +378,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
 
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.imageSessions.inspectVolumeDeletion(sessionId, targets);
+    }
+    inspectVolumeCapacity(sessionId: number, contentScopeId: string): Promise<VolumeCapacityInspection> {
+        return this.imageSessions.inspectVolumeCapacity(sessionId, contentScopeId);
     }
 
     inspectPlacement(

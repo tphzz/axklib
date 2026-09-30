@@ -49,6 +49,7 @@ add_library(
   local_operation_projection.cpp
   local_operations.cpp
   commands/analysis.cpp
+  commands/capacity.cpp
   commands/extract.cpp
   commands/package.cpp
   commands/reports.cpp

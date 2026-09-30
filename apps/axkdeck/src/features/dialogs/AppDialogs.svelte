@@ -206,6 +206,10 @@
             items={mutation.volumeAction.items}
             busy={mutation.volumeActionBusy}
             phase={mutation.volumeActionPhase}
+            locked={mutation.volumeActionLocked}
+            canDismiss={mutation.volumeActionCanDismiss}
+            recovery={mutation.volumeActionRecovery}
+            onrecover={() => void mutation.recoverVolumeAction()}
             error={mutation.volumeActionError}
             deletionInspection={mutation.volumeDeletionInspection}
             oncancel={() => mutation.cancelVolumeAction()}

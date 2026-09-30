@@ -49,10 +49,13 @@ inline std::vector<std::byte> smpl_object(std::string_view name = "TEST") {
     ascii(bytes, 0, "FSFSDEV3SPLX");
     ascii(bytes, 0x0c, "SMPL");
     be32(bytes, 0x10, 0xac);
+    be32(bytes, 0x14, 3);
+    be32(bytes, 0x18, 0x7c);
     be32(bytes, 0x1c, 4);
     be32(bytes, 0x20, 4);
     be16(bytes, 0x28, 32000);
     be16(bytes, 0x2a, 2);
+    std::fill(bytes.begin() + 0x32, bytes.begin() + 0x42, std::byte{' '});
     ascii(bytes, 0x32, name);
     bytes[0x84] = std::byte{0x30};
     be16(bytes, 0x8c, 32000);

@@ -18,7 +18,9 @@ import type { InputFileLocation } from './storageLocations';
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { HttpImageSessions } from './httpImageSessions';
 import type { HttpJobController } from './httpJobController';
-import { randomIdempotencyKey, serverInput } from './httpTransportWire';
+import { serverInput } from './httpTransportWire';
+import type { CapacityAdmission, CapacityImport, CapacityPolicy } from './importCapacity';
+import { filesystemEditWire } from './httpFilesystemInputs';
 
 const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
@@ -35,6 +37,44 @@ interface ImportAlterationRequest extends Record<string, unknown> {
 }
 
 export class HttpImportOperations {
+    async inspectCapacity(
+        sessionId: number,
+        input: CapacityImport,
+        policy: CapacityPolicy,
+    ): Promise<CapacityAdmission> {
+        const session = this.imageSessions.get(sessionId);
+        const request =
+            input.kind === 'AUDIO'
+                ? audioImportRequest(session.remoteId, session.revision, input.target, input.items, input.options)
+                : input.kind === 'SEQUENCE'
+                  ? sequenceImportRequest(
+                        session.remoteId,
+                        session.revision,
+                        input.target,
+                        input.items,
+                        input.systemExclusivePolicy,
+                    )
+                  : input.kind === 'TX16W'
+                    ? tx16wDiskSetImportRequest(
+                          session.remoteId,
+                          session.revision,
+                          input.sources,
+                          input.target,
+                          input.importMode,
+                      )
+                    : {
+                          imageId: session.remoteId,
+                          expectedRevision: input.expectedRevision,
+                          acknowledgeDeviceRelationships: true,
+                          edits: input.edits.map(filesystemEditWire),
+                      };
+        const result = await this.client.invoke<{ capacity: CapacityAdmission }>(
+            input.kind === 'FILES' ? 'images.filesystem.edit.inspect' : 'images.alter.inspect',
+            { ...request, capacityPolicy: policy },
+        );
+        if (this.jobs.isJob(result)) throw new Error('Capacity inspection unexpectedly returned a job');
+        return result.capacity;
+    }
     constructor(
         private readonly client: AxklibHttpApiClient,
         private readonly jobs: HttpJobController,
@@ -86,9 +126,10 @@ export class HttpImportOperations {
         target: VolumeImportDestination,
         items: AudioImportItem[],
         options: AudioImportOptions,
+        policy?: CapacityPolicy,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, options));
+        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, options), policy);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
@@ -106,10 +147,12 @@ export class HttpImportOperations {
         target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+        policy?: CapacityPolicy,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         return this.start(
             sequenceImportRequest(session.remoteId, session.revision, target, items, systemExclusivePolicy),
+            policy,
         );
     }
 
@@ -118,17 +161,17 @@ export class HttpImportOperations {
         sources: InputFileLocation[],
         target: AudioImportTarget,
         importMode: Tx16wImportMode,
+        policy?: CapacityPolicy,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(tx16wDiskSetImportRequest(session.remoteId, session.revision, sources, target, importMode));
+        return this.start(
+            tx16wDiskSetImportRequest(session.remoteId, session.revision, sources, target, importMode),
+            policy,
+        );
     }
 
-    private async start(request: ImportAlterationRequest): Promise<JobState> {
-        const job = await this.client.invoke<never>('images.alter', request, {
-            idempotencyKey: randomIdempotencyKey(),
-        });
-        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
-        return this.jobs.map(job);
+    private async start(request: ImportAlterationRequest, policy?: CapacityPolicy): Promise<JobState> {
+        return this.imageSessions.mutations.start({ ...request, ...(policy ? { capacityPolicy: policy } : {}) });
     }
 }
 

@@ -39,6 +39,7 @@ export class HttpPackageTransport extends HttpImageSessionReads {
         programSlotAssignments: PackageProgramSlotAssignment[] = [],
         replacePlanToken?: string,
         opaqueSequenceDecisions: PackageOpaqueSequenceDecision[] = [],
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<ImageSessionPackageImportPlan> {
         return this.packages.planImageImport(
             sessionId,
@@ -48,6 +49,7 @@ export class HttpPackageTransport extends HttpImageSessionReads {
             programSlotAssignments,
             replacePlanToken,
             opaqueSequenceDecisions,
+            policy,
         );
     }
     releaseImagePackageImportPlan(planToken: string): Promise<void> {

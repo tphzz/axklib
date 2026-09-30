@@ -21,6 +21,51 @@ const safeDeletion = {
 };
 
 describe('VolumeActionDialog', () => {
+    it('locks uncertain writes and offers identity-bound status recovery instead of another Add', async () => {
+        const onrecover = vi.fn();
+        const onsubmit = vi.fn();
+        const oncancel = vi.fn();
+        render(VolumeActionDialog, {
+            props: {
+                action: 'add-volume',
+                items: [{ ...volume, kind: 'partition' }],
+                busy: false,
+                locked: true,
+                canDismiss: false,
+                recovery: 'check',
+                phase: 'unconfirmed',
+                error: 'Image change could not be confirmed: Disconnected',
+                deletionInspection: null,
+                onrecover,
+                onsubmit,
+                oncancel,
+            },
+        });
+        expect((screen.getByLabelText('Volume name') as HTMLInputElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.queryByRole('button', { name: 'Add' })).toBeNull();
+        await fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+        expect(oncancel).not.toHaveBeenCalled();
+        await fireEvent.click(screen.getByRole('button', { name: 'Check status' }));
+        expect(onrecover).toHaveBeenCalledOnce();
+        expect(onsubmit).not.toHaveBeenCalled();
+    });
+
+    it('reports status recovery separately from sampler capacity checking', () => {
+        render(VolumeActionDialog, {
+            props: {
+                action: 'add-volume',
+                items: [{ ...volume, kind: 'partition' }],
+                busy: true,
+                phase: 'checking-status',
+                error: '',
+                deletionInspection: null,
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+        expect(screen.getByRole('status').textContent).toBe('Checking change status...');
+    });
     it('shows the active volume operation while submission is pending', () => {
         render(VolumeActionDialog, {
             props: {
@@ -35,9 +80,27 @@ describe('VolumeActionDialog', () => {
             },
         });
 
-        const submit = screen.getByRole('button', { name: 'Adding' });
+        const submit = screen.getByRole('button', { name: 'Add' });
+        expect(screen.getByRole('status').textContent).toContain('Adding volume');
         expect((submit as HTMLButtonElement).disabled).toBe(true);
         expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('keeps action labels stable while validating before submission', () => {
+        render(VolumeActionDialog, {
+            props: {
+                action: 'add-volume',
+                items: [{ ...volume, kind: 'partition' }],
+                busy: true,
+                phase: 'checking',
+                error: '',
+                deletionInspection: null,
+                oncancel: vi.fn(),
+                onsubmit: vi.fn(),
+            },
+        });
+        expect(screen.getByRole('status').textContent).toContain('Checking sampler capacity');
+        expect((screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement).disabled).toBe(true);
     });
 
     it('enforces Yamaha volume-name limits before adding a volume', async () => {

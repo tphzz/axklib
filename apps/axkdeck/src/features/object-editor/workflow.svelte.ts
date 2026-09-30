@@ -5,6 +5,7 @@ import { EditorComparison } from './comparison.svelte';
 import { SampleDuplication } from './duplication.svelte';
 import { objectEditorAdapter } from './registry';
 import { AxklibApiError } from '../../lib/httpErrors';
+import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { reportDiagnostic } from '../../lib/diagnostics';
 import type { ImageTransport, ObjectDetail, JobState } from '../../lib/transport';
@@ -311,10 +312,11 @@ export class ObjectEditorWorkflow {
         } catch (error) {
             if (
                 document.jobId === null &&
-                error instanceof AxklibApiError &&
-                error.status >= 400 &&
-                error.status < 500 &&
-                error.status !== 408
+                (error instanceof CapacityWriteRejected ||
+                    (error instanceof AxklibApiError &&
+                        error.status >= 400 &&
+                        error.status < 500 &&
+                        error.status !== 408))
             ) {
                 this.rejectWrite(document, userFacingMessage(error), error.code);
             } else {

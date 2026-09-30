@@ -31,6 +31,7 @@
 #include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -445,8 +446,11 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 const auto required_paths = external_paths(*manifest);
                 if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
                     return Result<Json>{std::unexpected(admitted.error())};
-                auto inspection =
-                    axk::inspect_hds_alteration(source_path, *manifest, context.cancellation, context.progress);
+                const auto policy = capacity_policy(input);
+                if (!policy)
+                    return Result<Json>{std::unexpected(policy.error())};
+                auto inspection = axk::inspect_hds_alteration(source_path, *manifest, context.cancellation,
+                                                              context.progress, *policy);
                 if (!inspection)
                     return Result<Json>{std::unexpected(core_error(inspection.error(), source->relative_path))};
 
@@ -462,7 +466,8 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                                {"valid", true},
                                {"operations", std::move(operations)},
                                {"warnings", Json::array()},
-                               {"validation", {{"valid", true}, {"issueCount", 0U}}}};
+                               {"validation", {{"valid", true}, {"issueCount", 0U}}},
+                               {"capacity", capacity_admission_json(inspection->capacity)}};
                 return Result<Json>{std::move(result)};
             });
         if (!bound)
@@ -546,8 +551,17 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 }
             }
             const auto staging = *staging_directory / "output.hds";
+            auto policy = capacity_policy(input);
+            if (!policy)
+                return Result<Json>{std::unexpected(policy.error())};
+            const auto inspection =
+                axk::inspect_hds_alteration(source_path, *manifest, context.cancellation, context.progress, *policy);
+            if (!inspection)
+                return Result<Json>{std::unexpected(core_error(inspection.error()))};
+            if (const auto admitted = enforce_volume_capacity_admission(inspection->capacity, *policy); !admitted)
+                return Result<Json>{std::unexpected(core_error(admitted.error()))};
             auto altered =
-                axk::alter_hds(source_path, *manifest, staging, context.cancellation, context.progress, false);
+                axk::alter_hds(source_path, *manifest, staging, context.cancellation, context.progress, false, *policy);
             if (!altered)
                 return Result<Json>{std::unexpected(core_error(altered.error(), output->relative_path))};
             if (context.progress) {

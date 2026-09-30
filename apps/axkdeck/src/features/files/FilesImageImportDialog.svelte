@@ -4,6 +4,7 @@
     import { formatStoredSize } from '../../lib/formatBytes';
     import FilesystemNameField from './FilesystemNameField.svelte';
     import FilesImportFooter from './FilesImportFooter.svelte';
+    import ImportCapacityControl from '../../lib/components/ImportCapacityControl.svelte';
     import type { FilesImageImportWorkflow } from './imageImportWorkflow.svelte';
     import { importPaths } from './importReview';
     let { workflow }: { workflow: FilesImageImportWorkflow } = $props();
@@ -61,6 +62,10 @@
                 >
             </header>
             <div class="image-import-content">
+                {#if importer.capacityAvailable}<ImportCapacityControl
+                        review={importer.capacity}
+                        disabled={importer.busy}
+                    />{/if}
                 <div class="image-import-summary">
                     <strong title={importer.target.path || '/'}>{importer.target.path || '/'}</strong><span
                         >{importer.rows.length} entries · {formatStoredSize(
