@@ -60,6 +60,7 @@
         sessionId: 1,
         revision,
         enabled: true,
+        selectedSource: item,
         transport: {
             inspectVolumeCapacity: async (_session, contentScopeId) => {
                 calls++;

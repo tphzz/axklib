@@ -12,13 +12,14 @@ interface Context {
     sessionId: number | null;
     revision: number;
     enabled: boolean;
+    selectedSource: DiskTreeItem | null;
     transport: Pick<ImageTransport, 'inspectVolumeCapacity'>;
 }
 
 const contextKey = Symbol('volume-capacity');
 
 export class VolumeCapacityController {
-    private selection = $state<DiskTreeItem | null>(null);
+    private showingVolume = $state(false);
     private selectionSession = $state<number | null>(null);
     private entries = $state<Record<string, VolumeCapacityState>>({});
     private pending = new Map<string, Promise<void>>();
@@ -31,7 +32,14 @@ export class VolumeCapacityController {
     }
 
     get selectedVolume(): DiskTreeItem | null {
-        return this.enabled && this.selectionSession === this.context().sessionId ? this.selection : null;
+        const context = this.context();
+        return context.enabled &&
+            context.sessionId !== null &&
+            this.showingVolume &&
+            this.selectionSession === context.sessionId &&
+            context.selectedSource?.kind === 'volume'
+            ? context.selectedSource
+            : null;
     }
 
     private key(scopeId: string): string {
@@ -49,13 +57,13 @@ export class VolumeCapacityController {
 
     selectVolume(item: DiskTreeItem): void {
         if (!this.enabled || item.kind !== 'volume') return;
-        this.selection = item;
+        this.showingVolume = true;
         this.selectionSession = this.context().sessionId;
         void this.inspect(item.id);
     }
 
     showObject(): void {
-        this.selection = null;
+        this.showingVolume = false;
     }
 
     async inspect(scopeId: string, retry = false): Promise<void> {

@@ -91,7 +91,7 @@
         sequenceExportAvailable,
         mediaConversionAvailable,
         allocationInspectionAvailable,
-        samplerOrderingEnabled = false,
+        samplerOrderingEnabled: enabled = false,
         openConnectionSettings,
         openImage,
         createImage,
@@ -117,7 +117,7 @@
     }: WorkspaceProps = $props();
 
     let mainStage: HTMLElement;
-    const capacity = provideVolumeCapacity(() => ({ transport, sessionId, revision, enabled: samplerOrderingEnabled }));
+    const capacity = provideVolumeCapacity(() => ({ transport, sessionId, revision, enabled, selectedSource }));
     const capacitySelect = capacitySelection(capacity, () => audition);
     let lowerOpen = $state(false);
     let programPresentation = $state<ProgramPresentation>('single');
@@ -392,7 +392,7 @@
         audioExportEnabled={audioExportAvailable}
         mediaConversionEnabled={mediaConversionAvailable}
         allocationInspectionEnabled={allocationInspectionAvailable}
-        {samplerOrderingEnabled}
+        samplerOrderingEnabled={enabled}
         onimageaction={imageAction}
         onloadchildren={(parentId, offset, limit) =>
             sessionId === null
@@ -560,7 +560,7 @@
 {/snippet}
 {#snippet deviceInspector()}
     <div class="device-inspector-zone">
-        {#if capacity.selectedVolume && samplerOrderingEnabled}
+        {#if capacity.selectedVolume && enabled}
             <VolumeInspector item={capacity.selectedVolume} />
         {:else}<ObjectInspector
                 selection={inspectorSelection}

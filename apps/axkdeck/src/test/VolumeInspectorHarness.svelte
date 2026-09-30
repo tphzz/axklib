@@ -23,6 +23,7 @@
         sessionId: 1,
         revision,
         enabled: true,
+        selectedSource: item,
         transport: {
             inspectVolumeCapacity: async (_session, contentScopeId) => {
                 if (error) throw new Error(error);

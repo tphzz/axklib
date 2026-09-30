@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { VolumeCapacityController } from './volumeCapacity.svelte';
 import type { VolumeCapacityInspection } from './transport';
 
+const selectedSource = { id: 'v', kind: 'volume' as const, name: 'Test', children: [], childCount: 0 };
+
 function response(revision: number, scope = 'v'): VolumeCapacityInspection {
     return {
         imageId: 'remote',
@@ -39,6 +41,7 @@ describe('volume capacity cache', () => {
                 sessionId: 1,
                 revision,
                 enabled: true,
+                selectedSource,
                 transport: { inspectVolumeCapacity },
             }));
             const stale = controller.inspect('bar');
@@ -58,6 +61,7 @@ describe('volume capacity cache', () => {
             sessionId,
             revision: 1,
             enabled: true,
+            selectedSource,
             transport: { inspectVolumeCapacity: vi.fn().mockResolvedValue(response(1)) },
         }));
         controller.selectVolume({ id: 'v', kind: 'volume', name: 'Test', children: [], childCount: 0 });
@@ -72,6 +76,7 @@ describe('volume capacity cache', () => {
             sessionId: 1,
             revision: 2,
             enabled: true,
+            selectedSource,
             transport: { inspectVolumeCapacity },
         }));
         await Promise.all([controller.inspect('v'), controller.inspect('v')]);
@@ -94,6 +99,7 @@ describe('volume capacity cache', () => {
             sessionId: 1,
             revision,
             enabled: true,
+            selectedSource,
             transport: { inspectVolumeCapacity },
         }));
         const pending = controller.inspect('v');
@@ -111,6 +117,7 @@ describe('volume capacity cache', () => {
             sessionId: 1,
             revision: 1,
             enabled,
+            selectedSource,
             transport: { inspectVolumeCapacity },
         }));
         await controller.inspect('v');
