@@ -220,9 +220,28 @@ bool ValidationReport::valid() const noexcept {
         issues, [](const ValidationIssue &issue) { return issue.severity == ValidationSeverity::error; });
 }
 
+std::vector<ValidationIssue> validate_program_bitmaps(const ObjectCatalog &catalog, const RelationshipGraph &graph) {
+    std::vector<ValidationIssue> result;
+    for (const auto &comparison : graph.bitmap_comparisons) {
+        if (comparison.status == "match")
+            continue;
+        const auto *source = find_object(catalog, comparison.object_key);
+        result.push_back({
+            comparison.object_type == ObjectType::sbac ? "REL_SBAC_PROGRAM_BITMAP_MISMATCH"
+                                                       : "REL_SBNK_PROGRAM_BITMAP_MISMATCH",
+            ValidationSeverity::warning,
+            program_bitmap_mismatch_message(comparison, source == nullptr ? "" : source->object.header.name),
+            source == nullptr ? "" : sampler_path(*source),
+            comparison.object_key,
+        });
+    }
+    return result;
+}
+
 ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                     const RelationshipGraph &graph) {
     ValidationReport result;
+    result.issues = validate_program_bitmaps(catalog, graph);
     for (const auto &diagnostic : container.diagnostics()) {
         if (diagnostic.code == ErrorCode::container_invalid_geometry ||
             diagnostic.code == ErrorCode::container_backup_mismatch)
@@ -299,19 +318,6 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
                 relation.source_key,
             });
         }
-    }
-    for (const auto &comparison : graph.bitmap_comparisons) {
-        if (comparison.status == "match")
-            continue;
-        const auto *source = find_object(catalog, comparison.sbnk_key);
-        result.issues.push_back({
-            "REL_SBNK_PROGRAM_BITMAP_MISMATCH",
-            ValidationSeverity::warning,
-            "Sample Program bitmap differs from decoded direct Program "
-            "assignments",
-            source == nullptr ? "" : sampler_path(*source),
-            comparison.sbnk_key,
-        });
     }
     for (const auto &partition : container.partitions()) {
         const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);

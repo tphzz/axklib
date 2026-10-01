@@ -268,7 +268,7 @@ describe('ObjectWorkspace', () => {
                 observer as unknown as IntersectionObserver,
             );
             await waitFor(() => expect(document.querySelectorAll('.wave-data-row canvas')).toHaveLength(1));
-            expect(onpreviewrequest).toHaveBeenCalledWith(waveData[1_999]);
+            expect(onpreviewrequest).toHaveBeenCalledWith(waveData[1_999], 1024);
 
             observer.callback(
                 [{ isIntersecting: false, target: lastTarget } as IntersectionObserverEntry],

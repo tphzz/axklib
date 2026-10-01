@@ -26,6 +26,7 @@
 #include "axklib/application/session_sequence_operations.hpp"
 #include "axklib/application/session_volume_package_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/io.hpp"
@@ -192,7 +193,7 @@ void write_batch_volume_source(const std::filesystem::path &path) {
 
     const auto volume = [&](std::string waveform_name, std::string sample_name) {
         axk::VolumeSpec result;
-        result.name = "Duplicate";
+        result.name = waveform_name == "First Wave" ? "Duplicate" : "Other";
         result.waveforms.push_back({"wave", std::move(waveform_name), audio_path, 60U, {}});
         axk::SampleSpec sample;
         sample.name = std::move(sample_name);
@@ -210,6 +211,25 @@ void write_batch_volume_source(const std::filesystem::path &path) {
         {{"Batch", {volume("First Wave", "First Sample"), std::move(empty), volume("Second Wave", "Second Sample")}}}};
     const auto written = axk::write_hds_image(manifest, path);
     ASSERT_TRUE(written) << written.error().message;
+    // Duplicate root names are a read-only malformed fixture, not a supported authoring request.
+    const auto image = axk::open_image(path).value();
+    const auto &partition = image.partitions().front();
+    const auto root_id = axk::locate_partition_root_record(partition).value();
+    const auto &root = *std::ranges::find(partition.records, root_id, &axk::IndexRecord::sfs_id);
+    const auto &entry = *std::ranges::find(root.directory_entries, "Other", &axk::DirectoryEntry::name);
+    auto row = image.read_record_range(partition.index, root_id, entry.payload_relative_offset, 32U).value();
+    axk::ByteWriter writer{row};
+    ASSERT_TRUE(writer.write_be16(2U, 10U));
+    std::fill(row.begin() + 8, row.end(), std::byte{});
+    ASSERT_TRUE(writer.write_ascii_field(8U, 9U, "Duplicate", std::byte{}));
+    const auto offset = static_cast<std::uint64_t>(partition.start_sector) * image.superblock().sector_size_bytes +
+                        static_cast<std::uint64_t>(root.extents.front().cluster_offset) *
+                            partition.sectors_per_cluster * image.superblock().sector_size_bytes +
+                        entry.payload_relative_offset;
+    std::fstream output{path, std::ios::binary | std::ios::in | std::ios::out};
+    output.seekp(static_cast<std::streamoff>(offset));
+    output.write(reinterpret_cast<const char *>(row.data()), static_cast<std::streamsize>(row.size()));
+    ASSERT_TRUE(output);
 }
 
 void write_audio_source_with_orphan_wave_data(const std::filesystem::path &path) {
@@ -611,6 +631,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
         {"packages", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "session-volume.axkvol"}}}}}},
         {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Imported"}}},
         {"renames", nlohmann::json::array()},
+        {"capacityPolicy", {{"target", "A3000"}}},
     };
     const auto abandoned = registry_.invoke("images.package_import.plan", request, context());
     ASSERT_TRUE(abandoned) << abandoned.error().message;
@@ -632,6 +653,12 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     EXPECT_TRUE(planned->at("programAssignmentAdjustments").empty());
     EXPECT_TRUE(planned->at("programSlotPlacements").empty());
     ASSERT_FALSE(planned->at("actions").empty());
+    ASSERT_TRUE(planned->at("capacity").at("allowed").get<bool>());
+    const auto original_bytes = read_bytes(root_ / "target.hds");
+    EXPECT_FALSE(registry_.invoke("images.package_import",
+                                  {{"planToken", planned->at("planToken")}, {"capacityReviewId", "obsolete"}},
+                                  context()));
+    EXPECT_EQ(read_bytes(root_ / "target.hds"), original_bytes);
     auto replacement_request = request;
     replacement_request["replacePlanToken"] = planned->at("planToken");
     const auto replanned = registry_.invoke("images.package_import.plan", replacement_request, operation_context);
@@ -646,6 +673,13 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
         return event.value("event", "") == "package_import_plan_phase" && event.value("phase", "") == "package" &&
                event.value("cacheHit", false);
     }));
+    EXPECT_FALSE(registry_.invoke("images.package_import",
+                                  {{"planToken", replanned->at("planToken")}, {"capacityReviewId", "obsolete"}},
+                                  context()));
+    auto stranger = context();
+    stranger.owner_id = "stranger";
+    EXPECT_FALSE(registry_.invoke("images.package_import", {{"planToken", replanned->at("planToken")}}, stranger));
+    EXPECT_EQ(read_bytes(root_ / "target.hds"), original_bytes);
     const auto applied = registry_.invoke("images.package_import",
                                           {{"planToken", replanned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
@@ -683,11 +717,17 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
         {"expectedRevision", opened->revision},
         {"inspectionToken", token},
         {"selectedObjectKeys", {sample->at("objectKey")}},
-        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "From floppy"}}}};
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "From floppy"}}},
+        {"capacityPolicy", {{"target", "A3000"}}}};
     const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_TRUE(plan->at("valid").get<bool>()) << *plan;
     EXPECT_EQ(plan->at("actions").size(), 2U);
+    ASSERT_TRUE(plan->at("capacity").at("allowed").get<bool>());
+    const auto original_bytes = read_bytes(root_ / "target.hds");
+    EXPECT_FALSE(registry_.invoke("images.floppy_import",
+                                  {{"planToken", plan->at("planToken")}, {"capacityReviewId", "stale"}}, context()));
+    EXPECT_EQ(read_bytes(root_ / "target.hds"), original_bytes);
     EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
     auto invalid = request;
     invalid["selectedObjectKeys"] = nlohmann::json::array();

@@ -180,7 +180,7 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
         [this, object_type, content_scope_id](auto id, auto owner, auto limit, auto cursor) {
             return images_.objects(id, owner, limit, cursor, object_type, content_scope_id);
         },
-        [](const axk::app::ImageObjectItem &item) {
+        [this](const axk::app::ImageObjectItem &item) {
             Json waveform;
             if (item.waveform) {
                 waveform = {{"sampleRate", item.waveform->sample_rate},
@@ -228,6 +228,7 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                         {"sizeWithDependenciesBytes",
                          item.size_with_dependencies_bytes ? Json(*item.size_with_dependencies_bytes) : Json{}},
                         {"waveform", std::move(waveform)},
+                        {"sampleFormat", openapi_validator_.wire_value("SampleFormatMetadata", item.sample_format)},
                         {"sequence", std::move(sequence)}};
         });
 }
@@ -240,7 +241,9 @@ crow::response ServerApplication::image_object_response(const crow::request &req
     const auto metadata = images_.object_detail(image_id, request_owner(request), object_id);
     if (!metadata)
         return error_response(status_for_error(metadata.error()), metadata.error(), id);
-    return json_response(200, {{"data", *metadata}, {"meta", {{"requestId", id}}}}, id);
+    return json_response(
+        200, {{"data", openapi_validator_.wire_value("ImageObjectDetail", *metadata)}, {"meta", {{"requestId", id}}}},
+        id);
 }
 
 crow::response ServerApplication::image_relationships_response(const crow::request &request,
@@ -360,6 +363,7 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
                          {"sourceObjectId", lane.source_object_id},
                          {"sampleRate", lane.sample_rate},
                          {"storedFrameCount", lane.stored_frame_count},
+                         {"sampleWidthBytes", lane.sample_width_bytes},
                          {"playbackStartFrame", lane.playback_start_frame},
                          {"playbackLengthFrames", lane.playback_length_frames},
                          {"loopStartFrame", lane.loop_start_frame},

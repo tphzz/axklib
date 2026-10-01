@@ -118,6 +118,7 @@ describe('FilesController', () => {
             putFile: true,
             deleteEntry: true,
             renameEntry: true,
+            moveEntry: true,
             maximumNameBytes: 23,
             namePolicy: 'PRESERVE' as const,
             namePattern: '^[ -~]{1,23}$',

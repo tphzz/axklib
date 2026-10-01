@@ -123,6 +123,10 @@ std::string_view hds_creation_profile_wire_id(axk::HdsCreationProfileId id) {
     switch (id) {
     case axk::HdsCreationProfileId::floppy_scale:
         return "FLOPPY_SCALE";
+    case axk::HdsCreationProfileId::hds_128_mib:
+        return "HDS_128_MIB";
+    case axk::HdsCreationProfileId::hds_256_mib:
+        return "HDS_256_MIB";
     case axk::HdsCreationProfileId::cd_r_650:
         return "CD_R_650";
     case axk::HdsCreationProfileId::cd_r_700:
@@ -131,6 +135,10 @@ std::string_view hds_creation_profile_wire_id(axk::HdsCreationProfileId id) {
         return "HDS_1_GIB";
     case axk::HdsCreationProfileId::hds_2_gib:
         return "HDS_2_GIB";
+    case axk::HdsCreationProfileId::hds_4_gib:
+        return "HDS_4_GIB";
+    case axk::HdsCreationProfileId::hds_8_gib:
+        return "HDS_8_GIB";
     }
     return {};
 }

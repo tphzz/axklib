@@ -71,6 +71,29 @@ cross-volume-only and missing matches remain diagnostics, not inferred package
 dependencies. The quality label describes the report's resolution result, not
 a field stored on disk.
 
+### Program-Link Cross-Checks
+
+The `relationships` report writes `current_program_bitmap_crosscheck.csv` and
+`.json`, with a matching schema under `_schemas/`. Each row identifies a Sample
+or Sample Bank through `object_key`, `object_type` (`SBNK` or `SBAC`),
+`object_name`, and its volume `scope_key`. Physical location columns are
+`partition_index`, `sfs_id`, `fat_file`, and `payload_offset` where applicable.
+
+`program_bitmap_offset` is the byte offset within the object: `0xc0` for Samples
+or `0x90` for Sample Banks. The four `linked_programs_NNN_NNN_bitmap` columns
+cover Program ranges 001-032, 033-064, 065-096, and 097-128. The report compares
+`bitmap_programs` with `direct_prog_assignment_programs`; missing and extra
+Program numbers have separate columns. `sbac_indirect_assignment_programs`
+applies only to Samples reached through a bank and does not require direct
+Sample bitmap bits. The summary's `program_bitmap_row_count` includes both
+object types.
+
+Integrity checking reports `REL_SBNK_PROGRAM_BITMAP_MISMATCH` for Samples and
+`REL_SBAC_PROGRAM_BITMAP_MISMATCH` for Sample Banks, with the object name and
+stored versus expected Program numbers. These are warnings under normal
+validation and failures under strict policy. The check does not change the
+image; operations that depend on inconsistent links are blocked.
+
 ## Physical And Rendered Audio
 
 Exact exports keep `_samples/physical/*.wav` (mono SMPL Wave Data) distinct from

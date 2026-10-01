@@ -15,14 +15,17 @@
         AudioImportCapabilities,
         VolumeImportDestination,
         AudioImportGrouping,
+        AudioImportOptions,
         AudioImportItem,
         AudioSourceInfo,
         ImageTransport,
     } from '../transport';
     import AudioImportRows from './AudioImportRows.svelte';
+    import AudioImportTargetSettings from './AudioImportTargetSettings.svelte';
     import type { AudioImportRow } from './audioImportDialogTypes';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
@@ -44,9 +47,10 @@
         ondestinationpartition: (partitionIndex: number) => void;
         ondestinationname: (volumeName: string) => void;
         completion: ImportCompletion;
+        sampleFormat?: AudioImportOptions['sampleFormat'];
         oncommit: (
             items: AudioImportItem[],
-            grouping: AudioImportGrouping,
+            options: AudioImportOptions,
             reviewedWarnings: string[],
         ) => Promise<boolean>;
         oncancel: () => void;
@@ -72,6 +76,7 @@
         ondestinationname,
         oncommit,
         completion,
+        sampleFormat = $bindable('A3000_188'),
         oncancel,
     }: Props = $props();
     let rows = $state<AudioImportRow[]>([]);
@@ -412,7 +417,11 @@
             }));
             const completed = await oncommit(
                 items,
-                importMode === 'SAMPLE_BANK' ? { kind: 'SAMPLE_BANK', sampleBankName } : { kind: 'SAMPLES' },
+                {
+                    sampleFormat,
+                    grouping:
+                        importMode === 'SAMPLE_BANK' ? { kind: 'SAMPLE_BANK', sampleBankName } : { kind: 'SAMPLES' },
+                },
                 rows.flatMap((row) => row.inspection?.issues.map((issue) => issue.message) ?? []),
             );
             if (completed || completion.phase === 'warnings') {
@@ -493,6 +502,7 @@
             </button>
         </header>
         <div class="audio-import-body">
+            <ImportCapacityControl review={completion.capacity} disabled={busy} />
             <ImportDestinationChooser
                 mode={destinationMode}
                 partitionIndex={destinationPartitionIndex}
@@ -517,28 +527,13 @@
                     onchooselocal={() => onchooselocal?.()}
                 />
             {:else}
-                <div class="import-target-settings">
-                    <label for="audio-import-mode">Import mode</label>
-                    <select id="audio-import-mode" class="dialog-field-control" bind:value={importMode} disabled={busy}>
-                        <option value="SAMPLES">Import as Samples</option>
-                        <option value="SAMPLE_BANK">Import as Samples in a Sample Bank</option>
-                    </select>
-                    {#if importMode === 'SAMPLE_BANK'}
-                        <label for="audio-import-sample-bank-name">Sample Bank name</label>
-                        <input
-                            id="audio-import-sample-bank-name"
-                            class="dialog-field-control"
-                            aria-invalid={sampleBankError !== ''}
-                            bind:value={sampleBankName}
-                            maxlength="16"
-                            autocomplete="off"
-                            disabled={busy}
-                        />
-                        {#if sampleBankError}
-                            <p class="field-error" role="alert">{sampleBankError}</p>
-                        {/if}
-                    {/if}
-                </div>
+                <AudioImportTargetSettings
+                    bind:mode={importMode}
+                    bind:sampleBankName
+                    bind:sampleFormat
+                    error={sampleBankError}
+                    disabled={busy}
+                />
                 {#if stagingError}
                     <p class="dialog-error" role="alert">{stagingError}</p>
                 {:else}
@@ -573,8 +568,12 @@
             {/if}
         </div>
         <footer class="dialog-footer">
-            <span class="dialog-footer-status" role="status" title={completion.message || generalError}
-                >{completion.message ||
+            <span
+                class="dialog-footer-status"
+                role="status"
+                title={completion.capacity.message || completion.message || generalError}
+                >{(completion.capacity.busy ? completion.capacity.message : '') ||
+                    completion.message ||
                     generalError ||
                     (ready ? 'Ready to import' : files.length ? 'Checking audio files' : 'Choose audio files')}</span
             >
@@ -634,27 +633,6 @@
         color: var(--color-text-muted);
         font-size: var(--dialog-body-font-size);
     }
-    .import-target-settings {
-        display: grid;
-        grid-template-columns: max-content minmax(240px, 360px) max-content minmax(180px, 1fr);
-        align-items: center;
-        gap: 6px 8px;
-    }
-    .import-target-settings > label {
-        color: var(--color-text-muted);
-        font-size: var(--dialog-label-font-size);
-        white-space: nowrap;
-    }
-    .import-target-settings select,
-    .import-target-settings input {
-        width: 100%;
-    }
-    .field-error {
-        grid-column: 4;
-        margin: 0;
-        color: var(--color-danger);
-        font-size: var(--dialog-body-font-size);
-    }
     .inspection-progress progress {
         width: 100%;
         height: 4px;
@@ -663,14 +641,6 @@
     @media (max-width: 900px) {
         .audio-import-dialog {
             width: calc(100vw - 24px);
-        }
-    }
-    @media (max-width: 760px) {
-        .import-target-settings {
-            grid-template-columns: max-content minmax(0, 1fr);
-        }
-        .field-error {
-            grid-column: 2;
         }
     }
 </style>

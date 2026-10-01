@@ -1,0 +1,35 @@
+window.runObjectDeletionChecks = async function () {
+    const failures = [];
+    const check = (ok, message) => { if (!ok) failures.push(message); };
+    const wait = () => new Promise(resolve => setTimeout(resolve, 180));
+    const dialog = document.querySelector('[role="dialog"]');
+    const list = dialog.querySelector('.object-deletion-content');
+    const footer = dialog.querySelector('.dialog-footer');
+    const action = footer.querySelector('.danger-button');
+    const geometry = () => {
+        const r = dialog.getBoundingClientRect();
+        return [r.x, r.y, r.width, r.height];
+    };
+    const before = geometry();
+    check(list.scrollHeight > list.clientHeight, 'Relationship list must overflow');
+    action.click();
+    await wait();
+    const alert = footer.querySelector('[role="alert"]');
+    check(Boolean(alert), 'Failure missing from fixed footer');
+    check(alert?.textContent.includes('SFS extent byte total'), 'Backend error not displayed');
+    check(list.scrollTop === 0, 'Showing failure moved relationship scroll position');
+    check(geometry().every((value, index) => Math.abs(value - before[index]) < 1), 'Failure changed dialog geometry');
+    const r = alert.getBoundingClientRect();
+    check(r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, 'Failure is outside viewport');
+    const details = alert.querySelector('[role="region"]');
+    details.focus();
+    check(document.activeElement === details, 'Failure details cannot receive keyboard focus');
+    check(getComputedStyle(details).overflowY === 'auto', 'Long failure details are not independently scrollable');
+    check(getComputedStyle(details).whiteSpace === 'normal', 'Failure details must wrap');
+    check(details.scrollWidth <= details.clientWidth + 1, 'Failure details require horizontal scrolling');
+    const buttons = [...footer.querySelectorAll('button')];
+    check(buttons.every(button => Math.abs(button.getBoundingClientRect().height - buttons[0].getBoundingClientRect().height) < 1), 'Footer action heights differ');
+    check(buttons.every(button => getComputedStyle(button).marginTop === '0px' && getComputedStyle(button).marginBottom === '0px'), 'Footer action has vertical margins');
+    check(document.querySelector('[data-testid="attempts"]').textContent === '1', 'Unexpected deletion resubmission');
+    return { failures, geometry: before, footer: { top: r.top, bottom: r.bottom }, attempts: 1 };
+};

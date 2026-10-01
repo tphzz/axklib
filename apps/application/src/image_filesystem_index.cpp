@@ -83,6 +83,7 @@ class Builder {
                                                   true,
                                                   true,
                                                   true,
+                                                  true,
                                                   23U,
                                                   "^[ -~]{1,23}$",
                                                   "Use 1-23 printable ASCII characters."};
@@ -191,6 +192,7 @@ class Builder {
         if ((ex5 || fat16) && source && axk::detail::inspect_fat_file_edit_support(source, partition)) {
             index.edit_partitions.emplace(index.entries[root].id, partition);
             index.root_capabilities.back() = {index.entries[root].id,
+                                              true,
                                               true,
                                               true,
                                               true,

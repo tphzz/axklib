@@ -10,7 +10,7 @@ Supported operations are:
 - rename partition;
 - insert, delete, and rename volume;
 - insert, delete, rename, and update metadata on Wave Data (`SMPL`);
-- insert, delete, rename, retarget Wave Data, and update parameters on a Sample (`SBNK`);
+- insert, delete, rename, retarget Wave Data, update parameters, and explicitly convert the stored format of a Sample (`SBNK`);
 - insert, delete, rename, and update parameters on a Sample Bank (`SBAC`);
 - assign selected Samples to an existing Sample Bank (`SBAC`);
 - insert, delete, rename, update parameters, and replace assignments on a Program.
@@ -53,20 +53,99 @@ change encoding, or admit incomplete/unsupported transfer profiles.
 to an existing Sample Bank and all its members atomically. Its target fields are
 `partition_index`, `volume_name`, and `sample_bank_name`. It uses the same typed
 Sample parameter contract, validates each member's merged values, and preserves
-unrelated object bytes, Wave Data and relationship identities. Current complete
-bank layouts with clear pending propagation state are supported. Pending state,
+unrelated object bytes, Wave Data and relationship identities. Complete native
+revision-2 banks and later split-tail banks with clear override-enable state
+are supported. Bank and member formats are retained and independently validated. Active overrides,
 unresolved or multiply-owned members, and invalid merged values reject the entire
 transaction without publishing a partial change.
 
-`update_sbnk_parameters` applies a non-empty partial
+`update_sample_bank_overrides` is the reversible, bank-only editing operation.
+It requires `partition_index`, `volume_name`, `sample_bank_name`, lowercase
+`expected_payload_sha256`, `parameters` (possibly empty), and `enable`/`disable`
+arrays of override-unit IDs. The editor snapshot lists each unit's named keys
+and physical selectors. IDs must be supported, unique and disjoint. Values may
+change only in currently enabled or explicitly enabled units. Activation
+validates the complete unit; disabling retains the stored bank values. Unknown
+states and stale digests reject the transaction. Only the bank payload changes;
+members, Wave Data, membership and Program links are preserved. This is not Freeze
+and does not convert any stored format.
+
+Fresh `insert_sbnk` Sample and `insert_sbac` Sample Bank specifications accept
+`storage_format`: `a3000_188` or `a4000_a5000_224`. Omission selects the later
+format. The bank's format does not convert existing members. See
+[A-Series Sample Formats And Generations](sample-formats.md) for domains and
+hardware distinctions, and [Writer And Alteration](write.md) for specification fields.
+
+`update_sbnk_parameters` applies a partial
 [`SampleParameters`](sample-parameters.md) object to one existing Sample.
+It retains that Sample's stored 188/224-byte format. Later-only settings on a
+native-format Sample are rejected rather than triggering conversion.
 Fields omitted from the update and unrelated opaque bytes are preserved.
 Dependent values are validated against the existing object, not fresh-object
 defaults. For example, a key limit of `=Orig` uses that Sample's current root
 key when the update omits `root_key`. Derived caches are recomputed from changed
 source values. Sample Bank
 `parameter_overrides` uses this model too, prepares every member update before
-mutation, and leaves the bank's pending-propagation bits clear.
+mutation, and leaves the bank's override-enable bits clear. This older authoring
+option is an immediate member update, not a reversible bank-only override.
+
+The update can additionally specify `playback_window` with unsigned
+`start_frame` and positive `length_frames`. At least one parameter or a playback
+window is required. Window edits require an ordinary current mono/stereo Sample
+and complete, matching PCM8/PCM16 Wave Data. The resulting playback and loop
+bounds are validated together, including retained loop values. The operation
+updates active channel bounds and their end cache, without changing PCM or an
+inactive channel's bytes. Optional `expected_payload_sha256` is the lowercase
+SHA-256 of the complete source Sample payload; a mismatch rejects the update.
+
+`convert_sbnk_format` explicitly converts an existing Sample between
+`a3000_188` and `a4000_a5000_224`. It requires a lowercase SHA-256 of the
+complete source payload and rejects stale inputs. For example, one manifest
+operation is:
+
+```json
+{
+  "id": "convert-sample",
+  "type": "convert_sbnk_format",
+  "partition_index": 0,
+  "volume_name": "Strings",
+  "sample_name": "Violin",
+  "target_format": "a4000_a5000_224",
+  "expected_payload_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+```
+
+Replace the example digest with the current payload's digest. Conversion
+preserves the Sample's identity, name, relationships and Wave Data, and commits
+atomically. The planner reports affected fields and rejects unknown formats,
+unsupported values, and changes that would lose parameter information. It does
+not silently clamp values or discard active settings. Both directions are
+subject to these checks; see [Sample Parameters](sample-parameters.md).
+The resulting format identifies storage, not hardware-tested media compatibility.
+
+`convert_sbac_format` performs the corresponding explicit operation on one
+Sample Bank. It has the same fields as the example above except for
+`"type": "convert_sbac_format"` and `sample_bank_name` instead of `sample_name`.
+Both target formats are supported. The source digest covers the entire bank
+payload, including preserved padding. Bank identity, Program links, member rows
+and capacity remain unchanged; member Samples and Wave Data are never converted
+or edited. Any nonzero override-enable word blocks cross-format conversion.
+Unrepresentable parameters or uninterpreted data also block it. The operation
+does not freeze the bank, clear overrides, or convert its members implicitly.
+An already matching format is a byte-preserving no-op.
+
+`duplicate_sbnk` creates a standalone Sample in the source volume, pointing to
+the same Wave Data. It requires `sample_name`, `new_name`, and `parameters`,
+which may be empty. Optional parameter and playback-window edits use the update
+contract above and affect only the copy. The source Sample, Sample Banks,
+Programs, and Wave Data remain unchanged. The copied Sample's bank-membership
+flag and Program-assignment bitmap are cleared; other unmodified payload bytes
+are preserved. Supported sources are complete ordinary current mono/stereo
+Samples with resolvable PCM8/PCM16 Wave Data and matching stereo rates/windows.
+`expected_payload_sha256` guards the source payload. Case-insensitive collisions
+with Sample names or existing Sample Bank/Program target names reject the
+transaction, including unresolved references that would otherwise attach to
+the new Sample. Allocation, validation, and insertion are atomic.
 
 `update_program_parameters` applies [Program-wide and guarded assignment
 parameter patches](program-parameters.md) to a current-layout Program. It

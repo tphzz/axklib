@@ -3,7 +3,9 @@
 #include <filesystem>
 #include <utility>
 
+#include "axklib/alteration_transaction.hpp"
 #include "axklib/application/secure_random.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/package_import_planning.hpp"
 
 namespace axk::app::package_operations_internal {
@@ -16,6 +18,9 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
     if (!parsed_identity)
         return std::unexpected(parsed_identity.error());
     const auto &identity = *parsed_identity;
+    const auto capacity = capacity_policy(input);
+    if (!capacity)
+        return std::unexpected{capacity.error()};
     const auto diagnostic = [&](std::string_view phase, Clock::time_point started, const Json &details) {
         if (!context.diagnostic)
             return;
@@ -48,6 +53,20 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
                                                                            context.cancellation);
     if (!plan)
         return std::unexpected(core_error(plan.error(), session.source.relative_path));
+    VolumeCapacityAdmission admission;
+    admission.target = capacity->target;
+    if (plan->valid()) {
+        const auto prepared = axk::detail::prepare_sfs_package_import_verified(
+            session.reader, std::filesystem::path{session.source.relative_path}, packages, *plan, *fingerprint,
+            context.cancellation, context.progress, *capacity);
+        if (!prepared)
+            return std::unexpected{core_error(prepared.error(), session.source.relative_path)};
+        admission = prepared->capacity;
+    } else {
+        admission.allowed = false;
+    }
+    if (const auto unchanged = session.verify_source_unchanged(); !unchanged)
+        return std::unexpected{unchanged.error()};
     diagnostic("planning", planning_started,
                {{"imageId", identity.first},
                 {"actionCount", plan->objects.size()},
@@ -62,7 +81,7 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
         return std::unexpected(token.error());
     auto record = std::make_shared<SessionPackagePlanRecord>(
         SessionPackagePlanRecord{*token, context.owner_id, now + state->retention, identity.first, identity.second,
-                                 package_set, std::move(*plan), false});
+                                 package_set, std::move(*plan), false, *capacity, std::move(admission)});
     {
         std::lock_guard lock{state->mutex};
         cleanup_session_plans(*state, now);
@@ -100,6 +119,7 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
     result["imageId"] = record->image_id;
     result["revision"] = record->expected_revision;
     result["packages"] = session_package_summaries(packages, preparation->destination_volume_names);
+    result["capacity"] = capacity_admission_json(record->capacity);
     diagnostic("total", operation_started,
                {{"imageId", identity.first},
                 {"revision", identity.second},

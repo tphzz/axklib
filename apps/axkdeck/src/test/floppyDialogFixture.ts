@@ -1,6 +1,7 @@
 import { FloppyImportWorkflow } from '../features/import/floppyWorkflow.svelte';
 import { PickerController } from '../features/dialogs/picker';
 import type { ImageTransport, ImageSessionPackageImportPlan } from '../lib/transport';
+import { fitsCapacity } from './samplerCapacityFixture';
 import type { JobController } from '../features/jobs/actions';
 import type { DiskTreeItem } from '../lib/types';
 import { serverDirectoryLocation } from '../lib/storageLocations';
@@ -15,6 +16,7 @@ export function floppyDialogFixture(count = 250, directSource = false, folder?: 
         children: [{ id: 'v0', name: 'Existing', kind: 'volume', partitionIndex: 0, childCount: 0 }],
     };
     const plan: ImageSessionPackageImportPlan = {
+        capacity: fitsCapacity,
         schemaVersion: '1.0',
         imageId: 'image',
         revision: 1,

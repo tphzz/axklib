@@ -23,6 +23,7 @@
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/types.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::app {
 
@@ -189,6 +190,7 @@ struct ImageObjectItem {
     std::optional<std::uint64_t> size_with_dependencies_bytes;
     std::optional<WaveformMetadata> waveform;
     std::optional<SequenceMetadata> sequence;
+    nlohmann::json sample_format = nullptr;
 };
 
 struct ImageRelationshipItem {
@@ -410,6 +412,7 @@ struct ImageWaveformPreviewLane {
     std::string role;
     std::string source_object_id;
     std::uint32_t sample_rate{};
+    std::uint16_t sample_width_bytes{};
     std::uint64_t stored_frame_count{};
     std::uint64_t playback_start_frame{};
     std::uint64_t playback_length_frames{};
@@ -485,6 +488,10 @@ class ImageSessionManager {
                                                                 const CompanionSelection &selection,
                                                                 const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageSessionSummary> inspect(std::string_view image_id, std::string_view owner_id);
+    [[nodiscard]] Result<VolumeCapacityReport> volume_capacity(std::string_view image_id, std::string_view owner_id,
+                                                               std::uint64_t expected_revision,
+                                                               std::string_view content_scope_id,
+                                                               const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageFilesystemPage> filesystem(std::string_view image_id, std::string_view owner_id,
                                                          std::uint64_t expected_revision,
                                                          const ImageFilesystemQuery &query = {});
@@ -571,7 +578,8 @@ class ImageSessionManager {
                                                        const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageAudition> prepare_audition(std::string_view image_id, std::string_view owner_id,
                                                          const std::vector<std::string> &object_ids,
-                                                         const CancellationToken &cancellation = {});
+                                                         const CancellationToken &cancellation = {},
+                                                         bool stored_pcm = false);
     [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,
                                                             std::uint64_t offset, std::size_t size,
                                                             const CancellationToken &cancellation = {});

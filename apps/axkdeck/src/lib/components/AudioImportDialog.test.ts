@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { clientUploadLocation, serverFileLocation } from '../storageLocations';
 import type { ClientUploadSource } from '../clientUploadSource';
+import type { AudioImportOptions } from '../audioImportOptions';
 import type { AudioImportCapabilities, AudioSourceInfo, ImageTransport } from '../transport';
 import AudioImportDialog from './AudioImportDialog.svelte';
 import { ImportCompletion } from '../../features/import/importCompletion.svelte';
@@ -16,6 +17,10 @@ const audioImportDialogSource = readFileSync(
     'utf8',
 );
 const audioImportRowsSource = readFileSync(resolve(process.cwd(), 'src/lib/components/AudioImportRows.svelte'), 'utf8');
+const targetSettingsSource = readFileSync(
+    resolve(process.cwd(), 'src/lib/components/AudioImportTargetSettings.svelte'),
+    'utf8',
+);
 const audioSamplerSettingsSource = readFileSync(
     resolve(process.cwd(), 'src/lib/components/AudioSamplerSettings.svelte'),
     'utf8',
@@ -106,6 +111,65 @@ function destinationProps(volumeName: string, partitionIndex = 0) {
 }
 
 describe('AudioImportDialog', () => {
+    it('chooses one format for the batch without reinspecting audio or changing row settings', async () => {
+        const imageTransport = transport();
+        const oncommit = vi.fn().mockResolvedValue(false);
+        render(AudioImportDialog, {
+            props: {
+                transport: imageTransport,
+                files: [serverFileLocation({ rootId: 'workspace', relativePath: 'Tone.wav' }, 'Tone.wav')],
+                ...destinationProps('Import'),
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+        await screen.findByDisplayValue('Tone');
+        const formats = screen.getByRole('group', { name: 'Sample format' });
+        expect(within(formats).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(within(formats).getByRole('button', { name: 'a4k/a5k' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+        expect(oncommit).toHaveBeenCalledWith(
+            [expect.objectContaining({ sampleName: 'Tone', rootKey: 60 })],
+            { sampleFormat: 'A4000_A5000_224', grouping: { kind: 'SAMPLES' } },
+            expect.any(Array),
+        );
+        expect(imageTransport.inspectAudio).toHaveBeenCalledOnce();
+        expect(screen.getAllByRole('group', { name: 'Sample format' })).toHaveLength(1);
+    });
+
+    it('locks the batch format through submission and restores editing after a confirmed failure', async () => {
+        let finish!: (result: boolean) => void;
+        const oncommit = vi.fn(
+            (_rows: unknown, _options: AudioImportOptions) => new Promise<boolean>((resolve) => (finish = resolve)),
+        );
+        render(AudioImportDialog, {
+            props: {
+                transport: transport(),
+                files: [serverFileLocation({ rootId: 'workspace', relativePath: 'Tone.wav' }, 'Tone.wav')],
+                ...destinationProps('Import'),
+                existingSampleNames: [],
+                existingWaveformNames: [],
+                oncommit,
+                oncancel: vi.fn(),
+            },
+        });
+        await screen.findByDisplayValue('Tone');
+        await waitFor(() =>
+            expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Import' }).disabled).toBe(false),
+        );
+        await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+        const group = screen.getByRole('group', { name: 'Sample format' });
+        for (const button of within(group).getAllByRole<HTMLButtonElement>('button'))
+            expect(button.disabled).toBe(true);
+        expect(oncommit.mock.calls[0]?.[1]).toEqual({ sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } });
+        finish(false);
+        await waitFor(() =>
+            expect(within(group).getByRole<HTMLButtonElement>('button', { name: 'a4k/a5k' }).disabled).toBe(false),
+        );
+    });
+
     it('does not revalidate imported names after refresh when new warnings retain the dialog', async () => {
         const imageTransport = transport();
         imageTransport.inspectAudio = vi.fn().mockResolvedValue(sourceInfo({ channels: 1 }));
@@ -251,7 +315,7 @@ describe('AudioImportDialog', () => {
         expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*10px;/s);
     });
 
-    it('keeps the import mode and conditional Sample Bank name in one compact shared-control row', async () => {
+    it('keeps batch format and grouping in compact responsive shared controls', async () => {
         render(AudioImportDialog, {
             props: {
                 transport: transport(),
@@ -269,12 +333,13 @@ describe('AudioImportDialog', () => {
         expect(mode.classList).toContain('dialog-field-control');
         await fireEvent.change(mode, { target: { value: 'SAMPLE_BANK' } });
         expect(screen.getByRole('textbox', { name: 'Sample Bank name' }).classList).toContain('dialog-field-control');
-        expect(audioImportDialogSource).toMatch(
-            /\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(240px, 360px\) max-content minmax\(180px, 1fr\);[^}]*align-items:\s*center;/s,
+        expect(targetSettingsSource).toMatch(
+            /\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 360px\) max-content max-content;[^}]*align-items:\s*center;/s,
         );
-        expect(audioImportDialogSource).toMatch(
+        expect(targetSettingsSource).toMatch(
             /@media \(max-width: 760px\)\s*\{[^}]*\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\);/s,
         );
+        expect(screen.getByRole('group', { name: 'Sample format' }).classList).toContain('dialog-segmented-control');
     });
 
     it('left-packs sampler fields independently from the identity columns', () => {
@@ -328,8 +393,8 @@ describe('AudioImportDialog', () => {
             expect(oncommit).toHaveBeenCalledWith(
                 [expect.objectContaining({ sampleName: 'Bass' })],
                 {
-                    kind: 'SAMPLE_BANK',
-                    sampleBankName: 'Bass Bank',
+                    sampleFormat: 'A3000_188',
+                    grouping: { kind: 'SAMPLE_BANK', sampleBankName: 'Bass Bank' },
                 },
                 [],
             ),
@@ -436,7 +501,7 @@ describe('AudioImportDialog', () => {
                         waveformNames: ['16bit_11k 2'],
                     }),
                 ],
-                { kind: 'SAMPLES' },
+                { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } },
                 [],
             ),
         );
@@ -614,7 +679,7 @@ describe('AudioImportDialog', () => {
                         targetSampleRate: 48_000,
                     },
                 ],
-                { kind: 'SAMPLES' },
+                { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } },
                 [],
             ),
         );
@@ -795,7 +860,7 @@ describe('AudioImportDialog', () => {
                         loopLengthFrames: 10_000,
                     }),
                 ],
-                { kind: 'SAMPLES' },
+                { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } },
                 ['An additional WAV sampler loop was ignored.', 'An additional WAV sampler loop was ignored.'],
             ),
         );
@@ -854,7 +919,7 @@ describe('AudioImportDialog', () => {
                         targetSampleRate: 22_050,
                     }),
                 ],
-                { kind: 'SAMPLES' },
+                { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } },
                 [],
             ),
         );

@@ -8,8 +8,10 @@
 #include <map>
 #include <set>
 #include <span>
+#include <system_error>
 
 #include "axklib/bytes.hpp"
+#include "axklib/capacity_admission_internal.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
@@ -384,8 +386,12 @@ Result<std::size_t> detail::checked_directory_index_size(std::span<const Prepare
     return pages * sfs_directory_index_page_bytes;
 }
 
-Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path,
-                                           bool overwrite, const CancellationToken &cancellation) {
+namespace {
+Result<WrittenImageLayout> prepare_hds_publication(const HdsBuildManifest &manifest,
+                                                   const std::filesystem::path &output_path, bool overwrite,
+                                                   const CancellationToken &cancellation,
+                                                   const VolumeCapacityPolicy &capacity_policy,
+                                                   VolumeCapacityAdmission *inspection) {
     if (const auto check = cancellation.check(); !check)
         return std::unexpected{check.error()};
     auto geometries = plan_hds_geometry(manifest);
@@ -458,13 +464,10 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
                 make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not write HDS transfer token")};
         std::vector<std::byte> header(1024);
         std::ranges::transform(magic, header.begin(), [](char value) { return static_cast<std::byte>(value); });
-        auto name =
-            ascii(manifest.partitions[partition_index].name, geometry.index > 0 && geometries->size() > 1 ? 15U : 16U);
+        auto name = ascii(manifest.partitions[partition_index].name, 16U);
         if (!name)
             return std::unexpected{name.error()};
         std::ranges::copy(*name, header.begin() + 0x40);
-        if (geometry.index > 0 && geometries->size() > 1)
-            header[0x4f] = static_cast<std::byte>('0' + geometry.index);
         ByteWriter header_writer{header};
         if (auto written = header_writer.write_be32(0x80, 2); !written)
             return std::unexpected{written.error()};
@@ -574,6 +577,41 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
         return std::unexpected{flushed.error()};
     if (auto validated = validate_hds_image(publication->path(), all_records, cancellation); !validated)
         return std::unexpected{validated.error()};
+    {
+        const auto reader = FileReader::open(publication->path());
+        if (!reader)
+            return std::unexpected{reader.error()};
+        OpenOptions capacity_options;
+        capacity_options.cancellation = cancellation;
+        const auto image = open_image(*reader, publication->path(), capacity_options);
+        if (!image)
+            return std::unexpected{image.error()};
+        std::vector<detail::CapacityDestination> destinations;
+        for (const auto &partition : image->partitions()) {
+            const auto root_id = locate_partition_root_record(partition);
+            if (!root_id)
+                return std::unexpected{root_id.error()};
+            const auto root = std::ranges::find(partition.records, *root_id, &IndexRecord::sfs_id);
+            for (const auto &entry : root->directory_entries) {
+                if (entry.state != DirectoryEntryState::live || entry.name == "." || entry.name == "..")
+                    continue;
+                const auto volume =
+                    std::ranges::find(partition.records, entry.target_link_id, &IndexRecord::directory_id);
+                if (volume != partition.records.end())
+                    destinations.push_back({partition.index, entry.name, volume->sfs_id});
+            }
+        }
+        const auto capacity =
+            detail::inspect_capacity_destinations(*image, destinations, capacity_policy, cancellation);
+        if (!capacity)
+            return std::unexpected{capacity.error()};
+        if (inspection) {
+            *inspection = *capacity;
+            return layout;
+        }
+        if (const auto admitted = enforce_volume_capacity_admission(*capacity, capacity_policy); !admitted)
+            return std::unexpected{admitted.error()};
+    }
     const auto mode = overwrite ? detail::PublicationMode::replace_existing : detail::PublicationMode::create_only;
     auto published = publication->publish(mode);
     if (!published)
@@ -582,6 +620,29 @@ Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, con
     const auto &last = geometries->back();
     layout.unused_tail_sectors = manifest.size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
     return layout;
+}
+} // namespace
+
+Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path,
+                                           bool overwrite, const CancellationToken &cancellation,
+                                           const VolumeCapacityPolicy &capacity_policy) {
+    return prepare_hds_publication(manifest, output_path, overwrite, cancellation, capacity_policy, nullptr);
+}
+
+Result<VolumeCapacityAdmission> inspect_hds_build_capacity(const HdsBuildManifest &manifest,
+                                                           const VolumeCapacityPolicy &capacity_policy,
+                                                           const CancellationToken &cancellation) {
+    std::error_code error;
+    const auto temporary_directory = std::filesystem::temp_directory_path(error);
+    if (error)
+        return std::unexpected{make_error(ErrorCode::io_open_failed, ErrorCategory::io,
+                                          "Could not locate the temporary directory for capacity inspection")};
+    VolumeCapacityAdmission inspection;
+    const auto prepared = prepare_hds_publication(manifest, temporary_directory / "axklib-capacity-preview.hds", true,
+                                                  cancellation, capacity_policy, &inspection);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return inspection;
 }
 
 Result<HdsBuildPlanSummary> plan_hds_build(const HdsBuildManifest &manifest, const CancellationToken &cancellation) {

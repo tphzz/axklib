@@ -15,6 +15,21 @@ namespace {
 
 constexpr std::string_view object_magic{"FSFSDEV3SPLX"};
 
+Result<void> decode_program_bitmap(const ByteReader &reader, std::size_t offset, std::array<std::uint32_t, 4> &words,
+                                   std::vector<std::uint8_t> &numbers) {
+    for (std::size_t index = 0; index < words.size(); ++index) {
+        const auto word = reader.be32(offset + index * 4U);
+        if (!word)
+            return std::unexpected{word.error()};
+        words[index] = *word;
+        for (std::uint8_t bit = 0; bit < 32U; ++bit) {
+            if ((*word & (std::uint32_t{1} << bit)) != 0U)
+                numbers.push_back(static_cast<std::uint8_t>(index * 32U + bit + 1U));
+        }
+    }
+    return {};
+}
+
 bool begins_with(std::span<const std::byte> bytes, std::string_view value) {
     return bytes.size() >= value.size() &&
            std::equal(value.begin(), value.end(), bytes.begin(), [](char left, std::byte right) {
@@ -193,7 +208,7 @@ Result<CurrentSbnkMember> decode_sbnk_member(const ByteReader &reader, bool righ
                              .loop_length_frames = *loop_length};
 }
 
-Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const ObjectHeader &header) {
+Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const ObjectHeader &) {
     if (payload.size() < 0x108U) {
         return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                           "current SBNK member contract requires at least 264 bytes")};
@@ -227,18 +242,10 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     } else {
         result.right_link_role = "unused-nonzero";
     }
-    for (std::size_t word_index = 0; word_index < result.linked_program_bitmap_words.size(); ++word_index) {
-        const auto word = reader.be32(0xc0U + word_index * 4U);
-        if (!word) {
-            return std::unexpected{word.error()};
-        }
-        result.linked_program_bitmap_words[word_index] = *word;
-        for (std::uint8_t bit = 0; bit < 32U; ++bit) {
-            if ((*word & (std::uint32_t{1} << bit)) != 0) {
-                result.linked_program_numbers.push_back(static_cast<std::uint8_t>(word_index * 32U + bit + 1U));
-            }
-        }
-    }
+    if (auto links =
+            decode_program_bitmap(reader, 0xc0U, result.linked_program_bitmap_words, result.linked_program_numbers);
+        !links)
+        return std::unexpected{links.error()};
     const auto sample_flags = reader.u8(0xd0);
     const auto mapout_flags = reader.u8(0xd1);
     const auto key_high = reader.u8(0xe2);
@@ -271,11 +278,8 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
     constexpr std::size_t control_bytes = control_count * control_size;
     constexpr std::size_t compatibility_control_offset = 0x0a8U;
     constexpr std::size_t tail_control_offset = 0x164U;
-    constexpr std::size_t object_prefix_size = 0x30U;
-    const auto declared_size = object_prefix_size + static_cast<std::size_t>(header.payload_bytes_0x1c);
-    const auto logical_size =
-        header.payload_bytes_0x1c == 0U ? payload.size() : std::min(payload.size(), declared_size);
-    result.control_record_tail_copy_present = logical_size >= tail_control_offset + control_bytes;
+    result.storage = inspect_sample_storage(payload);
+    result.control_record_tail_copy_present = result.storage.format == SampleStorageFormat::a4000_a5000_224;
     result.control_record_storage_offset =
         result.control_record_tail_copy_present ? tail_control_offset : compatibility_control_offset;
     if (result.control_record_tail_copy_present) {
@@ -321,7 +325,7 @@ Result<CurrentSbnk> decode_sbnk(std::span<const std::byte> payload, const Object
             {descriptor.offset, descriptor.width, Verification::corroborated, "current SBNK parameter field"},
         });
     }
-    const auto parameter_end = std::max<std::size_t>(0x0a8U, std::min<std::size_t>(logical_size, 0x188U));
+    const auto parameter_end = 0xa8U + (result.storage.structurally_valid ? *result.storage.parameter_bytes : 0U);
     result.raw_parameter_window.assign(payload.begin() + 0xa8,
                                        payload.begin() + static_cast<std::ptrdiff_t>(parameter_end));
     return result;
@@ -331,7 +335,7 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     constexpr std::size_t parameter_prefix_offset = 0x78U;
     constexpr std::size_t parameter_prefix_size = 0xbcU;
     constexpr std::size_t parameter_tail_size = 0x24U;
-    constexpr std::size_t pending_parameter_bitmap_offset = 0x134U;
+    constexpr std::size_t override_bitmap_offset = 0x134U;
     constexpr std::size_t member_count_offset = 0x144U;
     constexpr std::size_t first_member_offset = 0x14cU;
     constexpr std::size_t member_size = 0x14U;
@@ -341,36 +345,49 @@ Result<CurrentSbac> decode_sbac(std::span<const std::byte> payload, const Object
     }
     const ByteReader reader{payload};
     CurrentSbac result;
+    result.storage = inspect_sample_bank_storage(payload);
+    if (auto links =
+            decode_program_bitmap(reader, 0x90U, result.linked_program_bitmap_words, result.linked_program_numbers);
+        !links)
+        return std::unexpected{links.error()};
     const auto common = decode_current_common_record(payload);
     if (!common)
         return std::unexpected{common.error()};
     result.common = *common;
     std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_offset), parameter_prefix_size,
                 result.raw_sample_parameter_block.begin());
-    auto member_region_end = payload.size();
+    const auto logical_end =
+        result.storage.structurally_valid
+            ? static_cast<std::size_t>(result.storage.header_revision == 2U ? result.storage.older_body_bytes
+                                                                            : result.storage.later_body_bytes) +
+                  0x30U
+            : payload.size();
+    auto member_region_end = logical_end;
     if (header.unknown_0x14 >= 4U) {
         if (payload.size() < first_member_offset + parameter_tail_size) {
             return std::unexpected{make_error(ErrorCode::container_truncated, ErrorCategory::object,
                                               "current SBAC payload is too short for its split parameter tail")};
         }
         result.storage_layout = SbacStorageLayout::current_split_parameter_tail;
-        result.parameter_tail_offset = payload.size() - parameter_tail_size;
+        result.parameter_tail_offset = logical_end - parameter_tail_size;
         member_region_end = *result.parameter_tail_offset;
         std::copy_n(payload.begin() + static_cast<std::ptrdiff_t>(*result.parameter_tail_offset), parameter_tail_size,
                     result.raw_sample_parameter_block.begin() + static_cast<std::ptrdiff_t>(parameter_prefix_size));
     }
-    for (std::size_t word_index = 0; word_index < result.pending_parameter_propagation_words.size(); ++word_index) {
-        const auto word = reader.be32(pending_parameter_bitmap_offset + word_index * 4U);
+    for (std::size_t word_index = 0; word_index < result.override_enable_words.size(); ++word_index) {
+        const auto word = reader.be32(override_bitmap_offset + word_index * 4U);
         if (!word) {
             return std::unexpected{word.error()};
         }
-        result.pending_parameter_propagation_words[word_index] = *word;
+        result.override_enable_words[word_index] = *word;
         for (std::uint8_t bit = 0; bit < 32U; ++bit) {
             if ((*word & (std::uint32_t{1} << bit)) == 0) {
                 continue;
             }
             const auto number = static_cast<std::uint8_t>(word_index * 32U + bit);
-            (number <= 88U ? result.pending_parameter_numbers : result.reserved_pending_parameter_numbers)
+            (number <= (result.storage.format == SampleStorageFormat::a3000_188 ? 84U : 88U)
+                 ? result.override_selectors
+                 : result.reserved_override_selectors)
                 .push_back(number);
         }
     }

@@ -194,6 +194,7 @@
             "SBNK_RIGHT_MEMBER_CACHED_REFERENCE",
             "SBNK_GROUP_MEMBERSHIP",
             "SBNK_PROGRAM_BITMAP",
+            "SBAC_PROGRAM_BITMAP",
             "SBAC_SLOT_HANDLE",
             "PROG_ASSIGNMENT_HANDLE"
           ]

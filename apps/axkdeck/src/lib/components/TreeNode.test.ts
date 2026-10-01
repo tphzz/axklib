@@ -305,7 +305,7 @@ describe('TreeNode', () => {
         expect(onloadchildren).not.toHaveBeenCalled();
     });
 
-    it('shows a compact volume size tooltip without adding a capacity bar', () => {
+    it('shows a body-mounted volume tooltip on keyboard focus without adding a capacity bar', async () => {
         const { container } = render(TreeNode, {
             props: {
                 item: { id: 'v0', name: 'Strings', kind: 'volume', childCount: 12, sizeBytes: 1_572_864 },
@@ -316,9 +316,16 @@ describe('TreeNode', () => {
         });
 
         const volume = screen.getByRole('button', { name: 'Strings [Volume]' });
+        vi.spyOn(volume, 'matches').mockReturnValue(true);
+        expect(screen.queryByRole('tooltip')).toBeNull();
+        await fireEvent.focus(volume);
         const tooltip = screen.getByRole('tooltip');
         expect(tooltip.textContent).toContain('Size: 1.5 MiB');
         expect(volume.getAttribute('aria-describedby')).toBe(tooltip.id);
+        expect(tooltip.parentElement).toBe(document.body);
+        expect(tooltip.style.width).toBe('360px');
+        await fireEvent.keyDown(volume, { key: 'Escape' });
+        expect(screen.queryByRole('tooltip')).toBeNull();
         expect(container.querySelector('.partition-capacity')).toBeNull();
     });
 

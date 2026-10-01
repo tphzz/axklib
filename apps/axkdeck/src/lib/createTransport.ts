@@ -1,4 +1,5 @@
 import { HttpImageTransport } from './httpTransport';
+import type { CapacityReviewHandler } from './httpCapacityGate';
 import type { FilesystemPage } from './filesystem';
 import type { FilesystemExportInspection } from './filesystemExport';
 import type {
@@ -34,10 +35,14 @@ import type {
     SystemProgramContexts,
     WaveDataOrphanInspection,
     VolumeDeletionInspection,
+    VolumeCapacityInspection,
 } from './transport';
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    inspectImportCapacity(): Promise<import('./importCapacity').CapacityAdmission> {
+        return this.unavailable();
+    }
     startFloppyInspection(): Promise<JobState> {
         return this.unavailable();
     }
@@ -262,7 +267,20 @@ class UnavailableTransport implements ImageTransport {
     startObjectRename(): Promise<JobState> {
         return this.unavailable();
     }
+
+    startObjectParameterEdit(): Promise<JobState> {
+        return Promise.reject(new Error('Image editing is unavailable'));
+    }
+    startSampleDuplication(): Promise<JobState> {
+        return this.unavailable();
+    }
+    startObjectFormatConversion(): Promise<JobState> {
+        return this.unavailable();
+    }
     inspectVolumeDeletion(): Promise<VolumeDeletionInspection> {
+        return this.unavailable();
+    }
+    inspectVolumeCapacity(): Promise<VolumeCapacityInspection> {
         return this.unavailable();
     }
     inspectPlacement(): Promise<PlacementRepairInspection> {
@@ -330,7 +348,7 @@ class UnavailableTransport implements ImageTransport {
     }
 }
 
-export function createTransport(): ImageTransport {
-    if (window.__AXKLIB_SERVER__) return new HttpImageTransport(window.__AXKLIB_SERVER__);
+export function createTransport(capacityReviewer?: CapacityReviewHandler): ImageTransport {
+    if (window.__AXKLIB_SERVER__) return new HttpImageTransport(window.__AXKLIB_SERVER__, capacityReviewer);
     return new UnavailableTransport();
 }

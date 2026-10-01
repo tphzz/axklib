@@ -4,12 +4,16 @@ export interface ModalOptions {
     onescape?: () => void;
 }
 
-interface InertState {
-    count: number;
-    previous: boolean;
+interface ModalEntry {
+    node: HTMLElement;
+    backdrop: HTMLElement | null;
+    layer: string;
+    layerPriority: string;
+    previousFocus: HTMLElement | null;
 }
 
-const inertStates = new WeakMap<HTMLElement, InertState>();
+const modalStack: ModalEntry[] = [];
+const inertBackground = new Map<HTMLElement, boolean>();
 let activeModalCount = 0;
 
 function retainScrollbarMode(): () => void {
@@ -33,23 +37,21 @@ const focusableSelector =
     'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), ' +
     'a[href], [tabindex]:not([tabindex="-1"])';
 
-function retainInert(element: HTMLElement): void {
-    const state = inertStates.get(element);
-    if (state) {
-        state.count += 1;
-        return;
+function synchronizeModals(): void {
+    const top = modalStack.at(-1);
+    const background = new Set(top ? backgroundElements(top.node) : []);
+    // Only the top modal defines the inert boundary; older snapshots can contain its new host.
+    for (const [element, previous] of inertBackground) {
+        if (background.has(element)) continue;
+        element.inert = previous;
+        inertBackground.delete(element);
     }
-    inertStates.set(element, { count: 1, previous: Boolean(element.inert) });
-    element.inert = true;
-}
-
-function releaseInert(element: HTMLElement): void {
-    const state = inertStates.get(element);
-    if (!state) return;
-    state.count -= 1;
-    if (state.count > 0) return;
-    element.inert = state.previous;
-    inertStates.delete(element);
+    for (const element of background) {
+        if (inertBackground.has(element)) continue;
+        inertBackground.set(element, Boolean(element.inert));
+        element.inert = true;
+    }
+    modalStack.forEach((entry, index) => entry.backdrop?.style.setProperty('--modal-layer', String(50 + index * 10)));
 }
 
 function backgroundElements(node: HTMLElement): HTMLElement[] {
@@ -66,31 +68,46 @@ function backgroundElements(node: HTMLElement): HTMLElement[] {
 }
 
 function focusableElements(node: HTMLElement): HTMLElement[] {
-    return [...node.querySelectorAll<HTMLElement>(focusableSelector)].filter(
-        (element) => !element.hidden && !element.inert,
-    );
+    return [...node.querySelectorAll<HTMLElement>(focusableSelector)].filter(canFocus);
+}
+
+function canFocus(element: HTMLElement): boolean {
+    if (!element.isConnected || element.matches(':disabled')) return false;
+    for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.hidden || ancestor.inert) return false;
+    }
+    return true;
 }
 
 function initialFocusElement(node: HTMLElement): HTMLElement | null {
-    return node.querySelector<HTMLElement>('[data-dialog-initial-focus]');
+    return node.querySelector<HTMLElement>('[data-dialog-initial-focus]:not(:disabled)');
 }
 
 function focusInitialElement(element: HTMLElement): void {
-    element.focus();
+    element.focus({ preventScroll: true });
     if (element.dataset.dialogInitialFocus === 'select' && element instanceof HTMLInputElement) element.select();
 }
 
 export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     let options = initialOptions;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const backdrop = node.closest<HTMLElement>('.dialog-backdrop');
+    const entry: ModalEntry = {
+        node,
+        backdrop,
+        layer: backdrop?.style.getPropertyValue('--modal-layer') ?? '',
+        layerPriority: backdrop?.style.getPropertyPriority('--modal-layer') ?? '',
+        previousFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    };
     const releaseScrollbarMode = retainScrollbarMode();
-    const background = backgroundElements(node);
-    background.forEach(retainInert);
+    modalStack.push(entry);
+    synchronizeModals();
     if (!node.hasAttribute('tabindex')) node.tabIndex = -1;
 
     const keydown = (event: KeyboardEvent): void => {
+        if (modalStack.at(-1) !== entry || event.defaultPrevented) return;
         if (event.key === 'Escape' && options.onescape) {
             event.preventDefault();
+            event.stopPropagation();
             options.onescape();
             return;
         }
@@ -114,20 +131,21 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
     const removeKeydown = on(node, 'keydown', keydown);
     let userInteracted = false;
     const markInteraction = (): void => {
-        userInteracted = true;
+        if (modalStack.at(-1) === entry) userInteracted = true;
     };
     node.addEventListener('pointerdown', markInteraction);
     node.addEventListener('input', markInteraction);
+    node.addEventListener('keydown', markInteraction);
     const observer = new MutationObserver(() => {
-        if (userInteracted) return;
+        if (userInteracted || modalStack.at(-1) !== entry) return;
         const initial = initialFocusElement(node);
         if (!initial) return;
         focusInitialElement(initial);
         observer.disconnect();
     });
-    observer.observe(node, { childList: true, subtree: true });
+    observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
     queueMicrotask(() => {
-        if (!node.isConnected) return;
+        if (!node.isConnected || modalStack.at(-1) !== entry) return;
         const initial = initialFocusElement(node);
         if (initial) {
             focusInitialElement(initial);
@@ -143,13 +161,32 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             options = next;
         },
         destroy() {
+            const index = modalStack.indexOf(entry);
+            if (index === -1) return;
+            const wasTop = modalStack.at(-1) === entry;
             removeKeydown();
             node.removeEventListener('pointerdown', markInteraction);
             node.removeEventListener('input', markInteraction);
+            node.removeEventListener('keydown', markInteraction);
             observer.disconnect();
-            background.forEach(releaseInert);
+            modalStack.splice(index, 1);
+            for (const remaining of modalStack) {
+                if (remaining.previousFocus && node.contains(remaining.previousFocus)) {
+                    remaining.previousFocus = entry.previousFocus;
+                }
+            }
+            if (entry.layer) backdrop?.style.setProperty('--modal-layer', entry.layer, entry.layerPriority);
+            else backdrop?.style.removeProperty('--modal-layer');
+            synchronizeModals();
             releaseScrollbarMode();
-            if (previousFocus?.isConnected) previousFocus.focus();
+            if (!wasTop) return;
+            const top = modalStack.at(-1)?.node;
+            const previous = entry.previousFocus;
+            if (previous && canFocus(previous) && (!top || top.contains(previous))) {
+                previous.focus({ preventScroll: true });
+            } else if (top) {
+                (focusableElements(top)[0] ?? top).focus({ preventScroll: true });
+            }
         },
     };
 }

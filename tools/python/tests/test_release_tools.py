@@ -5,6 +5,7 @@ import json
 import re
 import shlex
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -1310,6 +1311,19 @@ def test_macos_lipo_verifies_each_architecture_in_a_separate_invocation() -> Non
         "$main": ["x86_64", "arm64"],
         "$sidecar": ["x86_64", "arm64"],
     }
+
+
+def test_desktop_release_keeps_host_macros_unstripped_without_changing_app_profile() -> None:
+    root = Path(__file__).resolve().parents[3]
+    manifest = tomllib.loads(
+        (root / "apps/axkdeck/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+    )
+    release = manifest["profile"]["release"]
+    assert release.get("build-override", {}).get("strip") is False
+    assert release["strip"] is True
+    assert release["lto"] is True
+    assert release["opt-level"] == "s"
+    assert manifest["package"]["rust-version"] == "1.85"
 
 
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:

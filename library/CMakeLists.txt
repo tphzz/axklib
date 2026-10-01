@@ -102,6 +102,11 @@ add_library(
   src/wav_stream.cpp
   src/bytes.cpp
   src/catalog.cpp
+  src/volume_capacity.cpp
+  src/volume_capacity_replay.cpp
+  src/volume_capacity_scan.cpp
+  src/capacity_admission.cpp
+  src/capacity_filesystem.cpp
   src/error.cpp
   src/effects.cpp
   src/export_paths.cpp
@@ -139,6 +144,7 @@ add_library(
   src/package_import_program_slots.cpp
   src/package_program_adjustment.cpp
   src/package_import_sfs.cpp
+  src/package_import_program_links.cpp
   src/package_import_sfs_capacity.cpp
   src/package_import_support.cpp
   src/package_manifest.cpp
@@ -162,6 +168,7 @@ add_library(
   src/sfs_files_preparation.cpp
   src/filesystem_preparation.cpp
   src/fat_files_edit.cpp
+  src/fat_files_move.cpp
   src/fat_files_import.cpp
   src/fat_files_state.cpp
   src/fat_files_preparation.cpp
@@ -172,7 +179,13 @@ add_library(
   src/system_file.cpp
   src/system_file_patch.cpp
   src/sample_parameter_decode.cpp
+  src/sample_storage.cpp
+  src/sample_bank_storage.cpp
+  src/sample_parameter_rules.cpp
+  src/sample_format_conversion.cpp
+  src/sample_bank_format_conversion.cpp
   src/sample_parameter_codec.cpp
+  src/sample_bank_overrides.cpp
   src/system_registered_program.cpp
   src/system_registered_sample.cpp
   src/system_recording.cpp
@@ -264,6 +277,8 @@ add_library(
   src/alteration_program_assignment.cpp
   src/alteration_sample_bank_assignment.cpp
   src/alteration_sample_bank_parameters.cpp
+  src/alteration_sample_bank_overrides.cpp
+  src/alteration_manifest_bank_overrides.cpp
   src/alteration_wave_data_parameters.cpp
   src/alteration_manifest_program_replacement.cpp
   src/alteration_program_replacement.cpp
@@ -275,10 +290,16 @@ add_library(
   src/alteration_publication.cpp
   src/alteration_placement.cpp
   src/alteration_sample.cpp
+  src/alteration_sample_update.cpp
+  src/alteration_sample_format.cpp
+  src/alteration_manifest_sample_format.cpp
+  src/alteration_sample_duplicate.cpp
+  src/alteration_manifest_duplicate.cpp
   src/alteration_program_parameters.cpp
   src/alteration_manifest_program_parameters.cpp
   src/alteration_sequence.cpp
   src/alteration_support.cpp
+  src/alteration_record_layout.cpp
   src/alteration_tx16w.cpp
   src/alteration_validation.cpp
   src/alteration_volume.cpp
@@ -297,6 +318,7 @@ add_library(
   src/object_write_codec.cpp
   src/prog_write_codec.cpp
   src/sample_parameter_json.cpp
+  src/sample_parameter_serialize.cpp
   src/program_parameter_json.cpp
   src/program_assignment_parameter_json.cpp
   src/program_spec_json.cpp
@@ -567,6 +589,7 @@ if(BUILD_TESTING)
     axk_core_tests
     tests/bytes_test.cpp
     tests/alteration_test.cpp
+    tests/alteration_record_resize_test.cpp
     tests/program_parameter_alteration_test.cpp
     tests/audio_import_test.cpp
     tests/audio_import_contract_test.cpp
@@ -575,6 +598,8 @@ if(BUILD_TESTING)
     tests/audio_export_wav_source_test.cpp
     tests/audio_export_test.cpp
     tests/catalog_test.cpp
+  tests/volume_capacity_test.cpp
+  tests/volume_capacity_scan_test.cpp
     tests/deletion_test.cpp
     tests/effects_test.cpp
     tests/file_publication_test.cpp
@@ -600,6 +625,9 @@ if(BUILD_TESTING)
     tests/program_parameter_bounds_test.cpp
     tests/package_archive_test.cpp
     tests/package_program_slot_test.cpp
+        tests/package_program_links_test.cpp
+        tests/package_program_source_load_test.cpp
+    tests/program_bitmap_integrity_test.cpp
     tests/package_test.cpp
     tests/package_graph_test.cpp
     tests/floppy_import_test.cpp
@@ -631,12 +659,18 @@ if(BUILD_TESTING)
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/hds_capacity_test.cpp
+    tests/partition_name_test.cpp
     tests/fresh_object_graph_test.cpp
     tests/sample_bank_parameter_alteration_test.cpp
     tests/sample_parameter_edit_validation_test.cpp
+    tests/sample_layout_upgrade_test.cpp
+    tests/sample_bank_format_conversion_test.cpp
+    tests/sample_bank_overrides_test.cpp
     tests/wave_data_parameter_alteration_test.cpp
     tests/program_assignment_replacement_test.cpp
     tests/sample_playback_window_test.cpp
+    tests/sample_duplicate_test.cpp
     tests/sample_wave_data_retarget_test.cpp
     tests/sample_bank_member_growth_test.cpp
     tests/smpl_writer_test.cpp

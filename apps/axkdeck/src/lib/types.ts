@@ -95,6 +95,7 @@ export interface SampleStructureItem {
 }
 
 export interface SampleBankAssignmentOption {
+    sampleFormat?: import('./objectEditing').SampleFormatMetadata | null;
     objectId: string;
     name: string;
     memberCount: number;
@@ -196,6 +197,7 @@ export type InspectorSelection =
           kind: 'sample-bank';
           item: SampleStructureItem;
           members: SampleStructureItem[];
+          unresolvedMemberCount: number;
           memberPreviews: SampleWaveformPreview[];
           displayedMemberId: string;
           relationships?: InspectorRelationshipGroup[];

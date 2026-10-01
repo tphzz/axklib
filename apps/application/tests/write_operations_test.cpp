@@ -10,6 +10,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -20,6 +21,7 @@
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/path_reservations.hpp"
 #include "axklib/application/session_extent_layout_repair_operations.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
@@ -425,14 +427,54 @@ TEST_F(WriteOperationsTest, PublishesTypedHardDiskCreationProfiles) {
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("schemaVersion"), "1.0");
     const auto &profiles = result->at("profiles");
-    ASSERT_EQ(profiles.size(), 5U);
-    EXPECT_EQ(profiles[0].at("profileId"), "FLOPPY_SCALE");
-    EXPECT_EQ(profiles[0].at("sizeBytes"), 1'474'560U);
-    EXPECT_EQ(profiles[0].at("defaultPartitionCount"), 1U);
-    EXPECT_EQ(profiles[0].at("partitionOptions").size(), 1U);
-    EXPECT_EQ(profiles[4].at("profileId"), "HDS_2_GIB");
-    EXPECT_EQ(profiles[4].at("defaultPartitionCount"), 2U);
-    EXPECT_EQ(profiles[4].at("partitionOptions").size(), 7U);
+    const std::array expected{
+        std::tuple{"FLOPPY_SCALE", 1'474'560ULL, 1U, 1U},  std::tuple{"HDS_128_MIB", 134'217'728ULL, 1U, 8U},
+        std::tuple{"HDS_256_MIB", 268'435'456ULL, 1U, 8U}, std::tuple{"CD_R_650", 681'984'000ULL, 1U, 8U},
+        std::tuple{"CD_R_700", 737'280'000ULL, 1U, 8U},    std::tuple{"HDS_1_GIB", 1'073'741'824ULL, 1U, 8U},
+        std::tuple{"HDS_2_GIB", 2'147'483'648ULL, 2U, 8U}, std::tuple{"HDS_4_GIB", 4'294'967'296ULL, 4U, 8U},
+        std::tuple{"HDS_8_GIB", 8'589'934'592ULL, 8U, 8U},
+    };
+    ASSERT_EQ(profiles.size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        const auto &[id, size, default_count, maximum_count] = expected[index];
+        SCOPED_TRACE(id);
+        const auto &profile = profiles[index];
+        EXPECT_EQ(profile.at("profileId"), id);
+        EXPECT_EQ(profile.at("sizeBytes"), size);
+        EXPECT_EQ(profile.at("defaultPartitionCount"), default_count);
+        const auto &options = profile.at("partitionOptions");
+        ASSERT_EQ(options.size(), maximum_count - default_count + 1U);
+        for (std::size_t option = 0; option < options.size(); ++option)
+            EXPECT_EQ(options[option].at("partitionCount"), default_count + option);
+    }
+}
+
+TEST_F(WriteOperationsTest, NewHardDiskProfilesPlanOnlyAdmittedCountsWithoutWritingImages) {
+    const std::array cases{
+        std::tuple{"HDS_128_MIB", 134'217'728ULL, 1U},
+        std::tuple{"HDS_256_MIB", 268'435'456ULL, 1U},
+        std::tuple{"HDS_4_GIB", 4'294'967'296ULL, 4U},
+        std::tuple{"HDS_8_GIB", 8'589'934'592ULL, 8U},
+    };
+    for (const auto &[id, size, minimum_count] : cases) {
+        for (unsigned count = 0U; count <= 9U; ++count) {
+            const auto filename = std::string{id} + '-' + std::to_string(count) + ".hds";
+            SCOPED_TRACE(filename);
+            const auto planned = registry_.invoke(
+                "create.hds.plan", {{"profileId", id}, {"partitionCount", count}, {"output", file_ref(filename)}},
+                context());
+            EXPECT_FALSE(std::filesystem::exists(root_ / filename));
+            if (count < minimum_count || count > 8U) {
+                EXPECT_FALSE(planned);
+                continue;
+            }
+            ASSERT_TRUE(planned) << planned.error().message;
+            EXPECT_EQ(planned->at("kind"), "HDS");
+            EXPECT_EQ(planned->at("summary").at("sizeBytes"), size);
+            EXPECT_EQ(planned->at("summary").at("partitionCount"), count);
+            EXPECT_FALSE(planned->at("planToken").get<std::string>().empty());
+        }
+    }
 }
 
 TEST_F(WriteOperationsTest, TypedHardDiskPlanUsesTheExistingAtomicBuildLifecycle) {
@@ -859,6 +901,78 @@ TEST_F(WriteOperationsTest, AlterationInspectionCreatesNoApplyAuthority) {
     EXPECT_FALSE(std::filesystem::exists(root_ / "stale.hds"));
 }
 
+TEST_F(WriteOperationsTest, OutputAlterationRejectsObsoleteCapacityApprovalFields) {
+    write_tone(root_ / "capacity.wav");
+    ASSERT_TRUE(axk::write_hds_image(placement_repair_manifest(root_ / "capacity.wav"), root_ / "capacity.hds"));
+    const nlohmann::json manifest{
+        {"schema_version", "1.0"},
+        {"operations",
+         nlohmann::json::array({{{"id", "insert"},
+                                 {"type", "insert_sbnk"},
+                                 {"partition_index", 0U},
+                                 {"volume_name", "Samples"},
+                                 {"sample",
+                                  {{"name", "Added"},
+                                   {"waveform_name", "Wave"},
+                                   {"parameters", {{"root_key", 60U}, {"key_low", 0U}, {"key_high", 127U}}}}}}})}};
+    nlohmann::json request{{"source", file_ref("capacity.hds")},
+                           {"manifest", {{"inline", manifest}}},
+                           {"capacityPolicy", {{"target", "A3000"}}}};
+    const auto inspection = registry_.invoke("alter.inspect", request, context());
+    ASSERT_TRUE(inspection) << inspection.error().message;
+    const auto &admission = inspection->at("capacity");
+    EXPECT_EQ(admission.at("target"), "A3000");
+    ASSERT_TRUE(admission.at("allowed").get<bool>());
+    const auto original = read_bytes(root_ / "capacity.hds");
+    request["output"] = file_ref("capacity-result.hds");
+    request["capacityPolicy"]["acknowledgedReviewId"] = nullptr;
+    EXPECT_FALSE(registry_.invoke("alter.hds", request, context()));
+    EXPECT_FALSE(std::filesystem::exists(root_ / "capacity-result.hds"));
+    request["capacityPolicy"].erase("acknowledgedReviewId");
+    const auto applied = registry_.invoke("alter.hds", request, context());
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_TRUE(applied->at("applied").get<bool>());
+    EXPECT_EQ(read_bytes(root_ / "capacity.hds"), original);
+}
+
+TEST_F(WriteOperationsTest, FrozenCapacityInspectionRejectsMalformedCandidate) {
+    write_tone(root_ / "capacity.wav");
+    const auto path = root_ / "capacity.hds";
+    ASSERT_TRUE(axk::write_hds_image(placement_repair_manifest(root_ / "capacity.wav"), path));
+    const axk::VolumeCapacityPolicy policy{axk::ASeriesLoadTarget::a3000};
+    const auto reader = axk::FileReader::open(path).value();
+    const auto image = axk::open_image(path).value();
+    const auto &partition = image.partitions().front();
+    const auto root = std::ranges::find(partition.records, axk::locate_partition_root_record(partition).value(),
+                                        &axk::IndexRecord::sfs_id);
+    const auto volume = std::ranges::find_if(partition.records, [&](const auto &record) {
+        return std::ranges::any_of(root->directory_entries, [&](const auto &entry) {
+            return entry.name == "Samples" && entry.target_link_id == record.directory_id;
+        });
+    });
+    ASSERT_NE(volume, partition.records.end());
+    axk::VolumeCapacityAdmission prepared;
+    prepared.reports.push_back(axk::inspect_volume_capacity(image, {0U}, volume->sfs_id).value());
+    const auto first = axk::app::inspect_frozen_capacity(reader, prepared, policy);
+    ASSERT_TRUE(first) << first.error().message;
+    ASSERT_TRUE(first->allowed);
+    ASSERT_TRUE(axk::enforce_volume_capacity_admission(*first, policy));
+    const auto sample = std::ranges::find(partition.records, "SBNK", &axk::IndexRecord::object_type);
+    ASSERT_NE(sample, partition.records.end());
+    ASSERT_FALSE(sample->extents.empty());
+    const auto sample_offset =
+        (static_cast<std::uint64_t>(partition.start_sector) +
+         static_cast<std::uint64_t>(sample->extents.front().cluster_offset) * partition.sectors_per_cluster) *
+        512U;
+    const auto original_bytes = read_bytes(path);
+    auto changed_bytes = original_bytes;
+    changed_bytes.at(static_cast<std::size_t>(sample_offset)) = std::byte{'X'};
+    const auto changed = axk::app::inspect_frozen_capacity(
+        std::make_shared<axk::MemoryReader>(std::move(changed_bytes)), prepared, policy);
+    EXPECT_FALSE(changed);
+    EXPECT_EQ(read_bytes(path), original_bytes);
+}
+
 TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExistingSession) {
     const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
@@ -1048,7 +1162,14 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     EXPECT_FALSE(placement->at("destinations").front().at("createsVolume").get<bool>());
     EXPECT_EQ(placement->at("destinations").front().at("objectTypeCounts").at("SBNK"), 1U);
 
-    const auto repaired = registry_.invoke("images.placement.repair", placement_request, context());
+    const auto original_bytes = read_bytes(source);
+    const auto prepared = registry_.invoke("images.placement.repair.prepare", placement_request, context());
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    EXPECT_EQ(read_bytes(source), original_bytes);
+    const auto capacity = registry_.invoke("images.alter.inspect", *prepared, context());
+    ASSERT_TRUE(capacity) << capacity.error().message;
+    EXPECT_EQ(read_bytes(source), original_bytes);
+    const auto repaired = registry_.invoke("images.alter", *prepared, context());
     ASSERT_TRUE(repaired) << repaired.error().message;
     EXPECT_EQ(repaired->at("revision"), 2U);
     ASSERT_EQ(repaired->at("operations").size(), 1U);
@@ -1225,6 +1346,25 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     ASSERT_FALSE(inspection->at("candidates").empty());
     const auto &candidate = inspection->at("candidates").front();
     ASSERT_TRUE(candidate.at("defaultSelected").get<bool>());
+
+    const auto original_bytes = read_bytes(root_ / "program-generation.hds");
+    const auto prepared =
+        registry_.invoke("images.programs.generate.prepare",
+                         {{"imageId", opened->image_id},
+                          {"expectedRevision", opened->revision},
+                          {"contentScopeId", volume->id},
+                          {"programs", nlohmann::json::array({{{"targetObjectId", candidate.at("targetObjectId")},
+                                                               {"programNumber", candidate.at("programNumber")},
+                                                               {"programName", candidate.at("defaultProgramName")}}})},
+                          {"capacityPolicy", {{"target", "A3000"}}}},
+                         context());
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    EXPECT_EQ(prepared->at("capacityPolicy").at("target"), "A3000");
+    EXPECT_EQ(read_bytes(root_ / "program-generation.hds"), original_bytes);
+    const auto capacity = registry_.invoke("images.alter.inspect", *prepared, context());
+    ASSERT_TRUE(capacity) << capacity.error().message;
+    EXPECT_EQ(capacity->at("capacity").at("target"), "A3000");
+    EXPECT_EQ(read_bytes(root_ / "program-generation.hds"), original_bytes);
 
     const auto generated =
         registry_.invoke("images.programs.generate",

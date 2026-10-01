@@ -9,18 +9,21 @@ import type { JobState } from '../../lib/transport';
 import { FilesystemWriteRejected } from '../../lib/filesystem';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { filesystemNameError, normalizeFilesystemName } from './nameValidation';
+import { moveConflicts, moveSelection, moveTargetAllowed } from './moveSelection';
 
 export interface FilesEditReview {
-    kind: 'create' | 'delete' | 'rename';
+    kind: 'create' | 'delete' | 'rename' | 'move';
     revision: number;
     entries: FilesystemEntry[];
     capabilities: FilesystemRootCapabilities;
+    destination?: FilesystemEntry;
 }
 
 export class FilesEditWorkflow {
     constructor(
         private readonly onRenamed: (review: FilesEditReview, name: string, revision: number) => void = () => undefined,
         private readonly setStatus: (message: string) => void = () => undefined,
+        private readonly onMoved: (review: FilesEditReview, revision: number) => void = () => undefined,
     ) {}
     review = $state<FilesEditReview | null>(null);
     name = $state('');
@@ -28,6 +31,8 @@ export class FilesEditWorkflow {
     message = $state('');
     jobId = $state<number | null>(null);
     cancelling = $state(false);
+    checking = $state(false);
+    conflicts = $state<Record<string, string>>({});
     private driver: FilesystemMutationDriver | null = null;
     private disposed = false;
 
@@ -39,7 +44,7 @@ export class FilesEditWorkflow {
         return this.phase === 'running' || this.phase === 'refreshing';
     }
     get nameError(): string | null {
-        if (!this.review) return null;
+        if (!this.review || this.review.kind === 'move') return null;
         const error = filesystemNameError(this.name, this.review.capabilities);
         if (error) return error;
         if (
@@ -53,6 +58,8 @@ export class FilesEditWorkflow {
     get canSubmit(): boolean {
         return (
             !!this.review &&
+            !this.checking &&
+            (this.phase !== 'ready' || !Object.keys(this.conflicts).length) &&
             !this.busy &&
             (this.phase !== 'unconfirmed' || this.jobId !== null) &&
             (this.phase !== 'ready' || this.review.kind === 'delete' || !this.nameError)
@@ -66,7 +73,9 @@ export class FilesEditWorkflow {
                 ? review.capabilities.createDirectory
                 : review.kind === 'rename'
                   ? review.capabilities.renameEntry
-                  : review.capabilities.deleteEntry;
+                  : review.kind === 'move'
+                    ? review.capabilities.moveEntry
+                    : review.capabilities.deleteEntry;
         if (
             !capability ||
             review.entries.some(
@@ -80,7 +89,8 @@ export class FilesEditWorkflow {
             )
         )
             return false;
-        if (review.kind !== 'delete' && review.entries.length !== 1) return false;
+        if (review.kind !== 'delete' && review.kind !== 'move' && review.entries.length !== 1) return false;
+        if (review.kind === 'move' && !moveTargetAllowed(review.entries, review.destination ?? null)) return false;
         this.review = {
             ...review,
             capabilities: { ...review.capabilities },
@@ -92,7 +102,34 @@ export class FilesEditWorkflow {
         this.message = 'Ready';
         this.jobId = null;
         this.cancelling = false;
+        this.conflicts = {};
         return true;
+    }
+
+    async openMove(
+        review: FilesEditReview,
+        driver: FilesystemMutationDriver,
+        children: () => Promise<FilesystemEntry[]>,
+    ): Promise<void> {
+        if (!review.destination || !moveTargetAllowed(review.entries, review.destination)) return;
+        const entries = moveSelection(review.entries, review.destination);
+        if (!entries.length || !this.open({ ...review, entries }, driver)) return;
+        const active = this.review;
+        this.checking = true;
+        this.message = 'Checking destination';
+        try {
+            const siblings = await children();
+            if (this.disposed || this.review !== active) return;
+            this.conflicts = moveConflicts(entries, siblings, review.capabilities);
+            this.message = Object.keys(this.conflicts).length ? 'Resolve name conflicts before moving' : 'Ready';
+        } catch (error) {
+            if (!this.disposed && this.review === active) {
+                this.phase = 'failed';
+                this.message = userFacingMessage(error);
+            }
+        } finally {
+            if (this.review === active || !this.review) this.checking = false;
+        }
     }
 
     close(): void {
@@ -112,15 +149,21 @@ export class FilesEditWorkflow {
             const edits: FilesystemEdit[] =
                 review.kind === 'create'
                     ? [{ kind: 'CREATE_DIRECTORY', parentEntryId: review.entries[0].id, relativePath: [this.name] }]
-                    : review.kind === 'rename'
-                      ? [{ kind: 'RENAME', entryId: review.entries[0].id, newName: this.name }]
-                      : review.entries
-                            .filter((entry) => !entry.ancestorIds.some((id) => selected.has(id)))
-                            .map((entry) => ({
-                                kind: 'DELETE',
-                                entryId: entry.id,
-                                recursive: entry.kind === 'directory',
-                            }));
+                    : review.kind === 'move'
+                      ? review.entries.map((entry) => ({
+                            kind: 'MOVE',
+                            entryId: entry.id,
+                            destinationParentEntryId: review.destination!.id,
+                        }))
+                      : review.kind === 'rename'
+                        ? [{ kind: 'RENAME', entryId: review.entries[0].id, newName: this.name }]
+                        : review.entries
+                              .filter((entry) => !entry.ancestorIds.some((id) => selected.has(id)))
+                              .map((entry) => ({
+                                  kind: 'DELETE',
+                                  entryId: entry.id,
+                                  recursive: entry.kind === 'directory',
+                              }));
             await this.run(() => this.driver!.execute(review.revision, edits, this.update));
         }
     }
@@ -144,6 +187,7 @@ export class FilesEditWorkflow {
                 const result = job.result as FilesystemEditResult | undefined;
                 if (this.review?.kind === 'rename' && result?.revision)
                     this.onRenamed(this.review, this.name, result.revision);
+                if (this.review?.kind === 'move' && result?.revision) this.onMoved(this.review, result.revision);
                 await this.refresh(true);
             } else {
                 this.phase = 'failed';
@@ -170,7 +214,11 @@ export class FilesEditWorkflow {
             if (!this.disposed) {
                 if (committed)
                     this.setStatus(
-                        this.review?.kind === 'rename' ? `Renamed to ${this.name}` : 'Filesystem changes saved',
+                        this.review?.kind === 'rename'
+                            ? `Renamed to ${this.name}`
+                            : this.review?.kind === 'move'
+                              ? `Moved ${this.review.entries.length} entries to ${this.review.destination!.path || '/'}`
+                              : 'Filesystem changes saved',
                     );
                 this.review = null;
             }

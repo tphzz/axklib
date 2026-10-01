@@ -75,7 +75,8 @@ Result<InsertSampleBankOperation> parse_insert_sample_bank_json(const Json &row,
         return std::unexpected{manifest_error(std::string{context} + ".volume_name must be a non-empty string")};
     const auto &sample_bank = row["sample_bank"];
     const auto sample_bank_context = std::string{context} + ".sample_bank";
-    if (auto valid = fields(sample_bank, {"name", "member_samples"}, {"parameter_overrides"}, sample_bank_context);
+    if (auto valid = fields(sample_bank, {"name", "member_samples"}, {"parameter_overrides", "storage_format"},
+                            sample_bank_context);
         !valid) {
         return std::unexpected{valid.error()};
     }
@@ -87,6 +88,10 @@ Result<InsertSampleBankOperation> parse_insert_sample_bank_json(const Json &row,
         return std::unexpected{manifest_error("member_samples must contain 1..127 names")};
     }
     SampleBankSpec spec;
+    auto format = parse_sample_storage_format(sample_bank, sample_bank_context);
+    if (!format)
+        return std::unexpected{format.error()};
+    spec.storage_format = *format;
     spec.name = *name;
     for (const auto &member_value : sample_bank["member_samples"]) {
         Json wrapper{{"name", member_value}};

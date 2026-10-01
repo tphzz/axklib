@@ -37,17 +37,22 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
                                    src/image_filesystem_attributes.cpp
                                    src/image_session_floppy_set.cpp src/image_session_inspection.cpp
+                                   src/image_session_volume_capacity.cpp src/volume_capacity.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
                                    src/image_session_program_generation.cpp
                                    src/image_session_program_assignment_cleanup.cpp
                                    src/image_session_system_program_contexts.cpp
                                    src/image_session_object_detail.cpp src/image_session_object_reader.cpp src/image_session_open.cpp
+                                   src/a_series_sample_editor.cpp
+                                   src/a_series_bank_editor.cpp
+                                   src/sample_formats.cpp
                                    src/image_session_directory.cpp
                                    src/image_session_support.cpp src/image_sessions.cpp
                                    src/job_request_resources.cpp src/jobs.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp
                                    src/operation_registry.cpp src/operation_registry_names.cpp
                                    src/operation_registry_program_assignments.cpp
+                                   src/operation_registry_capacity.cpp
                                    src/package_filename.cpp src/package_operations.cpp
                                    src/package_operations_support.cpp src/session_package_import_plan.cpp
                                    src/session_package_operations.cpp
@@ -108,10 +113,11 @@ axk_add_header_self_containment_target(
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
-                                       tests/content_id_test.cpp tests/image_allocation_map_test.cpp
+  add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/directory_shrink_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
+                                       tests/a_series_bank_editor_test.cpp tests/a_series_sample_editor_test.cpp tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
+                                       tests/program_bitmap_reporting_test.cpp
                                        tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
                                        tests/filesystem_edit_operations_test.cpp
                                        tests/filesystem_fat_edit_test.cpp

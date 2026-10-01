@@ -96,6 +96,7 @@ export function mapObject(item: ApiObjectItem): SamplerObject {
         volumeName: item.volumeName,
         categoryName: item.categoryName,
         objectEncoding: item.format,
+        sampleFormat: item.sampleFormat,
         directoryEntryName: item.entryName,
         sfsId: 0,
         storedSizeBytes: item.sizeBytes,

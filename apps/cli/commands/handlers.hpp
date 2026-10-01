@@ -15,6 +15,7 @@ class OperationRegistry;
 namespace axk::cli::commands {
 
 int run_info_request(const InfoRequest &request);
+int run_volume_capacity(const VolumeCapacityRequest &request);
 int run_objects_request(const ObjectsRequest &request);
 int run_relationships_request(const RelationshipsRequest &request);
 int run_inventory_request(const InventoryRequest &request);

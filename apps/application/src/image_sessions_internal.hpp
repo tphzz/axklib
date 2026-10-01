@@ -145,6 +145,7 @@ struct axk::app::ImageSessionManager::Implementation {
         std::unordered_map<std::string, axk::WaveformStatus> waveform_status_by_id;
         std::unordered_map<std::string, std::uint64_t> waveform_cluster_counts_by_id;
         std::vector<CatalogIssue> catalog_issues;
+        std::unordered_map<std::uint64_t, std::pair<std::uint64_t, VolumeCapacityReport>> volume_capacity_cache;
         std::unordered_map<std::string, AuditionEntry> auditions;
         std::size_t root_count{};
         std::uint64_t revision{1U};

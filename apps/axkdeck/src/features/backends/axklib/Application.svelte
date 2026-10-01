@@ -8,6 +8,7 @@
     import { DeletionWorkflow } from '../../../features/deletion/workflow.svelte';
     import { PickerController, type PickerRequest } from '../../../features/dialogs/picker';
     import PickerDialogHost from '../../../features/dialogs/PickerDialogHost.svelte';
+    import MutationCapacityDialog from '../../../lib/components/MutationCapacityDialog.svelte';
     import { hasOpenAppDialog } from '../../../features/dialogs/visibility';
     import ClientFileInputs from '../../../features/file-operations/ClientFileInputs.svelte';
     import { DirectComputerWorkflow } from '../../../features/file-operations/directComputerWorkflow';
@@ -29,14 +30,15 @@
     import { ProgramGenerationWorkflow } from '../../../features/program-generation/workflow.svelte';
     import { ProgramAssignmentCleanupWorkflow } from '../../../features/program-assignment-cleanup/workflow.svelte';
     import WorkspaceShell from './Workspace.svelte';
+    import EditorBoundary from '../../object-editor/EditorBoundary.svelte';
     import { createFilesystemBindings } from './filesBindings';
     import { workspaceTabs } from '../../../features/workspace/tabs';
     import ExperimentalWarningDialog from '../../../lib/components/ExperimentalWarningDialog.svelte';
     import ImageIntegrityDialog from '../../../lib/components/ImageIntegrityDialog.svelte';
     import ImageOpenProgressDialog from '../../../lib/components/ImageOpenProgressDialog.svelte';
     import WorkspaceGuard from '../../../lib/components/WorkspaceGuard.svelte';
-    import { createTransport } from '../../../lib/createTransport';
-    import type { RemoteServerSettingsInput, RemoteServerSettingsView } from '../../../lib/serverSettings';
+    import { createCapacityConnection } from './capacityConnection';
+    import type { RemoteServerSettingsView } from '../../../lib/serverSettings';
     import { reportMutationTiming } from '../../../lib/diagnostics';
     import {
         emptyPackageExportSelection,
@@ -44,6 +46,7 @@
         type PackageExportSelectionState,
     } from '../../../lib/objectSelection';
     import { userFacingMessage } from '../../../lib/userFacingMessage';
+    import { useASeriesPreferences } from '../../../lib/aSeriesPreferences.svelte';
     import type {
         InspectorSelection,
         PackageExportObject,
@@ -56,7 +59,8 @@
         initialExperimentalWarningOpen = true,
         openConnectionSettingsOnStart = false,
     }: AppProps = $props();
-    const transport = createTransport();
+    const preferences = useASeriesPreferences();
+    const { transport, capacity: mutationCapacity } = createCapacityConnection(preferences);
     const isDesktop = '__TAURI_INTERNALS__' in window;
     let pickerRequest = $state<PickerRequest | null>(null);
     let experimentalWarningAcknowledged = $state(false);
@@ -77,6 +81,7 @@
     const packagePickerHistory = new PackagePickerHistory();
     const imageSessionWorkflow = new ImageSessionWorkflow(transport, pickerController);
     const fileBindings = createFilesystemBindings({
+        imageFormat: () => imageSessionWorkflow.imageFormat,
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -148,10 +153,13 @@
         setInspectorOpen: (open) => (inspectorOpen = open),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         requestCompanionDisks: (retry) => imageSessionWorkflow.requestCompanionDisks(retry),
+        selection: () => packageExportSelection,
+        setSelection: (selection) => (packageExportSelection = selection),
     });
     catalogHooks.stopPlayback = () => auditionWorkflow.stop();
     catalogHooks.resetPreviews = () => auditionWorkflow.resetPreviewQueue();
     const mutationWorkflow = new MutationWorkflow({
+        preferredASeriesGeneration: () => preferences.generation,
         transport,
         jobs: jobController,
         catalog,
@@ -237,6 +245,7 @@
     });
     catalogHooks.resetCleanup = () => deletionWorkflow.resetCleanup();
     const audioImportWorkflow = new AudioImportWorkflow({
+        preferredASeriesGeneration: () => preferences.generation,
         transport,
         jobs: jobController,
         picker: pickerController,
@@ -353,6 +362,7 @@
     const sequences = $derived(catalog.sequences);
 
     onDestroy(() => {
+        mutationCapacity.dispose();
         exportWorkflow.dispose();
         volumePackageExportWorkflow.dispose();
         volumeFloppyExportWorkflow.dispose();
@@ -412,17 +422,7 @@
         catalog.selectedBankMemberId ? catalog.waveDataForSample(catalog.selectedBankMemberId) : [],
     );
     const sampleWaveData = $derived(selectedSample ? catalog.waveDataForSample(selectedSample.objectId) : []);
-    const activeCollectionObjectId = $derived(
-        workspaceView === 'programs'
-            ? catalog.selectedProgramId
-            : workspaceView === 'sample-banks'
-              ? catalog.selectedBankId
-              : workspaceView === 'samples'
-                ? catalog.selectedSampleId
-                : workspaceView === 'wave-data'
-                  ? catalog.selectedWaveDataId
-                  : catalog.selectedSequenceId,
-    );
+    const activeCollectionObjectId = $derived(catalog.selectedObjectId(workspaceView));
     const inspectorSelection = $derived.by<InspectorSelection>(() =>
         catalog.selectionForObject(catalog.inspectorObjectId, auditionWorkflow.sampleBankPreviewMemberId),
     );
@@ -509,13 +509,6 @@
             imageSessionWorkflow.setStatus(userFacingMessage(error));
         }
     }
-
-    async function saveRemoteConnection(input: RemoteServerSettingsInput): Promise<void> {
-        await connectionActions.saveRemote(input);
-    }
-    async function switchToLocalConnection(): Promise<void> {
-        await connectionActions.useLocal();
-    }
 </script>
 
 <svelte:window
@@ -541,78 +534,81 @@
     sequenceCancelled={() => directComputerWorkflow.cancelMidiSelection(sequenceImportWorkflow)}
 />
 
-<WorkspaceShell
-    bind:mode={workspaceMode}
-    revision={imageSessionWorkflow.revision}
-    {transport}
-    {...fileBindings}
-    {interfaceScaling}
-    {isDesktop}
-    {workspaceTabs}
-    {workspaceView}
-    bind:inspectorOpen
-    imageLocation={imageSessionWorkflow.location}
-    sourceItems={imageSessionWorkflow.sourceItems}
-    selectedSource={imageSessionWorkflow.selectedSource}
-    selectedVolumeIds={imageSessionWorkflow.volumeSelection.items.map((item) => item.id)}
-    imageOpening={imageSessionWorkflow.opening}
-    sessionId={imageSessionWorkflow.sessionId}
-    {catalog}
-    audition={auditionWorkflow}
-    mutation={mutationWorkflow}
-    audioImport={audioImportWorkflow}
-    sequenceImport={sequenceImportWorkflow}
-    importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
-    importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
-    {programs}
-    {sampleBanks}
-    {samples}
-    {waveData}
-    {sequences}
-    {bankMembers}
-    {bankMemberWaveData}
-    {sampleWaveData}
-    {activeCollectionObjectId}
-    {inspectorSelection}
-    {editorSelection}
-    sourceStatus={imageSessionWorkflow.status}
-    packageSelection={packageExportSelection}
-    objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
-    waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
-    programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
-    programAssignmentCleanupAvailable={imageSessionWorkflow.programAssignmentCleanupAvailable}
-    packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
-    packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
-    volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
-    volumeFloppyExportAvailable={imageSessionWorkflow.volumeFloppyExportAvailable}
-    audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
-    sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
-    mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
-    allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
-    samplerOrderingEnabled={imageSessionWorkflow.imageFormat === 'sfs'}
-    openConnectionSettings={() => void openConnectionSettings()}
-    openImage={() => void imageSessionWorkflow.chooseAndOpen()}
-    createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
-    closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
-    showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
-    manageLocations={() => (workspaceManagerOpen = true)}
-    selectSource={(item, mode, visibleVolumes) => imageSessionWorkflow.selectTreeSource(item, mode, visibleVolumes)}
-    selectSourceForContext={(item, visibleVolumes) => imageSessionWorkflow.selectSourceForContext(item, visibleVolumes)}
-    imageAction={requestImageAction}
-    selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
-    exportPackage={requestObjectPackageExport}
-    exportAudio={(items) => void requestAudioExport(items)}
-    exportWav={(items) => void requestWavExport(items)}
-    exportMidi={requestSequenceExport}
-    deleteObjects={requestObjectDeletion}
-    cleanupWaveData={requestWaveDataCleanup}
-    generatePrograms={() => void programGenerationWorkflow.open()}
-    cleanupProgramAssignments={() => void programAssignmentCleanupWorkflow.open()}
-    clearSelection={clearPackageExportSelection}
-    selectionChanged={(selection) => (packageExportSelection = selection)}
-    selectionLimit={reportPackageExportSelectionLimit}
-    setStatus={(status) => imageSessionWorkflow.setStatus(status)}
-/>
+<EditorBoundary {transport} imageSession={imageSessionWorkflow} audition={auditionWorkflow}>
+    <WorkspaceShell
+        bind:mode={workspaceMode}
+        revision={imageSessionWorkflow.revision}
+        {transport}
+        {...fileBindings}
+        {interfaceScaling}
+        {isDesktop}
+        {workspaceTabs}
+        {workspaceView}
+        bind:inspectorOpen
+        imageLocation={imageSessionWorkflow.location}
+        sourceItems={imageSessionWorkflow.sourceItems}
+        selectedSource={imageSessionWorkflow.selectedSource}
+        selectedVolumeIds={imageSessionWorkflow.volumeSelection.items.map((item) => item.id)}
+        imageOpening={imageSessionWorkflow.opening}
+        sessionId={imageSessionWorkflow.sessionId}
+        {catalog}
+        audition={auditionWorkflow}
+        mutation={mutationWorkflow}
+        audioImport={audioImportWorkflow}
+        sequenceImport={sequenceImportWorkflow}
+        importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
+        importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
+        {programs}
+        {sampleBanks}
+        {samples}
+        {waveData}
+        {sequences}
+        {bankMembers}
+        {bankMemberWaveData}
+        {sampleWaveData}
+        {activeCollectionObjectId}
+        {inspectorSelection}
+        {editorSelection}
+        sourceStatus={imageSessionWorkflow.status}
+        packageSelection={packageExportSelection}
+        objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
+        waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
+        programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
+        programAssignmentCleanupAvailable={imageSessionWorkflow.programAssignmentCleanupAvailable}
+        packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
+        packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
+        volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
+        volumeFloppyExportAvailable={imageSessionWorkflow.volumeFloppyExportAvailable}
+        audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
+        sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
+        mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
+        allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
+        samplerOrderingEnabled={imageSessionWorkflow.imageFormat === 'sfs'}
+        openConnectionSettings={() => void openConnectionSettings()}
+        openImage={() => void imageSessionWorkflow.chooseAndOpen()}
+        createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
+        closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
+        showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
+        manageLocations={() => (workspaceManagerOpen = true)}
+        selectSource={(item, mode, visibleVolumes) => imageSessionWorkflow.selectTreeSource(item, mode, visibleVolumes)}
+        selectSourceForContext={(item, visibleVolumes) =>
+            imageSessionWorkflow.selectSourceForContext(item, visibleVolumes)}
+        imageAction={requestImageAction}
+        selectWorkspace={(view) => auditionWorkflow.selectWorkspaceView(view)}
+        exportPackage={requestObjectPackageExport}
+        exportAudio={(items) => void requestAudioExport(items)}
+        exportWav={(items) => void requestWavExport(items)}
+        exportMidi={requestSequenceExport}
+        deleteObjects={requestObjectDeletion}
+        cleanupWaveData={requestWaveDataCleanup}
+        generatePrograms={() => void programGenerationWorkflow.open()}
+        cleanupProgramAssignments={() => void programAssignmentCleanupWorkflow.open()}
+        clearSelection={clearPackageExportSelection}
+        selectionChanged={(selection) => (packageExportSelection = selection)}
+        selectionLimit={reportPackageExportSelectionLimit}
+        setStatus={(status) => imageSessionWorkflow.setStatus(status)}
+    />
+</EditorBoundary>
 
 {#if experimentalWarningOpen}
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
@@ -635,6 +631,7 @@
 <WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
 
 {#if !experimentalWarningOpen}
+    <MutationCapacityDialog workflow={mutationCapacity} />
     <PickerDialogHost
         {transport}
         request={pickerRequest}
@@ -671,8 +668,8 @@
             finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
             cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
             {connectionSettings}
-            {saveRemoteConnection}
-            {switchToLocalConnection}
+            saveRemoteConnection={(input) => connectionActions.saveRemote(input)}
+            switchToLocalConnection={() => connectionActions.useLocal()}
             closeConnectionSettings={() => (connectionSettings = null)}
             mutation={mutationWorkflow}
             packageImport={packageImportWorkflow}

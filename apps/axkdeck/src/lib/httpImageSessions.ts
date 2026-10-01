@@ -2,6 +2,7 @@ import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
 import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
+import { HttpCapacityGate } from './httpCapacityGate';
 import {
     type ApiContentItem,
     type ApiImageSummary,
@@ -41,9 +42,11 @@ import type {
     ProgramAssignmentCleanupInspection,
     ProgramAssignmentCleanupSelection,
     VolumeDeletionInspection,
+    VolumeCapacityInspection,
     WaveDataOrphanInspection,
 } from './transport';
 import { randomIdempotencyKey, serverInput } from './httpTransportWire';
+import { inspectVolumeCapacity, inspectVolumeDeletion } from './httpVolumeOperations';
 import { startSu700Import } from './httpSu700Import';
 import { inspectFilesystemInputs, inspectFilesystemImage, filesystemEditWire } from './httpFilesystemInputs';
 import type { Su700Request } from './su700Import';
@@ -145,31 +148,35 @@ export class HttpImageSessions {
         sessionId: number,
         expectedRevision: number,
         edits: FilesystemEdit[],
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
         if (!edits.length) throw new Error('At least one filesystem edit is required');
         const session = this.get(sessionId);
-        const job = await this.client.invoke<never>(
-            'images.filesystem.edit',
+        return this.mutations.start(
             {
                 imageId: session.remoteId,
                 // Entry identities belong to the reviewed revision, not the latest heartbeat.
                 expectedRevision,
                 acknowledgeDeviceRelationships: true,
                 edits: edits.map(filesystemEditWire),
+                ...(policy ? { capacityPolicy: policy } : {}),
             },
-            { idempotencyKey: randomIdempotencyKey() },
+            'images.filesystem.edit',
+            'images.filesystem.edit.inspect',
         );
-        if (!this.jobs.isJob(job)) throw new Error('images.filesystem.edit did not return a job');
-        return this.jobs.map(job);
     }
 
     private readonly sessions = new Map<number, SessionState>();
     private nextSessionId = 1;
+    readonly mutations: HttpCapacityGate;
 
     constructor(
         private readonly client: AxklibHttpApiClient,
         private readonly jobs: HttpJobController,
-    ) {}
+        mutations?: HttpCapacityGate,
+    ) {
+        this.mutations = mutations ?? new HttpCapacityGate(client, jobs);
+    }
 
     async open(location: ImageLocation, options: ImageOpenOptions = {}): Promise<OpenedImage> {
         if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
@@ -329,11 +336,10 @@ export class HttpImageSessions {
 
     async objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
         const session = this.get(sessionId);
-        const response = await this.client.request<components['schemas']['ImageObjectDetailResponse']>(
+        return this.client.request<ObjectDetail>(
             'GET',
             `/images/${encodeURIComponent(session.remoteId)}/objects/${encodeURIComponent(objectId)}`,
         );
-        return response.data;
     }
 
     async relationshipPage(
@@ -390,14 +396,11 @@ export class HttpImageSessions {
         sessionId: number,
         targets: components['schemas']['ImageVolumeDeletionTarget'][],
     ): Promise<VolumeDeletionInspection> {
-        const session = this.get(sessionId);
-        const result = await this.client.invoke<VolumeDeletionInspection>('images.volume_deletion.inspect', {
-            imageId: session.remoteId,
-            expectedRevision: session.revision,
-            targets,
-        });
-        if (this.jobs.isJob(result)) throw new Error('images.volume_deletion.inspect unexpectedly returned a job');
-        return result;
+        return inspectVolumeDeletion(this.client, this.jobs, this.get(sessionId), targets);
+    }
+
+    inspectVolumeCapacity(sessionId: number, contentScopeId: string): Promise<VolumeCapacityInspection> {
+        return inspectVolumeCapacity(this.client, this.jobs, this.get(sessionId), contentScopeId);
     }
 
     async inspectPlacement(
@@ -422,18 +425,14 @@ export class HttpImageSessions {
         recoveryVolumeName?: string,
     ): Promise<JobState> {
         const session = this.get(sessionId);
-        const result = await this.client.invoke<never>(
-            'images.placement.repair',
-            {
-                imageId: session.remoteId,
-                expectedRevision: session.revision,
-                scope,
-                ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
-            },
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(result)) throw new Error('images.placement.repair did not return a job');
-        return this.jobs.map(result);
+        const result = await this.client.invoke<Record<string, unknown>>('images.placement.repair.prepare', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            scope,
+            ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
+        });
+        if (this.jobs.isJob(result)) throw new Error('Placement preparation unexpectedly returned a job');
+        return this.mutations.start(result);
     }
 
     async inspectObjectDeletion(
@@ -506,18 +505,14 @@ export class HttpImageSessions {
         programs: ProgramGenerationSelection[],
     ): Promise<JobState> {
         const session = this.get(sessionId);
-        const result = await this.client.invoke<never>(
-            'images.programs.generate',
-            {
-                imageId: session.remoteId,
-                expectedRevision: session.revision,
-                contentScopeId,
-                programs,
-            },
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(result)) throw new Error('images.programs.generate did not return a job');
-        return this.jobs.map(result);
+        const result = await this.client.invoke<Record<string, unknown>>('images.programs.generate.prepare', {
+            imageId: session.remoteId,
+            expectedRevision: session.revision,
+            contentScopeId,
+            programs,
+        });
+        if (this.jobs.isJob(result)) throw new Error('Program preparation unexpectedly returned a job');
+        return this.mutations.start(result);
     }
 
     async inspectProgramAssignmentCleanup(
@@ -570,26 +565,24 @@ export class HttpImageSessions {
         return this.jobs.map(result);
     }
 
-    async startMutations(sessionId: number, operations: Record<string, unknown>[]): Promise<JobState> {
+    async startMutations(
+        sessionId: number,
+        operations: Record<string, unknown>[],
+        expectedRevision?: number,
+    ): Promise<JobState> {
         if (operations.length === 0) throw new Error('at least one image mutation is required');
         const session = this.get(sessionId);
-        const job = await this.client.invoke<never>(
-            'images.alter',
-            {
-                imageId: session.remoteId,
-                expectedRevision: session.revision,
-                manifest: {
-                    inline: {
-                        schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
-                        operations,
-                    },
+        return this.mutations.start({
+            imageId: session.remoteId,
+            expectedRevision: expectedRevision ?? session.revision,
+            manifest: {
+                inline: {
+                    schema_version: ALTERATION_MANIFEST_SCHEMA_VERSION,
+                    operations,
                 },
-                inputBindings: [],
             },
-            { idempotencyKey: randomIdempotencyKey() },
-        );
-        if (!this.jobs.isJob(job)) throw new Error('images.alter did not return a job');
-        return this.jobs.map(job);
+            inputBindings: [],
+        });
     }
 
     get(sessionId: number): SessionState {

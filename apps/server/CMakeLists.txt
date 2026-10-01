@@ -274,6 +274,13 @@ if(BUILD_TESTING)
   )
   axk_configure_server_process_test(Server.LoopbackIntegration 45 server)
   add_test(
+    NAME Server.SampleEditIntegration
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_sample_edit_test.py"
+            --server "$<TARGET_FILE:axklib_server>"
+            --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
+  )
+  axk_configure_server_process_test(Server.SampleEditIntegration 45 server)
+  add_test(
     NAME Server.ResilienceIntegration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_resilience_test.py"
             --server "$<TARGET_FILE:axk_server_fixture>"

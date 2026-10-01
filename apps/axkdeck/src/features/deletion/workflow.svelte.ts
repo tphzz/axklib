@@ -338,7 +338,7 @@ export class DeletionWorkflow {
         }
     }
 
-    private async inspectObjects(generation = this.objectGeneration): Promise<void> {
+    private async inspectObjects(generation = this.objectGeneration, preserveError = false): Promise<void> {
         const request = this.objectRequest;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) return;
@@ -361,7 +361,7 @@ export class DeletionWorkflow {
                 cleanupObjectIds: requestedImpactIds(inspection, 'DEPENDENCY'),
                 inspection,
                 loading: false,
-                error: '',
+                error: preserveError ? request.error : '',
             };
         } catch (error) {
             if (
@@ -373,7 +373,7 @@ export class DeletionWorkflow {
                 ...request,
                 inspection: null,
                 loading: false,
-                error: userFacingMessage(error),
+                error: [preserveError ? request.error : '', userFacingMessage(error)].filter(Boolean).join(' '),
             };
         }
     }
@@ -424,8 +424,20 @@ export class DeletionWorkflow {
     ): Promise<void> {
         const message = userFacingMessage(error);
         this.dependencies.setStatus(message);
+        if (
+            generation !== this.objectGeneration ||
+            deletionRequestKey(this.objectRequest?.targets ?? []) !== deletionRequestKey(request.targets) ||
+            this.dependencies.sessionId() !== sessionId
+        )
+            return;
+        this.objectRequest = { ...request, busy: false, loading: true, error: message };
+        let refreshError = '';
         if (this.dependencies.sessionId() === sessionId) {
-            await this.dependencies.refreshSession(preferred).catch(() => undefined);
+            try {
+                await this.dependencies.refreshSession(preferred);
+            } catch (error) {
+                refreshError = userFacingMessage(error);
+            }
         }
         if (
             generation !== this.objectGeneration ||
@@ -433,6 +445,12 @@ export class DeletionWorkflow {
             this.dependencies.sessionId() !== sessionId
         )
             return;
+        if (refreshError) {
+            const failure = `${message} Refresh failed: ${refreshError}`;
+            this.objectRequest = { ...request, inspection: null, busy: false, loading: false, error: failure };
+            this.dependencies.setStatus(failure);
+            return;
+        }
         this.objectRequest = {
             ...request,
             busy: false,
@@ -440,17 +458,23 @@ export class DeletionWorkflow {
             error: `${message} The image has been refreshed; review the deletion again.`,
         };
         const nextGeneration = ++this.objectGeneration;
-        await this.inspectObjects(nextGeneration);
+        await this.inspectObjects(nextGeneration, true);
         if (
             nextGeneration === this.objectGeneration &&
             deletionRequestKey(this.objectRequest?.targets ?? []) === deletionRequestKey(request.targets)
         ) {
             const current = this.objectRequest;
-            if (current)
+            if (current) {
+                const blockers = current.inspection?.blockers.map((blocker) => blocker.message).join(' ');
+                const failure = blockers
+                    ? `${message} ${blockers}`
+                    : current.error || `${message} The image has been refreshed; review the deletion again.`;
                 this.objectRequest = {
                     ...current,
-                    error: `${message} The image has been refreshed; review the deletion again.`,
+                    error: failure,
                 };
+                this.dependencies.setStatus(failure);
+            }
         }
     }
 

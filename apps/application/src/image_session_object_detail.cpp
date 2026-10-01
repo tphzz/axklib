@@ -3,6 +3,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include "a_series_sample_editor.hpp"
+#include "axklib/application/sample_formats.hpp"
 #include "axklib/program_parameter_json.hpp"
 
 namespace {
@@ -194,9 +196,9 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"parameterTailOffsetBytes",
                  sample_bank->parameter_tail_offset ? Json(*sample_bank->parameter_tail_offset) : Json(nullptr)},
                 {"rawSampleParameterBlockHex", hex(sample_bank->raw_sample_parameter_block)},
-                {"pendingParameterPropagationWords", sample_bank->pending_parameter_propagation_words},
-                {"pendingParameterNumbers", sample_bank->pending_parameter_numbers},
-                {"reservedPendingParameterNumbers", sample_bank->reserved_pending_parameter_numbers},
+                {"overrideEnableWords", sample_bank->override_enable_words},
+                {"overrideSelectors", sample_bank->override_selectors},
+                {"reservedOverrideSelectors", sample_bank->reserved_override_selectors},
                 {"storedMemberCount", sample_bank->stored_member_count},
                 {"effectiveMemberCount", sample_bank->effective_member_count},
                 {"maximumMemberCount", sample_bank->maximum_member_count},
@@ -291,6 +293,9 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
+    const auto summary = inspect(image_id, owner_id);
+    if (!summary)
+        return std::unexpected(summary.error());
     const std::scoped_lock access{(*session)->access_mutex};
     const auto snapshot = (*session)->snapshots_by_id.find(std::string{object_id});
     const auto descriptor = (*session)->descriptors_by_id.find(std::string{object_id});
@@ -371,8 +376,39 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         {"header", header_json(snapshot->second.object.header)},
         {"decoded", decoded_json(snapshot->second.object, omissions)},
         {"omissions", std::move(omissions)}};
+    const auto *sample = std::get_if<CurrentSbnk>(&snapshot->second.object.payload);
+    object["sampleFormat"] = sample ? Json(sample_format_metadata(*sample)) : Json(nullptr);
+    const auto *bank = std::get_if<CurrentSbac>(&snapshot->second.object.payload);
+    if (bank)
+        object["sampleFormat"] = sample_format_metadata(*bank);
+    Json editing = nullptr;
+    Json conversion = nullptr;
+    if ((sample || bank) && media_descriptor.size <= 1024U * 1024U) {
+        // Session catalogs retain decoded metadata, not necessarily the original object bytes.
+        const auto payload = implementation_->read_object_range(**session, object_id, 0U,
+                                                                static_cast<std::size_t>(media_descriptor.size), {});
+        if (!payload)
+            return std::unexpected(payload.error());
+        const bool writable = std::ranges::contains(summary->available_operations, "images.alter.objects");
+        conversion = object_format_conversion(snapshot->second, *payload, writable);
+        Json sources = Json::array();
+        if (sample) {
+            const auto pcm =
+                implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::stored_pcm);
+            if (pcm)
+                for (const auto &member : pcm->members)
+                    sources.push_back({{"objectId", member.object_id},
+                                       {"role", member.role},
+                                       {"frames", member.frame_count},
+                                       {"sampleRate", member.sample_rate}});
+        }
+        editing = bank ? detail::a_series_bank_editor(snapshot->second, *payload, writable, relationships)
+                       : detail::a_series_sample_editor(snapshot->second, *payload, writable, sources);
+    }
     return Json{{"schemaVersion", 1U},
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},
                 {"object", std::move(object)},
+                {"editing", std::move(editing)},
+                {"formatConversion", std::move(conversion)},
                 {"relationships", std::move(relationships)}};
 }

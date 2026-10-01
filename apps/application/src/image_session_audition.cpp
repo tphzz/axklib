@@ -22,6 +22,7 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
         ImageWaveformPreviewLane lane{.role = member.role,
                                       .source_object_id = member.object_id,
                                       .sample_rate = member.sample_rate,
+                                      .sample_width_bytes = member.output_width,
                                       .stored_frame_count = member.stored_frame_count,
                                       .playback_start_frame = member.playback_start_frame,
                                       .playback_length_frames = member.playback_length_frames,
@@ -60,7 +61,7 @@ axk::app::ImageSessionManager::preview(std::string_view image_id, std::string_vi
 axk::app::Result<axk::app::ImageAudition>
 axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::string_view owner_id,
                                                 const std::vector<std::string> &object_ids,
-                                                const CancellationToken &cancellation) {
+                                                const CancellationToken &cancellation, bool stored_pcm) {
     if (object_ids.empty() || object_ids.size() > implementation_->maximum_audition_clips) {
         return std::unexpected(
             session_error("invalid_request", std::format("audition must contain between 1 and {} unique objects",
@@ -97,7 +98,9 @@ axk::app::ImageSessionManager::prepare_audition(std::string_view image_id, std::
             attach_object_context(error);
             return error;
         };
-        auto source = implementation_->prepare_source(**session, object_id, Implementation::PcmReadWindow::playback);
+        auto source = implementation_->prepare_source(**session, object_id,
+                                                      stored_pcm ? Implementation::PcmReadWindow::stored_pcm
+                                                                 : Implementation::PcmReadWindow::playback);
         if (!source) {
             auto error = std::move(source.error());
             attach_object_context(error);

@@ -23,6 +23,7 @@
 #include "axklib/writer.hpp"
 
 #include "a3k_test_fixture.hpp"
+#include "a_series_sample_editor.hpp"
 
 namespace {
 
@@ -257,6 +258,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
                                                                       "images.audio_export",
                                                                       "images.sequence_export",
                                                                       "images.volume_package_export",
+                                                                      "images.volume_capacity.inspect",
                                                                       "images.volume_floppy_export",
                                                                       "images.media_conversion",
                                                                       "images.alter.volumes",
@@ -320,6 +322,36 @@ TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, "image_source_changed");
+}
+
+TEST_F(ImageSessionTest, VolumeCapacityRequiresOwnedCurrentPhysicalVolumeAndRejectsStaleCache) {
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    ASSERT_TRUE(roots);
+    ASSERT_FALSE(roots->items.empty());
+    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    ASSERT_TRUE(volumes);
+    const auto volume = std::ranges::find_if(volumes->items, [](const auto &item) { return item.kind == "volume"; });
+    ASSERT_NE(volume, volumes->items.end());
+    const auto first = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_TRUE(first) << first.error().message;
+    ASSERT_EQ(first->profiles.size(), 2U);
+    const auto cached = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_TRUE(cached);
+    EXPECT_EQ(first->volume_directory, cached->volume_directory);
+    EXPECT_EQ(first->profiles[1].minimum_resident_bytes, cached->profiles[1].minimum_resident_bytes);
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-b", opened->revision, volume->id));
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision + 1U, volume->id));
+    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, roots->items.front().id));
+    const auto fixture = root_ / "fixture.hds";
+    const auto previous = std::filesystem::last_write_time(fixture);
+    patch_sample_cached_reference(fixture, 0x12345678U);
+    std::filesystem::last_write_time(fixture, previous + std::chrono::seconds{1});
+    const auto stale = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "image_source_changed");
 }
 
 TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation) {
@@ -1107,6 +1139,19 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     const auto opened = sessions.open({"workspace", "program-scope.hds"}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
+    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    ASSERT_TRUE(samples);
+    ASSERT_FALSE(samples->items.empty());
+    const auto detail = sessions.object_detail(opened->image_id, "owner-a", samples->items.front().id);
+    ASSERT_TRUE(detail) << detail.error().message;
+    const auto &editing = detail->at("editing");
+    ASSERT_FALSE(editing.is_null());
+    EXPECT_EQ(editing.at("profile"), "a-series/sample");
+    EXPECT_EQ(editing.at("editable"), true);
+    EXPECT_EQ(editing.at("payloadSha256").get<std::string>().size(), 64U);
+    EXPECT_TRUE(editing.at("parameters").contains("level"));
+    EXPECT_FALSE(editing.at("sources").empty());
+
     const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_FALSE(roots->items.empty());
@@ -1751,6 +1796,11 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
+    const auto detail = sessions.object_detail(opened->image_id, "owner-a", objects->items.front().id);
+    ASSERT_TRUE(detail) << detail.error().message;
+    ASSERT_FALSE(detail->at("editing").is_null());
+    EXPECT_EQ(detail->at("editing").at("profile"), "a-series/sample");
+
     const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
@@ -1759,6 +1809,69 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     const auto header = sessions.audition_range(audition->audition_id, "owner-a", 0U, 44U);
     ASSERT_TRUE(header) << header.error().message;
     EXPECT_EQ(std::string(reinterpret_cast<const char *>(header->bytes.data() + 8U), 4U), "WAVE");
+}
+
+TEST_F(ImageSessionTest, NativeSampleEditorExposesStoredParametersAndExplicitConversionCapabilities) {
+    const auto source = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(source);
+    const auto *container = std::get_if<axk::Container>(&source->storage());
+    ASSERT_NE(container, nullptr);
+    const auto catalog = axk::build_object_catalog(*container);
+    ASSERT_TRUE(catalog);
+    const auto sample = std::ranges::find_if(
+        catalog->objects, [](const auto &object) { return object.object.header.type == axk::ObjectType::sbnk; });
+    ASSERT_NE(sample, catalog->objects.end());
+    auto bytes = sample->raw_payload;
+    bytes.resize(0x164U);
+    write_be32(bytes, 0x18U, 0x134U);
+    write_be32(bytes, 0x1cU, 0U);
+    for (const auto selector : {2U}) {
+        write_be32(bytes, 0x14U, selector);
+        const auto decoded = axk::decode_object(bytes);
+        ASSERT_TRUE(decoded);
+        auto snapshot = *sample;
+        snapshot.object = *decoded;
+        const auto editing = axk::app::detail::a_series_sample_editor(snapshot, bytes, true,
+                                                                      nlohmann::json::array({{{"frames", 1000U}}}));
+        ASSERT_FALSE(editing.is_null()) << selector;
+        EXPECT_EQ(editing.at("profile"), "a-series/sample");
+        EXPECT_EQ(editing.at("editable"), true);
+        EXPECT_EQ(editing.at("canEditPlayback"), true);
+        const auto *stored_sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
+        ASSERT_NE(stored_sample, nullptr);
+        const auto stored_parameters = axk::decode_sample_parameter_block(stored_sample->raw_parameter_window,
+                                                                          axk::SampleParameterGeneration::a3000);
+        ASSERT_TRUE(stored_parameters);
+        EXPECT_EQ(editing.at("eqCoefficients"), nlohmann::json(stored_parameters->eq_coefficients));
+        EXPECT_TRUE(editing.at("parameters").contains("level"));
+        EXPECT_TRUE(editing.at("parameters").contains("controls"));
+        EXPECT_EQ(editing.at("parameters").at("output1_destination"), std::to_integer<unsigned>(bytes[0x14dU]));
+        EXPECT_EQ(editing.at("parameters").at("portamento_type"), std::to_integer<unsigned>(bytes[0xd1U]) & 1U);
+        EXPECT_FALSE(editing.at("parameters").contains("portamento_rate"));
+        EXPECT_FALSE(editing.at("parameters").contains("portamento_time"));
+        EXPECT_EQ(editing.at("sampleFormat").at("format"), "a3000_188");
+        EXPECT_EQ(editing.at("sampleFormat").at("parameterBytes"), 188U);
+        EXPECT_EQ(editing.at("parameterCapabilities").at("portamento_rate").at("available"), false);
+        EXPECT_EQ(editing.at("parameterCapabilities").at("output1_destination").at("editable"), true);
+        EXPECT_FALSE(editing.contains("formatConversions"));
+        EXPECT_EQ(editing.at("blockedParameterReasons").size(), editing.at("blockedParameters").size());
+        const auto &unavailable = editing.at("unavailableParameters");
+        EXPECT_FALSE(unavailable.contains("output1_destination"));
+        EXPECT_FALSE(unavailable.contains("portamento_type"));
+        EXPECT_TRUE(unavailable.contains("velocity_xfade_low"));
+        EXPECT_FALSE(unavailable.contains("level"));
+
+        auto unsupported = snapshot;
+        std::get<axk::CurrentSbnk>(unsupported.object.payload).raw_parameter_window[0x61U] = std::byte{255};
+        const auto unknown = axk::app::detail::a_series_sample_editor(unsupported, bytes, true,
+                                                                      nlohmann::json::array({{{"frames", 1000U}}}));
+        EXPECT_EQ(unknown.at("unavailableParameters").at("filter_type").at("reason"), "UNSUPPORTED_VALUE");
+        EXPECT_FALSE(unknown.at("parameters").contains("filter_type"));
+    }
+    write_be32(bytes, 0x14U, 99U);
+    auto unsupported = *sample;
+    unsupported.object = *axk::decode_object(bytes);
+    EXPECT_TRUE(axk::app::detail::a_series_sample_editor(unsupported, bytes, true, nlohmann::json::array()).is_null());
 }
 
 TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWaveDataWindow) {
@@ -1867,6 +1980,14 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(sample_preview_lane.loop_start_frame, 40U);
     EXPECT_EQ(sample_preview_lane.loop_length_frames, 8U);
     EXPECT_EQ(sample_preview_lane.bins.size(), 32U);
+
+    const auto stored_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id}, {}, true);
+    ASSERT_TRUE(stored_audition) << stored_audition.error().message;
+    ASSERT_EQ(stored_audition->clips.front().lanes.size(), 1U);
+    EXPECT_EQ(stored_audition->clips.front().lanes.front().frame_count, 132U);
+    const auto stored_pcm = sessions.audition_range(stored_audition->audition_id, "owner-a", 44U, 264U);
+    ASSERT_TRUE(stored_pcm) << stored_pcm.error().message;
+    EXPECT_EQ(stored_pcm->bytes.size(), 264U);
 
     const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id});
     const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave->id});

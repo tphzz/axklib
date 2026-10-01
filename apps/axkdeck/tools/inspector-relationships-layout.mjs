@@ -19,6 +19,9 @@ try {
                 await page.goto(`${base}/tools/layout-fixtures/inspector-relationships.html?kind=${kind}&width=${width}&scale=${scale}`);
                 const section = page.locator('.inspector-relationships');
                 await section.getByRole('heading', { name: 'Relationships' }).waitFor();
+                const disclosure = section.getByRole('button', { name: 'Relationships', exact: true });
+                assert.equal(await disclosure.getAttribute('aria-expanded'), 'false');
+                await disclosure.click();
                 const geometry = await page.evaluate(() => {
                     const property = document.querySelector('.metadata-list dd').getBoundingClientRect();
                     const label = document.querySelector('.metadata-list dt').getBoundingClientRect();
@@ -59,10 +62,10 @@ try {
                 if (kind === 'sample' || kind === 'wave-data') {
                     assert(geometry.rows.some((row) => row.detail === 'Left / Right' && !row.wraps));
                 }
-                assert.equal(await section.locator('span').filter({ hasText: /^$/ }).count(), 0);
+                assert.equal(await section.locator('.inspector-relationship-group button span').filter({ hasText: /^$/ }).count(), 0);
                 const footer = page.locator('.inspector-mode-footer');
                 const before = await footer.boundingBox();
-                const button = section.getByRole('button').first();
+                const button = section.locator('.inspector-relationship-group button').first();
                 await button.click();
                 assert.match(await page.locator('.fixture').getAttribute('data-navigation'), /:false$/);
                 await button.focus();

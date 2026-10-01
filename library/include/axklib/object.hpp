@@ -14,6 +14,7 @@
 #include "axklib/export.hpp"
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
+#include "axklib/sample_storage.hpp"
 
 namespace axk {
 
@@ -141,6 +142,7 @@ struct NumericField {
 };
 
 struct CurrentSbnk {
+    SampleStorageInfo storage;
     CurrentObjectCommonRecord common;
     std::string sample_name;
     bool right_slot_present{};
@@ -187,12 +189,15 @@ enum class SbacStorageLayout : std::uint8_t {
 
 struct CurrentSbac {
     CurrentObjectCommonRecord common;
+    SampleStorageInfo storage;
     SbacStorageLayout storage_layout{SbacStorageLayout::legacy_without_parameter_tail};
     std::optional<std::size_t> parameter_tail_offset;
     std::array<std::byte, 0xe0> raw_sample_parameter_block{};
-    std::array<std::uint32_t, 3> pending_parameter_propagation_words{};
-    std::vector<std::uint8_t> pending_parameter_numbers;
-    std::vector<std::uint8_t> reserved_pending_parameter_numbers;
+    std::array<std::uint32_t, 4> linked_program_bitmap_words{};
+    std::vector<std::uint8_t> linked_program_numbers;
+    std::array<std::uint32_t, 3> override_enable_words{};
+    std::vector<std::uint8_t> override_selectors;
+    std::vector<std::uint8_t> reserved_override_selectors;
     std::uint8_t stored_member_count{};
     std::size_t effective_member_count{};
     std::size_t maximum_member_count{};

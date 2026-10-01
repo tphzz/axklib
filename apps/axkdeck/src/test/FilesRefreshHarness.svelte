@@ -19,8 +19,8 @@
     const closed = filesystemEntry({ id: 'closed', name: 'CLOSED', path: '/CLOSED' });
     let entries = [
         root,
-        folder,
         closed,
+        folder,
         ...Array.from({ length: 80 }, (_, index) =>
             filesystemEntry({
                 id: `file-${index}`,
@@ -72,6 +72,22 @@
         execute: async (_revision, edits) => {
             writes++;
             for (const edit of edits) {
+                if (edit.kind === 'MOVE') {
+                    const entry = entries.find((item) => item.id === edit.entryId)!;
+                    const target = entries.find((item) => item.id === edit.destinationParentEntryId)!;
+                    entries = entries.map((item) =>
+                        item.id === entry.id
+                            ? {
+                                  ...item,
+                                  id: `moved-${item.id}`,
+                                  path: `${target.path}/${item.name}`,
+                                  parentId: target.id,
+                                  ancestorIds: [...target.ancestorIds, target.id],
+                              }
+                            : item,
+                    );
+                    continue;
+                }
                 if (edit.kind !== 'PUT_FILE') throw new Error('Unexpected edit');
                 const name = edit.relativePath.join('/');
                 entries = [

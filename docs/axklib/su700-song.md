@@ -1,7 +1,11 @@
+---
+title: SU700 Song And Track Records
+---
+
 # SU700 Song And Track Records
 
-This reference describes the SSQ records framed by [SU700 Files](su700.md#ssq-song-storage).
-Effects scenes have a separate [Effects Reference](su700-effects.md).
+This reference describes the SSQ records framed by [SU700 File Layout And Sample Data](su700.md#ssq-song-storage).
+Effects scenes are described separately in [SU700 Effects Records](su700-effects.md).
 Offsets and counts below are decimal unless prefixed with `0x`; offsets in
 tables are relative to the named body or snapshot. Multi-byte fields are
 big-endian. `byte` denotes raw storage without an implied universal domain;

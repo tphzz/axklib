@@ -1,6 +1,7 @@
 #include "alteration_internal.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <set>
 #include <utility>
@@ -69,9 +70,13 @@ Result<OperationReport> update_sample_bank_parameters(TransactionState &state, O
             return std::unexpected{updated.error()};
         replacements.emplace(member->second, std::move(*payload));
     }
+    std::uint64_t allocated = 0;
     for (auto &[id, payload] : replacements) {
-        if (auto replaced = replace_fixed_object_payload(state, partition, id, std::move(payload), cancellation);
-            !replaced)
+        const auto growth = grow_record_capacity(state, partition, id, payload.size(), cancellation);
+        if (!growth)
+            return std::unexpected{growth.error()};
+        allocated += growth->first + growth->second;
+        if (auto replaced = replace_record_payload(state, partition, id, std::move(payload), cancellation); !replaced)
             return std::unexpected{replaced.error()};
     }
     OperationReport report;
@@ -80,6 +85,7 @@ Result<OperationReport> update_sample_bank_parameters(TransactionState &state, O
     report.partition = *partition_index;
     report.volume_name = operation.volume_name;
     report.object_name = operation.sample_bank_name;
+    report.allocated_clusters = allocated;
     return report;
 }
 

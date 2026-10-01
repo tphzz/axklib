@@ -68,6 +68,7 @@ export interface FilesystemRootCapabilities {
     putFile: boolean;
     deleteEntry: boolean;
     renameEntry: boolean;
+    moveEntry: boolean;
     maximumNameBytes: number;
     namePolicy: 'PRESERVE' | 'FAT_8_3_UPPERCASE';
     namePattern: string;
@@ -96,7 +97,8 @@ export type FilesystemEdit =
           conflict: 'SKIP' | 'REPLACE';
       }
     | { kind: 'DELETE'; entryId: string; recursive: boolean }
-    | { kind: 'RENAME'; entryId: string; newName: string };
+    | { kind: 'RENAME'; entryId: string; newName: string }
+    | { kind: 'MOVE'; entryId: string; destinationParentEntryId: string };
 
 export interface FilesystemTransport {
     startFilesystemImportInspection(
@@ -109,7 +111,12 @@ export interface FilesystemTransport {
     startFilesystemImageInspection(source: InputFileLocation): Promise<JobState>;
     releaseFilesystemImageInspection(inspectionToken: string): Promise<void>;
     filesystem(sessionId: number, query?: FilesystemQuery): Promise<FilesystemPage>;
-    startFilesystemEdits(sessionId: number, expectedRevision: number, edits: FilesystemEdit[]): Promise<JobState>;
+    startFilesystemEdits(
+        sessionId: number,
+        expectedRevision: number,
+        edits: FilesystemEdit[],
+        policy?: import('./importCapacity').CapacityPolicy,
+    ): Promise<JobState>;
     inspectFilesystemExport(
         sessionId: number,
         expectedRevision: number,
@@ -131,7 +138,17 @@ export interface FilesystemAccess {
 }
 
 export interface FilesystemMutationDriver {
-    execute(revision: number, edits: FilesystemEdit[], update: (job: JobState) => void): Promise<JobState>;
+    execute(
+        revision: number,
+        edits: FilesystemEdit[],
+        update: (job: JobState) => void,
+        policy?: import('./importCapacity').CapacityPolicy,
+    ): Promise<JobState>;
+    inspectCapacity?(
+        revision: number,
+        edits: FilesystemEdit[],
+        policy: import('./importCapacity').CapacityPolicy,
+    ): Promise<import('./importCapacity').CapacityAdmission>;
     observe(jobId: number, update: (job: JobState) => void): Promise<JobState>;
     cancel(jobId: number): Promise<void>;
     refresh(): Promise<void>;

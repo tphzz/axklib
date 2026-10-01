@@ -68,6 +68,7 @@
                 <label>
                     <span>{subject} name</span>
                     <input
+                        class="dialog-field-control"
                         bind:value
                         data-dialog-initial-focus="select"
                         disabled={busy}
@@ -84,10 +85,11 @@
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
             <footer class="dialog-footer">
-                <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>Cancel</button>
-                <button class="primary-button" type="submit" disabled={!canSubmit}>
-                    {busy ? 'Renaming' : 'Rename'}
-                </button>
+                <span class="dialog-footer-status" role="status">{busy ? 'Renaming' : ''}</span>
+                <div class="dialog-footer-actions">
+                    <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>Cancel</button>
+                    <button class="primary-button" type="submit" disabled={!canSubmit}>Rename</button>
+                </div>
             </footer>
         </form>
     </div>

@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "logs",
+  "description": "Display, scaling and diagnostics for the local Logs window; no filesystem plugin access.",
+  "windows": ["logs"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-show",
+    "log:default"
+  ]
+}

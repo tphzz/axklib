@@ -4,11 +4,14 @@
     import type { LaneQueries } from '../../audition/workflow.svelte';
     import AboutDialog from '../../../lib/components/AboutDialog.svelte';
     import AuditionBar from '../../../lib/components/AuditionBar.svelte';
-    import ContainedObjectWorkspace from '../../../lib/components/ContainedObjectWorkspace.svelte';
+    import SampleCollection from './SampleCollection.svelte';
     import Icon from '../../../lib/components/Icon.svelte';
     import ImageNavigator from '../../../lib/components/ImageNavigator.svelte';
-    import ObjectEditor from '../../../lib/components/ObjectEditor.svelte';
+    import DeviceLowerZone from '../../object-editor/DeviceLowerZone.svelte';
     import ObjectInspector from '../../../lib/components/ObjectInspector.svelte';
+    import VolumeInspector from '../../../lib/components/VolumeInspector.svelte';
+    import { provideVolumeCapacity } from '../../../lib/volumeCapacity.svelte';
+    import { capacitySelection } from '../../../lib/capacitySelection';
     import ObjectWorkspace from '../../../lib/components/ObjectWorkspace.svelte';
     import ProgramWorkspace, { type ProgramPresentation } from '../../../lib/components/ProgramWorkspace.svelte';
     import PackageSelectionControls from '../../../lib/components/PackageSelectionControls.svelte';
@@ -24,7 +27,7 @@
     } from '../../../lib/types';
     import { revealCollectionObject } from '../../../lib/collectionNavigation';
     import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../../lib/desktopBuildInfo';
-    import { copyObjectDetailToClipboard } from '../../../lib/objectDetailClipboard';
+    import { copySessionObjectMetadata } from '../../../lib/objectDetailClipboard';
     import { userFacingMessage } from '../../../lib/userFacingMessage';
 
     import WorkspaceShell from '../../workspace/WorkspaceShell.svelte';
@@ -88,7 +91,7 @@
         sequenceExportAvailable,
         mediaConversionAvailable,
         allocationInspectionAvailable,
-        samplerOrderingEnabled = false,
+        samplerOrderingEnabled: enabled = false,
         openConnectionSettings,
         openImage,
         createImage,
@@ -114,6 +117,9 @@
     }: WorkspaceProps = $props();
 
     let mainStage: HTMLElement;
+    const capacity = provideVolumeCapacity(() => ({ transport, sessionId, revision, enabled, selectedSource }));
+    const capacitySelect = capacitySelection(capacity, () => audition);
+    let lowerOpen = $state(false);
     let programPresentation = $state<ProgramPresentation>('single');
     let selectedMultiPart = $state<SystemProgramPart | null>(null);
     let observedSessionId = $state<number | null>(null);
@@ -160,14 +166,18 @@
     }
 
     function selectSingleProgram(program: Program): void {
+        capacity.showObject();
+        lowerOpen = true;
         selectedMultiPart = null;
         audition.selectProgram(program);
     }
 
     function selectMultiPart(part: SystemProgramPart, program: Program | null): void {
+        capacity.showObject();
         selectedMultiPart = part;
         clearSelection();
         if (program) {
+            lowerOpen = true;
             audition.selectProgram(program);
             return;
         }
@@ -181,6 +191,7 @@
         const view = await audition.navigateToObject(objectId);
         if (!view) return;
         if (view === 'programs') {
+            lowerOpen = true;
             programPresentation = 'single';
             selectedMultiPart = null;
         }
@@ -188,15 +199,7 @@
     }
 
     async function copyInspectorMetadata(objectId: string): Promise<void> {
-        if (sessionId === null) throw new Error('No image is open');
-        try {
-            const detail = await transport.objectDetail(sessionId, objectId);
-            await copyObjectDetailToClipboard(detail);
-            setStatus('Copied object metadata to the clipboard');
-        } catch (error) {
-            setStatus(userFacingMessage(error));
-            throw error;
-        }
+        await copySessionObjectMetadata(transport, sessionId, objectId, setStatus);
     }
 
     async function openAbout(): Promise<void> {
@@ -389,7 +392,7 @@
         audioExportEnabled={audioExportAvailable}
         mediaConversionEnabled={mediaConversionAvailable}
         allocationInspectionEnabled={allocationInspectionAvailable}
-        {samplerOrderingEnabled}
+        samplerOrderingEnabled={enabled}
         onimageaction={imageAction}
         onloadchildren={(parentId, offset, limit) =>
             sessionId === null
@@ -399,7 +402,10 @@
 {/snippet}
 {#snippet deviceContent()}
     {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
-        <ContainedObjectWorkspace
+        <SampleCollection
+            {sessionId}
+            {revision}
+            bind:lowerOpen
             view={workspaceView}
             {sampleBanks}
             samples={workspaceView === 'sample-banks' ? bankMembers : samples}
@@ -413,11 +419,9 @@
             showOnlyStandaloneSamples={audition.showOnlyStandaloneSamples}
             onshowonlystandalonechange={(checked) => audition.updateShowOnlyStandaloneSamples(checked)}
             onquerychange={(lane: keyof LaneQueries, value) => audition.updateLaneQuery(workspaceView, lane, value)}
-            onsamplebankselect={(item: SampleStructureItem) => void audition.selectBank(item)}
-            onsampleselect={workspaceView === 'sample-banks'
-                ? (item: SampleStructureItem) => void audition.selectBankMember(item)
-                : (item: SampleStructureItem) => void audition.selectSample(item)}
-            onwavedataselect={(item: WaveDataItem) => void audition.selectWaveData(item)}
+            onsamplebankselect={capacitySelect.bank}
+            onsampleselect={workspaceView === 'sample-banks' ? capacitySelect.member : capacitySelect.sample}
+            onwavedataselect={capacitySelect.wave}
             onplaysamplebank={(item) => void audition.playSampleBank(item)}
             onplaysample={(item) => void audition.playSample(item)}
             onplaywavedata={(item) => void audition.playContainedWaveData(item)}
@@ -451,6 +455,7 @@
             query={audition.laneQueries.sequences.primary}
             onquerychange={(value) => audition.updateLaneQuery('sequences', 'primary', value)}
             onselect={(item) => {
+                capacity.showObject();
                 catalog.selectedSequenceId = item.objectId;
                 catalog.inspectorObjectId = item.objectId;
                 catalog.editorObjectIds.sequences = item.objectId;
@@ -506,8 +511,8 @@
             query={audition.laneQueries[workspaceView].primary}
             onquerychange={(value) => audition.updateLaneQuery(workspaceView, 'primary', value)}
             onprogramselect={selectSingleProgram}
-            onwavedataselect={(item: WaveDataItem) => void audition.selectWaveData(item)}
-            onpreviewrequest={(item) => audition.requestWaveformPreview(item)}
+            onwavedataselect={capacitySelect.wave}
+            onpreviewrequest={(item, bins) => audition.requestWaveformPreview(item, bins)}
             onplay={(item) => void audition.playWaveData(item)}
             onprefetch={(item) => audition.prefetchObject(item.objectKey)}
             onstop={() => void audition.stop()}
@@ -544,7 +549,8 @@
     />
 {/snippet}
 {#snippet deviceLower()}
-    <ObjectEditor
+    <DeviceLowerZone
+        {sessionId}
         selection={editorSelection}
         multiPartContext={multiPartEditorContext}
         assignmentQuery={audition.laneQueries.programs.secondary}
@@ -554,14 +560,16 @@
 {/snippet}
 {#snippet deviceInspector()}
     <div class="device-inspector-zone">
-        <ObjectInspector
-            selection={inspectorSelection}
-            playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
-            playheadFrame={audition.state.playheadFrame}
-            onrelationshipnavigate={(objectId, focusTarget) =>
-                void navigateInspectorRelationship(objectId, focusTarget)}
-            onmetadatacopy={copyInspectorMetadata}
-        />
+        {#if capacity.selectedVolume && enabled}
+            <VolumeInspector item={capacity.selectedVolume} />
+        {:else}<ObjectInspector
+                selection={inspectorSelection}
+                playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
+                playheadFrame={audition.state.playheadFrame}
+                onrelationshipnavigate={(objectId, focusTarget) =>
+                    void navigateInspectorRelationship(objectId, focusTarget)}
+                onmetadatacopy={copyInspectorMetadata}
+            />{/if}
 
         {#if revealEntry}<InspectorModeFooter mode="files" onclick={() => void revealInFiles()} />{/if}
     </div>
@@ -632,6 +640,7 @@
         {interfaceScaling}
         {isDesktop}
         bind:inspectorOpen
+        bind:lowerOpen
         imageName={imageLocation?.displayName.split(/[\\/]/).at(-1) ?? ''}
         context={files?.filesystemName ?? ''}
         status={mode === 'device'
@@ -654,6 +663,8 @@
                   content: deviceContent,
                   inspector: deviceInspector,
                   lower: lowerPanelAvailable ? deviceLower : undefined,
+                  lowerPreferredHeight:
+                      editorSelection?.kind === 'sample' || editorSelection?.kind === 'sample-bank' ? 360 : undefined,
                   tabs: deviceTabs,
                   playback: auditionAvailable ? devicePlayback : undefined,
                   selectionActions: deviceActions,

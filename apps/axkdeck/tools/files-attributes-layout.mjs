@@ -17,17 +17,18 @@ try {
                 const errors = [];
                 page.on('pageerror', (error) => errors.push(error.message));
                 await page.goto(`${base}/tools/layout-fixtures/files-attributes.html?kind=${kind}&width=${width}&scale=${scale}`);
-                const details = page.locator('details');
-                const summary = page.locator('summary');
+                const summary = page.getByRole('button', { name: 'Storage details', exact: true });
                 await summary.waitFor();
-                assert.equal(await details.getAttribute('open'), null);
+                assert.equal(await summary.getAttribute('aria-expanded'), 'true');
                 const properties = page.getByRole('region', { name: 'Entry properties' });
                 assert.doesNotMatch(await properties.innerText(), /0x|Filesystem references|Directory write flag/);
                 const footer = page.locator('.inspector-mode-footer');
                 const before = kind === 'directory' ? null : await footer.boundingBox();
                 await summary.focus();
                 await summary.press('Enter');
-                assert.notEqual(await details.getAttribute('open'), null);
+                assert.equal(await summary.getAttribute('aria-expanded'), 'false');
+                await summary.press('Space');
+                assert.equal(await summary.getAttribute('aria-expanded'), 'true');
                 const geometry = await page.evaluate(() => {
                     const body = document.querySelector('.inspector-body');
                     return {
@@ -70,7 +71,7 @@ try {
                     assert.equal(await tooltip.count(), 0);
                 }
                 const help = labels.first();
-                await page.locator('summary').focus();
+                await summary.focus();
                 await help.hover();
                 await page.getByRole('tooltip').waitFor();
                 await help.click();
@@ -88,7 +89,7 @@ try {
                 await page.locator('.inspector-body').evaluate((body) => body.scrollTop = 0);
                 await page.screenshot({ path: resolve(output, `${kind}-${width}-${scale}.png`) });
                 await summary.click();
-                assert.equal(await details.getAttribute('open'), null);
+                assert.equal(await summary.getAttribute('aria-expanded'), 'false');
                 assert.deepEqual(errors, []);
                 results.push({ kind, width, scale, geometry });
                 await page.close();

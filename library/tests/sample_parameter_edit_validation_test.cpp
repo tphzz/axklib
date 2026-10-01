@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -84,8 +85,9 @@ class SampleParameterEditValidation : public testing::Test {
     void use_short_parameter_layout() {
         payload.resize(0x164U);
         axk::ByteWriter writer{payload};
-        ASSERT_TRUE(writer.write_be32(0x18U, 0x110U));
-        ASSERT_TRUE(writer.write_be32(0x1cU, 0x134U));
+        ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+        ASSERT_TRUE(writer.write_be32(0x18U, 0x134U));
+        ASSERT_TRUE(writer.write_be32(0x1cU, 0U));
         const auto decoded = axk::decode_object(payload);
         ASSERT_TRUE(decoded) << decoded.error().message;
         const auto *sample = std::get_if<axk::CurrentSbnk>(&decoded->payload);
@@ -116,7 +118,81 @@ class SampleParameterEditValidation : public testing::Test {
         EXPECT_EQ(current->right->wave_data_name, current->left.wave_data_name);
         EXPECT_EQ(current->right->cached_wave_data_reference_value, current->left.cached_wave_data_reference_value);
     }
+
+    void set_stereo_empty_loops() {
+        axk::SampleSpec sample;
+        sample.name = "Rim";
+        sample.storage_format = axk::SampleStorageFormat::a3000_188;
+        sample.parameters.root_key = 50U;
+        sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_one_shot;
+        const auto prepared =
+            axk::detail::prepare_sbnk_payload(sample, {"Left", 0x100U, 48'000U, 15'000U},
+                                              axk::detail::PreparedWaveformMember{"Right", 0x200U, 48'000U, 15'000U});
+        ASSERT_TRUE(prepared) << prepared.error().message;
+        payload = *prepared;
+        axk::ByteWriter writer{payload};
+        ASSERT_TRUE(writer.write_be32(0xf8U, 0U));
+        ASSERT_TRUE(writer.write_be32(0xfcU, 900U));
+        ASSERT_TRUE(writer.write_be32(0x100U, 0U));
+        ASSERT_TRUE(writer.write_be32(0x104U, 0U));
+        ASSERT_TRUE(writer.write_be32(0x160U, 0U));
+    }
 };
+
+TEST_F(SampleParameterEditValidation, StereoEmptyLoopsPreserveDormantOffsetsForUnrelatedEdits) {
+    set_stereo_empty_loops();
+    ASSERT_FALSE(HasFatalFailure());
+    expect_level_only_change();
+}
+
+TEST_F(SampleParameterEditValidation, StereoEmptyLoopsPreserveDormantOffsetsForNonrepeatingModeChanges) {
+    set_stereo_empty_loops();
+    ASSERT_FALSE(HasFatalFailure());
+    const auto original = payload;
+    for (const auto mode : {axk::AudioSamplerLoopMode::forward, axk::AudioSamplerLoopMode::reverse,
+                            axk::AudioSamplerLoopMode::forward_one_shot, axk::AudioSamplerLoopMode::reverse_one_shot}) {
+        payload = original;
+        auto expected = original;
+        expected[0xe5U] = static_cast<std::byte>(mode);
+        axk::SampleParameters edits;
+        edits.loop_mode = mode;
+        const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits);
+        ASSERT_TRUE(changed) << changed.error().message;
+        EXPECT_EQ(payload, expected);
+    }
+}
+
+TEST_F(SampleParameterEditValidation, StereoEmptyLoopsAcceptExplicitSharedRepeatingWindow) {
+    set_stereo_empty_loops();
+    ASSERT_FALSE(HasFatalFailure());
+    axk::SampleParameters edits;
+    edits.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    edits.loop_start_frame = 100U;
+    edits.loop_length_frames = 14'900U;
+    const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits);
+    ASSERT_TRUE(changed) << changed.error().message;
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    const auto &sample = std::get<axk::CurrentSbnk>(decoded->payload);
+    ASSERT_TRUE(sample.right);
+    EXPECT_EQ(sample.left.loop_start_frame, 100U);
+    EXPECT_EQ(sample.right->loop_start_frame, 100U);
+    EXPECT_EQ(sample.left.loop_length_frames, 14'900U);
+    EXPECT_EQ(sample.right->loop_length_frames, 14'900U);
+    EXPECT_EQ(axk::ByteReader{payload}.be32(0x160U), 15'000U);
+}
+
+TEST_F(SampleParameterEditValidation, StereoNewLoopMustFitBothPlaybackWindowsAtomically) {
+    set_stereo_empty_loops();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_TRUE(axk::ByteWriter{payload}.write_be32(0xf4U, 14'000U));
+    axk::SampleParameters edits;
+    edits.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+    edits.loop_start_frame = 100U;
+    edits.loop_length_frames = 14'900U;
+    edits.level = 87U;
+    expect_rejected_without_changes(edits);
+}
 
 TEST_F(SampleParameterEditValidation, LevelEditPreservesOriginalKeySentinelWithInvertedEffectiveRange) {
     payload[0xe3U] = std::byte{0xff};
@@ -329,7 +405,7 @@ TEST_F(SampleParameterEditValidation, ShortLayoutEditsAllSixCompatibilityControl
     for (std::size_t index = 0; index < edits.controls.size(); ++index) {
         auto &control = edits.controls[index];
         control.device = static_cast<std::uint8_t>(10U + index);
-        control.function = static_cast<std::uint8_t>(31U + index);
+        control.function = static_cast<std::uint8_t>(16U + index);
         control.type = 3U;
         control.range = static_cast<std::int8_t>(static_cast<int>(index) - 5);
         const auto offset = 0xa8U + index * 4U;
@@ -357,25 +433,66 @@ TEST_F(SampleParameterEditValidation, ShortLayoutEditsAllSixCompatibilityControl
     }
 }
 
-TEST_F(SampleParameterEditValidation, ShortLayoutRejectsEveryExtendedOnlyFieldAtomically) {
+TEST_F(SampleParameterEditValidation, NativeEditsKeepTheFormatAndExtensionEditsRequireExplicitConversion) {
     use_short_parameter_layout();
     ASSERT_FALSE(HasFatalFailure());
     std::vector<axk::SampleParameters> edits(9U);
     edits[0].velocity_xfade_high = 10U;
     edits[1].velocity_xfade_low = 10U;
-    edits[2].output1_destination = 1U;
+    edits[2].output1_destination = 2U;
     edits[3].output1_level = 90U;
     edits[4].output2_destination = 1U;
     edits[5].output2_level = 90U;
     edits[6].portamento_type = 1U;
     edits[7].portamento_rate = 50U;
     edits[8].portamento_time = 50U;
+    const auto original = payload;
     for (std::size_t index = 0; index < edits.size(); ++index) {
         SCOPED_TRACE(index);
         edits[index].level = 87U;
         edits[index].controls[5].device = 74U;
-        expect_rejected_without_changes(edits[index]);
+        payload = original;
+        const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits[index]);
+        if (index < 2U || index > 6U) {
+            EXPECT_FALSE(changed);
+            EXPECT_EQ(payload, original);
+            continue;
+        }
+        ASSERT_TRUE(changed) << changed.error().message;
+        EXPECT_EQ(payload.size(), 0x164U);
+        EXPECT_EQ(axk::ByteReader{payload}.be32(0x18U), 0x134U);
+        EXPECT_EQ(axk::ByteReader{payload}.be32(0x1cU), 0U);
+        EXPECT_EQ(payload[0x116U], std::byte{87});
+        EXPECT_EQ(payload[0xa8U + 20U], std::byte{74});
+        EXPECT_TRUE(std::equal(original.begin() + 0x20U, original.begin() + 0xa8U, payload.begin() + 0x20U));
     }
+}
+
+TEST_F(SampleParameterEditValidation, PaddedShortLayoutPreservesPaddingAndUsesPrefixControllers) {
+    use_short_parameter_layout();
+    ASSERT_FALSE(HasFatalFailure());
+    payload.resize(0x200U, std::byte{0x5a});
+    auto expected = payload;
+    expected[0xa8U] = std::byte{74};
+    expected[0x116U] = std::byte{87};
+    axk::SampleParameters edit;
+    edit.controls[0].device = 74U;
+    edit.level = 87U;
+    ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, edit));
+    EXPECT_EQ(payload, expected);
+    edit.output1_level = 80U;
+    ASSERT_TRUE(axk::detail::apply_sample_parameters_to_payload(payload, edit));
+    EXPECT_EQ(payload.size(), 0x200U);
+    EXPECT_TRUE(
+        std::all_of(payload.begin() + 0x164U, payload.end(), [](std::byte value) { return value == std::byte{0x5a}; }));
+    EXPECT_EQ(payload[0x14eU], std::byte{80});
+}
+
+TEST_F(SampleParameterEditValidation, FailedShortLayoutUpgradeLeavesEveryByteUnchanged) {
+    use_short_parameter_layout();
+    axk::SampleParameters edit;
+    edit.output1_level = 255U;
+    expect_rejected_without_changes(edit);
 }
 
 } // namespace

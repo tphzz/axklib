@@ -2,7 +2,6 @@ import type {
     ImageTransport,
     ProgramGenerationCandidate,
     ProgramGenerationInspection,
-    ProgramGenerationResult,
     ProgramGenerationSelection,
 } from '../../lib/transport';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
@@ -161,8 +160,7 @@ export class ProgramGenerationWorkflow {
             if (completed.status !== 'completed') {
                 throw new Error(completed.error ?? 'Program generation did not complete');
             }
-            const result = completed.result as ProgramGenerationResult | undefined;
-            const firstProgramNumber = result?.createdPrograms[0]?.programNumber ?? programs[0]?.programNumber;
+            const firstProgramNumber = programs[0]?.programNumber;
             this.request = null;
             this.dependencies.selectWorkspace('programs');
             await this.dependencies.refreshSession({ partitionIndex: source.partitionIndex, volumeName: source.name });

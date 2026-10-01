@@ -1,7 +1,8 @@
-# Sequence Transfer And MIDI Conversion
+# A-Series Sequence Transfer And MIDI Conversion
 
-This page describes axklib operations. The binary layout is specified in
-[Sequence Data](sequences.md). Byte-preserving packages and MIDI conversion have
+This page describes axklib operations on A-series Sequences. The binary layout is
+specified in
+[A-Series Sequence Data (SEQU)](sequences.md). Byte-preserving packages and MIDI conversion have
 different contracts: packages retain object bytes, while MIDI conversion retains
 the supported musical events and normalized timing, not native byte packing.
 

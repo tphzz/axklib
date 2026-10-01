@@ -39,7 +39,8 @@ struct State {
 
     [[nodiscard]] std::uint64_t cluster_offset(std::uint16_t cluster) const;
     [[nodiscard]] Result<std::vector<std::uint16_t>> allocate(std::uint32_t count);
-    [[nodiscard]] Result<std::size_t> slot(Node &directory);
+    [[nodiscard]] Result<std::size_t> slot(Node &directory, std::size_t count = 1U);
+    [[nodiscard]] Result<void> move(const MoveFilesystemEntry &operation);
     [[nodiscard]] Result<void> apply(const FilesystemEdit &edit);
     [[nodiscard]] Result<void> remove(const std::string &path, bool recursive);
     [[nodiscard]] Result<void> finish();

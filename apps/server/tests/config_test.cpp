@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -305,7 +306,8 @@ TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
     invalid = parsed->config;
     invalid.maximum_alteration_journal_bytes = 0U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
-    invalid.maximum_alteration_journal_bytes = 8ULL * 1024ULL * 1024ULL * 1024ULL + 1U;
+    invalid.maximum_alteration_journal_bytes =
+        2ULL * 8ULL * 1024ULL * 1024ULL * 1024ULL + 64ULL * 1024ULL * 1024ULL + 1U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
     invalid = parsed->config;
     invalid.maximum_download_archive_depth = 0U;
@@ -316,6 +318,26 @@ TEST(ServerConfig, ParsesAndBoundsArchiveTraversalAndMediaBuildLimits) {
     invalid = parsed->config;
     invalid.maximum_media_build_output_bytes = axk::MediaBuildLimits{}.maximum_output_bytes + 1U;
     EXPECT_FALSE(axk::server::validate_config(invalid));
+}
+
+TEST(ServerConfig, AcceptsExactEightGiBImageJournalCeilingAndRejectsTheNextByte) {
+    constexpr std::uint64_t journal_ceiling = 2ULL * 8ULL * 1024ULL * 1024ULL * 1024ULL + 64ULL * 1024ULL * 1024ULL;
+    auto config = axk::server::Config{};
+    config.bearer_token = "0123456789abcdef";
+    EXPECT_EQ(config.maximum_alteration_journal_bytes, journal_ceiling);
+    config.maximum_alteration_journal_bytes = journal_ceiling;
+    EXPECT_TRUE(axk::server::validate_config(config));
+    config.maximum_alteration_journal_bytes = journal_ceiling + 1U;
+    EXPECT_FALSE(axk::server::validate_config(config));
+
+    TemporaryConfigFile file{R"({"bearerToken":"0123456789abcdef","maximumAlterationJournalBytes":17246978048})"};
+    std::array arguments{std::string{"axklib-server"}, std::string{"--config"}, file.path().string()};
+    std::array<char *, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < arguments.size(); ++index)
+        pointers[index] = arguments[index].data();
+    const auto parsed = axk::server::parse_command_line(static_cast<int>(pointers.size()), pointers.data());
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    EXPECT_EQ(parsed->config.maximum_alteration_journal_bytes, journal_ceiling);
 }
 
 TEST(ServerConfig, RestrictsParentMonitoringToSidecarMode) {

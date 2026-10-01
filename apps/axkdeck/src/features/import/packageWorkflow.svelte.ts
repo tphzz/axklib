@@ -403,6 +403,11 @@ export class PackageImportWorkflow {
         this.request = { ...request, status: 'applying', error: '' };
         this.dependencies.setStatus(`Importing package into ${destination.volumeName}`);
         try {
+            const policy = await this.completion.capacity.review(async () => request.plan!.capacity);
+            if (!policy) {
+                this.request = { ...request, status: 'ready' };
+                return;
+            }
             await this.dependencies.invalidateSession(sessionId);
             await this.completion.run(
                 () => this.dependencies.transport.startImagePackageImport(request.plan!.planToken),
@@ -617,6 +622,7 @@ export class PackageImportWorkflow {
             programSlotAssignments,
             replacePlanToken,
             opaqueSequenceDecisions,
+            this.completion.capacity.policy(),
         );
         if (generation !== this.generation || !this.request) {
             await this.dependencies.transport.releaseImagePackageImportPlan(plan.planToken).catch(() => undefined);

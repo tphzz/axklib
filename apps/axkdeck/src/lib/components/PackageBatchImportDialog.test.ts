@@ -53,6 +53,7 @@ const items: BatchPackageItem[] = ['one', 'two'].map((stem, packageIndex) => ({
 }));
 
 const plan: ImageSessionPackageImportPlan = {
+    capacity: { target: 'A3000', reports: [], allowed: true },
     schemaVersion: '1.0',
     imageId: 'image-1',
     revision: 1,

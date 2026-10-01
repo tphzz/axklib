@@ -16,6 +16,7 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/uploads.hpp"
 #include "axklib/package_import_planning.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::app::package_plan_internal {
 
@@ -40,6 +41,8 @@ struct Record {
     std::uint64_t source_bytes{};
     PackageImportPlan plan;
     bool claimed{};
+    VolumeCapacityPolicy capacity_policy;
+    VolumeCapacityAdmission capacity;
 };
 
 struct Store {

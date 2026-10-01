@@ -20,6 +20,7 @@
 #include "axklib/bytes.hpp"
 #include "axklib/deletion_manifest.hpp"
 #include "axklib/semantic.hpp"
+#include "deletion_selection.hpp"
 
 namespace {
 
@@ -232,28 +233,26 @@ void evaluate_program(const DeletionIndex &index, const axk::ObjectSnapshot &obj
         return;
     }
     std::set<std::string> assignments;
-    std::size_t direct_assignment_count{};
     if (const auto outgoing = index.outgoing.find(object.key); outgoing != index.outgoing.end()) {
         for (const auto *relationship : outgoing->second) {
             if (relationship->type != "PROG_ASSIGNMENT_TO_SBNK" ||
                 !axk::is_effective_program_assignment(*relationship)) {
                 continue;
             }
-            ++direct_assignment_count;
-            assignments.insert(*relationship->target_key);
+            if (!assignments.insert(*relationship->target_key).second)
+                add_notice(notices, "PROGRAM_LINKS_INCONSISTENT",
+                           "Program contains duplicate direct Sample assignments", {object.key});
         }
     }
-    std::set<std::string> bitmap_samples;
-    for (const auto &[key, candidate] : index.objects) {
-        if (candidate->object.header.type != axk::ObjectType::sbnk || !index.same_scope(object, *candidate))
+    for (const auto &comparison : index.graph.bitmap_comparisons) {
+        const auto *target = index.find(comparison.object_key);
+        if (target == nullptr || !index.same_scope(object, *target) ||
+            (!std::ranges::contains(comparison.bitmap_without_direct, *number) &&
+             !std::ranges::contains(comparison.direct_without_bitmap, *number)))
             continue;
-        const auto *sample = std::get_if<axk::CurrentSbnk>(&candidate->object.payload);
-        if (sample != nullptr && std::ranges::contains(sample->linked_program_numbers, *number))
-            bitmap_samples.insert(key);
-    }
-    if (assignments.size() != direct_assignment_count || assignments != bitmap_samples) {
         add_notice(notices, "PROGRAM_LINKS_INCONSISTENT",
-                   "Program direct assignments do not match Sample Program links", {object.key});
+                   axk::program_bitmap_mismatch_message(comparison, target->object.header.name),
+                   {object.key, target->key});
     }
 }
 
@@ -263,6 +262,12 @@ void evaluate_sample_bank(const DeletionIndex &index, const axk::ObjectSnapshot 
     if (bank == nullptr || bank->stored_member_count > bank->maximum_member_count) {
         add_notice(notices, "SAMPLE_BANK_UNREADABLE", "Sample Bank membership is unreadable", {object.key});
         return;
+    }
+    const auto bitmap =
+        std::ranges::find(index.graph.bitmap_comparisons, object.key, &axk::BitmapComparison::object_key);
+    if (bitmap != index.graph.bitmap_comparisons.end() && bitmap->status == "mismatch") {
+        add_notice(notices, "PROGRAM_LINKS_INCONSISTENT",
+                   axk::program_bitmap_mismatch_message(*bitmap, object.object.header.name), {object.key});
     }
     std::set<std::string> members;
     if (const auto outgoing = index.outgoing.find(object.key); outgoing != index.outgoing.end()) {
@@ -622,25 +627,15 @@ axk::Result<axk::ObjectDeletionInspection> axk::inspect_object_deletion(const Co
         result.impacts.push_back(std::move(impact));
     }
 
+    auto blocked_targets = requested_targets;
+    for (const auto &key : eligible_targets)
+        blocked_targets.erase(key);
+    const auto blocked_cleanup = reachable_cleanup(index, blocked_targets, cleanup_excluded);
     for (const auto &key : requested_cleanup) {
-        if (!optional_keys.contains(key))
+        if (!optional_keys.contains(key) && !blocked_cleanup.contains(key))
             return std::unexpected(deletion_error("cleanup object is not an optional dependency of this deletion"));
     }
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (const auto &key : requested_cleanup) {
-            if (selected.contains(key))
-                continue;
-            const auto impact = std::ranges::find(result.impacts, key, &ObjectDeletionImpact::object_key);
-            if (impact != result.impacts.end() &&
-                std::ranges::all_of(impact->prerequisite_keys,
-                                    [&](const auto &prerequisite) { return selected.contains(prerequisite); })) {
-                selected.insert(key);
-                changed = true;
-            }
-        }
-    }
+    deletion_internal::add_requested_cleanup(selected, requested_cleanup, result.impacts);
     for (auto &impact : result.impacts)
         impact.selected = selected.contains(impact.object_key);
     result.selected_keys.assign(selected.begin(), selected.end());

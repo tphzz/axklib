@@ -29,6 +29,7 @@ tauri = { version = "2.11.5", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2.5.1"
 tauri-plugin-log = "2"
+time = { version = "=0.3.45", features = ["parsing", "macros"] }
 url = "2.5.7"
 
 [target.'cfg(unix)'.dependencies]
@@ -56,3 +57,9 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Rust 1.85's Mach-O stripping can make host proc-macro dylibs unloadable on macOS 27.
+# Keep shipped application stripping above; this applies only to build-time crates.
+# https://github.com/rust-lang/rust/issues/157750
+[profile.release.build-override]
+strip = false

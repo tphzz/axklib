@@ -263,6 +263,31 @@ TEST_F(SamplePlaybackWindow, RejectsWindowsOutsideOriginalPcmAndInvalidAbsoluteL
     }
 }
 
+TEST_F(SamplePlaybackWindow, PlaybackOnlyEditsRejectRetainedNonemptyLoopsOutsideTheCandidateWindow) {
+    auto spec = window_sample();
+    spec["right_waveform_id"] = "right";
+    spec["parameters"] = {{"loop_mode", 0}, {"loop_start_frame", 65538}, {"loop_length_frames", 6}};
+    const auto build = axk::parse_hds_build_manifest(build_manifest(Json::array({spec})).dump(), root);
+    ASSERT_TRUE(build) << build.error().message;
+    const auto source = root / "source.hds";
+    ASSERT_TRUE(axk::write_hds_image(*build, source));
+    const Json operation{{"id", "trim"},
+                         {"type", "update_sbnk_parameters"},
+                         {"partition_index", 0},
+                         {"volume_name", "Windows"},
+                         {"sample_name", "Window"},
+                         {"parameters", Json::object()},
+                         {"playback_window", {{"start_frame", 65540}, {"length_frames", 4}}}};
+    const auto edit = axk::parse_alteration_manifest(
+        Json{{"schema_version", "1.0"}, {"operations", Json::array({operation})}}.dump());
+    ASSERT_TRUE(edit) << edit.error().message;
+
+    const auto altered = axk::alter_hds(source, *edit, output);
+
+    EXPECT_FALSE(altered);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
 TEST_F(SamplePlaybackWindow, InsertionUsesQueuedWaveDataWindowAndExplicitWindowsUsePhysicalStoredBounds) {
     const Json existing{{"name", "Existing"}, {"waveform_id", "left"}, {"parameters", {{"loop_mode", 0}}}};
     const auto build = axk::parse_hds_build_manifest(build_manifest(Json::array({existing})).dump(), root);

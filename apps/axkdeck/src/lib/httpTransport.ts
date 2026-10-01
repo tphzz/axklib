@@ -5,8 +5,10 @@ import {
     type DownloadArchiveSnapshot,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { normalizeWaveformPreview } from './waveformPreview';
+import type { ObjectParameterEdit, SampleDuplicationRequest, ObjectFormatConversionRequest } from './objectEditing';
 import type {
-    AudioImportGrouping,
+    AudioImportOptions,
     AudioImportItem,
     AudioImportCapabilities,
     VolumeImportDestination,
@@ -59,6 +61,7 @@ import type {
     Tx16wImportInspection,
     Tx16wImportMode,
     VolumeDeletionInspection,
+    VolumeCapacityInspection,
     VolumeDeletionTarget,
     VolumeMutation,
     ConnectionMode,
@@ -80,6 +83,7 @@ import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpPackageTransport } from './httpPackageTransport';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
+import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
 import { HttpJobController } from './httpJobController';
 import { HttpPackageOperations } from './httpPackageOperations';
 import type { ApiAlterationInspection, ApiWritePlan } from './httpTransportModels';
@@ -96,6 +100,13 @@ import {
 } from './httpTransportWire';
 type HttpImageTransportConnection = AxklibApiConnection & { mode: Exclude<ConnectionMode, 'unavailable'> };
 export class HttpImageTransport extends HttpPackageTransport implements ImageTransport {
+    inspectImportCapacity(
+        sessionId: number,
+        request: import('./importCapacity').CapacityImport,
+        policy: import('./importCapacity').CapacityPolicy,
+    ) {
+        return this.imports.inspectCapacity(sessionId, request, policy);
+    }
     readonly storageMode = 'server' as const;
     readonly connectionMode: Exclude<ConnectionMode, 'unavailable'>;
     readonly supportsClientUploads = true;
@@ -104,10 +115,10 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     private readonly imports: HttpImportOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
 
-    constructor(connection: HttpImageTransportConnection) {
+    constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
         const client = new AxklibHttpApiClient(connection);
         const jobs = new HttpJobController(client);
-        const imageSessions = new HttpImageSessions(client, jobs);
+        const imageSessions = new HttpImageSessions(client, jobs, new HttpCapacityGate(client, jobs, capacityReviewer));
         super(imageSessions, new HttpPackageOperations(client, jobs, imageSessions));
         this.client = client;
         this.jobs = jobs;
@@ -175,9 +186,10 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         sessionId: number,
         target: VolumeImportDestination,
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startAudioImport(sessionId, target, items, grouping);
+        return this.imports.startAudioImport(sessionId, target, items, options, policy);
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
@@ -191,8 +203,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy);
+        return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy, policy);
     }
 
     startTx16wDiskSetImport(
@@ -200,8 +213,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         sources: InputFileLocation[],
         target: AudioImportTarget,
         importMode: Tx16wImportMode,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<JobState> {
-        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode);
+        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode, policy);
     }
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = serverFile(location);
@@ -242,8 +256,9 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         packages: InputFileLocation[],
         destinations: PackageImportDestination[],
         overwrite: boolean,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<PackageImportPlan> {
-        return this.packages.planImport(target, output, packages, destinations, overwrite);
+        return this.packages.planImport(target, output, packages, destinations, overwrite, policy);
     }
     startPackageImport(planToken: string): Promise<JobState> {
         return this.packages.startImport(planToken);
@@ -351,8 +366,21 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imageSessions.startMutations(sessionId, [objectRenameOperation(mutation)]);
     }
 
+    startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState> {
+        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+    }
+    startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState> {
+        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+    }
+    startObjectFormatConversion(sessionId: number, edit: ObjectFormatConversionRequest): Promise<JobState> {
+        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+    }
+
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection> {
         return this.imageSessions.inspectVolumeDeletion(sessionId, targets);
+    }
+    inspectVolumeCapacity(sessionId: number, contentScopeId: string): Promise<VolumeCapacityInspection> {
+        return this.imageSessions.inspectVolumeCapacity(sessionId, contentScopeId);
     }
 
     inspectPlacement(
@@ -410,21 +438,25 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imageSessions.startProgramGeneration(sessionId, contentScopeId, programs);
     }
 
-    preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
+    async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
         const session = this.imageSessions.get(sessionId);
         const query = new URLSearchParams({ objectId: objectKey, bins: String(binCount) });
-        return this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`);
+        return normalizeWaveformPreview(
+            await this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`),
+        );
     }
 
     async prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],
         signal?: AbortSignal,
+        storedPcm = false,
     ): Promise<AuditionBundleDescriptor> {
         const session = this.imageSessions.get(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
             imageId: session.remoteId,
             objectIds: objectKeys,
+            ...(storedPcm ? { sourceWindow: 'STORED' } : {}),
         });
         if (!this.jobs.isJob(submitted)) throw new Error('auditions.prepare did not return a job');
         const localJob = this.jobs.map(submitted);

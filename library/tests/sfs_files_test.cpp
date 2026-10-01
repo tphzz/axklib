@@ -74,7 +74,10 @@ class SfsFiles : public testing::Test {
     static const axk::IndexRecord &named(const axk::Container &image, std::string_view name) {
         const auto &partition = image.partitions().front();
         for (const auto &directory : partition.records) {
-            const auto entry = std::ranges::find(directory.directory_entries, name, &axk::DirectoryEntry::name);
+            const auto entry = std::ranges::find_if(directory.directory_entries, [&](const auto &item) {
+                return item.name == name &&
+                       axk::directory_entry_state(item.raw_link_id) == axk::DirectoryEntryState::live;
+            });
             if (entry != directory.directory_entries.end())
                 return *std::ranges::find(partition.records, axk::SfsId{entry->raw_link_id.value},
                                           &axk::IndexRecord::sfs_id);
@@ -226,6 +229,45 @@ TEST_F(SfsFiles, RenamesEntriesInPlaceWithoutChangingIndexRecordsOrAllocation) {
     const std::vector<axk::FilesystemEdit> collision{axk::CreateFilesystemDirectory{{"Taken"}},
                                                      axk::RenameFilesystemEntry{{"Renamed"}, "Taken"}};
     EXPECT_FALSE(axk::detail::prepare_sfs_file_edits(plan->preview, axk::PartitionIndex{0}, collision));
+}
+
+TEST_F(SfsFiles, MovesTreesAndFilesPreservingRecordsPayloadsAndParentReferences) {
+    const auto populated = folder / "move-source.hds";
+    const std::vector<axk::FilesystemEdit> initial{axk::CreateFilesystemDirectory{{"From"}},
+                                                   axk::CreateFilesystemDirectory{{"To"}},
+                                                   axk::CreateFilesystemDirectory{{"From", "Child"}},
+                                                   axk::PutFilesystemFile{{"From", "Child", "data.bin"}, data(8193)},
+                                                   axk::PutFilesystemFile{{"loose.bin"}, data(3)}};
+    ASSERT_TRUE(axk::write_sfs_file_edits(source, populated, axk::PartitionIndex{0}, initial));
+    const auto reader = axk::FileReader::open(populated).value();
+    const auto before = axk::open_image(populated).value();
+    const auto hash = digest(populated);
+    const std::vector<axk::FilesystemEdit> moves{axk::MoveFilesystemEntry{{"From", "Child"}, {"To"}},
+                                                 axk::MoveFilesystemEntry{{"From", "Child", "data.bin"}, {"To"}},
+                                                 axk::MoveFilesystemEntry{{"loose.bin"}, {"To"}}};
+    const auto plan = axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, moves);
+    ASSERT_TRUE(plan) << plan.error().message;
+    const auto after = axk::open_image(plan->preview, {}).value();
+    const auto &child = named(after, "Child");
+    EXPECT_EQ(child.sfs_id, named(before, "Child").sfs_id);
+    const auto parent = std::ranges::find(child.directory_entries, "..", &axk::DirectoryEntry::name);
+    ASSERT_NE(parent, child.directory_entries.end());
+    EXPECT_EQ(parent->raw_link_id.value, named(after, "To").sfs_id.value);
+    EXPECT_EQ(named(after, "From").link_count + 1U, named(before, "From").link_count);
+    EXPECT_EQ(named(after, "To").link_count, named(before, "To").link_count + 1U);
+    const auto &file = named(after, "data.bin");
+    EXPECT_EQ(file.sfs_id, named(before, "data.bin").sfs_id);
+    EXPECT_EQ(file.attributes, named(before, "data.bin").attributes);
+    EXPECT_EQ(file.extents.front().cluster_offset, named(before, "data.bin").extents.front().cluster_offset);
+    EXPECT_EQ(after.read_record_data(axk::PartitionIndex{0}, file.sfs_id, 16384U).value(),
+              std::vector<std::byte>(8193U, std::byte{0x5a}));
+    EXPECT_EQ(digest(populated), hash);
+    for (const auto &edits : std::vector<std::vector<axk::FilesystemEdit>>{
+             {axk::MoveFilesystemEntry{{"From"}, {"From", "Child"}}},
+             {axk::MoveFilesystemEntry{{"To"}, {"To"}}},
+             {axk::MoveFilesystemEntry{{"sfserrlog"}, {"To"}}},
+             {axk::MoveFilesystemEntry{{"loose.bin"}, {"To"}}, axk::RemoveFilesystemEntry{{"From"}, true}}})
+        EXPECT_FALSE(axk::detail::prepare_sfs_file_edits(reader, axk::PartitionIndex{0}, edits));
 }
 
 TEST_F(SfsFiles, CreatesEmptyDirectoriesAndExactRawFilesWithoutSamplerCategories) {
@@ -1151,7 +1193,10 @@ TEST_F(SfsFiles, ReplacesSamplerAuthoredLargePayloadsWithoutChangingOtherRecords
         }
         ASSERT_FALSE(replacements.empty());
         const auto output = folder / std::format("large-source-{}.hds", image_number++);
-        const auto written = axk::write_sfs_file_edits(input, output, partition.index, replacements);
+        const auto capacity = axk::inspect_sfs_file_edit_capacity(input, partition.index, replacements);
+        ASSERT_TRUE(capacity) << capacity.error().message;
+        const auto written = axk::write_sfs_file_edits(input, output, partition.index, replacements, {}, nullptr,
+                                                       {axk::ASeriesLoadTarget::a4000_a5000});
         ASSERT_TRUE(written) << written.error().message;
         EXPECT_EQ(digest(input), before);
         const auto changed = axk::open_image(output).value();

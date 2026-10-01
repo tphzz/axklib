@@ -1,8 +1,11 @@
+mod a_series_preferences;
 mod allocation_inspector;
 mod desktop_preferences;
+mod diagnostic_logs;
 mod directory_tar;
 #[cfg(test)]
 mod directory_tar_tests;
+mod editor_exit;
 mod file_publication;
 mod local_directory_exports;
 mod local_packages;
@@ -466,6 +469,7 @@ pub fn run() {
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
         .manage(Mutex::new(DirectorySaveCandidateStore::default()))
         .manage(native_drag::state())
+        .manage(editor_exit::EditorExitGuard::default())
         .manage(startup.clone())
         .setup(move |app| {
             setup_startup.enable_logging();
@@ -474,6 +478,7 @@ pub fn run() {
                 .path()
                 .app_log_dir()
                 .map_err(|error| format!("resolve application log directory: {error}"))?;
+            app.manage(diagnostic_logs::LogState::new(log_directory.clone()));
             let application_data_directory = app
                 .path()
                 .app_local_data_dir()
@@ -487,8 +492,8 @@ pub fn run() {
             let settings_path = settings_paths.axkdeck_settings;
             setup_startup.record(StartupMilestone::PreferencesLoadStarted);
             let preferences = DesktopPreferencesStore::load(settings_path.clone()).unwrap_or_else(|error| {
-                log::warn!("axkdeck settings are unavailable and will be reset on the next update: {error}");
-                DesktopPreferencesStore::empty(settings_path)
+                log::warn!("axkdeck settings are unavailable; the settings file will remain unchanged: {error}");
+                DesktopPreferencesStore::unavailable(settings_path, error)
             });
             setup_startup.record(StartupMilestone::PreferencesLoadCompleted);
             app.manage(Mutex::new(preferences));
@@ -510,6 +515,7 @@ pub fn run() {
             setup_startup.record(StartupMilestone::TauriSetupCompleted);
             Ok(())
         })
+        .on_window_event(diagnostic_logs::window_event)
         .on_page_load(move |webview, payload| {
             if webview.label() != "main" {
                 return;
@@ -524,6 +530,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            diagnostic_logs::open_diagnostic_logs,
+            diagnostic_logs::read_diagnostic_logs,
+            diagnostic_logs::clear_diagnostic_log_view,
+            diagnostic_logs::save_diagnostic_logs,
+            editor_exit::set_editor_exit_guard,
+            editor_exit::approve_editor_exit,
             complete_startup,
             server_connection,
             remote_server_settings,
@@ -552,11 +564,14 @@ pub fn run() {
             desktop_build_info,
             desktop_interface_scale_mode,
             set_desktop_interface_scale_mode,
+            a_series_preferences::desktop_preferred_a_series_generation,
+            a_series_preferences::set_desktop_preferred_a_series_generation,
             open_allocation_inspector,
             save_allocation_map_json
         ]);
     startup.record(StartupMilestone::TauriBuilderConfigured);
     builder
-        .run(tauri::generate_context!())
-        .expect("failed to run axkdeck");
+        .build(tauri::generate_context!())
+        .expect("failed to build axkdeck")
+        .run(editor_exit::handle_exit);
 }

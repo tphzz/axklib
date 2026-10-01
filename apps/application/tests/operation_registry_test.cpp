@@ -11,7 +11,7 @@ namespace {
 TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 72U);
+    EXPECT_EQ(entries.size(), 77U);
 
     std::set<std::string> ids;
     std::set<std::string> cli_commands;
@@ -29,7 +29,7 @@ TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
         EXPECT_FALSE(entry.descriptor.request_schema.empty());
         EXPECT_FALSE(entry.descriptor.result_schema.empty());
     }
-    EXPECT_EQ(parity_count, 22U);
+    EXPECT_EQ(parity_count, 23U);
 }
 
 TEST(OperationRegistry, DeclaresImageOpeningAsAReadJob) {

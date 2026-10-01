@@ -9,6 +9,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/io.hpp"
 #include "axklib/package.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk::detail {
 
@@ -23,6 +24,7 @@ struct PreparedAlteration {
     std::uint64_t image_size_bytes{};
     std::vector<OperationReport> operations;
     std::vector<AlterationPatch> patches;
+    VolumeCapacityAdmission capacity;
 };
 
 struct PreparedPackageImport {
@@ -33,23 +35,25 @@ struct PreparedPackageImport {
     std::vector<PlannedPackageObject> objects;
     std::vector<PackageAllocationDelta> allocation;
     std::vector<AlterationPatch> patches;
+    VolumeCapacityAdmission capacity;
 };
 
-[[nodiscard]] Result<PreparedAlteration> prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source,
-                                                                std::filesystem::path source_path,
-                                                                const AlterationManifest &manifest,
-                                                                const CancellationToken &cancellation = {},
-                                                                ProgressSink *progress = nullptr);
+[[nodiscard]] Result<PreparedAlteration>
+prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                       const AlterationManifest &manifest, const CancellationToken &cancellation = {},
+                       ProgressSink *progress = nullptr, const VolumeCapacityPolicy &capacity_policy = {});
 
 [[nodiscard]] Result<PreparedPackageImport>
 prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                            std::span<const PortablePackage> packages, const PackageImportPlan &plan,
-                           const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
+                           const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                           const VolumeCapacityPolicy &capacity_policy = {});
 
 [[nodiscard]] Result<PreparedPackageImport>
 prepare_sfs_package_import_verified(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                                     std::span<const PortablePackage> packages, const PackageImportPlan &plan,
                                     std::string_view verified_source_snapshot_id,
-                                    const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
+                                    const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                                    const VolumeCapacityPolicy &capacity_policy = {});
 
 } // namespace axk::detail

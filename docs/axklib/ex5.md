@@ -1,4 +1,4 @@
-# EX5 Disk Images
+# EX5 FAT16 Disk Images
 
 EX5 hard disks and removable media use different FAT16-based layouts. Hard
 disks have an EX descriptor and a prefixed boot record; removable media has a

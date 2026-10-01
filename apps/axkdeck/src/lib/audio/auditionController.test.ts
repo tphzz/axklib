@@ -314,6 +314,133 @@ describe('AuditionController', () => {
         await controller.dispose();
     });
 
+    it.each([
+        { loopMode: 0, outputTimestamp: true },
+        { loopMode: 3, outputTimestamp: true },
+        { loopMode: 0, outputTimestamp: false },
+        { loopMode: 3, outputTimestamp: false },
+    ])(
+        'keeps mode $loopMode moving until audible completion (timestamp=$outputTimestamp)',
+        async ({ loopMode, outputTimestamp }) => {
+            installAudio();
+            vi.useFakeTimers();
+            const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044, loopMode }));
+            MockAudioContext.nextBuffers = [new MockAudioBuffer(12_000)];
+            const updates: AuditionState[] = [];
+            const controller = new AuditionController(transport, (state) => updates.push(state));
+            await controller.play(1, 'SMPL-1');
+            const context = MockAudioContext.instances[0]!;
+            Object.defineProperty(context, 'baseLatency', { value: 0.04 });
+            Object.defineProperty(context, 'outputLatency', { value: 0.06 });
+            vi.spyOn(context, 'getOutputTimestamp').mockImplementation(() => ({
+                contextTime: outputTimestamp ? context.currentTime - 0.1 : 0,
+                performanceTime: outputTimestamp ? performance.now() : 0,
+            }));
+
+            context.currentTime = 1.26;
+            animationCallbacks.at(-1)?.(0);
+            const renderEndFrame = updates.at(-1)!.playheadFrame;
+            MockAudioBufferSourceNode.instances[0]!.onended?.();
+            expect(updates.at(-1)?.status).toBe('playing');
+
+            context.currentTime = 1.31;
+            await vi.advanceTimersByTimeAsync(50);
+            animationCallbacks.at(-1)?.(0);
+            expect(updates.at(-1)?.status).toBe('playing');
+            if (loopMode === 3) expect(updates.at(-1)!.playheadFrame).toBeLessThan(renderEndFrame);
+            else expect(updates.at(-1)!.playheadFrame).toBeGreaterThan(renderEndFrame);
+
+            context.currentTime = 1.37;
+            await vi.advanceTimersByTimeAsync(60);
+            expect(updates.at(-1)).toEqual({ objectId: null, status: 'idle', playheadFrame: 0 });
+            await controller.dispose();
+        },
+    );
+
+    it('settles a Sample Bank sequence only after its final member reaches the output', async () => {
+        installAudio();
+        vi.useFakeTimers();
+        const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044 }));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(12_000)];
+        const completed = vi.fn();
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+        controller.playSequence(1, ['SMPL-1'], completed);
+        await vi.waitFor(() => expect(MockAudioBufferSourceNode.instances).toHaveLength(1));
+        const context = MockAudioContext.instances[0]!;
+        vi.spyOn(context, 'getOutputTimestamp').mockImplementation(() => ({
+            contextTime: context.currentTime - 0.1,
+            performanceTime: performance.now(),
+        }));
+
+        context.currentTime = 1.26;
+        animationCallbacks.at(-1)?.(0);
+        MockAudioBufferSourceNode.instances[0]!.onended?.();
+        await Promise.resolve();
+        expect(completed).not.toHaveBeenCalled();
+        expect(updates.at(-1)?.status).toBe('playing');
+
+        context.currentTime = 1.37;
+        await vi.advanceTimersByTimeAsync(110);
+        expect(completed).toHaveBeenCalledExactlyOnceWith({ status: 'completed', playedCount: 1, skippedCount: 0 });
+        expect(updates.at(-1)).toEqual({ objectId: null, status: 'idle', playheadFrame: 0 });
+        await controller.dispose();
+    });
+
+    it('stops immediately while rendered audio is still waiting to reach the output', async () => {
+        installAudio();
+        vi.useFakeTimers();
+        const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044 }));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(12_000)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+        await controller.play(1, 'SMPL-1');
+        const context = MockAudioContext.instances[0]!;
+        vi.spyOn(context, 'getOutputTimestamp').mockImplementation(() => ({
+            contextTime: context.currentTime - 0.1,
+            performanceTime: performance.now(),
+        }));
+        context.currentTime = 1.26;
+        const ended = MockAudioBufferSourceNode.instances[0]!.onended!;
+        ended();
+
+        await controller.stop();
+        expect(updates.at(-1)).toEqual({ objectId: null, status: 'idle', playheadFrame: 0 });
+        const stoppedUpdates = updates.length;
+        context.currentTime = 1.5;
+        ended();
+        await vi.advanceTimersByTimeAsync(250);
+        animationCallbacks.at(-1)?.(0);
+        expect(updates).toHaveLength(stoppedUpdates);
+        await controller.dispose();
+    });
+
+    it('ignores an ended callback and pending completion belonging to a replaced audition', async () => {
+        installAudio();
+        vi.useFakeTimers();
+        const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044 }));
+        MockAudioContext.nextBuffers = [new MockAudioBuffer(12_000), new MockAudioBuffer(12_000)];
+        const updates: AuditionState[] = [];
+        const controller = new AuditionController(transport, (state) => updates.push(state));
+        await controller.play(1, 'SMPL-1');
+        const context = MockAudioContext.instances[0]!;
+        vi.spyOn(context, 'getOutputTimestamp').mockImplementation(() => ({
+            contextTime: context.currentTime - 0.1,
+            performanceTime: performance.now(),
+        }));
+        context.currentTime = 1.26;
+        const ended = MockAudioBufferSourceNode.instances[0]!.onended!;
+        ended();
+
+        await controller.play(1, 'SMPL-2');
+        ended();
+        context.currentTime = 1.4;
+        await vi.advanceTimersByTimeAsync(140);
+        animationCallbacks.at(-1)?.(0);
+        expect(updates.at(-1)).toMatchObject({ objectId: 'SMPL-2', status: 'playing' });
+        await controller.dispose();
+    });
+
     it('closes a newly created context when output resume fails', async () => {
         installAudio();
         MockAudioContext.resumeFailuresRemaining = 1;
@@ -481,6 +608,7 @@ describe('AuditionController', () => {
         expect(MockAudioContext.instances[0]?.gains).toHaveLength(1);
         expect(MockAudioContext.instances[0]?.state).toBe('running');
 
+        MockAudioContext.instances[0]!.currentTime = 2.51;
         MockAudioBufferSourceNode.instances[1]?.onended?.();
         await vi.waitFor(() =>
             expect(completed).toHaveBeenCalledWith({ status: 'completed', playedCount: 2, skippedCount: 0 }),
@@ -754,6 +882,7 @@ describe('AuditionController', () => {
         expect(firstCompleted).toHaveBeenCalledWith({ status: 'cancelled', playedCount: 0, skippedCount: 1 });
         expect(secondCompleted).not.toHaveBeenCalled();
 
+        MockAudioContext.instances[0]!.currentTime = 2.01;
         MockAudioBufferSourceNode.instances[1]?.onended?.();
         await vi.waitFor(() =>
             expect(secondCompleted).toHaveBeenCalledWith({ status: 'completed', playedCount: 1, skippedCount: 0 }),

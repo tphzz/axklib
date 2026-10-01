@@ -17,6 +17,7 @@
     import { selectionMode } from '../../lib/objectSelection';
     import type { FilesystemExportActions } from '../../lib/filesystemExport';
     import { FilesDragWorkflow } from './dragWorkflow';
+    import { FilesMoveGesture } from './moveGesture';
     import { filesBackgroundSelection } from './backgroundSelection';
     let {
         controller,
@@ -45,12 +46,14 @@
         isBusy(): boolean;
         canDrop(target: FilesystemEntry | null): boolean;
         drop(target: FilesystemEntry, read: FilesystemDropReader): Promise<void>;
+        canMove(entries: FilesystemEntry[], target: FilesystemEntry | null): boolean;
+        move(entries: FilesystemEntry[], target: FilesystemEntry): Promise<void>;
     }>();
     export function importRoot(root: FilesystemEntry): void {
         void actions?.importRoot(root);
     }
     export function isBusy(): boolean {
-        return dragBusy || (actions?.isBusy() ?? false);
+        return dragBusy || moveActive || (actions?.isBusy() ?? false);
     }
     let scroller: HTMLElement;
     let query = $state('');
@@ -58,8 +61,8 @@
     let dragBusy = $state(false);
     let dragMessage = $state('');
     let dragError = $state('');
-    let armed: { x: number; y: number; pointerId: number; entry: FilesystemEntry } | null = null;
-    let suppressClick = false;
+    let moveActive = $state(false);
+    let moveMessage = $state('');
     const dragWorkflow = new FilesDragWorkflow(
         (message, busy) => {
             dragMessage = message;
@@ -69,45 +72,37 @@
             dragError = message;
         },
     );
-    function armDrag(event: PointerEvent, entry: FilesystemEntry): void {
-        suppressClick = false;
-        if (
-            !exports?.drag ||
-            event.button !== 0 ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.shiftKey ||
-            exportBlocked ||
-            isBusy() ||
-            (event.target instanceof Element && event.target.closest('button, input'))
-        )
-            return;
-        armed = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, entry };
-    }
-    function moveDrag(event: PointerEvent): void {
-        if (!armed || !exports || event.pointerId !== armed.pointerId) return;
-        if (!(event.buttons & 1)) {
-            releaseDrag();
-            return;
-        }
-        if (Math.hypot(event.clientX - armed.x, event.clientY - armed.y) < 8) return;
-        event.preventDefault();
-        controller.selectForContext(armed.entry);
-        suppressClick = true;
-        scroller.setPointerCapture?.(armed.pointerId);
-        armed = null;
-        dragError = '';
-        const revision = controller.revision;
-        const root = controller.rootId;
-        void dragWorkflow.start(
-            revision,
-            controller.selection,
-            exports,
-            () => controller.revision === revision && controller.rootId === root,
-        );
-    }
+    const gesture = new FilesMoveGesture({
+        controller: () => controller,
+        scroller: () => scroller,
+        blocked: () => exportBlocked || isBusy(),
+        canExport: () => !!exports?.drag && !exportBlocked,
+        canMove: (entries, target) => actions?.canMove(entries, target) ?? false,
+        move: (entries, target) => {
+            void actions?.move(entries, target);
+        },
+        export: (entries, revision, root) => {
+            dragError = '';
+            if (exports)
+                void dragWorkflow.start(
+                    revision,
+                    entries,
+                    exports,
+                    () => controller.revision === revision && controller.rootId === root,
+                );
+        },
+        show: (target, active, count) => {
+            moveActive = active;
+            dropTarget = target?.id ?? null;
+            moveMessage = active
+                ? target
+                    ? `Move ${count} entries to ${target.path || '/'}`
+                    : 'Choose a destination folder'
+                : '';
+        },
+    });
     function releaseDrag(): void {
-        armed = null;
+        gesture.cancel();
         dragWorkflow.cancel();
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -144,10 +139,11 @@
     });
     onDestroy(() => clearTimeout(timer));
     onDestroy(() => dragWorkflow.dispose());
+    onDestroy(() => gesture.cancel());
     onMount(() =>
         registerNativeFilesystemDropTarget((event, position) => {
             dropTarget = null;
-            if (!position || !scroller) return;
+            if (dragBusy || moveActive || !position || !scroller) return;
             const element = document.elementFromPoint(position.x, position.y);
             if (!element || element.closest('[role="dialog"], [role="menu"]')) return;
             if (
@@ -193,6 +189,10 @@
         return id ? (rows.find((row) => row.entry.id === id)?.entry ?? null) : controller.root;
     }
     function drag(event: DragEvent): void {
+        if (dragBusy || moveActive) {
+            event.preventDefault();
+            return;
+        }
         if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes('Files')) return;
         event.preventDefault();
         event.stopPropagation();
@@ -202,6 +202,10 @@
         event.dataTransfer.dropEffect = admitted ? 'copy' : 'none';
     }
     function dropped(event: DragEvent): void {
+        if (dragBusy || moveActive) {
+            event.preventDefault();
+            return;
+        }
         dropTarget = null;
         if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes('Files')) return;
         event.preventDefault();
@@ -285,12 +289,15 @@
 </script>
 
 <svelte:window
-    onpointermove={moveDrag}
-    onpointerup={releaseDrag}
+    onpointermove={(event) => gesture.update(event)}
+    onpointerup={(event) => {
+        gesture.release(event);
+        dragWorkflow.cancel();
+    }}
     onpointercancel={releaseDrag}
     onblur={releaseDrag}
     onkeydown={(event) => {
-        if (event.key === 'Escape' && dragBusy) {
+        if (event.key === 'Escape' && (dragBusy || moveActive)) {
             event.preventDefault();
             event.stopPropagation();
             releaseDrag();
@@ -304,11 +311,13 @@
     data-navigation-workspace
     data-workspace-background
     use:filesBackgroundSelection={() => {
-        if (!isBusy() && !exportBlocked && !suppressClick) controller.clearSelection();
+        if (!isBusy() && !exportBlocked && !gesture.suppressClick) controller.clearSelection();
     }}
 >
     <header class="files-toolbar">
-        <strong title={controller.root?.name}>{controller.root?.name ?? 'Files'}</strong>
+        <strong data-files-root-drop class:drop-target={dropTarget === controller.rootId} title="Move to partition root"
+            >{controller.root?.name ?? 'Files'}</strong
+        >
         <FilesActions
             {setStatus}
             {controller}
@@ -330,6 +339,7 @@
         >
     </header>
     {#if dragMessage}<div class="files-drag-status" role="status">{dragMessage}</div>{/if}
+    {#if moveMessage}<div class="files-move-status" role="status">{moveMessage}</div>{/if}
     {#if dragError}<div class="files-error" role="alert">
             {dragError}<button
                 type="button"
@@ -387,10 +397,10 @@
                     : -1}
                 data-file-entry={row.entry.id}
                 data-navigation-index={index}
-                onpointerdown={(event) => armDrag(event, row.entry)}
+                onpointerdown={(event) => gesture.arm(event, row.entry)}
                 onclick={(event) => {
-                    if (suppressClick) {
-                        suppressClick = false;
+                    if (gesture.suppressClick) {
+                        gesture.suppressClick = false;
                         return;
                     }
                     controller.select(row.entry, selectionMode(event));
@@ -469,6 +479,7 @@
 
 <style>
     .files-workspace {
+        position: relative;
         display: flex;
         flex-direction: column;
         min-height: 0;
@@ -537,6 +548,7 @@
         border-radius: 4px;
     }
     .file-row.drop-target,
+    [data-files-root-drop].drop-target,
     .files-scroll.drop-target {
         outline: 1px solid var(--workspace-accent);
         outline-offset: -1px;
@@ -607,6 +619,21 @@
         font-size: 10px;
         color: var(--color-text-muted);
         padding: 4px 8px;
+    }
+    .files-move-status {
+        position: absolute;
+        z-index: 2;
+        bottom: 8px;
+        left: 8px;
+        max-width: calc(100% - 16px);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        pointer-events: none;
+        background: var(--color-bg);
+        border: 1px solid var(--color-border);
+        padding: 4px 8px;
+        font-size: 10px;
     }
     .more-entries {
         display: block;

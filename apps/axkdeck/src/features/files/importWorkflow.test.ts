@@ -98,6 +98,7 @@ describe('Files import workflow', () => {
                 },
             ],
             expect.any(Function),
+            undefined,
         );
     });
     it('rejects a dropped directory without directory capability and does not upload a partial failed scan', async () => {
@@ -164,6 +165,7 @@ describe('Files import workflow', () => {
                 },
             ],
             expect.any(Function),
+            undefined,
         );
     });
     it('does not submit an all-merge directory review or accept a file decision for a directory', async () => {
@@ -284,6 +286,7 @@ describe('Files import workflow', () => {
                 },
             ],
             expect.any(Function),
+            undefined,
         );
     });
     it('imports empty directories without requiring a file source inspection', async () => {
@@ -346,6 +349,7 @@ describe('Files import workflow', () => {
                 },
             ],
             expect.any(Function),
+            undefined,
         );
         expect(mutations.refresh).toHaveBeenCalledOnce();
         expect(workflow.target).toBeNull();

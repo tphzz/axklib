@@ -29,6 +29,9 @@
   --density-table-header: 20px;
   --density-metadata-row: 22px;
   --density-gap: 4px;
+  --density-panel-padding: 6px;
+  --density-section-gap: 12px;
+  --density-cell-padding: 3px;
   --dialog-title-font-size: 13px;
   --dialog-body-font-size: 11px;
   --dialog-section-font-size: 11px;
@@ -351,7 +354,7 @@ input:focus-visible {
 
 .image-summary {
   position: relative;
-  padding: 6px 9px 7px;
+  padding: var(--density-panel-padding);
   border-bottom: 1px solid var(--color-border);
   background: rgb(255 255 255 / 1.5%);
 }
@@ -1172,7 +1175,7 @@ input:focus-visible {
 }
 
 .inspector-content {
-  padding: 8px calc(9px + var(--overlay-scrollbar-clearance)) 0 9px;
+  padding: var(--density-panel-padding) calc(var(--density-panel-padding) + var(--overlay-scrollbar-clearance)) var(--density-panel-padding) var(--density-panel-padding);
 }
 
 .inspector-empty {
@@ -1339,7 +1342,7 @@ input:focus-visible {
 
 .dialog-backdrop {
   position: fixed;
-  z-index: 50;
+  z-index: var(--modal-layer, 50);
   display: grid;
   place-items: center;
   inset: 0;
@@ -1347,11 +1350,11 @@ input:focus-visible {
 }
 
 .dialog-backdrop-raised {
-  z-index: 60;
+  z-index: var(--modal-layer, 60);
 }
 
 .dialog-backdrop-top {
-  z-index: 80;
+  z-index: var(--modal-layer, 80);
 }
 
 .storage-picker-backdrop {
@@ -2108,9 +2111,9 @@ input:focus-visible {
 
 .object-deletion-content {
   display: grid;
-  gap: 14px;
+  gap: var(--density-section-gap);
   min-height: 0;
-  padding: 12px;
+  padding: var(--density-panel-padding);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -2267,7 +2270,10 @@ input:focus-visible {
 
 .deletion-footer-summary {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  flex: 1;
   min-width: 0;
+  height: 42px;
   margin: 0;
   line-height: 1.35;
 }
@@ -2285,6 +2291,20 @@ input:focus-visible {
   font-size: var(--dialog-metadata-font-size);
 }
 
+.deletion-footer-detail {
+  min-height: 0;
+  overflow: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.deletion-footer-error strong,
+.deletion-footer-error span {
+  color: var(--color-danger);
+}
+
 .object-deletion-actions {
   display: flex;
   flex: none;
@@ -2299,7 +2319,7 @@ input:focus-visible {
 .volume-action-content {
   display: grid;
   gap: 8px;
-  padding: 12px;
+  padding: var(--density-panel-padding);
 }
 
 .volume-action-content label {
@@ -2774,7 +2794,7 @@ input:focus-visible {
 .entry-action-content {
   display: grid;
   gap: 7px;
-  padding: 12px;
+  padding: var(--density-panel-padding);
 }
 
 .entry-action-content strong,
@@ -2879,12 +2899,12 @@ input:focus-visible {
 
 /* Object workspace */
 .main-stage {
-  grid-template-rows: minmax(180px, var(--split-position)) 4px minmax(180px, 1fr);
+  grid-template-rows: minmax(0, var(--split-position)) 8px minmax(0, 1fr);
   background: var(--color-bg);
 }
 
 .main-stage.has-audition-bar {
-  grid-template-rows: minmax(180px, var(--split-position)) 30px 4px minmax(180px, 1fr);
+  grid-template-rows: minmax(0, var(--split-position)) 30px 8px minmax(0, 1fr);
 }
 
 .main-stage.lower-panel-closed {
@@ -2972,7 +2992,9 @@ input:focus-visible {
 }
 
 .object-editor {
-  background: var(--color-bg-deep);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel);
 }
 
 .multi-part-editor-context {
@@ -3149,42 +3171,6 @@ input:focus-visible {
   padding: 12px;
 }
 
-.horizontal-splitter {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  width: 100%;
-  height: 4px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  outline: 0;
-  background: #111416;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.horizontal-splitter span {
-  width: 44px;
-  height: 2px;
-  border-radius: 1px;
-  background: #596169;
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.horizontal-splitter:hover span,
-.horizontal-splitter:focus-visible span,
-.horizontal-splitter.resizing span {
-  opacity: 1;
-}
-
-.horizontal-splitter:focus-visible {
-  border-color: var(--color-accent);
-}
-
 .contained-object-workspace {
   display: grid;
   height: 100%;
@@ -3311,52 +3297,9 @@ input:focus-visible {
   line-height: 9px;
 }
 
-.editor-header {
-  display: flex;
-  height: 34px;
-  min-height: 34px;
-  align-items: stretch;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.editor-tabs {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: stretch;
-  overflow-x: auto;
-}
-
-.editor-tabs button {
-  position: relative;
-  min-width: max-content;
-  padding: 0 12px;
-  color: var(--color-text-muted);
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font-size: 10px;
-}
-
-.editor-tabs button:hover,
-.editor-tabs button[aria-selected='true'] {
-  color: var(--color-text-strong);
-  background: rgb(255 255 255 / 2%);
-}
-
-.editor-tabs button[aria-selected='true']::after {
-  position: absolute;
-  right: 8px;
-  bottom: 0;
-  left: 8px;
-  height: 2px;
-  background: var(--color-accent);
-  content: '';
-}
-
 .editor-panel {
   min-height: 0;
-  height: calc(100% - 34px);
+  flex: 1;
   overflow: hidden;
 }
 
@@ -3510,7 +3453,7 @@ input:focus-visible {
 }
 
 .inspector-section > h4 {
-  margin: 0 0 5px;
+  margin: 0;
   color: var(--color-text-strong);
   font-size: 10px;
   font-weight: 650;
@@ -3518,7 +3461,7 @@ input:focus-visible {
 }
 
 .inspector-preview .inspector-wave-stack,
-.inspector-preview > .inspector-wave-missing {
+.inspector-preview .inspector-wave-missing {
   margin-bottom: 0;
 }
 
@@ -3551,12 +3494,6 @@ input:focus-visible {
   font-family: var(--font-mono);
   font-size: 8.5px;
   text-align: right;
-}
-
-.inspector-relationships {
-  margin-right: calc(9px + var(--overlay-scrollbar-clearance));
-  margin-bottom: 9px;
-  margin-left: 9px;
 }
 
 .inspector-relationships-empty {

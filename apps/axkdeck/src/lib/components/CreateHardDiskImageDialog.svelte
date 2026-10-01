@@ -59,6 +59,10 @@
         switch (id) {
             case 'FLOPPY_SCALE':
                 return '1.44 MB';
+            case 'HDS_128_MIB':
+                return '128 MiB';
+            case 'HDS_256_MIB':
+                return '256 MiB';
             case 'CD_R_650':
                 return 'CD-R 650';
             case 'CD_R_700':
@@ -67,6 +71,10 @@
                 return '1 GiB';
             case 'HDS_2_GIB':
                 return '2 GiB';
+            case 'HDS_4_GIB':
+                return '4 GiB';
+            case 'HDS_8_GIB':
+                return '8 GiB';
         }
     }
 
@@ -125,6 +133,7 @@
     }
 
     async function cancel(): Promise<void> {
+        if (busy && !activeJob) return;
         if (activeJob) {
             if (cancelling) return;
             cancelling = true;
@@ -176,6 +185,7 @@
             <label class="create-hds-field">
                 <span>Type</span>
                 <select
+                    class="dialog-field-control"
                     aria-label="Type"
                     value={imageType}
                     disabled={busy}
@@ -192,6 +202,7 @@
                 <span>File name</span>
                 <span class="create-hds-name"
                     ><input
+                        class="dialog-field-control"
                         aria-label="File name"
                         bind:value={fileName}
                         data-dialog-initial-focus="select"
@@ -203,16 +214,16 @@
             {#if imageType === 'HD'}
                 <fieldset disabled={busy || loading}>
                     <legend>Capacity</legend>
-                    <div class="create-hds-segments capacity-segments dialog-segmented-control">
+                    <select
+                        class="dialog-field-control capacity-select"
+                        aria-label="Capacity"
+                        value={profileId}
+                        onchange={(event) => selectProfile(event.currentTarget.value as HardDiskCreationProfileId)}
+                    >
                         {#each profiles as profile (profile.profileId)}
-                            <button
-                                type="button"
-                                aria-pressed={profileId === profile.profileId}
-                                onclick={() => selectProfile(profile.profileId)}
-                                >{profileLabel(profile.profileId)}</button
-                            >
+                            <option value={profile.profileId}>{profileLabel(profile.profileId)}</option>
                         {/each}
-                    </div>
+                    </select>
                 </fieldset>
 
                 <fieldset disabled={busy || loading}>
@@ -227,6 +238,9 @@
                                 aria-label={`${count} ${count === 1 ? 'partition' : 'partitions'}`}
                                 aria-pressed={Boolean(option && partitionCount === count)}
                                 disabled={!option}
+                                title={!option
+                                    ? 'This partition count is not supported for the selected capacity.'
+                                    : undefined}
                                 onclick={() => {
                                     if (option) partitionCount = count;
                                 }}>{count}</button
@@ -249,19 +263,30 @@
             {#if error}<p class="create-hds-error" role="alert">{error}</p>{/if}
 
             <footer class="dialog-footer">
-                <button
-                    class="secondary-button"
-                    type="button"
-                    disabled={busy && !activeJob}
-                    onclick={() => void cancel()}>{cancelling ? 'Cancelling' : 'Cancel'}</button
+                <span class="dialog-footer-status" role="status"
+                    >{cancelling
+                        ? 'Cancelling...'
+                        : busy
+                          ? activeJob?.progress?.label || 'Creating image...'
+                          : loading
+                            ? 'Loading profiles...'
+                            : ''}</span
                 >
-                <button
-                    class="primary-button"
-                    type="submit"
-                    disabled={busy || (imageType === 'HD' && (loading || !selectedProfile || !selectedOption))}
-                >
-                    {busy ? 'Creating' : 'Create'}
-                </button>
+                <div class="dialog-footer-actions">
+                    <button
+                        class="secondary-button"
+                        type="button"
+                        disabled={busy && !activeJob}
+                        onclick={() => void cancel()}>Cancel</button
+                    >
+                    <button
+                        class="primary-button"
+                        type="submit"
+                        disabled={busy || (imageType === 'HD' && (loading || !selectedProfile || !selectedOption))}
+                    >
+                        Create
+                    </button>
+                </div>
             </footer>
         </form>
     </div>
@@ -285,9 +310,7 @@
         font-size: var(--dialog-label-font-size);
     }
 
-    .create-hds-field output,
-    .create-hds-field select,
-    .create-hds-name {
+    .create-hds-field output {
         min-width: 0;
         height: 30px;
         display: flex;
@@ -307,20 +330,20 @@
         padding: 0 9px;
     }
 
-    .create-hds-field select {
+    .create-hds-field select,
+    .capacity-select {
         width: 100%;
-        padding: 0 9px;
+    }
+
+    .create-hds-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     .create-hds-name input {
         min-width: 0;
-        height: 100%;
         flex: 1;
-        padding: 0 9px;
-        color: inherit;
-        border: 0;
-        outline: 0;
-        background: transparent;
     }
 
     .create-hds-name b {
@@ -346,10 +369,6 @@
         grid-auto-flow: row;
     }
 
-    .capacity-segments {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-    }
-
     .partition-segments {
         grid-template-columns: repeat(8, minmax(0, 1fr));
     }
@@ -372,11 +391,5 @@
 
     footer {
         margin: 0 -12px;
-    }
-
-    @media (max-width: 560px) {
-        .capacity-segments {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
     }
 </style>

@@ -93,6 +93,29 @@ function sampleSelection(): Extract<InspectorSelection, { kind: 'sample' }> {
 }
 
 describe('ObjectEditor', () => {
+    it('moves keyboard focus with the selected Program tab and retains it across selections', async () => {
+        const view = render(ObjectEditor, {
+            selection: programSelection(),
+            assignmentQuery: '',
+            onassignmentquerychange: vi.fn(),
+            onassignmentselect: vi.fn(),
+        });
+        const first = view.getByRole('tab', { name: 'Sample Select' });
+        first.focus();
+        await fireEvent.keyDown(first, { key: 'End' });
+        const last = view.getByRole('tab', { name: 'Control' });
+        expect(document.activeElement).toBe(last);
+        expect(last.getAttribute('aria-selected')).toBe('true');
+        await fireEvent.keyDown(last, { key: 'ArrowRight' });
+        expect(document.activeElement).toBe(first);
+        await fireEvent.keyDown(first, { key: 'ArrowLeft' });
+        expect(document.activeElement).toBe(last);
+        await view.rerender({ selection: programSelection() });
+        expect(last.getAttribute('aria-selected')).toBe('true');
+        await fireEvent.keyDown(last, { key: 'Home' });
+        expect(document.activeElement).toBe(first);
+    });
+
     it('keeps Program assignments in Sample Select and exposes the complete Program tab set', async () => {
         const onassignmentselect = vi.fn();
         render(ObjectEditor, {
@@ -402,6 +425,7 @@ describe('ObjectEditor', () => {
             props: {
                 selection: {
                     kind: 'sample-bank',
+                    unresolvedMemberCount: 0,
                     item: bank,
                     members: [],
                     memberPreviews: [],

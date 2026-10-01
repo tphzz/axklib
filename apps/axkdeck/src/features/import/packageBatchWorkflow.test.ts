@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ImageSessionPackageImportPlan, ImageTransport, PackageInspection } from '../../lib/transport';
 import type { DiskTreeItem } from '../../lib/types';
@@ -46,6 +47,7 @@ function plan(names: string[], token: string): ImageSessionPackageImportPlan {
         imageId: 'image-1',
         revision: 1,
         planToken: token,
+        capacity: fitsCapacity,
         expiresInSeconds: 600,
         planId: `${token}-id`,
         targetKind: 'SFS',
@@ -262,6 +264,7 @@ describe('PackageBatchImportWorkflow', () => {
             })),
             'suggested-plan',
             [],
+            { target: 'A3000' },
         );
         expect(workflow.request).toMatchObject({
             plan: { planToken: 'checked-plan', valid: true },
@@ -414,6 +417,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
 
         const secondItemId = workflow.request!.items[1].id;
@@ -438,6 +442,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             'initial-plan',
             [],
+            { target: 'A3000' },
         );
         expect(releaseImagePackageImportPlan).not.toHaveBeenCalled();
 
@@ -599,6 +604,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
         expect(releaseImagePackageImportPlan).toHaveBeenCalledWith('initial-plan');
         expect(releaseImagePackageImportPlan.mock.invocationCallOrder[0]).toBeLessThan(
@@ -686,6 +692,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
     });
 
@@ -748,6 +755,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
     });
 
@@ -805,6 +813,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
     });
 
@@ -884,6 +893,7 @@ describe('PackageBatchImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
         expect(workflow.request?.plan?.planToken).toBe('fresh-plan');
         expect(workflow.request?.status).toBe('ready');

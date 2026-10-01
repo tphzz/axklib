@@ -1,6 +1,6 @@
-# Program Parameters
+# A-Series Program Parameters
 
-A Program's `parameters` JSON object contains optional, writable Program-wide
+An A-series Program's `parameters` JSON object contains optional, writable Program-wide
 settings. Each assignment's `parameters` object contains optional Easy Edit
 settings for a fresh or existing assignment. Omission preserves a saved value in an update; explicit
 zero, `false`, and `"inherit"` are values, not omissions. JSON rejects `null`,

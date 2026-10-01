@@ -26,6 +26,7 @@
     {"id":"update-bank","type":"update_sample_bank_parameters","partition_index":0,"volume_name":"Volume","sample_bank_name":"Group","parameters":{"level":87,"controls":{"6":{"range":20}}}},
     {"id":"update-wave","type":"update_wave_data_parameters","partition_index":0,"volume_name":"Volume","waveform_name":"Wave","parameters":{"root_key":61,"fine_tune_cents":3,"loop_mode":0,"wave_start_frame":10,"wave_length_frames":100,"loop_start_frame":10,"loop_length_frames":100}},
     {"id":"replace-assignments","type":"replace_program_assignments","partition_index":0,"volume_name":"Volume","program_number":1,"model":"A4000","expected_payload_sha256":"0000000000000000000000000000000000000000000000000000000000000000","assignments":[{"retain_ordinal":0},{"sample":"Direct Sample"}]},
-    {"id":"retarget-sample","type":"retarget_sample_wave_data","partition_index":0,"volume_name":"Volume","sample_name":"Sample","waveform_name":"Wave","expected_payload_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+    {"id":"retarget-sample","type":"retarget_sample_wave_data","partition_index":0,"volume_name":"Volume","sample_name":"Sample","waveform_name":"Wave","expected_payload_sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+    {"id":"duplicate-sample","type":"duplicate_sbnk","partition_index":0,"volume_name":"Volume","sample_name":"Sample","new_name":"Sample Copy","parameters":{}}
   ]
 }

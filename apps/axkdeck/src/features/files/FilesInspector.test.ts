@@ -44,12 +44,11 @@ describe('FilesInspector native metadata', () => {
         const view = render(FilesInspector, { entry });
         expect(view.getByText('Filesystem metadata')).toBeTruthy();
         expect(view.getByText('SFS 0x94000000')).toBeTruthy();
-        expect(view.getByText('SFS 0x94000000').closest('details')?.open).toBe(false);
+        expect(view.getByRole('button', { name: 'Storage details' }).getAttribute('aria-expanded')).toBe('true');
         expect(view.getByRole('region', { name: 'Entry properties' }).textContent).not.toContain('0x');
         expect(view.queryByRole('status')).toBeNull();
         expect(view.queryByText('Read-only')).toBeNull();
         expect(view.queryByRole('button', { name: 'Show in Device' })).toBeNull();
-        await fireEvent.click(view.getByText('Storage details'));
         await fireEvent.focus(view.getByRole('button', { name: 'Native attributes' }));
         expect(view.getByRole('tooltip').textContent?.trim()).toBe(
             'Filesystem-specific technical storage information. The hexadecimal value contains the stored attribute and type encoding.',
@@ -105,7 +104,7 @@ describe('FilesInspector native metadata', () => {
         expect(properties.textContent).toContain('Disabled');
         expect(properties.textContent).not.toContain('Filesystem references');
         expect(view.queryByText('Read-only')).toBeNull();
-        expect(view.getByText('Filesystem references').closest('details')?.open).toBe(false);
+        expect(view.getByRole('button', { name: 'Storage details' }).getAttribute('aria-expanded')).toBe('true');
         expect(view.getAllByText('File write flag')).toHaveLength(1);
         expect(view.queryByText('Controls ordinary file data writes and extension.')).toBeNull();
         const label = view.getByRole('button', { name: 'File write flag' });

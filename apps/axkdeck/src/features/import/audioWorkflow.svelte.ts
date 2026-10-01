@@ -3,7 +3,7 @@ import { browserUploadSource, type ClientUploadSource } from '../../lib/clientUp
 import type { DirectoryRef, FileLocation, ImageLocation } from '../../lib/storageLocations';
 import type {
     VolumeImportDestination,
-    AudioImportGrouping,
+    AudioImportOptions,
     AudioImportItem,
     AudioImportTarget,
     ImageTransport,
@@ -20,6 +20,7 @@ import {
 } from './packageDestinations';
 import { findVolumeSourceItem, sameVolumeTarget } from './volumeTarget';
 import { ImportCompletion } from './importCompletion.svelte';
+import { generationSampleFormat, type ASeriesGeneration } from '../../lib/aSeriesPreferences.svelte';
 
 export interface AudioImportRequest {
     files: (ClientUploadSource | FileLocation)[];
@@ -29,6 +30,7 @@ export interface AudioImportRequest {
 }
 
 interface AudioImportDependencies {
+    preferredASeriesGeneration?: () => ASeriesGeneration;
     transport: ImageTransport;
     jobs: JobController;
     picker: PickerController;
@@ -54,6 +56,7 @@ interface AudioImportDependencies {
 
 export class AudioImportWorkflow {
     request = $state<AudioImportRequest | null>(null);
+    sampleFormat = $state<AudioImportOptions['sampleFormat']>('A3000_188');
     private lastDirectory = $state<DirectoryRef | null>(null);
 
     readonly completion: ImportCompletion;
@@ -117,10 +120,11 @@ export class AudioImportWorkflow {
 
     async commit(
         items: AudioImportItem[],
-        grouping: AudioImportGrouping,
+        options: AudioImportOptions,
         reviewedWarnings: readonly string[] = [],
     ): Promise<boolean> {
         if (this.completion.locked) return false;
+        const { grouping } = options;
         const request = this.request;
         const sessionId = this.dependencies.sessionId();
         if (!request || sessionId === null) throw new Error('Audio import target is no longer available');
@@ -130,9 +134,17 @@ export class AudioImportWorkflow {
         const started = performance.now();
         this.dependencies.setStatus('Importing audio');
         try {
+            const policy = await this.completion.capacity.review((policy) =>
+                this.dependencies.transport.inspectImportCapacity(
+                    sessionId,
+                    { kind: 'AUDIO', target, items, options },
+                    policy,
+                ),
+            );
+            if (!policy) return false;
             await this.dependencies.invalidateSession(sessionId);
             return await this.completion.run(
-                () => this.dependencies.transport.startAudioImport(sessionId, target, items, grouping),
+                () => this.dependencies.transport.startAudioImport(sessionId, target, items, options, policy),
                 async () => {
                     this.dependencies.selectWorkspace(grouping.kind === 'SAMPLE_BANK' ? 'sample-banks' : 'samples');
                     await this.dependencies.refreshSession({
@@ -246,6 +258,7 @@ export class AudioImportWorkflow {
         selected: DiskTreeItem | null,
     ): AudioImportRequest {
         this.completion.reset();
+        this.sampleFormat = generationSampleFormat(this.dependencies.preferredASeriesGeneration?.() ?? 'A3000');
         const initial = selected ? initialImportDestination(selected) : null;
         const firstPartition = collectImportDestinations(this.dependencies.sourceItems()).partitions[0];
         return {

@@ -11,6 +11,7 @@
 
 #include "alteration_internal.hpp"
 #include "alteration_manifest_internal.hpp"
+#include "axklib/capacity_admission_internal.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/package_relocation.hpp"
 
@@ -19,6 +20,29 @@ namespace axk {
 using namespace alteration_internal;
 
 namespace alteration_internal {
+
+Result<std::vector<detail::CapacityDestination>> capacity_destinations(const TransactionState &state,
+                                                                       const Container &image) {
+    std::vector<detail::CapacityDestination> result;
+    for (const auto &[index, id] : state.capacity_affected_volumes) {
+        const auto partition = std::ranges::find(image.partitions(), index, &Partition::index);
+        if (partition == image.partitions().end())
+            return std::unexpected{transaction_error("Capacity partition is missing")};
+        const auto root_id = locate_partition_root_record(*partition);
+        if (!root_id)
+            return std::unexpected{root_id.error()};
+        const auto root = std::ranges::find(partition->records, *root_id, &IndexRecord::sfs_id);
+        if (root == partition->records.end())
+            return std::unexpected{transaction_error("Capacity root is missing")};
+        const auto volume = std::ranges::find(partition->records, id, &IndexRecord::sfs_id);
+        if (volume == partition->records.end())
+            continue;
+        for (const auto &entry : root->directory_entries)
+            if (entry.state == DirectoryEntryState::live && entry.target_link_id == volume->directory_id)
+                result.emplace_back(index, entry.name);
+    }
+    return result;
+}
 
 std::optional<PartitionIndex> placement_repair_partition(const AlterationManifest &manifest) {
     for (const auto &operation : manifest.operations) {
@@ -54,6 +78,9 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
         const auto &typed_operation = manifest.operations[operation_index];
         const auto operation_type = operation_type_name(typed_operation.data);
         const OperationContext context{typed_operation.id, operation_type};
+        const auto previously_reclaimed = state.resized_record_freed_clusters;
+        state.object_payload_grew = false;
+        state.load_references_added = false;
         auto report = std::visit(
             [&](const auto &operation) -> Result<OperationReport> {
                 using T = std::decay_t<decltype(operation)>;
@@ -67,8 +94,16 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return insert_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleParametersOperation>)
                     return update_sbnk_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ConvertSampleFormatOperation>)
+                    return convert_sbnk_format(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ConvertSampleBankFormatOperation>)
+                    return convert_sbac_format(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, DuplicateSampleOperation>)
+                    return duplicate_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)
                     return update_sample_bank_parameters(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, UpdateSampleBankOverridesOperation>)
+                    return update_sample_bank_overrides(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateWaveDataParametersOperation>)
                     return update_wave_data_parameters(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, InsertWaveformOperation>)
@@ -119,6 +154,17 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
             typed_operation.data);
         if (!report)
             return std::unexpected{report.error()};
+        if (state.object_payload_grew || state.load_references_added || report->type == "retarget_sample_wave_data" ||
+            !report->inserted_sfs_ids.empty() || !report->placed_sfs_ids.empty()) {
+            auto &partition = state.partitions.at(report->partition.value);
+            const auto volume = unique_directory_child(state, partition, SfsId{1U}, report->volume_name, cancellation);
+            if (!volume)
+                return std::unexpected{volume.error()};
+            state.capacity_affected_volumes.emplace(report->partition, *volume);
+        }
+        if (const auto remembered = remember_object_targets(state, *report, cancellation); !remembered)
+            return std::unexpected{remembered.error()};
+        report->freed_clusters += state.resized_record_freed_clusters - previously_reclaimed;
         state.reports.push_back(std::move(*report));
         if (progress) {
             progress->report({ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(),
@@ -141,11 +187,10 @@ Result<TransactionState> prepare_alteration(const std::filesystem::path &source_
 
 } // namespace alteration_internal
 
-Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source,
-                                                                  std::filesystem::path source_path,
-                                                                  const AlterationManifest &manifest,
-                                                                  const CancellationToken &cancellation,
-                                                                  ProgressSink *progress) {
+Result<detail::PreparedAlteration>
+detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
+                               const AlterationManifest &manifest, const CancellationToken &cancellation,
+                               ProgressSink *progress, const VolumeCapacityPolicy &capacity_policy) {
     auto prepared = prepare_alteration(std::move(source), source_path, manifest, cancellation, progress,
                                        "planning alteration", text::path_to_utf8(source_path));
     if (!prepared)
@@ -156,22 +201,62 @@ Result<detail::PreparedAlteration> detail::prepare_hds_alteration(std::shared_pt
     OpenOptions options;
     options.cancellation = cancellation;
     auto overlay = patched_reader(prepared->source, *patches);
-    auto actual = open_image(std::move(overlay), source_path, options);
+    auto actual = open_image(overlay, source_path, options);
     if (!actual)
         return std::unexpected{actual.error()};
     if (auto placements = validate_post_write_placements(*prepared, *actual, cancellation); !placements)
         return std::unexpected{placements.error()};
+    const auto destinations = capacity_destinations(*prepared, *actual);
+    if (!destinations)
+        return std::unexpected{destinations.error()};
+    auto capacity = inspect_capacity_destinations(*actual, *destinations, capacity_policy, cancellation);
+    if (!capacity)
+        return std::unexpected{capacity.error()};
     return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
-                              std::move(prepared->reports), std::move(*patches)};
+                              std::move(prepared->reports), std::move(*patches), std::move(*capacity)};
 }
 
 namespace {
+
+Result<VolumeCapacityAdmission> capacity_for_state(const TransactionState &state,
+                                                   std::span<const detail::CapacityDestination> destinations,
+                                                   const VolumeCapacityPolicy &policy,
+                                                   const CancellationToken &cancellation) {
+    const auto patches = collect_patches(state, cancellation);
+    if (!patches)
+        return std::unexpected{patches.error()};
+    auto overlay = patched_reader(state.source, *patches);
+    OpenOptions options;
+    options.cancellation = cancellation;
+    const auto actual = open_image(overlay, state.container.source_path(), options);
+    if (!actual)
+        return std::unexpected{actual.error()};
+    return detail::inspect_capacity_destinations(*actual, destinations, policy, cancellation);
+}
+
+Result<void> admit_capacity_candidate(const std::filesystem::path &path,
+                                      std::span<const detail::CapacityDestination> destinations,
+                                      const VolumeCapacityPolicy &policy, const CancellationToken &cancellation) {
+    const auto frozen = FileReader::open(path);
+    if (!frozen)
+        return std::unexpected{frozen.error()};
+    OpenOptions options;
+    options.cancellation = cancellation;
+    const auto image = open_image(*frozen, path, options);
+    if (!image)
+        return std::unexpected{image.error()};
+    const auto review = detail::inspect_capacity_destinations(*image, destinations, policy, cancellation);
+    if (!review)
+        return std::unexpected{review.error()};
+    return enforce_volume_capacity_admission(*review, policy);
+}
 
 Result<detail::PreparedPackageImport>
 prepare_sfs_package_import_impl(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                                 std::span<const PortablePackage> packages, const PackageImportPlan &plan,
                                 std::optional<std::string_view> verified_source_snapshot_id,
-                                const CancellationToken &cancellation, ProgressSink *progress) {
+                                const CancellationToken &cancellation, ProgressSink *progress,
+                                const VolumeCapacityPolicy &capacity_policy) {
     if (!source)
         return std::unexpected{transaction_error("package import source reader is required")};
     if (const auto verified = verify_package_import_plan(plan); !verified)
@@ -197,13 +282,23 @@ prepare_sfs_package_import_impl(std::shared_ptr<const RandomAccessReader> source
     if (!patches)
         return std::unexpected{patches.error()};
     auto overlay = patched_reader(source, *patches);
-    if (auto validated = validate_package_result(std::move(overlay), source_path, packages, plan, cancellation);
-        !validated) {
+    if (auto validated = validate_package_result(overlay, source_path, packages, plan, cancellation); !validated) {
         return std::unexpected{validated.error()};
     }
-    return detail::PreparedPackageImport{std::move(source_path),  image_size_bytes, plan.plan_id,
-                                         plan.target_snapshot_id, plan.objects,     plan.allocation,
-                                         std::move(*patches)};
+    OpenOptions options;
+    options.cancellation = cancellation;
+    auto actual = open_image(overlay, source_path, options);
+    if (!actual)
+        return std::unexpected{actual.error()};
+    std::vector<detail::CapacityDestination> destinations;
+    for (const auto &destination : plan.destinations)
+        destinations.emplace_back(PartitionIndex{destination.partition_index}, destination.volume_name);
+    auto capacity = detail::inspect_capacity_destinations(*actual, destinations, capacity_policy, cancellation);
+    if (!capacity)
+        return std::unexpected{capacity.error()};
+    return detail::PreparedPackageImport{std::move(source_path),  image_size_bytes,    plan.plan_id,
+                                         plan.target_snapshot_id, plan.objects,        plan.allocation,
+                                         std::move(*patches),     std::move(*capacity)};
 }
 
 } // namespace
@@ -211,22 +306,25 @@ prepare_sfs_package_import_impl(std::shared_ptr<const RandomAccessReader> source
 Result<detail::PreparedPackageImport>
 detail::prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                                    std::span<const PortablePackage> packages, const PackageImportPlan &plan,
-                                   const CancellationToken &cancellation, ProgressSink *progress) {
+                                   const CancellationToken &cancellation, ProgressSink *progress,
+                                   const VolumeCapacityPolicy &capacity_policy) {
     return prepare_sfs_package_import_impl(std::move(source), std::move(source_path), packages, plan, std::nullopt,
-                                           cancellation, progress);
+                                           cancellation, progress, capacity_policy);
 }
 
 Result<detail::PreparedPackageImport> detail::prepare_sfs_package_import_verified(
     std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
     std::span<const PortablePackage> packages, const PackageImportPlan &plan,
-    std::string_view verified_source_snapshot_id, const CancellationToken &cancellation, ProgressSink *progress) {
+    std::string_view verified_source_snapshot_id, const CancellationToken &cancellation, ProgressSink *progress,
+    const VolumeCapacityPolicy &capacity_policy) {
     return prepare_sfs_package_import_impl(std::move(source), std::move(source_path), packages, plan,
-                                           verified_source_snapshot_id, cancellation, progress);
+                                           verified_source_snapshot_id, cancellation, progress, capacity_policy);
 }
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
                                    const std::filesystem::path &output_path, const CancellationToken &cancellation,
-                                   ProgressSink *progress, bool overwrite) {
+                                   ProgressSink *progress, bool overwrite,
+                                   const VolumeCapacityPolicy &capacity_policy) {
     if (auto valid = detail::validate_alteration_manifest(manifest); !valid)
         return std::unexpected{valid.error()};
     if (auto distinct = require_distinct_source_and_output(source_path, output_path, "alteration"); !distinct)
@@ -236,7 +334,27 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
     if (!prepared)
         return std::unexpected{prepared.error()};
     auto state = std::move(*prepared);
-    auto applied = publish(state, output_path, cancellation, overwrite, {}, progress);
+    const auto patches = collect_patches(state, cancellation);
+    if (!patches)
+        return std::unexpected{patches.error()};
+    OpenOptions options;
+    options.cancellation = cancellation;
+    const auto preview = open_image(patched_reader(state.source, *patches), source_path, options);
+    if (!preview)
+        return std::unexpected{preview.error()};
+    const auto selected = capacity_destinations(state, *preview);
+    if (!selected)
+        return std::unexpected{selected.error()};
+    const auto &destinations = *selected;
+    const auto capacity = capacity_for_state(state, destinations, capacity_policy, cancellation);
+    if (!capacity)
+        return std::unexpected{capacity.error()};
+    if (const auto admitted = enforce_volume_capacity_admission(*capacity, capacity_policy); !admitted)
+        return std::unexpected{admitted.error()};
+    const auto validator = [&](const std::filesystem::path &path) {
+        return admit_capacity_candidate(path, destinations, capacity_policy, cancellation);
+    };
+    auto applied = publish(state, output_path, cancellation, overwrite, validator, progress);
     if (!applied)
         return std::unexpected{applied.error()};
     return AlterationResult{source_path, output_path, true, std::move(state.reports), std::move(*applied)};
@@ -244,18 +362,24 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
 
 Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
                                                     const AlterationManifest &manifest,
-                                                    const CancellationToken &cancellation, ProgressSink *progress) {
-    auto prepared = prepare_alteration(source_path, manifest, cancellation, progress, "inspecting alteration");
+                                                    const CancellationToken &cancellation, ProgressSink *progress,
+                                                    const VolumeCapacityPolicy &capacity_policy) {
+    const auto source = FileReader::open(source_path);
+    if (!source)
+        return std::unexpected{source.error()};
+    auto prepared =
+        detail::prepare_hds_alteration(*source, source_path, manifest, cancellation, progress, capacity_policy);
     if (!prepared)
         return std::unexpected{prepared.error()};
-    return AlterationInspection{source_path, std::move(prepared->reports)};
+    return AlterationInspection{source_path, std::move(prepared->operations), std::move(prepared->capacity)};
 }
 
 Result<PackageImportReport> apply_package_import(const std::filesystem::path &target_path,
                                                  std::span<const PortablePackage> packages,
                                                  const PackageImportPlan &plan,
                                                  const std::filesystem::path &output_path, bool overwrite,
-                                                 const CancellationToken &cancellation, ProgressSink *progress) {
+                                                 const CancellationToken &cancellation, ProgressSink *progress,
+                                                 const VolumeCapacityPolicy &capacity_policy) {
     try {
         if (auto distinct = require_distinct_source_and_output(target_path, output_path, "package import"); !distinct)
             return std::unexpected{distinct.error()};
@@ -345,7 +469,7 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
                 if (has_action(object, PackageImportObjectAction::reuse) &&
                     has_action(object, PackageImportObjectAction::relocate)) {
                     if (!object.target_sfs_id || (object.object_type != "SMPL" && object.object_type != "SBNK" &&
-                                                  object.object_type != "PROG")) {
+                                                  object.object_type != "SBAC" && object.object_type != "PROG")) {
                         return std::unexpected{
                             transaction_error("planned reused relocation is not a supported fixed object")};
                     }
@@ -442,6 +566,8 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             report.object_name = object.destination_name;
             report.inserted_sfs_ids = {SfsId{*object.target_sfs_id}};
             report.allocated_clusters = allocated->second;
+            if (const auto remembered = remember_object_targets(state, report, cancellation); !remembered)
+                return std::unexpected{remembered.error()};
             state.reports.push_back(std::move(report));
             ++completed;
             if (progress) {
@@ -471,8 +597,18 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
             }
         }
 
+        std::vector<detail::CapacityDestination> capacity_destinations;
+        for (const auto &destination : plan.destinations)
+            capacity_destinations.emplace_back(PartitionIndex{destination.partition_index}, destination.volume_name);
+        const auto capacity = capacity_for_state(state, capacity_destinations, capacity_policy, cancellation);
+        if (!capacity)
+            return std::unexpected{capacity.error()};
+        if (const auto admitted = enforce_volume_capacity_admission(*capacity, capacity_policy); !admitted)
+            return std::unexpected{admitted.error()};
         const auto validator = [&](const std::filesystem::path &temporary) {
-            return validate_package_result(temporary, packages, plan, cancellation);
+            if (const auto valid = validate_package_result(temporary, packages, plan, cancellation); !valid)
+                return valid;
+            return admit_capacity_candidate(temporary, capacity_destinations, capacity_policy, cancellation);
         };
         auto published = publish(state, output_path, cancellation, overwrite, validator, progress);
         if (!published) {
@@ -496,6 +632,21 @@ Result<PackageImportReport> apply_package_import(const std::filesystem::path &ta
     } catch (...) {
         return std::unexpected{transaction_error("package import callback failed")};
     }
+}
+
+Result<VolumeCapacityAdmission> inspect_package_import_capacity(const std::filesystem::path &target_path,
+                                                                std::span<const PortablePackage> packages,
+                                                                const PackageImportPlan &plan,
+                                                                const VolumeCapacityPolicy &policy,
+                                                                const CancellationToken &cancellation) {
+    const auto source = FileReader::open(target_path);
+    if (!source)
+        return std::unexpected{source.error()};
+    const auto prepared =
+        detail::prepare_sfs_package_import(*source, target_path, packages, plan, cancellation, nullptr, policy);
+    if (!prepared)
+        return std::unexpected{prepared.error()};
+    return prepared->capacity;
 }
 
 } // namespace axk

@@ -497,6 +497,91 @@ TEST(FatFiles, AllocatesHighClusterNumbersOnlyUnderTheirEx5Profiles) {
     }
 }
 
+TEST(FatFiles, MovesFilesAndFoldersWithoutReallocatingPayloads) {
+    for (const auto &bytes : {plain_fixture(), plain_fixture(true), ex5_fixture(), long_name_fixture()}) {
+        const auto original = std::make_shared<axk::MemoryReader>(bytes);
+        const std::array<axk::FilesystemEdit, 2> create{axk::CreateFilesystemDirectory{{"TARGET"}},
+                                                        axk::CreateFilesystemDirectory{{"FROM"}}};
+        const auto seeded = axk::detail::prepare_fat_file_edits(original, axk::PartitionIndex{0}, create);
+        ASSERT_TRUE(seeded) << seeded.error().message;
+        const auto before = axk::FatImage::open(seeded->preview).value();
+        const std::array<axk::FilesystemEdit, 1> file_move{axk::MoveFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, {"FROM"}}};
+        const auto relocated = axk::detail::prepare_fat_file_edits(seeded->preview, axk::PartitionIndex{0}, file_move);
+        ASSERT_TRUE(relocated) << relocated.error().message;
+        const std::array<axk::FilesystemEdit, 1> move{axk::MoveFilesystemEntry{{"FROM"}, {"TARGET"}}};
+        const auto moved = axk::detail::prepare_fat_file_edits(relocated->preview, axk::PartitionIndex{0}, move);
+        ASSERT_TRUE(moved) << moved.error().message;
+        const auto after = axk::FatImage::open(moved->preview).value();
+        ASSERT_EQ(after.files().size(), 1U);
+        EXPECT_EQ(after.files().front().path, "TARGET/FROM/DEMO1.S1A");
+        EXPECT_EQ(after.files().front().clusters, before.files().front().clusters);
+        EXPECT_EQ(after.read_file(after.files().front()), before.read_file(before.files().front()));
+        const std::array<axk::FilesystemEdit, 1> to_root{axk::MoveFilesystemEntry{{"TARGET", "FROM", "DEMO1.S1A"}, {}}};
+        const auto root_move = axk::detail::prepare_fat_file_edits(moved->preview, axk::PartitionIndex{0}, to_root);
+        ASSERT_TRUE(root_move) << root_move.error().message;
+        EXPECT_EQ(axk::FatImage::open(root_move->preview)->files().front().path, "DEMO1.S1A");
+        EXPECT_EQ(read(*original), bytes);
+    }
+}
+
+TEST(FatFiles, RejectsMoveCyclesCollisionsAndMixedBatches) {
+    const auto source = std::make_shared<axk::MemoryReader>(plain_fixture());
+    for (const auto &edits : std::vector<std::vector<axk::FilesystemEdit>>{
+             {axk::MoveFilesystemEntry{{"DEMOS"}, {"DEMOS"}}},
+             {axk::MoveFilesystemEntry{{"DEMOS"}, {"DEMOS", "CHILD"}}},
+             {axk::MoveFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, {"MISSING"}}},
+             {axk::MoveFilesystemEntry{{"MISSING"}, {}}},
+             {axk::MoveFilesystemEntry{{"DEMOS"}, {"NEW"}}, axk::MoveFilesystemEntry{{"DEMOS", "MISSING"}, {"NEW"}}},
+             {axk::CreateFilesystemDirectory{{"NEW"}}, axk::MoveFilesystemEntry{{"DEMOS"}, {"NEW"}}}}) {
+        EXPECT_FALSE(axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits));
+    }
+    const std::array<axk::FilesystemEdit, 1> create{axk::PutFilesystemFile{{"DEMO1.S1A"}, input(1)}};
+    const auto seeded = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, create).value();
+    const std::array<axk::FilesystemEdit, 1> clash{axk::MoveFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, {}}};
+    EXPECT_FALSE(axk::detail::prepare_fat_file_edits(seeded.preview, axk::PartitionIndex{0}, clash));
+    EXPECT_EQ(read(*source), plain_fixture());
+}
+
+TEST(FatFiles, MovePreservesLongNameAndShortEntryBytesWhenTheDestinationGrows) {
+    auto bytes = long_name_fixture();
+    bytes[plain_data + 32U + 11U] = std::byte{0x26};
+    const auto source = std::make_shared<axk::MemoryReader>(bytes);
+    const auto original = axk::FatImage::open(source).value();
+    std::vector<axk::FilesystemEdit> create{axk::CreateFilesystemDirectory{{"TARGET"}}};
+    const auto entries_per_cluster = original.geometry().cluster_size() / 32U;
+    for (std::uint32_t i = 0; i < entries_per_cluster - 2U; ++i)
+        create.emplace_back(axk::PutFilesystemFile{{"TARGET", std::format("F{:04}.BIN", i)}, input(0)});
+    const auto seeded = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, create);
+    ASSERT_TRUE(seeded) << seeded.error().message;
+    const std::array<axk::FilesystemEdit, 1> moves{axk::MoveFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, {"TARGET"}}};
+    const auto moved = axk::detail::prepare_fat_file_edits(seeded->preview, axk::PartitionIndex{0}, moves);
+    ASSERT_TRUE(moved) << moved.error().message;
+    const auto image = axk::FatImage::open(moved->preview).value();
+    const auto file = std::ranges::find(image.files(), "TARGET/DEMO1.S1A", &axk::FatFile::path);
+    ASSERT_NE(file, image.files().end());
+    const auto after = read(*moved->preview);
+    EXPECT_TRUE(std::equal(bytes.begin() + static_cast<std::ptrdiff_t>(plain_data),
+                           bytes.begin() + static_cast<std::ptrdiff_t>(plain_data + 64U),
+                           after.begin() + static_cast<std::ptrdiff_t>(file->directory_offset - 32U)));
+    EXPECT_EQ(file->clusters, original.files().front().clusters);
+    EXPECT_EQ(image.read_file(*file), original.read_file(original.files().front()));
+    EXPECT_EQ(read(*source), bytes);
+}
+
+TEST(FatFiles, MoveRejectsAFullRootWithoutChangingTheSource) {
+    const auto source = std::make_shared<axk::MemoryReader>(plain_fixture());
+    const auto image = axk::FatImage::open(source).value();
+    std::vector<axk::FilesystemEdit> fill;
+    for (std::uint16_t i = 1U; i < image.geometry().root_entry_count; ++i)
+        fill.emplace_back(axk::PutFilesystemFile{{std::format("F{:04}.BIN", i)}, input(0)});
+    const auto full = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, fill);
+    ASSERT_TRUE(full) << full.error().message;
+    const auto before = read(*full->preview);
+    const std::array<axk::FilesystemEdit, 1> moves{axk::MoveFilesystemEntry{{"DEMOS", "DEMO1.S1A"}, {}}};
+    EXPECT_FALSE(axk::detail::prepare_fat_file_edits(full->preview, axk::PartitionIndex{0}, moves));
+    EXPECT_EQ(read(*full->preview), before);
+}
+
 TEST(FatFiles, ReviewsOrderedImportsWithoutAllocatingOrChangingBytes) {
     using Action = axk::FilesystemImportAction;
     const auto bytes = plain_fixture();

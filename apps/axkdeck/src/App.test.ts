@@ -1,5 +1,6 @@
+import { sampleFormatFixture } from './test/sampleFormatFixture';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     inspectWaveDataOrphans: vi.fn(),
     startObjectDeletion: vi.fn(),
     startObjectRename: vi.fn(),
+    startObjectParameterEdit: vi.fn(),
     waitForJob: vi.fn(),
     deleteSandboxEntry: vi.fn(),
     hardDiskCreationProfiles: vi.fn(),
@@ -62,6 +64,7 @@ vi.mock('./lib/createTransport', () => ({
         inspectWaveDataOrphans: mocks.inspectWaveDataOrphans,
         startObjectDeletion: mocks.startObjectDeletion,
         startObjectRename: mocks.startObjectRename,
+        startObjectParameterEdit: mocks.startObjectParameterEdit,
         waitForJob: mocks.waitForJob,
         deleteSandboxEntry: mocks.deleteSandboxEntry,
         hardDiskCreationProfiles: mocks.hardDiskCreationProfiles,
@@ -81,9 +84,11 @@ vi.mock('./lib/desktopBuildInfo', () => ({
 
 import App from './App.svelte';
 import { AuditionController } from './lib/audio/auditionController';
+import { ASeriesPreferences } from './lib/aSeriesPreferences.svelte';
+import type { AppProps } from './appProps';
 
-function renderAcknowledgedApp() {
-    const rendered = render(App);
+function renderAcknowledgedApp(props: AppProps = {}) {
+    const rendered = render(App, { props });
     flushSync(() => screen.getByRole('button', { name: 'I understand' }).click());
     return rendered;
 }
@@ -98,7 +103,142 @@ async function chooseNestedImage(buttonName: 'Open image' | 'Open another image'
     await fireEvent.click(await within(picker).findByText('nested.hds'));
 }
 
+async function openSampleSelectionFixture(props: AppProps = {}) {
+    const volume = { id: 'volume-1', name: 'Selection', kind: 'volume', childCount: 0, partitionIndex: 0 };
+    const objects = [
+        ['sample-a', 'SBNK', 'Sample A'],
+        ['sample-b', 'SBNK', 'Sample B'],
+        ['bank', 'SBAC', 'Bank'],
+        ['wave', 'SMPL', 'Wave'],
+    ].map(([key, objectType, name], index) => ({
+        key,
+        objectType,
+        name,
+        partitionIndex: 0,
+        partitionName: 'Partition 0',
+        volumeName: volume.name,
+        categoryName: objectType,
+        sfsId: index + 1,
+        storedSizeBytes: 356,
+        sampleRate: 44100,
+        rootKey: 60,
+        storedFrameCount: 100,
+        waveStartFrame: 0,
+        waveLengthFrames: 100,
+        storageState: 'COMPLETE',
+        sampleWidthBytes: 2,
+    }));
+    const opened = await mocks.openImage();
+    mocks.openImage.mockResolvedValue({
+        ...opened,
+        tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
+        initialVolume: volume,
+        validation: { ...opened.validation, objectCount: objects.length },
+    });
+    mocks.objectPage.mockResolvedValue({ objects, totalCount: objects.length });
+    mocks.objectDetail.mockImplementation(async (_session, id) => ({
+        object: { ...objects.find((object) => object.key === id), id },
+        relationships: [],
+        parameters: {},
+        editing: null,
+    }));
+    renderAcknowledgedApp(props);
+    await chooseNestedImage();
+    await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+    await screen.findByRole('button', { name: 'Inspect Sample A' });
+    return { image: await mocks.openImage(), objects };
+}
+
 describe('App panel layout', () => {
+    it('shares saved A-Series preferences with the next audio import and unknown-format bank assignment', async () => {
+        let finishLoading!: (generation: 'A4000_A5000') => void;
+        const save = vi.fn().mockResolvedValue(undefined);
+        const preferences = new ASeriesPreferences({
+            load: () =>
+                new Promise((resolve) => {
+                    finishLoading = resolve;
+                }),
+            save,
+        });
+        finishLoading('A4000_A5000');
+        await preferences.ready;
+        mocks.openImage.mockResolvedValue({ ...(await mocks.openImage()), packageImportAvailable: true });
+        mocks.uploadClientFile.mockResolvedValue({
+            kind: 'client-upload',
+            reference: { uploadId: 'audio' },
+            uploadKind: 'AUDIO',
+            displayName: 'take.wav',
+        });
+        await openSampleSelectionFixture({ aSeriesPreferences: preferences });
+
+        const cancelDialog = async (dialog: HTMLElement) => {
+            await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+            await waitFor(() => expect(dialog.isConnected).toBe(false));
+        };
+
+        const openImport = async () => {
+            const drop = new Event('drop', { bubbles: true, cancelable: true });
+            Object.defineProperty(drop, 'dataTransfer', {
+                value: { types: ['Files'], files: [new File(['audio'], 'take.wav', { type: 'audio/wav' })] },
+            });
+            window.dispatchEvent(drop);
+            const dialog = await screen.findByRole('dialog', { name: 'Import audio' }, { timeout: 5000 });
+            await waitFor(() =>
+                expect(
+                    (
+                        within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', {
+                            name: 'a3k',
+                        }) as HTMLButtonElement
+                    ).disabled,
+                ).toBe(false),
+            );
+            return dialog;
+        };
+        let dialog = await openImport();
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a4k/a5k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
+        await fireEvent.click(
+            within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', { name: 'a3k' }),
+        );
+        await cancelDialog(dialog);
+        expect(preferences.generation).toBe('A4000_A5000');
+        dialog = await openImport();
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a4k/a5k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
+        await cancelDialog(dialog);
+
+        const openBank = async () => {
+            const sample = screen.getByRole('button', { name: 'Inspect Sample A' });
+            await fireEvent.click(sample);
+            await fireEvent.contextMenu(sample);
+            await fireEvent.click(screen.getByRole('menuitem', { name: /Assign to Sample Bank/ }));
+            return screen.findByRole('dialog', { name: 'Assign to Sample Bank' });
+        };
+        dialog = await openBank();
+        expect(within(dialog).getByRole('button', { name: 'a4k/a5k' }).getAttribute('aria-pressed')).toBe('true');
+        await cancelDialog(dialog);
+        await fireEvent.click(screen.getByRole('button', { name: 'Preferences' }));
+        dialog = await screen.findByRole('dialog', { name: 'Preferences' });
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'a3k' }));
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Preferences' })).toBeNull());
+        expect(save).toHaveBeenCalledWith('A3000');
+        dialog = await openImport();
+        expect(
+            within(within(dialog).getByRole('group', { name: 'Sample format' }))
+                .getByRole('button', { name: 'a3k' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
+        await cancelDialog(dialog);
+        dialog = await openBank();
+        expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
+    });
     beforeEach(() => {
         delete window.__AXKLIB_SERVER__;
         mocks.filesystem.mockReset().mockResolvedValue({
@@ -376,6 +516,172 @@ describe('App panel layout', () => {
         expect(screen.queryByText('Sample pool')).toBeNull();
     });
 
+    it('opens the sample editor on selection and reopens it after a manual close', async () => {
+        await openSampleSelectionFixture();
+        const toggle = screen.getByRole('button', { name: 'Editor panel' });
+        const sample = screen.getByRole('button', { name: 'Inspect Sample A' });
+        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(sample);
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+        expect(screen.getByRole('region', { name: 'Sample editor' })).toBeTruthy();
+        await fireEvent.click(toggle);
+        expect(screen.queryByRole('region', { name: 'Sample editor' })).toBeNull();
+
+        await fireEvent.click(sample);
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(toggle);
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Sample B' }));
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    });
+
+    it.each([false, true])(
+        'retains the mounted editor and selection through delayed saves (multi=%s)',
+        async (multi) => {
+            vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+            const { image, objects } = await openSampleSelectionFixture();
+            let revision = 1;
+            let tune = 0;
+            mocks.objectDetail.mockImplementation(async (_session, id) => ({
+                image: { revision },
+                object: { ...objects.find((object) => object.key === id), id },
+                relationships: [],
+                parameters: {},
+                editing: {
+                    profile: 'a-series/sample',
+                    editable: true,
+                    reason: '',
+                    payloadSha256: String(revision).repeat(64),
+                    parameters: { coarse_tune: tune, loop_mode: 4, loop_start_frame: 0, loop_length_frames: 100 },
+                    playbackWindow: { start_frame: 0, length_frames: 100 },
+                    maximumFrames: 100,
+                    canEditPlayback: true,
+                    sources: [],
+                    blockedParameters: [],
+                    blockedParameterReasons: {},
+                    ...sampleFormatFixture(),
+                    unavailableParameters: {},
+                    partitionIndex: 0,
+                    volumeName: 'Selection',
+                },
+            }));
+            mocks.startObjectParameterEdit.mockReset().mockImplementation(async (_session, edit) => {
+                tune = edit.operation.parameters.coarse_tune;
+                revision++;
+                return { jobId: revision, status: 'queued' };
+            });
+            mocks.waitForJob.mockResolvedValue({ jobId: 2, status: 'completed' });
+            mocks.refreshImage.mockImplementation(async () => ({ ...image, revision }));
+            const sample = screen.getByRole('button', { name: 'Inspect Sample A' });
+            await fireEvent.click(sample);
+            if (multi)
+                await fireEvent.click(screen.getByRole('button', { name: 'Inspect Sample B' }), { ctrlKey: true });
+            await fireEvent.click(await screen.findByRole('tab', { name: 'Map/Out' }));
+            await fireEvent.click(screen.getByRole('button', { name: 'Pitch' }));
+            const panel = screen.getByRole('tabpanel');
+            const field = screen.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement;
+            const scroller = sample.closest('.contained-list') as HTMLElement;
+            panel.scrollTop = 71;
+            scroller.scrollTop = 53;
+            const assertRetained = () => {
+                expect(screen.getByRole('button', { name: 'Inspect Sample A' })).toBe(sample);
+                expect(sample.getAttribute('aria-pressed')).toBe('true');
+                if (multi)
+                    expect(screen.getByRole('button', { name: 'Inspect Sample B' }).getAttribute('aria-pressed')).toBe(
+                        'true',
+                    );
+                expect(screen.getByRole('tabpanel')).toBe(panel);
+                expect(screen.getByRole('spinbutton', { name: 'Coarse tune' })).toBe(field);
+                expect(screen.getByRole('tab', { name: 'Map/Out' }).getAttribute('aria-selected')).toBe('true');
+                expect(screen.getByRole('button', { name: 'Pitch' }).getAttribute('aria-pressed')).toBe('true');
+                expect(panel.scrollTop).toBe(71);
+                expect(scroller.scrollTop).toBe(53);
+            };
+            for (const value of [3, 7]) {
+                let finish!: () => void;
+                let fail!: (error: Error) => void;
+                const pending = new Promise<{ objects: typeof objects; totalCount: number }>((resolve, reject) => {
+                    fail = reject;
+                    finish = () =>
+                        resolve({ objects: objects.map((object) => ({ ...object })), totalCount: objects.length });
+                });
+                const request = mocks.objectPage.mock.calls.length;
+                mocks.objectPage.mockReturnValue(pending);
+                await fireEvent.input(field, { target: { value: String(value) } });
+                expect(sample.querySelector('[aria-label="Unsaved Sample edits"]')).not.toBeNull();
+                await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+                await waitFor(() => expect(mocks.objectPage.mock.calls.length).toBeGreaterThan(request));
+                assertRetained();
+                if (multi && value === 3) {
+                    fail(new Error('Refresh temporarily unavailable'));
+                    const retry = await screen.findByRole('button', { name: 'Refresh' });
+                    assertRetained();
+                    expect(field.disabled).toBe(true);
+                    expect(screen.queryByRole('button', { name: 'Check status' })).toBeNull();
+                    mocks.objectPage.mockResolvedValue({ objects, totalCount: objects.length });
+                    await fireEvent.click(retry);
+                } else finish();
+                await waitFor(() => expect(field.disabled).toBe(false));
+                assertRetained();
+                expect(field.value).toBe(String(value));
+                expect(sample.querySelector('[aria-label="Unsaved Sample edits"]')).toBeNull();
+                expect(screen.queryByRole('button', { name: 'Check status' })).toBeNull();
+            }
+            expect(mocks.startObjectParameterEdit).toHaveBeenCalledTimes(2);
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+        },
+    );
+
+    it('opens on keyboard sample selection without moving focus or resetting the splitter', async () => {
+        const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
+        try {
+            await openSampleSelectionFixture();
+            const sample = screen.getByRole('button', { name: 'Inspect Sample A' });
+            await fireEvent.click(sample);
+            const splitter = screen.getByRole('separator', { name: 'Resize editor panel' });
+            const initial = splitter.getAttribute('aria-valuenow');
+            await fireEvent.keyDown(splitter, { key: 'ArrowUp' });
+            const resized = splitter.getAttribute('aria-valuenow');
+            expect(resized).not.toBe(initial);
+            await fireEvent.click(screen.getByRole('button', { name: 'Editor panel' }));
+
+            sample.focus();
+            await fireEvent.keyDown(sample, { key: 'ArrowDown' });
+            expect(screen.getByRole('button', { name: 'Editor panel' }).getAttribute('aria-pressed')).toBe('true');
+            expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Inspect Sample B' }));
+            expect(screen.getByRole('separator', { name: 'Resize editor panel' }).getAttribute('aria-valuenow')).toBe(
+                resized,
+            );
+        } finally {
+            height.mockRestore();
+        }
+    });
+
+    it('opens the bank editor but not multi-selection, Wave Data, or late inspection updates', async () => {
+        await openSampleSelectionFixture();
+        const toggle = screen.getByRole('button', { name: 'Editor panel' });
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Sample A' }), { ctrlKey: true });
+        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+        await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Bank' }));
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(toggle);
+        await fireEvent.click(screen.getByRole('button', { name: 'Wave Data' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Wave' }));
+        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+        await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
+        const detail = await mocks.objectDetail(17, 'sample-a');
+        let finishInspection!: (value: typeof detail) => void;
+        mocks.objectDetail.mockReturnValue(new Promise((resolve) => (finishInspection = resolve)));
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Sample A' }));
+        expect(toggle.getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(toggle);
+        finishInspection(detail);
+        await tick();
+        expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    });
+
     it('keeps autoplay session-local and disabled until the user enables it', async () => {
         renderAcknowledgedApp();
 
@@ -512,6 +818,7 @@ describe('App panel layout', () => {
             await chooseNestedImage();
             await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Navigation Bank' }));
+            await fireEvent.click(screen.getByRole('button', { name: 'Relationships' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Target Sample' }), { detail: 1 });
 
             await waitFor(() => {
@@ -527,6 +834,7 @@ describe('App panel layout', () => {
                 expect(scrollIntoView.mock.calls.filter(([options]) => options?.block === 'center')).toHaveLength(1);
             });
 
+            await fireEvent.click(screen.getByRole('button', { name: 'Relationships' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Target Wave Left' }), {
                 detail: 1,
             });
@@ -876,11 +1184,12 @@ describe('App panel layout', () => {
     });
 
     it('defaults the object browser to two-thirds of the middle workspace', () => {
+        const size = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(900);
         const { container } = renderAcknowledgedApp();
-
-        expect(container.querySelector<HTMLElement>('.main-stage')?.style.getPropertyValue('--split-position')).toBe(
-            '66.66666666666666%',
-        );
+        expect(
+            parseFloat(container.querySelector<HTMLElement>('.main-stage')!.style.getPropertyValue('--split-position')),
+        ).toBeCloseTo(((900 - 8) * 2) / 3);
+        size.mockRestore();
     });
 
     it('keeps image management commands out of the top toolbar', async () => {
@@ -982,7 +1291,7 @@ describe('App panel layout', () => {
 
         await chooseNestedImage();
 
-        const dialog = await screen.findByRole('dialog', { name: 'Image integrity' });
+        const dialog = await screen.findByRole('dialog', { name: 'Disk integrity' });
         expect(within(dialog).getByText('Alteration is disabled for this image')).toBeTruthy();
         expect(within(dialog).getByText(/Browsing and export remain available/)).toBeTruthy();
         expect(mocks.validationIssues).toHaveBeenCalledWith(17);
@@ -1221,7 +1530,8 @@ describe('App panel layout', () => {
         await vi.waitFor(() => expect(mocks.waitForJob).toHaveBeenCalledWith(55, expect.any(Function)));
         await vi.waitFor(() => expect(mocks.refreshImage).toHaveBeenCalledWith(17));
         expect(screen.getByRole('dialog', { name: 'Delete Sample' })).toBeTruthy();
-        expect((screen.getByRole('button', { name: 'Deleting…' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Delete 2 objects' }) as HTMLButtonElement).disabled).toBe(true);
+        expect(screen.getByText('Waiting for completion and image refresh.')).toBeTruthy();
         finishRefresh?.({ ...opened, validation: { ...opened.validation, objectCount: 0 } });
         await vi.waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete Sample' })).toBeNull());
         expect(screen.queryByText('Piano C3')).toBeNull();
@@ -1536,6 +1846,7 @@ describe('App panel layout', () => {
             issues: [],
         });
         mocks.planImagePackageImport.mockResolvedValue({
+            capacity: { target: 'A3000', reports: [], allowed: true },
             schemaVersion: '1.0',
             imageId: 'image-1',
             revision: 1,
@@ -1626,6 +1937,7 @@ describe('App panel layout', () => {
                 [],
                 undefined,
                 [],
+                { target: 'A3000' },
             ),
         );
         expect(await screen.findByText('Ready to import')).toBeTruthy();

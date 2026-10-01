@@ -381,8 +381,8 @@ Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
             (!sorted_programs || unique_programs.size() != object.target_program_numbers.size()) ||
             std::ranges::any_of(object.target_program_numbers,
                                 [](const auto number) { return number < 1U || number > 128U; }) ||
-            (object.object_type != "SBNK" &&
-             (!object.target_program_numbers.empty() || object.target_sample_bank_member)) ||
+            (object.object_type != "SBNK" && object.target_sample_bank_member) ||
+            (object.object_type != "SBNK" && object.object_type != "SBAC" && !object.target_program_numbers.empty()) ||
             (plan.target_kind == MediaKind::iso9660
                  ? (object.payload_clusters != 0U || object.continuation_clusters != 0U ||
                     (inserts && !conflicts && object.payload_sectors == 0U))

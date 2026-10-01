@@ -865,7 +865,7 @@ def exercise_raw_filesystem_jobs(
     assert status == 200, roots
     root_id = roots["data"]["items"][0]["id"]
     assert roots["data"]["rootCapabilities"] == [{
-        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True, "renameEntry": True,
+        "rootId": root_id, "createDirectory": True, "putFile": True, "deleteEntry": True, "renameEntry": True, "moveEntry": True,
         "maximumNameBytes": 23, "namePolicy": "PRESERVE", "namePattern": "^[ -~]{1,23}$",
         "nameHint": "Use 1-23 printable ASCII characters.",
         "supportedImports": [],
@@ -1461,7 +1461,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "maximumJsonNodes": 100000,
                 "maximumJsonContainerItems": 10000,
                 "maximumJsonStringBytes": 256 * 1024,
-                "maximumAlterationJournalBytes": 2 * 2_147_483_648 + 64 * 1024 * 1024,
+                "maximumAlterationJournalBytes": 2 * 8_589_934_592 + 64 * 1024 * 1024,
                 "maximumUploadBytes": 4 * 1024 * 1024 * 1024,
                 "maximumUploadTotalBytes": 8 * 1024 * 1024 * 1024,
                 "maximumUploads": 1024,
@@ -1895,6 +1895,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.audio_export",
                 "images.sequence_export",
                 "images.volume_package_export",
+                "images.volume_capacity.inspect",
                 "images.volume_floppy_export",
                 "images.media_conversion",
                 "images.alter.volumes",

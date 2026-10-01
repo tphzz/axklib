@@ -13,9 +13,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "alteration_manifest_bank_overrides.hpp"
+#include "alteration_manifest_duplicate.hpp"
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_program.hpp"
+#include "alteration_manifest_sample_format.hpp"
 #include "alteration_manifest_sequence.hpp"
 #include "alteration_manifest_wave_data.hpp"
 
@@ -151,13 +154,15 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
             if (!seen.insert(*id).second)
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
-                *type != "insert_sbnk" && *type != "update_sbnk_parameters" &&
-                *type != "update_sample_bank_parameters" && *type != "insert_waveform" && *type != "delete_waveform" &&
-                *type != "delete_program" && *type != "insert_program" && *type != "delete_sbac" &&
-                *type != "insert_sbac" && *type != "rename_waveform" && *type != "rename_sbnk" &&
-                *type != "assign_sbac_members" && *type != "rename_sbac" && *type != "rename_program" &&
-                *type != "delete_sequence" && *type != "insert_sequence" && *type != "rename_sequence" &&
-                *type != "rename_volume" && *type != "rename_partition" && *type != "repair_object_placements" &&
+                *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "duplicate_sbnk" &&
+                *type != "convert_sbnk_format" && *type != "convert_sbac_format" &&
+                *type != "update_sample_bank_overrides" && *type != "update_sample_bank_parameters" &&
+                *type != "insert_waveform" && *type != "delete_waveform" && *type != "delete_program" &&
+                *type != "insert_program" && *type != "delete_sbac" && *type != "insert_sbac" &&
+                *type != "rename_waveform" && *type != "rename_sbnk" && *type != "assign_sbac_members" &&
+                *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
+                *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
+                *type != "rename_partition" && *type != "repair_object_placements" &&
                 *type != "import_tx16w_disk_set" && *type != "clear_program_assignments" &&
                 *type != "update_program_parameters" && *type != "update_wave_data_parameters" &&
                 *type != "replace_program_assignments" && *type != "retarget_sample_wave_data") {
@@ -307,7 +312,8 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{transaction_error(context + ".sample must be an object")};
                 }
                 const std::set<std::string> required{"name", "waveform_name"};
-                const std::set<std::string> optional{"right_waveform_name", "parameters", "playback_window"};
+                const std::set<std::string> optional{"right_waveform_name", "parameters", "playback_window",
+                                                     "storage_format"};
                 for (const auto &field : required) {
                     if (!sample.contains(field)) {
                         return std::unexpected{transaction_error(context + ".sample is missing field " + field)};
@@ -327,6 +333,10 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!waveform)
                     return std::unexpected{waveform.error()};
                 SampleSpec spec;
+                auto format = detail::parse_sample_storage_format(sample, sample_context);
+                if (!format)
+                    return std::unexpected{format.error()};
+                spec.storage_format = *format;
                 spec.name = std::move(*name);
                 spec.waveform_id = std::move(*waveform);
                 if (sample.contains("playback_window")) {
@@ -350,10 +360,36 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     spec.parameters = std::move(*parameters);
                 }
                 data = InsertSampleOperation{std::move(selector), std::move(*volume), std::move(spec)};
+            } else if (*type == "convert_sbnk_format") {
+                auto operation = detail::parse_sample_format_conversion_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "convert_sbac_format") {
+                auto operation = detail::parse_sample_bank_format_conversion_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "update_sample_bank_overrides") {
+                auto operation = detail::parse_bank_overrides_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "duplicate_sbnk") {
+                auto operation = detail::parse_sample_duplicate_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
             } else if (*type == "update_sbnk_parameters" || *type == "update_sample_bank_parameters") {
                 const auto name_field = *type == "update_sbnk_parameters" ? "sample_name" : "sample_bank_name";
+                auto required_row = row;
+                if (*type == "update_sbnk_parameters") {
+                    required_row.erase("playback_window");
+                    required_row.erase("expected_payload_sha256");
+                }
                 if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", name_field, "parameters"}, context);
+                        required_row, {"id", "type", "partition_index", "volume_name", name_field, "parameters"},
+                        context);
                     !valid) {
                     return std::unexpected{valid.error()};
                 }
@@ -363,15 +399,28 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                     return std::unexpected{volume.error()};
                 if (!sample)
                     return std::unexpected{sample.error()};
-                auto parameters =
-                    detail::parse_sample_parameters_json(row["parameters"], context + ".parameters", true,
-                                                         ErrorCode::transaction_rejected, ErrorCategory::transaction);
+                auto parameters = detail::parse_sample_parameters_json(
+                    row["parameters"], context + ".parameters", !row.contains("playback_window"),
+                    ErrorCode::transaction_rejected, ErrorCategory::transaction);
                 if (!parameters)
                     return std::unexpected{parameters.error()};
-                if (*type == "update_sbnk_parameters")
-                    data = UpdateSampleParametersOperation{std::move(selector), std::move(*volume), std::move(*sample),
-                                                           std::move(*parameters)};
-                else
+                if (*type == "update_sbnk_parameters") {
+                    UpdateSampleParametersOperation operation{std::move(selector), std::move(*volume),
+                                                              std::move(*sample), std::move(*parameters)};
+                    if (row.contains("playback_window")) {
+                        auto window = detail::parse_sample_playback_window_json(row["playback_window"]);
+                        if (!window)
+                            return std::unexpected{window.error()};
+                        operation.playback_window = *window;
+                    }
+                    if (row.contains("expected_payload_sha256")) {
+                        auto hash = required_text(row, "expected_payload_sha256", context);
+                        if (!hash)
+                            return std::unexpected{hash.error()};
+                        operation.expected_payload_sha256 = *hash;
+                    }
+                    data = std::move(operation);
+                } else
                     data = UpdateSampleBankParametersOperation{std::move(selector), std::move(*volume),
                                                                std::move(*sample), std::move(*parameters)};
             } else if (*type == "update_wave_data_parameters") {

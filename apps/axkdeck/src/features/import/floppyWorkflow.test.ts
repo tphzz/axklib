@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 import { floppySelection, floppyVolumeName } from './floppySelection';
 import type { FloppyInspection } from '../../lib/floppyImport';
@@ -48,6 +49,7 @@ export const inspection: FloppyInspection = {
     ],
 };
 const plan: ImageSessionPackageImportPlan = {
+    capacity: fitsCapacity,
     schemaVersion: '1.0',
     imageId: 'image',
     revision: 1,
@@ -202,6 +204,8 @@ describe('floppy import', () => {
         await workflow.chooseFiles(volume);
         expect(choose).toHaveBeenCalledWith({
             parentDialog: 'floppy-import',
+            initialDirectory: null,
+            ondirectorychange: expect.any(Function),
         });
         expect(workflow.request).toMatchObject({ volumeName: 'Existing', mode: 'existing' });
         expect(workflow.request?.inspection?.complete).toBe(true);

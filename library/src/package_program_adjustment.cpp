@@ -1,11 +1,20 @@
 #include "package_import_support.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <format>
+#include <functional>
+#include <map>
 #include <ranges>
 #include <set>
 #include <span>
+#include <string>
+#include <string_view>
 #include <tuple>
+#include <utility>
+#include <vector>
+
+#include "axklib/relationship.hpp"
 
 #include "package_import_internal.hpp"
 
@@ -125,6 +134,44 @@ bool incoming_program_replaces(const ObjectSnapshot &program, std::span<const Ca
     });
 }
 
+std::set<std::pair<std::string, std::uint32_t>> reject_source_load_collisions(std::span<const Candidate> candidates,
+                                                                              std::span<const ExistingObject> existing,
+                                                                              PackageImportPlan &plan) {
+    std::vector<const ObjectSnapshot *> snapshots;
+    std::map<std::string_view, const ObjectSnapshot *, std::less<>> by_key;
+    for (const auto &item : existing) {
+        if (!item.snapshot->scope_key.starts_with("iso:"))
+            continue;
+        snapshots.push_back(item.snapshot);
+        by_key.emplace(item.snapshot->key, item.snapshot);
+    }
+    std::set<std::pair<std::string, std::uint32_t>> collisions;
+    const auto graph = build_relationship_graph(snapshots);
+    for (const auto &row : graph.relationships) {
+        if (row.assignment_state != AssignmentState::source_load_assignment || !row.target_key ||
+            !row.assignment_index || row.type != "PROG_ASSIGNMENT_TO_SBNK") {
+            continue;
+        }
+        const auto source = by_key.find(row.source_key);
+        if (source == by_key.end())
+            continue;
+        const auto target = std::ranges::find_if(candidates, [&](const Candidate &candidate) {
+            return candidate.node->object_type == "SBNK" && candidate.destination_name == row.assignment_name &&
+                   existing_in_scope(*source->second, *candidate.destination);
+        });
+        if (target == candidates.end() ||
+            !collisions.emplace(row.source_key, static_cast<std::uint32_t>(*row.assignment_index)).second) {
+            continue;
+        }
+        add_conflict(plan, "SOURCE_LOAD_PROGRAM_ASSIGNMENT_COLLISION",
+                     std::format("Program '{}' assignment {} already source-loads '{}'; importing a same-name "
+                                 "Sample would retarget the existing assignment",
+                                 source->second->object.header.name, *row.assignment_index, row.assignment_name),
+                     target->destination, target->package, target->node);
+    }
+    return collisions;
+}
+
 } // namespace
 
 std::string program_assignment_adjustment_identity(const PackageProgramAssignmentAdjustment &adjustment) {
@@ -150,6 +197,7 @@ std::string program_assignment_adjustment_identity(const PackageProgramAssignmen
 
 Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candidates,
                                                  std::span<const ExistingObject> existing, PackageImportPlan &plan) {
+    const auto source_load_collisions = reject_source_load_collisions(candidates, existing, plan);
     for (auto &candidate : candidates) {
         candidate.unadjusted_normalized_sha256 = candidate.projected_normalized_sha256;
         if (candidate.node->object_type != "PROG")
@@ -193,7 +241,7 @@ Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candida
         for (std::size_t index = 0; index < program->assignments.size(); ++index) {
             const auto &assignment = program->assignments[index];
             const auto ordinal = static_cast<std::uint32_t>(index);
-            if (!program_assignment_row(assignment) || assignment.raw_handle != 0U)
+            if (!program_assignment_row(assignment) || source_load_collisions.contains({snapshot.key, ordinal}))
                 continue;
             const auto target = std::ranges::find_if(candidates, [&](const Candidate &candidate) {
                 return candidate.node->object_type == assignment_target_type(assignment) &&
@@ -203,6 +251,16 @@ Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candida
             if (target == candidates.end() ||
                 existing_target_exists(*target, existing, assignment_target_type(assignment), assignment.name) ||
                 !adjusted_existing_rows.emplace(snapshot.key, ordinal).second) {
+                continue;
+            }
+            if (assignment.raw_handle != 0U) {
+                add_conflict(plan, "UNRESOLVED_PROGRAM_SOURCE_HANDLE_COLLISION",
+                             std::format("Program '{}' assignment {} has an unresolved nonzero source handle; "
+                                         "importing {} '{}' would activate the unresolved assignment",
+                                         snapshot.object.header.name, ordinal,
+                                         package_object_type_label(assignment_target_type(assignment)),
+                                         assignment.name),
+                             target->destination, target->package, target->node);
                 continue;
             }
             PackageProgramAssignmentAdjustment adjustment;

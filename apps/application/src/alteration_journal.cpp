@@ -21,6 +21,7 @@
 #include "alteration_journal_io.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/file_publication.hpp"
+#include "axklib/filesystem_transaction.hpp"
 #include "private_storage.hpp"
 
 namespace {
@@ -123,12 +124,11 @@ bool axk::app::AlterationJournalStore::storage_ready() const noexcept {
     return storage_ready_.load(std::memory_order_relaxed);
 }
 
-axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared_ptr<SandboxMutation> &target,
-                                                               std::uint64_t image_size_bytes,
-                                                               std::span<const AlterationJournalPatch> patches,
-                                                               const CancellationToken &cancellation,
-                                                               const std::function<Result<void>()> &validate,
-                                                               const std::function<void()> &on_rollback_verified) {
+axk::app::Result<void> axk::app::AlterationJournalStore::apply(
+    const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
+    std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation,
+    const std::function<Result<void>()> &validate, const std::function<void()> &on_rollback_verified,
+    const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen) {
     if (!storage_ready())
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
@@ -226,6 +226,23 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(const std::shared
         }
         journal_guard.resolved = true;
         return std::unexpected(journal_error(frozen.error().message));
+    }
+    if (admit_frozen) {
+        std::vector<axk::detail::FilesystemWritePatch> frozen_patches;
+        for (const auto &patch : journal->patches)
+            frozen_patches.push_back({patch.target_offset, *frozen, patch.replacement_file_offset, patch.size});
+        auto admitted = admit_frozen(axk::detail::filesystem_preview(target, std::move(frozen_patches)));
+        if (admitted)
+            admitted = target->verify_unchanged();
+        if (!admitted) {
+            frozen = {};
+            if (auto removed = remove_file(path, "refused alteration journal"); !removed) {
+                quarantine();
+                return removed;
+            }
+            journal_guard.resolved = true;
+            return admitted;
+        }
     }
     std::vector<std::byte> buffer(maximum_patch_write_bytes_);
     std::size_t write_chunk_index{};

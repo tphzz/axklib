@@ -57,6 +57,11 @@ struct TransactionState {
     std::optional<PartitionObjectSet> approved_volume_deletion_batch;
     std::map<std::uint8_t, MutablePartition> partitions;
     std::vector<OperationReport> reports;
+    std::uint64_t resized_record_freed_clusters{};
+    bool object_payload_grew{};
+    bool load_references_added{};
+    PartitionObjectSet capacity_affected_volumes{};
+    std::map<std::pair<PartitionIndex, SfsId>, SfsId> object_target_volumes{};
 };
 
 struct OperationContext {
@@ -70,6 +75,9 @@ struct ExpectedObjectPlacement {
     std::string volume_name;
     bool preserve_payload{};
 };
+
+Result<void> remember_object_targets(TransactionState &state, const OperationReport &report,
+                                     const CancellationToken &cancellation);
 
 struct ParsedDirectoryEntry {
     LinkId raw_link_id;
@@ -108,6 +116,12 @@ Result<void> set_root_payload(TransactionState &state, MutablePartition &partiti
                               const CancellationToken &cancellation);
 Result<void> replace_record_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                     std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<std::vector<std::byte>> encode_changed_record_index(const MutablePartition::InsertedRecord &record,
+                                                           std::span<const Extent> extents, std::size_t size);
+Result<std::vector<std::byte>> continuation_list_bytes(const MutablePartition::InsertedRecord &record,
+                                                       std::size_t list_index);
+Result<std::uint64_t> shrink_record_extents(MutablePartition &partition, MutablePartition::InsertedRecord &record,
+                                            std::size_t size);
 Result<SfsId> unique_directory_child(TransactionState &state, MutablePartition &partition, SfsId directory,
                                      std::string_view name, const CancellationToken &cancellation);
 Result<SfsId> volume_category(TransactionState &state, MutablePartition &partition, std::string_view volume_name,
@@ -121,6 +135,9 @@ Result<std::vector<CategoryObject>> category_objects(TransactionState &state, Mu
                                                      ObjectType expected_type, const CancellationToken &cancellation);
 Result<void> replace_fixed_object_payload(TransactionState &state, MutablePartition &partition, SfsId id,
                                           std::vector<std::byte> payload, const CancellationToken &cancellation);
+Result<OperationReport> update_sample_bank_overrides(TransactionState &state, OperationContext context,
+                                                     const UpdateSampleBankOverridesOperation &operation,
+                                                     const CancellationToken &cancellation);
 Result<OperationReport> update_sample_bank_parameters(TransactionState &state, OperationContext context,
                                                       const UpdateSampleBankParametersOperation &operation,
                                                       const CancellationToken &cancellation);
@@ -191,6 +208,18 @@ Result<OperationReport> delete_sbnk(TransactionState &state, OperationContext co
                                     const DeleteSampleOperation &operation, const CancellationToken &cancellation);
 Result<OperationReport> insert_sbnk(TransactionState &state, OperationContext context,
                                     const InsertSampleOperation &operation, const CancellationToken &cancellation);
+Result<OperationReport> duplicate_sbnk(TransactionState &state, OperationContext context,
+                                       const DuplicateSampleOperation &operation,
+                                       const CancellationToken &cancellation);
+Result<void> apply_sample_edit(TransactionState &state, MutablePartition &partition,
+                               const UpdateSampleParametersOperation &operation, std::vector<std::byte> &payload,
+                               const CancellationToken &cancellation);
+Result<OperationReport> convert_sbnk_format(TransactionState &state, OperationContext context,
+                                            const ConvertSampleFormatOperation &operation,
+                                            const CancellationToken &cancellation);
+Result<OperationReport> convert_sbac_format(TransactionState &state, OperationContext context,
+                                            const ConvertSampleBankFormatOperation &operation,
+                                            const CancellationToken &cancellation);
 Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
                                                const UpdateSampleParametersOperation &operation,
                                                const CancellationToken &cancellation);

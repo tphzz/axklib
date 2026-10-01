@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ImageTransport, PlacementRepairInspection } from '../../lib/transport';
+import type { ImageTransport, JobState, PlacementRepairInspection } from '../../lib/transport';
 import type { SampleStructureItem } from '../../lib/types';
 import { MutationWorkflow } from './workflow.svelte';
+import { JobController } from '../jobs/actions';
+import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 
 const volume = {
     id: 'volume-1',
@@ -72,6 +74,98 @@ function placementInspection(overrides: Partial<PlacementRepairInspection> = {})
 }
 
 describe('MutationWorkflow', () => {
+    it('checks before job acknowledgement, submits once, and refreshes the new volume once', async () => {
+        let acknowledge!: (value: JobState) => void;
+        let complete!: (value: JobState) => void;
+        const startVolumeMutations = vi.fn(
+            () =>
+                new Promise<JobState>((resolve) => {
+                    acknowledge = resolve;
+                }),
+        );
+        const { workflow, run, refreshSession } = workflowWith({ startVolumeMutations });
+        const jobs = new JobController({
+            waitForJob: () =>
+                new Promise((resolve) => {
+                    complete = resolve;
+                }),
+            cancelJob: vi.fn(),
+        } as never);
+        run.mockImplementation(jobs.run.bind(jobs));
+        workflow.requestVolumeAction(partition, 'add-volume');
+        const pending = workflow.submitVolumeAction('bar');
+        await vi.waitFor(() => expect(startVolumeMutations).toHaveBeenCalledOnce());
+        expect(workflow.volumeActionPhase).toBe('checking');
+        await workflow.submitVolumeAction('bar');
+        expect(startVolumeMutations).toHaveBeenCalledOnce();
+        acknowledge({ jobId: 1, status: 'queued', kind: 'test' });
+        await vi.waitFor(() => expect(workflow.volumeActionPhase).toBe('submitting'));
+        complete({ jobId: 1, status: 'completed', kind: 'test' });
+        await pending;
+        expect(refreshSession).toHaveBeenCalledExactlyOnceWith({ partitionIndex: 0, volumeName: 'bar' });
+        expect(workflow.volumeAction).toBeNull();
+        expect(workflow.volumeActionBusy).toBe(false);
+        expect(workflow.volumeActionPhase).toBe('idle');
+    });
+
+    it('restores editing after validation refuses to start a job', async () => {
+        const startVolumeMutations = vi.fn().mockRejectedValue(new CapacityWriteRejected('Capacity inspection failed'));
+        const { workflow } = workflowWith({ startVolumeMutations });
+        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.submitVolumeAction('bar');
+        expect(startVolumeMutations).toHaveBeenCalledOnce();
+        expect(workflow.volumeActionError).toBe('Capacity inspection failed');
+        expect(workflow.volumeAction?.action).toBe('add-volume');
+        expect(workflow.volumeActionBusy).toBe(false);
+        expect(workflow.volumeActionPhase).toBe('idle');
+    });
+
+    it('recovers an acknowledged volume job without submitting a second write', async () => {
+        const startVolumeMutations = vi.fn().mockResolvedValue({ jobId: 9, status: 'queued', kind: 'test' });
+        const waitForJob = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Disconnected'))
+            .mockResolvedValue({ jobId: 9, status: 'completed', kind: 'test' });
+        const { workflow, run, refreshSession } = workflowWith({ startVolumeMutations, waitForJob });
+        const jobs = new JobController({ waitForJob, cancelJob: vi.fn() } as never);
+        run.mockImplementation(jobs.run.bind(jobs));
+        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.submitVolumeAction('bar');
+        expect(workflow.volumeActionPhase).toBe('unconfirmed');
+        expect(workflow.volumeActionRecovery).toBe('check');
+        await workflow.submitVolumeAction('bar');
+        workflow.cancelVolumeAction();
+        expect(workflow.volumeAction).not.toBeNull();
+        await workflow.recoverVolumeAction();
+        expect(startVolumeMutations).toHaveBeenCalledOnce();
+        expect(waitForJob).toHaveBeenNthCalledWith(2, 9, expect.any(Function));
+        expect(refreshSession).toHaveBeenCalledExactlyOnceWith({ partitionIndex: 0, volumeName: 'bar' });
+        expect(workflow.volumeAction).toBeNull();
+    });
+
+    it('recovers a saved volume with refresh only and locks an unknown submission without a job reference', async () => {
+        const startVolumeMutations = vi.fn().mockResolvedValue({ jobId: 9, status: 'queued', kind: 'test' });
+        const { workflow, refreshSession } = workflowWith({ startVolumeMutations });
+        refreshSession.mockRejectedValueOnce(new Error('Refresh disconnected'));
+        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.submitVolumeAction('bar');
+        expect(workflow.volumeActionPhase).toBe('refresh-failed');
+        expect(workflow.volumeActionRecovery).toBe('refresh');
+        await workflow.submitVolumeAction('bar');
+        await workflow.recoverVolumeAction();
+        expect(startVolumeMutations).toHaveBeenCalledOnce();
+        expect(workflow.volumeAction).toBeNull();
+        startVolumeMutations.mockRejectedValueOnce(new Error('Response lost'));
+        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.submitVolumeAction('bar');
+        expect(workflow.volumeActionPhase).toBe('unconfirmed');
+        expect(workflow.volumeActionRecovery).toBeNull();
+        await workflow.submitVolumeAction('bar');
+        workflow.cancelVolumeAction();
+        expect(startVolumeMutations).toHaveBeenCalledTimes(2);
+        expect(workflow.volumeAction).not.toBeNull();
+    });
+
     it('creates a Sample Bank from selected Samples in the supplied order', async () => {
         const sample = (name: string): SampleStructureItem => ({
             id: `sample-${name}`,
@@ -122,13 +216,14 @@ describe('MutationWorkflow', () => {
         workflow.requestSampleBankAssignment(samples);
         expect(workflow.sampleBankAssignmentRequest?.samples).toEqual(samples);
         expect(workflow.sampleBankAssignmentRequest?.options).toEqual([]);
-        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'Layered' });
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'Layered', sampleFormat: 'A3000_188' });
 
         expect(startSampleBankCreation).toHaveBeenCalledWith(7, {
             partitionIndex: 0,
             volumeName: 'Samples',
             sampleBankName: 'Layered',
             sampleNames: ['Sample 2', 'Sample 10'],
+            sampleFormat: 'A3000_188',
         });
         expect(setWorkspaceView).toHaveBeenCalledWith('sample-banks');
         expect(clearSelection).toHaveBeenCalledOnce();
@@ -286,7 +381,7 @@ describe('MutationWorkflow', () => {
         expect(workflow.sampleBankAssignmentRequest?.blockers).toEqual([
             { sampleName: 'Direct Sample', programName: '001: Lead' },
         ]);
-        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'New Bank' });
+        await workflow.submitSampleBankAssignment({ mode: 'new', name: 'New Bank', sampleFormat: 'A3000_188' });
         await workflow.submitSampleBankAssignment({ mode: 'existing', bankObjectId: 'bank-1' });
         expect(startSampleBankCreation).not.toHaveBeenCalled();
         expect(startSampleBankAssignment).not.toHaveBeenCalled();

@@ -197,6 +197,21 @@ Result<void> validate_flat_package_result(const std::filesystem::path &temporary
                                                          "from the import plan")};
             }
         }
+        if (object.object_type == "SBAC") {
+            const auto *bank = std::get_if<CurrentSbac>(&matches.front()->object.payload);
+            if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers) {
+                return std::unexpected{
+                    transaction_error("post-write SBAC graph metadata differs from the import plan")};
+            }
+        }
+        if (object.object_type == "SBNK" || object.object_type == "SBAC") {
+            const auto comparison =
+                std::ranges::find(graph.bitmap_comparisons, matches.front()->key, &BitmapComparison::object_key);
+            if (comparison == graph.bitmap_comparisons.end() || comparison->status != "match") {
+                return std::unexpected{
+                    transaction_error("post-write Program links disagree with destination assignments")};
+            }
+        }
         actual_by_action.emplace(object.action_id, matches.front());
     }
     if (auto adjusted = validate_flat_program_assignment_adjustments(*catalog, plan, actual_by_action); !adjusted)

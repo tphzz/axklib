@@ -261,6 +261,8 @@ Result<std::pair<std::uint64_t, std::uint64_t>> grow_record_capacity(Transaction
         target = &inserted->second;
     }
     std::uint64_t capacity{};
+    if (kind == PayloadKind::object && required_size > target->payload.size())
+        state.object_payload_grew = true;
     for (const auto &extent : target->extents)
         capacity += static_cast<std::uint64_t>(extent.cluster_count) * 1024U;
     if (required_size <= capacity)

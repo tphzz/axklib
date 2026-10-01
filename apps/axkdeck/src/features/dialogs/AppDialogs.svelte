@@ -206,6 +206,10 @@
             items={mutation.volumeAction.items}
             busy={mutation.volumeActionBusy}
             phase={mutation.volumeActionPhase}
+            locked={mutation.volumeActionLocked}
+            canDismiss={mutation.volumeActionCanDismiss}
+            recovery={mutation.volumeActionRecovery}
+            onrecover={() => void mutation.recoverVolumeAction()}
             error={mutation.volumeActionError}
             deletionInspection={mutation.volumeDeletionInspection}
             oncancel={() => mutation.cancelVolumeAction()}
@@ -240,6 +244,7 @@
 {/if}
 {#if mutation.sampleBankAssignmentRequest}
     <AssignSampleBankDialog
+        initialSampleFormat={mutation.sampleBankAssignmentRequest.initialSampleFormat}
         volumeName={mutation.sampleBankAssignmentRequest.volumeName}
         sampleCount={mutation.sampleBankAssignmentRequest.samples.length}
         assignedSampleCount={mutation.sampleBankAssignmentRequest.assignedSampleCount}
@@ -514,6 +519,7 @@
         completion={audioImport.completion}
         {transport}
         files={audioImport.request.files}
+        bind:sampleFormat={audioImport.sampleFormat}
         target={audioImport.destination()}
         destinationMode={audioImport.request.destinationMode}
         destinationPartitionIndex={audioImport.request.destinationPartitionIndex}

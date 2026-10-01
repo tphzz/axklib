@@ -23,6 +23,7 @@ TEST(ImageSessionContract, FilesystemRootAcceptsFatFloppyContentsCapability) {
                                     {"putFile", true},
                                     {"deleteEntry", true},
                                     {"renameEntry", true},
+                                    {"moveEntry", true},
                                     {"maximumNameBytes", 12},
                                     {"namePolicy", "FAT_8_3_UPPERCASE"},
                                     {"namePattern", ""},

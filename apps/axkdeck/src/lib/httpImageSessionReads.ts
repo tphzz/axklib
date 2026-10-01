@@ -65,8 +65,13 @@ export class HttpImageSessionReads {
     filesystem(sessionId: number, query?: FilesystemQuery): Promise<FilesystemPage> {
         return this.imageSessions.filesystem(sessionId, query);
     }
-    startFilesystemEdits(sessionId: number, expectedRevision: number, edits: FilesystemEdit[]): Promise<JobState> {
-        return this.imageSessions.startFilesystemEdits(sessionId, expectedRevision, edits);
+    startFilesystemEdits(
+        sessionId: number,
+        expectedRevision: number,
+        edits: FilesystemEdit[],
+        policy?: import('./importCapacity').CapacityPolicy,
+    ): Promise<JobState> {
+        return this.imageSessions.startFilesystemEdits(sessionId, expectedRevision, edits, policy);
     }
     protected constructor(protected readonly imageSessions: HttpImageSessions) {}
 

@@ -1,7 +1,7 @@
-# Portable Object Packages
+# AXK Portable Object Packages
 
-The axklib portable-package format moves complete Yamaha A-series object graphs
-from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
+The AXK portable-package format is defined by axklib. It moves complete Yamaha
+A-series object graphs from supported SFS/HDS, Yamaha FAT12 floppy, Yamaha ISO9660, and read-only
 A3K media into portable packages and imports packages into admitted
 writable targets. A package contains original Yamaha object payloads and a
 source-neutral graph. It is not a disk image, a WAV collection, or a general
@@ -418,6 +418,17 @@ admitted object profile. Import may change only the object name and registered
 relocation ranges needed for destination links, Program membership, or group
 membership. Any other byte change fails before publication.
 
+`SBNK_PROGRAM_BITMAP` (`0x0c0..0x0cf`) and `SBAC_PROGRAM_BITMAP`
+(`0x090..0x09f`) are destination-local reverse links, not portable identity.
+Import rebuilds both from the destination Program assignments and assigned
+Program numbers. Importing a bank without its Programs clears its source
+Program links; it does not mark member Samples as directly assigned to those
+Programs. Reusing a Sample or Sample Bank preserves its consistent existing
+direct assignments and adds the incoming assignments. Reuse is refused when
+the existing reverse links disagree with the destination Program rows; import
+does not repair unrelated destination metadata. This applies to both A3000
+and A4000/A5000 bank formats on SFS, FAT12 and ISO9660 destinations.
+
 Current `SBAC_SLOT_HANDLE` and `PROG_ASSIGNMENT_HANDLE` words are source-local
 state. Import writes the admitted zero representation while preserving the
 bound graph edge and its ordinal. The Program rule applies only to named
@@ -452,6 +463,14 @@ Bank, Sample, and Wave Data import remains valid and is not blocked by the
 higher-level inconsistency. Other Program rows are unchanged. Apply verifies
 the cleared row before publication or in-place journal commit on SFS/HDS,
 FAT12, and ISO9660 targets.
+
+Reuse is refused if clearing an imported unresolved row would remove a live
+assignment from the reused destination Program. An ISO import is also refused
+if introducing a same-name Sample would retarget an existing source-load
+assignment. These are conflicts, not dormant-row cleanup opportunities.
+An unresolved destination row with a nonzero source handle also blocks an
+import that would introduce its named target; it is not silently activated or
+cleared.
 
 Package closure does not use a trailing `*` alone as a relationship-state
 signal: when an exact target including the suffix exists, that exact object is

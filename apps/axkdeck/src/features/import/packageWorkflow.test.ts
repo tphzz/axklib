@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
 import { clientUploadLocation, serverFileLocation } from '../../lib/storageLocations';
 import type { ImageSessionPackageImportPlan, ImageTransport, PackageInspection } from '../../lib/transport';
@@ -48,6 +49,7 @@ function programPlan(
         imageId: 'image-1',
         revision: 1,
         planToken,
+        capacity: fitsCapacity,
         expiresInSeconds: 600,
         planId: `${planToken}-id`,
         targetKind: 'SFS',
@@ -183,6 +185,7 @@ describe('PackageImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
         expect(planImagePackageImport).toHaveBeenNthCalledWith(
             2,
@@ -197,6 +200,7 @@ describe('PackageImportWorkflow', () => {
             })),
             'suggested-plan',
             [],
+            { target: 'A3000' },
         );
         expect(workflow.request?.plan?.valid).toBe(true);
         expect(workflow.request?.renames).toEqual({});
@@ -222,6 +226,7 @@ describe('PackageImportWorkflow', () => {
             })),
             'checked-plan',
             [],
+            { target: 'A3000' },
         );
         expect(workflow.request?.plan?.planToken).toBe('rechecked-plan');
         expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
@@ -315,6 +320,7 @@ describe('PackageImportWorkflow', () => {
             [],
             'opaque-plan',
             [{ packageIndex: 0, nodeId: 'sequence-1', action: 'PRESERVE_UNCHANGED' }],
+            { target: 'A3000' },
         );
         expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
         expect(workflow.request?.plan?.valid).toBe(true);
@@ -404,6 +410,7 @@ describe('PackageImportWorkflow', () => {
             })),
             'checked-plan',
             [{ packageIndex: 0, nodeId: 'sequence-1', action: 'SKIP' }],
+            { target: 'A3000' },
         );
         expect(workflow.request?.hasUnvalidatedChanges).toBe(false);
         expect(workflow.request?.plan?.valid).toBe(true);
@@ -737,6 +744,7 @@ describe('PackageImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
 
         workflow.setExistingVolume(0, 'Existing');
@@ -752,6 +760,7 @@ describe('PackageImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
 
         workflow.setDestinationMode('create');
@@ -767,6 +776,7 @@ describe('PackageImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
 
         workflow.setExistingVolume(null, 'Not a volume');
@@ -844,6 +854,7 @@ describe('PackageImportWorkflow', () => {
             [],
             undefined,
             [],
+            { target: 'A3000' },
         );
     });
 

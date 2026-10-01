@@ -17,6 +17,8 @@
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/sample_format_conversion.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -84,6 +86,7 @@ class SampleBankParameterAlteration : public testing::Test {
         volume.samples.push_back(member);
         volume.sample_banks.push_back({"Bank", {"Member A", "Member B"}});
         volume.programs.push_back({1U, "Direct", {{"SBNK", "Direct", {.receive = axk::ProgramReceiveInherit{}}}}});
+        volume.programs.push_back({2U, "BankProg", {{"SBAC", "Bank", {}}}});
         const axk::HdsBuildManifest build{"1.0", 4U * 1024U * 1024U, {{"Partition", {volume}}}};
         const auto written = axk::write_hds_image(build, source);
         ASSERT_TRUE(written) << written.error().message;
@@ -130,6 +133,182 @@ TEST(SampleBankParameterManifest, AcceptsSparseValuesAndRejectsEmptyUnknownAndIn
     EXPECT_FALSE(parse_bank_update(missing));
 }
 
+TEST(SampleBankOverrideManifest, RequiresDigestAndStrictDisjointUnitArrays) {
+    auto operation = bank_update(Json::object());
+    operation["type"] = "update_sample_bank_overrides";
+    operation["enable"] = {33};
+    operation["disable"] = Json::array();
+    operation["expected_payload_sha256"] = std::string(64U, 'a');
+    ASSERT_TRUE(parse_bank_update(operation));
+    for (const auto &units : {Json::array({true}), Json::array({1.5}), Json::array({-1}), Json::array({89}),
+                              Json::array({33, 33}), Json(nullptr)}) {
+        auto invalid = operation;
+        invalid["enable"] = units;
+        EXPECT_FALSE(parse_bank_update(invalid)) << units.dump();
+    }
+    for (const auto &digest : {std::string{}, std::string(64U, 'A'), std::string(63U, 'a')}) {
+        auto invalid = operation;
+        invalid["expected_payload_sha256"] = digest;
+        EXPECT_FALSE(parse_bank_update(invalid));
+    }
+    auto invalid = operation;
+    invalid["disable"] = {33};
+    EXPECT_FALSE(parse_bank_update(invalid));
+    invalid = operation;
+    invalid["enable"] = Json::array();
+    EXPECT_FALSE(parse_bank_update(invalid));
+    invalid = operation;
+    invalid["unknown"] = 1;
+    EXPECT_FALSE(parse_bank_update(invalid));
+    invalid = operation;
+    invalid.erase("expected_payload_sha256");
+    EXPECT_FALSE(parse_bank_update(invalid));
+}
+
+TEST_F(SampleBankParameterAlteration, ReversibleOverridesNeverRewriteMembersAndClearRetainsBankValues) {
+    const auto image = axk::open_image(source);
+    ASSERT_TRUE(image);
+    const auto before = axk::build_object_catalog(*image);
+    ASSERT_TRUE(before);
+    const auto bank = std::ranges::find_if(
+        before->objects, [](const auto &item) { return item.object.header.type == axk::ObjectType::sbac; });
+    ASSERT_NE(bank, before->objects.end());
+    auto operation = bank_update();
+    operation["type"] = "update_sample_bank_overrides";
+    operation["enable"] = {33};
+    operation["disable"] = Json::array();
+    operation["expected_payload_sha256"] =
+        axk::package_internal::hex_digest(axk::package_internal::sha256(bank->raw_payload));
+    const auto manifest = parse_bank_update(operation);
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto result = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(result) << result.error().message;
+    const auto source_bytes = read_bytes(source);
+    const auto output_bytes = read_bytes(output);
+    const auto stale = axk::alter_hds(output, *manifest, source, {}, nullptr, true);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, axk::ErrorCode::transaction_stale);
+    EXPECT_EQ(read_bytes(source), source_bytes);
+    EXPECT_EQ(read_bytes(output), output_bytes);
+    auto failed_batch = *manifest;
+    auto missing = std::get<axk::UpdateSampleBankOverridesOperation>(manifest->operations.front().data);
+    missing.sample_bank_name = "Missing";
+    failed_batch.operations.push_back({"missing-bank", missing});
+    EXPECT_FALSE(axk::alter_hds(source, failed_batch, output, {}, nullptr, true));
+    EXPECT_EQ(read_bytes(source), source_bytes);
+    EXPECT_EQ(read_bytes(output), output_bytes);
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    EXPECT_FALSE(axk::alter_hds(source, *manifest, output, cancellation.token(), nullptr, true));
+    EXPECT_EQ(read_bytes(output), output_bytes);
+    const auto reopened = axk::open_image(output);
+    ASSERT_TRUE(reopened);
+    const auto after = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(after);
+    for (const auto &old : before->objects) {
+        const auto current = std::ranges::find(after->objects, old.key, &axk::ObjectSnapshot::key);
+        ASSERT_NE(current, after->objects.end());
+        if (old.key != bank->key) {
+            EXPECT_EQ(current->raw_payload, old.raw_payload);
+            continue;
+        }
+        auto expected = old.raw_payload;
+        expected[0x78U + 0x6eU] = std::byte{87};
+        expected[0x13bU] = std::byte{2};
+        EXPECT_EQ(current->raw_payload, expected);
+        operation["parameters"] = Json::object();
+        operation["enable"] = Json::array();
+        operation["disable"] = {33};
+        operation["expected_payload_sha256"] =
+            axk::package_internal::hex_digest(axk::package_internal::sha256(current->raw_payload));
+    }
+    const auto clear = parse_bank_update(operation);
+    ASSERT_TRUE(clear) << clear.error().message;
+    const auto cleared = root / "cleared.hds";
+    ASSERT_TRUE(axk::alter_hds(output, *clear, cleared));
+    const auto cleared_image = axk::open_image(cleared);
+    ASSERT_TRUE(cleared_image);
+    const auto final = axk::build_object_catalog(*cleared_image);
+    ASSERT_TRUE(final);
+    for (const auto &old : before->objects) {
+        const auto current = std::ranges::find(final->objects, old.key, &axk::ObjectSnapshot::key);
+        ASSERT_NE(current, final->objects.end());
+        auto expected = old.raw_payload;
+        if (old.key == bank->key)
+            expected[0xe6U] = std::byte{87};
+        EXPECT_EQ(current->raw_payload, expected);
+    }
+}
+
+Json bank_conversion(const axk::ObjectSnapshot &bank, std::string_view target) {
+    return {{"id", "bank-format"},
+            {"type", "convert_sbac_format"},
+            {"partition_index", 0},
+            {"volume_name", "Samples"},
+            {"sample_bank_name", "Bank"},
+            {"target_format", target},
+            {"expected_payload_sha256",
+             axk::package_internal::hex_digest(axk::package_internal::sha256(bank.raw_payload))}};
+}
+
+TEST_F(SampleBankParameterAlteration, FormatRoundTripPreservesIdentityMembersAndUnrelatedPayloads) {
+    auto current_path = source;
+    for (const auto target : {axk::SampleStorageFormat::a3000_188, axk::SampleStorageFormat::a4000_a5000_224}) {
+        const auto image = axk::open_image(current_path);
+        ASSERT_TRUE(image);
+        const auto before = axk::build_object_catalog(*image);
+        ASSERT_TRUE(before);
+        const auto bank = std::ranges::find_if(
+            before->objects, [](const auto &item) { return item.object.header.type == axk::ObjectType::sbac; });
+        ASSERT_NE(bank, before->objects.end());
+        const auto plan = axk::plan_sample_bank_format_conversion(bank->raw_payload, target);
+        ASSERT_TRUE(plan.allowed()) << plan.blockers.front().message;
+        const auto operation = bank_conversion(*bank, axk::sample_storage_format_name(target));
+        const auto manifest = parse_bank_update(operation);
+        ASSERT_TRUE(manifest) << manifest.error().message;
+        auto wrong_name = operation;
+        wrong_name["sample_name"] = wrong_name["sample_bank_name"];
+        wrong_name.erase("sample_bank_name");
+        EXPECT_FALSE(parse_bank_update(wrong_name));
+        const auto destination = root / (std::string{axk::sample_storage_format_name(target)} + ".hds");
+        const auto original = read_bytes(current_path);
+        const auto result = axk::alter_hds(current_path, *manifest, destination);
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(read_bytes(current_path), original);
+        const auto reopened = axk::open_image(destination);
+        ASSERT_TRUE(reopened);
+        const auto after = axk::build_object_catalog(*reopened);
+        ASSERT_TRUE(after);
+        ASSERT_EQ(after->objects.size(), before->objects.size());
+        for (const auto &old : before->objects) {
+            const auto found = std::ranges::find(after->objects, old.key, &axk::ObjectSnapshot::key);
+            ASSERT_NE(found, after->objects.end());
+            EXPECT_EQ(found->sfs_id, old.sfs_id);
+            EXPECT_EQ(found->object.header.name, old.object.header.name);
+            EXPECT_EQ(found->raw_payload, old.key == bank->key ? plan.converted_payload : old.raw_payload);
+        }
+        const auto saved = read_bytes(destination);
+        const auto rejected = axk::alter_hds(destination, *manifest, current_path, {}, nullptr, true);
+        ASSERT_FALSE(rejected);
+        EXPECT_EQ(rejected.error().code, axk::ErrorCode::transaction_stale);
+        EXPECT_EQ(read_bytes(current_path), original);
+        EXPECT_EQ(read_bytes(destination), saved);
+        auto later_failure = *manifest;
+        auto invalid =
+            axk::ConvertSampleBankFormatOperation{axk::PartitionIndex{0U}, "Samples", "Missing", target,
+                                                  operation.at("expected_payload_sha256").get<std::string>()};
+        later_failure.operations.push_back({"missing-bank", std::move(invalid)});
+        EXPECT_FALSE(axk::alter_hds(current_path, later_failure, destination, {}, nullptr, true));
+        EXPECT_EQ(read_bytes(destination), saved);
+        EXPECT_EQ(read_bytes(current_path), original);
+        axk::CancellationSource cancellation;
+        cancellation.cancel();
+        EXPECT_FALSE(axk::alter_hds(current_path, *manifest, destination, cancellation.token(), nullptr, true));
+        EXPECT_EQ(read_bytes(destination), saved);
+        current_path = destination;
+    }
+}
+
 TEST_F(SampleBankParameterAlteration, ChangesBankAndEveryMemberLevelWhilePreservingAllOtherPayloadBytes) {
     const auto parsed = parse_bank_update(bank_update());
     ASSERT_TRUE(parsed) << parsed.error().message;
@@ -156,8 +335,8 @@ TEST_F(SampleBankParameterAlteration, ChangesBankAndEveryMemberLevelWhilePreserv
             expected[0xe6U] = std::byte{87};
             const auto *bank = std::get_if<axk::CurrentSbac>(&current->object.payload);
             ASSERT_NE(bank, nullptr);
-            EXPECT_TRUE(bank->pending_parameter_numbers.empty());
-            EXPECT_TRUE(bank->reserved_pending_parameter_numbers.empty());
+            EXPECT_TRUE(bank->override_selectors.empty());
+            EXPECT_TRUE(bank->reserved_override_selectors.empty());
         } else if (old.object.header.type == axk::ObjectType::sbnk && old.object.header.name != "Direct") {
             expected[0x116U] = std::byte{87};
         }
@@ -272,7 +451,7 @@ TEST_F(SampleBankParameterAlteration, RejectsPendingPropagationWithoutDiscarding
     bool pending_seen = false;
     for (const auto &object : catalog->objects) {
         if (const auto *bank = std::get_if<axk::CurrentSbac>(&object.object.payload))
-            pending_seen = !bank->pending_parameter_numbers.empty();
+            pending_seen = !bank->override_selectors.empty();
     }
     ASSERT_TRUE(pending_seen);
 
@@ -280,6 +459,83 @@ TEST_F(SampleBankParameterAlteration, RejectsPendingPropagationWithoutDiscarding
 
     EXPECT_FALSE(std::filesystem::exists(output));
     EXPECT_EQ(read_bytes(source), original);
+}
+
+TEST_F(SampleBankParameterAlteration, MixedFormatsValidateInsertionAndUpdatesWithoutPartialPublication) {
+    for (const bool native_bank : {false, true}) {
+        for (const bool insert_bank : {false, true}) {
+            const auto bank_format =
+                native_bank ? axk::SampleStorageFormat::a3000_188 : axk::SampleStorageFormat::a4000_a5000_224;
+            const auto other_format =
+                native_bank ? axk::SampleStorageFormat::a4000_a5000_224 : axk::SampleStorageFormat::a3000_188;
+            axk::VolumeSpec volume;
+            volume.name = "Samples";
+            volume.waveforms.push_back({"wave", "Wave", root / "tone.wav", 60U, {}});
+            axk::SampleSpec member;
+            member.name = "Member A";
+            member.waveform_id = "wave";
+            member.storage_format = bank_format;
+            volume.samples.push_back(member);
+            member.name = "Member B";
+            member.storage_format = other_format;
+            volume.samples.push_back(member);
+            if (!insert_bank) {
+                axk::SampleBankSpec bank{"Bank", {"Member A", "Member B"}};
+                bank.storage_format = bank_format;
+                volume.sample_banks.push_back(bank);
+            }
+            const auto suffix = std::to_string(native_bank) + std::to_string(insert_bank);
+            const auto mixed = root / ("mixed" + suffix + ".hds");
+            ASSERT_TRUE(axk::write_hds_image({"1.0", 4U * 1024U * 1024U, {{"Partition", {volume}}}}, mixed));
+            const auto original = read_bytes(mixed);
+            const auto existing = root / ("existing" + suffix + ".hds");
+            std::filesystem::copy_file(mixed, existing);
+            for (const bool compatible : {false, true}) {
+                const Json parameters = compatible    ? Json{{"level", 82}}
+                                        : native_bank ? Json{{"coarse_tune", 100}}
+                                                      : Json{{"portamento_time", 90}};
+                auto operation = bank_update(parameters);
+                if (insert_bank) {
+                    operation = {{"id", "bank"},
+                                 {"type", "insert_sbac"},
+                                 {"partition_index", 0},
+                                 {"volume_name", "Samples"},
+                                 {"sample_bank",
+                                  {{"name", "Bank"},
+                                   {"member_samples", {"Member A", "Member B"}},
+                                   {"storage_format", axk::sample_storage_format_name(bank_format)},
+                                   {"parameter_overrides", parameters}}}};
+                }
+                const auto parsed = parse_bank_update(operation);
+                ASSERT_TRUE(parsed) << parsed.error().message;
+                const auto destination = root / ("result" + suffix + std::to_string(compatible) + ".hds");
+                const auto result = axk::alter_hds(mixed, *parsed, destination);
+                EXPECT_EQ(read_bytes(mixed), original);
+                if (!compatible) {
+                    ASSERT_FALSE(result);
+                    EXPECT_FALSE(std::filesystem::exists(destination));
+                    EXPECT_FALSE(axk::alter_hds(mixed, *parsed, existing, {}, nullptr, true));
+                    EXPECT_EQ(read_bytes(existing), original);
+                    continue;
+                }
+                ASSERT_TRUE(result) << result.error().message;
+                const auto image = axk::open_image(destination);
+                ASSERT_TRUE(image);
+                const auto catalog = axk::build_object_catalog(*image);
+                ASSERT_TRUE(catalog);
+                for (const auto &object : catalog->objects) {
+                    if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload)) {
+                        EXPECT_EQ(sample->storage.format,
+                                  object.object.header.name == "Member A" ? bank_format : other_format);
+                        EXPECT_EQ(sample->sample_level, 82U);
+                    } else if (const auto *bank = std::get_if<axk::CurrentSbac>(&object.object.payload)) {
+                        EXPECT_EQ(bank->parameter_tail_offset.has_value(), !native_bank);
+                        EXPECT_EQ(bank->raw_sample_parameter_block[0x6e], std::byte{82});
+                    }
+                }
+            }
+        }
+    }
 }
 
 } // namespace

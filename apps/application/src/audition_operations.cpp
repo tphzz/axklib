@@ -34,8 +34,9 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                 context.progress->report({axk::ProgressPhase::reading, 0U, object_ids.size(),
                                           "Preparing bounded audio sources", std::nullopt});
             }
-            auto audition = images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id, object_ids,
-                                                    context.cancellation);
+            auto audition =
+                images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id, object_ids,
+                                        context.cancellation, request.value("sourceWindow", "PLAYBACK") == "STORED");
             if (!audition)
                 return std::unexpected(audition.error());
             if (context.progress != nullptr) {

@@ -39,7 +39,7 @@
         <header class="dialog-header">
             <div>
                 <Icon name="info" size={17} />
-                <h2 id="image-integrity-title">Image integrity</h2>
+                <h2 id="image-integrity-title">Disk integrity</h2>
             </div>
             <button
                 class="icon-button"

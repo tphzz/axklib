@@ -138,6 +138,7 @@ export function inspectorRelationshipFixture(kind: string): InspectorSelection {
                 object: selected,
             },
             members: samples,
+            unresolvedMemberCount: 0,
             memberPreviews: [preview],
             displayedMemberId: sample.objectId,
             relationships,

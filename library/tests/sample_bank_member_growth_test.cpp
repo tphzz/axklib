@@ -135,7 +135,7 @@ TEST_F(SampleBankMemberGrowth, GrowsTo127MembersPreservingOrderSplitParametersAn
     EXPECT_EQ(bank.stored_member_count, 127U);
     EXPECT_EQ(bank.effective_member_count, 127U);
     EXPECT_EQ(bank.raw_sample_parameter_block, old_bank.raw_sample_parameter_block);
-    EXPECT_EQ(bank.pending_parameter_propagation_words, old_bank.pending_parameter_propagation_words);
+    EXPECT_EQ(bank.override_enable_words, old_bank.override_enable_words);
     ASSERT_TRUE(old_bank.parameter_tail_offset);
     ASSERT_TRUE(bank.parameter_tail_offset);
     EXPECT_TRUE(std::ranges::equal(std::span{old->raw_payload}.subspan(*old_bank.parameter_tail_offset),

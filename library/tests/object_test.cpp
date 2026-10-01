@@ -229,7 +229,7 @@ TEST(CurrentSbnk, DecodesExtendedControllerTailAndReportsCopyMismatch) {
     EXPECT_EQ(sample.raw_parameter_window.size(), 0xe0U);
 }
 
-TEST(CurrentSbnk, DecodesCompatibilityControllersWhenTheDeclaredObjectEndsBeforeTheTail) {
+TEST(CurrentSbnk, DecodesNativeControllersFromThe188ByteStoredFormat) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} / "tests/fixtures/images/sampler-authored/"
                                                                "HD00_512_single_sbnk_authored.hds";
     const auto container = axk::open_image(path);
@@ -239,7 +239,9 @@ TEST(CurrentSbnk, DecodesCompatibilityControllersWhenTheDeclaredObjectEndsBefore
     ASSERT_TRUE(payload);
     payload->resize(0x164U);
     axk::ByteWriter writer{*payload};
-    ASSERT_TRUE(writer.write_be32(0x1cU, 0x134U));
+    ASSERT_TRUE(writer.write_be32(0x14U, 2U));
+    ASSERT_TRUE(writer.write_be32(0x18U, 0x134U));
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0U));
 
     const auto decoded = axk::decode_object(*payload);
 
@@ -275,9 +277,9 @@ TEST(CurrentSbac, MatchesMaintainedSlotAndBitmapContracts) {
     ASSERT_EQ(sample_bank.slots.size(), 1U);
     EXPECT_EQ(sample_bank.slots[0].name, "_NewSample");
     EXPECT_EQ(sample_bank.slots[0].transient_member_pointer, 21249456U);
-    EXPECT_EQ(sample_bank.pending_parameter_propagation_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
-    EXPECT_TRUE(sample_bank.pending_parameter_numbers.empty());
-    EXPECT_TRUE(sample_bank.reserved_pending_parameter_numbers.empty());
+    EXPECT_EQ(sample_bank.override_enable_words, (std::array<std::uint32_t, 3>{0U, 0U, 0U}));
+    EXPECT_TRUE(sample_bank.override_selectors.empty());
+    EXPECT_TRUE(sample_bank.reserved_override_selectors.empty());
     EXPECT_EQ(sample_bank.effective_member_count, 1U);
     EXPECT_TRUE(sample_bank.slots[0].active);
     EXPECT_TRUE(std::ranges::equal(std::span{*payload}.subspan(0x78U, 0xbcU),
@@ -311,10 +313,9 @@ TEST(CurrentSbac, ReconstructsLegacyParameterTailWithoutConsumingMemberRows) {
     EXPECT_FALSE(sample_bank.parameter_tail_offset);
     EXPECT_EQ(sample_bank.stored_member_count, 2U);
     EXPECT_EQ(sample_bank.maximum_member_count, 2U);
-    EXPECT_EQ(sample_bank.pending_parameter_propagation_words,
-              (std::array<std::uint32_t, 3>{0x80000005U, 0x00000003U, 0x03000001U}));
-    EXPECT_EQ(sample_bank.pending_parameter_numbers, (std::vector<std::uint8_t>{0U, 2U, 31U, 32U, 33U, 64U, 88U}));
-    EXPECT_EQ(sample_bank.reserved_pending_parameter_numbers, (std::vector<std::uint8_t>{89U}));
+    EXPECT_EQ(sample_bank.override_enable_words, (std::array<std::uint32_t, 3>{0x80000005U, 0x00000003U, 0x03000001U}));
+    EXPECT_EQ(sample_bank.override_selectors, (std::vector<std::uint8_t>{0U, 2U, 31U, 32U, 33U, 64U, 88U}));
+    EXPECT_EQ(sample_bank.reserved_override_selectors, (std::vector<std::uint8_t>{89U}));
     EXPECT_EQ(sample_bank.effective_member_count, 2U);
     EXPECT_TRUE(std::ranges::equal(std::span{payload}.subspan(0x78U, 0xbcU),
                                    std::span{sample_bank.raw_sample_parameter_block}.first(0xbcU)));

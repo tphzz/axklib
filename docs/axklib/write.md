@@ -85,13 +85,18 @@ specifies the image capacity and available partition counts:
 | Profile ID | Image size | Default partitions | Available partitions |
 | --- | ---: | ---: | --- |
 | `floppy-scale` | 1,474,560 bytes | 1 | 1 |
+| `hds-128-mib` | 134,217,728 bytes | 1 | 1 through 8 |
+| `hds-256-mib` | 268,435,456 bytes | 1 | 1 through 8 |
 | `cd-r-650` | 681,984,000 bytes | 1 | 1 through 8 |
 | `cd-r-700` | 737,280,000 bytes | 1 | 1 through 8 |
 | `hds-1-gib` | 1,073,741,824 bytes | 1 | 1 through 8 |
 | `hds-2-gib` | 2,147,483,648 bytes | 2 | 2 through 8 |
+| `hds-4-gib` | 4,294,967,296 bytes | 4 | 4 through 8 |
+| `hds-8-gib` | 8,589,934,592 bytes | 8 | 8 |
 
 Every partition starts without volumes. The 2 GiB profile does not offer one
-partition because one SFS partition cannot represent that capacity. Callers
+partition because one SFS partition cannot represent that capacity. Likewise,
+4 GiB requires at least four partitions and 8 GiB requires eight. Callers
 must use the published options instead of inferring valid partition counts
 from the total byte size. Add a named volume explicitly before authoring or
 importing sampler objects.
@@ -180,7 +185,7 @@ versioned `axk-tpdf-pcg32-v1` dither policy. The supported output rates are
 unsupported source rate defaults to 44,100 Hz. Explicit conversion to any
 supported rate uses pinned libsoxr VHQ processing and the same deterministic
 dither policy. See
-[Sampler Data Structures](sampler-data.md) for the generated object fields and
+[A-Series Sampler Object Structures](sampler-data.md) for the generated object fields and
 stored PCM representation.
 
 Audio conversion reports the number of individual channel values outside the
@@ -585,7 +590,7 @@ Top-level HDS fields:
 | Field | Rule |
 | --- | --- |
 | `schema_version` | Required; the only accepted value is `"1.0"`. |
-| `size_bytes` | Required integer from 1 MiB through 2 GiB, divisible by 512. The starter uses 512 MiB. |
+| `size_bytes` | Required integer from 1 MiB through 8 GiB, divisible by 512. The starter uses 512 MiB. |
 | `partitions` | Required array containing `1..8` partition objects. |
 
 HDS partition and volume fields:
@@ -637,6 +642,7 @@ Direct and stereo Sample fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required unique ASCII `SBNK` name, at most 16 bytes. |
+| `storage_format` | Optional `a3000_188` or `a4000_a5000_224`; omission selects the latter. Determines framing, defaults and accepted parameter domains, independently of the image container. |
 | `waveform_id` | Direct left/mono member. Mutually exclusive with `interleaved_audio_path`. |
 | `right_waveform_id` | Optional direct right member; it must differ from `waveform_id`. |
 | `interleaved_audio_path` | Alternative two-channel source that generates linked left/right `SMPL` objects. |
@@ -654,14 +660,22 @@ Sample Bank fields:
 | Field | Rule |
 | --- | --- |
 | `name` | Required unique ASCII `SBAC` name, at most 16 bytes. |
+| `storage_format` | Optional `a3000_188` or `a4000_a5000_224`; omission selects the latter. Native banks omit the terminal parameter extension. |
 | `member_samples` | Required array of 1..127 distinct existing Sample names. A Sample can belong to only one authored Sample Bank. |
 | `parameter_overrides` | Optional non-empty [Sample parameter object](sample-parameters.md), applied atomically to every member Sample and stored as the Sample Bank's current parameter state. |
 
-Fresh Sample Banks use the canonical current parameter defaults. Semantic
-overrides are applied immediately to the member Samples, so the three pending
-propagation bitmaps remain clear. Their linked-Program bitmaps are derived from
-the authored Program assignments. Raw pending or relationship-bitmap authoring
+Fresh Sample Banks use the selected generation's parameter defaults. Semantic
+overrides are applied immediately to the member Samples, so the three override-enable
+bitmaps remain clear. Their linked-Program bitmaps are derived from
+the authored Program assignments. Raw override or relationship-bitmap authoring
 is not exposed.
+
+The same `storage_format` field is accepted by `insert_sbnk` and `insert_sbac`
+inside their `sample` and `sample_bank` objects. Format selection is explicit,
+not inferred from neighbors. Overrides are validated against each affected
+object's generation and never cause silent promotion. Axkdeck's audio import
+sends one selected format for every new Sample and its optional bank in the same
+transaction. See [A-Series Sample Formats And Generations](sample-formats.md).
 
 Each authored Sample Bank contains 1..127 mono or stereo Samples. Programs admit
 0..999 ordered Sample Bank or standalone Sample assignments with independently
@@ -732,6 +746,7 @@ Supported operation types:
 | `delete_sbnk` | `volume_name`, `sample_name` |
 | `insert_sbnk` | `volume_name`, `sample` |
 | `update_sbnk_parameters` | `volume_name`, `sample_name`, non-empty `parameters` |
+| `duplicate_sbnk` | `volume_name`, `sample_name`, `new_name`, `parameters` (may be empty); optional `playback_window`, `expected_payload_sha256` |
 | `update_sample_bank_parameters` | `volume_name`, `sample_bank_name`, non-empty `parameters` |
 | `update_wave_data_parameters` | `volume_name`, `waveform_name`, non-empty `parameters` |
 | `retarget_sample_wave_data` | `volume_name`, `sample_name`, `waveform_name`, `expected_payload_sha256`; stereo also requires `right_waveform_name` |
@@ -772,11 +787,19 @@ bytes are preserved. Derived pitch, loop, topology, and Program-portamento
 caches are recomputed when their source fields change. The complete operation
 is transactional.
 
+`duplicate_sbnk` copies an existing ordinary current mono/stereo Sample within
+its volume, retaining the existing Wave Data references without copying PCM.
+The destination is standalone and has no Program assignments. Its `new_name`
+must be a unique, case-insensitive Sample name of 1-16 printable ASCII characters.
+The optional parameter patch and playback window affect only the copy; `{}`
+copies the stored settings. See [guarded structural edits](alteration.md) for
+layout requirements and preservation rules.
+
 An `insert_sbac` object contains `name` and `member_samples`, an array of
 one to 127 distinct existing Sample names. It may also contain the same
 non-empty semantic `parameter_overrides` object accepted by authored Sample
 Banks. The overrides are applied immediately to every member Sample and stored
-as the bank's current parameter state; raw pending propagation state cannot be
+as the bank's current parameter state; raw override-enable words cannot be
 authored. Samples may be mono, stereo, or single-source expanded mono. If a
 member already belongs to another Sample Bank, the transaction removes that
 membership and moves the Sample into the new bank; the source bank remains with
@@ -798,7 +821,7 @@ An `insert_program` object contains a Program `number`, its sampler-visible
 and `0..999` ordered assignments. Each assignment has exactly one `sample_bank`
 or `sample` target and an optional `parameters` object. The Program also accepts
 optional `model` (`A4000` by default, or `A5000`) and Program-wide `parameters`.
-See [Program Parameters](program-parameters.md) for the shared fresh/update
+See [A-Series Program Parameters](program-parameters.md) for the shared fresh/update
 parameter contract.
 
 - Omitted assignment receive settings, or `"parameters":{"receive":"inherit"}`,
@@ -888,7 +911,7 @@ a later apply request; `alter.hds` receives and revalidates the complete request
 ## Raw Filesystem Operations
 
 Files-mode editing supports admitted writable SFS, standard FAT16, and EX5
-HD/removable roots. It provides directory creation, file import, rename and
+HD/removable roots. It provides directory creation, file import, rename, move and
 deletion independently of A-series object editing. FAT12 and ISO roots remain
 read-only; creation of new images uses the separate profiles above.
 
@@ -914,13 +937,24 @@ allowed.
 The destination is the selected directory, a selected file's parent, or the
 active root when selection is empty. Names must satisfy the root's advertised
 byte limit and naming rules. Reserved filesystem metadata and partition roots
-cannot be renamed or deleted. Entry attributes can prohibit a change even when
+cannot be renamed, moved or deleted. Entry attributes can prohibit a change even when
 the containing root is writable. Nonempty directory deletion requires explicit
 recursive confirmation.
 
+In Files mode, drag one or more selected files or folders onto a folder or the
+active partition root to review a move. Moving is limited to one partition;
+dropping opens a confirmation before any changes are written. Selected descendants
+travel with their selected folder, and entries already in the destination stay
+in place. Existing destination names or duplicate names in the selection block
+the whole batch: moving never overwrites files or merges folders. Folder cycles
+are rejected. A successful move preserves file contents, native attributes and
+payload allocation, updates directory parent references, and retains expanded
+folders and selection after refresh. The destination directory may need additional
+allocation to hold its new entries.
+
 Import review resolves name conflicts before writing. Directory entries merge;
 file conflicts use an explicit Skip or Replace choice. Raw changes do not update
-sampler-object relationships. Renaming or deleting a file that a sampler object
+sampler-object relationships. Moving, renaming or deleting a file that a sampler object
 references can therefore leave that relationship unresolved.
 
 Each batch is bound to its reviewed image revision and input identities. It
@@ -928,13 +962,13 @@ uses a journaled transaction with rollback on failure, then refreshes the
 session. Do not modify the same open image in another process. For EX5 media
 with an admitted declared-capacity mismatch, writes remain restricted to
 physically present, complete clusters; they do not extend the image or silently
-repair its geometry. See [EX5 Disk Images](ex5.md) for the boundary and
+repair its geometry. See [EX5 FAT16 Disk Images](ex5.md) for the boundary and
 [Server Files Operations](server.md#files-inside-an-image) for the HTTP contract.
 
 ## System File Operations
 
 System Files are distinct from ordinary Sample and Program objects. Their
-stored regions and unknown fields are specified in [System Files](system-files.md).
+stored regions and unknown fields are specified in [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md).
 There is no public CLI, HTTP or installed SDK parameter editor or fresh System
 File authoring interface. General raw-file copying does not validate the
 semantic correctness of replacement System data. In particular, ordinary
@@ -944,7 +978,7 @@ templates as though they were independent objects.
 ## Generated Floppy Names
 
 Generated object files occupy the FAT root directory. The geometry follows
-the 1.44 MB profile in [FAT12 Floppy Images](floppy.md). Catalogs are written
+the 1.44 MB profile in [A-Series FAT12 Floppy Images](floppy.md). Catalogs are written
 in deterministic root-directory order; rebuilding a valid existing catalog
 retains its disk-name record and regenerates the file/category records.
 
@@ -1130,13 +1164,25 @@ for the input manifest.
 ## A-Series Formatted Layout
 
 Generated hard-disk partitions use 512-byte sectors and two-sector clusters.
-The writer accepts 512-byte-aligned images from 1 MiB through 2 GiB with one
+The writer accepts 512-byte-aligned images from 1 MiB through 8 GiB with one
 through eight equal partition slots. Given `N` partitions, `total_sectors` is
 `size_bytes / 512`, the slot span is
 `min(floor((total_sectors - 2) / N), 0x1fffff)`, partition `i` starts at
 `3 + i * slot_span`, and its stored sector count is `slot_span - 1`. Every slot
 must have at least 2045 partition sectors. Division remainder and capacity past
 the 1 GiB slot-span cap remain unused at the end of the image.
+
+The general manifest deliberately permits fewer partitions with an unused tail;
+quick creation profiles omit those wasteful choices. The [A3000 Version 2
+upgrade manual](https://usa.yamaha.com/files/download/other_assets/9/328709/A3000V2E.pdf)
+documents disks up to 8 GB and partitions up to 1 GB. This does
+not establish A3000 Version 1 support. Container capacity does not determine
+whether its Samples or Sample Banks use a3k or a4k/a5k parameter storage.
+
+Empty large images are written with bounded metadata buffers and may be sparse
+when supported by the host filesystem. Object authoring retains prepared object
+payloads in memory, so dense manifests need memory proportional to their content;
+the empty-image memory regression is not a bound for densely populated images.
 
 The non-logical tail of an allocated extent is storage padding; it is not
 part of the file's logical contents.

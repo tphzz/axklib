@@ -239,65 +239,8 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             mark_conflict(object);
     }
 
-    struct BankMetadata {
-        std::set<std::uint8_t> programs;
-        bool sample_bank_member{};
-    };
-    const auto physical_key = [](const PlannedPackageObject &object) {
-        if (object.existing_object_key)
-            return "existing:" + *object.existing_object_key;
-        if (object.canonical_action_id)
-            return "planned:" + *object.canonical_action_id;
-        return "planned:" + object.action_id;
-    };
-    std::map<std::string, BankMetadata, std::less<>> bank_metadata;
-    for (const auto &object : plan.objects) {
-        if (object.object_type != "SBNK")
-            continue;
-        auto &metadata = bank_metadata[physical_key(object)];
-        if (!object.existing_object_key)
-            continue;
-        const auto found = std::ranges::find_if(
-            existing, [&](const auto &candidate) { return candidate.snapshot->key == *object.existing_object_key; });
-        if (found != existing.end()) {
-            if (const auto *sample = std::get_if<CurrentSbnk>(&found->snapshot->object.payload)) {
-                metadata.programs.insert(sample->linked_program_numbers.begin(), sample->linked_program_numbers.end());
-                metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
-            }
-        }
-    }
-    for (const auto &owner : plan.objects) {
-        if (std::ranges::contains(owner.actions, PackageImportObjectAction::conflict))
-            continue;
-        const auto &package = packages[owner.package_index];
-        for (const auto &edge : package.relationships) {
-            if (edge.source_node_id != owner.node_id ||
-                (edge.role != "SBAC_SLOT_TO_SBNK" && edge.role != "PROG_ASSIGNMENT_TO_SBNK")) {
-                continue;
-            }
-            const auto *target_action = planned_node(plan, owner, edge.target_node_id);
-            if (target_action == nullptr || target_action->object_type != "SBNK")
-                continue;
-            auto &metadata = bank_metadata[physical_key(*target_action)];
-            if (edge.role == "SBAC_SLOT_TO_SBNK") {
-                metadata.sample_bank_member = true;
-            } else {
-                const auto number = planned_program_number(owner);
-                if (!number)
-                    return std::unexpected{number.error()};
-                metadata.programs.insert(*number);
-            }
-        }
-    }
-    for (auto &object : plan.objects) {
-        if (object.object_type != "SBNK")
-            continue;
-        const auto metadata = bank_metadata.find(physical_key(object));
-        if (metadata == bank_metadata.end())
-            continue;
-        object.target_program_numbers.assign(metadata->second.programs.begin(), metadata->second.programs.end());
-        object.target_sample_bank_member = metadata->second.sample_bank_member;
-    }
+    if (auto links = plan_program_links(packages, existing, plan); !links)
+        return std::unexpected{links.error()};
 
     if (plan.conflicts.empty()) {
         for (auto &object : plan.objects) {
@@ -338,7 +281,8 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
             if (found == existing.end())
                 return std::unexpected{planner_error("planned FAT12 existing object is missing")};
             if (*relocated != found->snapshot->raw_payload) {
-                if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG") {
+                if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "SBAC" &&
+                    object.object_type != "PROG") {
                     return std::unexpected{planner_error("existing FAT12 object relocation fields "
                                                          "differ from the target")};
                 }

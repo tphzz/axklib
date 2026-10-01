@@ -1,4 +1,6 @@
 import type { DiskTreeItem } from './types';
+import type { ObjectEditingTransport } from './objectEditing';
+import type { ImportMutationTransport } from './importCapacity';
 import type { HardDiskCreationProfile, HardDiskCreationProfileId } from './hardDiskCreation';
 export type * from './hardDiskCreation';
 import type { FilesystemTransport } from './filesystem';
@@ -18,6 +20,8 @@ import type {
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import type { components } from './generated/axklibApiV1';
+import type { VolumeCapacityInspection, VolumeDeletionInspection, VolumeDeletionTarget } from './volumeInspections';
+export type * from './volumeInspections';
 import type { ProgramAssignmentCleanupTransport } from './programAssignmentCleanupTransport';
 export type * from './programAssignmentCleanupTransport';
 
@@ -174,8 +178,6 @@ export interface ObjectDeletionInspection {
     estimatedFreedClusters: number;
 }
 
-export type VolumeDeletionInspection = components['schemas']['ImageVolumeDeletionInspection'];
-export type VolumeDeletionTarget = components['schemas']['ImageVolumeDeletionTarget'];
 export type ProgramGenerationCandidate = components['schemas']['ImageProgramGenerationCandidate'];
 export type ProgramGenerationInspection = components['schemas']['ImageProgramGenerationInspection'];
 export type ProgramGenerationSelection = components['schemas']['ImageProgramGenerationSelection'];
@@ -238,6 +240,7 @@ export interface SamplerRelationship {
     receiveChannelDisplay: string;
 }
 export interface SamplerObject {
+    sampleFormat?: import('./objectEditing').SampleFormatMetadata | null;
     key: string;
     objectType: string;
     name: string;
@@ -429,9 +432,10 @@ export interface AudioImportTarget {
     volumeName: string;
 }
 
-export type AudioImportGrouping = { kind: 'SAMPLES' } | { kind: 'SAMPLE_BANK'; sampleBankName: string };
+export type { AudioImportGrouping, AudioImportOptions } from './audioImportOptions';
 
 export interface SampleBankCreation {
+    sampleFormat: import('./aSeriesPreferences.svelte').KnownSampleFormat;
     partitionIndex: number;
     volumeName: string;
     sampleBankName: string;
@@ -463,7 +467,13 @@ export interface ImageOpenOptions {
 }
 
 export interface ImageTransport
-    extends ProgramAssignmentCleanupTransport, FilesystemTransport, Su700Transport, FloppyTransport {
+    extends
+        ProgramAssignmentCleanupTransport,
+        FilesystemTransport,
+        Su700Transport,
+        FloppyTransport,
+        ObjectEditingTransport,
+        ImportMutationTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
@@ -494,6 +504,7 @@ export interface ImageTransport
     startPartitionMutation(sessionId: number, mutation: PartitionMutation): Promise<JobState>;
     startObjectRename(sessionId: number, mutation: ObjectRenameMutation): Promise<JobState>;
     inspectVolumeDeletion(sessionId: number, targets: VolumeDeletionTarget[]): Promise<VolumeDeletionInspection>;
+    inspectVolumeCapacity(sessionId: number, contentScopeId: string): Promise<VolumeCapacityInspection>;
     inspectPlacement(
         sessionId: number,
         scope: PlacementRepairScope,
@@ -528,6 +539,7 @@ export interface ImageTransport
         sessionId: number,
         objectKeys: readonly string[],
         signal?: AbortSignal,
+        storedPcm?: boolean,
     ): Promise<AuditionBundleDescriptor>;
     readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
     deleteAudition(auditionId: string): Promise<void>;
@@ -547,26 +559,6 @@ export interface ImageTransport
         target: AudioImportTarget,
         importMode: Tx16wImportMode,
     ): Promise<Tx16wImportInspection>;
-    startAudioImport(
-        sessionId: number,
-        target: VolumeImportDestination,
-        items: AudioImportItem[],
-        grouping: AudioImportGrouping,
-    ): Promise<JobState>;
-    startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState>;
-    startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState>;
-    startSequenceImport(
-        sessionId: number,
-        target: VolumeImportDestination,
-        items: SequenceImportItem[],
-        systemExclusivePolicy: SequenceSystemExclusivePolicy,
-    ): Promise<JobState>;
-    startTx16wDiskSetImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-    ): Promise<JobState>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection>;
@@ -576,6 +568,7 @@ export interface ImageTransport
         packages: InputFileLocation[],
         destinations: PackageImportDestination[],
         overwrite: boolean,
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<PackageImportPlan>;
     startPackageImport(planToken: string): Promise<JobState>;
     planImagePackageImport(
@@ -586,6 +579,7 @@ export interface ImageTransport
         programSlotAssignments?: PackageProgramSlotAssignment[],
         replacePlanToken?: string,
         opaqueSequenceDecisions?: PackageOpaqueSequenceDecision[],
+        policy?: import('./importCapacity').CapacityPolicy,
     ): Promise<ImageSessionPackageImportPlan>;
     releaseImagePackageImportPlan(planToken: string): Promise<void>;
     startImagePackageImport(planToken: string): Promise<JobState>;

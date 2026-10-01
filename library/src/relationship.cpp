@@ -292,10 +292,18 @@ std::vector<const Relationship *> RelationshipGraph::parents(std::string_view ke
 }
 
 RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
+    std::vector<const ObjectSnapshot *> objects;
+    objects.reserve(catalog.objects.size());
+    for (const auto &item : catalog.objects)
+        objects.push_back(&item);
+    return build_relationship_graph(objects);
+}
+
+RelationshipGraph build_relationship_graph(std::span<const ObjectSnapshot *const> objects) {
     RelationshipGraph result;
     std::map<std::string, std::vector<const ObjectSnapshot *>> scopes;
-    for (const auto &item : catalog.objects)
-        scopes[item.scope_key].push_back(&item);
+    for (const auto *item : objects)
+        scopes[item->scope_key].push_back(item);
 
     for (const auto &[scope_key, scope] : scopes) {
         static_cast<void>(scope_key);
@@ -410,7 +418,10 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
             const auto number = program_number(*source->second);
             if (!number)
                 continue;
-            if (row.type == "PROG_ASSIGNMENT_TO_SBNK" && row.target_key) {
+            const auto target = row.target_key ? scope_index.keys.find(*row.target_key) : scope_index.keys.end();
+            const auto target_type =
+                target == scope_index.keys.end() ? ObjectType::unknown : target->second->object.header.type;
+            if (row.type == "PROG_ASSIGNMENT_TO_SBNK" && target_type == ObjectType::sbnk) {
                 direct_programs[*row.target_key].push_back(*number);
                 bool nondefault = false;
                 if (row.assignment_index) {
@@ -426,22 +437,28 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
             } else if (row.type == "PROG_ASSIGNMENT_TO_SBNK" && row.quality == RelationshipQuality::tentative) {
                 for (const auto &candidate : row.candidate_keys)
                     ambiguous_programs[candidate].push_back(*number);
-            } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC" && row.target_key) {
+            } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC" && target_type == ObjectType::sbac) {
+                direct_programs[*row.target_key].push_back(*number);
                 const auto members = sample_bank_members.find(*row.target_key);
                 if (members == sample_bank_members.end())
                     continue;
                 for (const auto &sample_key : members->second)
                     indirect_programs[sample_key].push_back(*number);
+            } else if (row.type == "PROG_ASSIGNMENT_TO_SBAC" && row.quality == RelationshipQuality::tentative) {
+                for (const auto &candidate : row.candidate_keys)
+                    ambiguous_programs[candidate].push_back(*number);
             }
         }
 
         for (const auto *item : scope) {
             const auto *sample = std::get_if<CurrentSbnk>(&item->object.payload);
-            if (sample == nullptr)
+            const auto *bank = std::get_if<CurrentSbac>(&item->object.payload);
+            if (sample == nullptr && bank == nullptr)
                 continue;
             BitmapComparison comparison;
-            comparison.sbnk_key = item->key;
-            comparison.bitmap_programs = sample->linked_program_numbers;
+            comparison.object_key = item->key;
+            comparison.object_type = item->object.header.type;
+            comparison.bitmap_programs = sample ? sample->linked_program_numbers : bank->linked_program_numbers;
             comparison.direct_assignment_programs = direct_programs[item->key];
             comparison.indirect_assignment_programs = indirect_programs[item->key];
             comparison.direct_assignment_programs = sorted_unique(comparison.direct_assignment_programs);
@@ -501,15 +518,16 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
                 std::ranges::replace(mismatch_basis, '_', '-');
                 std::ranges::replace(mismatch_basis, ':', '-');
                 std::ranges::replace(mismatch_basis, '+', '-');
-                const auto basis = comparison.status == "match"
-                                       ? std::string{"program-link-bitmap"}
-                                       : std::format("sbnk-program-link-bitmap-{}-diagnostic", mismatch_basis);
+                const auto type = bank ? "SBAC" : "SBNK";
+                const auto basis = comparison.status == "match" ? std::string{"program-link-bitmap"}
+                                                                : std::format("{}-program-link-bitmap-{}-diagnostic",
+                                                                              bank ? "sbac" : "sbnk", mismatch_basis);
                 result.relationships.push_back({
-                    std::format("{}|SBNK_PROGRAM_BITMAP_TO_PROG|{}|{}", item->key, targets, basis),
+                    std::format("{}|{}_PROGRAM_BITMAP_TO_PROG|{}|{}", item->key, type, targets, basis),
                     item->key,
                     targets,
                     {},
-                    "SBNK_PROGRAM_BITMAP_TO_PROG",
+                    std::format("{}_PROGRAM_BITMAP_TO_PROG", type),
                     quality,
                     basis,
                     "program-link bitmap cross-check",
@@ -529,6 +547,21 @@ RelationshipGraph build_relationship_graph(const ObjectCatalog &catalog) {
         return std::tuple{row.scope_key, row.source_key, row.type, row.key};
     });
     return result;
+}
+
+std::string program_bitmap_mismatch_message(const BitmapComparison &comparison, std::string_view name) {
+    const auto numbers = [](const std::vector<std::uint8_t> &values) {
+        std::string result;
+        for (const auto value : values) {
+            if (!result.empty())
+                result += ", ";
+            result += std::format("{:03}", value);
+        }
+        return result.empty() ? std::string{"none"} : result;
+    };
+    return std::format("{} '{}' has inconsistent Program links: stored [{}]; expected [{}] from direct assignments",
+                       comparison.object_type == ObjectType::sbac ? "Sample Bank" : "Sample", name,
+                       numbers(comparison.bitmap_programs), numbers(comparison.direct_assignment_programs));
 }
 
 std::string_view relationship_quality_name(RelationshipQuality quality) noexcept {

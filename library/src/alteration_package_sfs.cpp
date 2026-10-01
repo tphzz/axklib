@@ -126,8 +126,8 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         if (!has_action(object, PackageImportObjectAction::insert)) {
             if (has_action(object, PackageImportObjectAction::reuse) &&
                 has_action(object, PackageImportObjectAction::relocate)) {
-                if (!object.target_sfs_id ||
-                    (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG")) {
+                if (!object.target_sfs_id || (object.object_type != "SMPL" && object.object_type != "SBNK" &&
+                                              object.object_type != "SBAC" && object.object_type != "PROG")) {
                     return std::unexpected{
                         transaction_error("planned reused relocation is not a supported fixed object")};
                 }
@@ -221,6 +221,8 @@ Result<TransactionState> prepare_sfs_package_import_state(std::shared_ptr<const 
         report.object_name = object.destination_name;
         report.inserted_sfs_ids = {SfsId{*object.target_sfs_id}};
         report.allocated_clusters = allocated->second;
+        if (const auto remembered = remember_object_targets(state, report, cancellation); !remembered)
+            return std::unexpected{remembered.error()};
         state.reports.push_back(std::move(report));
         ++completed;
         if (progress) {
@@ -354,6 +356,21 @@ Result<void> validate_package_result(std::shared_ptr<const RandomAccessReader> r
                 (((sample->sample_flags & 1U) != 0U) != object.target_sample_bank_member)) {
                 return std::unexpected{transaction_error("post-write SBNK graph metadata differs "
                                                          "from the import plan")};
+            }
+        }
+        if (object.object_type == "SBAC") {
+            const auto *bank = std::get_if<CurrentSbac>(&matches.front()->object.payload);
+            if (bank == nullptr || bank->linked_program_numbers != object.target_program_numbers) {
+                return std::unexpected{
+                    transaction_error("post-write SBAC graph metadata differs from the import plan")};
+            }
+        }
+        if (object.object_type == "SBNK" || object.object_type == "SBAC") {
+            const auto comparison =
+                std::ranges::find(graph.bitmap_comparisons, matches.front()->key, &BitmapComparison::object_key);
+            if (comparison == graph.bitmap_comparisons.end() || comparison->status != "match") {
+                return std::unexpected{
+                    transaction_error("post-write Program links disagree with destination assignments")};
             }
         }
         actual_by_action.emplace(object.action_id, matches.front());

@@ -1,21 +1,34 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { getContext, onDestroy } from 'svelte';
+    import { inspectorSectionVisibility } from '../inspectorPanels.svelte';
     import { on } from 'svelte/events';
     import type { Snippet } from 'svelte';
 
     let {
         label,
-        description,
+        description = '',
         contextKey = '',
         children,
+        anchor,
+        content,
+        preferredWidth = 320,
+        hoverDelay = 400,
+        focusVisibleOnly = false,
     }: {
         label: string;
-        description: string;
+        description?: string;
         contextKey?: string;
         children?: Snippet;
+        anchor?: HTMLElement;
+        content?: Snippet;
+        preferredWidth?: number;
+        hoverDelay?: number;
+        focusVisibleOnly?: boolean;
     } = $props();
     const id = $props.id();
-    let trigger = $state<HTMLButtonElement>();
+    const sectionVisible = getContext<(() => boolean) | undefined>(inspectorSectionVisibility);
+    let internalTrigger = $state<HTMLButtonElement>();
+    const trigger = $derived(anchor ?? internalTrigger);
     let tooltip: HTMLElement | undefined;
     let open = $state(false);
     let pinned = false;
@@ -32,15 +45,21 @@
     }
     function show() {
         cancelTimer();
-        open = true;
+        if (!sectionVisible || sectionVisible()) open = true;
     }
     function enter() {
         cancelTimer();
-        if (!open) timer = setTimeout(show, 400);
+        if (!open) timer = setTimeout(show, hoverDelay);
+    }
+    function keyboardFocused() {
+        return document.activeElement === trigger && (!focusVisibleOnly || trigger.matches(':focus-visible'));
+    }
+    function focus() {
+        if (!focusVisibleOnly || trigger?.matches(':focus-visible')) show();
     }
     function leave() {
         cancelTimer();
-        if (!pinned && document.activeElement !== trigger) timer = setTimeout(close, 150);
+        if (!pinned && !keyboardFocused()) timer = setTimeout(close, 150);
     }
     function toggle() {
         if (pinned) close();
@@ -50,10 +69,8 @@
         }
     }
 
-    function mountTooltip(node: HTMLElement) {
+    function positionTooltip(node: HTMLElement) {
         if (!trigger) return;
-        tooltip = node;
-        document.body.appendChild(node);
         const anchor = trigger.getBoundingClientRect();
         const bodyScale = document.body.offsetWidth
             ? document.body.getBoundingClientRect().width / document.body.offsetWidth
@@ -61,7 +78,7 @@
         const anchorScale = trigger.offsetWidth ? anchor.width / trigger.offsetWidth : 1;
         const scale = anchorScale || 1;
         node.style.zoom = String(scale / (bodyScale || 1));
-        node.style.width = `${Math.min(320, (window.innerWidth - 16) / scale)}px`;
+        node.style.width = `${Math.min(preferredWidth, (window.innerWidth - 16) / scale)}px`;
         node.style.maxHeight = `${(window.innerHeight - 16) / scale}px`;
         const bounds = node.getBoundingClientRect();
         const left = Math.max(8, Math.min(anchor.left, window.innerWidth - bounds.width - 8));
@@ -70,8 +87,17 @@
             below + bounds.height <= window.innerHeight - 8 ? below : Math.max(8, anchor.top - bounds.height - 6);
         node.style.left = `${left / scale}px`;
         node.style.top = `${top / scale}px`;
+    }
+
+    function mountTooltip(node: HTMLElement) {
+        tooltip = node;
+        document.body.appendChild(node);
+        positionTooltip(node);
+        const observer = new ResizeObserver(() => positionTooltip(node));
+        observer.observe(node);
         return {
             destroy() {
+                observer.disconnect();
                 node.remove();
                 tooltip = undefined;
             },
@@ -79,10 +105,30 @@
     }
 
     $effect(() => {
+        if (sectionVisible && !sectionVisible()) close();
+    });
+    $effect(() => {
         contextKey;
         label;
         description;
         close();
+    });
+    $effect(() => {
+        if (!anchor) return;
+        const release = [
+            on(anchor, 'pointerenter', enter),
+            on(anchor, 'pointerleave', leave),
+            on(anchor, 'focus', focus),
+            on(anchor, 'blur', close),
+            on(anchor, 'pointerdown', close),
+        ];
+        return () => release.forEach((remove) => remove());
+    });
+    $effect(() => {
+        if (!anchor) return;
+        if (open) anchor.setAttribute('aria-describedby', id);
+        else anchor.removeAttribute('aria-describedby');
+        return () => anchor?.removeAttribute('aria-describedby');
     });
     $effect(() => {
         if (!open) return;
@@ -124,7 +170,9 @@
                 window,
                 'scroll',
                 (event) => {
-                    if (event.target !== tooltip) close();
+                    if (event.target === tooltip) return;
+                    if (keyboardFocused() && tooltip) positionTooltip(tooltip);
+                    else close();
                 },
                 { capture: true },
             ),
@@ -134,32 +182,35 @@
     onDestroy(cancelTimer);
 </script>
 
-{#if description}
-    <button
-        type="button"
-        class="attribute-help-label"
-        aria-label={children ? label : undefined}
-        bind:this={trigger}
-        aria-describedby={open ? id : undefined}
-        onpointerenter={enter}
-        onpointerleave={leave}
-        onfocus={show}
-        onblur={() => {
-            if (!pinned) close();
-        }}
-        onclick={toggle}
-        >{#if children}{@render children()}{:else}{label}{/if}</button
-    >
+{#if description || content}
+    {#if !anchor}
+        <button
+            type="button"
+            class="attribute-help-label"
+            aria-label={children ? label : undefined}
+            bind:this={internalTrigger}
+            aria-describedby={open ? id : undefined}
+            onpointerenter={enter}
+            onpointerleave={leave}
+            onfocus={focus}
+            onblur={() => {
+                if (!pinned) close();
+            }}
+            onclick={toggle}
+            >{#if children}{@render children()}{:else}{label}{/if}</button
+        >
+    {/if}
     {#if open}
         <div
             {id}
             role="tooltip"
             class="attribute-help-tooltip"
+            class:rich={!!content}
             use:mountTooltip
             onpointerenter={cancelTimer}
             onpointerleave={leave}
         >
-            {description}
+            {#if content}{@render content()}{:else}{description}{/if}
         </div>
     {/if}
 {:else}{label}{/if}
@@ -194,5 +245,8 @@
         white-space: pre-line;
         overflow-wrap: anywhere;
         overflow: auto;
+    }
+    .attribute-help-tooltip.rich {
+        white-space: normal;
     }
 </style>

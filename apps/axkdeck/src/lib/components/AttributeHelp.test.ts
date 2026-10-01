@@ -67,6 +67,18 @@ describe('Attribute label help', () => {
         expect(view.queryByRole('tooltip')).toBeNull();
     });
 
+    it('keeps keyboard help anchored after focus scrolls its field into view', async () => {
+        const view = setup();
+        const trigger = view.getByRole('button');
+        await act(() => trigger.focus());
+        const tooltip = view.getByRole('tooltip');
+        await fireEvent.scroll(view.container);
+        expect(view.getByRole('tooltip')).toBe(tooltip);
+        expect(trigger.getAttribute('aria-describedby')).toBe(tooltip.id);
+        await fireEvent.blur(trigger);
+        expect(view.queryByRole('tooltip')).toBeNull();
+    });
+
     it('pins on click, ignores internal pointers, and closes on repeat click or outside pointer', async () => {
         const view = setup();
         const trigger = view.getByRole('button');
@@ -106,5 +118,42 @@ describe('Attribute label help', () => {
         const view = render(AttributeHelp, { label: 'Type', description: '' });
         expect(view.getByText('Type')).toBeTruthy();
         expect(view.queryByRole('button')).toBeNull();
+    });
+
+    it('supports delayed external help without retaining pointer-selected focus', async () => {
+        vi.useFakeTimers();
+        const anchor = document.createElement('button');
+        document.body.appendChild(anchor);
+        const focusVisible = vi.spyOn(anchor, 'matches').mockReturnValue(false);
+        const view = render(AttributeHelp, {
+            props: {
+                label: 'Volume',
+                description: 'Capacity',
+                anchor,
+                preferredWidth: 360,
+                hoverDelay: 500,
+                focusVisibleOnly: true,
+            },
+        });
+        try {
+            await act(() => anchor.focus());
+            expect(view.queryByRole('tooltip')).toBeNull();
+            await fireEvent.pointerEnter(anchor);
+            await act(() => vi.advanceTimersByTime(499));
+            expect(view.queryByRole('tooltip')).toBeNull();
+            await act(() => vi.advanceTimersByTime(1));
+            expect(view.getByRole('tooltip').style.width).toBe('360px');
+            await fireEvent.pointerLeave(anchor);
+            await act(() => vi.advanceTimersByTime(150));
+            expect(view.queryByRole('tooltip')).toBeNull();
+            focusVisible.mockReturnValue(true);
+            await fireEvent.focus(anchor);
+            expect(view.getByRole('tooltip')).toBeTruthy();
+            await fireEvent.pointerDown(anchor);
+            expect(view.queryByRole('tooltip')).toBeNull();
+        } finally {
+            view.unmount();
+            anchor.remove();
+        }
     });
 });

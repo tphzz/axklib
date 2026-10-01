@@ -34,9 +34,7 @@ export function waveformPixelColumns(
     if (values.length === 0 || contentRatio <= 0 || cssWidth <= 0 || pixelWidth <= 0 || pixelHeight <= 0) return [];
     const normalizedRatio = Math.min(1, contentRatio);
     const contentPixelWidth = Math.max(1, Math.min(pixelWidth, Math.round(pixelWidth * normalizedRatio)));
-    const columnCount = Math.max(1, Math.min(contentPixelWidth, Math.round(cssWidth * normalizedRatio)));
-    let peak = 1;
-    for (const value of values) peak = Math.max(peak, Math.abs(value.minimum), Math.abs(value.maximum));
+    const columnCount = contentPixelWidth;
     const center = pixelHeight / 2;
     const columns: WaveformPixelColumn[] = [];
     for (let column = 0; column < columnCount; column += 1) {
@@ -50,8 +48,8 @@ export function waveformPixelColumns(
         }
         const x = Math.round((column / columnCount) * contentPixelWidth);
         const right = Math.round(((column + 1) / columnCount) * contentPixelWidth);
-        const y = Math.max(0, Math.min(pixelHeight - 1, Math.round(center - (maximum / peak) * center)));
-        const bottom = Math.max(y + 1, Math.min(pixelHeight, Math.round(center - (minimum / peak) * center)));
+        const y = Math.max(0, Math.min(pixelHeight - 1, Math.round(center - maximum * center)));
+        const bottom = Math.max(y + 1, Math.min(pixelHeight, Math.round(center - minimum * center)));
         columns.push({ x, y, width: Math.max(1, right - x), height: bottom - y });
     }
     return columns;

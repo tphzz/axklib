@@ -19,6 +19,7 @@
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/package.hpp"
 #include "axklib/package_import_planning.hpp"
 #include "content_digest.hpp"
@@ -189,6 +190,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
             continue;
         auto bound = registry.bind(
             operation, [state, &images, &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+                if (!input.is_object() || input.size() != 1U)
+                    return std::unexpected(operation_error("invalid_request", "Only planToken is accepted"));
                 std::string token;
                 try {
                     token = input.at("planToken").get<std::string>();
@@ -199,6 +202,9 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 if (!claim)
                     return std::unexpected(claim.error());
                 const auto record = claim->record();
+                auto policy = record->capacity_policy;
+                if (const auto admitted = enforce_volume_capacity_admission(record->capacity, policy); !admitted)
+                    return std::unexpected{core_error(admitted.error())};
                 if (!record->plan.valid()) {
                     claim->consume();
                     return std::unexpected(
@@ -226,9 +232,11 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 const auto packages = std::span<const axk::PortablePackage>{record->package_set->packages};
                 auto prepared = axk::detail::prepare_sfs_package_import_verified(
                     mutation->target, std::filesystem::path{mutation->source.relative_path}, packages, record->plan,
-                    *current_snapshot, context.cancellation, context.progress);
+                    *current_snapshot, context.cancellation, context.progress, policy);
                 if (!prepared)
                     return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
+                if (const auto admitted = enforce_volume_capacity_admission(prepared->capacity, policy); !admitted)
+                    return std::unexpected{core_error(admitted.error(), mutation->source.relative_path)};
 
                 std::vector<AlterationJournalPatch> patches;
                 patches.reserve(prepared->patches.size());
@@ -243,9 +251,18 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     prepared_commit.emplace(std::move(*validation));
                     return {};
                 };
+                const auto admit_frozen = [&](std::shared_ptr<const RandomAccessReader> frozen) -> Result<void> {
+                    auto current =
+                        inspect_frozen_capacity(std::move(frozen), prepared->capacity, policy, context.cancellation);
+                    if (!current)
+                        return std::unexpected{current.error()};
+                    if (const auto admitted = enforce_volume_capacity_admission(*current, policy); !admitted)
+                        return std::unexpected{core_error(admitted.error(), mutation->source.relative_path)};
+                    return {};
+                };
                 mutation_guard.invalidate_on_abort(true);
                 if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches,
-                                                  context.cancellation, validate_commit);
+                                                  context.cancellation, validate_commit, {}, admit_frozen);
                     !applied) {
                     mutation_guard.invalidate_on_abort(!journals.storage_ready());
                     return std::unexpected(applied.error());

@@ -7,6 +7,8 @@
     } from '../collectionNavigation';
     import type { InspectorSelection, ProgramSampleSelectRow } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
+    import EditorHeader from './EditorHeader.svelte';
+    import EditorTabs from './EditorTabs.svelte';
 
     type ProgramEditorTab = 'sample-select' | 'easy-edit' | 'effect-setup' | 'setup' | 'control';
     type SampleEditorTab = 'trim-loop' | 'map-out' | 'filter-eg' | 'lfo' | 'midi-ctrl';
@@ -87,28 +89,6 @@
         void focusCollectionIndex(event.currentTarget, targetIndex);
     }
 
-    function moveTab<T extends string>(
-        event: KeyboardEvent,
-        tabs: Tab<T>[],
-        active: T,
-        select: (value: T) => void,
-    ): void {
-        let index = tabs.findIndex((tab) => tab.id === active);
-        if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;
-        else if (event.key === 'ArrowLeft') index = (index - 1 + tabs.length) % tabs.length;
-        else if (event.key === 'Home') index = 0;
-        else if (event.key === 'End') index = tabs.length - 1;
-        else return;
-        event.preventDefault();
-        select(tabs[index]!.id);
-        queueMicrotask(() => {
-            const buttons =
-                event.currentTarget instanceof HTMLElement ? event.currentTarget.parentElement?.children : [];
-            const button = buttons?.[index];
-            if (button instanceof HTMLElement) button.focus();
-        });
-    }
-
     function multiPartContextLabel(): string {
         if (!multiPartContext) return '';
         return `Multi Part ${multiPartContext.partLabel} → Program ${String(multiPartContext.programNumber).padStart(3, '0')}`;
@@ -122,23 +102,16 @@
         </div>
     {/if}
     {#if selection?.kind === 'program'}
-        <header class="editor-header">
-            <div class="editor-tabs" role="tablist" aria-label="Program editor">
-                {#each programTabs as tab (tab.id)}
-                    <button
-                        id={`program-tab-${tab.id}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={programTab === tab.id}
-                        aria-controls={`program-panel-${tab.id}`}
-                        tabindex={programTab === tab.id ? 0 : -1}
-                        onclick={() => (programTab = tab.id)}
-                        onkeydown={(event) => moveTab(event, programTabs, programTab, (value) => (programTab = value))}
-                        >{tab.label}</button
-                    >
-                {/each}
-            </div>
-        </header>
+        <EditorHeader>
+            <EditorTabs
+                tabs={programTabs}
+                active={programTab}
+                onselect={(id) => (programTab = id)}
+                label="Program editor"
+                idPrefix="program-tab"
+                panelId={`program-panel-${programTab}`}
+            />
+        </EditorHeader>
         <div
             id={`program-panel-${programTab}`}
             class="editor-panel"
@@ -194,23 +167,16 @@
             {/if}
         </div>
     {:else if selection?.kind === 'sample'}
-        <header class="editor-header">
-            <div class="editor-tabs" role="tablist" aria-label="Sample editor">
-                {#each sampleTabs as tab (tab.id)}
-                    <button
-                        id={`sample-tab-${tab.id}`}
-                        type="button"
-                        role="tab"
-                        aria-selected={sampleTab === tab.id}
-                        aria-controls={`sample-panel-${tab.id}`}
-                        tabindex={sampleTab === tab.id ? 0 : -1}
-                        onclick={() => (sampleTab = tab.id)}
-                        onkeydown={(event) => moveTab(event, sampleTabs, sampleTab, (value) => (sampleTab = value))}
-                        >{tab.label}</button
-                    >
-                {/each}
-            </div>
-        </header>
+        <EditorHeader>
+            <EditorTabs
+                tabs={sampleTabs}
+                active={sampleTab}
+                onselect={(id) => (sampleTab = id)}
+                label="Sample editor"
+                idPrefix="sample-tab"
+                panelId={`sample-panel-${sampleTab}`}
+            />
+        </EditorHeader>
         <div
             id={`sample-panel-${sampleTab}`}
             class="editor-panel editor-canvas"

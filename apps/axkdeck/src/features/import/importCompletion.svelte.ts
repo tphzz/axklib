@@ -1,10 +1,13 @@
 import { AxklibApiError } from '../../lib/httpErrors';
+import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import type { ImageTransport, JobState } from '../../lib/transport';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { JobController } from '../jobs/actions';
 import type { components } from '../../lib/generated/axklibApiV1';
+import { ImportCapacityReview } from './importCapacityReview.svelte';
 
 export class ImportCompletion {
+    readonly capacity = new ImportCapacityReview();
     phase = $state<
         'idle' | 'importing' | 'checking' | 'refreshing' | 'unconfirmed' | 'refresh-failed' | 'warnings' | 'completed'
     >('idle');
@@ -23,21 +26,22 @@ export class ImportCompletion {
     ) {}
 
     get busy(): boolean {
-        return ['importing', 'checking', 'refreshing'].includes(this.phase);
+        return this.capacity.busy || ['importing', 'checking', 'refreshing'].includes(this.phase);
     }
     get locked(): boolean {
-        return this.phase !== 'idle';
+        return this.capacity.busy || this.phase !== 'idle';
     }
     get canCheck(): boolean {
         return this.phase === 'unconfirmed' && this.jobId !== null;
     }
     get canDismiss(): boolean {
-        return ['idle', 'refresh-failed', 'warnings', 'completed'].includes(this.phase);
+        return !this.capacity.busy && ['idle', 'refresh-failed', 'warnings', 'completed'].includes(this.phase);
     }
 
     reset(): void {
         if (this.busy || this.phase === 'unconfirmed') return;
         this.phase = 'idle';
+        this.capacity.reset();
         this.message = '';
         this.failure = null;
         this.warnings = [];
@@ -70,10 +74,11 @@ export class ImportCompletion {
         } catch (error) {
             if (
                 this.jobId === null &&
-                error instanceof AxklibApiError &&
-                error.status >= 400 &&
-                error.status < 500 &&
-                error.status !== 408
+                (error instanceof CapacityWriteRejected ||
+                    (error instanceof AxklibApiError &&
+                        error.status >= 400 &&
+                        error.status < 500 &&
+                        error.status !== 408))
             ) {
                 this.phase = 'idle';
                 this.message = userFacingMessage(error);

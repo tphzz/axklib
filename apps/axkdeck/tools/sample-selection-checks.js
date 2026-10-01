@@ -1,0 +1,76 @@
+// Shared Chromium and native WebKitGTK checks against the real Sample collection/editor.
+window.runSampleEditorRegression = async function () {
+    const failures = [], measurements = [];
+    const assert = (condition, message) => { if (!condition) failures.push(message); };
+    const settle = () => new Promise(resolve => setTimeout(resolve, 140));
+    const find = (selector, text) => [...document.querySelectorAll(selector)].find(node => !text || node.textContent.trim() === text);
+    const click = async (selector, text) => {
+        let node = find(selector, text);
+        for (let attempt = 0; attempt < 20 && !node; attempt++) { await settle(); node = find(selector, text); }
+        if (!node) throw new Error(`Missing ${selector}: ${text}`);
+        node.click(); await settle();
+    };
+    const input = async (node, value) => { node.value = value; node.dispatchEvent(new Event('input', { bubbles: true })); await settle(); };
+    const menu = async (name) => {
+        const node = document.querySelector(`[aria-label="Inspect ${name}"]`);
+        const box = node.getBoundingClientRect();
+        node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: box.x + 30, clientY: box.y + 8 }));
+        await settle();
+    };
+    const page = async (tab, sub) => { await click('[role=tab]', tab); await click('[aria-label="Sample subpages"] button', sub); };
+    const dialogGeometry = (name) => {
+        const shell = document.querySelector('[role=dialog]');
+        const field = shell.querySelector('input');
+        const style = getComputedStyle(field);
+        const rect = shell.getBoundingClientRect();
+        const buttons = [...shell.querySelectorAll('.dialog-footer-actions button')];
+        assert(field.classList.contains('dialog-field-control'), `${name}: shared control`);
+        assert(style.fontSize === '11px', `${name}: compact value typography`);
+        assert(style.backgroundColor !== getComputedStyle(shell).backgroundColor, `${name}: distinct deep input background`);
+        assert(Math.abs(buttons[0].getBoundingClientRect().height - buttons[1].getBoundingClientRect().height) < 1, `${name}: equal footer action heights`);
+        assert(buttons.every(button => getComputedStyle(button).marginTop === '0px' && getComputedStyle(button).marginBottom === '0px'), `${name}: no button margins`);
+        assert(rect.left >= -1 && rect.right <= innerWidth + 1, `${name}: dialog fits viewport`);
+        measurements.push({ name, background: style.backgroundColor, font: style.fontSize, height: field.getBoundingClientRect().height });
+    };
+    await click('[aria-label="Inspect Sample A"]');
+    await page('Map/Out', 'Pitch');
+    await click('[aria-label="Inspect Sample B"]');
+    assert(find('[aria-label="Sample subpages"] [aria-pressed=true]', 'Pitch'), 'switching Samples preserves Pitch page');
+    await page('Map/Out', 'Mix & Key');
+    document.querySelector('[aria-label="Inspect Sample A"]').dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })); await settle();
+    assert(document.querySelector('[data-parameter="level"][data-different]'), 'different level marked');
+    assert(document.querySelector('[data-parameter="root_key"][data-different]'), 'different original key marked');
+    assert(!document.querySelector('[data-parameter="pan"][data-different]'), 'equal pan not marked');
+    await input(document.querySelector('input[aria-label="Level"]'), '74');
+    assert(document.querySelectorAll('[aria-label="Unsaved Sample edits"]:not([aria-hidden=true])').length === 1, 'comparison edits only active Sample');
+    await click('.device-editor button', 'Discard');
+    await page('MIDI/CTRL', 'Control');
+    const labels = [...document.querySelectorAll('[aria-label="Sample MIDI controls"] .parameter-label-text')];
+    const narrowEditor = !!document.querySelector('.device-editor[data-editor-under~="700"]');
+    assert(labels.length === 24 && labels.every(node => getComputedStyle(node).display === (narrowEditor ? 'inline' : 'none')), 'MIDI comparison labels keep compact columns');
+    await click('[aria-label="Inspect Sample A"]');
+    await menu('Sample A'); await click('[role=menuitem]', 'Rename…');
+    dialogGeometry('Rename');
+    const rename = document.querySelector('[role=dialog] input');
+    assert(document.activeElement === rename, 'Rename name focused');
+    rename.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
+    assert(!document.querySelector('[role=dialog]'), 'Rename Escape dismisses');
+    await menu('Sample A'); await click('[role=menuitem]', 'Duplicate...');
+    dialogGeometry('Duplicate');
+    const duplicate = document.querySelector('[role=dialog] input');
+    assert(document.activeElement === duplicate && duplicate.selectionStart === 0 && duplicate.selectionEnd === duplicate.value.length, 'Duplicate focuses and selects suggested name');
+    await input(duplicate, 'sAmPlE b');
+    assert(find('[role=dialog] .primary-button').disabled, 'case-insensitive duplicate name blocked');
+    await input(duplicate, 'New Sample');
+    assert(!find('[role=dialog] .primary-button').disabled, 'unique duplicate name allowed');
+    await click('[role=dialog] .primary-button');
+    for (let attempt = 0; attempt < 20 && !document.querySelector('[role=tab]'); attempt++) await settle();
+    assert(!document.querySelector('[role=dialog]'), 'confirmed duplication closes dialog');
+    assert(document.querySelector('[aria-label="Inspect New Sample"]'), 'duplicate added to collection');
+    assert(find('[aria-label="Sample subpages"] [aria-pressed=true]', 'Control'), 'duplicate retains current page');
+    assert(document.querySelector('[aria-label="Write count"]').textContent === '1', 'one duplication write');
+    await page('Map/Out', 'Mix & Key');
+    assert(document.querySelector('input[aria-label="Level"]').value === '100', 'duplicate parameters loaded');
+    assert(document.documentElement.scrollWidth <= innerWidth + 1, 'no horizontal page overflow');
+    return { failures, measurements };
+};

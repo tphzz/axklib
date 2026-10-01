@@ -77,6 +77,13 @@ export class AuditionAssetStore {
         this.activeRequestKey = key;
     }
 
+    beginPreparedRequest(key: string): AbortSignal {
+        this.cancelActiveRequest();
+        this.activeRequestKey = key;
+        this.activeBundleAbort = new AbortController();
+        return this.activeBundleAbort.signal;
+    }
+
     finishRequest(): void {
         this.activeRequestKey = undefined;
         this.activeBundleAbort = undefined;

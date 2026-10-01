@@ -33,6 +33,7 @@
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/secure_random.hpp"
 #include "axklib/application/session_placement_operations.hpp"
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -53,6 +54,49 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                                                UploadStore &uploads, ImageSessionManager &images,
                                                                AlterationJournalStore &journals) {
     if (auto bound = bind_filesystem_edit_operations(registry, sandbox, uploads, images, journals); !bound)
+        return bound;
+    if (auto bound = registry.bind(
+            "images.alter.inspect",
+            [&sandbox, &uploads, &images](const Json &input, const OperationContext &context) -> Result<Json> {
+                const auto policy = capacity_policy(input);
+                if (!policy)
+                    return std::unexpected{policy.error()};
+                const auto image = input.at("imageId").get<std::string>();
+                const auto revision = input.at("expectedRevision").get<std::uint64_t>();
+                const auto session = images.begin_read(image, context.owner_id, revision);
+                if (!session)
+                    return std::unexpected{session.error()};
+                auto document = load_manifest(input, context, sandbox, uploads);
+                if (!document)
+                    return std::unexpected{document.error()};
+                const auto manifest = parse_alteration_manifest(document->json.dump());
+                if (!manifest)
+                    return std::unexpected{core_error(manifest.error())};
+                if (const auto bound_inputs =
+                        require_bound_inputs(external_paths(*manifest), document->bound_input_paths);
+                    !bound_inputs)
+                    return std::unexpected{bound_inputs.error()};
+                const auto fingerprints = fingerprint_files(document->observed_paths, context.cancellation);
+                if (!fingerprints)
+                    return std::unexpected{fingerprints.error()};
+                auto prepared = axk::detail::prepare_hds_alteration(
+                    session->reader, std::filesystem::path{session->source.relative_path}, *manifest,
+                    context.cancellation, context.progress, *policy);
+                if (!prepared)
+                    return std::unexpected{core_error(prepared.error())};
+                if (const auto verified = verify_fingerprints(*fingerprints, context.cancellation); !verified)
+                    return std::unexpected{verified.error()};
+                if (const auto verified = verify_sandbox_files(document->file_inputs, document->file_input_sha256,
+                                                               sandbox, context.cancellation);
+                    !verified)
+                    return std::unexpected{verified.error()};
+                if (const auto unchanged = session->verify_source_unchanged(); !unchanged)
+                    return std::unexpected{unchanged.error()};
+                return Json{{"imageId", image},
+                            {"revision", revision},
+                            {"capacity", capacity_admission_json(prepared->capacity)}};
+            });
+        !bound)
         return bound;
     const auto alter_session = [&sandbox, &uploads, &images,
                                 &journals](const Json &input, const OperationContext &context) -> Result<Json> {
@@ -99,6 +143,9 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         diagnostic("admission", admission_started, {{"imageId", image_id}, {"revision", expected_revision}});
 
         const auto manifest_started = Clock::now();
+        const auto policy = capacity_policy(input);
+        if (!policy)
+            return std::unexpected{policy.error()};
         auto document = load_manifest(input, context, sandbox, uploads);
         if (!document)
             return std::unexpected(document.error());
@@ -119,9 +166,11 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         const auto planning_started = Clock::now();
         auto prepared =
             axk::detail::prepare_hds_alteration(mutation->target, std::filesystem::path{mutation->source.relative_path},
-                                                *manifest, context.cancellation, context.progress);
+                                                *manifest, context.cancellation, context.progress, *policy);
         if (!prepared)
             return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
+        if (const auto admitted = enforce_volume_capacity_admission(prepared->capacity, *policy); !admitted)
+            return std::unexpected{core_error(admitted.error(), mutation->source.relative_path)};
         std::uint64_t patch_bytes{};
         std::vector<AlterationJournalPatch> patches;
         patches.reserve(prepared->patches.size());
@@ -161,9 +210,18 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             prepared_commit.emplace(std::move(*validation));
             return {};
         };
+        const auto admit_frozen = [&](std::shared_ptr<const RandomAccessReader> frozen) -> Result<void> {
+            auto current =
+                inspect_frozen_capacity(std::move(frozen), prepared->capacity, *policy, context.cancellation);
+            if (!current)
+                return std::unexpected{current.error()};
+            if (const auto admitted = enforce_volume_capacity_admission(*current, *policy); !admitted)
+                return std::unexpected{core_error(admitted.error(), mutation->source.relative_path)};
+            return {};
+        };
         guard.invalidate_session = true;
         if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation,
-                                          validate_commit);
+                                          validate_commit, {}, admit_frozen);
             !applied) {
             guard.invalidate_session = !journals.storage_ready();
             return std::unexpected(applied.error());
@@ -278,10 +336,13 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         if (!bound)
             return bound;
     }
-    if (!registry.is_implemented("images.programs.generate")) {
+    for (const auto operation : {"images.programs.generate", "images.programs.generate.prepare"}) {
+        if (registry.is_implemented(operation))
+            continue;
         auto bound = registry.bind(
-            "images.programs.generate",
-            [&images, alter_session](const Json &input, const OperationContext &context) -> Result<Json> {
+            operation,
+            [&images, alter_session, prepare_only = std::string_view{operation}.ends_with(".prepare")](
+                const Json &input, const OperationContext &context) -> Result<Json> {
                 std::string image_id;
                 std::uint64_t revision{};
                 std::string content_scope_id;
@@ -304,12 +365,15 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     images.plan_program_generation(image_id, context.owner_id, revision, content_scope_id, selections);
                 if (!plan)
                     return std::unexpected(plan.error());
-                auto altered =
-                    alter_session({{"imageId", image_id},
-                                   {"expectedRevision", revision},
-                                   {"manifest", {{"inline", program_generation_manifest_json(plan->manifest)}}},
-                                   {"inputBindings", Json::array()}},
-                                  context);
+                Json mutation{{"imageId", image_id},
+                              {"expectedRevision", revision},
+                              {"manifest", {{"inline", program_generation_manifest_json(plan->manifest)}}},
+                              {"inputBindings", Json::array()}};
+                if (input.contains("capacityPolicy"))
+                    mutation["capacityPolicy"] = input.at("capacityPolicy");
+                if (prepare_only)
+                    return mutation;
+                auto altered = alter_session(mutation, context);
                 if (!altered)
                     return std::unexpected(altered.error());
                 std::unordered_map<std::string, const ImageProgramGenerationCandidate *> candidates;

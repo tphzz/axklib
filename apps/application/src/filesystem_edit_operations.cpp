@@ -10,6 +10,7 @@
 #include <utility>
 #include <variant>
 
+#include "axklib/application/volume_capacity.hpp"
 #include "axklib/filesystem_transaction.hpp"
 #include "content_digest.hpp"
 #include "filesystem_session_mutation.hpp"
@@ -21,7 +22,8 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
                                                    std::uint64_t expected_revision, PartitionIndex partition,
                                                    std::span<const FilesystemEdit> edits,
                                                    const CancellationToken &cancellation, ProgressSink *progress,
-                                                   const FilesystemInputVerification &input_verification) {
+                                                   const FilesystemInputVerification &input_verification,
+                                                   const VolumeCapacityPolicy &capacity_policy) {
     using write_operations_internal::core_error;
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(core_error(checked.error()));
@@ -65,7 +67,18 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
         }
         return {};
     };
+    const auto admit = [&](const ImageSessionMutation &mutation,
+                           std::shared_ptr<const RandomAccessReader> frozen) -> Result<void> {
+        if (mutation.media_kind != MediaKind::sfs)
+            return {};
+        auto result = axk::detail::inspect_filesystem_capacity(mutation.target, std::move(frozen), partition, edits,
+                                                               capacity_policy, cancellation);
+        if (!result)
+            return std::unexpected{core_error(result.error())};
+        const auto admitted = enforce_volume_capacity_admission(*result, capacity_policy);
+        return admitted ? Result<void>{} : std::unexpected{core_error(admitted.error())};
+    };
     return detail::apply_session_filesystem_mutation(images, journals, image_id, owner_id, expected_revision, partition,
-                                                     prepare, verify_inputs, cancellation, progress);
+                                                     prepare, verify_inputs, cancellation, progress, admit);
 }
 } // namespace axk::app

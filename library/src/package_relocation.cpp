@@ -286,6 +286,8 @@ Result<RelocationProfile> build_relocation_profile(const DecodedObject &object,
         const auto *sample_bank = std::get_if<CurrentSbac>(&object.payload);
         if (sample_bank == nullptr)
             return std::unexpected{profile_error(object, "current SBAC payload is not decoded")};
+        if (auto added = add_range(result, object, 0x90U, 16U, "SBAC_PROGRAM_BITMAP"); !added)
+            return std::unexpected{added.error()};
         for (const auto &slot : sample_bank->slots) {
             if (auto added = add_range(result, object, slot.offset + 16U, 4U, "SBAC_SLOT_HANDLE"); !added) {
                 return std::unexpected{added.error()};
@@ -358,6 +360,23 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
     for (const auto &relocation : node.relocations)
         allowed.push_back({relocation.offset, relocation.width});
 
+    if (node.object_type == "SBNK" || node.object_type == "SBAC") {
+        const std::size_t bitmap_offset = node.object_type == "SBNK" ? 0xc0U : 0x90U;
+        std::array<std::uint32_t, 4> words{};
+        std::set<std::uint8_t> unique_programs;
+        for (const auto number : context.linked_program_numbers) {
+            if (number < 1U || number > 128U || !unique_programs.emplace(number).second) {
+                return std::unexpected{
+                    relocation_error(node, "Program bitmap relocation contains an invalid Program number")};
+            }
+            words[(number - 1U) / 32U] |= std::uint32_t{1} << ((number - 1U) % 32U);
+        }
+        for (std::size_t index = 0; index < words.size(); ++index) {
+            if (auto written = write_be32(bitmap_offset + index * 4U, words[index]); !written)
+                return std::unexpected{written.error()};
+        }
+    }
+
     if (node.object_type == "SMPL") {
         if (context.destination_embedded_container_name.empty() || !context.wave_data_reference_value ||
             result.size() < 0xacU) {
@@ -405,21 +424,6 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
                 return std::unexpected{written.error()};
         } else {
             if (auto written = write_be32(0xa4U, 0U); !written)
-                return std::unexpected{written.error()};
-        }
-        std::fill(result.begin() + 0xc0, result.begin() + 0xd0, std::byte{});
-        std::set<std::uint8_t> unique_programs;
-        for (const auto number : context.linked_program_numbers) {
-            if (number < 1U || number > 128U || !unique_programs.emplace(number).second) {
-                return std::unexpected{relocation_error(node, "SBNK relocation contains an invalid Program number")};
-            }
-            const auto word_offset = 0xc0U + static_cast<std::size_t>((number - 1U) / 32U) * 4U;
-            const auto bit = std::uint32_t{1} << ((number - 1U) % 32U);
-            const auto word = (std::to_integer<std::uint32_t>(result[word_offset]) << 24U) |
-                              (std::to_integer<std::uint32_t>(result[word_offset + 1U]) << 16U) |
-                              (std::to_integer<std::uint32_t>(result[word_offset + 2U]) << 8U) |
-                              std::to_integer<std::uint32_t>(result[word_offset + 3U]);
-            if (auto written = write_be32(word_offset, word | bit); !written)
                 return std::unexpected{written.error()};
         }
         auto flags = std::to_integer<std::uint8_t>(result[0xd0U]);
@@ -506,6 +510,13 @@ Result<std::vector<std::byte>> relocate_package_node(const PortablePackage &pack
             }
         }
     } else if (const auto *sample_bank = std::get_if<CurrentSbac>(&decoded->payload)) {
+        const std::set<std::uint8_t> expected_programs(context.linked_program_numbers.begin(),
+                                                       context.linked_program_numbers.end());
+        const std::set<std::uint8_t> actual_programs(sample_bank->linked_program_numbers.begin(),
+                                                     sample_bank->linked_program_numbers.end());
+        if (expected_programs != actual_programs)
+            return std::unexpected{
+                relocation_error(node, "relocated SBAC metadata did not decode to the planned graph")};
         for (const auto &edge : package.relationships) {
             if (edge.source_node_id != node.node_id || edge.role != "SBAC_SLOT_TO_SBNK")
                 continue;

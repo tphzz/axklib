@@ -160,6 +160,16 @@ See the official
 [Tauri macOS prerequisites](https://v2.tauri.app/start/prerequisites/#macos)
 for the Xcode installation options.
 
+Release builds keep build-time Rust dependencies (including procedural macros)
+unstripped. This avoids a
+[Rust/LLVM Mach-O stripping defect](https://github.com/rust-lang/rust/issues/157750)
+that macOS 27 can expose as `E0463: can't find crate` for a macro such as
+`zerofrom_derive`, even after debug tests pass. The override is in `Cargo.toml`
+and covers both architecture slices and the universal build. Keep it while using
+Rust 1.85; the shipped application remains optimized and stripped. A failed
+workflow must be started on a ref containing this fix; rerunning an older run
+uses its original commit.
+
 ### Windows
 
 Windows builds require the Microsoft C++ Build Tools and Microsoft Edge
@@ -397,6 +407,7 @@ that path explicitly when it starts the sidecar.
 ```json
 {
   "schemaVersion": 1,
+  "preferredASeriesGeneration": "A3000",
   "appearance": {
     "interfaceScaleMode": "auto"
   },
@@ -416,7 +427,56 @@ earlier unreleased filenames and locations are not read or migrated. Logs,
 WebView profile/cache data, protected credentials, and sidecar operational
 state remain in their platform-specific application locations.
 
+The Preferences button beside interface scale opens the A-Series settings.
+**Preferred A-Series generation** accepts `A3000` (a3k, the initial default)
+or `A4000_A5000` (a4k/a5k). It is a local desktop preference even when using a
+remote server. Saving preserves interface scale and export directories. Failed
+saves leave the published preference unchanged; malformed or unreadable settings
+are reported and never replaced by fallback defaults.
+
+Each fresh audio import starts from this preference. Its format can be changed
+for that operation without changing Preferences. When assigning Samples to a new
+Sample Bank, the highest known generation among the selected Samples takes
+precedence; the preference is used only if no selected format is known. Existing
+Sample Banks display their stored format and are not converted by assignment.
+Package imports, duplication, edits, explicit conversions and other sampler
+families retain their existing format rules.
+
 ### Diagnostics
+
+Open **Logs...** at the right of the status bar to view retained Application and
+Local server logs in a separate, resizable window. The same entry is available
+on the startup screen if the server cannot connect. Opening Logs again focuses
+the existing window; closing it preserves its view until axkdeck exits.
+
+Use Source, Minimum level and Search together to narrow the view. The level
+selector is a display filter, not a change to capture verbosity: Debug records
+are only available if they were originally logged. Unclassified records remain
+visible by default and can be excluded. Server stderr alone is not an error
+severity. Search is literal and case-insensitive; times are displayed in UTC.
+
+**Clear view** hides everything read so far, including from **Save view...**,
+without deleting or truncating log files. Reproduce the problem, then copy a
+text selection or choose Save view to export every matching retained record
+since Clear, not only the displayed page. **Show retained history** removes that
+boundary. **Save all logs...** ignores filters and Clear. Both save commands
+write a frozen UTF-8 `.log` snapshot through the native save dialog. Existing
+redaction is preserved, but review logs for local filenames or other sensitive
+details before sharing them.
+
+Selecting text or scrolling away from the bottom pauses Follow latest. New
+entries are counted without changing the selected text; resume following to
+jump to the latest records. Older/newer controls page through retained history.
+The viewer polls only while visible, using pages bounded to 400 records or
+1 MiB. It reports expired history, unreadable files and safety limits instead of
+silently claiming a complete view. Limits are 32 files, 8 MiB per file, 64 MiB
+total retained/decoded text, 250,000 records and 256 KiB per record. Log rotation
+can remove old history; Clear view does not change retention.
+
+The viewer reads only this computer's axkdeck and bundled local-server logs.
+It does not retrieve remote-server logs or clear files. Browser-only builds do
+not expose the desktop Logs entry. Capture settings remain described under
+[Logging](#logging).
 
 Development builds open the web developer tools with `F12`. This shortcut is
 not enabled in release builds. Desktop/frontend messages and sidecar output are

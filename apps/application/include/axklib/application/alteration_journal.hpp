@@ -18,7 +18,7 @@
 namespace axk::app {
 
 inline constexpr std::uint64_t default_maximum_alteration_journal_bytes =
-    2ULL * 2'147'483'648ULL + 64ULL * 1024ULL * 1024ULL;
+    2ULL * 8'589'934'592ULL + 64ULL * 1024ULL * 1024ULL;
 
 // Owned small metadata or a borrowed range of an immutable, shared input.
 // Reader-backed bytes are frozen in the journal before the target is modified.
@@ -65,11 +65,11 @@ class AlterationJournalStore {
 
     [[nodiscard]] bool storage_ready() const noexcept;
     [[nodiscard]] Result<void> recover(const Sandbox &sandbox);
-    [[nodiscard]] Result<void> apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
-                                     std::span<const AlterationJournalPatch> patches,
-                                     const CancellationToken &cancellation = {},
-                                     const std::function<Result<void>()> &validate = {},
-                                     const std::function<void()> &on_rollback_verified = {});
+    [[nodiscard]] Result<void>
+    apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
+          std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation = {},
+          const std::function<Result<void>()> &validate = {}, const std::function<void()> &on_rollback_verified = {},
+          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {});
 
   private:
     std::filesystem::path directory_;

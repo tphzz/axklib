@@ -219,12 +219,10 @@ describe('HttpImageTransport', () => {
                 }
                 if (url.pathname.endsWith('/images/image-remote/objects/object-1')) {
                     return json({
-                        data: {
-                            schemaVersion: 1,
-                            image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
-                            object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
-                            relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
-                        },
+                        schemaVersion: 1,
+                        image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
+                        object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
+                        relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
                     });
                 }
                 if (url.pathname.endsWith('/images/image-remote/objects') && !url.searchParams.has('cursor')) {
@@ -1399,14 +1397,26 @@ describe('HttpImageTransport', () => {
                                 implemented: true,
                             },
                             {
-                                id: 'images.placement.repair',
+                                id: 'images.placement.repair.prepare',
                                 method: 'POST',
-                                route: '/api/v1/image-object-placement-repairs',
+                                route: '/api/v1/image-placement-repair-preparations',
+                                mode: 'request',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImagePlacementRepairRequest',
+                                resultSchema: 'ImageSessionAlterationRequest',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.alter',
+                                method: 'POST',
+                                route: '/api/v1/image-session-alterations',
                                 mode: 'job',
                                 operationClass: 'write',
                                 requiresIdempotency: true,
                                 variant: null,
-                                requestSchema: 'ImagePlacementRepairRequest',
+                                requestSchema: 'ImageSessionAlterationRequest',
                                 resultSchema: 'ImageSessionAlterationResult',
                                 implemented: true,
                             },
@@ -1475,12 +1485,20 @@ describe('HttpImageTransport', () => {
                         blockers: [],
                     });
                 }
-                if (url.pathname.endsWith('/image-object-placement-repairs')) {
+                if (url.pathname.endsWith('/image-placement-repair-preparations')) {
+                    bodies.set('prepare', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-repair',
+                        expectedRevision: 4,
+                        manifest: { schemaVersion: '1.0', operations: [] },
+                    });
+                }
+                if (url.pathname.endsWith('/image-session-alterations')) {
                     bodies.set('repair', JSON.parse(String(init?.body)));
                     return json(
                         {
                             jobId: 'repair-job',
-                            operationId: 'images.placement.repair',
+                            operationId: 'images.alter',
                             state: 'QUEUED',
                             latestSequence: 0,
                             progress: null,
@@ -1507,7 +1525,7 @@ describe('HttpImageTransport', () => {
         const inspection = await transport.inspectPlacement(opened.sessionId, scope);
         expect(inspection).toMatchObject({ canRepair: true, repairObjectCount: 1 });
         const repair = await transport.startPlacementRepair(opened.sessionId, scope);
-        expect(repair).toMatchObject({ kind: 'images.placement.repair', status: 'queued' });
+        expect(repair).toMatchObject({ kind: 'images.alter', status: 'queued' });
         expect(bodies.get('inspect')).toEqual({
             imageId: 'image-repair',
             expectedRevision: 4,
@@ -1518,7 +1536,12 @@ describe('HttpImageTransport', () => {
             expectedRevision: 4,
             scope,
         });
-        expect(bodies.get('repair')).toEqual(bodies.get('placementInspect'));
+        expect(bodies.get('prepare')).toEqual(bodies.get('placementInspect'));
+        expect(bodies.get('repair')).toEqual({
+            imageId: 'image-repair',
+            expectedRevision: 4,
+            manifest: { schemaVersion: '1.0', operations: [] },
+        });
     });
 
     it('inspects and starts revision-bound object deletion through typed operations', async () => {
@@ -1799,15 +1822,27 @@ describe('HttpImageTransport', () => {
                                 implemented: true,
                             },
                             {
-                                id: 'images.programs.generate',
+                                id: 'images.programs.generate.prepare',
                                 method: 'POST',
-                                route: '/api/v1/image-program-generations',
+                                route: '/api/v1/image-program-generation-preparations',
+                                mode: 'request',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                                requestSchema: 'ImageProgramGenerationRequest',
+                                resultSchema: 'ImageSessionAlterationRequest',
+                                implemented: true,
+                            },
+                            {
+                                id: 'images.alter',
+                                method: 'POST',
+                                route: '/api/v1/image-session-alterations',
                                 mode: 'job',
                                 operationClass: 'write',
                                 requiresIdempotency: true,
                                 variant: null,
-                                requestSchema: 'ImageProgramGenerationRequest',
-                                resultSchema: 'ImageProgramGenerationResult',
+                                requestSchema: 'ImageSessionAlterationRequest',
+                                resultSchema: 'ImageSessionAlterationResult',
                                 implemented: true,
                             },
                         ],
@@ -1854,12 +1889,20 @@ describe('HttpImageTransport', () => {
                         notices: [],
                     });
                 }
-                if (url.pathname.endsWith('/image-program-generations')) {
+                if (url.pathname.endsWith('/image-program-generation-preparations')) {
+                    bodies.set('prepare', JSON.parse(String(init?.body)));
+                    return json({
+                        imageId: 'image-programs',
+                        expectedRevision: 5,
+                        manifest: { schemaVersion: '1.0', operations: [] },
+                    });
+                }
+                if (url.pathname.endsWith('/image-session-alterations')) {
                     bodies.set('generate', JSON.parse(String(init?.body)));
                     return json(
                         {
                             jobId: 'job-programs',
-                            operationId: 'images.programs.generate',
+                            operationId: 'images.alter',
                             state: 'QUEUED',
                             latestSequence: 0,
                             progress: null,
@@ -1887,17 +1930,22 @@ describe('HttpImageTransport', () => {
         ]);
         const programs = [{ targetObjectId: 'object-bank', programNumber: 1, programName: 'Drums' }];
         const job = await transport.startProgramGeneration(opened.sessionId, 'volume-1', programs);
-        expect(job).toMatchObject({ kind: 'images.programs.generate', status: 'queued' });
+        expect(job).toMatchObject({ kind: 'images.alter', status: 'queued' });
         expect(bodies.get('inspect')).toEqual({
             imageId: 'image-programs',
             expectedRevision: 5,
             contentScopeId: 'volume-1',
         });
-        expect(bodies.get('generate')).toEqual({
+        expect(bodies.get('prepare')).toEqual({
             imageId: 'image-programs',
             expectedRevision: 5,
             contentScopeId: 'volume-1',
             programs,
+        });
+        expect(bodies.get('generate')).toEqual({
+            imageId: 'image-programs',
+            expectedRevision: 5,
+            manifest: { schemaVersion: '1.0', operations: [] },
         });
     });
 
@@ -2142,7 +2190,7 @@ describe('HttpImageTransport', () => {
                     targetSampleRate: 22_050,
                 },
             ],
-            { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' },
+            { sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLE_BANK', sampleBankName: 'Imported Bank' } },
         );
 
         expect(job).toMatchObject({ jobId: 2, kind: 'images.alter', status: 'queued' });
@@ -2176,6 +2224,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample: {
                                 name: 'Mono',
+                                storage_format: 'a3000_188',
                                 waveform_name: 'Mono Wave',
                                 parameters: {
                                     root_key: 60,
@@ -2214,6 +2263,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample: {
                                 name: 'Stereo',
+                                storage_format: 'a3000_188',
                                 waveform_name: 'Stereo-L',
                                 right_waveform_name: 'Stereo-R',
                                 parameters: {
@@ -2237,6 +2287,7 @@ describe('HttpImageTransport', () => {
                             volume_name: 'Imported',
                             sample_bank: {
                                 name: 'Imported Bank',
+                                storage_format: 'a3000_188',
                                 member_samples: ['Mono', 'Stereo'],
                             },
                         },
@@ -2660,7 +2711,9 @@ describe('HttpImageTransport', () => {
                     });
                 }
                 if (url.pathname.endsWith('/package-imports')) {
-                    expect(JSON.parse(String(init?.body))).toEqual({ planToken: 'package-plan-one' });
+                    expect(JSON.parse(String(init?.body))).toEqual({
+                        planToken: 'package-plan-one',
+                    });
                     expect((init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy();
                     return json(
                         {

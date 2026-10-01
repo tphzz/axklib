@@ -8,13 +8,12 @@ describe('Waveform', () => {
         vi.restoreAllMocks();
     });
 
-    it('uses one ordinary resize observer without resolution media-query subscriptions', () => {
+    it('observes size and monitor resolution changes and releases both subscriptions', () => {
         const observe = vi.fn();
         const disconnect = vi.fn();
-        const matchMedia = vi.fn(() => ({
-            addEventListener: vi.fn(),
-            removeEventListener: vi.fn(),
-        }));
+        const addEventListener = vi.fn();
+        const removeEventListener = vi.fn();
+        const matchMedia = vi.fn(() => ({ addEventListener, removeEventListener }));
         class TestResizeObserver {
             observe = observe;
             disconnect = disconnect;
@@ -28,10 +27,16 @@ describe('Waveform', () => {
         expect(canvas).toBeTruthy();
         expect(observe).toHaveBeenCalledOnce();
         expect(observe).toHaveBeenCalledWith(canvas);
-        expect(matchMedia).not.toHaveBeenCalled();
+        expect(matchMedia).toHaveBeenCalledWith('(resolution: 1dppx)');
+        const changed = addEventListener.mock.calls[0]![1] as () => void;
+        vi.stubGlobal('devicePixelRatio', 1.5);
+        changed();
+        expect(removeEventListener).toHaveBeenCalledWith('change', changed);
+        expect(matchMedia).toHaveBeenLastCalledWith('(resolution: 1.5dppx)');
 
         unmount();
         expect(disconnect).toHaveBeenCalledOnce();
+        expect(removeEventListener).toHaveBeenCalledTimes(2);
     });
 
     it('positions the Wave window and loop boundaries against the stored-frame timeline', () => {

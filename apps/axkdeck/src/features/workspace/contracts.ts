@@ -9,6 +9,7 @@ export interface WorkspacePresentation {
     content: Snippet;
     inspector?: Snippet;
     lower?: Snippet;
+    lowerPreferredHeight?: number;
     tabs?: Snippet;
     playback?: Snippet;
     selectionActions?: Snippet;

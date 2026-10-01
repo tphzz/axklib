@@ -213,6 +213,18 @@ and invalidated after commit or rollback. Package application still verifies
 the planned content fingerprint. Standalone copy-publishing writers retain
 their own source-content checks.
 
+Writable roots advertise `moveEntry` separately from other Files actions.
+Move requests use `{ "kind": "MOVE", "entryId": "...", "destinationParentEntryId": "..." }`
+inside `images.filesystem.edit`, bound to `expectedRevision`. A move batch contains
+only moves to one directory in the same partition; partition roots and protected
+metadata cannot be moved. Selected descendants move with their selected ancestor.
+Same-parent entries are unchanged. Name collisions reject the whole transaction;
+there is no overwrite or directory merge. Payloads and native attributes are
+preserved, with directory parent links updated transactionally. Raw moves do not
+repair sampler-object relationships. Use the ordinary edit acknowledgement and
+job recovery rules; a committed move followed by a failed refresh must not be
+resubmitted.
+
 Writable roots advertise `renameEntry` separately from other Files actions.
 Submit `{"kind":"RENAME","entryId":"...","newName":"..."}` through
 `images.filesystem.edit`. A rename request must contain exactly one edit:
@@ -612,9 +624,10 @@ the temporary file is resized or published. These values are reported by
 In-place image mutations are protected by an `AXKJNL02` alteration journal.
 The journal stores both the original and replacement bytes for every changed
 extent, so its exact size is approximately twice the changed payload plus
-metadata. `maximumAlterationJournalBytes` defaults to 4,362,076,160 bytes,
-which covers a complete rewrite at the supported 2 GiB image boundary plus
-64 MiB of metadata, and may be configured up to 8 GiB. Journal publication,
+metadata. `maximumAlterationJournalBytes` defaults to 17,246,978,048 bytes,
+which covers a complete rewrite at the supported 8 GiB image boundary plus
+64 MiB of metadata. This is also the maximum configurable value; lower positive
+limits remain available. Journal publication,
 application and recovery use bounded streaming I/O; the configured limit is a
 storage and admission bound, not a request to allocate that amount of memory. Before
 mutating an image, the server verifies both the exact encoded journal size and
@@ -1055,8 +1068,11 @@ snapshots, and directory changes between requests may change the available entri
 identifier. A Wave Data preview returns one `MONO` lane over its physical PCM
 extent. A Sample preview applies its member start and length fields and returns
 one `LEFT` lane plus an optional `RIGHT` lane. Each lane identifies its source
-Wave Data and its own frame count; the response-level frame count is the
-playback timeline used for audition and playhead positioning.
+Wave Data, stored frame count and playback window. Its `sampleWidthBytes` is
+the decoded PCM width (1 or 2 bytes), and envelope minima/maxima use signed
+PCM units. Normalize by 128 or 32768 respectively for full-scale rendering;
+do not peak-normalize each lane independently. This preserves relative stereo
+levels and keeps the envelope consistent with decoded audition audio.
 
 `auditions.prepare` accepts up to 256 ordered, unique Sample or Wave Data object
 identifiers. It validates the complete selection before retaining one bounded
@@ -1065,6 +1081,70 @@ audition bundle. Every clip exposes one or two mono-WAV lane ranges in
 differ and clients normalize them independently. The default aggregate content
 limit is 128 MiB. A failure rejects the complete request and includes the
 responsible object ID when one object caused it.
+
+The optional `sourceWindow` is `PLAYBACK` by default. `STORED` prepares the
+complete linked Wave Data spans for client-side Sample draft preview; the same
+selection validation and content limits apply. It does not alter stored Samples.
+
+Sample object details may include an `editing` snapshot for the
+`a-series/sample` profile: revision, payload digest, placement, decoded
+parameters, source frame bounds, and field restrictions. Its read-only
+`eqCoefficients` array contains five signed Q13 values in stored order
+`b1, b2, b0, -a1, -a2`; the desktop can show these in an optional response overlay.
+The solid editing curve uses the unquantized parameter response. The read-only
+`unavailableParameters` map uses dotted field paths and supplies a `reason`
+and `message` for each omitted decoded value. `UNSUPPORTED_VALUE` identifies a
+stored value outside the supported domain. `parameterCapabilities` supplies its
+raw value and the active format's allowed domain so an explicit valid replacement
+can repair it. Other edits preserve it. `FORMAT_UNAVAILABLE` identifies fields
+not stored in this format; they are not synthesized into editable values.
+`sampleFormat` identifies the stored 188/224-byte format separately from parameter
+warnings and A5000 output requirements. It is also present on collection items
+and object details for both Samples and Sample Banks (null for other objects).
+Its HTTP `format` enum is `A3000_188`, `A4000_A5000_224`, or `UNKNOWN`;
+conversion preview `targetFormat` uses the two recognized values. The embedded
+alteration manifest retains its own lowercase `target_format` values.
+Fresh Sample and Sample Bank alteration specifications accept lowercase
+`storage_format` values `a3000_188` and `a4000_a5000_224`; omission selects the
+later profile. Audio import uses the existing atomic alteration operation,
+passing the batch selection to each new Sample and optional bank, not a separate
+conversion job. See [A-Series Sample Formats And Generations](sample-formats.md).
+The nullable root `formatConversion` capability is separate from `editing`.
+It includes `payloadSha256`, `partitionIndex`, `volumeName`, `sampleFormat`,
+`canConvertFormat`, `reason` and `formatConversions`. The last field gives
+read-only target previews with changes and blockers; `canConvertFormat` indicates
+whether the image, placement and stored layout support conversion, not whether
+each target is free of blockers. Execution uses `convert_sbnk_format` for a
+Sample or `convert_sbac_format` for a bank, the original payload digest and the
+current image revision, and recomputes the same conversion checks. Bank conversion leaves
+members untouched and blocks active bank overrides. Ordinary Save
+never changes format. Stereo restrictions remain in `blockedParameters`; each has an
+explanation in `blockedParameterReasons` and retains its decoded value. These
+metadata fields are not mutation inputs.
+Unsupported layouts
+return no editor profile. The desktop retains session-only drafts across the
+six Sample editing tabs and object selection. Save applies only the selected
+Sample's changed values, after rechecking its identity; Discard reloads that
+Sample. Undo/redo applies to the unsaved draft and resets after Save.
+Banks expose `editing.profile = a-series/sample-bank` and `bankOverrides` with
+generation-specific `units` (`id`, named `keys`, physical `selectors`, and
+`activeSelectors`) plus ordered member names and nullable resolved object IDs.
+The lower-zone bank editor shows `---` for inherited values and `(---)` for
+parameters which cannot be overridden by banks. Editing activates the complete
+unit, using the selected preview member to seed its other fields. Reset returns
+the unit to individual sample values. Preview selection never changes the editing
+target or writes member Samples. Bank Save submits `update_sample_bank_overrides`
+and preserves member payloads, Wave Data and relationships. Unresolved members
+disable their audition, not otherwise valid bank-only editing.
+Image close/replacement and desktop exit request confirmation for unsaved drafts.
+Unconfirmed writes retain their job identity for status recovery; a refresh
+failure after a confirmed write never resubmits it.
+
+Draft audition previews playback bounds, loops, pitch, level and pan through
+the desktop audio engine. It is not a hardware synthesis emulator: filters,
+envelopes, LFO, routing and effects remain sampler-playback parameters. Random
+pan previews at center. Both recognized Sample storage formats support editing;
+destructive PCM operations are not part of this editor.
 
 Until the first supported public release, the checked-in contract is corrected
 in place and every in-repository consumer is updated with it. Compatibility

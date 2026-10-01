@@ -512,61 +512,8 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
             mark_conflict(object);
     }
 
-    struct SbnkTargetMetadata {
-        std::set<std::uint8_t> program_numbers;
-        bool sample_bank_member{};
-    };
-    using PhysicalObjectKey = std::pair<std::uint8_t, std::uint32_t>;
-    std::map<PhysicalObjectKey, SbnkTargetMetadata> sbnk_metadata;
-    for (const auto &object : plan.objects) {
-        if (object.object_type != "SBNK" || !object.target_sfs_id)
-            continue;
-        auto &metadata = sbnk_metadata[{object.partition_index, *object.target_sfs_id}];
-        if (!object.existing_object_key)
-            continue;
-        const auto found = existing_by_key.find(*object.existing_object_key);
-        if (found == existing_by_key.end())
-            continue;
-        if (const auto *sample = std::get_if<CurrentSbnk>(&existing[found->second].snapshot->object.payload)) {
-            metadata.program_numbers.insert(sample->linked_program_numbers.begin(),
-                                            sample->linked_program_numbers.end());
-            metadata.sample_bank_member = (sample->sample_flags & 1U) != 0U;
-        }
-    }
-    for (const auto &owner : plan.objects) {
-        if (std::ranges::contains(owner.actions, PackageImportObjectAction::conflict))
-            continue;
-        const auto &package = packages[owner.package_index];
-        for (const auto &edge : package.relationships) {
-            if (edge.source_node_id != owner.node_id ||
-                (edge.role != "SBAC_SLOT_TO_SBNK" && edge.role != "PROG_ASSIGNMENT_TO_SBNK")) {
-                continue;
-            }
-            const auto *target_action = planned_node(plan, owner, edge.target_node_id);
-            if (target_action == nullptr || target_action->object_type != "SBNK" || !target_action->target_sfs_id) {
-                continue;
-            }
-            auto &metadata = sbnk_metadata[{target_action->partition_index, *target_action->target_sfs_id}];
-            if (edge.role == "SBAC_SLOT_TO_SBNK") {
-                metadata.sample_bank_member = true;
-            } else {
-                auto number = planned_program_number(owner);
-                if (!number)
-                    return std::unexpected{number.error()};
-                metadata.program_numbers.insert(*number);
-            }
-        }
-    }
-    for (auto &object : plan.objects) {
-        if (object.object_type != "SBNK" || !object.target_sfs_id)
-            continue;
-        const auto metadata = sbnk_metadata.find({object.partition_index, *object.target_sfs_id});
-        if (metadata == sbnk_metadata.end())
-            continue;
-        object.target_program_numbers.assign(metadata->second.program_numbers.begin(),
-                                             metadata->second.program_numbers.end());
-        object.target_sample_bank_member = metadata->second.sample_bank_member;
-    }
+    if (auto links = plan_program_links(packages, existing, plan); !links)
+        return std::unexpected{links.error()};
 
     if (plan.conflicts.empty()) {
         for (auto &object : plan.objects) {
@@ -609,7 +556,8 @@ Result<PackageImportPlan> plan_sfs_import(std::shared_ptr<const RandomAccessRead
                 return std::unexpected{loaded.error()};
             if (std::ranges::equal(*relocated, existing_payload(existing_object)))
                 continue;
-            if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "PROG") {
+            if (object.object_type != "SMPL" && object.object_type != "SBNK" && object.object_type != "SBAC" &&
+                object.object_type != "PROG") {
                 return std::unexpected{planner_error("existing package object relocation fields "
                                                      "do not match the projected target")};
             }

@@ -124,6 +124,8 @@ AXK_API WaveformOrphanReport analyze_waveform_orphans(const Container &container
                                                       const RelationshipGraph &graph);
 AXK_API ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
                                             const RelationshipGraph &graph);
+AXK_API std::vector<ValidationIssue> validate_program_bitmaps(const ObjectCatalog &catalog,
+                                                              const RelationshipGraph &graph);
 AXK_API std::string_view content_scope_role_name(ContentScopeRole role) noexcept;
 AXK_API std::string_view waveform_status_name(WaveformStatus status) noexcept;
 

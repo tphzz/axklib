@@ -13,6 +13,7 @@
 #include "axklib/io.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/types.hpp"
+#include "axklib/volume_capacity.hpp"
 
 namespace axk {
 
@@ -35,14 +36,24 @@ struct RenameFilesystemEntry {
     FilesystemPath path;
     std::string new_name;
 };
-using FilesystemEdit =
-    std::variant<CreateFilesystemDirectory, PutFilesystemFile, RemoveFilesystemEntry, RenameFilesystemEntry>;
+struct MoveFilesystemEntry {
+    FilesystemPath path;
+    FilesystemPath destination_parent;
+};
+using FilesystemEdit = std::variant<CreateFilesystemDirectory, PutFilesystemFile, RemoveFilesystemEntry,
+                                    RenameFilesystemEntry, MoveFilesystemEntry>;
 
 // Publishes a new destination image. The source and input readers must remain
 // immutable for the operation; callers coordinate shared-image path leases.
+[[nodiscard]] AXK_API Result<VolumeCapacityAdmission>
+inspect_sfs_file_edit_capacity(const std::filesystem::path &source, PartitionIndex partition,
+                               std::span<const FilesystemEdit> edits, const VolumeCapacityPolicy &capacity_policy = {},
+                               const CancellationToken &cancellation = {});
+
 [[nodiscard]] AXK_API Result<PublicationOutcome>
 write_sfs_file_edits(const std::filesystem::path &source, const std::filesystem::path &destination,
                      PartitionIndex partition, std::span<const FilesystemEdit> edits,
-                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr);
+                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                     const VolumeCapacityPolicy &capacity_policy = {});
 
 } // namespace axk

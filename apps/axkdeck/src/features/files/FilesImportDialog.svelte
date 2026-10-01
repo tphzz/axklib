@@ -1,6 +1,7 @@
 <script lang="ts">
     import FilesystemNameField from './FilesystemNameField.svelte';
     import FilesImportFooter from './FilesImportFooter.svelte';
+    import ImportCapacityControl from '../../lib/components/ImportCapacityControl.svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportSourceChoice from '../../lib/components/ImportSourceChoice.svelte';
@@ -59,6 +60,10 @@
                 >
             </header>
             <div class="files-import-content">
+                {#if workflow.capacityAvailable}<ImportCapacityControl
+                        review={workflow.capacity}
+                        disabled={workflow.busy}
+                    />{/if}
                 <div class="import-summary">
                     <strong title={workflow.target.path || workflow.target.name}
                         >{workflow.target.path || workflow.target.name}</strong

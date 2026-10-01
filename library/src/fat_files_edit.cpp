@@ -88,13 +88,17 @@ void State::store(Node &node) {
               parent.directory_data.begin() + static_cast<std::ptrdiff_t>(node.slot));
     parent.dirty = true;
 }
-Result<std::size_t> State::slot(Node &directory) {
+Result<std::size_t> State::slot(Node &directory, std::size_t count) {
+    std::size_t run{};
+    bool ended{};
     for (std::size_t offset = 0; offset < directory.directory_data.size(); offset += 32U) {
         const auto first = directory.directory_data[offset];
-        if (first == std::byte{0xe5} || first == std::byte{}) {
-            if (first == std::byte{} && offset + 32U < directory.directory_data.size())
+        ended = ended || first == std::byte{};
+        run = ended || first == std::byte{0xe5} ? run + 1U : 0U;
+        if (run == count) {
+            if (ended && offset + 32U < directory.directory_data.size())
                 directory.directory_data[offset + 32U] = std::byte{};
-            return offset;
+            return offset - (count - 1U) * 32U;
         }
     }
     if (directory.clusters.empty())
@@ -110,7 +114,7 @@ Result<std::size_t> State::slot(Node &directory) {
     directory.clusters.push_back(cluster->front());
     const auto offset = directory.directory_data.size();
     directory.directory_data.resize(offset + geometry.cluster_size());
-    return offset;
+    return slot(directory, count);
 }
 
 Result<void> State::remove(const std::string &path, bool recursive) {
@@ -143,6 +147,8 @@ Result<void> State::remove(const std::string &path, bool recursive) {
 Result<void> State::apply(const FilesystemEdit &edit) {
     if (auto check = cancellation.check(); !check)
         return check;
+    if (const auto *operation = std::get_if<MoveFilesystemEntry>(&edit))
+        return move(*operation);
     return std::visit(
         [&](const auto &operation) -> Result<void> {
             using T = std::decay_t<decltype(operation)>;
@@ -200,6 +206,8 @@ Result<void> State::apply(const FilesystemEdit &edit) {
                     nodes.insert(std::move(moved));
                 }
                 return {};
+            } else if constexpr (std::is_same_v<T, MoveFilesystemEntry>) {
+                return std::unexpected(error("Move dispatch failed"));
             } else {
                 constexpr bool directory = std::is_same_v<T, CreateFilesystemDirectory>;
                 if (found != nodes.end()) {

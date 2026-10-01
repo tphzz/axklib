@@ -206,11 +206,24 @@ Result<void> parse_controls(const Json &value, std::array<SampleControlParameter
 
 } // namespace
 
+Result<SampleStorageFormat> parse_sample_storage_format(const Json &object, std::string_view context) {
+    if (!object.contains("storage_format"))
+        return SampleStorageFormat::a4000_a5000_224;
+    const auto &value = object["storage_format"];
+    if (value == "a3000_188")
+        return SampleStorageFormat::a3000_188;
+    if (value == "a4000_a5000_224")
+        return SampleStorageFormat::a4000_a5000_224;
+    return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
+                                      std::string{context} + ".storage_format must be a3000_188 or a4000_a5000_224")};
+}
+
 Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::string_view context,
                                                       bool require_nonempty, ErrorCode error_code,
                                                       ErrorCategory error_category) {
     if (auto valid = fields(value, context,
                             {"fixed_pitch",
+                             "velocity_crossfade",
                              "key_crossfade",
                              "mono_mode",
                              "sample_eq_type",
@@ -337,6 +350,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
     if (auto parsed = boolean_field(value, #member, result.member, context, error_code, error_category); !parsed)      \
         return std::unexpected { parsed.error() }
     AXK_BOOLEAN(fixed_pitch);
+    AXK_BOOLEAN(velocity_crossfade);
     AXK_BOOLEAN(key_crossfade);
     AXK_BOOLEAN(mono_mode);
 #undef AXK_BOOLEAN
@@ -376,7 +390,7 @@ Result<SampleParameters> parse_sample_parameters_json(const Json &value, std::st
             !parsed)
             return std::unexpected{parsed.error()};
     }
-    if (auto valid = validate_sample_parameter_fields(result); !valid) {
+    if (auto valid = validate_sample_parameter_patch(result); !valid) {
         return std::unexpected{
             invalid(error_code, error_category, std::string{context} + " contains an unsupported parameter value")};
     }

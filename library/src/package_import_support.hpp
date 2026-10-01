@@ -97,6 +97,8 @@ Result<std::string> projected_normalized_sha256(const PortablePackage &package, 
                                                 const package_internal::PackageNodeRelocationContext &context);
 Result<void> plan_program_assignment_adjustments(std::vector<Candidate> &candidates,
                                                  std::span<const ExistingObject> existing, PackageImportPlan &plan);
+Result<void> plan_program_links(std::span<const PortablePackage> packages, std::span<const ExistingObject> existing,
+                                PackageImportPlan &plan);
 PartitionCapacity partition_capacity(const Partition &partition, const ObjectCatalog &catalog);
 PartitionCapacity partition_capacity(const Partition &partition,
                                      std::span<const ObjectSnapshot *const> catalog_objects);

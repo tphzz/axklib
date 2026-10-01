@@ -192,6 +192,7 @@ pub(crate) async fn start_native_files_drag(
         state.active = true;
         paths
     };
+    let (finished_sender, finished_receiver) = std::sync::mpsc::channel();
     let finish = Arc::new(move |dropped: bool| {
         if let Ok(mut state) = state.lock() {
             state.active = false;
@@ -201,6 +202,7 @@ pub(crate) async fn start_native_files_drag(
                 }
             }
         }
+        let _ = finished_sender.send(dropped);
     });
     let callback = finish.clone();
     let target = window.clone();
@@ -216,7 +218,11 @@ pub(crate) async fn start_native_files_drag(
         return Err(error.to_string());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        receiver.recv().map_err(|error| error.to_string())?
+        receiver.recv().map_err(|error| error.to_string())??;
+        finished_receiver
+            .recv()
+            .map_err(|error| error.to_string())?;
+        Ok(())
     })
     .await
     .map_err(|error| error.to_string())?

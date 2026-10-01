@@ -1,5 +1,7 @@
 #pragma once
 
+#include "axklib/volume_capacity.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,13 +19,14 @@
 #include "axklib/program_parameters.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/sample_parameters.hpp"
+#include "axklib/sample_storage.hpp"
 #include "axklib/sampler_model.hpp"
 
 namespace axk {
 
 inline constexpr std::string_view build_manifest_schema_version = "1.0";
 inline constexpr std::uint64_t minimum_hds_size = 1'048'576;
-inline constexpr std::uint64_t maximum_hds_size = 2'147'483'648;
+inline constexpr std::uint64_t maximum_hds_size = 8'589'934'592;
 inline constexpr std::uint64_t formatted_floppy_size_bytes = 1'474'560;
 inline constexpr std::uint64_t maximum_wave_data_frames_per_channel = 1ULL << 24U;
 inline constexpr std::uint64_t maximum_audio_source_frames_per_channel = maximum_wave_data_frames_per_channel;
@@ -77,12 +80,14 @@ struct SampleSpec {
     std::optional<std::uint32_t> target_sample_rate;
     SampleParameters parameters;
     std::optional<SamplePlaybackWindow> playback_window{};
+    SampleStorageFormat storage_format{SampleStorageFormat::a4000_a5000_224};
 };
 
 struct SampleBankSpec {
     std::string name;
     std::vector<std::string> member_samples;
     std::optional<SampleParameters> parameter_overrides{};
+    SampleStorageFormat storage_format{SampleStorageFormat::a4000_a5000_224};
 };
 
 struct ProgramAssignmentSpec {
@@ -259,7 +264,17 @@ struct HdsBuildPlanSummary {
     std::vector<PartitionGeometry> partitions;
 };
 
-enum class HdsCreationProfileId : std::uint8_t { floppy_scale, cd_r_650, cd_r_700, hds_1_gib, hds_2_gib };
+enum class HdsCreationProfileId : std::uint8_t {
+    floppy_scale,
+    hds_128_mib,
+    hds_256_mib,
+    cd_r_650,
+    cd_r_700,
+    hds_1_gib,
+    hds_2_gib,
+    hds_4_gib,
+    hds_8_gib
+};
 
 struct HdsCreationPartitionOption {
     std::uint8_t partition_count{};
@@ -449,10 +464,12 @@ AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const std::filesystem::
                                                          const AudioImportOptions &options);
 AXK_AUDIO_API Result<ImportedAudio> import_sampler_audio(const RandomAccessReader &reader,
                                                          const AudioImportOptions &options);
-AXK_AUDIO_API Result<WrittenImageLayout> write_hds_image(const HdsBuildManifest &manifest,
-                                                         const std::filesystem::path &output_path,
-                                                         bool overwrite = false,
-                                                         const CancellationToken &cancellation = {});
+AXK_AUDIO_API Result<WrittenImageLayout>
+write_hds_image(const HdsBuildManifest &manifest, const std::filesystem::path &output_path, bool overwrite = false,
+                const CancellationToken &cancellation = {}, const VolumeCapacityPolicy &capacity_policy = {});
+AXK_AUDIO_API Result<VolumeCapacityAdmission>
+inspect_hds_build_capacity(const HdsBuildManifest &manifest, const VolumeCapacityPolicy &capacity_policy = {},
+                           const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<WrittenMediaImage> write_media_image(const MediaBuildManifest &manifest,
                                                           const std::filesystem::path &output_path,
                                                           bool overwrite = false,

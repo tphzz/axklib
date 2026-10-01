@@ -1,16 +1,22 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <ranges>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "axklib/alteration.hpp"
+#include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/server/contract.hpp"
 #include "axklib/server/server.hpp"
@@ -215,28 +221,46 @@ TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
     EXPECT_EQ(inspection.at("enum"), nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
 }
 
-TEST(ServerContract, AlterationJobReportsIncludeTx16wDiskSetImports) {
+TEST(ServerContract, AlterationJobReportsCoverEveryNativeOperation) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
     axk::server::OpenApiValidator validator;
     const auto &type =
         document.at("components").at("schemas").at("AlterationOperationReport").at("properties").at("type");
-    EXPECT_TRUE(std::ranges::contains(type.at("enum"), "IMPORT_TX16W_DISK_SET"));
-    EXPECT_EQ(type.at("x-axklib-application-enum").at("IMPORT_TX16W_DISK_SET"), "import_tx16w_disk_set");
-    const auto application_report = nlohmann::json{{"id", "tx16w-import"},
-                                                   {"type", "import_tx16w_disk_set"},
-                                                   {"partitionIndex", 0U},
-                                                   {"volumeName", "TX16W"},
-                                                   {"objectName", ""},
-                                                   {"removedSfsIds", nlohmann::json::array()},
-                                                   {"insertedSfsIds", nlohmann::json::array({4U, 5U})},
-                                                   {"placedSfsIds", nlohmann::json::array()},
-                                                   {"freedClusters", 0U},
-                                                   {"allocatedClusters", 2U},
-                                                   {"audioImport", nullptr}};
-    const auto wire_report = validator.wire_value("AlterationOperationReport", application_report);
-    EXPECT_EQ(wire_report.at("type"), "IMPORT_TX16W_DISK_SET");
-    EXPECT_TRUE(validator.validate("AlterationOperationReport", wire_report));
+    EXPECT_EQ(type.at("enum").size(), std::variant_size_v<axk::AlterationOperationData>);
+    EXPECT_EQ(type.at("x-axklib-application-enum").size(), std::variant_size_v<axk::AlterationOperationData>);
+    const auto verify = [&]<std::size_t Index>() {
+        const axk::AlterationOperationData operation{std::in_place_index<Index>};
+        const std::string application_type{axk::operation_type_name(operation)};
+        SCOPED_TRACE(application_type);
+        auto wire_type = application_type;
+        std::ranges::transform(wire_type, wire_type.begin(),
+                               [](unsigned char value) { return static_cast<char>(std::toupper(value)); });
+        ASSERT_TRUE(std::ranges::contains(type.at("enum"), nlohmann::json(wire_type)));
+        ASSERT_TRUE(type.at("x-axklib-application-enum").contains(wire_type));
+        EXPECT_EQ(type.at("x-axklib-application-enum").at(wire_type), application_type);
+        const auto application_report = nlohmann::json{{"id", "operation"},
+                                                       {"type", application_type},
+                                                       {"partitionIndex", 0U},
+                                                       {"volumeName", "TX16W"},
+                                                       {"objectName", ""},
+                                                       {"removedSfsIds", nlohmann::json::array()},
+                                                       {"insertedSfsIds", nlohmann::json::array({4U, 5U})},
+                                                       {"placedSfsIds", nlohmann::json::array()},
+                                                       {"freedClusters", 0U},
+                                                       {"allocatedClusters", 2U},
+                                                       {"audioImport", nullptr}};
+        const auto wire_report = validator.wire_value("AlterationOperationReport", application_report);
+        EXPECT_EQ(wire_report.at("type"), wire_type);
+        EXPECT_TRUE(validator.validate("AlterationOperationReport", wire_report));
+        EXPECT_EQ(validator.application_value("AlterationOperationReport", wire_report), application_report);
+        auto invalid = wire_report;
+        invalid["type"] = "UNKNOWN_OPERATION";
+        EXPECT_FALSE(validator.validate("AlterationOperationReport", invalid));
+    };
+    [&]<std::size_t... Indices>(std::index_sequence<Indices...>) {
+        (verify.template operator()<Indices>(), ...);
+    }(std::make_index_sequence<std::variant_size_v<axk::AlterationOperationData>>{});
 }
 
 TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
@@ -301,7 +325,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 72U);
+    EXPECT_EQ(entries.size(), 77U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -489,6 +513,8 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(bins->at("schema").at("maximum"), 4096);
 
     const auto &limits = document.at("components").at("schemas").at("ApiLimits");
+    EXPECT_EQ(limits.at("properties").at("maximumAlterationJournalBytes").at("maximum"),
+              axk::app::default_maximum_alteration_journal_bytes);
     for (const auto name : {"maximumDownloadArchiveDepth", "maximumDownloadArchivePathBytes",
                             "maximumConcurrentArchiveDownloads", "maximumMediaBuildObjectBytes",
                             "maximumMediaBuildPayloadBytes", "maximumMediaBuildOutputBytes", "maximumUploads"}) {
@@ -628,6 +654,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
         {"programSlotPlacements", placements},
         {"allocation", nlohmann::json::array()},
         {"sfsIndexCapacity", nlohmann::json::array()},
+        {"capacity", {{"target", "A4000_A5000"}, {"reports", nlohmann::json::array()}, {"allowed", true}}},
     };
     const auto wire_plan = validator.wire_value("PackageImportPlan", application_plan);
     ASSERT_TRUE(validator.validate("PackageImportPlan", wire_plan));
@@ -657,6 +684,7 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     application_session_result.erase("opaqueSequences");
     application_session_result.erase("conflicts");
     application_session_result.erase("sfsIndexCapacity");
+    application_session_result.erase("capacity");
     application_session_result["imageId"] = "image-1";
     application_session_result["revision"] = 2U;
     application_session_result["objectCount"] = 4U;
@@ -1007,6 +1035,44 @@ TEST(ServerContract, WorkspaceCreateRequestRejectsUnknownFields) {
     EXPECT_FALSE(validator.validate("WorkspaceCreateRequest", misspelled));
 }
 
+TEST(ServerContract, CapacityContractsRejectObsoleteApprovalFields) {
+    axk::server::OpenApiValidator validator;
+    nlohmann::json policy{{"target", "A3000"}};
+    EXPECT_TRUE(validator.validate("VolumeCapacityPolicy", policy));
+    policy["acknowledgedReviewId"] = nullptr;
+    EXPECT_FALSE(validator.validate("VolumeCapacityPolicy", policy));
+    nlohmann::json request{{"planToken", "retained-token"}};
+    EXPECT_TRUE(validator.validate("PackageImportRequest", request));
+    request["capacityReviewId"] = nullptr;
+    EXPECT_FALSE(validator.validate("PackageImportRequest", request));
+    nlohmann::json admission{{"target", "A3000"}, {"reports", nlohmann::json::array()}, {"allowed", true}};
+    EXPECT_TRUE(validator.validate("VolumeCapacityAdmission", admission));
+    admission["reviewId"] = "obsolete";
+    EXPECT_FALSE(validator.validate("VolumeCapacityAdmission", admission));
+}
+
+TEST(ServerContract, HardDiskCreationPlansAcceptExpandedProfileIdsAndBoundPartitionCounts) {
+    axk::server::OpenApiValidator validator;
+    const std::array cases{
+        std::pair{"HDS_128_MIB", 1U},
+        std::pair{"HDS_256_MIB", 1U},
+        std::pair{"HDS_4_GIB", 4U},
+        std::pair{"HDS_8_GIB", 8U},
+    };
+    for (const auto &[id, count] : cases) {
+        SCOPED_TRACE(id);
+        const auto request = nlohmann::json{{"profileId", id}, {"partitionCount", count}, {"output", file_ref()}};
+        EXPECT_TRUE(validator.validate("HardDiskCreationPlanRequest", request));
+        for (const auto invalid_count : {0U, 9U}) {
+            auto invalid = request;
+            invalid["partitionCount"] = invalid_count;
+            EXPECT_FALSE(validator.validate("HardDiskCreationPlanRequest", invalid));
+        }
+    }
+    EXPECT_FALSE(validator.validate("HardDiskCreationPlanRequest",
+                                    {{"profileId", "HDS_16_GIB"}, {"partitionCount", 8U}, {"output", file_ref()}}));
+}
+
 TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas) {
     axk::server::OpenApiValidator validator;
     const auto inspection_request = nlohmann::json{{"imageId", "image-one"},
@@ -1101,6 +1167,25 @@ TEST(ServerContract, WireEnumsAreUpperSnakeAndTranslateOnlyAtTheApplicationBound
     EXPECT_EQ(object_directory_wire_result.at("sourceMediaKind"), "AXK_OBJECT_DIRECTORY");
     EXPECT_TRUE(validator.validate("PackageInspection", object_directory_wire_result));
     EXPECT_EQ(validator.application_value("PackageInspection", object_directory_wire_result), object_directory_result);
+}
+
+TEST(ServerContract, SampleStorageAndConversionEnumsTranslateAtTheWireBoundary) {
+    axk::server::OpenApiValidator validator;
+    for (const auto *format : {"unknown", "a3000_188", "a4000_a5000_224"}) {
+        const auto wire = validator.wire_value("SampleStorageFormat", format);
+        EXPECT_TRUE(validator.validate("SampleStorageFormat", wire));
+        EXPECT_NE(wire, format);
+        EXPECT_EQ(validator.application_value("SampleStorageFormat", wire), format);
+        EXPECT_FALSE(validator.validate("SampleStorageFormat", format));
+    }
+    const auto preview = nlohmann::json{{"targetFormat", "a4000_a5000_224"},
+                                        {"allowed", true},
+                                        {"changes", nlohmann::json::array()},
+                                        {"blockers", nlohmann::json::array()}};
+    const auto wire = validator.wire_value("SampleFormatConversionPreview", preview);
+    EXPECT_EQ(wire.at("targetFormat"), "A4000_A5000_224");
+    EXPECT_TRUE(validator.validate("SampleFormatConversionPreview", wire));
+    EXPECT_EQ(validator.application_value("SampleFormatConversionPreview", wire), preview);
 }
 
 TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {

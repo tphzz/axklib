@@ -4,10 +4,14 @@
     import { modal } from '../modal';
     import type { SampleBankAssignmentBlocker, SampleBankAssignmentOption } from '../types';
     import Icon from './Icon.svelte';
-
-    type SampleBankAssignmentTarget = { mode: 'new'; name: string } | { mode: 'existing'; bankObjectId: string };
+    import { untrack } from 'svelte';
+    import SampleFormatControl from './SampleFormatControl.svelte';
+    import SampleFormatBadge from '../../features/object-editor/SampleFormatBadge.svelte';
+    import type { KnownSampleFormat } from '../aSeriesPreferences.svelte';
+    import type { SampleBankAssignmentTarget } from '../../features/mutation/sampleBankAssignmentWorkflow.svelte';
 
     interface Props {
+        initialSampleFormat?: KnownSampleFormat;
         volumeName: string;
         sampleCount: number;
         assignedSampleCount: number;
@@ -24,8 +28,19 @@
         warning: boolean;
     }
 
-    let { volumeName, sampleCount, assignedSampleCount, options, blockers, busy, error, oncancel, onsubmit }: Props =
-        $props();
+    let {
+        volumeName,
+        sampleCount,
+        assignedSampleCount,
+        options,
+        blockers,
+        busy,
+        error,
+        oncancel,
+        onsubmit,
+        initialSampleFormat = 'A3000_188',
+    }: Props = $props();
+    let sampleFormat = $state(untrack(() => initialSampleFormat));
     let mode = $state<'existing' | 'new'>('new');
     let newName = $state('');
     let query = $state('');
@@ -165,7 +180,7 @@
         if (!canSubmit) return;
         onsubmit(
             mode === 'new'
-                ? { mode: 'new', name: trimmedNewName }
+                ? { mode: 'new', name: trimmedNewName, sampleFormat }
                 : { mode: 'existing', bankObjectId: selectedObjectId },
         );
     }
@@ -323,19 +338,44 @@
                         </div>
                     {/if}
                 </div>
+                <div class="sample-bank-format">
+                    <span>Sample Bank format</span>
+                    {#if mode === 'new'}
+                        <SampleFormatControl
+                            bind:value={sampleFormat}
+                            label="Sample Bank format"
+                            disabled={selectionDisabled}
+                        />
+                    {:else if selected?.sampleFormat}
+                        <SampleFormatBadge format={selected.sampleFormat} />
+                    {:else}
+                        <span>{selected ? 'Unknown' : 'No Sample Bank selected'}</span>
+                    {/if}
+                </div>
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
             <footer class="dialog-footer">
-                <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>Cancel</button>
-                <button class="primary-button" type="submit" disabled={!canSubmit}>
-                    {busy ? 'Assigning' : 'Assign to Sample Bank'}
-                </button>
+                <span class="dialog-footer-status" aria-live="polite">{busy ? 'Assigning Samples...' : ''}</span>
+                <div class="dialog-footer-actions">
+                    <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>Cancel</button>
+                    <button class="primary-button" type="submit" disabled={!canSubmit}>Assign to Sample Bank</button>
+                </div>
             </footer>
         </form>
     </div>
 </div>
 
 <style>
+    .sample-bank-format {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: var(--density-control);
+    }
+    .sample-bank-format > span {
+        color: var(--color-text-muted);
+        font-size: var(--dialog-label-font-size);
+    }
     .assign-sample-bank-dialog {
         width: min(560px, calc(100vw - 32px));
     }

@@ -2,6 +2,8 @@
     import { onMount } from 'svelte';
     import type { WaveformBin } from '../types';
     import { canvasPixelSize, waveformPixelColumns } from '../waveformCanvas';
+    import { observeCanvas } from '../observeCanvas';
+    import { previewBinCount } from '../waveformPreview';
     import { waveformContentRatio, waveformFrameWindow, type WaveformTimeline } from '../waveformTimeline';
 
     interface Props {
@@ -9,9 +11,10 @@
         large?: boolean;
         playheadRatio?: number;
         timeline?: WaveformTimeline;
+        onresolution?: (bins: number) => void;
     }
 
-    let { values, large = false, playheadRatio = 0, timeline }: Props = $props();
+    let { values, large = false, playheadRatio = 0, timeline, onresolution }: Props = $props();
     let canvas: HTMLCanvasElement;
     const contentRatio = $derived(timeline ? waveformContentRatio(timeline) : 1);
     const normalizedPlayheadRatio = $derived(Math.max(0, Math.min(1, playheadRatio)));
@@ -23,8 +26,10 @@
     );
 
     function draw(): void {
-        if (!canvas || typeof CanvasRenderingContext2D === 'undefined') return;
+        if (!canvas) return;
         const bounds = canvas.getBoundingClientRect();
+        onresolution?.(previewBinCount(bounds.width, window.devicePixelRatio || 1));
+        if (typeof CanvasRenderingContext2D === 'undefined') return;
         const { width, height } = canvasPixelSize(bounds.width, bounds.height, window.devicePixelRatio || 1);
         if (canvas.width !== width || canvas.height !== height) {
             canvas.width = width;
@@ -48,12 +53,7 @@
         draw();
     });
 
-    onMount(() => {
-        const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(draw);
-        observer?.observe(canvas);
-        draw();
-        return () => observer?.disconnect();
-    });
+    onMount(() => observeCanvas(canvas, draw));
 </script>
 
 <div

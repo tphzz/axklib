@@ -284,7 +284,7 @@ axk::ReportRow coverage_summary(const std::vector<LoadedSource> &sources, std::s
             {"sbac_sbnk_row_count", sbac},
             {"prog_assignment_row_count", program},
             {"prog_ignored_row_count", ignored},
-            {"sbnk_bitmap_row_count", bitmaps},
+            {"program_bitmap_row_count", bitmaps},
             {"relationship_type_counts", joined(types)},
             {"quality_counts", joined(qualities)},
             {"load_error_count", static_cast<std::uint64_t>(load_error_count)}};

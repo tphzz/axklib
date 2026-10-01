@@ -1,15 +1,68 @@
-# Sampler Data Structures
+---
+title: A-Series Sampler Object Structures
+---
 
-Yamaha A-series object files share a header across SFS hard disks, FAT12
-floppies, ISO9660 CD-ROMs and A3K volume archives. The container locates each
+# A-Series Sampler Object Structures
+
+Yamaha A-series (A3000/A4000/A5000) object files share a header across SFS hard
+disks, FAT12 floppies, ISO9660 CD-ROMs and A3K volume archives. The container locates each
 file; the object payload defines its type and contents.
 
 This page describes SMPL (Wave Data), SBNK (Sample), SBAC (Sample Bank) and
-PROG (Program). See [System Files](system-files.md) for SYSTEM/SYSTEM2 and
-[Sequence Data](sequences.md) for SEQU. Offsets are hexadecimal and relative
+PROG (Program). See [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md) for SYSTEM/SYSTEM2 and
+[A-Series Sequence Data (SEQU)](sequences.md) for SEQU. Offsets are hexadecimal and relative
 to the object start unless a table specifies another base. Multi-byte numeric
 fields are big-endian unless stated otherwise. Descriptive field names below
 are labels for the byte layout, not an API or report schema.
+
+## Sampler Memory Versus Disk Capacity
+
+Parameter memory holds runtime Sample, Sample Bank, Program, Wave Data metadata
+and Sequence objects. PCM audio uses separate Wave Memory. Free space in a disk
+image therefore does not mean that its entire volume can be loaded by a sampler.
+
+| Sampler profile | Shared parameter heap | Shared runtime object descriptors |
+| --- | ---: | ---: |
+| A3000 V2 | 512 KiB | 1,024 |
+| A4000/A5000, inspected versions 1.07 and 1.50 | 768 KiB | 2,048 |
+
+These are pool totals, not bytes available for an imported volume or maximum
+Sample counts. Default Programs already occupy part of both pools. A mono Sample
+and its Wave Data use separate descriptors; stereo may use two Wave Data objects.
+Banks, Programs and Sequences also consume the same pools. Large Sequences can
+exhaust parameter memory while the Sample count remains small.
+On A5000 version 1.50, native volume loading uses the combined error
+`Param memory full or too many samples` for either byte or descriptor exhaustion;
+the message does not identify a separate global Sample-count limit.
+
+Stored object size is not exact runtime memory demand. Older-format objects can
+be expanded when loaded on a later sampler, unused physical Program/Bank rows
+can remain allocated, replacements can temporarily coexist, and shared Bank
+references can cause additional Sample copies. A completed Wipe does not remove
+the default Program reservation. The 127-member Bank limit, 999-row Program
+limit and MIDI Sample-number range are not interchangeable with a volume-wide
+Sample limit.
+
+Authoring checks the prepared final volume's load capacity as well as disk
+allocation and relationships. A clean native load replay reports `FITS` with resident
+and peak demand. A proven limit reports `DOES_NOT_FIT` and blocks authoring.
+Unsupported behavior and malformed structures return inspection errors, not a
+third status. Available lower bounds are explicitly minima. Neither capacity
+failures nor inspection errors can be overridden.
+
+The baseline is uninterrupted power-on initialization without boot auto-load,
+a completed Wipe, then full VOLUME/LOAD, without concurrent CD-R authoring.
+Wipe retains Programs; an EEPROM-configured boot auto-load or earlier RAM edits
+do not establish this baseline. A3000 V2 reserves 87,720 bytes and 129 shared
+slots; A4000/A5000 reserve 111,280 bytes and 130 slots. The analyzer accounts for
+physical assignment capacity, replacement overlap, descriptor allocation order,
+temporary Wave metadata, membership copies and cleanup, mixed target selectors,
+and stored object names, rather than treating final unique-object totals as a
+safe peak. Missing Wave Data follows the native known-skip path with a warning.
+`FITS` proves capacity, not compatible playback. The selected load
+target is independent of stored Sample/Bank format, installed PCM RAM and disk
+space. A3000 V1 and merge-loading into existing sampler RAM are outside this
+check. See [Volume Load Capacity](volume-capacity.md) for controls and API use.
 
 ## Shared Object Header
 
@@ -68,8 +121,8 @@ the embedded header supplies its sampler object name.
 `SMPL` and `SBNK` have variable total file sizes. Consumers must use the
 big-endian length and offset fields in the object rather than inferring payload
 boundaries from a FAT cluster count, ISO extent padding, or an `Fnnn` name.
-`SEQU` contains a timeline; see [Sequence Data](sequences.md).
-`PRF3` includes SYSTEM/SYSTEM2 files, described in [System Files](system-files.md).
+`SEQU` contains a timeline; see [A-Series Sequence Data (SEQU)](sequences.md).
+`PRF3` includes SYSTEM/SYSTEM2 files, described in [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md).
 Other PRF3 inner formats are unspecified.
 
 ## SMPL: Wave Data Object
@@ -308,13 +361,18 @@ for word_index in 0..3:
 
 ### Sample Parameter Window
 
-The extended sample parameter window starts at `0x0a8`, contains 224 bytes, and
-ends at `0x187`. Two current logical object extents occur in real media:
+The Sample parameter window starts at `0x0a8`. Its stored extent depends on the
+header revision, not the allocated file size:
 
-- a `0x164`-byte object ends after parameter offset `0xbb`; and
-- a `0x188`-byte object includes the complete 224-byte parameter window.
+| Stored format | Revision at `0x14` | Length at `0x18` | Length at `0x1c` | Logical object extent |
+| --- | ---: | ---: | ---: | ---: |
+| A3000, 188 parameter bytes | 2 | `0x134` | 0 on fresh objects | `0x164` |
+| A4000/A5000, 224 parameter bytes | 4 | `0x134` | `0x158` | `0x188` |
 
-For `SBNK`, calculate this extent as `0x30 + payload_bytes`.
+For `SBNK`, calculate the extent as `0x30 + length_at_0x18` for revision 2, or
+`0x30 + length_at_0x1c` for revision 4. Native parameters end at `0x163`; the
+later extension occupies `0x164..0x187`. Fresh native objects leave `0x1c..0x2f`
+zero. Unrelated edits preserve existing uninterpreted header bytes.
 Sampler-authored Samples commonly store zero in the generic `header_size` field,
 so `header_size + payload_bytes` is not an SBNK size formula.
 
@@ -327,9 +385,11 @@ its full value. Device, Type and Range copy unchanged. Unrelated edits and
 no-op patches preserve a preexisting mismatch. Short objects have no extended
 copy to project and retain their single controller record array.
 
-Controller record domains are Device `0..126`, Function `0..36`, Type `0..3`,
-and signed Range `-63..+63`. Device values `121..126` are special selectors,
-not ordinary MIDI controller numbers.
+Native controller domains are Device `0..125`, Function `0..21`, Type `0..3`,
+and signed Range `-63..+63`. Later authoritative records extend Device to `126`
+and Function to `36`. Device values above `120` are special selectors, not
+ordinary MIDI controller numbers. Physical prefix reuse does not imply identical
+parameter domains; see [A-Series Sample Formats And Generations](sample-formats.md).
 
 The following tables give physical parameter offsets. The same parameter
 layout is split across the SBAC prefix and terminal block as described below.
@@ -573,26 +633,28 @@ contain member rows that point by name to Sample (`SBNK`) objects.
 
 | Offset | Size | Type | Field |
 | --- | ---: | --- | --- |
-| `0x078..0x133` | 188 | bytes | First part of the canonical 224-byte Sample Parameter block. |
+| `0x078..0x133` | 188 | bytes | Native parameter block, or prefix of the later 224-byte block. |
 | `0x090..0x09f` | 16 | 4 x u32be | Linked Programs 001-128 bitmap within that parameter block. |
-| `0x134..0x13f` | 12 | 3 x u32be | Pending Sample Parameter propagation bitmaps. |
+| `0x134..0x13f` | 12 | 3 x u32be | Persistent Sample Parameter override-enable bitmaps. |
 | `0x140..0x143` | 4 | bytes | Reserved; preserve for existing objects. |
 | `0x144` | 1 | u8 | Stored member count. |
 | `0x145..0x14b` | 7 | bytes | Reserved; preserve for existing objects. |
 | `0x14c + n*0x14` | 20 each | rows | Member rows, followed by any preallocated blank-row capacity. |
-| Last `0x24` bytes, layout selector `0x14 >= 4` | 36 | bytes | Final part of the canonical Sample Parameter block. |
+| Last `0x24` logical bytes, revision 4 | 36 | bytes | Final part of the canonical Sample Parameter block; precedes any allocation padding. |
 
 The disk layout is not the flat Sample Bank Bulk layout used by the runtime.
-The loader transform reconstructs one canonical 224-byte Sample
+The later-generation loader transform reconstructs one canonical 224-byte Sample
 Parameter block from disk `0x078..0x133` followed by the terminal 36 bytes.
-The serializer applies the inverse transform. For legacy objects with layout
-selector `0x14 < 4`, no terminal block is stored and the loader supplies
-zero/default bytes for that final 36-byte portion. Offsets `0x040..0x11f` and
+The serializer applies the inverse transform. For native revision-2 objects,
+no terminal block is stored. The later loader initializes it from the native
+controllers, outputs, Boolean crossfade and portamento switch, with rate/time
+defaults of 90. Offsets `0x040..0x11f` and
 `0x120..0x12b` describe the normalized runtime/Bulk representation, not the
 physical SBAC object.
 
-The member region ends at the object size for a legacy SBAC and at
-`object_size - 0x24` for the current split-tail layout. Its complete-row
+The member region ends at the logical object size for a native SBAC and at
+`logical_object_size - 0x24` for the later split-tail layout. Allocation padding
+is not a member row or parameter tail. Its complete-row
 capacity is therefore:
 
 ```text
@@ -601,34 +663,68 @@ member_capacity = (member_region_end - 0x14c) / 0x14
 
 Current-layout mutation inserts additional rows before the terminal parameter
 bytes. Legacy mutation extends the row region without creating a terminal tail.
-The two layouts also retain their header-length conventions: legacy objects use
+The two layouts also retain their header-length conventions (`object_size` here
+means logical size): native objects use
 `0x18 = object_size - 0x30`, while current objects use
 `0x18 = object_size - 0x54` and `0x1c = object_size - 0x30`.
 
-SBAC pending-propagation bitmap decoding:
+Fresh native banks use revision 2, zero `0x1c..0x2f`, and allocate at least eight
+member rows: `object_size = 0x14c + 20 * max(8, member_count)`. Fresh later banks
+use revision 4 and add the 36-byte tail to that size. Empty rows and saved live
+handles are zero. Native common-record bytes `0x6c..0x6e` repeat the first three
+parameter bytes at `0x78..0x7a`; an edit to that controller record maintains both
+copies. Other common-record residue is preserved on existing banks, while fresh
+authoring initializes unused padding deterministically.
+
+SBAC override-enable bitmap decoding:
 
 ```text
 for word_index in 0..2:
     base_p2 = word_index * 32
     for bit in 0..31:
         if word & (1 << bit):
-            pending_sample_parameter_p2 = base_p2 + bit
+            override_selectors = base_p2 + bit
 ```
 
-The `Freeze SampleBank` operation consumes these bits. For every marked P2
-number, it copies the
-bank's corresponding Sample Parameter value into each resolved member Sample,
-clears the consumed bit, and marks the Sample Bank dirty. These words are
-therefore pending operation state, not durable per-bank value-enable settings.
-Only P2 `0..88` are actionable. The operation stops after `88`, and there are no
+The sampler uses these bits during playback to overlay enabled bank values on a
+temporary copy of a member's parameters. The member's stored values remain
+unchanged. Clearing an enable bit restores use of the member's own value;
+it does not erase the retained bank value. These are persistent override enables,
+not a queue of unfinished writes.
+
+The separate `Freeze SampleBank` operation copies enabled values into resolved
+member Samples and clears the consumed bits. Ordinary bank editing and saving
+must not perform Freeze.
+The native A3000 V2 loop stops after P2 `84`; the later loop stops after `88`.
+Some positions within those bounds are skipped or have different effects.
+On the later generation, there are no
 parameter-table entries for `89..95`; those seven positions are reserved bitmap
 capacity; preserve them when nonzero.
 Existing words are preserved by unrelated mutation; a fresh Sample Bank writes
 zero.
 
-Bank parameter values and pending propagation bits are separate: storing a
-value in the bank is not equivalent to applying it to every member. Clearing
-pending bits without applying their values discards the pending operation.
+Do not apply that later P2 parameter numbering to native banks. Reversible
+`update_sample_bank_overrides` validates the bank's format and changes only its
+payload. Envelope rates, envelope levels, pairs of scaling parameters and the
+complete controller matrix have shared enables. Sample EQ is treated as one
+unit: selectors 49/50/51 on A3000 and 49/50/51/85 on A4000/A5000. Existing partial
+EQ masks are preserved by unrelated edits; an EQ edit activates its whole unit.
+Unsupported enable states remain read-only.
+
+The distinct, immediate member-wide `update_sample_bank_parameters` operation
+requires clear override state, validates the bank and each member against their
+own format, and rejects the entire update on a conflict.
+Explicit format conversion also requires all three words to be zero, but does
+not propagate any parameter into member Samples. It adds or removes only the
+terminal 36-byte block, translates the authoritative parameter fields, updates
+the revision/lengths and synchronizes the native common-record alias. Member
+rows stay at `0x14c`, and the complete row capacity and trailing padding are
+preserved. See [Sample Formats And Generations](sample-formats.md#sample-bank-conversion).
+
+Bank parameter values and enables are separate. Flag-only activation preserves
+the retained values and coefficient vector. A value edit regenerates only the
+dependent caches, including the complete Sample EQ coefficient vector. The
+reserved word at `0x140` is never an override input.
 
 The four linked-Program words use the same bit numbering as the Sample bitmap:
 bit zero of the first big-endian word is Program 001. They represent
@@ -636,6 +732,13 @@ Program-to-Sample-Bank assignments. A consistent assignment change updates
 both the Program row and the target Sample Bank bitmap; unrelated edits
 preserve the words. Software transaction guarantees are described in
 [Writer And Alteration](write.md).
+
+Integrity checks compare these words with direct Program assignments in the
+same scope, separately from the Sample bitmap. A bank assignment does not set
+its member Samples' direct-Program bits. A mismatch reports the object name
+and the stored and expected Program numbers. Deletion of an implicated Program
+is blocked during inspection, before a mutation is submitted. These checks
+diagnose inconsistencies; they do not rewrite the stored links.
 
 SBAC slot row layout, stride `0x14`:
 
@@ -880,8 +983,8 @@ and unstarred objects.
 
 ## SEQU And PRF3
 
-SEQU contains sequence timing and events; see [Sequence Data](sequences.md).
-PRF3 includes the partition-level [System Files](system-files.md). Other PRF3
+SEQU contains sequence timing and events; see [A-Series Sequence Data (SEQU)](sequences.md).
+PRF3 includes the partition-level [A-Series System Files (SYSTEM / SYSTEM2)](system-files.md). Other PRF3
 inner layouts are unspecified; do not apply the SYSTEM layout based on the
 type tag alone.
 

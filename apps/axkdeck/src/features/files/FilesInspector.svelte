@@ -1,5 +1,7 @@
 <script lang="ts">
     import InspectorModeFooter from '../../lib/components/InspectorModeFooter.svelte';
+    import InspectorSection from '../../lib/components/InspectorSection.svelte';
+    import { provideInspectorPanels } from '../../lib/inspectorPanels.svelte';
     import AttributeHelp from '../../lib/components/AttributeHelp.svelte';
     import type { FilesystemEntry } from '../../lib/filesystem';
     let {
@@ -13,6 +15,7 @@
         interpretationLabel?: string;
         onshowdevice?: (id: string) => void;
     } = $props();
+    provideInspectorPanels();
 </script>
 
 <aside class="inspector" aria-label="Filesystem inspector" data-workspace-background>
@@ -33,8 +36,12 @@
                     >
                     <h3>{entry.name}</h3>
                 </div>
-                <section class="inspector-section" aria-label="Entry properties">
-                    <h4>Properties</h4>
+                <InspectorSection
+                    scope="files"
+                    sectionId="properties"
+                    title="Properties"
+                    regionLabel="Entry properties"
+                >
                     <dl class="metadata-list">
                         {#if entry.filesystemMetadata}<div>
                                 <dt>Classification</dt>
@@ -69,10 +76,13 @@
                             </div>
                         {/each}
                     </dl>
-                </section>
+                </InspectorSection>
                 {#if entry.issue}<p class="entry-issue" role="status">{entry.issue}</p>{/if}
-                {#if entry.storage || entry.rawAttributes || entry.attributes.length}<details class="inspector-section">
-                        <summary>Storage details</summary>
+                {#if entry.storage || entry.rawAttributes || entry.attributes.length}<InspectorSection
+                        scope="files"
+                        sectionId="storage"
+                        title="Storage details"
+                    >
                         <dl class="metadata-list">
                             {#if entry.rawAttributes}
                                 <div>
@@ -100,7 +110,7 @@
                             {/each}
                         </dl>
                         {#if entry.storage}<p class="storage-details">{entry.storage}</p>{/if}
-                    </details>{/if}
+                    </InspectorSection>{/if}
             </div>
         {:else}<p class="empty-copy">No entry selected</p>{/if}
     </div>
@@ -119,10 +129,6 @@
         color: var(--color-text-muted);
         overflow-wrap: anywhere;
         margin-top: 6px;
-    }
-    summary {
-        cursor: pointer;
-        font-size: 10px;
     }
     .entry-issue {
         color: #e0b765;
