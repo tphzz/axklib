@@ -30,6 +30,14 @@ impl Fixture {
             .unwrap();
         file.write_all(bytes).unwrap();
     }
+    fn set_modified(&self, name: &str, seconds: u64) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(self.0.join(name))
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+            .unwrap();
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -217,9 +225,17 @@ fn accepts_only_owned_log_names_and_rejects_symlinks() {
 
 #[test]
 fn rotation_during_refresh_never_reimports_cleared_entries_with_new_ids() {
+    for timestamp_changes in [false, true] {
+        rotation_during_refresh(timestamp_changes);
+    }
+}
+
+fn rotation_during_refresh(timestamp_changes: bool) {
     let root = Fixture::new();
     root.write("axklib-server.log.1", b"1790575199000 [stderr] archive\n");
     root.write("axklib-server.log", b"1790575200000 [stderr] old active\n");
+    root.set_modified("axklib-server.log.1", 1790575200);
+    root.set_modified("axklib-server.log", 1790575200);
     let mut reader = LogReader::new(root.0.clone());
     reader.refresh().unwrap();
     let since = reader.sequence;
@@ -245,6 +261,9 @@ fn rotation_during_refresh_never_reimports_cleared_entries_with_new_ids() {
                 root.0.join("axklib-server.log.1"),
             )
             .unwrap();
+            if timestamp_changes {
+                root.set_modified("axklib-server.log.1", 1790575201);
+            }
             root.write("axklib-server.log", b"1790575200000 [stderr] new active\n");
         })
         .unwrap();
@@ -266,6 +285,72 @@ fn rotation_during_refresh_never_reimports_cleared_entries_with_new_ids() {
             .len(),
         1
     );
+}
+
+#[test]
+fn modification_time_changes_preserve_cleared_entries_and_pending_record_ids() {
+    let root = Fixture::new();
+    root.write("axkdeck.log", format!("{}partial", line("old")).as_bytes());
+    root.set_modified("axkdeck.log", 1790575200);
+    let mut reader = LogReader::new(root.0.clone());
+    reader.refresh().unwrap();
+    let since = reader.sequence;
+    let id = reader.matching(&Filter::all())[0].id;
+    root.set_modified("axkdeck.log", 1790575201);
+    reader.refresh().unwrap();
+    assert_eq!(reader.sequence, since);
+    assert_eq!(reader.history_changes, 0);
+    assert_eq!(reader.matching(&Filter::all())[0].id, id);
+    assert!(
+        reader
+            .matching(&Filter {
+                since: Some(since),
+                ..Filter::all()
+            })
+            .is_empty()
+    );
+    root.append("axkdeck.log", b" continuation\n");
+    reader.refresh().unwrap();
+    assert_eq!(reader.sequence, since);
+    assert_eq!(reader.matching(&Filter::all())[0].id, id);
+    assert!(
+        reader.matching(&Filter::all())[0]
+            .text
+            .ends_with("partial continuation")
+    );
+}
+
+#[test]
+fn same_length_rewrite_with_unchanged_head_and_tail_replaces_cached_records() {
+    let root = Fixture::new();
+    let old = format!(
+        "{}{}{}",
+        line(&"a".repeat(100)),
+        line("old"),
+        line(&"z".repeat(100))
+    );
+    let new = old.replace("old", "new");
+    assert_eq!(old.len(), new.len());
+    assert_eq!(&old.as_bytes()[..64], &new.as_bytes()[..64]);
+    assert_eq!(
+        &old.as_bytes()[old.len() - 64..],
+        &new.as_bytes()[new.len() - 64..]
+    );
+    root.write("axkdeck.log", old.as_bytes());
+    root.set_modified("axkdeck.log", 1790575200);
+    let mut reader = LogReader::new(root.0.clone());
+    reader.refresh().unwrap();
+    let since = reader.sequence;
+    root.write("axkdeck.log", new.as_bytes());
+    root.set_modified("axkdeck.log", 1790575201);
+    reader.refresh().unwrap();
+    assert_eq!(reader.history_changes, 1);
+    let visible = reader.matching(&Filter {
+        since: Some(since),
+        ..Filter::all()
+    });
+    assert_eq!(visible.len(), 3);
+    assert!(visible[1].text.ends_with("new"));
 }
 
 #[test]

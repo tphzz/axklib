@@ -121,8 +121,28 @@ impl FileLog {
             return Err("A log file exceeds the 8 MiB viewer limit".into());
         }
         let modified = metadata.modified().ok();
-        let mut replaced = length < self.offset
-            || (length == self.offset && modified != self.modified && self.offset != 0);
+        if length == self.offset && modified != self.modified && self.offset != 0 {
+            // A timestamp change alone must not reimport cleared records.
+            let mut replacement = Self::new(self.identity, self.source, file)?;
+            let mut replacement_sequence = *sequence;
+            replacement.read(file, &mut replacement_sequence)?;
+            let replaced = self.pending != replacement.pending
+                || self.entries.len() != replacement.entries.len()
+                || self
+                    .entries
+                    .iter()
+                    .zip(&replacement.entries)
+                    .any(|(old, new)| old.text != new.text);
+            if replaced {
+                *sequence = replacement_sequence;
+            } else {
+                replacement.entries = std::mem::take(&mut self.entries);
+                replacement.pending_id = self.pending_id;
+            }
+            *self = replacement;
+            return Ok(replaced);
+        }
+        let mut replaced = length < self.offset;
         if !replaced && self.offset > 0 {
             file.seek(SeekFrom::Start(self.offset - self.anchor.len() as u64))
                 .map_err(|e| e.to_string())?;
