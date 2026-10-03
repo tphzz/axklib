@@ -1427,7 +1427,8 @@
           "sizeWithDependenciesBytes",
           "waveform",
           "sequence",
-          "sampleFormat"
+          "sampleFormat",
+          "programFormat"
         ],
         "properties": {
           "id": {
@@ -1507,7 +1508,8 @@
                 "type": "null"
               }
             ]
-          }
+          },
+          "programFormat": {"oneOf": [{"$ref": "#/components/schemas/ProgramFormatMetadata"}, {"type": "null"}]}
         }
       },
       "ImageObjectPage": {
@@ -1607,7 +1609,8 @@
           "header",
           "decoded",
           "omissions",
-          "sampleFormat"
+          "sampleFormat",
+          "programFormat"
         ],
         "properties": {
           "id": {
@@ -1678,7 +1681,7 @@
           },
           "decoded": {
             "type": "object",
-            "description": "Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model.",
+            "description": "Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). PROG effectBlocks retain storedType separately from type. effectTypeInterpretation is a3000-v2-and-later-load for revision 1 (type and typed effects use later-loader normalization, not original V1 playback), otherwise stored. Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model.",
             "required": [
               "kind"
             ],
@@ -1704,7 +1707,8 @@
                 "type": "null"
               }
             ]
-          }
+          },
+          "programFormat": {"oneOf": [{"$ref": "#/components/schemas/ProgramFormatMetadata"}, {"type": "null"}]}
         }
       },
       "ImageObjectDetailReference": {
@@ -2084,6 +2088,59 @@
       "SamplePlaybackWindow": {
         "type": "object", "additionalProperties": false, "required": ["start_frame", "length_frames"],
         "properties": {"start_frame": {"type": "integer", "minimum": 0}, "length_frames": {"type": "integer", "minimum": 0}}
+      },
+      "ProgramStorageFormat": {
+        "type": "string",
+        "enum": ["UNKNOWN", "A3000", "A4000_A5000"],
+        "x-axklib-application-enum": {"UNKNOWN": "unknown", "A3000": "a3000", "A4000_A5000": "a4000_a5000"}
+      },
+      "ProgramFormatMetadata": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["format", "structurallyValid", "headerRevision", "logicalSize", "storedAssignmentCount", "assignmentCapacity", "parameterTailBytes"],
+        "properties": {
+          "format": {"$ref": "#/components/schemas/ProgramStorageFormat"},
+          "structurallyValid": {"type": "boolean"},
+          "headerRevision": {"type": "integer", "minimum": 0},
+          "logicalSize": {"type": ["integer", "null"], "minimum": 0},
+          "storedAssignmentCount": {"type": ["integer", "null"], "minimum": 0, "maximum": 999},
+          "assignmentCapacity": {"type": ["integer", "null"], "minimum": 0},
+          "parameterTailBytes": {"type": ["integer", "null"], "enum": [0, 176, null]}
+        }
+      },
+      "ProgramFormatConversionIssue": {
+        "type": "object", "additionalProperties": false,
+        "required": ["key", "message", "storedValue"],
+        "properties": {"key": {"type": "string"}, "message": {"type": "string"}, "storedValue": {"type": ["integer", "null"]}}
+      },
+      "ProgramFormatConversionPreview": {
+        "type": "object", "additionalProperties": false,
+        "required": ["targetFormat", "allowed", "changes", "blockers"],
+        "properties": {
+          "targetFormat": {
+            "type": "string", "enum": ["A3000", "A4000_A5000"],
+            "x-axklib-application-enum": {"A3000": "a3000", "A4000_A5000": "a4000_a5000"}
+          },
+          "allowed": {"type": "boolean"},
+          "changes": {"type": "array", "items": {"type": "string"}},
+          "blockers": {"type": "array", "items": {"$ref": "#/components/schemas/ProgramFormatConversionIssue"}}
+        }
+      },
+      "ProgramFormatConversion": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "payloadSha256", "partitionIndex", "volumeName", "programNumber", "programName", "programFormat", "canConvertFormat", "formatConversions", "reason"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["PROGRAM"], "x-axklib-application-enum": {"PROGRAM": "program"}},
+          "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "partitionIndex": {"type": "integer", "minimum": 0, "maximum": 7},
+          "volumeName": {"type": "string"},
+          "programNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+          "programName": {"type": "string"},
+          "programFormat": {"$ref": "#/components/schemas/ProgramFormatMetadata"},
+          "canConvertFormat": {"type": "boolean"},
+          "formatConversions": {"type": "array", "items": {"$ref": "#/components/schemas/ProgramFormatConversionPreview"}},
+          "reason": {"type": "string"}
+        }
       },
       "SampleStorageFormat": {
         "type": "string",
@@ -2499,9 +2556,16 @@
         }
       },
       "ObjectFormatConversion": {
+        "oneOf": [
+          {"$ref": "#/components/schemas/SampleObjectFormatConversion"},
+          {"$ref": "#/components/schemas/ProgramFormatConversion"}
+        ]
+      },
+      "SampleObjectFormatConversion": {
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "kind",
           "payloadSha256",
           "partitionIndex",
           "volumeName",
@@ -2511,6 +2575,7 @@
           "reason"
         ],
         "properties": {
+          "kind": {"type": "string", "enum": ["SAMPLE", "SAMPLE_BANK"], "x-axklib-application-enum": {"SAMPLE": "sample", "SAMPLE_BANK": "sample-bank"}},
           "payloadSha256": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$"
@@ -5342,6 +5407,7 @@
               "DUPLICATE_SBNK",
               "CONVERT_SBNK_FORMAT",
               "CONVERT_SBAC_FORMAT",
+              "CONVERT_PROG_FORMAT",
               "UPDATE_SAMPLE_BANK_OVERRIDES"
             ],
             "x-axklib-application-enum": {
@@ -5377,6 +5443,7 @@
               "DUPLICATE_SBNK": "duplicate_sbnk",
               "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
               "CONVERT_SBAC_FORMAT": "convert_sbac_format",
+              "CONVERT_PROG_FORMAT": "convert_prog_format",
               "UPDATE_SAMPLE_BANK_OVERRIDES": "update_sample_bank_overrides"
             }
           },

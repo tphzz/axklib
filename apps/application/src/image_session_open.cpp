@@ -3,11 +3,13 @@
 #include "image_sessions_internal.hpp"
 
 #include <charconv>
+#include <format>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <set>
 
+#include "axklib/application/program_formats.hpp"
 #include "axklib/application/sample_formats.hpp"
 #include "axklib/package_closure.hpp"
 
@@ -238,6 +240,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         }
     }
 
+    std::map<std::string, std::vector<std::size_t>, std::less<>> owned_volume_objects;
     session->objects.reserve(inventory->catalog.objects.size());
     for (const auto &object : inventory->catalog.objects) {
         ImageObjectItem item;
@@ -253,11 +256,15 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             item.volume_name = object.placement->volume_name;
             item.category_name = object.placement->category_name;
             item.entry_name = object.placement->entry_name;
+            owned_volume_objects[std::format("volume:{}:{}", object.partition.value,
+                                             object.placement->volume_directory.value)]
+                .push_back(session->objects.size());
         }
         if (const auto *sample = std::get_if<axk::CurrentSbnk>(&object.object.payload))
             item.sample_format = sample_format_metadata(*sample);
         if (const auto *bank = std::get_if<axk::CurrentSbac>(&object.object.payload))
             item.sample_format = sample_format_metadata(*bank);
+        item.program_format = program_format_metadata(object.object);
         if (const auto *waveform = std::get_if<axk::CurrentSmpl>(&object.object.payload)) {
             const auto stored_width = waveform->stored_sample_width_bytes.value;
             item.waveform = WaveformMetadata{
@@ -402,6 +409,11 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             if (!appended)
                 return std::unexpected(appended.error());
             scoped_indices.insert(scoped_indices.end(), appended->begin(), appended->end());
+        }
+        // Device navigation may hide quiet default Programs, but inventory must retain their real records.
+        if (node.node_type == "volume") {
+            if (const auto found = owned_volume_objects.find(node.node_id); found != owned_volume_objects.end())
+                scoped_indices.insert(scoped_indices.end(), found->second.begin(), found->second.end());
         }
         std::ranges::sort(scoped_indices);
         const auto unique_end = std::ranges::unique(scoped_indices).begin();

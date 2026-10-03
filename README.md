@@ -81,6 +81,9 @@ unsafe allocation remain available for browsing and export of readable content.
   `a4k/a5k` formats, with checks that reject settings that cannot be represented.
   Converting a bank does not convert its member Samples. See
   [Sample and Sample Bank formats](docs/axklib/sample-formats.md).
+- Inspect Program `a3k`/`a4k/a5k` badges and explicitly convert one Program
+  when its settings can be retained, without changing its linked objects or
+  System Files. See [Program formats](docs/axklib/program-formats.md).
 
 ### Import And Organize
 

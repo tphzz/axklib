@@ -116,7 +116,7 @@ Result<ObjectCatalog> detail::build_object_catalog(const Container &container, s
                     record.sfs_id,
                 });
                 auto header = decode_object_header(*bytes);
-                if (!header || header->type != ObjectType::sequ)
+                if (!header || (header->type != ObjectType::sequ && header->type != ObjectType::prog))
                     continue;
                 decoded = DecodedObject{std::move(*header), ObjectFormat::unknown,
                                         GenericObject{std::vector<std::byte>{bytes->begin(), bytes->end()}}};

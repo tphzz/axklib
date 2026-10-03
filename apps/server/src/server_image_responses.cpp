@@ -229,6 +229,7 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
                          item.size_with_dependencies_bytes ? Json(*item.size_with_dependencies_bytes) : Json{}},
                         {"waveform", std::move(waveform)},
                         {"sampleFormat", openapi_validator_.wire_value("SampleFormatMetadata", item.sample_format)},
+                        {"programFormat", openapi_validator_.wire_value("ProgramFormatMetadata", item.program_format)},
                         {"sequence", std::move(sequence)}};
         });
 }

@@ -770,6 +770,98 @@ supply the missing local member.
 three-digit slot ID. The Program display name occupies `0x078..0x07f`.
 Its three-byte common prefix alias is stored at `0x6c..0x6e`.
 
+### Storage Generation And Sampler Model
+
+A Program's disk layout, its loaded parameter state, and the features of the
+sampler playing it are different things. The layout selector is not the model
+number of the machine that authored the file. A CD-ROM intended for later
+samplers can contain Programs in the older storage layout.
+
+Let `L` be the logical Program length and `C` its physical assignment-row
+capacity. All offsets below are relative to the start of the `PROG` object,
+except offsets explicitly relative to an effect block or the parameter tail.
+
+| Property | A3000 storage, selectors 1/2 | A4000/A5000 storage, selector 4 |
+| --- | --- | --- |
+| Logical length | `L = 0x120 + C * 0x38` | `L = 0x1d0 + C * 0x38` |
+| Header length views | `u32be(0x18) = L - 0x30` | `u32be(0x18) = L - 0xe0`; `u32be(0x1c) = L - 0x30` |
+| Assignment count and rows | Count at `0x96`; rows at `0x120`, stride `0x38` | Same count location and physical row stride |
+| Terminal parameter block | Absent | 176 bytes at `L - 0xb0`, after all stored rows |
+| Effect blocks | Three at `0x98`, `0xc0`, `0xe8` | Same three plus three in the terminal block |
+| Authoritative effect type | Effect-block `+7`; selector 1 has different numbering | Effect-block `+6`; `+7` retains an older-format projection |
+| Four Program controllers | `0x110..0x11f` | Canonical records at `tail + 0x78`; the fixed-position records are compatibility copies |
+| A/D routing | Older shared routing fields in the fixed prefix | Separate left/right destinations and levels, plus right Pan, in the tail |
+| Easy Edit output routing | Row `+0x2d/+0x2e` and `+0x30/+0x31` | Canonical row `+0x1d/+0x2f` and `+0x28/+0x32`; older locations are projections |
+| Velocity crossfade | Inherited/off/on packed selection | Separate high/low signed offsets; loading older records translates the packed selection |
+| Additional stored state | No terminal StepWave or port-B maps | StepWave values/count/slope, port-B maps and second effect-group connection |
+
+The later layout is not just an append-only set of new fields: authoritative
+locations and some encodings change. A4000/A5000 loading of an older Program
+initializes the missing parameter block and translates effects, controllers,
+A/D routing and counted assignment rows into the later runtime layout. That
+does not add bytes to the source file. Reading the stored representation must
+not present these runtime defaults as values already saved in the file.
+
+In the other direction, A3000 V2 accepts the Program revision-4 header on its
+normal object-load path, but uses only the older length view at `0x18`. For
+a revision-4 record it consumes physical bytes through `L - 0xb0`, leaving
+the terminal block unread. Assignment rows retain their native runtime
+placement. Effects use block `+7`, controllers use `0x110`, and routing uses
+the older compatibility fields. These can differ from canonical later values.
+Its Program save writes revision 2 without the terminal block; loading that
+save on a later sampler initializes a new extension rather than recovering
+the previous one. Allocation, dependencies and target parameter restrictions
+can still prevent a complete volume from loading.
+
+A4000 and A5000 share the later storage layout, but not all feature limits:
+
+| Feature | A3000 V2 | A4000 | A5000 |
+| --- | --- | --- | --- |
+| Usable Program effect slots | 3 | 3 | 6 |
+| Ordinary effect type IDs | `0..54` | `0..96` | `0..96` |
+| Canonical Program controller function IDs | `0..63` | `0..71` | `0..128` |
+| Program StepWave | Not in the native parameter model | Available | Available |
+| Program port-B channel maps and receive assignments | Not in the native parameter model | Not available | Available |
+
+The six stored effect blocks in a selector-4 file do not imply six usable
+effects on an A4000. Conversely, storing an older Program does not imply that
+all linked Samples or Sample Banks use the same generation. SYSTEM/SYSTEM2
+hold separate Single/Multi and global receive state. Whole-volume loadability
+also depends on those objects, parameter domains, sampler memory and target load behavior;
+neither a Program layout selector nor a disc title establishes it.
+
+Selector-1 raw effect numbering must remain distinct from the selector-2 or
+later interpretation described below. Unknown selectors, bytes and parameter
+encodings must not be used to infer another model or silently discarded.
+CLI decoded metadata identifies `effect_type_interpretation` as
+`a3000-v2-and-later-load` for selector 1, otherwise `stored`; each effect
+retains `stored_type` separately from `type`. HTTP uses
+`effectTypeInterpretation` and `storedType` for the same distinction. The
+typed effect parameters follow that interpretation. Original V1 playback is
+not established by the later loader's ID normalization.
+
+### Program Save Revision
+
+The revision written when saving a loaded Program is determined by the sampler's
+Program serializer, not by the features used in that Program:
+
+| Sampler software | Written Program revision | Terminal parameter block |
+| --- | ---: | --- |
+| A3000 V2 | 2 | Absent |
+| A4000/A5000 OS 1.07 and 1.50 | 4 | Always 176 bytes |
+
+A4000/A5000 saves do not select revision 2 for Programs that use only older
+features. Saving a loaded revision-2 Program produces revision 4 even without
+parameter edits. Default or inactive extension settings do not remove the
+extension, and the A4000's smaller feature set does not change this rule.
+Both length views and the terminal block follow the revision-4 layout above.
+
+This describes serialization from sampler memory, not byte-preserving copying
+of an existing file. Loading a source does not rewrite it, and a revision-2
+Program on media intended for later models does not identify the machine or
+tool that created that file. Revision values are object-type-specific: the
+revision-3 Wave Data encoding is not a revision-3 Program format.
+
 ### Program Common Fields
 
 The checked layout distinguishes legacy selectors `1`/`2` from current `4`.

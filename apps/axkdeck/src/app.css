@@ -992,7 +992,7 @@ input:focus-visible {
 .program-multi-program {
   display: grid;
   min-width: 0;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   column-gap: 5px;
   align-items: center;
 }

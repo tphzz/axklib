@@ -188,7 +188,8 @@ ProgramParameters decode_program_parameters(std::span<const std::byte> payload, 
     if (layout.parameter_tail_offset)
         blocks.extended =
             std::span<const std::byte, 0x28>{payload.subspan(*layout.parameter_tail_offset + 0x88U, 0x28U)};
-    return decode_program_parameter_blocks(blocks);
+    return decode_program_parameter_blocks(blocks, layout.parameter_tail_offset ? ProgramParameterGeneration::current
+                                                                                : ProgramParameterGeneration::a3000);
 }
 
 ProgramParameters decode_program_parameter_blocks(const ProgramParameterBlocks &blocks,

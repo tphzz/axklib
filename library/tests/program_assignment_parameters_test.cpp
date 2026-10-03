@@ -22,6 +22,7 @@ std::vector<std::byte> assignments(std::uint16_t count = 3, std::size_t capacity
     EXPECT_TRUE(writer.write_be32(0x14, 4));
     EXPECT_TRUE(writer.write_be32(0x18, static_cast<std::uint32_t>(size - 0xe0U)));
     EXPECT_TRUE(writer.write_be32(0x1c, static_cast<std::uint32_t>(size - 0x30U)));
+    EXPECT_TRUE(writer.write_u8(0x30, 0x14));
     EXPECT_TRUE(writer.write_be16(0x96, count));
     for (std::size_t index = 0; index < count; ++index) {
         const auto row = 0x120U + index * 0x38U;

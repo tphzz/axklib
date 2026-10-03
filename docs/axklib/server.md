@@ -1109,8 +1109,22 @@ Fresh Sample and Sample Bank alteration specifications accept lowercase
 later profile. Audio import uses the existing atomic alteration operation,
 passing the batch selection to each new Sample and optional bank, not a separate
 conversion job. See [A-Series Sample Formats And Generations](sample-formats.md).
+The required nullable `programFormat` field on collection items and object
+details describes Programs (null for other objects). Its `format` is `A3000`,
+`A4000_A5000`, or `UNKNOWN`; metadata includes `headerRevision`, `logicalSize`,
+`storedAssignmentCount`, `assignmentCapacity`, `parameterTailBytes`, and
+`structurallyValid`. This is storage identity, not whole-volume compatibility.
+Malformed Programs remain in inventories with `UNKNOWN`, `structurallyValid:
+false` and null layout metrics; their `formatConversion` is null. Volume-scoped
+inventory includes real empty default Programs even when Device navigation
+hides them. A decoded Program's `effectTypeInterpretation` is
+`a3000-v2-and-later-load` for revision 1 and `stored` otherwise. Each effect
+block retains `storedType` separately from its interpreted `type`; original
+revision-1 playback is not inferred from the later-loader mapping.
+
 The nullable root `formatConversion` capability is separate from `editing`.
-It includes `payloadSha256`, `partitionIndex`, `volumeName`, `sampleFormat`,
+Its `kind` discriminates `SAMPLE`, `SAMPLE_BANK` and `PROGRAM`.
+Sample/Bank capabilities include `payloadSha256`, `partitionIndex`, `volumeName`, `sampleFormat`,
 `canConvertFormat`, `reason` and `formatConversions`. The last field gives
 read-only target previews with changes and blockers; `canConvertFormat` indicates
 whether the image, placement and stored layout support conversion, not whether
@@ -1121,6 +1135,13 @@ members untouched and blocks active bank overrides. Ordinary Save
 never changes format. Stereo restrictions remain in `blockedParameters`; each has an
 explanation in `blockedParameterReasons` and retains its decoded value. These
 metadata fields are not mutation inputs.
+Program capabilities instead include `programFormat`, nullable `programNumber`
+and `programName`, with the same hash, placement, reason and preview fields.
+Their targets are `A3000`/`A4000_A5000`, not Sample format enums. An invalid
+numeric slot disables conversion. Programs retain `editing: null`; execution
+uses `convert_prog_format` with the numeric slot and lowercase manifest
+target. Neither conversion nor its preview touches dependencies or System Files.
+See [Program Formats](program-formats.md).
 Unsupported layouts
 return no editor profile. The desktop retains session-only drafts across the
 six Sample editing tabs and object selection. Save applies only the selected

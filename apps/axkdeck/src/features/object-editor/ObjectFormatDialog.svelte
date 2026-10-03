@@ -2,15 +2,22 @@
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import SampleFormatBadge from './SampleFormatBadge.svelte';
+    import ProgramFormatBadge from './ProgramFormatBadge.svelte';
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
+    import { programConversionTitle } from '../../lib/programFormatLabels';
     import type { ObjectEditorWorkflow, ObjectEditorDocument } from './workflow.svelte';
     let { workflow, document }: { workflow: ObjectEditorWorkflow; document: ObjectEditorDocument } = $props();
     const snapshot = $derived(document.detail!.formatConversion!);
     const bank = $derived(document.detail!.object.type === 'SBAC');
-    const noun = $derived(bank ? 'sample bank' : 'sample');
+    const program = $derived(snapshot.kind === 'PROGRAM');
+    const noun = $derived(program ? 'program' : bank ? 'sample bank' : 'sample');
     const preview = $derived(snapshot.formatConversions[0]);
     const target = $derived(preview?.targetFormat);
-    const title = $derived(sampleConversionTitle(target, bank));
+    const title = $derived(
+        snapshot.kind === 'PROGRAM'
+            ? programConversionTitle(snapshot.formatConversions[0]?.targetFormat)
+            : sampleConversionTitle(snapshot.formatConversions[0]?.targetFormat, bank),
+    );
     const reason = $derived(workflow.conversionReason(document));
     const locked = $derived(document.phase !== 'editable');
     const recovery = $derived(
@@ -45,23 +52,36 @@
                 >
             </header>
             <div class="format-summary">
-                <strong>{document.detail!.object.name}</strong><SampleFormatBadge format={snapshot.sampleFormat} />
+                {#if snapshot.kind === 'PROGRAM'}
+                    <strong
+                        >{snapshot.programNumber === null
+                            ? ''
+                            : `${String(snapshot.programNumber).padStart(3, '0')}: `}{snapshot.programName}</strong
+                    >
+                    <ProgramFormatBadge format={snapshot.programFormat} />
+                {:else}
+                    <strong>{document.detail!.object.name}</strong><SampleFormatBadge format={snapshot.sampleFormat} />
+                {/if}
                 <p>
-                    {target === 'A3000_188'
-                        ? `The ${noun} becomes a3k format. Any incompatible settings must be changed and saved first so the conversion preserves your parameters.`
-                        : target === 'A4000_A5000_224'
+                    {target === 'A3000_188' || target === 'A3000'
+                        ? `The ${noun} becomes a3k format only when its settings can be preserved. Incompatible settings block conversion.`
+                        : target === 'A4000_A5000_224' || target === 'A4000_A5000'
                           ? `The ${noun} becomes a4k/a5k format, even if no a4k/a5k-specific settings are used.`
-                          : 'Conversion is unavailable for this sample format.'}
+                          : `Conversion is unavailable for this ${noun} format.`}
                 </p>
                 <p>
-                    {bank
-                        ? "The bank's name, Program links and member rows remain unchanged. Member Samples and Wave Data are not converted or edited."
-                        : "The sample's name, relationships and Wave Data remain unchanged."}
+                    {program
+                        ? "The Program's slot, name and assignments remain unchanged. Sample Banks, Samples, Wave Data and System Files are not converted or edited."
+                        : bank
+                          ? "The bank's name, Program links and member rows remain unchanged. Member Samples and Wave Data are not converted or edited."
+                          : "The sample's name, relationships and Wave Data remain unchanged."}
                 </p>
             </div>
             <div class="format-results">
+                {#if program}{#each preview?.changes ?? [] as change}<p>{change}</p>{/each}{/if}
                 {#each preview?.blockers ?? [] as issue}<p class="format-blocker">
-                        {issue.key}{issue.storedValue === null ? '' : ` (${issue.storedValue})`}: {issue.message}
+                        {#if !program}{issue.key}{issue.storedValue === null ? '' : ` (${issue.storedValue})`}:
+                        {/if}{issue.message}
                     </p>{/each}
             </div>
             <footer class="dialog-footer">

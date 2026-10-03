@@ -1,4 +1,5 @@
 <script lang="ts">
+    import ProgramFormatDetails from '../../features/object-editor/ProgramFormatDetails.svelte';
     import InspectorSection from './InspectorSection.svelte';
     import { provideInspectorPanels } from '../inspectorPanels.svelte';
     import SampleFormatDetails from '../../features/object-editor/SampleFormatDetails.svelte';
@@ -433,6 +434,9 @@
                     groups={selection.relationships ?? []}
                     onnavigate={onrelationshipnavigate}
                 />
+            {/if}
+            {#if selection?.kind === 'program' && selection.program.object.programFormat}
+                <ProgramFormatDetails format={selection.program.object.programFormat} />
             {/if}
             {#if (selection?.kind === 'sample' || selection?.kind === 'sample-bank') && selection.item.object.sampleFormat}
                 <SampleFormatDetails

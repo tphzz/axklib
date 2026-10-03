@@ -232,6 +232,7 @@ struct ProgLayout {
 
 struct ProgEffectBlock {
     std::array<std::byte, 0x28> raw_bytes{};
+    // Revision 1 uses the later loader's ID mapping; raw_bytes retains the stored ID.
     std::uint16_t type{};
     std::array<std::uint16_t, 16> parameter_values{};
 };

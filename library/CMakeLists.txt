@@ -129,6 +129,9 @@ add_library(
   src/su700.cpp
   src/object.cpp
   src/prog_codec.cpp
+  src/program_storage.cpp
+  src/program_format_conversion.cpp
+  src/program_conversion_parameters.cpp
         src/program_parameter_codec.cpp
         src/program_effect_parameter_codec.cpp
         src/program_assignment_parameter_codec.cpp
@@ -292,6 +295,8 @@ add_library(
   src/alteration_sample.cpp
   src/alteration_sample_update.cpp
   src/alteration_sample_format.cpp
+  src/alteration_program_format.cpp
+  src/alteration_manifest_program_format.cpp
   src/alteration_manifest_sample_format.cpp
   src/alteration_sample_duplicate.cpp
   src/alteration_manifest_duplicate.cpp
@@ -618,6 +623,8 @@ if(BUILD_TESTING)
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/prog_codec_test.cpp
+    tests/program_format_conversion_test.cpp
+    tests/program_format_alteration_test.cpp
     tests/program_parameters_test.cpp
     tests/program_effect_parameters_test.cpp
     tests/program_assignment_parameters_test.cpp

@@ -22,6 +22,7 @@ std::vector<std::byte> program_payload(std::uint32_t version = 4U) {
     EXPECT_TRUE(writer.write_be32(0x14, version));
     EXPECT_TRUE(writer.write_be32(0x18, size - (version == 4U ? 0xe0U : 0x30U)));
     EXPECT_TRUE(writer.write_be32(0x1c, version == 4U ? size - 0x30U : 0U));
+    EXPECT_TRUE(writer.write_u8(0x30, 0x14));
     EXPECT_TRUE(writer.write_ascii_field(0x32, 16, "001", std::byte{}));
     EXPECT_TRUE(writer.write_ascii_field(0x78, 8, "TEST", std::byte{}));
     EXPECT_TRUE(writer.write_be16(0x96, 0));

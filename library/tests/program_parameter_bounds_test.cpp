@@ -27,6 +27,7 @@ std::vector<std::byte> payload() {
     EXPECT_TRUE(writer.write_be32(0x14, 4));
     EXPECT_TRUE(writer.write_be32(0x18, 0x2b0));
     EXPECT_TRUE(writer.write_be32(0x1c, 0x360));
+    EXPECT_TRUE(writer.write_u8(0x30, 0x14));
     EXPECT_TRUE(writer.write_be16(0x96, 1));
     EXPECT_TRUE(writer.write_ascii_field(row_start, 16, "Target"));
     bytes[row_start + 0x14] = std::byte{0x10};

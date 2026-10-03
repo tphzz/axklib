@@ -210,6 +210,10 @@ static ContentTree build_content_tree_impl(std::string source_path,
                     std::format("object:{}", item->key), "program", display_program(*item), item->key, "PROG",
                 };
                 node.basis = "container object metadata";
+                if (!std::holds_alternative<CurrentProg>(item->object.payload)) {
+                    node.quality = RelationshipQuality::unknown;
+                    node.notes = "Program parameters could not be decoded; stored format is unknown.";
+                }
                 for (const auto *row : graph.children(item->key)) {
                     if (!row->type.starts_with("PROG_ASSIGNMENT_TO_") || !navigable(*row))
                         continue;
@@ -276,28 +280,6 @@ static ContentTree build_content_tree_impl(std::string source_path,
                 });
             }
         }
-        std::map<unsigned int, ContentNode> programs_by_slot;
-        std::vector<ContentNode> unslotted_programs;
-        std::ranges::sort(programs, {}, [](const ContentNode &node) {
-            return std::tuple{lowercase(node.display_name), node.object_type, node.object_key};
-        });
-        for (auto &program : programs) {
-            unsigned int slot{};
-            const auto end = program.display_name.find(':');
-            const auto parsed =
-                end == 3U ? std::from_chars(program.display_name.data(), program.display_name.data() + end, slot)
-                          : std::from_chars_result{};
-            if (end == 3U && parsed.ec == std::errc{} && slot >= 1U && slot <= 128U)
-                programs_by_slot[slot] = std::move(program);
-            else
-                unslotted_programs.push_back(std::move(program));
-        }
-        programs.clear();
-        for (auto &[slot, program] : programs_by_slot) {
-            static_cast<void>(slot);
-            programs.push_back(std::move(program));
-        }
-        std::ranges::move(unslotted_programs, std::back_inserter(programs));
         if (include_default_programs) {
             std::set<unsigned int> present;
             for (const auto *item : items) {

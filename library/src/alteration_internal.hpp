@@ -220,6 +220,9 @@ Result<OperationReport> convert_sbnk_format(TransactionState &state, OperationCo
 Result<OperationReport> convert_sbac_format(TransactionState &state, OperationContext context,
                                             const ConvertSampleBankFormatOperation &operation,
                                             const CancellationToken &cancellation);
+Result<OperationReport> convert_prog_format(TransactionState &state, OperationContext context,
+                                            const ConvertProgramFormatOperation &operation,
+                                            const CancellationToken &cancellation);
 Result<OperationReport> update_sbnk_parameters(TransactionState &state, OperationContext context,
                                                const UpdateSampleParametersOperation &operation,
                                                const CancellationToken &cancellation);

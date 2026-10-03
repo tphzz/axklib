@@ -9,7 +9,8 @@ import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { reportDiagnostic } from '../../lib/diagnostics';
 import type { ImageTransport, ObjectDetail, JobState } from '../../lib/transport';
-import type { SampleStorageFormat } from '../../lib/objectEditing';
+import type { ObjectStorageFormat, ObjectFormatConversionRequest } from '../../lib/objectEditing';
+import { conversionFormat, conversionRequest, sameConversionIdentity } from './formatConversion';
 
 export class ObjectEditorDocument {
     detail = $state.raw<ObjectDetail>();
@@ -23,7 +24,7 @@ export class ObjectEditorDocument {
     inputErrors = $state<Record<string, string>>({});
     jobId: number | null = null;
     writeKind: 'save' | 'conversion' = 'save';
-    conversionTarget: SampleStorageFormat | null = null;
+    conversionTarget: ObjectStorageFormat | null = null;
     constructor(
         readonly sessionId: number,
         detail: ObjectDetail,
@@ -51,7 +52,11 @@ export class ObjectEditorDocument {
         return !!objectEditorAdapter(this.detail!) && this.phase === 'editable' && this.draft.dirty && !this.validation;
     }
     get noun(): string {
-        return this.detail?.object.type === 'SBAC' ? 'Sample Bank' : 'Sample';
+        return this.detail?.object.type === 'PROG'
+            ? 'Program'
+            : this.detail?.object.type === 'SBAC'
+              ? 'Sample Bank'
+              : 'Sample';
     }
 }
 
@@ -158,11 +163,12 @@ export class ObjectEditorWorkflow {
             current.object.type !== old.object.type ||
             current.editing?.payloadSha256 !== old.editing?.payloadSha256 ||
             current.formatConversion?.payloadSha256 !== old.formatConversion?.payloadSha256 ||
+            !sameConversionIdentity(current.formatConversion, old.formatConversion) ||
             current.editing?.volumeName !== old.editing?.volumeName ||
             current.formatConversion?.volumeName !== old.formatConversion?.volumeName ||
             current.object.name !== old.object.name
         ) {
-            document.conflict = `This ${document.noun} changed outside the editor. ${old.object.type === 'SBAC' ? 'Close and reopen conversion to reload it.' : 'Discard the draft to reload it.'}`;
+            document.conflict = `This ${document.noun} changed outside the editor. ${old.object.type !== 'SBNK' ? 'Close and reopen conversion to reload it.' : 'Discard the draft to reload it.'}`;
             return false;
         }
         document.detail = current;
@@ -241,7 +247,7 @@ export class ObjectEditorWorkflow {
         try {
             const document = await this.load(sessionId, id);
             if (!document?.detail?.formatConversion || !current()) return;
-            if (document.detail.object.type === 'SBAC' && !document.draft.dirty) {
+            if (document.detail.object.type !== 'SBNK' && !document.draft.dirty) {
                 const detail = await this.dependencies.transport.objectDetail(sessionId, id);
                 if (!current()) return;
                 this.acceptReload(document, detail);
@@ -259,11 +265,12 @@ export class ObjectEditorWorkflow {
             this.conversionDocument = null;
         }
     }
-    async convert(document: ObjectEditorDocument, target: Exclude<SampleStorageFormat, 'UNKNOWN'>): Promise<void> {
+    async convert(document: ObjectEditorDocument, target: Exclude<ObjectStorageFormat, 'UNKNOWN'>): Promise<void> {
         if (this.locked || this.conversionReason(document)) return;
         document.phase = 'saving';
         document.status = `Checking ${document.noun} format`;
         this.dependencies.stopPlayback();
+        let request: ObjectFormatConversionRequest | null = null;
         try {
             if (!(await this.check(document))) {
                 document.phase = 'editable';
@@ -271,7 +278,8 @@ export class ObjectEditorWorkflow {
             }
             const snapshot = document.detail!.formatConversion!;
             const preview = snapshot.formatConversions.find((item) => item.targetFormat === target);
-            if (this.conversionReason(document) || !preview?.allowed) {
+            request = conversionRequest(document.detail!, target);
+            if (this.conversionReason(document) || !preview?.allowed || !request) {
                 document.phase = 'editable';
                 document.status =
                     this.conversionReason(document) || 'Resolve the conversion blockers before converting.';
@@ -284,22 +292,8 @@ export class ObjectEditorWorkflow {
         }
         document.writeKind = 'conversion';
         document.conversionTarget = target;
-        const detail = document.detail!;
-        const snapshot = detail.formatConversion!;
         await this.submit(document, () =>
-            this.dependencies.transport.startObjectFormatConversion!(document.sessionId, {
-                expectedRevision: detail.image.revision,
-                operation: {
-                    id: 'sample-format',
-                    ...(detail.object.type === 'SBAC'
-                        ? { type: 'convert_sbac_format' as const, sample_bank_name: detail.object.name }
-                        : { type: 'convert_sbnk_format' as const, sample_name: detail.object.name }),
-                    target_format: target === 'A3000_188' ? 'a3000_188' : 'a4000_a5000_224',
-                    partition_index: snapshot.partitionIndex,
-                    volume_name: snapshot.volumeName,
-                    expected_payload_sha256: snapshot.payloadSha256,
-                },
-            }),
+            this.dependencies.transport.startObjectFormatConversion!(document.sessionId, request!),
         );
     }
     private async submit(document: ObjectEditorDocument, start: () => Promise<JobState>): Promise<void> {
@@ -406,10 +400,11 @@ export class ObjectEditorWorkflow {
             if (
                 detail.object.key !== document.detail!.object.key ||
                 detail.object.type !== document.detail!.object.type ||
-                detail.object.name !== document.detail!.object.name
+                detail.object.name !== document.detail!.object.name ||
+                !sameConversionIdentity(detail.formatConversion, document.detail!.formatConversion)
             )
                 throw new Error('The refreshed object does not match the saved identity');
-            if (document.conversionTarget && detail.formatConversion?.sampleFormat.format !== document.conversionTarget)
+            if (document.conversionTarget && conversionFormat(detail.formatConversion) !== document.conversionTarget)
                 throw new Error('The refreshed object does not have the confirmed target format');
             document.detail = detail;
             if (document.draft instanceof BankDraft && detail.editing?.bankOverrides)

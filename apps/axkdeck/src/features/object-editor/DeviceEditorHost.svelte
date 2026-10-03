@@ -31,8 +31,11 @@
     const matches = $derived(document?.sessionId === sessionId && document?.detail?.object.id === sampleId);
     const inactive = $derived(pending || !matches);
     const displayedPreview = $derived(matches && selection?.kind === 'sample' ? selection.preview : previousPreview);
+    const conversion = $derived(document?.detail?.formatConversion);
     const conversionTitle = $derived(
-        sampleConversionTitle(document?.detail?.formatConversion?.formatConversions[0]?.targetFormat),
+        sampleConversionTitle(
+            conversion?.kind !== 'PROGRAM' ? conversion?.formatConversions[0]?.targetFormat : undefined,
+        ),
     );
     $effect(() => {
         if (editors) editors.visible = !!navigation;

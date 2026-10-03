@@ -134,6 +134,13 @@ Unrepresentable parameters or uninterpreted data also block it. The operation
 does not freeze the bank, clear overrides, or convert its members implicitly.
 An already matching format is a byte-preserving no-op.
 
+`convert_prog_format` converts one Program between `a3000` and `a4000_a5000`.
+It selects the Program by `program_number` (1..128), requires
+`expected_payload_sha256`, preserves assignments and dependencies, and writes
+A3000 revision 2 or current revision 4. Unrepresentable settings block the
+whole transaction, including inactive settings. See [Program Formats](program-formats.md)
+for the manifest shape, preservation guarantees and conversion limits.
+
 `duplicate_sbnk` creates a standalone Sample in the source volume, pointing to
 the same Wave Data. It requires `sample_name`, `new_name`, and `parameters`,
 which may be empty. Optional parameter and playback-window edits use the update

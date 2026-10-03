@@ -11,7 +11,8 @@ These writes require the current Program layout (selector 4) and an explicit
 A4000 or A5000 target model. The model selects writable domains; it does not
 convert the Program or remove untouched settings belonging to another model.
 Legacy Programs remain readable and preservable but do not accept these
-parameter updates. Model-specific compatibility is bounded as described under
+parameter updates. Explicit [Program format conversion](program-formats.md)
+is a separate guarded operation. Model-specific compatibility is bounded as described under
 [Validation Limits](#validation-limits).
 
 The same sparse JSON groups are used by build manifests, Program insertion

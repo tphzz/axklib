@@ -13,7 +13,8 @@
     import { provideVolumeCapacity } from '../../../lib/volumeCapacity.svelte';
     import { capacitySelection } from '../../../lib/capacitySelection';
     import ObjectWorkspace from '../../../lib/components/ObjectWorkspace.svelte';
-    import ProgramWorkspace, { type ProgramPresentation } from '../../../lib/components/ProgramWorkspace.svelte';
+    import type { ProgramPresentation } from '../../../lib/components/ProgramWorkspace.svelte';
+    import ProgramCollection from './ProgramCollection.svelte';
     import PackageSelectionControls from '../../../lib/components/PackageSelectionControls.svelte';
     import SequenceWorkspace from '../../sequence/SequenceWorkspace.svelte';
     import type { SystemProgramContexts, SystemProgramPart } from '../../../lib/transport';
@@ -475,11 +476,10 @@
             onselectionlimit={selectionLimit}
         />
     {:else if workspaceView === 'programs'}
-        <ProgramWorkspace
+        <ProgramCollection
             {programs}
-            contexts={catalog.systemProgramContexts}
-            contextsLoading={catalog.systemProgramContextsLoading}
-            contextsError={catalog.systemProgramContextsError}
+            {sessionId}
+            {catalog}
             presentation={programPresentation}
             selectedPartNumber={selectedMultiPart?.partNumber ?? null}
             activeObjectId={activeCollectionObjectId}

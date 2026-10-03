@@ -157,6 +157,13 @@ field-label hover and keyboard focus. True stereo pairs permit scalar expansion
 edits without changing topology; retained expanded/duplicate-source pairs remain
 restricted and explain why.
 
+Program storage metadata and conversion are independent of Sample parameter
+profiles. The library owns the generation-specific raw-byte conversion plan;
+the application exposes a discriminated Program capability while keeping its
+parameter editor null. The frontend shares the conversion dialog and guarded
+write/recovery lifecycle, selecting Programs by numeric slot and payload digest.
+Conversion changes one PROG only, not dependencies or SYSTEM2 Multi assignments.
+
 Position units, zoom, snapping, monitor lead-in, beat-count selection, preview
 note and audition volume are local view settings. Only an explicit tempo
 calculation or parameter edit changes the draft. Source-rate PCM is loaded on

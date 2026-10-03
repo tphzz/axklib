@@ -7,7 +7,7 @@
     import { provideObjectEditors } from './context';
     import { provideEditorAudio } from './audioContext';
     import SampleDuplicateDialog from './SampleDuplicateDialog.svelte';
-    import SampleFormatDialog from './SampleFormatDialog.svelte';
+    import ObjectFormatDialog from './ObjectFormatDialog.svelte';
     import { modal } from '../../lib/modal';
     import { prepareEditorDraft } from './registry';
     import type { installDesktopEditorGuard } from './desktopGuard';
@@ -127,7 +127,7 @@
 
 {@render children()}
 {#if editors.duplication.visible}<SampleDuplicateDialog workflow={editors.duplication} />{/if}
-{#if editors.conversionDocument}<SampleFormatDialog workflow={editors} document={editors.conversionDocument} />{/if}
+{#if editors.conversionDocument}<ObjectFormatDialog workflow={editors} document={editors.conversionDocument} />{/if}
 {#if confirmation}
     <div class="dialog-backdrop dialog-backdrop-top" role="presentation">
         <div

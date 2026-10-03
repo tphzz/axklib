@@ -1,4 +1,5 @@
 #include "axklib/application/sample_formats.hpp"
+#include "axklib/application/program_formats.hpp"
 
 #include <algorithm>
 #include <string>
@@ -122,10 +123,11 @@ Json object_format_conversion(const ObjectSnapshot &snapshot, std::span<const st
     const auto *bank = std::get_if<CurrentSbac>(&snapshot.object.payload);
     const auto *sample = std::get_if<CurrentSbnk>(&snapshot.object.payload);
     if (!bank && !sample)
-        return nullptr;
+        return program_format_conversion(snapshot, payload, writable);
     const auto &storage = bank ? bank->storage : sample->storage;
     const bool supported = writable && snapshot.placement.has_value() && storage.structurally_valid;
-    return {{"payloadSha256", package_internal::hex_digest(package_internal::sha256(payload))},
+    return {{"kind", bank ? "sample-bank" : "sample"},
+            {"payloadSha256", package_internal::hex_digest(package_internal::sha256(payload))},
             {"partitionIndex", snapshot.partition.value},
             {"volumeName", snapshot.placement ? snapshot.placement->volume_name : ""},
             {"sampleFormat", bank ? sample_format_metadata(*bank) : sample_format_metadata(*sample)},

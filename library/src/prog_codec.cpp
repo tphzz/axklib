@@ -10,6 +10,10 @@
 namespace axk::detail {
 
 Result<ProgLayout> decode_prog_layout(std::span<const std::byte> payload, const ObjectHeader &header) {
+    if (header.type != ObjectType::prog || payload.size() <= 0x30U || payload[0x30U] != std::byte{0x14}) {
+        return std::unexpected{make_error(ErrorCode::object_malformed, ErrorCategory::object,
+                                          "Program signature and common object class disagree")};
+    }
     const auto version = header.unknown_0x14;
     if (version != 1U && version != 2U && version != 4U) {
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
@@ -92,7 +96,9 @@ Result<CurrentProg> decode_prog(std::span<const std::byte> payload, const Object
         }
         for (std::size_t parameter = 0; parameter < effect.parameter_values.size(); ++parameter)
             effect.parameter_values[parameter] = *reader.be16(offset + 8U + parameter * 2U);
-        result.parameters.effects[index] = decode_program_effect_parameters(effect, index);
+        result.parameters.effects[index] = decode_program_effect_parameters(
+            effect, index,
+            layout->parameter_tail_offset ? ProgramParameterGeneration::current : ProgramParameterGeneration::a3000);
         result.effect_blocks.push_back(effect);
     }
     result.assignments.reserve(layout->stored_assignment_count);

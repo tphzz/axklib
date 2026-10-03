@@ -1188,6 +1188,177 @@ TEST(ServerContract, SampleStorageAndConversionEnumsTranslateAtTheWireBoundary) 
     EXPECT_EQ(validator.application_value("SampleFormatConversionPreview", wire), preview);
 }
 
+TEST(ServerContract, ProgramStorageAndConversionEnumsRemainDistinctFromSampleFormats) {
+    axk::server::OpenApiValidator validator;
+    for (const auto &[application, wire] : std::array<std::pair<std::string_view, std::string_view>, 3>{
+             {{"unknown", "UNKNOWN"}, {"a3000", "A3000"}, {"a4000_a5000", "A4000_A5000"}}}) {
+        EXPECT_EQ(validator.wire_value("ProgramStorageFormat", application), wire);
+        EXPECT_EQ(validator.application_value("ProgramStorageFormat", wire), application);
+        EXPECT_TRUE(validator.validate("ProgramStorageFormat", wire));
+        EXPECT_FALSE(validator.validate("ProgramStorageFormat", application));
+    }
+    for (const auto *format : {"A3000_188", "A4000_A5000_224"})
+        EXPECT_FALSE(validator.validate("ProgramStorageFormat", format));
+    for (const auto *format : {"A3000", "A4000_A5000"})
+        EXPECT_FALSE(validator.validate("SampleStorageFormat", format));
+    const auto application_preview = nlohmann::json{
+        {"targetFormat", "a3000"},
+        {"allowed", false},
+        {"changes", nlohmann::json::array()},
+        {"blockers",
+         nlohmann::json::array(
+             {{{"key", "controller.function"}, {"message", "Function cannot be represented."}, {"storedValue", 64}},
+              {{"key", "tail"}, {"message", "Unknown tail bytes are present."}, {"storedValue", nullptr}}})}};
+    const auto wire_preview = validator.wire_value("ProgramFormatConversionPreview", application_preview);
+    EXPECT_EQ(wire_preview.at("targetFormat"), "A3000");
+    EXPECT_TRUE(validator.validate("ProgramFormatConversionPreview", wire_preview));
+    EXPECT_EQ(validator.application_value("ProgramFormatConversionPreview", wire_preview), application_preview);
+    for (const auto *format : {"UNKNOWN", "unknown", "a3000", "A3000_188", "A4000_A5000_224"}) {
+        auto invalid = wire_preview;
+        invalid["targetFormat"] = format;
+        EXPECT_FALSE(validator.validate("ProgramFormatConversionPreview", invalid));
+    }
+    auto missing_value = wire_preview;
+    missing_value["blockers"][0].erase("storedValue");
+    EXPECT_FALSE(validator.validate("ProgramFormatConversionPreview", missing_value));
+}
+
+nlohmann::json program_conversion_application_value() {
+    return {
+        {"kind", "program"},
+        {"payloadSha256", std::string(64U, 'a')},
+        {"partitionIndex", 0U},
+        {"volumeName", "Programs"},
+        {"programNumber", 33U},
+        {"programName", "Format"},
+        {"programFormat",
+         {{"format", "a4000_a5000"},
+          {"structurallyValid", true},
+          {"headerRevision", 4U},
+          {"logicalSize", 912U},
+          {"storedAssignmentCount", 0U},
+          {"assignmentCapacity", 8U},
+          {"parameterTailBytes", 176U}}},
+        {"canConvertFormat", true},
+        {"formatConversions", nlohmann::json::array({{{"targetFormat", "a3000"},
+                                                      {"allowed", true},
+                                                      {"changes", nlohmann::json::array({"Remove the current tail."})},
+                                                      {"blockers", nlohmann::json::array()}}})},
+        {"reason", ""}};
+}
+
+TEST(ServerContract, ObjectFormatConversionSelectsTheProgramBranchAndRejectsMixedContracts) {
+    axk::server::OpenApiValidator validator;
+    const auto application = program_conversion_application_value();
+    const auto wire = validator.wire_value("ObjectFormatConversion", application);
+    EXPECT_EQ(wire.at("kind"), "PROGRAM");
+    EXPECT_EQ(wire.at("programFormat").at("format"), "A4000_A5000");
+    EXPECT_EQ(wire.at("formatConversions").front().at("targetFormat"), "A3000");
+    EXPECT_TRUE(validator.validate("ObjectFormatConversion", wire));
+    EXPECT_EQ(validator.application_value("ObjectFormatConversion", wire), application);
+    for (const auto *field : {"programFormat", "programNumber", "programName"}) {
+        auto invalid = wire;
+        invalid.erase(field);
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    }
+    for (const auto &number : {nlohmann::json(1), nlohmann::json(128), nlohmann::json(nullptr)}) {
+        auto valid = wire;
+        valid["programNumber"] = number;
+        EXPECT_TRUE(validator.validate("ObjectFormatConversion", valid));
+    }
+    for (const auto &number : {nlohmann::json(0), nlohmann::json(129), nlohmann::json(true), nlohmann::json(1.5)}) {
+        auto invalid = wire;
+        invalid["programNumber"] = number;
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    }
+    auto invalid = wire;
+    invalid["sampleFormat"] = nullptr;
+    EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    invalid = wire;
+    invalid["kind"] = "SAMPLE";
+    EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    invalid = wire;
+    invalid["kind"] = "program";
+    EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    invalid = wire;
+    invalid["programFormat"]["format"] = "A4000_A5000_224";
+    EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    invalid = wire;
+    invalid["formatConversions"][0]["targetFormat"] = "A3000_188";
+    EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+}
+
+TEST(ServerContract, ObjectFormatConversionRetainsSeparateSampleAndSampleBankBranches) {
+    axk::server::OpenApiValidator validator;
+    auto application =
+        nlohmann::json{{"kind", "sample"},
+                       {"payloadSha256", std::string(64U, 'a')},
+                       {"partitionIndex", 0U},
+                       {"volumeName", "Samples"},
+                       {"sampleFormat",
+                        {{"format", "a3000_188"},
+                         {"structurallyValid", true},
+                         {"parameterBytes", 188U},
+                         {"headerRevision", 2U},
+                         {"olderBodyBytes", 308U},
+                         {"laterBodyBytes", 0U},
+                         {"diagnostics", nlohmann::json::array()},
+                         {"parameterIssues", nlohmann::json::array()},
+                         {"requiresA5000", false},
+                         {"extensionDiffersFromPrefixDefaults", nullptr}}},
+                       {"canConvertFormat", true},
+                       {"formatConversions", nlohmann::json::array({{{"targetFormat", "a4000_a5000_224"},
+                                                                     {"allowed", true},
+                                                                     {"changes", nlohmann::json::array()},
+                                                                     {"blockers", nlohmann::json::array()}}})},
+                       {"reason", ""}};
+    for (const auto *kind : {"sample", "sample-bank"}) {
+        application["kind"] = kind;
+        const auto wire = validator.wire_value("ObjectFormatConversion", application);
+        EXPECT_EQ(wire.at("kind"), std::string_view{kind} == "sample" ? "SAMPLE" : "SAMPLE_BANK");
+        EXPECT_EQ(wire.at("sampleFormat").at("format"), "A3000_188");
+        EXPECT_EQ(wire.at("formatConversions").front().at("targetFormat"), "A4000_A5000_224");
+        EXPECT_TRUE(validator.validate("ObjectFormatConversion", wire));
+        EXPECT_EQ(validator.application_value("ObjectFormatConversion", wire), application);
+        auto invalid = wire;
+        invalid["programNumber"] = 33U;
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+        invalid = wire;
+        invalid["kind"] = kind;
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+        invalid = wire;
+        invalid["sampleFormat"]["format"] = "A3000";
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+        invalid = wire;
+        invalid["formatConversions"][0]["targetFormat"] = "A4000_A5000";
+        EXPECT_FALSE(validator.validate("ObjectFormatConversion", invalid));
+    }
+}
+
+TEST(ServerContract, ProgramMetadataIsRequiredButNullableOnObjectSummariesAndDetails) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    axk::server::OpenApiValidator validator;
+    const auto metadata =
+        validator.wire_value("ProgramFormatMetadata", program_conversion_application_value().at("programFormat"));
+    for (const auto *name : {"ImageObjectItem", "ImageObjectDetailObject"}) {
+        const auto &schema = document.at("components").at("schemas").at(name);
+        EXPECT_TRUE(std::ranges::contains(schema.at("required"), "programFormat"));
+        const auto &property = schema.at("properties").at("programFormat");
+        EXPECT_TRUE(axk::server::validate_openapi_schema(document, property, nullptr));
+        EXPECT_TRUE(axk::server::validate_openapi_schema(document, property, metadata));
+        auto invalid = metadata;
+        invalid["format"] = "A4000_A5000_224";
+        EXPECT_FALSE(axk::server::validate_openapi_schema(document, property, invalid));
+    }
+    auto invalid = metadata;
+    invalid["storedAssignmentCount"] = 1000U;
+    EXPECT_FALSE(validator.validate("ProgramFormatMetadata", invalid));
+    invalid = metadata;
+    invalid["parameterTailBytes"] = 175U;
+    EXPECT_FALSE(validator.validate("ProgramFormatMetadata", invalid));
+}
+
 TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {
     axk::server::OpenApiValidator validator;
     const auto exact = nlohmann::json{{"kind", "VOLUME"}, {"contentId", "content-volume-1"}};

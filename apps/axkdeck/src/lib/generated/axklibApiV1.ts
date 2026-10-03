@@ -1994,6 +1994,7 @@ export interface components {
                 | 'DUPLICATE_SBNK'
                 | 'CONVERT_SBNK_FORMAT'
                 | 'CONVERT_SBAC_FORMAT'
+                | 'CONVERT_PROG_FORMAT'
                 | 'UPDATE_SAMPLE_BANK_OVERRIDES';
             volumeName: string;
         };
@@ -3247,7 +3248,7 @@ export interface components {
             recordSizeOrHeaderUsed0x18: number;
         };
         ImageObjectDetailObject: {
-            /** @description Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model. */
+            /** @description Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). PROG effectBlocks retain storedType separately from type. effectTypeInterpretation is a3000-v2-and-later-load for revision 1 (type and typed effects use later-loader normalization, not original V1 playback), otherwise stored. Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model. */
             decoded: {
                 kind: string;
             } & {
@@ -3265,6 +3266,7 @@ export interface components {
             placementCandidates: components['schemas']['ImageObjectDetailPlacement'][];
             /** @enum {string} */
             placementResolution: 'EXACT' | 'MISSING' | 'AMBIGUOUS';
+            programFormat: components['schemas']['ProgramFormatMetadata'] | null;
             sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             scopeKey: string;
             sfsId: number;
@@ -3320,6 +3322,7 @@ export interface components {
             name: string;
             partitionIndex: number | null;
             partitionName: string;
+            programFormat: components['schemas']['ProgramFormatMetadata'] | null;
             sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
@@ -4465,15 +4468,8 @@ export interface components {
         MidiInspectionRequest: {
             source: components['schemas']['InputRef'];
         };
-        ObjectFormatConversion: {
-            canConvertFormat: boolean;
-            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
-            partitionIndex: number;
-            payloadSha256: string;
-            reason: string;
-            sampleFormat: components['schemas']['SampleFormatMetadata'];
-            volumeName: string;
-        };
+        ObjectFormatConversion:
+            components['schemas']['SampleObjectFormatConversion'] | components['schemas']['ProgramFormatConversion'];
         ObjectsRequest: {
             destination: components['schemas']['DirectoryRef'];
             /** @default false */
@@ -4823,6 +4819,43 @@ export interface components {
         PlanTokenRequest: {
             planToken: string;
         };
+        ProgramFormatConversion: {
+            canConvertFormat: boolean;
+            formatConversions: components['schemas']['ProgramFormatConversionPreview'][];
+            /** @enum {string} */
+            kind: 'PROGRAM';
+            partitionIndex: number;
+            payloadSha256: string;
+            programFormat: components['schemas']['ProgramFormatMetadata'];
+            programName: string;
+            programNumber: number | null;
+            reason: string;
+            volumeName: string;
+        };
+        ProgramFormatConversionIssue: {
+            key: string;
+            message: string;
+            storedValue: number | null;
+        };
+        ProgramFormatConversionPreview: {
+            allowed: boolean;
+            blockers: components['schemas']['ProgramFormatConversionIssue'][];
+            changes: string[];
+            /** @enum {string} */
+            targetFormat: 'A3000' | 'A4000_A5000';
+        };
+        ProgramFormatMetadata: {
+            assignmentCapacity: number | null;
+            format: components['schemas']['ProgramStorageFormat'];
+            headerRevision: number;
+            logicalSize: number | null;
+            /** @enum {integer|null} */
+            parameterTailBytes: 0 | 176 | null;
+            storedAssignmentCount: number | null;
+            structurallyValid: boolean;
+        };
+        /** @enum {string} */
+        ProgramStorageFormat: 'UNKNOWN' | 'A3000' | 'A4000_A5000';
         ReadinessResponse: {
             data: {
                 checks: {
@@ -4945,6 +4978,17 @@ export interface components {
             parameterIssues: components['schemas']['SampleParameterIssue'][];
             requiresA5000: boolean;
             structurallyValid: boolean;
+        };
+        SampleObjectFormatConversion: {
+            canConvertFormat: boolean;
+            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
+            /** @enum {string} */
+            kind: 'SAMPLE' | 'SAMPLE_BANK';
+            partitionIndex: number;
+            payloadSha256: string;
+            reason: string;
+            sampleFormat: components['schemas']['SampleFormatMetadata'];
+            volumeName: string;
         };
         SampleParameterCapability: {
             a3000: components['schemas']['SampleParameterDomain'] | null;

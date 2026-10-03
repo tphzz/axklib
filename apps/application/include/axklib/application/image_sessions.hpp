@@ -191,6 +191,7 @@ struct ImageObjectItem {
     std::optional<WaveformMetadata> waveform;
     std::optional<SequenceMetadata> sequence;
     nlohmann::json sample_format = nullptr;
+    nlohmann::json program_format = nullptr;
 };
 
 struct ImageRelationshipItem {

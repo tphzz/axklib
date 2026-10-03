@@ -38,14 +38,23 @@ export interface ObjectEditingTransport {
 
 export type SampleStorageFormat = components['schemas']['SampleStorageFormat'];
 export type SampleFormatMetadata = components['schemas']['SampleFormatMetadata'];
+export type ProgramStorageFormat = components['schemas']['ProgramStorageFormat'];
+export type ProgramFormatMetadata = components['schemas']['ProgramFormatMetadata'];
+export type ObjectStorageFormat = SampleStorageFormat | ProgramStorageFormat;
 export type ObjectFormatConversionSnapshot = components['schemas']['ObjectFormatConversion'];
 export interface ObjectFormatConversionRequest {
     expectedRevision: number;
-    operation: Omit<SampleParameterEdit['operation'], 'type' | 'parameters' | 'playback_window' | 'sample_name'> & {
-        target_format: Lowercase<Exclude<SampleStorageFormat, 'UNKNOWN'>>;
-    } & (
-            | { type: 'convert_sbnk_format'; sample_name: string }
-            | { type: 'convert_sbac_format'; sample_bank_name: string }
+    operation: Omit<SampleParameterEdit['operation'], 'type' | 'parameters' | 'playback_window' | 'sample_name'> &
+        (
+            | ({ target_format: Lowercase<Exclude<SampleStorageFormat, 'UNKNOWN'>> } & (
+                  | { type: 'convert_sbnk_format'; sample_name: string }
+                  | { type: 'convert_sbac_format'; sample_bank_name: string }
+              ))
+            | {
+                  type: 'convert_prog_format';
+                  program_number: number;
+                  target_format: Lowercase<Exclude<ProgramStorageFormat, 'UNKNOWN'>>;
+              }
         );
 }
 

@@ -174,11 +174,14 @@ ProgramAssignmentParameters decode_program_assignment_parameters(std::span<const
                                                                  ProgStorageLayout layout) {
     const ByteReader reader{row};
     Parameters result;
-    result.receive = decode_program_receive(*reader.u8(0x15));
     const auto current = layout == ProgStorageLayout::current_split_parameter_tail;
+    const auto receive = *reader.u8(0x15);
+    if (current || receive <= 16U || receive == 0xffU)
+        result.receive = decode_program_receive(receive);
     for (const auto &field : signed_fields) {
-        // Current output lanes do not describe the legacy routing representation.
-        if (current || field.offset < 0x2dU)
+        // These velocity and output lanes have no native A3000 parameter meaning.
+        if (current ||
+            (field.offset < 0x2dU && field.offset != 0x17U && field.offset != 0x19U && field.offset != 0x1bU))
             result.*field.member = known(*reader.s8(field.offset), field.minimum, field.maximum);
     }
     for (const auto &[member, offset] : limits)

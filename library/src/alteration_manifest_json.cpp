@@ -18,6 +18,7 @@
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_placement.hpp"
 #include "alteration_manifest_program.hpp"
+#include "alteration_manifest_program_format.hpp"
 #include "alteration_manifest_sample_format.hpp"
 #include "alteration_manifest_sequence.hpp"
 #include "alteration_manifest_wave_data.hpp"
@@ -155,7 +156,7 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 return std::unexpected{transaction_error("duplicate operation id")};
             if (*type != "delete_volume" && *type != "insert_volume" && *type != "delete_sbnk" &&
                 *type != "insert_sbnk" && *type != "update_sbnk_parameters" && *type != "duplicate_sbnk" &&
-                *type != "convert_sbnk_format" && *type != "convert_sbac_format" &&
+                *type != "convert_sbnk_format" && *type != "convert_sbac_format" && *type != "convert_prog_format" &&
                 *type != "update_sample_bank_overrides" && *type != "update_sample_bank_parameters" &&
                 *type != "insert_waveform" && *type != "delete_waveform" && *type != "delete_program" &&
                 *type != "insert_program" && *type != "delete_sbac" && *type != "insert_sbac" &&
@@ -367,6 +368,11 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 data = std::move(*operation);
             } else if (*type == "convert_sbac_format") {
                 auto operation = detail::parse_sample_bank_format_conversion_json(row, std::move(selector));
+                if (!operation)
+                    return std::unexpected{operation.error()};
+                data = std::move(*operation);
+            } else if (*type == "convert_prog_format") {
+                auto operation = detail::parse_program_format_conversion_json(row, std::move(selector));
                 if (!operation)
                     return std::unexpected{operation.error()};
                 data = std::move(*operation);
