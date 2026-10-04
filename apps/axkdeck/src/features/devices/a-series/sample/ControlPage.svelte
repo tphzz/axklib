@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { SamplePage } from './fields';
     import ParameterField from './ParameterField.svelte';
@@ -7,7 +8,7 @@
     import { parameterBlockReason } from './parameterAvailability';
     let { document, page, disabled }: { document: ObjectEditorDocument; page: SamplePage; disabled: boolean } =
         $props();
-    const blocked = $derived(document.detail?.editing?.blockedParameters ?? []);
+    const blocked = $derived(sampleSnapshot(document.detail)?.blockedParameters ?? []);
     const columns = $derived(
         [
             { suffix: '.device', label: 'Controller' },
@@ -18,8 +19,7 @@
             ...column,
             extended: page.fields.some(
                 (field) =>
-                    field.key.endsWith(column.suffix) &&
-                    formatField(field, document.detail?.editing ?? undefined).extended,
+                    field.key.endsWith(column.suffix) && formatField(field, sampleSnapshot(document.detail)).extended,
             ),
         })),
     );
@@ -45,10 +45,11 @@
                         ><ParameterField
                             field={{ ...field, label: `Control ${row} ${field.label}` }}
                             draft={document.draft}
-                            unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
+                            unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]
+                                ?.message}
                             disabled={disabled || blocked.includes(field.key)}
-                            blockedReason={document.detail?.editing
-                                ? parameterBlockReason(field.key, document.detail.editing)
+                            blockedReason={sampleSnapshot(document.detail)
+                                ? parameterBlockReason(field.key, sampleSnapshot(document.detail)!)
                                 : ''}
                             oninvalid={(message) =>
                                 (document.inputErrors = { ...document.inputErrors, [field.key]: message })}

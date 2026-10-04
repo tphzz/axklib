@@ -22,7 +22,11 @@ const partition = {
     partitionIndex: 0,
 };
 
-function workflowWith(transport: Partial<ImageTransport>, catalog: object = {}) {
+function workflowWith(
+    transport: Partial<ImageTransport>,
+    catalog: object = {},
+    confirmEditorLeave?: () => Promise<boolean>,
+) {
     const run = vi.fn().mockImplementation(async (start: () => Promise<unknown>) => {
         await start();
         return { status: 'completed' };
@@ -31,6 +35,7 @@ function workflowWith(transport: Partial<ImageTransport>, catalog: object = {}) 
     const setWorkspaceView = vi.fn();
     const clearSelection = vi.fn();
     const workflow = new MutationWorkflow({
+        confirmEditorLeave,
         transport: transport as ImageTransport,
         jobs: { run } as never,
         catalog: catalog as never,
@@ -74,6 +79,77 @@ function placementInspection(overrides: Partial<PlacementRepairInspection> = {})
 }
 
 describe('MutationWorkflow', () => {
+    it.each(['volume action', 'volume deletion'] as const)(
+        'waits for editor confirmation and leaves %s closed when cancelled',
+        async (kind) => {
+            let confirm!: (allowed: boolean) => void;
+            const confirmEditorLeave = vi.fn(() => new Promise<boolean>((resolve) => (confirm = resolve)));
+            const inspectVolumeDeletion = vi.fn();
+            const { workflow } = workflowWith({ inspectVolumeDeletion }, {}, confirmEditorLeave);
+            const pending =
+                kind === 'volume action'
+                    ? workflow.requestVolumeAction(volume, 'rename-volume')
+                    : workflow.requestVolumeDeletion([volume]);
+            expect(confirmEditorLeave).toHaveBeenCalledOnce();
+            expect(workflow.volumeAction).toBeNull();
+            expect(inspectVolumeDeletion).not.toHaveBeenCalled();
+            confirm(false);
+            expect(await pending).toBe(false);
+            expect(workflow.volumeAction).toBeNull();
+            expect(inspectVolumeDeletion).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['volume action', 'volume deletion'] as const)(
+        'refuses %s admission while the editor has an unresolved write',
+        async (kind) => {
+            const confirmEditorLeave = vi.fn().mockResolvedValue(false);
+            const inspectVolumeDeletion = vi.fn();
+            const { workflow } = workflowWith({ inspectVolumeDeletion }, {}, confirmEditorLeave);
+            const allowed =
+                kind === 'volume action'
+                    ? await workflow.requestVolumeAction(volume, 'rename-volume')
+                    : await workflow.requestVolumeDeletion([volume]);
+            expect(confirmEditorLeave).toHaveBeenCalledOnce();
+            expect(allowed).toBe(false);
+            expect(workflow.volumeAction).toBeNull();
+            expect(inspectVolumeDeletion).not.toHaveBeenCalled();
+        },
+    );
+
+    it.each(['volume action', 'volume deletion'] as const)(
+        'opens %s only after editor confirmation succeeds',
+        async (kind) => {
+            let confirm!: (allowed: boolean) => void;
+            const confirmEditorLeave = vi.fn(() => new Promise<boolean>((resolve) => (confirm = resolve)));
+            const inspectVolumeDeletion = vi.fn().mockResolvedValue({
+                imageId: 'image-1',
+                revision: 1,
+                targets: [{ partitionIndex: 0, volumeName: 'Samples' }],
+                canDelete: true,
+                crossingRelationshipCount: 0,
+                blockers: [],
+            });
+            const { workflow } = workflowWith({ inspectVolumeDeletion }, {}, confirmEditorLeave);
+            const pending =
+                kind === 'volume action'
+                    ? workflow.requestVolumeAction(volume, 'rename-volume')
+                    : workflow.requestVolumeDeletion([volume]);
+            expect(confirmEditorLeave).toHaveBeenCalledOnce();
+            expect(workflow.volumeAction).toBeNull();
+            expect(inspectVolumeDeletion).not.toHaveBeenCalled();
+            confirm(true);
+            expect(await pending).toBe(true);
+            expect(workflow.volumeAction?.action).toBe(kind === 'volume action' ? 'rename-volume' : 'delete-volume');
+            if (kind === 'volume deletion') {
+                await vi.waitFor(() => expect(workflow.volumeActionBusy).toBe(false));
+                expect(inspectVolumeDeletion).toHaveBeenCalledOnce();
+            }
+            workflow.cancelVolumeAction();
+            expect(workflow.volumeAction).toBeNull();
+        },
+    );
+
     it('checks before job acknowledgement, submits once, and refreshes the new volume once', async () => {
         let acknowledge!: (value: JobState) => void;
         let complete!: (value: JobState) => void;
@@ -92,7 +168,7 @@ describe('MutationWorkflow', () => {
             cancelJob: vi.fn(),
         } as never);
         run.mockImplementation(jobs.run.bind(jobs));
-        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.requestVolumeAction(partition, 'add-volume');
         const pending = workflow.submitVolumeAction('bar');
         await vi.waitFor(() => expect(startVolumeMutations).toHaveBeenCalledOnce());
         expect(workflow.volumeActionPhase).toBe('checking');
@@ -111,7 +187,7 @@ describe('MutationWorkflow', () => {
     it('restores editing after validation refuses to start a job', async () => {
         const startVolumeMutations = vi.fn().mockRejectedValue(new CapacityWriteRejected('Capacity inspection failed'));
         const { workflow } = workflowWith({ startVolumeMutations });
-        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.requestVolumeAction(partition, 'add-volume');
         await workflow.submitVolumeAction('bar');
         expect(startVolumeMutations).toHaveBeenCalledOnce();
         expect(workflow.volumeActionError).toBe('Capacity inspection failed');
@@ -129,7 +205,7 @@ describe('MutationWorkflow', () => {
         const { workflow, run, refreshSession } = workflowWith({ startVolumeMutations, waitForJob });
         const jobs = new JobController({ waitForJob, cancelJob: vi.fn() } as never);
         run.mockImplementation(jobs.run.bind(jobs));
-        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.requestVolumeAction(partition, 'add-volume');
         await workflow.submitVolumeAction('bar');
         expect(workflow.volumeActionPhase).toBe('unconfirmed');
         expect(workflow.volumeActionRecovery).toBe('check');
@@ -147,7 +223,7 @@ describe('MutationWorkflow', () => {
         const startVolumeMutations = vi.fn().mockResolvedValue({ jobId: 9, status: 'queued', kind: 'test' });
         const { workflow, refreshSession } = workflowWith({ startVolumeMutations });
         refreshSession.mockRejectedValueOnce(new Error('Refresh disconnected'));
-        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.requestVolumeAction(partition, 'add-volume');
         await workflow.submitVolumeAction('bar');
         expect(workflow.volumeActionPhase).toBe('refresh-failed');
         expect(workflow.volumeActionRecovery).toBe('refresh');
@@ -156,7 +232,7 @@ describe('MutationWorkflow', () => {
         expect(startVolumeMutations).toHaveBeenCalledOnce();
         expect(workflow.volumeAction).toBeNull();
         startVolumeMutations.mockRejectedValueOnce(new Error('Response lost'));
-        workflow.requestVolumeAction(partition, 'add-volume');
+        await workflow.requestVolumeAction(partition, 'add-volume');
         await workflow.submitVolumeAction('bar');
         expect(workflow.volumeActionPhase).toBe('unconfirmed');
         expect(workflow.volumeActionRecovery).toBeNull();
@@ -462,7 +538,7 @@ describe('MutationWorkflow', () => {
         const startVolumeMutations = vi.fn();
         const { workflow } = workflowWith({ inspectVolumeDeletion, startVolumeMutations });
 
-        expect(workflow.requestVolumeAction(volume, 'delete-volume')).toBe(true);
+        expect(await workflow.requestVolumeAction(volume, 'delete-volume')).toBe(true);
         await vi.waitFor(() => expect(workflow.volumeDeletionInspection?.canDelete).toBe(false));
         await workflow.submitVolumeAction('Samples');
 
@@ -487,7 +563,7 @@ describe('MutationWorkflow', () => {
         const startVolumeMutations = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
         const { workflow, refreshSession } = workflowWith({ inspectVolumeDeletion, startVolumeMutations });
 
-        expect(workflow.requestVolumeDeletion([volume, secondVolume])).toBe(true);
+        expect(await workflow.requestVolumeDeletion([volume, secondVolume])).toBe(true);
         await vi.waitFor(() => expect(workflow.volumeDeletionInspection?.canDelete).toBe(true));
         await workflow.submitVolumeAction('');
 
@@ -499,11 +575,11 @@ describe('MutationWorkflow', () => {
         expect(refreshSession).toHaveBeenCalledWith({ partitionIndex: 0, volumeName: undefined });
     });
 
-    it('rejects duplicate deletion targets even when their tree ids differ', () => {
+    it('rejects duplicate deletion targets even when their tree ids differ', async () => {
         const duplicateVolume = { ...volume, id: 'duplicate-volume' };
         const { workflow } = workflowWith({});
 
-        expect(workflow.requestVolumeDeletion([volume, duplicateVolume])).toBe(false);
+        expect(await workflow.requestVolumeDeletion([volume, duplicateVolume])).toBe(false);
         expect(workflow.volumeAction).toBeNull();
     });
 
@@ -522,7 +598,7 @@ describe('MutationWorkflow', () => {
         const startPlacementRepair = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
         const { workflow, refreshSession } = workflowWith({ inspectPlacement, startPlacementRepair });
 
-        expect(workflow.requestVolumeAction(volume, 'repair-placement')).toBe(true);
+        expect(await workflow.requestVolumeAction(volume, 'repair-placement')).toBe(true);
         await vi.waitFor(() => expect(workflow.placementRepairRequest?.inspection?.repairObjectCount).toBe(1));
         await workflow.submitPlacementRepair();
 
@@ -561,7 +637,7 @@ describe('MutationWorkflow', () => {
         const startPlacementRepair = vi.fn().mockResolvedValue({ jobId: 1, status: 'queued' });
         const { workflow, refreshSession } = workflowWith({ inspectPlacement, startPlacementRepair });
 
-        expect(workflow.requestVolumeAction(partition, 'repair-placement')).toBe(true);
+        expect(await workflow.requestVolumeAction(partition, 'repair-placement')).toBe(true);
         await vi.waitFor(() => expect(workflow.placementRepairRequest?.inspection).toEqual(initial));
         await workflow.submitPlacementRepair('Recovered Waves');
 

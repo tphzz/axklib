@@ -212,10 +212,10 @@ struct UpdateProgramParametersOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::uint8_t program_number{};
-    // No inferred model: the default is unsupported by this current-layout operation.
-    ASeriesModel model{ASeriesModel::a3000};
+    std::optional<ASeriesModel> model{};
     ProgramParameters parameters;
     std::vector<ProgramAssignmentParameterPatch> assignments;
+    std::optional<std::string> expected_payload_sha256{};
 };
 
 struct SequenceSpec {
@@ -280,6 +280,7 @@ struct ReplaceProgramAssignmentsOperation {
     ASeriesModel model{ASeriesModel::a4000};
     std::string expected_payload_sha256;
     std::vector<ProgramAssignmentEdit> assignments;
+    ProgramParameters parameters{};
 };
 
 struct RetargetSampleWaveDataOperation {

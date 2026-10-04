@@ -1523,6 +1523,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/program-editor-catalog': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bounded Program parameter domains and effect reset vectors */
+        get: operations['programEditorCatalog'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/reports/coverage': {
         parameters: {
             query?: never;
@@ -2034,6 +2051,31 @@ export interface components {
         };
         /** @enum {string} */
         ASeriesLoadTarget: 'A3000' | 'A4000_A5000';
+        ASeriesProgramEditor: {
+            assignments: {
+                /** @enum {unknown} */
+                kind: 'SBNK' | 'SBAC' | 'UNKNOWN';
+                name: string;
+                ordinal: number;
+                targetObjectId: string | null;
+            }[];
+            editable: boolean;
+            /** @enum {unknown} */
+            model: 'A3000' | 'A5000';
+            partitionIndex: number;
+            payloadSha256: string;
+            /** @constant */
+            profile: 'a-series/program';
+            programName: string;
+            programNumber: number | null;
+            reason: string;
+            storageRevision: number;
+            targets: components['schemas']['ProgramEditorTarget'][];
+            values: {
+                [key: string]: number | boolean;
+            };
+            volumeName: string;
+        };
         ASeriesSampleEditor: {
             bankOverrides?: {
                 members: {
@@ -2064,7 +2106,7 @@ export interface components {
             partitionIndex: number;
             payloadSha256: string;
             playbackWindow: components['schemas']['SamplePlaybackWindow'];
-            profile: string;
+            profile: 'a-series/sample' | 'a-series/sample-bank';
             reason: string;
             sampleFormat: components['schemas']['SampleFormatMetadata'];
             sources: {
@@ -3211,7 +3253,8 @@ export interface components {
             warnings: components['schemas']['Issue'][];
         };
         ImageObjectDetail: {
-            editing?: components['schemas']['ASeriesSampleEditor'] | null;
+            editing?:
+                components['schemas']['ASeriesSampleEditor'] | components['schemas']['ASeriesProgramEditor'] | null;
             formatConversion?: components['schemas']['ObjectFormatConversion'] | null;
             image: {
                 format: string;
@@ -4818,6 +4861,53 @@ export interface components {
         };
         PlanTokenRequest: {
             planToken: string;
+        };
+        ProgramEditorCatalog: {
+            formats: components['schemas']['ProgramEditorFormat'][];
+            /** @constant */
+            schemaVersion: 1;
+        };
+        ProgramEditorFormat: {
+            effects: {
+                id: number;
+                label: string;
+                parameters: {
+                    editable: boolean;
+                    index: number;
+                    label: string;
+                    max: number;
+                    min: number;
+                }[];
+                printedNumber: number;
+                resetWords: number[];
+            }[];
+            fields: {
+                allowedValues?: number[];
+                boolean?: boolean;
+                defaultValue?: number | boolean;
+                key: string;
+                max: number;
+                min: number;
+            }[];
+            /** @enum {unknown} */
+            model: 'A3000' | 'A5000';
+        };
+        ProgramEditorTarget: {
+            assignable: boolean;
+            available: boolean;
+            /** @enum {unknown} */
+            kind: 'SBNK' | 'SBAC';
+            members: {
+                name: string;
+                objectId: string | null;
+            }[];
+            name: string;
+            objectId: string;
+            overrideKeys: string[];
+            reason: string;
+            values: {
+                [key: string]: number | boolean;
+            };
         };
         ProgramFormatConversion: {
             canConvertFormat: boolean;
@@ -14096,6 +14186,39 @@ export interface operations {
             };
             /** @description Contained internal failure */
             500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    programEditorCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Program editor catalog */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ProgramEditorCatalog'];
+                    };
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;

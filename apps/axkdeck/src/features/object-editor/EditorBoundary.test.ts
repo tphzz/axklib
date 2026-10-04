@@ -1,11 +1,12 @@
 import { sampleFormatFixture } from '../../test/sampleFormatFixture';
-import { fireEvent, render, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { ImageSessionWorkflow } from '../image-session/workflow.svelte';
 import type { ImageTransport, JobState, ObjectDetail } from '../../lib/transport';
-import type { ObjectParameterEdit } from '../../lib/objectEditing';
+import { sampleSnapshot, type ObjectParameterEdit } from '../../lib/objectEditing';
 import SampleSaveHarness from '../../test/SampleSaveHarness.svelte';
+import { ObjectEditorWorkflow } from './workflow.svelte';
 
 const native = vi.hoisted(() => ({
     invoke: vi.fn().mockResolvedValue(undefined),
@@ -84,13 +85,14 @@ function setup() {
                 new Promise<JobState>((resolve) => {
                     complete = () => {
                         const revision = current.image.revision + 1;
+                        const editing = sampleSnapshot(current)!;
                         current = {
                             ...current,
                             image: { ...current.image, revision },
                             editing: {
-                                ...current.editing!,
+                                ...editing,
                                 payloadSha256: String(revision).repeat(64),
-                                parameters: { ...current.editing!.parameters, ...submitted.operation.parameters },
+                                parameters: { ...editing.parameters, ...submitted.operation.parameters },
                             },
                         };
                         resolve({ jobId: 7, status: 'completed' } as JobState);
@@ -117,6 +119,155 @@ function setup() {
     });
     return { view, transport, imageSession, complete: () => complete() };
 }
+
+async function dirtyDraft() {
+    const fixture = setup();
+    await fireEvent.click(await fixture.view.findByRole('tab', { name: 'Map/Out' }));
+    await fireEvent.click(fixture.view.getByRole('button', { name: 'Pitch' }));
+    await fireEvent.input(fixture.view.getByRole('spinbutton', { name: 'Coarse tune' }), {
+        target: { value: '7' },
+    });
+    return fixture;
+}
+
+describe('Unsaved editor exit confirmation', () => {
+    it.each(['Discard', 'Save'] as const)(
+        '%s keeps the mounted selection tracked when the structural action is cancelled',
+        async (action) => {
+            const { view, imageSession, transport, complete } = await dirtyDraft();
+            const pending = imageSession.confirmEditorLeave();
+            const dialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+            await fireEvent.click(within(dialog).getByRole('button', { name: action }));
+            if (action === 'Save') {
+                await waitFor(() => expect(transport.waitForJob).toHaveBeenCalledOnce());
+                complete();
+            }
+            expect(await pending).toBe(true);
+            await waitFor(() => expect(view.queryByRole('dialog', { name: 'Unsaved edits' })).toBeNull());
+
+            // Cancelling the subsequent structural dialog leaves the original selection mounted.
+            const field = view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement;
+            expect(field.value).toBe(action === 'Discard' ? '0' : '7');
+            expect(view.getByRole('group', { name: 'Sample: Sample' })).toBeTruthy();
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+            await fireEvent.input(field, { target: { value: '9' } });
+            expect(view.getByRole('group', { name: 'Sample: Sample (unsaved changes)' })).toBeTruthy();
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+            const next = imageSession.confirmEditorLeave();
+            const nextDialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+            expect(within(nextDialog).getByText(/1 unsaved draft/)).toBeTruthy();
+            await fireEvent.click(within(nextDialog).getByRole('button', { name: 'Cancel' }));
+            expect(await next).toBe(false);
+            expect(field.value).toBe('9');
+        },
+    );
+
+    it('keeps the draft and navigation pending if preparation throws', async () => {
+        const { view, imageSession } = await dirtyDraft();
+        const save = vi
+            .spyOn(ObjectEditorWorkflow.prototype, 'saveAll')
+            .mockRejectedValueOnce(new Error('Invalid draft'));
+        const pending = imageSession.confirmEditorLeave();
+        const dialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+        expect(await within(dialog).findByText('Invalid draft')).toBeTruthy();
+        expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+        expect(await pending).toBe(false);
+        save.mockRestore();
+    });
+
+    it.each(['Cancel', 'Escape', 'Discard'] as const)('%s resolves without starting a save', async (action) => {
+        const { view, transport, imageSession } = await dirtyDraft();
+        const pending = imageSession.confirmEditorLeave();
+        const dialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+        expect(within(dialog).getByText(/1 unsaved draft/)).toBeTruthy();
+        expect(dialog.textContent).not.toContain('Sample');
+        expect(
+            within(dialog)
+                .getAllByRole('button')
+                .map((button) => button.textContent?.trim()),
+        ).toEqual(['Cancel', 'Discard', 'Save']);
+        if (action === 'Escape') await fireEvent.keyDown(dialog, { key: 'Escape' });
+        else await fireEvent.click(within(dialog).getByRole('button', { name: action }));
+        expect(await pending).toBe(action === 'Discard');
+        expect(transport.startObjectParameterEdit).not.toHaveBeenCalled();
+        expect(view.queryByRole('dialog', { name: 'Unsaved edits' })).toBeNull();
+        if (action !== 'Discard') {
+            expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('7');
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+        } else {
+            expect(await imageSession.confirmEditorLeave()).toBe(true);
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+        }
+    });
+
+    it('Save continues only after the confirmed job and workspace refresh', async () => {
+        const { view, transport, imageSession, complete } = await dirtyDraft();
+        let refreshed!: () => void;
+        imageSession.refresh.mockReturnValueOnce(new Promise<void>((resolve) => (refreshed = resolve)));
+        const continued = vi.fn();
+        const pending = imageSession.confirmEditorLeave().then(continued);
+        const dialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+        await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+        await waitFor(() => expect(transport.waitForJob).toHaveBeenCalledOnce());
+        expect(continued).not.toHaveBeenCalled();
+        for (const button of within(dialog).getAllByRole('button'))
+            expect((button as HTMLButtonElement).disabled).toBe(true);
+        await fireEvent.keyDown(dialog, { key: 'Escape' });
+        expect(continued).not.toHaveBeenCalled();
+        complete();
+        await waitFor(() => expect(imageSession.refresh).toHaveBeenCalledOnce());
+        expect(continued).not.toHaveBeenCalled();
+        expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+        refreshed();
+        await pending;
+        expect(continued).toHaveBeenCalledExactlyOnceWith(true);
+        await waitFor(() => expect(view.queryByRole('dialog', { name: 'Unsaved edits' })).toBeNull());
+        expect(transport.startObjectParameterEdit).toHaveBeenCalledOnce();
+        expect(await imageSession.confirmEditorLeave()).toBe(true);
+        expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+    });
+
+    it.each(['failed', 'unconfirmed', 'refresh-failed'] as const)(
+        'Save keeps navigation pending after a %s result',
+        async (outcome) => {
+            const { view, transport, imageSession, complete } = await dirtyDraft();
+            if (outcome === 'failed')
+                transport.waitForJob.mockResolvedValueOnce({
+                    jobId: 7,
+                    kind: 'alteration',
+                    status: 'failed',
+                    error: 'Rejected',
+                });
+            else if (outcome === 'unconfirmed')
+                transport.waitForJob.mockRejectedValueOnce(new Error('Connection lost'));
+            else imageSession.refresh.mockRejectedValueOnce(new Error('Refresh unavailable'));
+            const continued = vi.fn();
+            const pending = imageSession.confirmEditorLeave().then(continued);
+            const dialog = await view.findByRole('dialog', { name: 'Unsaved edits' });
+            await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+            await waitFor(() => expect(transport.waitForJob).toHaveBeenCalledOnce());
+            if (outcome === 'refresh-failed') complete();
+            await waitFor(() => expect(within(dialog).getByRole('status').textContent).toMatch(/did not complete/));
+            expect(continued).not.toHaveBeenCalled();
+            expect(transport.startObjectParameterEdit).toHaveBeenCalledOnce();
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+            expect((within(dialog).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(
+                outcome !== 'failed',
+            );
+            expect((within(dialog).getByRole('button', { name: 'Discard' }) as HTMLButtonElement).disabled).toBe(
+                outcome !== 'failed',
+            );
+            await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+            await pending;
+            expect(continued).toHaveBeenCalledExactlyOnceWith(false);
+            expect(view.queryByRole('dialog', { name: 'Unsaved edits' })).toBeNull();
+            expect((view.getByRole('spinbutton', { name: 'Coarse tune' }) as HTMLInputElement).value).toBe('7');
+            expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+        },
+    );
+});
 
 describe('Sample save and exit lifecycle', () => {
     it.each(['close', 'quit'] as const)(

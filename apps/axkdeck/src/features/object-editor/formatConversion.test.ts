@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
+import { sampleSnapshot } from '../../lib/objectEditing';
 import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { ObjectEditorWorkflow } from './workflow.svelte';
 
@@ -162,7 +163,7 @@ describe('explicit Sample format conversion', () => {
         });
         expect(await workflow.load(1, 'sample')).toBe(document);
         expect(workflow.navigation('a-series/sample')).toBe(navigation);
-        expect(document.detail!.editing!.sampleFormat.format).toBe('A4000_A5000_224');
+        expect(sampleSnapshot(document.detail)!.sampleFormat.format).toBe('A4000_A5000_224');
         expect(document.draft.dirty).toBe(false);
         expect(document.phase).toBe('editable');
         expect(workflow.conversionDocument).toBeNull();

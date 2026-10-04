@@ -3,6 +3,8 @@
 #include <iomanip>
 #include <sstream>
 
+#include "a_series_program_context.hpp"
+#include "a_series_program_editor.hpp"
 #include "a_series_sample_editor.hpp"
 #include "axklib/application/program_formats.hpp"
 #include "axklib/application/sample_formats.hpp"
@@ -411,6 +413,11 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         if (sample || bank)
             editing = bank ? detail::a_series_bank_editor(snapshot->second, *payload, writable, relationships)
                            : detail::a_series_sample_editor(snapshot->second, *payload, writable, sources);
+        else if (program)
+            editing = detail::a_series_program_editor(snapshot->second, *payload, writable);
+        if (editing.is_object() && editing.value("profile", "") == "a-series/program")
+            detail::add_program_editing_context(editing, object_id, (*session)->snapshots_by_id,
+                                                (*session)->relationships);
     }
     return Json{{"schemaVersion", 1U},
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},

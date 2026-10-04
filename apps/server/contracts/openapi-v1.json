@@ -125,6 +125,119 @@
         ],
         "type": "string"
       },
+      "ASeriesProgramEditor": {
+        "additionalProperties": false,
+        "properties": {
+          "assignments": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "SBNK",
+                    "SBAC",
+                    "UNKNOWN"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "ordinal": {
+                  "maximum": 998,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "targetObjectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "ordinal",
+                "kind",
+                "name",
+                "targetObjectId"
+              ],
+              "type": "object"
+            },
+            "maxItems": 999,
+            "type": "array"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "model": {
+            "enum": [
+              "A3000",
+              "A5000"
+            ]
+          },
+          "partitionIndex": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payloadSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "profile": {
+            "const": "a-series/program"
+          },
+          "programName": {
+            "type": "string"
+          },
+          "programNumber": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "storageRevision": {
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramEditorTarget"
+            },
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "editable",
+          "reason",
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "programNumber",
+          "programName",
+          "storageRevision",
+          "model",
+          "values",
+          "assignments",
+          "targets"
+        ],
+        "type": "object"
+      },
       "ASeriesSampleEditor": {
         "additionalProperties": false,
         "oneOf": [
@@ -275,7 +388,14 @@
             "$ref": "#/components/schemas/SamplePlaybackWindow"
           },
           "profile": {
-            "type": "string"
+            "oneOf": [
+              {
+                "const": "a-series/sample"
+              },
+              {
+                "const": "a-series/sample-bank"
+              }
+            ]
           },
           "reason": {
             "type": "string"
@@ -5560,6 +5680,9 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ASeriesSampleEditor"
+              },
+              {
+                "$ref": "#/components/schemas/ASeriesProgramEditor"
               },
               {
                 "type": "null"
@@ -13205,6 +13328,231 @@
         },
         "required": [
           "planToken"
+        ],
+        "type": "object"
+      },
+      "ProgramEditorCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "formats": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramEditorFormat"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "schemaVersion": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "formats"
+        ],
+        "type": "object"
+      },
+      "ProgramEditorFormat": {
+        "additionalProperties": false,
+        "properties": {
+          "effects": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "maximum": 96,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "parameters": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "editable": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "maximum": 15,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "max": {
+                        "type": "integer"
+                      },
+                      "min": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "index",
+                      "label",
+                      "min",
+                      "max",
+                      "editable"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 16,
+                  "minItems": 16,
+                  "type": "array"
+                },
+                "printedNumber": {
+                  "type": "integer"
+                },
+                "resetWords": {
+                  "items": {
+                    "maximum": 65535,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "maxItems": 16,
+                  "minItems": 16,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "printedNumber",
+                "resetWords",
+                "parameters"
+              ],
+              "type": "object"
+            },
+            "maxItems": 97,
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "allowedValues": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "boolean": {
+                  "type": "boolean"
+                },
+                "defaultValue": {
+                  "type": [
+                    "integer",
+                    "boolean"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                },
+                "max": {
+                  "type": "integer"
+                },
+                "min": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key",
+                "min",
+                "max"
+              ],
+              "type": "object"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "model": {
+            "enum": [
+              "A3000",
+              "A5000"
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "fields",
+          "effects"
+        ],
+        "type": "object"
+      },
+      "ProgramEditorTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "assignable": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "SBNK",
+              "SBAC"
+            ]
+          },
+          "members": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "objectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "objectId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "overrideKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "objectId",
+          "kind",
+          "name",
+          "assignable",
+          "reason",
+          "available",
+          "values",
+          "overrideKeys",
+          "members"
         ],
         "type": "object"
       },
@@ -42249,6 +42597,65 @@
         "x-axklib-operation-ids": [
           "package.verify"
         ]
+      }
+    },
+    "/program-editor-catalog": {
+      "get": {
+        "operationId": "programEditorCatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProgramEditorCatalog"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Program editor catalog",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "summary": "Bounded Program parameter domains and effect reset vectors"
       }
     },
     "/reports/coverage": {

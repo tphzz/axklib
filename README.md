@@ -77,6 +77,11 @@ unsafe allocation remain available for browsing and export of readable content.
   it does not emulate sampler filters, envelopes or effects.
 - Edit Sample Bank overrides without rewriting member Sample parameters;
   settings without a bank override use each member's own values.
+- Edit supported native A3000 and A4000/A5000 Programs: assignment Easy Edit,
+  effect routing and parameters, setup, controllers and StepWave. Program
+  drafts use undo/redo and explicit Save, without changing the stored format.
+  Effect parameters use their stored numeric ranges; the editor does not
+  emulate sampler effects. See [Program parameters](docs/axklib/program-parameters.md).
 - Explicitly convert supported Samples and Sample Banks between `a3k` and
   `a4k/a5k` formats, with checks that reject settings that cannot be represented.
   Converting a bank does not convert its member Samples. See

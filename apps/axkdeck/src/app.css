@@ -2352,6 +2352,7 @@ input:focus-visible {
   position: relative;
   min-width: 0;
 }
+.dialog-autocomplete-control input:enabled { cursor: pointer; }
 
 .dialog-autocomplete-control > .dialog-field-control {
   width: 100%;

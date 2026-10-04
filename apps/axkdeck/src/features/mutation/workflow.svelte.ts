@@ -26,6 +26,7 @@ import {
 } from './sampleBankAssignmentWorkflow.svelte';
 
 interface MutationWorkflowDependencies {
+    confirmEditorLeave?: () => Promise<boolean>;
     preferredASeriesGeneration?: () => import('../../lib/aSeriesPreferences.svelte').ASeriesGeneration;
     transport: ImageTransport;
     jobs: JobController;
@@ -126,8 +127,11 @@ export class MutationWorkflow {
         this.objectRenameAvailable = capabilities.objectRenameAvailable;
     }
 
-    requestVolumeAction(item: DiskTreeItem, action: ImageTreeAction): boolean {
+    async requestVolumeAction(item: DiskTreeItem, action: ImageTreeAction): Promise<boolean> {
         if (!this.volumeActionCanDismiss) return false;
+        const session = this.dependencies.sessionId();
+        if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return false;
+        if (session !== this.dependencies.sessionId() || !this.volumeActionCanDismiss) return false;
         if (action === 'repair-placement') return this.requestPlacementRepair(item);
         const partitionAction = action === 'rename-partition';
         if (partitionAction && (!this.partitionAvailable || item.kind !== 'partition')) return false;
@@ -144,7 +148,7 @@ export class MutationWorkflow {
         return true;
     }
 
-    requestVolumeDeletion(items: DiskTreeItem[]): boolean {
+    async requestVolumeDeletion(items: DiskTreeItem[]): Promise<boolean> {
         if (!this.volumeActionCanDismiss) return false;
         if (!this.volumeAvailable || items.length === 0) return false;
         const uniqueItems = new Map<string, DiskTreeItem>();
@@ -153,6 +157,9 @@ export class MutationWorkflow {
             uniqueItems.set(`${item.partitionIndex}\0${item.name}`, item);
         }
         if (uniqueItems.size !== items.length) return false;
+        const session = this.dependencies.sessionId();
+        if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return false;
+        if (session !== this.dependencies.sessionId() || !this.volumeActionCanDismiss) return false;
         this.volumeExecution.reset();
         this.volumeInspectionError = '';
         this.volumeDeletionInspection = null;
@@ -163,8 +170,11 @@ export class MutationWorkflow {
         return true;
     }
 
-    requestObjectRename(target: ObjectRenameTarget): void {
+    async requestObjectRename(target: ObjectRenameTarget): Promise<void> {
         if (!this.objectRenameAvailable || this.dependencies.sessionId() === null) return;
+        const session = this.dependencies.sessionId();
+        if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return;
+        if (session !== this.dependencies.sessionId()) return;
         this.objectRenameRequest = { target, busy: false, error: '' };
     }
 

@@ -56,6 +56,7 @@ struct ProgramAssignmentParameters {
     std::optional<std::int8_t> output1_level_offset{};
     std::optional<std::int8_t> output2_level_offset{};
     std::optional<bool> midi_control{};
+    std::optional<ProgramInheritableSwitch> velocity_crossfade{};
 };
 
 struct ProgramAssignmentParameterPatch {

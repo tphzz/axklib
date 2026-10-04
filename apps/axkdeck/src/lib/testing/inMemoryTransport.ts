@@ -373,6 +373,10 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startObjectRename', [sessionId, mutation]);
     }
 
+    programEditorCatalog(): Promise<import('../objectEditing').ProgramEditorCatalog> {
+        return this.invoke('programEditorCatalog', []);
+    }
+
     startObjectParameterEdit(
         sessionId: number,
         edit: import('../objectEditing').ObjectParameterEdit,

@@ -317,6 +317,63 @@ TEST_F(SampleWaveDataRetarget, CombinedWindowAndLoopEditPreservesEveryOtherByte)
     }
 }
 
+TEST_F(SampleWaveDataRetarget, RetainedNamedChannelsAllowLevelEditWithoutChangingAnyOtherPayloadBytes) {
+    const auto *original_sample = find(before, axk::ObjectType::sbnk, "Stereo");
+    ASSERT_NE(original_sample, nullptr);
+    patch_sample("Stereo", 0xd0U, {original_sample->raw_payload[0xd0U] | std::byte{2}});
+    ASSERT_FALSE(HasFatalFailure());
+    auto edit = operation("Stereo", "Old Left");
+    edit["type"] = "update_sbnk_parameters";
+    edit.erase("waveform_name");
+    edit["parameters"] = {{"level", 87}};
+    const auto parsed = parse_retarget(edit);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto original = image_bytes(source);
+
+    const auto changed = axk::alter_hds(source, *parsed, output);
+
+    ASSERT_TRUE(changed) << changed.error().message;
+    EXPECT_EQ(image_bytes(source), original);
+    const auto after = catalog(output);
+    ASSERT_TRUE(after);
+    ASSERT_EQ(after->objects.size(), before.objects.size());
+    for (const auto &old : before.objects) {
+        const auto *current = find(*after, old.object.header.type, old.object.header.name);
+        ASSERT_NE(current, nullptr);
+        auto expected = old.raw_payload;
+        if (old.object.header.type == axk::ObjectType::sbnk && old.object.header.name == "Stereo")
+            expected[0x116U] = std::byte{87};
+        EXPECT_EQ(current->raw_payload, expected) << old.object.header.name;
+    }
+}
+
+TEST_F(SampleWaveDataRetarget, RetainedNamedChannelsRejectPlaybackAndExpansionEditsWithoutPublishingOutput) {
+    const auto *original_sample = find(before, axk::ObjectType::sbnk, "Stereo");
+    ASSERT_NE(original_sample, nullptr);
+    patch_sample("Stereo", 0xd0U, {original_sample->raw_payload[0xd0U] | std::byte{2}});
+    ASSERT_FALSE(HasFatalFailure());
+    const auto original = image_bytes(source);
+    for (const auto *kind : {"playback_window", "expand_detune", "expand_dephase"}) {
+        SCOPED_TRACE(kind);
+        auto edit = operation("Stereo", "Old Left");
+        edit["type"] = "update_sbnk_parameters";
+        edit.erase("waveform_name");
+        edit["parameters"] = {{"level", 87}};
+        if (std::string_view{kind} == "playback_window")
+            edit[kind] = {{"start_frame", 1}, {"length_frames", 14}};
+        else
+            edit["parameters"][kind] = 1;
+        const auto parsed = parse_retarget(edit);
+        ASSERT_TRUE(parsed) << parsed.error().message;
+
+        EXPECT_FALSE(axk::inspect_hds_alteration(source, *parsed));
+        EXPECT_FALSE(axk::alter_hds(source, *parsed, output));
+
+        EXPECT_FALSE(std::filesystem::exists(output));
+        EXPECT_EQ(image_bytes(source), original);
+    }
+}
+
 TEST_F(SampleWaveDataRetarget, WindowUpdateRejectsRetainedLoopOutsideWindowAndStalePayload) {
     auto edit = operation("Mono", "Old Left");
     edit["type"] = "update_sbnk_parameters";

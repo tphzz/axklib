@@ -3,6 +3,7 @@
 #include <format>
 #include <utility>
 
+#include "axklib/package_archive.hpp"
 #include "axklib/program_parameter_codec.hpp"
 
 namespace axk::alteration_internal {
@@ -24,11 +25,18 @@ Result<OperationReport> update_program_parameters(TransactionState &state, Opera
     auto payload = current_payload(state, partition, located->second, cancellation);
     if (!payload)
         return std::unexpected{payload.error()};
+    if (!operation.model)
+        return std::unexpected{
+            make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, "An explicit Program model is required")};
+    if (operation.expected_payload_sha256 &&
+        package_internal::hex_digest(package_internal::sha256(*payload)) != *operation.expected_payload_sha256)
+        return std::unexpected{make_error(ErrorCode::transaction_stale, ErrorCategory::transaction,
+                                          "Program payload changed since inspection")};
 
     // Both scopes edit a private payload before anything enters the transaction's changed records.
-    if (auto applied = detail::apply_program_parameters(*payload, operation.parameters, operation.model); !applied)
+    if (auto applied = detail::apply_program_parameters(*payload, operation.parameters, *operation.model); !applied)
         return std::unexpected{applied.error()};
-    if (auto applied = detail::apply_program_assignment_patches(*payload, operation.assignments, operation.model);
+    if (auto applied = detail::apply_program_assignment_patches(*payload, operation.assignments, *operation.model);
         !applied)
         return std::unexpected{applied.error()};
     if (auto replaced =

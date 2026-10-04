@@ -6,6 +6,7 @@ import ParameterField from './ParameterField.svelte';
 import { sampleTabs } from './fields';
 import { EditorDraft } from '../../../object-editor/draft.svelte';
 import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
+import { sampleSnapshot } from '../../../../lib/objectEditing';
 
 it('edits six controller rows independently through searchable controls', async () => {
     const pages = sampleTabs.find((tab) => tab.id === 'midi-ctrl')!.pages;
@@ -37,7 +38,7 @@ it('edits six controller rows independently through searchable controls', async 
         expect(view.getByRole('columnheader', { name: label }).querySelector('.extended-parameter')).toBeNull();
     await fireEvent.input(view.getByRole('spinbutton', { name: 'Control 6 Range' }), { target: { value: '25' } });
     expect(draft.changes).toEqual({ 'controls.6.range': 25 });
-    const editing = document.detail!.editing!;
+    const editing = sampleSnapshot(document.detail)!;
     const parameterCapabilities = { ...editing.parameterCapabilities };
     for (const [key, capability] of Object.entries(parameterCapabilities))
         parameterCapabilities[key] = { ...capability, a4000A5000: capability.a3000 };

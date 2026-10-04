@@ -1,5 +1,5 @@
 import type { GraphPoint } from '../../../object-editor/graphTypes';
-import type { EditorDraft } from '../../../object-editor/draft.svelte';
+import type { EditorDraftState } from '../../../object-editor/draft.svelte';
 
 export type SampleEnvelope = 'aeg' | 'feg' | 'peg';
 export interface SampleEnvelopePoint extends GraphPoint {
@@ -12,7 +12,7 @@ export interface SampleEnvelopePoint extends GraphPoint {
 export const envelopeDuration = (rate: number) => 0.25 + 127 - Math.max(0, Math.min(127, rate));
 export const envelopeRate = (duration: number) => Math.max(0, Math.min(127, Math.round(127.25 - duration)));
 
-export function envelopeDurations(kind: SampleEnvelope, values: EditorDraft['values']) {
+export function envelopeDurations(kind: SampleEnvelope, values: EditorDraftState['values']) {
     return ['attack', 'decay', 'release'].map((stage) => {
         const rate = Number(values[`${kind}.${stage}_rate`] ?? 127);
         // Yamaha owner's manual p137 explicitly defines maximum AEG release as immediate.
@@ -20,7 +20,7 @@ export function envelopeDurations(kind: SampleEnvelope, values: EditorDraft['val
     });
 }
 
-export function sampleEnvelope(kind: SampleEnvelope, values: EditorDraft['values']): SampleEnvelopePoint[] {
+export function sampleEnvelope(kind: SampleEnvelope, values: EditorDraftState['values']): SampleEnvelopePoint[] {
     const amplitude = kind === 'aeg';
     const hold = amplitude && values['aeg.attack_mode'] === 1;
     const level = (name: string) => Number(values[`${kind}.${name}_level`] ?? 0);

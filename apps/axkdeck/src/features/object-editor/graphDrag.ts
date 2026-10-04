@@ -1,7 +1,7 @@
 export function graphDrag(
     start: PointerEvent,
     origin: { x: number; y: number },
-    bounds: { width: number; height: number; unboundedX?: boolean },
+    bounds: { width: number; height: number; unboundedX?: boolean; unboundedY?: boolean },
     change: (x: number, y: number) => void,
     end: () => void,
 ): () => void {
@@ -21,7 +21,8 @@ export function graphDrag(
         if (!pending || finished) return;
         pending = false;
         const x = origin.x + (lastX - start.clientX) / width;
-        change(bounds.unboundedX ? x : clamp(x), clamp(origin.y - (lastY - start.clientY) / height));
+        const y = origin.y - (lastY - start.clientY) / height;
+        change(bounds.unboundedX ? x : clamp(x), bounds.unboundedY ? y : clamp(y));
     };
     const move = (event: PointerEvent) => {
         if (event.pointerId !== start.pointerId || (event.clientX === lastX && event.clientY === lastY)) return;

@@ -21,6 +21,7 @@ void register_infrastructure_routes(ServerCrowApp &app, InfrastructureRoutes rou
     app.route_dynamic("/api/v1/host-directories/list")
         .methods(crow::HTTPMethod::Post)(std::move(routes.host_directory_list));
     app.route_dynamic("/api/v1/openapi.json")(std::move(routes.openapi));
+    app.route_dynamic("/api/v1/program-editor-catalog")(std::move(routes.program_editor_catalog));
 }
 
 } // namespace axk::server::detail

@@ -2,6 +2,47 @@ import type { components } from './generated/axklibApiV1';
 import type { JobState } from './transport';
 
 export type SampleEditingSnapshot = components['schemas']['ASeriesSampleEditor'];
+export type ProgramEditingSnapshot = components['schemas']['ASeriesProgramEditor'];
+export type EditingSnapshot = SampleEditingSnapshot | ProgramEditingSnapshot;
+export function sampleSnapshot(
+    detail: { editing?: EditingSnapshot | null } | null | undefined,
+): SampleEditingSnapshot | undefined {
+    return detail?.editing?.profile === 'a-series/program' ? undefined : (detail?.editing ?? undefined);
+}
+export type ProgramEditorCatalog = components['schemas']['ProgramEditorCatalog'];
+export type ProgramEditorFormat = components['schemas']['ProgramEditorFormat'];
+export type ProgramEditorTarget = components['schemas']['ProgramEditorTarget'];
+export interface ProgramParameterEdit {
+    expectedRevision: number;
+    operation: {
+        id: string;
+        partition_index: number;
+        volume_name: string;
+        program_number: number;
+        model: 'A3000' | 'A5000';
+        expected_payload_sha256: string;
+        parameters: Record<string, unknown>;
+    } & (
+        | {
+              type: 'update_program_parameters';
+              assignments: {
+                  ordinal: number;
+                  expected_target_kind: string;
+                  expected_target_name: string;
+                  parameters: Record<string, unknown>;
+              }[];
+          }
+        | {
+              type: 'replace_program_assignments';
+              assignments: {
+                  retain_ordinal?: number;
+                  sample?: string;
+                  sample_bank?: string;
+                  parameters?: Record<string, unknown>;
+              }[];
+          }
+    );
+}
 export interface SampleParameterEdit {
     expectedRevision: number;
     operation: {
@@ -29,8 +70,9 @@ export interface BankParameterEdit {
         disable: number[];
     };
 }
-export type ObjectParameterEdit = SampleParameterEdit | BankParameterEdit;
+export type ObjectParameterEdit = SampleParameterEdit | BankParameterEdit | ProgramParameterEdit;
 export interface ObjectEditingTransport {
+    programEditorCatalog(): Promise<ProgramEditorCatalog>;
     startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState>;
     startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState>;
     startObjectFormatConversion(sessionId: number, edit: ObjectFormatConversionRequest): Promise<JobState>;

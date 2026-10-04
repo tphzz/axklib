@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { onDestroy, untrack, tick } from 'svelte';
     import { on } from 'svelte/events';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
@@ -16,7 +17,7 @@
     const audio = editorAudio();
     const view = $derived(sampleView(document));
     let playbackRequest = 0;
-    const bank = $derived(document.detail?.editing?.profile === 'a-series/sample-bank');
+    const bank = $derived(sampleSnapshot(document.detail)?.profile === 'a-series/sample-bank');
     const sourceDetail = $derived(bank ? document.previewDetail : document.detail);
     $effect(() => {
         document.detail;
@@ -44,7 +45,7 @@
         audio?.audition.state?.objectId === document.detail!.object.id && audio.audition.state.status === 'preparing',
     );
     const playbackValidation = $derived(
-        document.detail?.editing?.editable === false && !document.draft.dirty
+        sampleSnapshot(document.detail)?.editable === false && !document.draft.dirty
             ? document.conflict || Object.values(document.inputErrors ?? {}).find(Boolean) || ''
             : document.validation,
     );
@@ -161,7 +162,7 @@
                     audio.transport,
                     document.sessionId,
                     sourceIdentity.object.id,
-                    sourceIdentity.editing!,
+                    sampleSnapshot(sourceIdentity)!,
                     values,
                     view.note,
                     context,

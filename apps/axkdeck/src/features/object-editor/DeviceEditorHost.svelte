@@ -1,19 +1,38 @@
 <script lang="ts">
     import './editor.css';
-    import { onDestroy, untrack } from 'svelte';
+    import { onDestroy, untrack, type Snippet } from 'svelte';
     import { measureWidth } from './measureWidth';
     import { provideEditorWidth } from './editorWidth';
-    import type { InspectorSelection } from '../../lib/types';
+    import type { InspectorSelection, ProgramSampleSelectRow } from '../../lib/types';
     import { objectEditors } from './context';
     import { objectEditorAdapter } from './registry';
     import type { ObjectEditorDocument } from './workflow.svelte';
     import SampleEditor from '../devices/a-series/sample/SampleEditor.svelte';
+    import ProgramEditor from '../devices/a-series/program/ProgramEditor.svelte';
+    import { programTabs } from '../devices/a-series/program/fields';
+    import EditorTabs from '../../lib/components/EditorTabs.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import EditorHeader from '../../lib/components/EditorHeader.svelte';
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
     import { userFacingMessage } from '../../lib/userFacingMessage';
     import SampleNavigation from '../devices/a-series/sample/SampleNavigation.svelte';
-    let { sessionId, selection }: { sessionId: number | null; selection: InspectorSelection } = $props();
+    let {
+        sessionId,
+        selection,
+        assignmentQuery = '',
+        onassignmentquerychange = () => {},
+        onassignmentselect = () => {},
+        multiPartContext = null,
+        fallback,
+    }: {
+        sessionId: number | null;
+        selection: InspectorSelection;
+        assignmentQuery?: string;
+        onassignmentquerychange?: (value: string) => void;
+        onassignmentselect?: (row: ProgramSampleSelectRow) => void;
+        multiPartContext?: { partLabel: string; programNumber: number } | null;
+        fallback?: Snippet;
+    } = $props();
     const editors = objectEditors();
     const panelId = $props.id();
     let width = $state(0);
@@ -26,16 +45,20 @@
     const editing = $derived(document?.detail && objectEditorAdapter(document.detail) ? document.detail.editing : null);
     const navigation = $derived(editing && editors?.navigation(editing.profile));
     const sampleId = $derived(
-        selection?.kind === 'sample' || selection?.kind === 'sample-bank' ? selection.item.objectId : null,
+        selection?.kind === 'sample' || selection?.kind === 'sample-bank'
+            ? selection.item.objectId
+            : selection?.kind === 'program'
+              ? selection.program.objectId
+              : null,
     );
     const matches = $derived(document?.sessionId === sessionId && document?.detail?.object.id === sampleId);
     const inactive = $derived(pending || !matches);
     const displayedPreview = $derived(matches && selection?.kind === 'sample' ? selection.preview : previousPreview);
     const conversion = $derived(document?.detail?.formatConversion);
     const conversionTitle = $derived(
-        sampleConversionTitle(
-            conversion?.kind !== 'PROGRAM' ? conversion?.formatConversions[0]?.targetFormat : undefined,
-        ),
+        conversion?.kind === 'PROGRAM'
+            ? 'Program format conversion'
+            : sampleConversionTitle(conversion?.formatConversions[0]?.targetFormat),
     );
     $effect(() => {
         if (editors) editors.visible = !!navigation;
@@ -56,7 +79,7 @@
             return;
         }
         pending = true;
-        message = 'Loading Sample parameters';
+        message = `Loading ${selection?.kind === 'program' ? 'Program' : 'Sample'} parameters`;
         if (editors && session !== null && id)
             void untrack(() => editors.load(session, id))
                 .then((value) => {
@@ -65,7 +88,7 @@
                     message =
                         value?.detail && objectEditorAdapter(value.detail)
                             ? ''
-                            : 'Editing is not available for this Sample format';
+                            : 'Editing is not available for this object format';
                     if (!value?.detail || !objectEditorAdapter(value.detail)) {
                         resolved = null;
                         pending = false;
@@ -109,7 +132,7 @@
 
 <section
     class="device-editor"
-    aria-label="Sample editor"
+    aria-label={selection?.kind === 'program' ? 'Program editor' : 'Sample editor'}
     aria-busy={pending}
     use:measureWidth={{ scope: 'editor', change: (value) => (width = value) }}
 >
@@ -123,9 +146,18 @@
             aria-hidden={inactive ? 'true' : undefined}
         >
             <EditorHeader>
-                <SampleNavigation {navigation} {panelId} />
+                {#if editing?.profile === 'a-series/program'}
+                    <EditorTabs
+                        tabs={programTabs}
+                        active={navigation.tab}
+                        onselect={(id) => navigation.selectTab(id)}
+                        label="Program parameter tabs"
+                        idPrefix={panelId}
+                        {panelId}
+                    />
+                {:else}<SampleNavigation {navigation} {panelId} />{/if}
                 {#snippet status()}
-                    {#if editors.comparison.count > 1}<span
+                    {#if editing?.profile !== 'a-series/program' && editors.comparison.count > 1}<span
                             class="comparison"
                             role="status"
                             title={`Editing ${current.detail?.object.name} only`}>{editors.comparison.status}</span
@@ -144,46 +176,71 @@
                         <button
                             class="icon-button"
                             title="Undo"
-                            aria-label="Undo Sample edit"
+                            aria-label={`Undo ${current.noun} edit`}
                             disabled={!current.draft.canUndo || current.phase !== 'editable'}
                             onclick={() => current.draft.undo()}><Icon name="undo" size={14} /></button
                         >
                         <button
                             class="icon-button"
                             title="Redo"
-                            aria-label="Redo Sample edit"
+                            aria-label={`Redo ${current.noun} edit`}
                             disabled={!current.draft.canRedo || current.phase !== 'editable'}
                             onclick={() => current.draft.redo()}><Icon name="redo" size={14} /></button
                         >
                         <button
                             class="editor-action"
+                            title="Discard"
+                            aria-label="Discard"
                             disabled={(!current.draft.dirty && !current.conflict) || current.phase !== 'editable'}
                             onclick={() =>
                                 void editors.discard(current).catch((error) => {
                                     current.status = userFacingMessage(error);
-                                })}>Discard</button
+                                })}
+                            ><span class="compact-icon"><Icon name="close" size={14} /></span><span class="action-label"
+                                >Discard</span
+                            ></button
                         >
                         {#if current.phase === 'refresh-failed' || (current.phase === 'unconfirmed' && current.jobId !== null)}
-                            <button class="editor-action" onclick={() => void editors.recover(current)}
-                                ><Icon name="refresh" size={14} />{current.phase === 'refresh-failed'
-                                    ? 'Refresh'
-                                    : 'Check status'}</button
+                            <button
+                                class="editor-action"
+                                title={current.phase === 'refresh-failed' ? 'Refresh' : 'Check status'}
+                                aria-label={current.phase === 'refresh-failed' ? 'Refresh' : 'Check status'}
+                                onclick={() => void editors.recover(current)}
+                                ><Icon name="refresh" size={14} /><span class="action-label"
+                                    >{current.phase === 'refresh-failed' ? 'Refresh' : 'Check status'}</span
+                                ></button
                             >
                         {:else}
                             <button
                                 class="editor-action save"
+                                title="Save"
+                                aria-label="Save"
                                 disabled={!current.canSave || editors.locked}
-                                onclick={() => void editors.save(current)}><Icon name="save" size={14} />Save</button
+                                onclick={() => void editors.save(current)}
+                                ><Icon name="save" size={14} /><span class="action-label">Save</span></button
                             >
                         {/if}
                     </div>
                 {/snippet}
             </EditorHeader>
             {#key document}
-                <SampleEditor {document} {navigation} {panelId} preview={displayedPreview} {inactive} />
+                {#if editing?.profile === 'a-series/program'}
+                    <ProgramEditor
+                        {document}
+                        {navigation}
+                        {panelId}
+                        {inactive}
+                        {selection}
+                        {assignmentQuery}
+                        {onassignmentquerychange}
+                        {onassignmentselect}
+                        {multiPartContext}
+                    />
+                {:else}<SampleEditor {document} {navigation} {panelId} preview={displayedPreview} {inactive} />{/if}
             {/key}
         </div>
         {#if inactive}<div class="transition-status" role="status">{message}</div>{/if}
+    {:else if !pending && fallback}{@render fallback()}
     {:else}<p role="status">{message}</p>{/if}
 </section>
 
@@ -249,6 +306,24 @@
     }
     .save {
         border-color: var(--color-accent);
+    }
+    .compact-icon {
+        display: none;
+    }
+    .device-editor:global([data-editor-under~='420']) .actions {
+        gap: 3px;
+    }
+    .device-editor:global([data-editor-under~='420']) .actions button {
+        width: 26px;
+        min-width: 26px;
+        padding: 0;
+        justify-content: center;
+    }
+    .device-editor:global([data-editor-under~='420']) .action-label {
+        display: none;
+    }
+    .device-editor:global([data-editor-under~='420']) .compact-icon {
+        display: flex;
     }
     button:disabled {
         opacity: 0.4;

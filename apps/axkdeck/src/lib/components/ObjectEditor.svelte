@@ -24,6 +24,7 @@
         onassignmentquerychange: (value: string) => void;
         onassignmentselect: (row: ProgramSampleSelectRow) => void;
         multiPartContext?: { partLabel: string; programNumber: number } | null;
+        embedded?: boolean;
     }
 
     let {
@@ -32,6 +33,7 @@
         onassignmentquerychange,
         onassignmentselect,
         multiPartContext = null,
+        embedded = false,
     }: Props = $props();
     let programTab = $state<ProgramEditorTab>('sample-select');
     let sampleTab = $state<SampleEditorTab>('trim-loop');
@@ -102,16 +104,18 @@
         </div>
     {/if}
     {#if selection?.kind === 'program'}
-        <EditorHeader>
-            <EditorTabs
-                tabs={programTabs}
-                active={programTab}
-                onselect={(id) => (programTab = id)}
-                label="Program editor"
-                idPrefix="program-tab"
-                panelId={`program-panel-${programTab}`}
-            />
-        </EditorHeader>
+        {#if !embedded}
+            <EditorHeader>
+                <EditorTabs
+                    tabs={programTabs}
+                    active={programTab}
+                    onselect={(id) => (programTab = id)}
+                    label="Program editor"
+                    idPrefix="program-tab"
+                    panelId={`program-panel-${programTab}`}
+                />
+            </EditorHeader>
+        {/if}
         <div
             id={`program-panel-${programTab}`}
             class="editor-panel"

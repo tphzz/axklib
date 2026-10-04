@@ -466,6 +466,16 @@
         }
       }
     },
+    "/program-editor-catalog": {
+      "get": {
+        "operationId": "programEditorCatalog",
+        "summary": "Bounded Program parameter domains and effect reset vectors",
+        "responses": {
+          "200": {"description": "Program editor catalog", "content": {"application/json": {"schema": {"type": "object", "required": ["data"], "properties": {"data": {"$ref": "#/components/schemas/ProgramEditorCatalog"}}}}}},
+          "default": {"description": "Request failed", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
+        }
+      }
+    },
     "/images/{imageId}/system-program-contexts": {
       "parameters": [
         {"name": "imageId", "in": "path", "required": true, "schema": {"type": "string"}},
@@ -2375,6 +2385,67 @@
           }
         }
       },
+      "ASeriesProgramEditor": {
+        "type": "object", "additionalProperties": false,
+        "required": ["profile", "editable", "reason", "payloadSha256", "partitionIndex", "volumeName", "programNumber", "programName", "storageRevision", "model", "values", "assignments", "targets"],
+        "properties": {
+          "profile": {"const": "a-series/program"},
+          "editable": {"type": "boolean"}, "reason": {"type": "string"},
+          "payloadSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "partitionIndex": {"type": "integer", "minimum": 0}, "volumeName": {"type": "string"},
+          "programNumber": {"type": ["integer", "null"], "minimum": 1, "maximum": 128},
+          "programName": {"type": "string"}, "storageRevision": {"type": "integer"},
+          "model": {"enum": ["A3000", "A5000"]},
+          "values": {"type": "object", "additionalProperties": {"type": ["integer", "boolean"]}},
+          "assignments": {"type": "array", "maxItems": 999, "items": {
+            "type": "object", "additionalProperties": false, "required": ["ordinal", "kind", "name", "targetObjectId"],
+            "properties": {"ordinal": {"type": "integer", "minimum": 0, "maximum": 998}, "kind": {"enum": ["SBNK", "SBAC", "UNKNOWN"]}, "name": {"type": "string"}, "targetObjectId": {"type": ["string", "null"]}}
+          }},
+          "targets": {"type": "array", "items": {"$ref": "#/components/schemas/ProgramEditorTarget"}}
+        }
+      },
+      "ProgramEditorTarget": {
+        "type": "object", "additionalProperties": false,
+        "required": ["objectId", "kind", "name", "assignable", "reason", "available", "values", "overrideKeys", "members"],
+        "properties": {
+          "objectId": {"type": "string"}, "kind": {"enum": ["SBNK", "SBAC"]}, "name": {"type": "string"},
+          "assignable": {"type": "boolean"}, "reason": {"type": "string"}, "available": {"type": "boolean"},
+          "values": {"type": "object", "additionalProperties": {"type": ["integer", "boolean"]}},
+          "overrideKeys": {"type": "array", "items": {"type": "string"}},
+          "members": {"type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "objectId"],
+            "properties": {"name": {"type": "string"}, "objectId": {"type": ["string", "null"]}}
+          }}
+        }
+      },
+      "ProgramEditorCatalog": {
+        "type": "object", "additionalProperties": false, "required": ["schemaVersion", "formats"],
+        "properties": {
+          "schemaVersion": {"const": 1},
+          "formats": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/components/schemas/ProgramEditorFormat"}}
+        }
+      },
+      "ProgramEditorFormat": {
+        "type": "object", "additionalProperties": false, "required": ["model", "fields", "effects"],
+        "properties": {
+          "model": {"enum": ["A3000", "A5000"]},
+          "fields": {"type": "array", "maxItems": 256, "items": {
+            "type": "object", "additionalProperties": false, "required": ["key", "min", "max"],
+            "properties": {"key": {"type": "string"}, "min": {"type": "integer"}, "max": {"type": "integer"}, "boolean": {"type": "boolean"}, "defaultValue": {"type": ["integer", "boolean"]}, "allowedValues": {"type": "array", "items": {"type": "integer"}}}
+          }},
+          "effects": {"type": "array", "maxItems": 97, "items": {
+            "type": "object", "additionalProperties": false, "required": ["id", "label", "printedNumber", "resetWords", "parameters"],
+            "properties": {
+              "id": {"type": "integer", "minimum": 0, "maximum": 96}, "label": {"type": "string"}, "printedNumber": {"type": "integer"},
+              "resetWords": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "integer", "minimum": 0, "maximum": 65535}},
+              "parameters": {"type": "array", "minItems": 16, "maxItems": 16, "items": {
+                "type": "object", "additionalProperties": false, "required": ["index", "label", "min", "max", "editable"],
+                "properties": {"index": {"type": "integer", "minimum": 0, "maximum": 15}, "label": {"type": "string"}, "min": {"type": "integer"}, "max": {"type": "integer"}, "editable": {"type": "boolean"}}
+              }}
+            }
+          }}
+        }
+      },
       "ASeriesSampleEditor": {
         "type": "object",
         "additionalProperties": false,
@@ -2402,9 +2473,7 @@
           "parameterCapabilities"
         ],
         "properties": {
-          "profile": {
-            "type": "string"
-          },
+          "profile": {"oneOf": [{"const": "a-series/sample"}, {"const": "a-series/sample-bank"}]},
           "bankOverrides": {
             "type": "object",
             "additionalProperties": false,
@@ -2650,6 +2719,7 @@
               {
                 "$ref": "#/components/schemas/ASeriesSampleEditor"
               },
+              {"$ref": "#/components/schemas/ASeriesProgramEditor"},
               {
                 "type": "null"
               }

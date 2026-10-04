@@ -147,6 +147,13 @@ flag: the member bindings, channel windows and pitch values remain unchanged.
 Retained expanded or duplicate-source pairs are not authorized for topology
 changes by these scalar edits. Context-free registered templates retain their
 separate restrictions.
+The editor permits unrelated parameter updates on retained named two-channel
+layouts even when their flags do not describe an ordinary stereo pair. These
+updates preserve the flags, source names and audio data. Playback-range edits
+remain disabled for such layouts, as do detune/dephase changes; width changes
+are also disabled when retained detune/dephase values make them dependent on
+an unsupported topology update. Different stored channel pitches or active
+loop bounds retain their own shared-edit restrictions.
 Sample EQ frequency is a stored selection, not a frequency in hertz. For
 example, raw `30` displays as `630Hz`.
 

@@ -11,6 +11,7 @@
     import { sampleFields } from '../features/devices/a-series/sample/fields';
     import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
     import type { ObjectDetail, ImageTransport } from '../lib/transport';
+    import { sampleSnapshot } from '../lib/objectEditing';
     import type {
         ObjectParameterEdit,
         SampleDuplicationRequest,
@@ -161,7 +162,7 @@
         },
         startSampleDuplication: async (_: number, edit: SampleDuplicationRequest) => {
             writes++;
-            const parameters = detail(edit.operation.sample_name).editing!.parameters;
+            const parameters = sampleSnapshot(detail(edit.operation.sample_name))!.parameters;
             patchParameters(parameters, edit.operation.parameters);
             copies.set(edit.operation.new_name, parameters);
             names = [...names, edit.operation.new_name];

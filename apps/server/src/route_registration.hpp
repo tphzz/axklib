@@ -32,6 +32,7 @@ struct InfrastructureRoutes {
     RequestRoute host_directory_roots;
     RequestRoute host_directory_list;
     RequestRoute openapi;
+    RequestRoute program_editor_catalog;
 };
 
 void register_infrastructure_routes(ServerCrowApp &app, InfrastructureRoutes routes);

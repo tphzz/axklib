@@ -40,7 +40,7 @@ export class SampleDuplication {
         if (this.dependencies.otherWritePending() || this.source.phase !== 'editable')
             return 'Resolve the pending Sample save first';
         if (this.source.validation) return this.source.validation;
-        if (!this.source.detail?.editing?.canEditPlayback)
+        if (this.source.detail?.editing?.profile !== 'a-series/sample' || !this.source.detail.editing.canEditPlayback)
             return 'Duplication requires matching stereo playback windows and sample rates';
         const name = this.name.trim();
         if (!/^[\x20-\x7e]{1,16}$/.test(name)) return 'Use 1-16 printable ASCII characters';

@@ -573,7 +573,7 @@ TEST_F(VolumeCapacityScan, NewProgramReferencesAreInspectedWithoutPayloadGrowth)
     replacement.volume_name = "Programs";
     replacement.program_number = 1U;
     replacement.expected_payload_sha256 = axk::package_internal::hex_digest(axk::package_internal::sha256(payload));
-    replacement.assignments.push_back({{}, axk::ProgramAssignmentSpec{"SBNK", "Member"}});
+    replacement.assignments.push_back({{}, axk::ProgramAssignmentSpec{"SBAC", "Bank"}});
     const axk::AlterationManifest manifest{"1.0", {{"assign", replacement}}};
     const auto inspection = axk::inspect_hds_alteration(image_path, manifest);
     ASSERT_TRUE(inspection) << inspection.error().message;
@@ -582,7 +582,7 @@ TEST_F(VolumeCapacityScan, NewProgramReferencesAreInspectedWithoutPayloadGrowth)
     EXPECT_TRUE(inspection->capacity.allowed);
     const auto &profile = inspection->capacity.reports.front().profiles[1];
     EXPECT_EQ(profile.status, axk::VolumeCapacityStatus::fits);
-    EXPECT_EQ(profile.resident_bytes, 111280U + 336U * 3U + 472U + 72U);
+    EXPECT_EQ(profile.resident_bytes, 111280U + 336U * 2U + 472U + 72U);
     ASSERT_TRUE(axk::alter_hds(image_path, manifest, folder / "assigned.hds"));
 }
 

@@ -83,6 +83,8 @@ TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
         bytes[0x136] = std::byte{12};
         bytes[0x13d] = std::byte{7};
         bytes[0x148] = std::byte{9};
+        bytes[0x14d] = std::byte{4};
+        bytes[0x14e] = std::byte{11};
         bytes[0x14f] = std::byte{20};
         bytes[0x152] = std::byte{30};
         const auto decoded = axk::decode_object(bytes);
@@ -99,10 +101,10 @@ TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
         EXPECT_FALSE(program.parameters.effects[3].enabled);
         const auto &row = program.assignments[0];
         EXPECT_EQ(row.parameters.level_offset, 12);
-        EXPECT_FALSE(row.parameters.output1);
-        EXPECT_FALSE(row.parameters.output2);
-        EXPECT_FALSE(row.parameters.output1_level_offset);
-        EXPECT_FALSE(row.parameters.output2_level_offset);
+        EXPECT_EQ(row.parameters.output1, 4);
+        EXPECT_EQ(row.parameters.output2, 0);
+        EXPECT_EQ(row.parameters.output1_level_offset, 11);
+        EXPECT_EQ(row.parameters.output2_level_offset, 0);
         EXPECT_EQ(row.raw_row[0x1d], std::byte{7});
         EXPECT_EQ(row.raw_row[0x2f], std::byte{20});
     }

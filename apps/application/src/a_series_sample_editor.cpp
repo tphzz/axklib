@@ -51,21 +51,24 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
             blocked.push_back("loop_start_frame");
             blocked.push_back("loop_length_frames");
         }
-        if (!equal_windows) {
-            blocked.push_back("playback.start_frame");
-            blocked.push_back("playback.length_frames");
-        }
         if ((sample->sample_flags & 6U) != 0U || sample->right->wave_data_name == sample->left.wave_data_name) {
             blocked.push_back("expand_detune");
             blocked.push_back("expand_dephase");
+            if (decoded->parameters.expand_detune.value_or(0) != 0 ||
+                decoded->parameters.expand_dephase.value_or(0) != 0)
+                blocked.push_back("expand_width");
         }
+    }
+    if (!ordinary || !equal_windows) {
+        blocked.push_back("playback.start_frame");
+        blocked.push_back("playback.length_frames");
     }
     std::uint64_t frames = maximum_wave_data_frames_per_channel;
     for (const auto &source : sources)
         frames = std::min(frames, source.at("frames").get<std::uint64_t>());
     if (sources.empty())
         frames = 0;
-    const auto editable = writable && ordinary && snapshot.placement.has_value() && !sources.empty();
+    const auto editable = writable && snapshot.placement.has_value() && !sources.empty();
     std::vector<std::string> missing;
     const auto parameters = axk::detail::sample_parameters_json(decoded->parameters, &missing);
     const auto capabilities = sample_parameter_capabilities(*sample);
@@ -79,9 +82,12 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
     auto blocked_reasons = nlohmann::json::object();
     for (const auto &key : blocked) {
         blocked_reasons[key.get<std::string>()] =
-            key == "expand_detune" || key == "expand_dephase"
+            key == "expand_detune" || key == "expand_dephase" || key == "expand_width"
                 ? "This retained expanded or duplicate-source layout needs a verified topology update. Its expansion "
                   "values are preserved."
+            : !ordinary && (key == "playback.start_frame" || key == "playback.length_frames")
+                ? "Playback range edits are not supported for this retained channel layout. Its channel flags and "
+                  "Wave Data references are preserved."
                 : "The stereo channels store different values. A shared edit cannot preserve both channel settings.";
     }
     return {{"profile", "a-series/sample"},
@@ -99,7 +105,7 @@ nlohmann::json a_series_sample_editor(const ObjectSnapshot &snapshot, std::span<
             {"parameterCapabilities", capabilities},
             {"playbackWindow",
              {{"start_frame", sample->left.wave_start_frame}, {"length_frames", sample->left.wave_length_frames}}},
-            {"canEditPlayback", editable && equal_windows},
+            {"canEditPlayback", editable && ordinary && equal_windows},
             {"maximumFrames", frames},
             {"sources", sources}};
 }

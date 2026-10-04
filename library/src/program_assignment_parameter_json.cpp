@@ -105,7 +105,8 @@ Result<ProgramAssignmentParameters> parse_program_assignment_parameters_json(con
                                     "filter_cutoff_distance_offset",
                                     "output1_level_offset",
                                     "output2_level_offset",
-                                    "midi_control"});
+                                    "midi_control",
+                                    "velocity_crossfade"});
         !valid)
         return std::unexpected{valid.error()};
     ProgramAssignmentParameters result;
@@ -150,6 +151,7 @@ Result<ProgramAssignmentParameters> parse_program_assignment_parameters_json(con
     AXK_SWITCH(portamento);
     AXK_SWITCH(mono);
     AXK_SWITCH(key_crossfade);
+    AXK_SWITCH(velocity_crossfade);
 #undef AXK_SWITCH
     return result;
 }
@@ -188,6 +190,7 @@ nlohmann::json program_assignment_parameters_json(const ProgramAssignmentParamet
     write_switch(result, "portamento", value.portamento);
     write_switch(result, "mono", value.mono);
     write_switch(result, "key_crossfade", value.key_crossfade);
+    write_switch(result, "velocity_crossfade", value.velocity_crossfade);
     return result;
 }
 

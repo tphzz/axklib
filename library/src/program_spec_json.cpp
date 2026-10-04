@@ -28,7 +28,9 @@ Result<std::string> name(const Json &value, std::string_view key, std::size_t ma
     return result;
 }
 
-Result<ProgramAssignmentSpec> assignment(const Json &value) {
+} // namespace
+
+Result<ProgramAssignmentSpec> parse_program_assignment_spec_json(const Json &value) {
     if (auto valid = fields(value, {"sample", "sample_bank", "parameters"}); !valid)
         return std::unexpected{valid.error()};
     if (value.contains("sample") == value.contains("sample_bank"))
@@ -42,8 +44,6 @@ Result<ProgramAssignmentSpec> assignment(const Json &value) {
         return std::unexpected{valid.error()};
     return result;
 }
-
-} // namespace
 
 Result<ProgramSpec> parse_program_spec_json(const Json &value) {
     if (auto valid = fields(value, {"number", "name", "model", "parameters", "assignments"}); !valid)
@@ -69,7 +69,7 @@ Result<ProgramSpec> parse_program_spec_json(const Json &value) {
         value["assignments"].size() > maximum_program_assignments)
         return std::unexpected{invalid("assignments must contain 0..999 rows")};
     for (const auto &row : value["assignments"]) {
-        auto parsed = assignment(row);
+        auto parsed = parse_program_assignment_spec_json(row);
         if (!parsed)
             return std::unexpected{parsed.error()};
         result.assignments.push_back(std::move(*parsed));

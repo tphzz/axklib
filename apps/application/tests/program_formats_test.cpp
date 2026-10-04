@@ -193,7 +193,7 @@ class ProgramFormatSession : public testing::Test {
     }
 };
 
-TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionWithoutEnablingProgramParameterEditing) {
+TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramParameterEditing) {
     for (const bool writable : {false, true}) {
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root, writable}});
         ASSERT_TRUE(sandbox) << sandbox.error().message;
@@ -210,7 +210,14 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionWithoutEnablingProg
         ASSERT_TRUE(detail) << detail.error().message;
         EXPECT_EQ(detail->at("object").at("programFormat"), program->program_format);
         EXPECT_TRUE(detail->at("object").at("sampleFormat").is_null());
-        EXPECT_TRUE(detail->at("editing").is_null());
+        const auto &editing = detail->at("editing");
+        ASSERT_TRUE(editing.is_object());
+        EXPECT_EQ(editing.at("profile"), "a-series/program");
+        EXPECT_EQ(editing.at("editable"), writable);
+        EXPECT_EQ(editing.at("reason").get<std::string>().empty(), writable);
+        EXPECT_EQ(editing.at("storageRevision"), 4U);
+        EXPECT_EQ(editing.at("programNumber"), 33U);
+        EXPECT_EQ(editing.at("programName"), "Format");
         const auto &conversion = detail->at("formatConversion");
         EXPECT_EQ(conversion.at("kind"), "program");
         EXPECT_EQ(conversion.at("programFormat"), program->program_format);
@@ -282,7 +289,12 @@ TEST_F(ProgramFormatSession, RevisionOneSeparatesStoredEffectIdsFromLaterLoaderV
     EXPECT_EQ(effects.at(2).at("storedType"), 59U);
     EXPECT_EQ(effects.at(2).at("type"), 54U);
     EXPECT_EQ(detail->at("formatConversion").at("formatConversions").front().at("allowed"), false);
-    EXPECT_TRUE(detail->at("editing").is_null());
+    const auto &editing = detail->at("editing");
+    ASSERT_TRUE(editing.is_object());
+    EXPECT_EQ(editing.at("profile"), "a-series/program");
+    EXPECT_EQ(editing.at("editable"), false);
+    EXPECT_FALSE(editing.at("reason").get<std::string>().empty());
+    EXPECT_EQ(editing.at("storageRevision"), 1U);
     ASSERT_TRUE(sessions.close(opened->image_id, "owner"));
 }
 

@@ -1,6 +1,8 @@
-export const graphLayout = $state({ ratio: 0.5 });
+export const graphLayout = $state({ ratio: 0.5, views: {} as Record<string, number> });
 
-export function graphSplitRatio(ratio: number, available: number): number {
-    const minimum = Math.min(0.5, 360 / Math.max(1, available));
-    return Math.max(minimum, Math.min(1 - minimum, ratio));
+export function graphSplitRatio(ratio: number, available: number, graphMinimum = 360, controlsMinimum = 360): number {
+    const space = Math.max(1, available);
+    const minimum = Math.min(graphMinimum / (graphMinimum + controlsMinimum), graphMinimum / space);
+    const maximum = Math.max(minimum, 1 - controlsMinimum / space);
+    return Math.max(minimum, Math.min(maximum, ratio));
 }

@@ -1,5 +1,6 @@
 export type EditorValue = number | boolean;
 export type EditorValues = Record<string, EditorValue>;
+export type EditorDraftState = Pick<EditorDraft, keyof EditorDraft>;
 
 export class EditorDraft {
     storedValues = $state.raw<EditorValues>({});

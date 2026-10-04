@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     import EditorNumber from '../../../object-editor/EditorNumber.svelte';
@@ -27,7 +28,7 @@
     const blockedTempo = $derived(
         disabled ||
             document.draft.values.loop_tempo_hundredths === undefined ||
-            document.detail!.editing!.blockedParameters.includes('loop_tempo_hundredths'),
+            sampleSnapshot(document.detail)!.blockedParameters.includes('loop_tempo_hundredths'),
     );
     function calculate() {
         const result = calculatedLoopTempo(
@@ -51,7 +52,7 @@
         <span class="source-metadata editor-meta">
             <span>{rate.toLocaleString('en-US')} Hz</span><span aria-hidden="true">&middot;</span>
             <AttributeHelp
-                label={`Source: ${(document.detail!.editing!.maximumFrames / rate).toFixed(3)} s`}
+                label={`Source: ${(sampleSnapshot(document.detail)!.maximumFrames / rate).toFixed(3)} s`}
                 description="Duration of the underlying source wave, independent of playback trimming and loop boundaries."
             />
         </span>
@@ -63,9 +64,9 @@
                 <ParameterField
                     {field}
                     draft={document.draft}
-                    unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
-                    blockedReason={parameterBlockReason(field.key, document.detail!.editing!)}
-                    disabled={disabled || document.detail!.editing!.blockedParameters.includes(field.key)}
+                    unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]?.message}
+                    blockedReason={parameterBlockReason(field.key, sampleSnapshot(document.detail)!)}
+                    disabled={disabled || sampleSnapshot(document.detail)!.blockedParameters.includes(field.key)}
                     oninvalid={(message) => (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
                 />
             {/each}

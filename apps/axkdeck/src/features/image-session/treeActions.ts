@@ -119,6 +119,8 @@ export function createImageTreeActionHandler(dependencies: ImageTreeActionDepend
             void dependencies.directComputer.exportMedia(dependencies.mediaExports, item);
             return;
         }
-        if (dependencies.mutation.requestVolumeAction(item, action)) imageSession.selectSource(item);
+        void dependencies.mutation.requestVolumeAction(item, action).then((accepted) => {
+            if (accepted) imageSession.selectSource(item);
+        });
     };
 }

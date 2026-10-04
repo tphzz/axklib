@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { untrack, tick } from 'svelte';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import { objectEditors } from '../../../object-editor/context';
@@ -11,7 +12,7 @@
     let { document, onready }: { document: ObjectEditorDocument; onready: () => void } = $props();
     const editors = objectEditors();
     const audio = editorAudio();
-    const members = $derived(document.detail!.editing!.bankOverrides!.members);
+    const members = $derived(sampleSnapshot(document.detail)!.bankOverrides!.members);
     const index = $derived(members.findIndex((member) => member.objectId === document.previewMemberId));
     const previous = $derived(members.slice(0, Math.max(0, index)).findLast((member) => member.objectId));
     const next = $derived(members.slice(index + 1).find((member) => member.objectId));

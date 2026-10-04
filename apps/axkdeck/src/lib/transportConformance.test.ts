@@ -149,6 +149,16 @@ beforeEach(() => {
 });
 
 describe('ImageTransport shared read contract', () => {
+    it('reports an unavailable Program catalog unless a test operation supplies it', async () => {
+        const unavailable = new InMemoryImageTransport({ opened });
+        await expect(unavailable.programEditorCatalog()).rejects.toThrow('programEditorCatalog is not configured');
+        const catalog = { schemaVersion: 1 as const, formats: [] };
+        const programEditorCatalog = vi.fn().mockResolvedValue(catalog);
+        const available = new InMemoryImageTransport({ opened, operations: { programEditorCatalog } });
+        await expect(available.programEditorCatalog()).resolves.toBe(catalog);
+        expect(programEditorCatalog).toHaveBeenCalledExactlyOnceWith();
+    });
+
     it('passes through the in-memory UI conformance transport', async () => {
         const transport = new InMemoryImageTransport({
             opened,

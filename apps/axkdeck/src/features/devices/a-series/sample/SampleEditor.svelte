@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { setContext, untrack } from 'svelte';
     import { sampleFormatContext } from './formatCapabilities';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
@@ -27,8 +28,8 @@
     } = $props();
     // The host keys this component by document; cleanup must retain that identity.
     const document = untrack(() => suppliedDocument);
-    setContext(sampleFormatContext, () => document.detail!.editing!);
-    const bank = $derived(document.detail!.editing!.profile === 'a-series/sample-bank');
+    setContext(sampleFormatContext, () => sampleSnapshot(document.detail)!);
+    const bank = $derived(sampleSnapshot(document.detail)!.profile === 'a-series/sample-bank');
     const tabs = $derived(
         bank
             ? sampleTabs.map((tab) => ({ ...tab, pages: tab.pages.filter((page) => page.id !== 'waveform') }))
@@ -39,11 +40,11 @@
     const scroll = $derived({ positions: navigation.scrollPositions, key: activePage.id });
     setContext(editorScrollContext, () => scroll);
     const disabled = $derived(
-        inactive || document.phase !== 'editable' || !document.detail?.editing?.editable || !!document.conflict,
+        inactive || document.phase !== 'editable' || !sampleSnapshot(document.detail)?.editable || !!document.conflict,
     );
     const rate = $derived(
         bank
-            ? (document.previewDetail?.editing?.sources[0]?.sampleRate ?? 44100)
+            ? (sampleSnapshot(document.previewDetail)?.sources[0]?.sampleRate ?? 44100)
             : (preview?.preview?.lanes[0]?.sampleRate ?? 44100),
     );
     let transport: SampleTransport;

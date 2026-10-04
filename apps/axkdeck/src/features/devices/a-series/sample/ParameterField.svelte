@@ -10,7 +10,7 @@
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     import EditorAutocomplete from '../../../object-editor/EditorAutocomplete.svelte';
     import type { SampleField } from './fields';
-    import type { EditorDraft } from '../../../object-editor/draft.svelte';
+    import type { EditorDraftState } from '../../../object-editor/draft.svelte';
     import { noteName } from './geometry';
     import { eqFrequencyLabel } from './eqModel';
     import { measureWidth } from '../../../object-editor/measureWidth';
@@ -25,7 +25,7 @@
         oninvalid = () => {},
     }: {
         field: SampleField;
-        draft: EditorDraft;
+        draft: EditorDraftState;
         disabled?: boolean;
         slider?: boolean;
         readOnlyText?: string;

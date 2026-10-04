@@ -2,6 +2,7 @@ import { sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { AxklibApiError } from '../../lib/httpErrors';
 import type { ObjectDetail } from '../../lib/transport';
+import { sampleSnapshot } from '../../lib/objectEditing';
 import { ObjectEditorWorkflow } from './workflow.svelte';
 
 function detail(id = 'Source', revision = 1): ObjectDetail {
@@ -77,7 +78,7 @@ describe('Sample duplication workflow', () => {
         expect(source.draft.changes).toEqual(changes);
         expect(source.draft.dirty).toBe(true);
         expect(source.draft.canUndo).toBe(true);
-        expect(source.detail!.editing!.parameters.level).toBe(100);
+        expect(sampleSnapshot(source.detail)!.parameters.level).toBe(100);
         expect(source.phase).toBe('editable');
         expect(refresh).toHaveBeenCalledTimes(1);
         expect(oncreated).toHaveBeenCalledExactlyOnceWith('Copy');
@@ -154,7 +155,7 @@ describe('Sample duplication workflow', () => {
     it('rejects asymmetric stereo playback layouts even when parameter editing is available', async () => {
         const { duplicate, transport, oncreated } = setup();
         const asymmetric = detail();
-        asymmetric.editing!.canEditPlayback = false;
+        sampleSnapshot(asymmetric)!.canEditPlayback = false;
         transport.objectDetail.mockResolvedValue(asymmetric);
         await duplicate.open(1, 'Source', ['Source'], oncreated);
         duplicate.name = 'Copy';
@@ -171,7 +172,7 @@ describe('Sample duplication workflow', () => {
         duplicate.name = 'Copy';
         expect(duplicate.canSubmit).toBe(true);
         const asymmetric = detail('Source', 2);
-        asymmetric.editing!.canEditPlayback = false;
+        sampleSnapshot(asymmetric)!.canEditPlayback = false;
         transport.objectDetail.mockResolvedValue(asymmetric);
         await duplicate.submit();
         expect(duplicate.canSubmit).toBe(false);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpImageTransport } from '../../lib/httpTransport';
 import type { ApiContentItem, ApiImageSummary, ApiObjectItem } from '../../lib/httpTransportModels';
-import type { SampleStorageFormat } from '../../lib/objectEditing';
+import { sampleSnapshot, type SampleStorageFormat } from '../../lib/objectEditing';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ObjectDetail } from '../../lib/transport';
 import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
@@ -295,7 +295,7 @@ describe('Sample conversion refresh across regenerated content identities', () =
             expect(document.status).not.toContain('refresh failed');
             expect(editor.conversionDocument).toBeNull();
             expect(editor.locked).toBe(false);
-            expect(document.detail!.editing!.sampleFormat.format).toBe(target);
+            expect(sampleSnapshot(document.detail)!.sampleFormat.format).toBe(target);
             expect(catalog.samples[0]!.object.sampleFormat!.format).toBe(target);
             expect(image.selectedSource.id).toBe('volume-r2');
             expect(image.volumeSelection.items.map((item) => item.id)).toEqual(['volume-r2']);
@@ -337,7 +337,7 @@ describe('Sample conversion refresh across regenerated content identities', () =
         expect(mutations).toHaveLength(1);
         expect(editor.conversionDocument).toBeNull();
         expect(document.phase).toBe('editable');
-        expect(document.detail!.editing!.sampleFormat.format).toBe('A3000_188');
+        expect(sampleSnapshot(document.detail)!.sampleFormat.format).toBe('A3000_188');
         expect(image.selectedSource.id).toBe('volume-r2');
         expect(catalog.activeVolumeId).toBe('volume-r2');
         expect(catalog.selectedSampleId).toBe('sample-1');

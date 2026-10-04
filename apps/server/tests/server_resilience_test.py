@@ -152,6 +152,22 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         assert missing.json()["error"]["code"] == "authentication_required"
         assert invalid.json()["error"]["code"] == "authentication_required"
 
+        catalog_path = "/api/v1/program-editor-catalog"
+        assert request(port, None, "GET", catalog_path).status == 401
+        assert request(port, "not-a-token", "GET", catalog_path).status == 401
+        catalog_response = request(port, TOKEN_A, "GET", catalog_path)
+        assert catalog_response.status == 200, catalog_response.content
+        catalog = catalog_response.json()["data"]
+        assert catalog["schemaVersion"] == 1
+        formats = {entry["model"]: entry for entry in catalog["formats"]}
+        assert set(formats) == {"A3000", "A5000"}
+        for model, count in (("A3000", 55), ("A5000", 97)):
+            assert len(formats[model]["effects"]) == count
+            assert formats[model]["fields"]
+            for effect in formats[model]["effects"]:
+                assert len(effect["resetWords"]) == len(effect["parameters"]) == 16
+        assert request(port, TOKEN_A, "GET", catalog_path).json()["data"] == catalog
+
         capabilities = request(port, TOKEN_A, "GET", "/api/v1/system/capabilities")
         assert capabilities.status == 200, capabilities.content
         limits = capabilities.json()["data"]["limits"]

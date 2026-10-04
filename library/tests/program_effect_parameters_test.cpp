@@ -15,13 +15,13 @@
 
 namespace {
 
-std::vector<std::byte> effect_payload() {
-    std::vector<std::byte> result(0x390U, std::byte{0xa5});
+std::vector<std::byte> effect_payload(std::uint32_t version = 4U) {
+    std::vector<std::byte> result(version == 4U ? 0x390U : 0x2e0U, std::byte{0xa5});
     axk::ByteWriter writer{result};
     EXPECT_TRUE(writer.write_ascii_field(0, 16, "FSFSDEV3SPLXPROG"));
-    EXPECT_TRUE(writer.write_be32(0x14, 4));
+    EXPECT_TRUE(writer.write_be32(0x14, version));
     EXPECT_TRUE(writer.write_be32(0x18, 0x2b0));
-    EXPECT_TRUE(writer.write_be32(0x1c, 0x360));
+    EXPECT_TRUE(writer.write_be32(0x1c, version == 4U ? 0x360U : 0U));
     EXPECT_TRUE(writer.write_u8(0x30, 0x14));
     EXPECT_TRUE(writer.write_be16(0x96, 0));
     return result;
@@ -241,4 +241,104 @@ TEST(ProgramEffects, FreshTypeSelectionInitializesOnlyTheRequestedPhysicalBlock)
             EXPECT_EQ(*payload, expected);
         }
     }
+}
+
+TEST(ProgramEffects, NativeEffectTypeUsesByteSevenAndResetsAllSixteenWords) {
+    auto payload = effect_payload(2U);
+    auto expected = payload;
+    axk::ProgramParameters patch;
+    patch.effects[1].type = 47;
+    patch.effects[1].parameters[0] = 49;
+    constexpr auto effect = 0xc0U;
+    constexpr std::array<std::uint16_t, 16> hall{49, 18, 10, 8, 13, 49, 0, 4, 50, 8, 64, 5, 5, 5, 5, 5};
+    expected[effect + 7U] = std::byte{47};
+    for (std::size_t index = 0; index < hall.size(); ++index)
+        ASSERT_TRUE(axk::ByteWriter{expected}.write_be16(effect + 8U + index * 2U, hall[index]));
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    const auto &value = std::get<axk::CurrentProg>(decoded->payload).parameters.effects[1];
+    EXPECT_EQ(value.type, 47);
+    EXPECT_EQ(value.parameters[0], 49);
+}
+
+TEST(ProgramEffects, NativeSameTypeAndParameterEditsPreserveCanonicalShadowAndUnusedWords) {
+    auto payload = effect_payload(2U);
+    payload[0x9f] = std::byte{1};
+    const auto original = payload;
+    axk::ProgramParameters patch;
+    patch.effects[0].type = 1;
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, original);
+    patch.effects[0].parameters[1] = 2345;
+    auto expected = original;
+    ASSERT_TRUE(axk::ByteWriter{expected}.write_be16(0xa2U, 2345));
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+}
+
+TEST(ProgramEffects, ExplicitSameTypeResetRestoresCompleteDefaultsBeforeOverrides) {
+    for (const auto version : {2U, 4U}) {
+        SCOPED_TRACE(version);
+        const auto model = version == 2U ? axk::ASeriesModel::a3000 : axk::ASeriesModel::a4000;
+        auto payload = effect_payload(version);
+        payload[0x9f] = std::byte{47};
+        if (version == 4U)
+            payload[0x9e] = std::byte{47};
+        const auto original = payload;
+        axk::ProgramParameters patch;
+        patch.effects[0].type = 47;
+        ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, model));
+        EXPECT_EQ(payload, original);
+        patch.effects[0].reset_parameters = false;
+        ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, model));
+        EXPECT_EQ(payload, original);
+        patch.effects[0].reset_parameters = true;
+        patch.effects[0].parameters[0] = 49;
+        auto expected = original;
+        constexpr std::array<std::uint16_t, 16> hall{49, 18, 10, 8, 13, 49, 0, 4, 50, 8, 64, 5, 5, 5, 5, 5};
+        for (std::size_t index = 0; index < hall.size(); ++index)
+            ASSERT_TRUE(axk::ByteWriter{expected}.write_be16(0xa0U + index * 2U, hall[index]));
+        ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, model));
+        EXPECT_EQ(payload, expected);
+        const auto decoded = axk::decode_object(payload);
+        ASSERT_TRUE(decoded);
+        EXPECT_FALSE(std::get<axk::CurrentProg>(decoded->payload).parameters.effects[0].reset_parameters);
+    }
+}
+
+TEST(ProgramEffects, ExplicitResetRequiresTypeAndRejectsInvalidOverrideAtomically) {
+    for (const auto version : {2U, 4U}) {
+        const auto model = version == 2U ? axk::ASeriesModel::a3000 : axk::ASeriesModel::a4000;
+        auto payload = effect_payload(version);
+        payload[0x9f] = std::byte{47};
+        if (version == 4U)
+            payload[0x9e] = std::byte{47};
+        const auto original = payload;
+        axk::ProgramParameters patch;
+        patch.level = 12;
+        patch.effects[0].reset_parameters = true;
+        EXPECT_FALSE(axk::detail::apply_program_parameters(payload, patch, model));
+        EXPECT_EQ(payload, original);
+        patch.effects[0].type = 47;
+        patch.effects[0].parameters[11] = 0;
+        EXPECT_FALSE(axk::detail::apply_program_parameters(payload, patch, model));
+        EXPECT_EQ(payload, original);
+    }
+}
+
+TEST(ProgramEffects, NativeExplicitResetUsesNativeWideUnusedWordDefaults) {
+    auto payload = effect_payload(2U);
+    payload[0x9f] = std::byte{54};
+    auto expected = payload;
+    // Native reset includes the unused final word, not the current type's zero.
+    constexpr std::array<std::uint16_t, 16> native{50, 59, 6, 63, 0, 45, 34, 62, 91, 13, 25, 4, 64, 4, 64, 0x890a};
+    for (std::size_t index = 0; index < native.size(); ++index)
+        ASSERT_TRUE(axk::ByteWriter{expected}.write_be16(0xa0U + index * 2U, native[index]));
+    axk::ProgramParameters patch;
+    patch.effects[0].type = 54;
+    patch.effects[0].reset_parameters = true;
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
 }

@@ -1,4 +1,6 @@
-import { EditorDraft } from './draft.svelte';
+import { EditorDraft, type EditorDraftState } from './draft.svelte';
+import { ProgramDraft } from '../devices/a-series/program/draft.svelte';
+import type { ProgramEditorCatalog } from '../../lib/objectEditing';
 import { BankDraft } from '../devices/a-series/bank/draft.svelte';
 import { EditorNavigation } from './navigation.svelte';
 import { EditorComparison } from './comparison.svelte';
@@ -17,7 +19,8 @@ export class ObjectEditorDocument {
     previewMemberId = $state<string | null | undefined>(undefined);
     previewDetail = $state.raw<ObjectDetail | null>(null);
     previewStatus = $state('');
-    draft: EditorDraft;
+    programAssignmentId = $state(0);
+    draft: EditorDraftState;
     conflict = $state('');
     status = $state('');
     phase = $state<'editable' | 'saving' | 'unconfirmed' | 'refresh-failed'>('editable');
@@ -29,21 +32,40 @@ export class ObjectEditorDocument {
         readonly sessionId: number,
         detail: ObjectDetail,
         readonly preferencesScope: object = {},
+        readonly programCatalog?: ProgramEditorCatalog,
     ) {
         this.detail = detail;
         const values = objectEditorAdapter(detail)?.values(detail.editing!) ?? {};
-        this.draft = detail.editing?.bankOverrides
-            ? new BankDraft(values, detail.editing.bankOverrides.units)
-            : new EditorDraft(values);
+        this.draft =
+            detail.editing?.profile === 'a-series/program'
+                ? new ProgramDraft(values, detail.editing.assignments)
+                : detail.editing?.bankOverrides
+                  ? new BankDraft(values, detail.editing.bankOverrides.units)
+                  : new EditorDraft(values);
+    }
+    get programFormat() {
+        const editing = this.detail?.editing;
+        return editing?.profile === 'a-series/program'
+            ? this.programCatalog?.formats.find((item) => item.model === editing.model)
+            : undefined;
     }
     get validation(): string {
         return (
             this.conflict ||
-            Object.values(this.inputErrors).find(Boolean) ||
-            objectEditorAdapter(this.detail!)?.validate(
+            Object.entries(this.inputErrors).find(([key, error]) => {
+                const row = /^assignments\.(\d+)\./.exec(key);
+                return (
+                    error &&
+                    (!(this.draft instanceof ProgramDraft) ||
+                        !row ||
+                        this.draft.assignments.some((item) => item.id === Number(row[1])))
+                );
+            })?.[1] ||
+            objectEditorAdapter(this.detail!, this.draft)?.validate(
                 this.draft.storedValues,
                 this.draft.changes,
                 this.detail!.editing!,
+                this.programFormat,
             ) ||
             ''
         );
@@ -62,7 +84,9 @@ export class ObjectEditorDocument {
 
 type Dependencies = {
     transport: Pick<ImageTransport, 'objectDetail' | 'startObjectParameterEdit' | 'waitForJob'> &
-        Partial<Pick<ImageTransport, 'startSampleDuplication' | 'startObjectFormatConversion'>>;
+        Partial<
+            Pick<ImageTransport, 'startSampleDuplication' | 'startObjectFormatConversion' | 'programEditorCatalog'>
+        >;
     refresh: () => Promise<void>;
     stopPlayback: () => void;
     status: (message: string) => void;
@@ -97,6 +121,7 @@ export class ObjectEditorWorkflow {
         let navigation = this.navigations.get(profile);
         if (!navigation) {
             navigation = new EditorNavigation();
+            if (profile === 'a-series/program') navigation.tab = 'sample-select';
             this.navigations.set(profile, navigation);
         }
         return navigation;
@@ -139,12 +164,19 @@ export class ObjectEditorWorkflow {
         const generation = this.generation;
         const task = this.dependencies.transport
             .objectDetail(sessionId, objectId)
-            .then((detail) => {
+            .then(async (detail) => {
                 if (generation !== this.generation) return null;
                 if (!objectEditorAdapter(detail) && !detail.formatConversion) return null;
                 const scope = this.preferenceScopes.get(sessionId) ?? {};
                 this.preferenceScopes.set(sessionId, scope);
-                const document = new ObjectEditorDocument(sessionId, detail, scope);
+                const catalog =
+                    detail.editing?.profile === 'a-series/program'
+                        ? await this.dependencies.transport.programEditorCatalog?.()
+                        : undefined;
+                if (generation !== this.generation) return null;
+                const document = new ObjectEditorDocument(sessionId, detail, scope, catalog);
+                if (detail.editing?.profile === 'a-series/program' && !document.programFormat)
+                    throw new Error('Program parameter catalog is unavailable for this format.');
                 this.documents = [...this.documents, document];
                 return document;
             })
@@ -192,16 +224,41 @@ export class ObjectEditorWorkflow {
         if (generation !== this.generation || document.phase !== 'editable') return;
         this.acceptReload(document, detail);
     }
-    private acceptReload(document: ObjectEditorDocument, detail: ObjectDetail): void {
+    private acceptReload(document: ObjectEditorDocument, detail: ObjectDetail, committed = false): void {
         const adapter = objectEditorAdapter(detail);
         if (!adapter && !detail.formatConversion) throw new Error('This object is no longer available');
         document.detail = detail;
-        if (document.draft instanceof BankDraft && detail.editing?.bankOverrides)
+        if (
+            document.draft instanceof BankDraft &&
+            detail.editing?.profile !== 'a-series/program' &&
+            detail.editing?.bankOverrides
+        )
             document.draft.units = detail.editing.bankOverrides.units;
-        document.draft.accept(adapter?.values(detail.editing!) ?? {});
+        const values = adapter?.values(detail.editing!) ?? {};
+        if (document.draft instanceof ProgramDraft && detail.editing?.profile === 'a-series/program') {
+            const rows = document.draft.assignments;
+            const selected = rows.find((row) => row.id === document.programAssignmentId);
+            const index = committed ? rows.indexOf(selected!) : (selected?.retainOrdinal ?? 0);
+            document.draft.acceptProgram(values, detail.editing.assignments);
+            document.programAssignmentId = detail.editing.assignments[Math.max(0, index)]?.ordinal ?? 0;
+        } else document.draft.accept(values);
+        document.inputErrors = {};
         document.conflict = '';
         document.status = '';
         this.dependencies.stopPlayback();
+    }
+    confirmStructuralChange: () => Promise<boolean> = async () => !this.dirtyCount && !this.locked;
+    async discardAll(): Promise<boolean> {
+        if (this.locked) return false;
+        for (const document of this.documents.filter((item) => item.draft.dirty)) await this.discard(document);
+        return !this.locked && !this.dirtyCount;
+    }
+    async saveAll(): Promise<boolean> {
+        for (const document of this.documents.filter((item) => item.draft.dirty)) {
+            await this.save(document);
+            if (document.phase !== 'editable' || document.draft.dirty) return false;
+        }
+        return !this.locked && !this.dirtyCount;
     }
     async save(document: ObjectEditorDocument): Promise<void> {
         if (!document.canSave || this.locked) return;
@@ -220,10 +277,11 @@ export class ObjectEditorWorkflow {
         }
         document.writeKind = 'save';
         document.conversionTarget = null;
-        const edit = objectEditorAdapter(document.detail!)!.edit(
+        const edit = objectEditorAdapter(document.detail!, document.draft)!.edit(
             document.detail!,
             document.draft.changes,
             document.draft.storedValues,
+            document.programFormat,
         );
         await this.submit(document, () =>
             this.dependencies.transport.startObjectParameterEdit(document.sessionId, edit),
@@ -241,6 +299,13 @@ export class ObjectEditorWorkflow {
     }
     async openConversion(sessionId: number, id: string): Promise<void> {
         if (this.locked) return;
+        if (
+            this.documents.some(
+                (item) => item.sessionId === sessionId && item.detail?.object.id === id && item.draft.dirty,
+            ) &&
+            !(await this.confirmStructuralChange())
+        )
+            return;
         const request = ++this.conversionOpenRequest;
         const generation = this.generation;
         const current = () => request === this.conversionOpenRequest && generation === this.generation && !this.locked;
@@ -406,11 +471,7 @@ export class ObjectEditorWorkflow {
                 throw new Error('The refreshed object does not match the saved identity');
             if (document.conversionTarget && conversionFormat(detail.formatConversion) !== document.conversionTarget)
                 throw new Error('The refreshed object does not have the confirmed target format');
-            document.detail = detail;
-            if (document.draft instanceof BankDraft && detail.editing?.bankOverrides)
-                document.draft.units = detail.editing.bankOverrides.units;
-            document.draft.accept(adapter?.values(detail.editing!) ?? {});
-            document.conflict = '';
+            this.acceptReload(document, detail, true);
             document.status = `${document.noun} saved`;
             document.jobId = null;
             document.phase = 'editable';

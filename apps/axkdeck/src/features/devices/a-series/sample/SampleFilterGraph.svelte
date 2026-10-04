@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { BankDraft } from '../bank/draft.svelte';
     import { blockedGraphParameters } from './formatCapabilities';
     import { onDestroy } from 'svelte';
@@ -24,7 +25,7 @@
         ].every((key) => Number.isFinite(values[key])),
     );
     const stages = $derived(available ? sampleFilterStages(type, cutoff, q, distance) : []);
-    const graphBlocked = $derived(blockedGraphParameters(document.detail!.editing!));
+    const graphBlocked = $derived(blockedGraphParameters(sampleSnapshot(document.detail)!));
     const canEdit = (key: string) => !disabled && type !== 0 && available && !graphBlocked.includes(key);
     const origin = (keys: string[]) =>
         document.draft instanceof BankDraft ? `. ${document.draft.sourceDescription(keys)}` : '';

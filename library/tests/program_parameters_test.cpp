@@ -123,7 +123,7 @@ TEST(ProgramParameters, RejectsInvalidMergedRequestBeforeChangingAnyBytes) {
     }
 }
 
-TEST(ProgramParameters, RequiresCurrentLayoutAndExplicitSupportedModel) {
+TEST(ProgramParameters, RequiresSupportedRevisionAndModelMatchingTheStoredLayout) {
     axk::ProgramParameters patch;
     patch.level = 64;
     for (const auto version : {1U, 2U}) {
@@ -138,6 +138,10 @@ TEST(ProgramParameters, RequiresCurrentLayoutAndExplicitSupportedModel) {
         EXPECT_FALSE(axk::detail::apply_program_parameters(payload, patch, model));
         EXPECT_EQ(payload, original);
     }
+    auto revision_one = program_payload(1U);
+    const auto original = revision_one;
+    EXPECT_FALSE(axk::detail::apply_program_parameters(revision_one, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(revision_one, original);
 }
 
 TEST(ProgramParameters, RejectsRequestedModelOnlyValuesWithoutRejectingUntouchedOnes) {
@@ -297,5 +301,63 @@ TEST(ProgramParameters, AdAndControllerModelLimitsAreValidatedBeforeAnyWrite) {
         const auto before = payload;
         EXPECT_FALSE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a5000));
         EXPECT_EQ(payload, before);
+    }
+}
+
+TEST(ProgramParameters, NativeCommonAndControllerWritesPreserveTheStoredLayout) {
+    auto payload = program_payload(2U);
+    payload.resize(payload.size() + 37U, std::byte{0x69});
+    auto expected = payload;
+    axk::ProgramParameters patch;
+    patch.level = 42;
+    patch.transpose = -12;
+    patch.controllers[2].device = 125;
+    patch.controllers[2].function = 63;
+    patch.controllers[2].type = 3;
+    patch.controllers[2].range = -63;
+    expected[0x8b] = std::byte{42};
+    expected[0x8e] = std::byte{0xf4};
+    expected[0x118] = std::byte{125};
+    expected[0x119] = std::byte{63};
+    expected[0x11a] = std::byte{3};
+    expected[0x11b] = std::byte{0xc1};
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    const auto &program = std::get<axk::CurrentProg>(decoded->payload);
+    EXPECT_FALSE(program.layout.parameter_tail_offset);
+    EXPECT_EQ(program.parameters.controllers[2].device, 125);
+    EXPECT_EQ(program.parameters.controllers[2].function, 63);
+    EXPECT_EQ(program.parameters.controllers[2].range, -63);
+}
+
+TEST(ProgramParameters, NativeEmptyPatchPreservesUnknownValuesAndTrailingBytes) {
+    auto payload = program_payload(2U);
+    payload.resize(payload.size() + 19U, std::byte{0x69});
+    const auto original = payload;
+    ASSERT_TRUE(axk::detail::apply_program_parameters(payload, {}, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, original);
+}
+
+TEST(ProgramParameters, NativeLaterOnlyFieldsRejectWithoutChangingCommonParameters) {
+    const auto original = program_payload(2U);
+    std::array<axk::ProgramParameters, 9> patches{};
+    patches[0].controllers[0].device = 126;
+    patches[1].controllers[0].function = 64;
+    patches[2].controller_reset.b[0] = false;
+    patches[3].step_wave.values[0] = 0;
+    patches[4].ad.right.pan = 0;
+    patches[5].ad.left.output1.destination = 5;
+    patches[6].ad.left.output2.destination = 6;
+    patches[7].effects[3].enabled = false;
+    patches[8].effects[0].type = 55;
+    for (auto patch : patches) {
+        auto payload = original;
+        patch.level = 12;
+        EXPECT_FALSE(axk::detail::apply_program_parameters(payload, patch, axk::ASeriesModel::a3000));
+        EXPECT_EQ(payload, original);
     }
 }

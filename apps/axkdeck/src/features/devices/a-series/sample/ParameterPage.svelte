@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { SamplePage, SampleField } from './fields';
     import { pageGroups } from './pageGroups';
@@ -17,7 +18,7 @@
     );
     const blocked = (field: SampleField) =>
         disabled ||
-        (document.detail?.editing?.blockedParameters.includes(field.key) ?? true) ||
+        (sampleSnapshot(document.detail)?.blockedParameters.includes(field.key) ?? true) ||
         (!(document.draft instanceof BankDraft) && !!parameterInactiveReason(field.key, document.draft.values));
     let width = $state(initialEditorWidth());
     const columns = $derived(width >= 984 ? 3 : width >= 652 ? 2 : 1);
@@ -59,10 +60,11 @@
                         <ParameterField
                             {field}
                             draft={document.draft}
-                            unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
+                            unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]
+                                ?.message}
                             disabled={blocked(field)}
                             blockedReason={parameterInactiveReason(field.key, document.draft.values) ||
-                                parameterBlockReason(field.key, document.detail!.editing!)}
+                                parameterBlockReason(field.key, sampleSnapshot(document.detail)!)}
                             oninvalid={(message) =>
                                 (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
                         />

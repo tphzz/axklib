@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "program-mapping",
+  "description": "Mapping Editor display and scaling; Program changes are relayed to the main editor.",
+  "windows": ["program-mapping"],
+  "permissions": [
+    "core:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:window:allow-set-min-size",
+    "core:window:allow-set-size",
+    "core:window:allow-show",
+    "log:default"
+  ]
+}

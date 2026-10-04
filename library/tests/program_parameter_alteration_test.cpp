@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -7,6 +9,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -15,6 +18,9 @@
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/object.hpp"
+#include "axklib/package_archive.hpp"
+#include "axklib/program_format_conversion.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -42,6 +48,24 @@ axk::Result<axk::AlterationManifest> manifest(const Json &operation) {
 std::vector<char> bytes(const std::filesystem::path &path) {
     std::ifstream input{path, std::ios::binary};
     return {std::istreambuf_iterator<char>{input}, {}};
+}
+
+axk::Result<axk::ObjectCatalog> catalog(const std::filesystem::path &path) {
+    const auto image = axk::open_image(path);
+    if (!image)
+        return std::unexpected{image.error()};
+    return axk::build_object_catalog(*image);
+}
+
+const axk::ObjectSnapshot *find_program(const axk::ObjectCatalog &objects) {
+    const auto found = std::ranges::find_if(objects.objects, [](const auto &item) {
+        return item.object.header.type == axk::ObjectType::prog && item.object.header.name == "033";
+    });
+    return found == objects.objects.end() ? nullptr : &*found;
+}
+
+std::string payload_hash(const axk::ObjectSnapshot &program) {
+    return axk::package_internal::hex_digest(axk::package_internal::sha256(program.raw_payload));
 }
 
 class ProgramParameterAlteration : public testing::Test {
@@ -139,13 +163,16 @@ TEST(ProgramParameterManifest, AcceptsExplicitModelSparseGlobalAndGuardedAssignm
     EXPECT_TRUE(manifest(rows));
     rows["assignments"][0]["expected_target_name"] = " Leading";
     EXPECT_TRUE(manifest(rows));
+    auto native = update();
+    native["model"] = "A3000";
+    EXPECT_TRUE(manifest(native));
 }
 
 TEST(ProgramParameterManifest, RejectsMissingModelEmptyLeavesInvalidIdentitiesAndNarrowing) {
     auto invalid = update();
     invalid.erase("model");
     EXPECT_FALSE(manifest(invalid));
-    for (const auto &value : {Json("A3000"), Json("a4000"), Json(nullptr), Json(4)}) {
+    for (const auto &value : {Json("a3000"), Json("a4000"), Json(nullptr), Json(4)}) {
         invalid = update();
         invalid["model"] = value;
         EXPECT_FALSE(manifest(invalid));
@@ -177,6 +204,128 @@ TEST(ProgramParameterManifest, RejectsMissingModelEmptyLeavesInvalidIdentitiesAn
     invalid = update();
     invalid["retarget"] = "Other";
     EXPECT_FALSE(manifest(invalid));
+}
+
+TEST(ProgramParameterManifest, RejectsMalformedPayloadGuards) {
+    for (const auto &digest : {Json(""), Json(std::string(63U, 'a')), Json(std::string(65U, 'a')),
+                               Json(std::string(64U, 'A')), Json(std::string(64U, 'g')), Json(nullptr), Json(42)}) {
+        SCOPED_TRACE(digest.dump());
+        auto operation = update();
+        operation["expected_payload_sha256"] = digest;
+        const auto parsed = manifest(operation);
+        ASSERT_FALSE(parsed);
+        EXPECT_EQ(parsed.error().code, axk::ErrorCode::manifest_invalid);
+    }
+}
+
+TEST_F(ProgramParameterAlteration, PayloadGuardAllowsMatchingBytesAndRejectsStaleWritesWithoutPublishing) {
+    const auto before = catalog(source);
+    ASSERT_TRUE(before);
+    const auto *program = find_program(*before);
+    ASSERT_NE(program, nullptr);
+    const auto original = bytes(source);
+    auto operation = update();
+    operation["expected_payload_sha256"] = payload_hash(*program);
+    const auto parsed = manifest(operation);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto applied = axk::alter_hds(source, *parsed, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_EQ(bytes(source), original);
+    const auto saved = bytes(output);
+    EXPECT_NE(saved, original);
+
+    const auto unpublished = root / "stale.hds";
+    const auto stale = axk::alter_hds(output, *parsed, unpublished);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, axk::ErrorCode::transaction_stale);
+    EXPECT_FALSE(std::filesystem::exists(unpublished));
+    EXPECT_EQ(bytes(output), saved);
+
+    const auto overwrite = axk::alter_hds(output, *parsed, source, {}, nullptr, true);
+    ASSERT_FALSE(overwrite);
+    EXPECT_EQ(overwrite.error().code, axk::ErrorCode::transaction_stale);
+    EXPECT_EQ(bytes(source), original);
+    EXPECT_EQ(bytes(output), saved);
+}
+
+TEST_F(ProgramParameterAlteration, MalformedTypedPayloadGuardPreservesSourceAndExistingDestination) {
+    std::filesystem::copy_file(source, output);
+    const auto original = bytes(source);
+    auto parsed = manifest(update());
+    ASSERT_TRUE(parsed);
+    auto &operation = std::get<axk::UpdateProgramParametersOperation>(parsed->operations.front().data);
+    for (const auto &digest :
+         {std::string{}, std::string(63U, 'a'), std::string(65U, 'a'), std::string(64U, 'A'), std::string(64U, 'g')}) {
+        SCOPED_TRACE(digest);
+        operation.expected_payload_sha256 = digest;
+        const auto applied = axk::alter_hds(source, *parsed, output, {}, nullptr, true);
+        ASSERT_FALSE(applied);
+        EXPECT_EQ(applied.error().code, axk::ErrorCode::manifest_invalid);
+        EXPECT_EQ(bytes(source), original);
+        EXPECT_EQ(bytes(output), original);
+    }
+}
+
+TEST_F(ProgramParameterAlteration, NativeRevisionTwoEditsPreserveLayoutOpaqueBytesAndOtherObjects) {
+    const auto current = catalog(source);
+    ASSERT_TRUE(current);
+    const auto *current_program = find_program(*current);
+    ASSERT_NE(current_program, nullptr);
+    const auto conversion = manifest({{"id", "native-source"},
+                                      {"type", "convert_prog_format"},
+                                      {"partition_index", 0},
+                                      {"volume_name", "Programs"},
+                                      {"program_number", 33},
+                                      {"target_format", "a3000"},
+                                      {"expected_payload_sha256", payload_hash(*current_program)}});
+    ASSERT_TRUE(conversion);
+    const auto native = root / "native.hds";
+    const auto converted = axk::alter_hds(source, *conversion, native);
+    ASSERT_TRUE(converted) << converted.error().message;
+    source = native;
+    patch_program(0x43U, std::string(1U, '\x5a'));
+    patch_program(0x120U + 0x10U, std::string(1U, '\x6b'));
+    patch_program(0x120U + 7U * 0x38U + 0x17U, std::string(1U, '\x77'));
+    const auto original = bytes(source);
+    const auto before = catalog(source);
+    ASSERT_TRUE(before);
+    const auto *program = find_program(*before);
+    ASSERT_NE(program, nullptr);
+    const auto storage = axk::inspect_program_storage(program->raw_payload);
+    ASSERT_EQ(storage.header_revision, std::uint32_t{2U});
+    ASSERT_EQ(storage.format, axk::ProgramStorageFormat::a3000);
+
+    auto operation = update();
+    operation["model"] = "A3000";
+    operation["expected_payload_sha256"] = payload_hash(*program);
+    operation["assignments"][0]["parameters"] = {{"pan_offset", 31}};
+    const auto parsed = manifest(operation);
+    ASSERT_TRUE(parsed);
+    const auto applied = axk::alter_hds(source, *parsed, output);
+    ASSERT_TRUE(applied) << applied.error().message;
+    EXPECT_EQ(bytes(source), original);
+    const auto after = catalog(output);
+    ASSERT_TRUE(after);
+    ASSERT_EQ(after->objects.size(), before->objects.size());
+    for (const auto &old : before->objects) {
+        const auto found = std::ranges::find(after->objects, old.key, &axk::ObjectSnapshot::key);
+        ASSERT_NE(found, after->objects.end());
+        auto expected = old.raw_payload;
+        if (old.key == program->key) {
+            expected[0x8bU] = std::byte{87};
+            expected[0x98U] = std::byte{};
+            expected[0x120U + 0x38U + 0x18U] = std::byte{31};
+        }
+        EXPECT_EQ(found->sfs_id, old.sfs_id);
+        EXPECT_EQ(found->raw_payload, expected) << old.object.header.name;
+    }
+    const auto *saved = find_program(*after);
+    ASSERT_NE(saved, nullptr);
+    const auto saved_storage = axk::inspect_program_storage(saved->raw_payload);
+    EXPECT_EQ(saved_storage.header_revision, storage.header_revision);
+    EXPECT_EQ(saved_storage.format, storage.format);
+    EXPECT_EQ(saved_storage.assignment_capacity, storage.assignment_capacity);
+    EXPECT_EQ(saved_storage.parameter_tail_bytes, storage.parameter_tail_bytes);
 }
 
 TEST_F(ProgramParameterAlteration, ChangesOnlyRequestedBytesAndIsIdempotent) {

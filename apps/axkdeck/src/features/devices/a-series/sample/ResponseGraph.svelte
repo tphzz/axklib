@@ -2,7 +2,7 @@
     import type { Snippet } from 'svelte';
     import BreakpointGraph from '../../../object-editor/BreakpointGraph.svelte';
     import EnvelopeGraph from './EnvelopeGraph.svelte';
-    import type { EditorDraft } from '../../../object-editor/draft.svelte';
+    import type { EditorDraftState } from '../../../object-editor/draft.svelte';
     import type { SampleEnvelope } from './envelope';
     import type { GraphPoint } from '../../../object-editor/graphTypes';
     import { noteName } from './geometry';
@@ -16,7 +16,7 @@
         title,
         tools,
     }: {
-        draft: EditorDraft;
+        draft: EditorDraftState;
         page: string;
         disabled: boolean;
         blocked?: string[];

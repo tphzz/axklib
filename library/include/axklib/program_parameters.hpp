@@ -72,6 +72,8 @@ struct ProgramEffectParameters {
     std::optional<std::uint8_t> destination{};
     std::optional<std::uint8_t> type{};
     std::array<std::optional<std::uint16_t>, 16> parameters{};
+    // Write intent only; decoding never produces a reset request.
+    std::optional<bool> reset_parameters{};
 };
 
 // Omitted leaves preserve stored values in updates and use defaults in fresh Programs.
