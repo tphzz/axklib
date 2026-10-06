@@ -8,9 +8,13 @@
     import { MappingController, provideMappingEditor } from '../features/program-mapping/controller.svelte';
     import type { MappingCommand, MappingMessage } from '../features/program-mapping/protocol';
     import { programEditorFixture } from './programEditorFixture';
+    import { MappingAuditionFixture } from './mappingAuditionFixture.svelte';
 
     const params = new URLSearchParams(location.search);
     const child = params.get('view') === 'mapping';
+    const benchmark = params.has('benchmark');
+    const count = Math.max(1, Math.min(512, Number(params.get('count')) || 2));
+    const dense = params.has('dense');
     const channelName = `mapping-layout-${params.get('channel') ?? 'fixture'}`;
     const channel = new BroadcastChannel(channelName);
     function post(
@@ -27,6 +31,44 @@
             object: { ...fixture.document.detail!.object, id: `program-${index}`, name },
         };
         const draft = fixture.document.draft as ProgramDraft;
+        if (benchmark) {
+            fixture.editing.targets[0]!.values.key_low = 0;
+            fixture.editing.targets[0]!.values.key_high = 127;
+            const base = Object.fromEntries(
+                Object.entries(draft.values)
+                    .filter(([key]) => key.startsWith('assignments.0.'))
+                    .map(([key, value]) => [key.slice('assignments.0.'.length), value]),
+            );
+            fixture.editing.assignments = Array.from({ length: count }, (_, ordinal) => ({
+                ordinal,
+                kind: 'SBNK',
+                name: 'Duplicate',
+                targetObjectId: 'sample',
+            }));
+            draft.acceptProgram(
+                {
+                    ...draft.values,
+                    ...Object.fromEntries(
+                        fixture.editing.assignments.flatMap(({ ordinal }) =>
+                            Object.entries({
+                                ...base,
+                                key_low: dense ? 0 : Math.floor((ordinal * 128) / count),
+                                key_high: dense
+                                    ? 127
+                                    : Math.max(
+                                          Math.floor((ordinal * 128) / count),
+                                          Math.floor(((ordinal + 1) * 128) / count) - 1,
+                                      ),
+                                velocity_low: dense ? ordinal % 64 : 0,
+                                velocity_high: dense ? 64 + (ordinal % 64) : 127,
+                            }).map(([key, value]) => [`assignments.${ordinal}.${key}`, value]),
+                        ),
+                    ),
+                },
+                fixture.editing.assignments,
+            );
+            return fixture;
+        }
         draft.acceptProgram(
             {
                 ...draft.values,
@@ -60,7 +102,20 @@
             throw new Error('The browser fixture has no write jobs');
         },
     };
-    const controller = new MappingController(delegate);
+    const audio = params.has('audio') && !child ? new MappingAuditionFixture() : null;
+    const controller = new MappingController(
+        delegate,
+        'program',
+        audio
+            ? {
+                  play: (document, role, token, note, velocity) => {
+                      audio.notes.push({ note, velocity });
+                      return audio.mapping.play(document, role, token, note, velocity);
+                  },
+                  release: (token) => audio.mapping.release(token),
+              }
+            : undefined,
+    );
     provideMappingEditor(controller);
     const navigation = new EditorNavigation();
     navigation.tab = 'easy-edit';
@@ -106,16 +161,40 @@
         return () => {
             if (!child) controller.dispose();
             channel.close();
+            void audio?.dispose();
         };
     });
 </script>
 
 {#if child}
     <MappingWindow adapter={mappingAdapter} />
-    <output hidden data-mapping-snapshot>{JSON.stringify(received)}</output>
+    <output hidden data-mapping-snapshot
+        >{JSON.stringify(
+            benchmark
+                ? {
+                      requestId: received?.requestId,
+                      state: {
+                          version: received?.state.version,
+                          editRevision: received?.state.editRevision,
+                          selectionId: received?.state.selectionId,
+                      },
+                  }
+                : received,
+        )}</output
+    >
 {:else}
+    {#if audio}<output hidden data-mapping-audio
+            >{JSON.stringify({
+                state: audio.state,
+                notes: audio.notes,
+                voices: audio.voices,
+                outputState: audio.outputState,
+                peak: audio.peak,
+            })}</output
+        >{/if}
     <main class="mapping-fixture">
         <nav aria-label="Fixture Program selection">
+            {#if benchmark}<button onclick={() => controller.open()}>Mapping Editor</button>{/if}
             {#each fixtures as fixture, index}
                 <button aria-label={`Select ${fixture.editing.programName}`} onclick={() => (selected = index)}
                     >{fixture.editing.programName}</button
@@ -127,7 +206,7 @@
             >
         </nav>
         <section class="main-editor device-editor" aria-label="Main Program editor">
-            {#if selectedDocument}
+            {#if selectedDocument && !benchmark}
                 {#key selectedDocument}
                     <ProgramEditor document={selectedDocument} {navigation} panelId="mapping-main-editor" />
                 {/key}
@@ -141,12 +220,12 @@
             version: controller.state.version,
             selected,
             assignment: selectedDocument?.programAssignmentId,
-            values: selectedDocument?.draft.values,
+            values: benchmark ? undefined : selectedDocument?.draft.values,
             dirty: selectedDocument?.draft.dirty,
             canUndo: selectedDocument?.draft.canUndo,
             saves,
             discards,
-            commands,
+            commands: benchmark ? undefined : commands,
         })}</output
     >
 {/if}

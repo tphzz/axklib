@@ -1,12 +1,35 @@
-import type { KeyboardRange, KeyboardZone } from '../object-editor/keyboardMapping';
+import type { EditableMappingAxes, RangeBoundary, KeyboardRange, KeyboardZone } from '../object-editor/keyboardMapping';
+
+export const mappingRoles = ['program', 'sample', 'bank', 'members'] as const;
+export type MappingRole = (typeof mappingRoles)[number];
+export interface MappingTarget {
+    id: number;
+    limits: KeyboardRange | null;
+    editableAxes: EditableMappingAxes;
+    editable: boolean;
+    canUndo: boolean;
+    canRedo: boolean;
+    canSave: boolean;
+    canDiscard: boolean;
+    status: string;
+}
 
 export interface MappingSnapshot {
+    role: MappingRole;
     owner: string;
     context: string;
     version: number;
+    editRevision: number;
+    imageRevision: number;
     title: string;
-    assignmentId: number | null;
-    assignments: { value: number; label: string }[];
+    selectionId: number | null;
+    selectionLabel: string;
+    selections: { value: number; label: string; disabled?: boolean }[];
+    targets: MappingTarget[];
+    editableAxes: EditableMappingAxes;
+    rootEditable: boolean;
+    rangeLabel: string;
+    overrides: { boundary: RangeBoundary; label: string; inherited: boolean }[];
     zones: KeyboardZone[];
     limits: KeyboardRange | null;
     editable: boolean;
@@ -19,10 +42,24 @@ export interface MappingSnapshot {
 }
 export type MappingAction =
     | { kind: 'ready' }
-    | { kind: 'select'; assignmentId: number }
-    | { kind: 'range'; assignmentId: number; range: KeyboardRange }
+    | { kind: 'select'; selectionId: number }
+    | {
+          kind: 'move';
+          selectionId: number;
+          editRevision: number;
+          original: KeyboardRange;
+          range: KeyboardRange;
+          boundaries: RangeBoundary[];
+      }
+    | { kind: 'note'; clientId: string; sequence: number; note: number; velocity: number; imageRevision: number }
+    | { kind: 'release'; clientId: string; sequence: number }
+    | { kind: 'lease'; clientId: string; sequence: number }
+    | { kind: 'range'; selectionId: number; range: KeyboardRange; boundaries: RangeBoundary[] }
+    | { kind: 'root'; selectionId: number; note: number }
+    | { kind: 'inherit'; boundary: RangeBoundary }
     | { kind: 'undo' | 'redo' | 'save' | 'discard' | 'recover' };
 export interface MappingCommand {
+    role: MappingRole;
     requestId: string;
     context: string;
     version: number;

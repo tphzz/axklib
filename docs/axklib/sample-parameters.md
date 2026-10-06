@@ -261,6 +261,72 @@ The following object state is deliberately not public authoring input:
 JSON rejects these as unknown fields rather than accepting raw offsets, caches,
 flags, aliases, or obsolete flat Sample fields.
 
+## Mapping Editors
+
+In axkdeck, Map/Out > Mix & Key includes a compact keyboard with low/high-key
+handles. Mapping Editor opens a separate key/velocity view for the selected
+Sample. Both views share the same draft and undo history. Editing velocity or
+one key boundary preserves untouched bounds, including `=Orig` key values.
+In the full Sample Mapping Editor, right-click a key or a pitch position to
+set the root key. A small amber marker identifies its key, including black keys,
+without obscuring the muted mapping fill or dark key edges.
+This changes the Sample root without replacing stored key/velocity bounds;
+`=Orig` bounds continue to follow it. The command has one undo step and uses
+the same guarded Sample Save. Root editing is unavailable in Program, Bank
+and Member Mapping windows.
+
+Sample Banks expose two separate windows, which may remain open together:
+
+- **Bank Mapping** edits the bank's low/high velocity overrides, with a reset
+  action to inherit each value from its Samples. Member keys are read-only here.
+- **Member Mapping** edits the stored key and velocity ranges of confirmed
+  member Samples. Source outlines and effective ranges distinguish stored
+  values from any active bank overrides that mask them.
+
+The bank's inline keyboard is a preview. Key mappings belong to the member
+Samples, not to the bank. Member changes affect every use of those Samples,
+including other banks and Programs. Unresolved members are not editable.
+Both compact and full views show every confirmed member, alternating mint green
+and a shade 10% darker in source-range order. These shades distinguish neighboring
+mappings, not permanent Sample identities, and remain stable through selection,
+panning and zooming. Overlaps retain subtle hatching, contributor tooltips and
+selection cycling. The full view uses vertical names where they fit, stronger
+selected-region highlights, and labeled velocity raster lines every 5 steps.
+Heavier lines mark 0, 25, 50, 75, 100 and 125, independent of window height.
+Four dashed guides follow the selected effective coverage; the blue editable
+bounds remain separate, including where bank overrides mask stored member
+values. Group selection uses its outer edges without filling unmapped gaps.
+Names that cannot fit remain available through tooltips.
+Drag a block to move its editable range without resizing it or changing its
+root. Member Mapping changes that member's stored bounds; Bank Mapping moves
+only velocity overrides. A completed movement is one undo step. Escape,
+pointer cancellation and stale-draft updates discard unfinished movements.
+Keyboard fills use the same surface colors as the blocks above, with visible
+key edges rather than brighter selection colors.
+Member details load only when a mapping view is visible and reuse the same
+canonical drafts. Active bank overrides affect effective coverage, not stored
+member values. Storage badges use the same neutral styling for all formats;
+warnings appear separately. Bank parameter warnings concern enabled override
+units, not inactive placeholder bytes or Sample-only fields.
+
+Press and hold a keyboard key to audition all matching Samples at the chosen
+velocity (1-127, initially 100), without selecting a block or moving its root.
+Sample Bank and Member Mapping audition all matching confirmed members,
+including overlapping velocity layers and active Bank overrides, not just the
+preview member. Release stops the whole group; loops remain active only while
+held, and focus loss or closing the window releases the key. Unsupported or
+unresolved playback fails the group rather than silently omitting a member.
+The existing preview engine applies trim, supported loop/reverse modes, fixed
+pitch, tuning, level and pan. It does not emulate the sampler's envelopes,
+filters, LFOs, effects, output routing or MIDI/controller behavior.
+
+Bank Save writes only bank overrides. Member Save writes all changed confirmed
+members in one atomic transaction, without saving pending bank or unrelated
+object edits. Member Discard likewise affects only member drafts. Closing a
+mapping window retains its accepted draft changes; reopening restores them.
+When a write result is uncertain, Check status retrieves the same job rather
+than repeating the write. A committed write whose refresh failed offers Refresh.
+
 ## JSON Example
 
 ```json

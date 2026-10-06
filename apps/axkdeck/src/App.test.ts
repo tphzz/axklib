@@ -566,7 +566,7 @@ describe('App panel layout', () => {
                 },
             }));
             mocks.startObjectParameterEdit.mockReset().mockImplementation(async (_session, edit) => {
-                tune = edit.operation.parameters.coarse_tune;
+                tune = edit.operations[0].parameters.coarse_tune;
                 revision++;
                 return { jobId: revision, status: 'queued' };
             });

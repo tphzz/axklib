@@ -1,134 +1,53 @@
 <script lang="ts">
     import '../object-editor/editor.css';
-    import { onMount } from 'svelte';
+    import { onMount, untrack } from 'svelte';
     import KeyboardMapping from '../object-editor/KeyboardMapping.svelte';
     import EditorChoice from '../object-editor/EditorChoice.svelte';
+    import EditorNumber from '../object-editor/EditorNumber.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import { noteName } from '../devices/a-series/sample/geometry';
-    import type { KeyboardRange } from '../object-editor/keyboardMapping';
-    import type { MappingAction, MappingCommand, MappingMessage, MappingSnapshot } from './protocol';
+    import { MappingClient, type MappingWindowAdapter } from './client.svelte';
+    import type { MappingRole } from './protocol';
     let {
         adapter,
+        role = 'program',
     }: {
-        adapter: {
-            send(command: MappingCommand): Promise<void>;
-            listen(callback: (message: MappingMessage) => void): Promise<() => void>;
-        };
+        adapter: MappingWindowAdapter;
+        role?: MappingRole;
     } = $props();
-    let snapshot = $state.raw<MappingSnapshot | null>(null);
-    let status = $state('Connecting to the Program editor');
-    let pending = $state('');
-    let preview = $state<KeyboardRange | null>(null);
-    let gesture: { context: string; version: number; assignmentId: number } | null = null;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let mounted = true;
-    const retiredOwners = new Set<string>();
-    async function send(action: MappingAction, identity = snapshot) {
-        if (pending) return;
-        const requestId = crypto.randomUUID();
-        pending = requestId;
-        status = '';
-        timeout = setTimeout(() => {
-            if (pending === requestId) {
-                pending = '';
-                status = 'The main editor did not respond. Refresh to check its current snapshot.';
-            }
-        }, 10000);
-        try {
-            await adapter.send({
-                requestId,
-                context: identity?.context ?? '',
-                version: identity?.version ?? 0,
-                action,
-            });
-        } catch (error) {
-            if (mounted && pending === requestId) {
-                clearTimeout(timeout);
-                pending = '';
-                status = String(error);
-            }
-        }
-    }
-    function begin() {
-        if (snapshot?.editable && snapshot.assignmentId !== null && !pending) {
-            gesture = { context: snapshot.context, version: snapshot.version, assignmentId: snapshot.assignmentId };
-            preview = snapshot.limits ? { ...snapshot.limits } : null;
-        }
-    }
-    function end() {
-        const range = preview,
-            identity = gesture;
-        preview = null;
-        gesture = null;
-        if (
-            range &&
-            identity &&
-            snapshot &&
-            identity.context === snapshot.context &&
-            identity.version === snapshot.version
-        )
-            void send({ kind: 'range', assignmentId: identity.assignmentId, range });
-    }
+    const client = untrack(() => new MappingClient(role, adapter));
+    const snapshot = $derived(client.state);
+    const status = $derived(client.status);
+    const pending = $derived(client.locked);
+    const targets = $derived(new Map(snapshot?.targets.map((row) => [row.id, row])));
+    const send = (action: Parameters<typeof client.send>[0]) => client.send(action);
+    let inputErrors = $state<Record<string, string>>({});
+    let velocity = $state(100);
+    $effect(() => {
+        snapshot?.context;
+        snapshot?.selectionId;
+        inputErrors = {};
+    });
     onMount(() => {
-        mounted = true;
-        let stop: (() => void) | undefined;
-        void adapter
-            .listen((message) => {
-                if (!mounted) return;
-                if (
-                    !retiredOwners.has(message.state.owner) &&
-                    (!snapshot || message.state.owner !== snapshot.owner || message.state.version >= snapshot.version)
-                ) {
-                    if (snapshot && message.state.owner !== snapshot.owner) retiredOwners.add(snapshot.owner);
-                    if (
-                        gesture &&
-                        (gesture.context !== message.state.context || gesture.version !== message.state.version)
-                    ) {
-                        gesture = null;
-                        preview = null;
-                    }
-                    snapshot = message.state;
-                }
-                if (message.requestId === pending) {
-                    clearTimeout(timeout);
-                    pending = '';
-                    status = message.error ?? '';
-                }
-            })
+        let closed = false,
+            stop: (() => void) | undefined;
+        void client
+            .connect()
             .then((dispose) => {
-                if (!mounted) {
-                    dispose();
-                    return;
-                }
-                stop = dispose;
-                void send({ kind: 'ready' });
+                if (closed) dispose();
+                else stop = dispose;
             })
             .catch((error) => {
-                if (mounted) status = String(error);
+                client.status = String(error);
             });
-        const heartbeat = setInterval(() => {
-            if (!gesture)
-                void adapter
-                    .send({
-                        requestId: crypto.randomUUID(),
-                        context: snapshot?.context ?? '',
-                        version: snapshot?.version ?? 0,
-                        action: { kind: 'ready' },
-                    })
-                    .catch((error) => {
-                        if (mounted) status = String(error);
-                    });
-        }, 5000);
         return () => {
-            mounted = false;
-            gesture = null;
-            preview = null;
-            clearTimeout(timeout);
-            clearInterval(heartbeat);
+            closed = true;
             stop?.();
         };
     });
 </script>
+
+<svelte:window onblur={() => client.release()} />
 
 <main class="device-editor mapping-window">
     <header>
@@ -161,37 +80,99 @@
                 >
             {:else}<button
                     class="action"
-                    disabled={!!pending || !snapshot?.canSave}
+                    disabled={!!pending || !snapshot?.canSave || Object.values(inputErrors).some(Boolean)}
                     onclick={() => void send({ kind: 'save' })}><Icon name="save" size={14} />Save</button
                 >{/if}
         </div>
     </header>
-    <div class="assignment">
-        <span>Sample/Bank</span>
-        <EditorChoice
-            label="Sample/Bank"
-            value={snapshot?.assignmentId ?? undefined}
-            options={snapshot?.assignments ?? []}
-            segmented={false}
-            disabled={!!pending || !snapshot?.assignments.length}
-            onchange={(assignmentId) => void send({ kind: 'select', assignmentId })}
-        />
-    </div>
+    {#if snapshot?.selections.length}<div class="assignment">
+            <span>{snapshot.selectionLabel}</span>
+            <EditorChoice
+                label={snapshot.selectionLabel}
+                value={snapshot.selectionId ?? undefined}
+                options={snapshot.selections}
+                segmented={false}
+                disabled={!!pending}
+                onchange={(selectionId) => client.select(selectionId)}
+            />
+        </div>{/if}
+    {#if snapshot?.overrides.length}<div class="overrides">
+            {#each snapshot.overrides as control (control.boundary)}
+                <div class="override-control">
+                    <span>{control.label}</span>
+                    <EditorNumber
+                        label={control.label}
+                        value={snapshot.limits?.[control.boundary]}
+                        min={control.boundary === 'velocityHigh' ? (snapshot.limits?.velocityLow ?? 0) : 0}
+                        max={control.boundary === 'velocityLow' ? (snapshot.limits?.velocityHigh ?? 127) : 127}
+                        disabled={!!pending || !snapshot.editable}
+                        inherited={control.inherited}
+                        oninvalid={(message) => (inputErrors[control.boundary] = message)}
+                        onchange={(value) => {
+                            if (snapshot?.limits && snapshot.selectionId !== null)
+                                void send({
+                                    kind: 'range',
+                                    selectionId: snapshot.selectionId,
+                                    range: { ...snapshot.limits, [control.boundary]: value },
+                                    boundaries: [control.boundary],
+                                });
+                        }}
+                    />
+                    <button
+                        class="editor-icon"
+                        aria-label={`Inherit ${control.label.toLowerCase()}`}
+                        title={`Use the Sample's ${control.label.toLowerCase()}`}
+                        disabled={!!pending || !snapshot.editable || control.inherited}
+                        onclick={() => void send({ kind: 'inherit', boundary: control.boundary })}
+                        ><Icon name="undo" size={14} /></button
+                    >
+                </div>
+            {/each}
+        </div>{/if}
     <div class="canvas">
         {#if snapshot?.limits}
             {#key snapshot.context}
                 <KeyboardMapping
                     mode="mapping"
+                    {velocity}
+                    onvelocity={(value) => {
+                        client.release();
+                        velocity = value;
+                    }}
+                    onpress={(note) => client.press(note, velocity)}
+                    onrelease={() => client.release()}
                     zones={snapshot.zones}
-                    limits={preview ?? snapshot.limits}
+                    limits={client.preview ?? snapshot.limits}
+                    targets={snapshot.zones.flatMap((zone) => {
+                        const target = targets.get(zone.selectionId!);
+                        return target?.limits
+                            ? [
+                                  {
+                                      id: zone.id,
+                                      limits: target.limits,
+                                      axes: target.editableAxes,
+                                      editable: target.editable,
+                                  },
+                              ]
+                            : [];
+                    })}
+                    editableAxes={snapshot.editableAxes}
+                    rangeLabel={snapshot.rangeLabel}
+                    rootEditable={snapshot.rootEditable}
+                    rootIdentity={`${snapshot.context}:${snapshot.version}:${snapshot.selectionId}`}
+                    onroot={(note) => {
+                        if (snapshot?.selectionId !== null && snapshot)
+                            void send({ kind: 'root', selectionId: snapshot.selectionId, note });
+                    }}
                     formatNote={noteName}
                     disabled={!!pending || !snapshot.editable}
-                    onselect={(id) => void send({ kind: 'select', assignmentId: Number(id.split(':')[0]) })}
-                    onbegin={begin}
-                    onchange={(range) => {
-                        if (gesture) preview = range;
+                    onselect={(id) => {
+                        const selectionId = snapshot?.zones.find((zone) => zone.id === id)?.selectionId;
+                        if (selectionId !== undefined && snapshot?.selections.length) client.select(selectionId);
                     }}
-                    onend={end}
+                    onbegin={(id) => client.begin(id)}
+                    onchange={(range, changed) => client.change(range, changed)}
+                    onend={(cancelled, move) => client.end(cancelled, move)}
                 />
             {/key}
         {:else}<p>{snapshot?.status ?? status}</p>{/if}
@@ -256,6 +237,18 @@
     .assignment span {
         font-size: 10px;
         color: var(--color-text-muted);
+    }
+    .overrides {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 8px 18px;
+        padding: 8px 10px 0;
+    }
+    .override-control {
+        display: grid;
+        grid-template-columns: 80px minmax(0, 1fr) 24px;
+        align-items: center;
+        gap: 6px;
     }
     .canvas {
         flex: 1;

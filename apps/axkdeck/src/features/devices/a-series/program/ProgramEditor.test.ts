@@ -27,6 +27,36 @@ function setup(tab = 'setup', native = false, editable = true, inactive = false)
 }
 
 describe('Program editor controls', () => {
+    it('uses note labels and the shared velocity range editor in Program Key/Velocity', async () => {
+        const { view, document } = setup('easy-edit');
+        await fireEvent.click(view.getByRole('button', { name: 'Key/Velocity' }));
+        expect(view.getByRole('spinbutton', { name: 'Low key' }).parentElement?.textContent).toContain('C-2');
+        expect(view.getByRole('spinbutton', { name: 'High key' }).parentElement?.textContent).toContain('G8');
+        await fireEvent.keyDown(view.getByRole('slider', { name: 'High velocity boundary' }), { key: 'ArrowDown' });
+        await fireEvent.keyUp(view.getByRole('slider', { name: 'High velocity boundary' }), { key: 'ArrowDown' });
+        expect(document.draft.changes).toEqual({ 'assignments.0.velocity_high': 126 });
+    });
+    it('does not badge shared algorithm or Ef4 generic controls as new parameters', async () => {
+        const fixture = programEditorFixture();
+        fixture.catalog.formats.push(programEditorFixture(true).format);
+        const navigation = new EditorNavigation();
+        navigation.tab = 'effects';
+        const view = render(ProgramEditor, { document: fixture.document, navigation, panelId: 'effect-markers' });
+        expect(
+            view
+                .getByRole('spinbutton', { name: 'Parameter 1' })
+                .closest('.parameter-field')
+                ?.querySelector('.extended-parameter'),
+        ).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Select Ef4' }));
+        expect(
+            view
+                .getByRole('spinbutton', { name: 'Input level' })
+                .closest('.parameter-field')
+                ?.querySelector('.extended-parameter'),
+        ).toBeNull();
+        expect(view.container.querySelector('.effect-heading .extended-parameter')).not.toBeNull();
+    });
     it('bounds assignment rendering and reaches offscreen targets through keyboard navigation', async () => {
         const fixture = programEditorFixture();
         fixture.editing.targets.push(
@@ -48,11 +78,11 @@ describe('Program editor controls', () => {
         await fireEvent.click(view.getByRole('option', { name: '=Sample' }));
         expect((fixture.document.draft as ProgramDraft).assignments.at(-1)?.name).toBe('Target 2047');
     });
-    it('keeps source outlines when Program limits clip all keys or velocities', async () => {
+    it('keeps the keyboard when Program limits clip all keys or velocities', async () => {
         const { document, view } = setup('easy-edit');
         await act(() => document.draft.patch({ 'assignments.0.key_high': 24, 'assignments.1.velocity_high': 0 }));
         await fireEvent.click(view.getByRole('button', { name: 'Key/Velocity' }));
-        expect(view.container.querySelectorAll('.source')).toHaveLength(2);
+        expect(view.getByRole('group', { name: /^Keyboard/ })).toBeTruthy();
         expect(view.queryAllByRole('button', { name: /^Select mapping/ })).toHaveLength(0);
         expect(view.queryByText('No resolved playable range for this assignment.')).toBeNull();
     });
@@ -117,7 +147,7 @@ describe('Program editor controls', () => {
     it('edits inclusive key/velocity limits in the shared mapping without changing key shift', async () => {
         const { document, view } = setup('easy-edit');
         await fireEvent.click(view.getByRole('button', { name: 'Key/Velocity' }));
-        expect(view.getByRole('img', { name: /^Keyboard/ })).toBeTruthy();
+        expect(view.getByRole('group', { name: /^Keyboard/ })).toBeTruthy();
         await fireEvent.keyDown(view.getByRole('button', { name: 'Low key limit' }), {
             key: 'ArrowRight',
         });
@@ -172,18 +202,16 @@ describe('Program editor controls', () => {
         expect(document.draft.dirty).toBe(false);
     });
 
-    it('retains the effect type chooser on Parameters and edits only visible parameter words', async () => {
-        const { document, navigation, view } = setup('effects');
-        await fireEvent.click(view.getByRole('button', { name: 'Parameters' }));
-        expect(navigation.page).toBe('parameters');
+    it('shows routing and algorithm parameters together without a secondary tab row', async () => {
+        const { document, view } = setup('effects');
+        expect(view.queryByRole('button', { name: 'Parameters' })).toBeNull();
+        expect(view.queryByRole('button', { name: 'Routing' })).toBeNull();
         expect(view.getByRole('combobox', { name: 'Effect type' })).toHaveProperty('value', '1: Scratch');
         const parameter = view.getByRole('spinbutton', { name: 'Parameter 1' });
         await fireEvent.input(parameter, { target: { value: '99' } });
         expect(document.draft.changes).toEqual({ 'effects.1.words.0': 99 });
         expect(view.queryByRole('spinbutton', { name: 'Parameter 16' })).toBeNull();
         expect(document.draft.values['effects.1.words.15']).toBe(215);
-        await fireEvent.click(view.getByRole('button', { name: 'Routing' }));
-        expect(navigation.page).toBe('routing');
         expect(view.getByRole('button', { name: 'Select Ef1' })).toBeTruthy();
     });
 

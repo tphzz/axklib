@@ -423,7 +423,11 @@
                 >
                     <span class="object-slot">{program.slot}</span>
                     <span class="program-identity">
-                        <ObjectSizeIdentity name={program.name} object={program.object} />
+                        <ObjectSizeIdentity
+                            name={program.name}
+                            object={program.object}
+                            metadata={program.assignmentSummary}
+                        />
                     </span>
                 </button>
             {:else}

@@ -1,7 +1,7 @@
 import { aSeriesSampleAdapter } from '../devices/a-series/sample/adapter';
 import { aSeriesBankAdapter } from '../devices/a-series/bank/adapter';
 import type { ObjectDetail } from '../../lib/transport';
-import type { EditingSnapshot, ObjectParameterEdit, ProgramEditorFormat } from '../../lib/objectEditing';
+import type { EditingSnapshot, ObjectParameterChange, ProgramEditorFormat } from '../../lib/objectEditing';
 import type { EditorValues } from './draft.svelte';
 import { programEdit, validateProgram } from '../devices/a-series/program/adapter';
 import { ProgramDraft } from '../devices/a-series/program/draft.svelte';
@@ -19,7 +19,7 @@ export function objectEditorAdapter(detail: ObjectDetail, draft?: EditorDraftSta
                 changes: EditorValues,
                 values: EditorValues,
                 format?: ProgramEditorFormat,
-            ): ObjectParameterEdit => {
+            ): ObjectParameterChange => {
                 if (!format) throw new Error('Program parameter catalog is unavailable');
                 return programEdit(detail, changes, values, format, draft instanceof ProgramDraft ? draft : undefined);
             },
@@ -55,7 +55,7 @@ export function objectEditorAdapter(detail: ObjectDetail, draft?: EditorDraftSta
                   changes: EditorValues,
                   values: EditorValues,
                   _format?: ProgramEditorFormat,
-              ): ObjectParameterEdit => adapter.edit(detail, changes, values),
+              ): ObjectParameterChange => adapter.edit(detail, changes, values),
               validate: (
                   values: EditorValues,
                   changes: EditorValues,

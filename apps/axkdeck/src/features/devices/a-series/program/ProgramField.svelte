@@ -7,6 +7,7 @@
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
     import ExtendedParameterMarker from '../../../object-editor/ExtendedParameterMarker.svelte';
     import { measureWidth } from '../../../object-editor/measureWidth';
+    import { noteName } from '../sample/geometry';
     let {
         document,
         field,
@@ -16,11 +17,13 @@
     const locked = $derived(disabled || !!field.reason || value === undefined);
     const earlier = $derived(document.programCatalog?.formats.find((item) => item.model === 'A3000'));
     const earlierDomain = $derived(
-        earlier?.fields.find((item) => item.key === field.key.replace(/^assignments\.\d+\./, 'assignments.*.')),
+        earlier?.fields.find(
+            (item) => item.key === (field.nativeKey ?? field.key).replace(/^assignments\.\d+\./, 'assignments.*.'),
+        ),
     );
     const later = $derived(document.programFormat?.model !== 'A3000' && !!earlier);
     const extended = $derived(
-        field.extended || (later && (!earlierDomain || field.min < earlierDomain.min || field.max > earlierDomain.max)),
+        field.extended ?? (later && (!earlierDomain || field.min < earlierDomain.min || field.max > earlierDomain.max)),
     );
     const options = $derived(
         field.options?.map((item) => ({
@@ -82,6 +85,7 @@
             value={typeof value === 'number' ? value : undefined}
             min={field.min}
             max={field.max}
+            unit={field.note && typeof value === 'number' ? noteName(value) : ''}
             disabled={locked}
             resetValue={Number(document.draft.baselineValue(field.key))}
             onchange={(value) => document.draft.set(field.key, value)}

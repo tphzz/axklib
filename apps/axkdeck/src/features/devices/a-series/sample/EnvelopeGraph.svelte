@@ -6,6 +6,7 @@
     import { sampleEnvelope, envelopeDurations, envelopeRate, type SampleEnvelope } from './envelope';
     import { envelopeViewport } from './envelopeViewport';
     import Icon from '../../../../lib/components/Icon.svelte';
+    import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     let {
         draft,
         kind,
@@ -75,8 +76,8 @@
         const point = points[Number(id)]!;
         onselect(rateOffsets?.[point.rateParameter ?? '']?.key ?? point.parameter ?? point.rateParameter!);
     }
-    function selectStage(event: Event) {
-        const id = (event.currentTarget as HTMLSelectElement).value;
+    function selectStage(value: number) {
+        const id = String(value);
         const handle = handles.find((handle) => handle.id === id && !handle.disabled);
         if (!handle) return;
         selected = id;
@@ -108,18 +109,20 @@
 </script>
 
 {#snippet tools()}
-    <select
-        class="envelope-stage"
-        aria-label="Envelope stage"
-        title="Envelope stage"
-        value={selected}
-        disabled={disabled || !handles.some((handle) => !handle.disabled)}
-        onchange={selectStage}
-    >
-        {#each handles as handle (handle.id)}
-            <option value={handle.id} disabled={handle.disabled}>{handle.label}</option>
-        {/each}
-    </select>
+    <div class="envelope-stage">
+        <EditorChoice
+            label="Envelope stage"
+            value={Number(selected)}
+            segmented={false}
+            options={handles.map((handle) => ({
+                value: Number(handle.id),
+                label: handle.label,
+                disabled: handle.disabled,
+            }))}
+            disabled={disabled || !handles.some((handle) => !handle.disabled)}
+            onchange={selectStage}
+        />
+    </div>
     <button
         class="editor-icon"
         aria-label="Zoom envelope out"
@@ -196,19 +199,7 @@
 
 <style>
     .envelope-stage {
-        width: 88px;
-        height: 22px;
-        padding: 0 4px;
-        border: 1px solid var(--color-border);
-        border-radius: 3px;
-        background: var(--color-panel-deep);
-        color: var(--color-text);
-        font: inherit;
-        font-size: 11px;
-        color-scheme: dark;
-    }
-    .envelope-stage:focus-visible {
-        outline: 1px solid var(--color-accent);
-        outline-offset: 2px;
+        flex: 0 0 96px;
+        width: 96px;
     }
 </style>

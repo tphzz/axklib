@@ -1,18 +1,41 @@
 import type { ProgramEditingSnapshot, ProgramEditorTarget } from '../../../../lib/objectEditing';
 import type { EditorValues } from '../../../object-editor/draft.svelte';
 import type { DraftAssignment } from './draft.svelte';
+import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
+import { BankDraft } from '../bank/draft.svelte';
+import { sampleMappingRange } from '../sample/mapping';
 
 export const clampMidi = (value: number) => Math.max(0, Math.min(127, value));
-export function previewSamples(snapshot: ProgramEditingSnapshot, assignment: DraftAssignment) {
+export function previewSamples(
+    snapshot: ProgramEditingSnapshot,
+    assignment: DraftAssignment,
+    lookup?: (id: string) => ObjectEditorDocument | undefined,
+) {
     const target = snapshot.targets.find((item) => item.objectId === assignment.targetObjectId);
     if (!target?.available) return [];
-    if (target.kind === 'SBNK') return [target];
+    const current = (sample: ProgramEditorTarget) => {
+        const document = lookup?.(sample.objectId);
+        const values = { ...(document?.draft.storedValues ?? sample.values) };
+        const range = sampleMappingRange(values);
+        if (range) {
+            values.key_low = range.low;
+            values.key_high = range.high;
+        }
+        return { ...sample, values };
+    };
+    if (target.kind === 'SBNK') return [current(target)];
+    const bank = lookup?.(target.objectId)?.draft;
     return target.members.flatMap((member) => {
         const sample = snapshot.targets.find((item) => item.objectId === member.objectId);
         if (!sample?.available) return [];
-        const values = { ...sample.values };
-        for (const key of target.overrideKeys) {
-            if (key in target.values) values[key] = target.values[key]!;
+        const values = { ...current(sample).values };
+        const overrideKeys =
+            bank instanceof BankDraft
+                ? bank.units.flatMap((unit) => unit.keys.filter((key) => bank.isOverridden(key)))
+                : target.overrideKeys;
+        const overrides = bank instanceof BankDraft ? bank.storedValues : target.values;
+        for (const key of overrideKeys) {
+            if (key in overrides) values[key] = overrides[key]!;
             else delete values[key];
         }
         return [{ ...sample, values }];

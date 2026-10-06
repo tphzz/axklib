@@ -1,5 +1,6 @@
 <script lang="ts">
     import AttributeHelp from '../../lib/components/AttributeHelp.svelte';
+    import Icon from '../../lib/components/Icon.svelte';
     let { label, description, warning = false }: { label: string; description: string; warning?: boolean } = $props();
     let anchor = $state<HTMLElement>();
     function rowHelp(node: HTMLElement) {
@@ -13,9 +14,10 @@
     }
 </script>
 
-<span class="format-badge" class:warning title={anchor ? undefined : description} aria-label={description} use:rowHelp
-    >{label}</span
->
+<span class="format-badge" title={anchor ? undefined : description} aria-label={description} use:rowHelp>{label}</span>
+{#if warning}<span class="warning" title={description} aria-label="Stored parameter warning"
+        ><Icon name="triangle-alert" size={11} /></span
+    >{/if}
 {#if anchor}<AttributeHelp {anchor} {label} {description} focusVisibleOnly />{/if}
 
 <style>
@@ -35,5 +37,8 @@
     }
     .warning {
         color: var(--color-warning, #e6a34c);
+        display: inline-flex;
+        flex: none;
+        align-items: center;
     }
 </style>

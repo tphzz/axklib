@@ -70,7 +70,11 @@ export interface BankParameterEdit {
         disable: number[];
     };
 }
-export type ObjectParameterEdit = SampleParameterEdit | BankParameterEdit | ProgramParameterEdit;
+export type ObjectParameterChange = SampleParameterEdit | BankParameterEdit | ProgramParameterEdit;
+export interface ObjectParameterEdit {
+    expectedRevision: number;
+    operations: ObjectParameterChange['operation'][];
+}
 export interface ObjectEditingTransport {
     programEditorCatalog(): Promise<ProgramEditorCatalog>;
     startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState>;

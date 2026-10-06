@@ -12,12 +12,14 @@ type StoredAssignment = Omit<DraftAssignment, 'id' | 'retainOrdinal'> & { ordina
 const activeKey = (id: number) => `$assignment.${id}`;
 
 export class ProgramDraft {
+    revision = $state(0);
     storedValues = $state<EditorValues>({});
     private baseline: EditorValues = {};
     private changed = $state<EditorValues>({});
     private past = $state.raw<Delta[]>([]);
     private future = $state.raw<Delta[]>([]);
     private gesture: Delta | null = null;
+    private gestureFuture: Delta[] = [];
     private definitions = $state.raw<DraftAssignment[]>([]);
     private original: StoredAssignment[] | undefined;
     private nextId = 0;
@@ -102,7 +104,10 @@ export class ProgramDraft {
         this.patch({ [key]: value });
     }
     beginGesture(): void {
-        this.gesture ??= {};
+        if (!this.gesture) {
+            this.gesture = {};
+            this.gestureFuture = this.future;
+        }
     }
     endGesture(): void {
         if (!this.gesture) return;
@@ -110,6 +115,12 @@ export class ProgramDraft {
             Object.entries(this.gesture).filter(([, value]) => value.before !== value.after),
         );
         if (Object.keys(delta).length) this.past = [...this.past.slice(-99), delta];
+        this.gesture = null;
+    }
+    cancelGesture(): void {
+        if (!this.gesture) return;
+        this.apply(this.gesture, 'before');
+        this.future = this.gestureFuture;
         this.gesture = null;
     }
     undo(): void {
@@ -136,6 +147,7 @@ export class ProgramDraft {
             if (value === this.baseline[key] || value === undefined) delete this.changed[key];
             else this.changed[key] = value;
         }
+        this.revision++;
     }
     changeEffectType(slot: number, type: number, defaults: readonly number[]): void {
         if (defaults.length !== 16) throw new Error('An effect reset requires sixteen parameter words');
@@ -166,5 +178,6 @@ export class ProgramDraft {
         this.past = [];
         this.future = [];
         this.gesture = null;
+        this.revision++;
     }
 }

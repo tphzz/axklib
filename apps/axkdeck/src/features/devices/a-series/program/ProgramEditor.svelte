@@ -17,6 +17,7 @@
     import ProgramWave from './ProgramWave.svelte';
     import ProgramEnvelope from './ProgramEnvelope.svelte';
     import ProgramMapping from './ProgramMapping.svelte';
+    import ProgramRanges from './ProgramRanges.svelte';
     let {
         document: suppliedDocument,
         navigation,
@@ -104,7 +105,7 @@
     aria-labelledby={`${panelId}-${tab.id}`}
     class="program-panel"
     class:assignments={tab.id === 'sample-select'}
-    class:graphical={page?.id === 'amp' || page?.id === 'routing'}
+    class:graphical={page?.id === 'amp' || tab.id === 'effects'}
     use:rememberEditorScroll={scroll}
 >
     {#if !snapshot || !format}
@@ -121,13 +122,7 @@
             onselect={onassignmentselect}
         />
     {:else if tab.id === 'effects'}
-        <ProgramEffects
-            {document}
-            page={page?.id ?? 'routing'}
-            {slot}
-            onselect={(value) => (navigation.effectSlot = value)}
-            {disabled}
-        />
+        <ProgramEffects {document} {slot} onselect={(value) => (navigation.effectSlot = value)} {disabled} />
     {:else if page?.id === 'controllers'}
         <div class="controller-grid">
             {#each [1, 2, 3, 4] as controller}
@@ -218,6 +213,12 @@
                     {/snippet}
                 </GraphPanel>
             </div>
+        {:else if page?.id === 'range' && assignment}
+            <ProgramRanges
+                {document}
+                assignmentId={assignment.id}
+                disabled={disabled || assignment.kind === 'UNKNOWN'}
+            />
         {:else}<div class="fields">
                 {#each keys as key}
                     {@const control = field(key)}{#if control}<ProgramField

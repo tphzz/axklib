@@ -64,6 +64,7 @@ export type ImageTreeAction =
     | 'export-floppy';
 
 export interface Program {
+    assignmentSummary?: string;
     id: string;
     objectId: string;
     slot: string;

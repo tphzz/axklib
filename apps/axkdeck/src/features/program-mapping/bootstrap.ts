@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { mount, tick } from 'svelte';
 import MappingWindow from './MappingWindow.svelte';
 import { mappingWindowAdapter } from './desktop';
+import { mappingRoles } from './protocol';
 import { installDiagnostics, reportDiagnostic } from '../../lib/diagnostics';
 import { createInterfaceScaleController, type InterfaceScaleMode } from '../../lib/interfaceScale';
 import { createTauriInterfaceScaleAdapter, showCurrentTauriWindow } from '../../lib/tauriInterfaceScale';
@@ -28,7 +29,9 @@ export async function startMappingView(target: HTMLElement, desktop: boolean): P
             },
             { once: true },
         );
-        mount(MappingWindow, { target, props: { adapter: mappingWindowAdapter } });
+        const role = mappingRoles.find((role) => role === new URLSearchParams(window.location.search).get('role'));
+        if (!role) throw new Error('Unknown Mapping Editor context');
+        mount(MappingWindow, { target, props: { adapter: mappingWindowAdapter, role } });
     } catch (error) {
         reportDiagnostic('mapping_startup_failed', { message: String(error) }, 'error');
         target.textContent = `Mapping Editor could not be loaded: ${String(error)}`;

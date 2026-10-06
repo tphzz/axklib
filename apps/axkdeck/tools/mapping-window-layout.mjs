@@ -4,6 +4,9 @@ import { createConnection, createServer as createSocketServer } from 'node:net';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
+import { bankMappingCases } from './bank-mapping-cases.mjs';
+import { mappingPresentationCases } from './mapping-presentation-cases.mjs';
+import { mappingAuditionCases } from './mapping-audition-cases.mjs';
 
 assert.ok(process.argv[2], 'Provide a build/reports output directory');
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
@@ -60,9 +63,9 @@ async function geometry(page) {
             root: rect(root), header: rect(header), canvas: rect(canvas), plot: rect(plot), footer: rect(footer),
             keyboard: rect(root.querySelector('.keyboard')), legend: rect(root.querySelector('.legend')),
             heading: rect(root.querySelector('h1')), actions: rect(root.querySelector('.actions')),
-            handles: [...root.querySelectorAll('.limit-handle')].map(rect),
+            handles: [...root.querySelectorAll('.limit-handle')].map(node => ({ ...rect(node), label: node.getAttribute('aria-label') })),
             zones: [...root.querySelectorAll('.zone')].map(node => ({ ...rect(node), background: getComputedStyle(node).backgroundColor })),
-            gridPaths: plot.querySelectorAll('svg path').length,
+            gridPaths: plot.querySelectorAll('.grid-overlay path').length,
             pageOverflow: document.documentElement.scrollWidth > innerWidth,
         };
     });
@@ -82,7 +85,7 @@ try {
     await server.listen();
     port = server.httpServer.address().port;
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
-    for (const zoom of [1, 1.5]) {
+    for (const zoom of [1, 1.25, 1.5]) {
         if (stopping) break;
         const name = `mapping-${Math.round(zoom * 100)}`;
         const viewport = zoom === 1 ? { width: 1040, height: 680 } : { width: 800, height: 600 };
@@ -106,12 +109,12 @@ try {
             assert.equal(layout.pageOverflow, false, 'Mapping must not overflow horizontally');
             assert.ok(layout.heading.right <= layout.actions.x + 1, 'Title and actions must not overlap');
             assert.ok(layout.plot.width > 500 && layout.plot.height > 250, 'Mapping plot must be usable and nonblank');
-            assert.ok(layout.gridPaths >= 129 && layout.zones.length === 2, 'Mapping must paint both assignment zones and its grid');
+            assert.ok(layout.gridPaths === 4 && layout.zones.length === 2, 'Mapping paints both assignment zones and four batched grid strokes');
             assert.ok(layout.footer.bottom <= layout.viewport.height + 1, 'Footer must remain inside the window');
             assert.ok(layout.canvas.bottom <= layout.footer.y + 1, 'Canvas and footer must not overlap');
             assert.ok(layout.plot.bottom <= layout.keyboard.y + 1, 'Keyboard axis must follow the mapping plot');
             assert.ok(layout.legend.y >= layout.keyboard.bottom - 1 && layout.legend.y - layout.keyboard.bottom < 20, 'The mapping must not leave a large unused grid row below its keyboard');
-            assert.ok(layout.handles.every(handle => handle.x >= layout.plot.x - 1 && handle.right <= layout.plot.right + 1), 'Handles must be framed');
+            assert.ok(layout.handles.every(handle => (handle.x + handle.right) / 2 >= layout.plot.x - 1 && (handle.x + handle.right) / 2 <= layout.plot.right + 1), 'Handle centers must follow the exact range boundaries');
             assert.ok(layout.zones.every(zone => zone.background !== 'rgba(0, 0, 0, 0)'), 'Effective zones must be painted');
             await mapping.screenshot({ path: resolve(output, `${name}-window.png`) });
 
@@ -145,16 +148,42 @@ try {
             const beforeDrag = (await state(main)).commands.filter(command => command.action.kind === 'range').length;
             await mapping.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
             await mapping.mouse.down();
-            await mapping.mouse.move(box.x + box.width / 2 + plot.width * 8 / 128, box.y + box.height / 2, { steps: 8 });
+            await mapping.mouse.move(box.x + box.width / 2 + plot.width * 20 / 128, box.y + box.height / 2, { steps: 20 });
             assert.equal((await state(main)).values['assignments.0.key_low'], 24, 'An unfinished drag must remain a child preview');
+            const guide = await mapping.locator('.range-guide[data-boundary="low"]').getAttribute('x1');
+            assert.equal(Number(guide), 36, 'Coverage guide remains on the Sample edge during a local limits preview');
+            await mapping.waitForFunction(() => document.querySelector('.limits').style.left === '34.375%');
+            assert.equal(await mapping.locator('.limits').evaluate(node => node.style.left), '34.375%', 'Editable bounds follow the local drag before commit');
             await mapping.mouse.up();
-            await waitValue(main, 'assignments.0.key_low', 32);
-            await waitLimit(mapping, 'low', 32);
+            await waitValue(main, 'assignments.0.key_low', 44);
+            await waitLimit(mapping, 'low', 44);
+            assert.equal(Number(await mapping.locator('.range-guide[data-boundary="low"]').getAttribute('x1')), 44);
             assert.equal((await state(main)).commands.filter(command => command.action.kind === 'range').length, beforeDrag + 1);
             await mapping.screenshot({ path: resolve(output, `${name}-drag.png`) });
             await mapping.getByRole('button', { name: 'Undo', exact: true }).click();
             await waitValue(main, 'assignments.0.key_low', 24);
             assert.equal((await state(main)).canUndo, false, 'The complete pointer drag must be one undo entry');
+            const moveBefore = (await state(main)).commands.filter(command => command.action.kind === 'move').length;
+            const movePlot = await mapping.locator('.plot').boundingBox();
+            const movePoint = { x: movePlot.x + movePlot.width * 40.5 / 128, y: movePlot.y + movePlot.height / 3 };
+            await mapping.mouse.move(movePoint.x, movePoint.y); await mapping.mouse.down();
+            await mapping.mouse.move(movePoint.x + 2, movePoint.y); await mapping.mouse.up();
+            await waitState(main, 'assignment', 0);
+            assert.equal((await state(main)).commands.filter(command => command.action.kind === 'move').length, moveBefore, 'A sub-threshold click is not a move');
+            await mapping.mouse.move(movePoint.x, movePoint.y); await mapping.mouse.down();
+            await mapping.mouse.move(movePoint.x + movePlot.width * 5 / 128, movePoint.y, { steps: 8 });
+            assert.equal((await state(main)).values['assignments.0.key_low'], 24, 'Whole-block movement remains local until release');
+            await mapping.mouse.up(); await waitValue(main, 'assignments.0.key_low', 29);
+            assert.equal((await state(main)).values['assignments.0.key_high'], 105, 'Block movement preserves its width');
+            assert.equal((await state(main)).values['assignments.0.key_shift'], 0, 'Moving a block never transposes its root');
+            assert.equal((await state(main)).commands.filter(command => command.action.kind === 'move').length, moveBefore + 1);
+            await mapping.getByRole('button', { name: 'Undo', exact: true }).click(); await waitValue(main, 'assignments.0.key_low', 24);
+            assert.equal((await state(main)).canUndo, false, 'A moved block has exactly one undo step');
+            await mapping.mouse.move(movePoint.x, movePoint.y); await mapping.mouse.down();
+            await mapping.mouse.move(movePoint.x + movePlot.width * 5 / 128, movePoint.y, { steps: 8 });
+            await mapping.keyboard.press('Escape'); await mapping.mouse.up();
+            assert.equal((await state(main)).values['assignments.0.key_low'], 24, 'Escape cancels a moved block');
+            assert.equal((await state(main)).commands.filter(command => command.action.kind === 'move').length, moveBefore + 1);
             await main.getByRole('spinbutton', { name: 'Low key', exact: true }).fill('28');
             await waitLimit(mapping, 'low', 28);
             await main.getByRole('button', { name: 'Main undo', exact: true }).click();
@@ -213,6 +242,9 @@ try {
             await mapping?.screenshot({ path: resolve(output, `${name}-failure.png`) }).catch(() => {});
         } finally { await context.close(); }
     }
+    await bankMappingCases(browser, `http://127.0.0.1:${port}`, output, results);
+    await mappingPresentationCases(browser, `http://127.0.0.1:${port}`, output, results);
+    await mappingAuditionCases(browser, `http://127.0.0.1:${port}`, output, results);
 } finally {
     clearTimeout(deadline);
     process.removeListener('SIGTERM', signal);
@@ -225,7 +257,7 @@ try {
     });
     await writeFile(resolve(output, 'results.json'), JSON.stringify({
         port, serverStopped: true, browserStopped: !browser?.isConnected(), portReleased,
-        scaleMethod: 'CSS viewport and device-scale emulation at 100/150 percent; not native WebView zoom', results,
+        scaleMethod: 'Bank/Sample CSS zoom and Program device-scale emulation at 100/125/150 percent; not native WebView zoom', results,
     }, null, 2) + '\n');
     assert.equal(portReleased, true, 'Owned Vite port must be released');
 }

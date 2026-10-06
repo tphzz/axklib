@@ -25,10 +25,24 @@ describe('EditorTabs', () => {
         const view = render(EditorTabs, { tabs, active: 'first', label: 'Sections', onselect: vi.fn() });
         const strip = view.getByRole('tablist');
         Object.defineProperty(strip, 'clientWidth', { configurable: true, value: 100 });
+        vi.spyOn(strip, 'getBoundingClientRect').mockImplementation(
+            () =>
+                ({
+                    left: 0,
+                    right: strip.clientWidth,
+                    width: strip.clientWidth,
+                }) as DOMRect,
+        );
         const buttons = view.getAllByRole('tab');
         buttons.forEach((button, index) => {
-            Object.defineProperty(button, 'offsetLeft', { value: index * 80 });
-            Object.defineProperty(button, 'offsetWidth', { value: 80 });
+            vi.spyOn(button, 'getBoundingClientRect').mockImplementation(
+                () =>
+                    ({
+                        left: index * 80 - strip.scrollLeft,
+                        right: (index + 1) * 80 - strip.scrollLeft,
+                        width: 80,
+                    }) as DOMRect,
+            );
         });
         buttons[0]!.focus();
         await view.rerender({ active: 'last' });
@@ -43,6 +57,23 @@ describe('EditorTabs', () => {
         expect(strip.scrollLeft).toBe(0);
         view.unmount();
         expect(disconnect).toHaveBeenCalledOnce();
+    });
+
+    it('reveals fractional tab edges at 125 percent interface scale', async () => {
+        const view = render(EditorTabs, { tabs, active: 'first', label: 'Sections', onselect: vi.fn() });
+        await act(() => {});
+        const strip = view.getByRole('tablist');
+        strip.scrollLeft = 76.8;
+        Object.defineProperty(strip, 'clientWidth', { value: 122 });
+        vi.spyOn(strip, 'getBoundingClientRect').mockReturnValue({ left: 20, right: 172.5, width: 152.5 } as DOMRect);
+        const button = view.getAllByRole('tab')[2]!;
+        vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({
+            left: 110.78125,
+            right: 173.796875,
+            width: 63.015625,
+        } as DOMRect);
+        await fireEvent.focus(button);
+        expect(strip.scrollLeft).toBe(78.8);
     });
 
     it.each([false, true])(

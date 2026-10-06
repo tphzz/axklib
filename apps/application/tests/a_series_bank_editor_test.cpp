@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <variant>
@@ -7,8 +8,45 @@
 #include <nlohmann/json.hpp>
 
 #include "a_series_sample_editor.hpp"
+#include "axklib/application/sample_formats.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/object.hpp"
+
+TEST(SampleBankFormats, DiagnosticsIgnoreInactiveAndSampleOnlyParametersWithoutChangingBytes) {
+    axk::CurrentSbac bank;
+    bank.storage.format = axk::SampleStorageFormat::a4000_a5000_224;
+    bank.storage.structurally_valid = true;
+    bank.storage.parameter_bytes = 224U;
+    bank.raw_sample_parameter_block[0x2eU] = std::byte{255};
+    bank.raw_sample_parameter_block[0x9bU] = std::byte{3};
+    bank.raw_sample_parameter_block[0xd6U] = std::byte{10};
+    const auto bytes = bank.raw_sample_parameter_block;
+    const auto inactive = axk::app::sample_format_metadata(bank);
+    EXPECT_TRUE(inactive.at("parameterIssues").empty());
+    EXPECT_FALSE(inactive.at("requiresA5000"));
+    bank.override_enable_words[2] = (1U << (69U % 32U)) | (1U << (79U % 32U));
+    const auto active = axk::app::sample_format_metadata(bank);
+    ASSERT_EQ(active.at("parameterIssues").size(), 1U);
+    EXPECT_EQ(active.at("parameterIssues")[0].at("key"), "aeg.attack_mode");
+    EXPECT_TRUE(active.at("requiresA5000"));
+    EXPECT_EQ(bank.raw_sample_parameter_block, bytes);
+}
+
+TEST(SampleBankFormats, PartialGroupedSelectorsAndUnsupportedFlagsRetainTheirDiagnostics) {
+    axk::CurrentSbac bank;
+    bank.storage.format = axk::SampleStorageFormat::a4000_a5000_224;
+    bank.storage.structurally_valid = true;
+    bank.storage.parameter_bytes = 224U;
+    bank.raw_sample_parameter_block[0x7aU] = std::byte{4};
+    bank.raw_sample_parameter_block[0x7bU] = std::byte{77};
+    bank.raw_sample_parameter_block[0x7cU] = std::byte{10};
+    bank.override_enable_words[2] = 1U << (85U % 32U);
+    const auto active = axk::app::sample_format_metadata(bank);
+    ASSERT_EQ(active.at("parameterIssues").size(), 1U);
+    EXPECT_EQ(active.at("parameterIssues")[0].at("key"), "sample_eq_gain_db");
+    bank.override_enable_words[2] |= 0x80000000U;
+    EXPECT_FALSE(axk::app::sample_format_metadata(bank).at("diagnostics").empty());
+}
 
 TEST(SampleBankEditor, EmptyUnresolvedAndInactiveMembersDoNotBlockBankOnlyEditing) {
     const auto path = std::filesystem::path{AXK_SOURCE_ROOT} /

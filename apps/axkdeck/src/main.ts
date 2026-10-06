@@ -43,7 +43,7 @@ async function connectServer(restartLocal: boolean): Promise<ServerConnection | 
 
 async function bootstrap(mountTarget: HTMLElement): Promise<void> {
     const isDesktop = '__TAURI_INTERNALS__' in window;
-    if (new URLSearchParams(window.location.search).get('view') === 'program-mapping') {
+    if (new URLSearchParams(window.location.search).get('view') === 'mapping-editor') {
         try {
             const { startMappingView } = await import('./features/program-mapping/bootstrap');
             await startMappingView(mountTarget, isDesktop);

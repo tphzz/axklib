@@ -39,7 +39,7 @@
     {#if object.sampleFormat}<SampleFormatBadge format={object.sampleFormat} />{/if}
     {#if object.programFormat}<ProgramFormatBadge format={object.programFormat} />{/if}
 </span>
-<small class="object-size-secondary" title={tooltip}>
+<small class="object-size-secondary" title={metadata ? `${metadata}\n${tooltip}` : tooltip}>
     {metadata ? `${metadata} · ` : ''}{objectSizeSummary(object)}
 </small>
 

@@ -5,6 +5,7 @@
     import { pageGroups } from './pageGroups';
     import ParameterField from './ParameterField.svelte';
     import VelocityRange from './VelocityRange.svelte';
+    import SampleMapping from './SampleMapping.svelte';
     import GraphicalSamplePage from './GraphicalSamplePage.svelte';
     import { parameterBlockReason, parameterInactiveReason } from './parameterAvailability';
     import ControlPage from './ControlPage.svelte';
@@ -56,7 +57,7 @@
                         fields={group.fields}
                         {disabled}
                     />{:else}
-                    {#each group.fields as field (field.key)}
+                    {#each group.fields.filter((field) => !(document.draft instanceof BankDraft && page.id === 'mix-key' && ['root_key', 'key_low', 'key_high'].includes(field.key))) as field (field.key)}
                         <ParameterField
                             {field}
                             draft={document.draft}
@@ -73,6 +74,7 @@
             </section>
         {/each}
     </div>
+    {#if page.id === 'mix-key'}<SampleMapping {document} {disabled} />{/if}
 {/if}
 
 <style>

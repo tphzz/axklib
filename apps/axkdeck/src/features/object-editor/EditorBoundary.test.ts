@@ -92,7 +92,7 @@ function setup() {
                             editing: {
                                 ...editing,
                                 payloadSha256: String(revision).repeat(64),
-                                parameters: { ...editing.parameters, ...submitted.operation.parameters },
+                                parameters: { ...editing.parameters, ...submitted.operations[0]!.parameters },
                             },
                         };
                         resolve({ jobId: 7, status: 'completed' } as JobState);
@@ -307,7 +307,7 @@ describe('Sample save and exit lifecycle', () => {
             expect(transport.startObjectParameterEdit.mock.calls.map(([, edit]) => edit.expectedRevision)).toEqual([
                 1, 2,
             ]);
-            expect(transport.startObjectParameterEdit.mock.calls[1]![1].operation.parameters).toEqual({
+            expect(transport.startObjectParameterEdit.mock.calls[1]![1].operations[0]!.parameters).toEqual({
                 coarse_tune: 7,
             });
             if (exit === 'close') {

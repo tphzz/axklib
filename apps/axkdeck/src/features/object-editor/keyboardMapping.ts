@@ -6,6 +6,7 @@ export interface KeyboardRange {
 }
 export interface KeyboardZone extends KeyboardRange {
     id: string;
+    selectionId?: number;
     label: string;
     root?: number;
     selected?: boolean;
@@ -13,6 +14,16 @@ export interface KeyboardZone extends KeyboardRange {
     empty?: boolean;
 }
 export type RangeHandle = 'move' | 'low' | 'high' | 'velocityLow' | 'velocityHigh';
+export type RangeBoundary = Exclude<RangeHandle, 'move'>;
+export interface EditableMappingAxes {
+    keys: boolean;
+    velocity: boolean;
+}
+export function rangeBoundaries(handle: RangeHandle, axes: EditableMappingAxes): RangeBoundary[] {
+    const keys: RangeBoundary[] = axes.keys ? ['low', 'high'] : [];
+    const velocity: RangeBoundary[] = axes.velocity ? ['velocityLow', 'velocityHigh'] : [];
+    return [...keys, ...velocity].filter((key) => handle === 'move' || key === handle);
+}
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, Math.round(value)));
 export function editKeyboardRange(
     range: KeyboardRange,

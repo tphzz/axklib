@@ -568,9 +568,9 @@ pub fn run() {
             a_series_preferences::desktop_preferred_a_series_generation,
             a_series_preferences::set_desktop_preferred_a_series_generation,
             open_allocation_inspector,
-            program_mapping::open_program_mapping,
-            program_mapping::command_program_mapping,
-            program_mapping::publish_program_mapping,
+            program_mapping::open_mapping_editor,
+            program_mapping::command_mapping_editor,
+            program_mapping::publish_mapping_editor,
             save_allocation_map_json
         ]));
     startup.record(StartupMilestone::TauriBuilderConfigured);

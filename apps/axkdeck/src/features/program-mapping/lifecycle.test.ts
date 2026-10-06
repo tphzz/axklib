@@ -37,6 +37,21 @@ async function windowFixture(controller: MappingController) {
 afterEach(() => vi.useRealTimers());
 
 describe('Mapping Editor owner lifecycle', () => {
+    it('ignores equal-version snapshot bodies while still completing their acknowledgement', async () => {
+        const { controller, document } = owner('Original');
+        document.draft.set('level', 40);
+        controller.refresh(document);
+        const { view, publish, commands } = await windowFixture(controller);
+        await fireEvent.click(view.getByRole('button', { name: /^Save$/ }));
+        const requestId = commands.at(-1)!.requestId;
+        await act(() =>
+            publish({ state: { ...controller.state, title: 'Repeated body' }, requestId, error: 'Save was rejected' }),
+        );
+        expect(view.getByRole('heading', { name: 'Mapping Editor: Original' })).toBeTruthy();
+        expect(view.queryByRole('heading', { name: 'Mapping Editor: Repeated body' })).toBeNull();
+        expect(view.getByRole('button', { name: /^Save$/ })).toHaveProperty('disabled', false);
+        expect(view.getByText('Save was rejected')).toBeTruthy();
+    });
     it('updates conflict guards without any draft, phase or status change', async () => {
         const { controller, document } = owner('Original');
         const original = controller.state;
@@ -75,6 +90,7 @@ describe('Mapping Editor owner lifecycle', () => {
         expect(replacement.controller.opened).toBe(false);
 
         await replacement.controller.receive({
+            role: 'program',
             requestId: 'reconnect',
             context: original.controller.state.context,
             version: original.controller.state.version,

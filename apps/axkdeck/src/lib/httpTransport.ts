@@ -369,7 +369,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     }
 
     startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState> {
-        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+        return this.imageSessions.startMutations(sessionId, edit.operations, edit.expectedRevision);
     }
     startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState> {
         return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);

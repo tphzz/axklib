@@ -15,6 +15,8 @@
     import type { InspectorSelection } from '../../lib/types';
     import { MappingController, provideMappingEditor } from '../program-mapping/controller.svelte';
     import MappingBridge from '../program-mapping/MappingBridge.svelte';
+    import { mappingRoles } from '../program-mapping/protocol';
+    import { MappingAudition } from '../program-mapping/audition';
     let {
         transport,
         imageSession,
@@ -58,9 +60,15 @@
         },
     });
     provideObjectEditors(editors);
-    const mapping = new MappingController(editors);
-    provideMappingEditor(mapping);
+    const mappingAudio = new MappingAudition(
+        editors,
+        untrack(() => transport),
+        untrack(() => audition),
+    );
+    const mappings = mappingRoles.map((role) => new MappingController(editors, role, mappingAudio));
+    mappings.forEach(provideMappingEditor);
     provideEditorAudio({
+        mapping: mappingAudio,
         get transport() {
             return transport;
         },
@@ -119,6 +127,7 @@
         const session = imageSession.sessionId;
         const revision = imageSession.revision;
         untrack(() => {
+            mappingAudio.invalidate();
             if (previousSession !== session) {
                 editors.clear();
                 previousSession = session;
@@ -159,6 +168,7 @@
             window.removeEventListener('beforeunload', beforeUnload);
             imageSession.confirmEditorLeave = async () => true;
             confirmation?.(false);
+            mappingAudio.invalidate();
         };
     });
     $effect(() => {
@@ -166,7 +176,12 @@
     });
 </script>
 
-<MappingBridge controller={mapping} {editors} sessionId={imageSession.sessionId} {selection} />
+{#each mappings as controller}<MappingBridge
+        {controller}
+        {editors}
+        sessionId={imageSession.sessionId}
+        {selection}
+    />{/each}
 {@render children()}
 {#if editors.duplication.visible}<SampleDuplicateDialog workflow={editors.duplication} />{/if}
 {#if editors.conversionDocument}<ObjectFormatDialog workflow={editors} document={editors.conversionDocument} />{/if}

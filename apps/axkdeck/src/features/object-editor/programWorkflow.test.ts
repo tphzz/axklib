@@ -93,11 +93,13 @@ describe('Program editor lifecycle', () => {
         expect(transport.startObjectParameterEdit).toHaveBeenLastCalledWith(
             1,
             expect.objectContaining({
-                operation: expect.objectContaining({
-                    type: 'replace_program_assignments',
-                    parameters: { level: 80 },
-                    assignments: [{ retain_ordinal: 1, sample: 'Duplicate', parameters: { level_offset: 55 } }],
-                }),
+                operations: [
+                    expect.objectContaining({
+                        type: 'replace_program_assignments',
+                        parameters: { level: 80 },
+                        assignments: [{ retain_ordinal: 1, sample: 'Duplicate', parameters: { level_offset: 55 } }],
+                    }),
+                ],
             }),
         );
         expect(document.draft.dirty).toBe(false);
@@ -108,18 +110,20 @@ describe('Program editor lifecycle', () => {
             1,
             expect.objectContaining({
                 expectedRevision: 2,
-                operation: expect.objectContaining({
-                    type: 'update_program_parameters',
-                    expected_payload_sha256: 'b'.repeat(64),
-                    assignments: [
-                        {
-                            ordinal: 0,
-                            expected_target_kind: 'SBNK',
-                            expected_target_name: 'Duplicate',
-                            parameters: { pan_offset: 5 },
-                        },
-                    ],
-                }),
+                operations: [
+                    expect.objectContaining({
+                        type: 'update_program_parameters',
+                        expected_payload_sha256: 'b'.repeat(64),
+                        assignments: [
+                            {
+                                ordinal: 0,
+                                expected_target_kind: 'SBNK',
+                                expected_target_name: 'Duplicate',
+                                parameters: { pan_offset: 5 },
+                            },
+                        ],
+                    }),
+                ],
             }),
         );
     });
@@ -182,17 +186,19 @@ describe('Program editor lifecycle', () => {
         await workflow.save(document);
         expect(transport.startObjectParameterEdit).toHaveBeenCalledExactlyOnceWith(1, {
             expectedRevision: 2,
-            operation: {
-                id: 'program-edit',
-                type: 'update_program_parameters',
-                partition_index: 0,
-                volume_name: 'Volume',
-                program_number: 33,
-                model: 'A5000',
-                expected_payload_sha256: 'a'.repeat(64),
-                parameters: { level: 80 },
-                assignments: [],
-            },
+            operations: [
+                {
+                    id: 'program-edit',
+                    type: 'update_program_parameters',
+                    partition_index: 0,
+                    volume_name: 'Volume',
+                    program_number: 33,
+                    model: 'A5000',
+                    expected_payload_sha256: 'a'.repeat(64),
+                    parameters: { level: 80 },
+                    assignments: [],
+                },
+            ],
         });
         expect(document.draft.dirty).toBe(false);
         expect(document.phase).toBe('editable');

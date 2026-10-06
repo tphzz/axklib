@@ -3,7 +3,7 @@ export function graphDrag(
     origin: { x: number; y: number },
     bounds: { width: number; height: number; unboundedX?: boolean; unboundedY?: boolean },
     change: (x: number, y: number) => void,
-    end: () => void,
+    end: (cancelled: boolean) => void,
 ): () => void {
     const target = start.currentTarget as HTMLElement;
     const fine = start.shiftKey ? 4 : 1;
@@ -31,7 +31,7 @@ export function graphDrag(
         pending = true;
         if (frame === undefined) frame = requestAnimationFrame(flush);
     };
-    const finish = () => {
+    const finish = (cancelled = true) => {
         if (finished) return;
         finished = true;
         if (frame !== undefined) cancelAnimationFrame(frame);
@@ -41,17 +41,23 @@ export function graphDrag(
         target.removeEventListener('pointercancel', cancel);
         target.removeEventListener('lostpointercapture', cancel);
         if (target.hasPointerCapture(start.pointerId)) target.releasePointerCapture(start.pointerId);
-        end();
+        window.removeEventListener('keydown', escape);
+        end(cancelled);
     };
     const release = (event: PointerEvent) => {
         if (event.pointerId !== start.pointerId) return;
         move(event);
         flush();
-        finish();
+        finish(false);
     };
     const cancel = (event: PointerEvent) => {
         if (event.pointerId === start.pointerId) {
-            flush();
+            finish();
+        }
+    };
+    const escape = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
             finish();
         }
     };
@@ -60,5 +66,6 @@ export function graphDrag(
     target.addEventListener('pointerup', release);
     target.addEventListener('pointercancel', cancel);
     target.addEventListener('lostpointercapture', cancel);
+    window.addEventListener('keydown', escape);
     return finish;
 }

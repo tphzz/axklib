@@ -7,15 +7,14 @@
     import ProgramField from './ProgramField.svelte';
     import { ProgramDraft } from './draft.svelte';
     import { programField } from './fields';
+    import { effectParameterExtended } from './effectCapabilities';
     let {
         document,
-        page,
         slot,
         onselect,
         disabled,
     }: {
         document: ObjectEditorDocument;
-        page: string;
         slot: number;
         onselect: (value: number) => void;
         disabled: boolean;
@@ -23,6 +22,7 @@
     const format = $derived(document.programFormat!);
     const values = $derived(document.draft.values);
     const native = $derived(format.model === 'A3000');
+    const earlier = $derived(document.programCatalog?.formats.find((format) => format.model === 'A3000'));
     const effect = $derived(format.effects.find((item) => item.id === values[`effects.${slot}.type`]));
     function changeType(value: number) {
         const type = format.effects.find((item) => item.id === value);
@@ -39,17 +39,33 @@
         <EditorAutocomplete
             label="Effect type"
             value={Number(values[`effects.${slot}.type`])}
-            options={format.effects.map((type) => ({ value: type.id, label: `${type.printedNumber}: ${type.label}` }))}
+            options={format.effects.map((type) => ({
+                value: type.id,
+                label: `${type.printedNumber}: ${type.label}`,
+                extended: !native && !!earlier && !earlier.effects.some((effect) => effect.id === type.id),
+            }))}
             {disabled}
             onchange={changeType}
         />
     </div>
-    <div class="fields" class:single={page === 'routing'}>
+    <div class="fields">
         {#each ['enabled', 'input_level', 'output_level', 'pan', 'width', 'destination'] as key}
             {@const control = programField(`effects.${slot}.${key}`, format, values)}
-            {#if control}<ProgramField {document} field={control} {disabled} />{/if}
+            {#if control}<ProgramField
+                    {document}
+                    field={{
+                        ...control,
+                        a5000Only: false,
+                        nativeKey: control.key.replace(/^effects\.\d+\./, 'effects.1.'),
+                    }}
+                    {disabled}
+                />{/if}
         {/each}
-        {#if page === 'parameters'}
+    </div>
+    {#if effect?.parameters.some((item) => item.editable)}
+        <hr />
+        <h3>Effect parameters</h3>
+        <div class="fields">
             {#each effect?.parameters.filter((item) => item.editable) ?? [] as parameter}
                 <ProgramField
                     {document}
@@ -58,60 +74,43 @@
                         label: parameter.label,
                         min: parameter.min,
                         max: parameter.max,
+                        extended: effectParameterExtended(format, earlier, effect!.id, parameter.index),
                     }}
                     {disabled}
                 />
             {/each}
-        {/if}
-    </div>
+        </div>
+    {/if}
 {/snippet}
-{#if page === 'routing'}
-    <GraphPanel
-        label="Effect routing"
-        layoutKey="program-routing"
-        graphMinimum={420}
-        controlsMinimum={300}
-        stackBelow={740}
-    >
-        {#snippet graph()}
-            <div class="connections">
-                {#each native ? ['effect_connections.1'] : ['effect_connections.1', 'effect_connections.2'] as key}
-                    {@const control = programField(key, format, values)}
-                    {#if control}<ProgramField {document} field={control} {disabled} />{/if}
-                {/each}
-            </div>
-            <EffectRouting {document} selected={slot} {onselect} />
-        {/snippet}
-        {#snippet controls()}{@render common()}{/snippet}
-    </GraphPanel>
-{:else}
-    <div class="effect-tabs" role="group" aria-label="Effect slots">
-        {#each Array.from({ length: native ? 3 : 6 }, (_, i) => i + 1) as value}
-            <button
-                class="editor-control"
-                aria-label={`Select Ef${value}`}
-                aria-pressed={value === slot}
-                onclick={() => onselect(value)}
-            >
-                Ef{value}{#if value > 3}<ExtendedParameterMarker a5000Only decorative />{/if}
-            </button>
-        {/each}
-    </div>
-    {@render common()}
-{/if}
+<GraphPanel
+    label="Effect routing"
+    layoutKey="program-routing"
+    graphMinimum={420}
+    controlsMinimum={300}
+    stackBelow={740}
+>
+    {#snippet graph()}
+        <div class="connections">
+            {#each native ? ['effect_connections.1'] : ['effect_connections.1', 'effect_connections.2'] as key}
+                {@const control = programField(key, format, values)}
+                {#if control}<ProgramField {document} field={control} {disabled} />{/if}
+            {/each}
+        </div>
+        <EffectRouting {document} selected={slot} {onselect} />
+    {/snippet}
+    {#snippet controls()}{@render common()}{/snippet}
+</GraphPanel>
 
 <style>
     .fields {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr));
+        grid-template-columns: minmax(0, 1fr);
         gap: 6px 18px;
         margin: 8px 0;
     }
-    .fields.single {
-        grid-template-columns: minmax(0, 1fr);
-    }
     .connections {
         display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 205px), 1fr));
         gap: 6px;
     }
     .effect-heading {
@@ -120,23 +119,20 @@
         align-items: center;
         gap: 8px;
         margin: 4px 0 10px;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--color-panel);
+        padding-block: 4px;
     }
-    strong {
+    strong,
+    h3 {
         font-size: 11px;
         font-weight: 600;
     }
-    .effect-tabs {
-        display: flex;
-        gap: 4px;
-        flex-wrap: wrap;
-        margin-bottom: 8px;
-    }
-    .effect-tabs button {
-        width: auto;
-        min-width: 44px;
-    }
-    .effect-tabs button[aria-pressed='true'] {
-        border-color: var(--color-accent);
-        background: var(--color-panel-raised);
+    hr {
+        border: 0;
+        border-top: 1px solid var(--color-border);
+        margin: 12px 0;
     }
 </style>

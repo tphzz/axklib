@@ -3,6 +3,7 @@ export type EditorValues = Record<string, EditorValue>;
 export type EditorDraftState = Pick<EditorDraft, keyof EditorDraft>;
 
 export class EditorDraft {
+    revision = $state(0);
     storedValues = $state.raw<EditorValues>({});
     get values(): EditorValues {
         return this.storedValues;
@@ -11,6 +12,7 @@ export class EditorDraft {
     private past = $state.raw<EditorValues[]>([]);
     private future = $state.raw<EditorValues[]>([]);
     private gesture: EditorValues | null = null;
+    private gestureFuture: EditorValues[] = [];
 
     constructor(values: EditorValues) {
         this.baseline = { ...values };
@@ -38,6 +40,7 @@ export class EditorDraft {
         if (!this.gesture) this.past = [...this.past.slice(-99), this.storedValues];
         this.future = [];
         this.storedValues = { ...this.storedValues, ...values };
+        this.revision++;
     }
     set(key: string, value: EditorValue): void {
         this.patch({ [key]: value });
@@ -45,11 +48,19 @@ export class EditorDraft {
     beginGesture(): void {
         if (this.gesture) return;
         this.gesture = this.storedValues;
+        this.gestureFuture = this.future;
     }
     endGesture(): void {
         if (this.gesture && Object.keys(this.storedValues).some((key) => this.storedValues[key] !== this.gesture![key]))
             this.past = [...this.past.slice(-99), this.gesture];
         this.gesture = null;
+    }
+    cancelGesture(): void {
+        if (!this.gesture) return;
+        this.storedValues = this.gesture;
+        this.future = this.gestureFuture;
+        this.gesture = null;
+        this.revision++;
     }
     undo(): void {
         this.endGesture();
@@ -58,6 +69,7 @@ export class EditorDraft {
         this.future = [...this.future, this.storedValues];
         this.past = this.past.slice(0, -1);
         this.storedValues = value;
+        this.revision++;
     }
     redo(): void {
         const value = this.future.at(-1);
@@ -65,6 +77,7 @@ export class EditorDraft {
         this.past = [...this.past, this.storedValues];
         this.future = this.future.slice(0, -1);
         this.storedValues = value;
+        this.revision++;
     }
     discard(): void {
         this.accept(this.baseline);
@@ -75,5 +88,6 @@ export class EditorDraft {
         this.past = [];
         this.future = [];
         this.gesture = null;
+        this.revision++;
     }
 }

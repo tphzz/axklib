@@ -5,6 +5,7 @@ import { BankDraft } from '../devices/a-series/bank/draft.svelte';
 import { EditorNavigation } from './navigation.svelte';
 import { EditorComparison } from './comparison.svelte';
 import { SampleDuplication } from './duplication.svelte';
+import { MemberEdits } from './memberEdits.svelte';
 import { objectEditorAdapter } from './registry';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
@@ -49,7 +50,8 @@ export class ObjectEditorDocument {
             ? this.programCatalog?.formats.find((item) => item.model === editing.model)
             : undefined;
     }
-    get validation(): string {
+    private validated = $derived.by(() => {
+        this.draft.revision;
         return (
             this.conflict ||
             Object.entries(this.inputErrors).find(([key, error]) => {
@@ -69,6 +71,9 @@ export class ObjectEditorDocument {
             ) ||
             ''
         );
+    });
+    get validation(): string {
+        return this.validated;
     }
     get canSave(): boolean {
         return !!objectEditorAdapter(this.detail!) && this.phase === 'editable' && this.draft.dirty && !this.validation;
@@ -102,10 +107,19 @@ export class ObjectEditorWorkflow {
     private conversionOpenRequest = 0;
     private navigations = new Map<string, EditorNavigation>();
     private preferenceScopes = new Map<number, object>();
-    private memberCache = new Map<string, Promise<ObjectDetail>>();
+    private checks = new WeakMap<ObjectEditorDocument, number>();
     readonly comparison: EditorComparison;
     readonly duplication: SampleDuplication;
+    readonly members: MemberEdits;
     constructor(private readonly dependencies: Dependencies) {
+        this.members = new MemberEdits({
+            ...dependencies,
+            documents: () => this.documents,
+            locked: () => this.locked,
+            check: (document) => this.check(document),
+            accept: (document, detail) => this.acceptReload(document, detail, true),
+            stop: dependencies.stopPlayback,
+        });
         this.comparison = new EditorComparison(dependencies.transport, (sessionId, id) => this.find(sessionId, id));
         this.duplication = new SampleDuplication({
             transport: dependencies.transport,
@@ -140,17 +154,6 @@ export class ObjectEditorWorkflow {
     }
     stop(): void {
         this.dependencies.stopPlayback();
-    }
-    loadMember(sessionId: number, revision: number, id: string): Promise<ObjectDetail> {
-        const key = `${sessionId}:${revision}:${id}`;
-        let request = this.memberCache.get(key);
-        if (!request) {
-            if (this.memberCache.size >= 64) this.memberCache.delete(this.memberCache.keys().next().value!);
-            request = this.dependencies.transport.objectDetail(sessionId, id);
-            this.memberCache.set(key, request);
-            void request.catch(() => this.memberCache.delete(key));
-        }
-        return request;
     }
     find(sessionId: number, objectId: string): ObjectEditorDocument | undefined {
         return this.documents.find((item) => item.sessionId === sessionId && item.detail?.object.id === objectId);
@@ -187,8 +190,19 @@ export class ObjectEditorWorkflow {
         return task;
     }
     async check(document: ObjectEditorDocument): Promise<boolean> {
+        const old = document.detail!,
+            phase = document.phase,
+            generation = this.generation;
+        const request = (this.checks.get(document) ?? 0) + 1;
+        this.checks.set(document, request);
         const current = await this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id);
-        const old = document.detail!;
+        if (
+            generation !== this.generation ||
+            request !== this.checks.get(document) ||
+            document.phase !== phase ||
+            document.detail !== old
+        )
+            return false;
         if (
             (!objectEditorAdapter(current) && !current.formatConversion) ||
             current.object.key !== old.object.key ||
@@ -210,10 +224,13 @@ export class ObjectEditorWorkflow {
         for (const document of this.documents.filter(
             (item) => item.sessionId === sessionId && item.phase === 'editable',
         )) {
+            if (document.phase !== 'editable') continue;
+            const detail = document.detail;
             try {
                 await this.check(document);
             } catch (error) {
-                document.conflict = userFacingMessage(error);
+                if (document.phase === 'editable' && document.detail === detail && this.documents.includes(document))
+                    document.conflict = userFacingMessage(error);
             }
         }
     }
@@ -284,7 +301,10 @@ export class ObjectEditorWorkflow {
             document.programFormat,
         );
         await this.submit(document, () =>
-            this.dependencies.transport.startObjectParameterEdit(document.sessionId, edit),
+            this.dependencies.transport.startObjectParameterEdit(document.sessionId, {
+                expectedRevision: edit.expectedRevision,
+                operations: [edit.operation],
+            }),
         );
     }
     conversionReason(document: ObjectEditorDocument): string {
@@ -386,6 +406,7 @@ export class ObjectEditorWorkflow {
         }
     }
     async recover(document: ObjectEditorDocument): Promise<void> {
+        if (this.members.contains(document)) return this.members.recover(document);
         if (document.phase === 'refresh-failed') {
             await this.finish(document);
             return;
@@ -400,6 +421,7 @@ export class ObjectEditorWorkflow {
         }
     }
     clear(): void {
+        this.members.clear();
         this.generation++;
         this.conversionOpenRequest++;
         this.navigations.clear();
@@ -408,7 +430,6 @@ export class ObjectEditorWorkflow {
         this.duplication.close();
         this.conversionDocument = null;
         this.loading.clear();
-        this.memberCache.clear();
         this.documents = [];
     }
     private async accept(document: ObjectEditorDocument, job: JobState): Promise<void> {

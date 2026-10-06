@@ -95,4 +95,28 @@ describe('graph drag coordinates', () => {
         expect(cancelFrame).toHaveBeenCalledWith(2);
         expect(change).not.toHaveBeenCalled();
     });
+    it('reports pointer cancellation without flushing or committing a pending move', () => {
+        const target = document.createElement('button');
+        target.setPointerCapture = vi.fn();
+        target.hasPointerCapture = () => false;
+        vi.stubGlobal('requestAnimationFrame', () => 1);
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+        const change = vi.fn(),
+            end = vi.fn();
+        graphDrag(
+            { currentTarget: target, pointerId: 1, clientX: 0, clientY: 0 } as unknown as PointerEvent,
+            { x: 0, y: 0 },
+            { width: 100, height: 100 },
+            change,
+            end,
+        );
+        const move = new Event('pointermove');
+        Object.assign(move, { pointerId: 1, clientX: 20, clientY: 20 });
+        target.dispatchEvent(move);
+        const cancel = new Event('pointercancel');
+        Object.assign(cancel, { pointerId: 1 });
+        target.dispatchEvent(cancel);
+        expect(change).not.toHaveBeenCalled();
+        expect(end).toHaveBeenCalledExactlyOnceWith(true);
+    });
 });

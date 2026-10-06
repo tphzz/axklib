@@ -148,16 +148,18 @@
         objectDetail: async (_: number, id: string) => detail(id),
         startObjectParameterEdit: async (_: number, edit: ObjectParameterEdit) => {
             writes++;
-            if (edit.operation.type === 'update_sample_bank_overrides') {
-                const name = edit.operation.sample_bank_name;
-                const stored = copies.get(name) ?? structuredClone(parameters);
-                patchParameters(stored, edit.operation.parameters);
-                copies.set(name, stored);
-                const enabled = bankOverrides.get(name) ?? new Set<number>();
-                edit.operation.enable.forEach((id) => enabled.add(id));
-                edit.operation.disable.forEach((id) => enabled.delete(id));
-                bankOverrides.set(name, enabled);
-            } else patchParameters(parameters, edit.operation.parameters);
+            for (const operation of edit.operations) {
+                if (operation.type === 'update_sample_bank_overrides') {
+                    const name = operation.sample_bank_name;
+                    const stored = copies.get(name) ?? structuredClone(parameters);
+                    patchParameters(stored, operation.parameters);
+                    copies.set(name, stored);
+                    const enabled = bankOverrides.get(name) ?? new Set<number>();
+                    operation.enable.forEach((id) => enabled.add(id));
+                    operation.disable.forEach((id) => enabled.delete(id));
+                    bankOverrides.set(name, enabled);
+                } else patchParameters(parameters, operation.parameters);
+            }
             return { jobId: 1, kind: 'edit', status: 'queued' };
         },
         startSampleDuplication: async (_: number, edit: SampleDuplicationRequest) => {

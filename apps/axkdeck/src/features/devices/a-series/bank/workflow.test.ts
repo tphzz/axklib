@@ -40,11 +40,12 @@ describe('bank editing lifecycle', () => {
         const transport = {
             objectDetail: vi.fn(async () => detail()),
             startObjectParameterEdit: vi.fn(async (_session: number, edit: ObjectParameterEdit) => {
-                expect(edit.operation.type).toBe('update_sample_bank_overrides');
-                if (edit.operation.type === 'update_sample_bank_overrides') {
-                    expect(edit.operation.sample_bank_name).toBe('Bank');
-                    active = edit.operation.enable.includes(33);
-                    level = Number(edit.operation.parameters.level ?? level);
+                const operation = edit.operations[0]!;
+                expect(operation.type).toBe('update_sample_bank_overrides');
+                if (operation.type === 'update_sample_bank_overrides') {
+                    expect(operation.sample_bank_name).toBe('Bank');
+                    active = operation.enable.includes(33);
+                    level = Number(operation.parameters.level ?? level);
                 }
                 revision++;
                 return { jobId: 1, kind: 'edit', status: 'queued' as const };
@@ -73,7 +74,7 @@ describe('bank editing lifecycle', () => {
         expect(workflow.locked).toBe(false);
         draft.clearOverride('level');
         await workflow.save(document);
-        expect(transport.startObjectParameterEdit.mock.calls[1]![1].operation).toMatchObject({
+        expect(transport.startObjectParameterEdit.mock.calls[1]![1].operations[0]).toMatchObject({
             parameters: {},
             enable: [],
             disable: [33],

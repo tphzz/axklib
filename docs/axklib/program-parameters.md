@@ -245,8 +245,9 @@ Membership and parameter edits share one undo history and one atomic Save.
 Duplicate stored rows remain independent, including after another row is removed.
 
 Easy Edit is per assigned Sample or Sample Bank, not a global Program modifier.
-Its Sample/Bank selector follows the table and keyboard selection; Program-wide
-Effects, Setup and Control pages do not have that selector. A Sample Bank's
+Its Sample/Bank selector follows the assignment table and mapping-block
+selection; Program-wide Effects, Setup and Control pages do not have that
+selector. A Sample Bank's
 active parameter overrides are applied when calculating member previews.
 Amp EG shows the source and effective curves and edits the three rate offsets;
 levels remain read-only in this view. Time spacing is relative, not calibrated
@@ -257,18 +258,73 @@ in a separate desktop window that follows the main Program selection. Both
 windows share the selected assignment, draft, undo history, Save and Discard;
 closing the Mapping Editor does not discard accepted edits. Source outlines,
 effective coverage, Program limits and root keys are distinct. Drag or
-keyboard-adjust the Program limits; moving the rectangle
-preserves its size. Key shift is a separate parameter. Limits intersect the
+keyboard-adjust the Program limits, or drag a mapping block to move its limits.
+A movement begins after a small pointer threshold, preserves the range's size,
+and clamps to the key/velocity boundaries. Release accepts one undo step; Escape
+or pointer cancellation accepts nothing. Moving a block does not move its root.
+Key shift is a separate parameter. Limits intersect the
 shifted Sample range and cannot expand its playable coverage. Bank members
 remain separately visible; unresolved sources do not acquire invented ranges.
+The compact view places low/high-key handles directly on the keyboard. Both
+views label every C key vertically, centered on its white key. All resolved
+Samples alternate between mint green and a shade 10% darker in source-range
+order. The shades distinguish neighboring mappings, not permanent Sample
+identities; selection, panning and zooming do not change their order. Overlapping
+coverage has subtle hatching and contributor tooltips.
+The selected Program limits have a separate outline, including keys with no
+playable source. Key fields also show note names, and the shared velocity editor
+adjusts low/high velocity. A small amber marker identifies the root without
+covering the keyboard's mapping colors. Roots are read-only here.
+The full view labels fitting regions vertically and highlights selected effective
+coverage. Velocity raster lines and labels occur every 5 steps, with heavier lines
+at 0, 25, 50, 75, 100 and 125. The plot keeps a minimum usable height and scrolls
+within short windows, leaving the action/status bars visible.
+Four dashed guides mark the outer edges of selected
+effective coverage, including grouped assignments. Individual member outlines
+remain visible; the group envelope does not fill unmapped gaps. The blue editable
+Program limits and handles remain separate and preview dragging locally.
+Thin or overlapping labels yield to the selected
+region, with complete names retained in tooltips.
+Program list subtitles summarize assignments,
+assigned banks, their distinct member Samples, and directly assigned Samples;
+unresolved assignments are identified separately from confirmed targets.
+
+Press and hold a keyboard key to audition every assignment whose effective
+key/velocity range matches it, regardless of selection. The audition velocity
+defaults to 100 and can be adjusted from 1 to 127. Releasing the key stops the
+group, including held loops; focus loss or window closure also releases it.
+Keyboard audition changes neither selection nor roots. The main window owns
+playback and uses the current canonical Sample/Bank drafts. Unresolved or
+unsupported members fail the group rather than playing a silently incomplete
+subset. Source preparation is bounded to four concurrent requests and a shared
+128 MiB working limit, with identical Wave Data reused across distinct voices.
+
+This is a draft preview, not a complete sampler sound engine. It applies trim,
+supported loops/reverse playback, fixed pitch, tuning, level and pan; active Bank
+overrides and Program Easy Edit key-shift/tuning/level/pan offsets are included,
+as is Program level. It does not emulate envelopes, filters, LFOs, effects,
+Program transpose/portamento, output routing or MIDI/controller behavior.
+Displayed Program coverage is the Easy Edit/source intersection before Program
+transpose. Use the sampler to judge those additional sound-engine settings.
 
 Effects routing uses the sampler's five fixed connection
 patterns, not an unrestricted patch graph. Selecting a block opens its type,
-levels, pan, width and destination beside the graph; Parameters exposes writable
-effect words. Amp EG uses the same graph-left, controls-right layout, stacking
+levels, pan, width and destination beside the graph. The same independently
+scrollable pane includes algorithm parameters below a divider. Ef1-3 and Ef4-6
+routing selectors share a row when space permits; there is no separate Effects
+subtab row. Amp EG uses the same graph-left, controls-right layout, stacking
 the panes when the lower zone is narrow.
 Numeric effect words use their exact stored ranges; these are not universally
 MIDI-sized values or calibrated physical units.
+
+The blue `+` identifies a later-generation effect or parameter domain, not every
+parameter in a current Program. Raw effect IDs 0..54 (Through and the original
+54 effects) share their 593 visible parameter domains across generations.
+The first three effects retain the same sixteen-word layout; the type selector
+is stored in a different header byte and is copied during legacy import.
+Unused reset words can differ and are not treated as additional editable
+parameters. Ef4-6 are marked A5000-only at the effect heading; their ordinary
+level, pan and width controls do not each receive a redundant marker.
 
 The storage revision controls which parameter model is shown. A current
 Program uses the A4000/A5000 superset, with A5000-only selections identified;
@@ -277,4 +333,3 @@ unavailable current-only pages. Multi mode retains the selected Program's
 settings and identifies pages whose playback depends on the master Program.
 Blue plus markers identify extended parameters and choices; their tooltips
 distinguish A4000/A5000-format extensions from A5000-only features.
-Program audio synthesis and effect DSP audition are not emulated by this editor.

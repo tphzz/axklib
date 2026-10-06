@@ -20,6 +20,8 @@ export interface ProgramField {
     extended?: boolean;
     a5000Only?: boolean;
     reason?: string;
+    note?: boolean;
+    nativeKey?: string;
 }
 export const programTabs = [
     { id: 'sample-select', label: 'Sample Select', pages: [] },
@@ -38,10 +40,7 @@ export const programTabs = [
     {
         id: 'effects',
         label: 'Effects',
-        pages: [
-            { id: 'routing', label: 'Routing' },
-            { id: 'parameters', label: 'Parameters' },
-        ],
+        pages: [],
     },
     {
         id: 'setup',
@@ -350,7 +349,7 @@ export function programField(key: string, format: ProgramEditorFormat, values: E
             reason = 'Output feeds the connected effect; saved destination is retained';
     }
     let label = labels[suffix] ?? suffix;
-    if (key.startsWith('effect_connections.')) label = key.endsWith('.1') ? 'Ef1-3 connection' : 'Ef4-6 connection';
+    if (key.startsWith('effect_connections.')) label = key.endsWith('.1') ? 'Ef1-3' : 'Ef4-6';
     if (key.startsWith('ad.') && key.split('.').length > 2)
         label = `${key.includes('.right.') ? 'Right' : 'Left'} ${key.includes('.output') ? `output ${key.includes('output1') ? '1' : '2'} ` : ''}${label.toLowerCase()}`;
     if (key.startsWith('controllers.')) label = `Control ${key.split('.')[1]} ${label.toLowerCase()}`;
@@ -360,6 +359,15 @@ export function programField(key: string, format: ProgramEditorFormat, values: E
     if (key.startsWith('note_toggle.'))
         label = `${key.includes('.b.') ? 'B' : 'A'}${suffix.padStart(2, '0')} note toggle`;
     const a5000Only = /^effects\.[456]\.|^effect_connections\.2$|^(controller_reset|note_toggle)\.b\./.test(key);
-    const extended = key.startsWith('step_wave.');
-    return { ...domain, key, label, options, extended, a5000Only, reason };
+    const extended = key.startsWith('step_wave.') ? true : undefined;
+    return {
+        ...domain,
+        key,
+        label,
+        options,
+        extended,
+        a5000Only,
+        reason,
+        note: suffix === 'key_low' || suffix === 'key_high',
+    };
 }

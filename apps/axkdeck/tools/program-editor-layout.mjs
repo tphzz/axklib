@@ -95,8 +95,8 @@ async function geometry(page, zoom) {
     });
     assert.equal(result.pageOverflow, false, 'Page must not overflow horizontally');
     near(result.headers[0].height, 32 * zoom, 'Primary header height');
-    near(result.headers[1].height, 28 * zoom, 'Secondary header height');
-    assert.ok(result.panel.y >= result.headers[1].bottom - 1, 'Content must not overlap the secondary header');
+    if (result.headers[1]) near(result.headers[1].height, 28 * zoom, 'Secondary header height');
+    assert.ok(result.panel.y >= result.headers.at(-1).bottom - 1, 'Content must not overlap the last header');
     assert.ok(result.panel.bottom <= result.footer.y + 1, 'Content must not overlap the status footer');
     near(result.footer.bottom, result.editor.bottom, 'Footer must stay inside lower editor pane');
     for (const header of result.headers) {
@@ -130,18 +130,23 @@ try {
     port = server.httpServer.address().port;
     const base = `http://127.0.0.1:${port}/tools/layout-fixtures/program-editor.html`;
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
-    const matrix = [1366, 1920, 390].flatMap(width => [1, 1.5].flatMap(zoom => [false, true].map(native => ({ width, zoom, native, compact: false }))));
+    const matrix = [1366, 1920, 390].flatMap(width => [1, 1.25, 1.5].flatMap(zoom => [false, true].map(native => ({ width, zoom, native, compact: false }))));
     matrix.push(...[false, true].map(native => ({ width: 1366, zoom: 1, native, compact: true })));
     matrix.push(...[false, true].flatMap(native => [
         { width: 2049, zoom: 1.5, native, compact: false },
         { width: 1250, zoom: 1, native, compact: false },
         { width: 1875, zoom: 1.5, native, compact: false },
     ]));
-    for (const { width, zoom, native, compact } of matrix) {
+    const caseName = ({ width, zoom, native, compact }) => `${width}-${Math.round(zoom * 100)}-${native ? 'native' : 'current'}${compact ? '-lower320' : ''}`;
+    const requestedCase = process.argv[3];
+    const cases = matrix.filter(item => !requestedCase || caseName(item) === requestedCase);
+    assert.ok(cases.length, `Unknown layout case: ${requestedCase}`);
+    for (const { width, zoom, native, compact } of cases) {
         if (stopping) break;
-        const name = `${width}-${zoom === 1 ? '100' : '150'}-${native ? 'native' : 'current'}${compact ? '-lower320' : ''}`;
+        const name = `${width}-${Math.round(zoom * 100)}-${native ? 'native' : 'current'}${compact ? '-lower320' : ''}`;
         const page = await browser.newPage({ viewport: { width, height: 900 } });
         page.setDefaultTimeout(8000);
+        page.setDefaultNavigationTimeout(30000);
         const errors = [];
         let catalogRequests = 0;
         await page.route('**/api/v1/program-editor-catalog', async route => {
@@ -191,7 +196,7 @@ try {
             }
 
             const undo = page.getByRole('button', { name: 'Undo Program edit', exact: true });
-            await page.getByRole('button', { name: 'Ef1-3 connection', exact: true }).click();
+            await page.getByRole('button', { name: 'Ef1-3', exact: true }).click();
             await page.getByRole('option', { name: '1 > 2 > 3', exact: true }).click();
             assert.equal((await state(page)).values['effect_connections.1'], 2);
             result.serialGraph = await graphGeometry(page, count);
@@ -241,9 +246,8 @@ try {
             assert.equal(current.dirty, false);
             for (let word = 0; word < 16; ++word) assert.equal(current.values[`effects.1.words.${word}`], 200 + word);
 
-            await page.getByRole('button', { name: 'Routing', exact: true }).focus();
-            await page.keyboard.press('ArrowRight');
-            assert.equal((await state(page)).page, 'parameters');
+            assert.equal(await page.getByRole('button', { name: 'Routing', exact: true }).count(), 0);
+            assert.equal(await page.getByRole('button', { name: 'Parameters', exact: true }).count(), 0);
             assert.equal(await effect.inputValue(), '1: Scratch');
             await page.getByRole('spinbutton', { name: 'Parameter 1', exact: true }).fill('99');
             assert.deepEqual((await state(page)).changes, { 'effects.1.words.0': 99 });
@@ -331,6 +335,14 @@ try {
             await page.screenshot({ path: resolve(output, `${name}-envelope.png`) });
             await undo.click();
             await page.getByRole('button', { name: 'Key/Velocity', exact: true }).click();
+            result.rangeControls = await page.locator('.range-groups').evaluate(groups => {
+                const bounds = groups.getBoundingClientRect();
+                return [...groups.querySelectorAll('input, [role="combobox"]')].map(control => {
+                    const box = control.getBoundingClientRect();
+                    return { label: control.getAttribute('aria-label'), left: box.left, right: box.right, fits: box.left >= bounds.left - 1 && box.right <= bounds.right + 1 };
+                });
+            });
+            assert.ok(result.rangeControls.every(control => control.fits), 'Key and velocity inputs must fit the pane without horizontal clipping');
             await page.getByRole('button', { name: 'Low key limit', exact: true }).press('ArrowRight');
             assert.equal((await state(page)).values['assignments.1.key_low'], 1);
             await page.screenshot({ path: resolve(output, `${name}-ranges.png`) });
@@ -345,7 +357,11 @@ try {
                 });
             }), 'Mapping toolbar buttons must remain visible at every scale');
             assert.equal(await page.getByRole('button', { name: 'High velocity limit', exact: true }).count(), 0, 'Inline keyboard remains a compact range view');
-            assert.ok((await page.locator('.keyboard-mapping .plot').boundingBox()).height <= 64 * zoom, 'Inline range graph must remain compact');
+            assert.equal(await page.locator('.keyboard-mapping .plot').count(), 0, 'Inline keyboard must not reserve a second plot row');
+            const keyboard = await page.locator('.keyboard-mapping .keyboard-surface').boundingBox();
+            const toolbar = await page.locator('.keyboard-mapping .toolbar').boundingBox();
+            assert.ok(Math.abs(keyboard.x - toolbar.x) <= 1, 'Keyboard and toolbar must share the left edge');
+            assert.equal(await page.locator('.keyboard-mapping .key-labels span').count(), 11, 'Every C must be labeled');
             assert.equal((await state(page)).values['assignments.1.key_shift'], 0);
             await page.screenshot({ path: resolve(output, `${name}-compact-keyboard.png`) });
             assert.equal((await state(page)).dirty, false);
@@ -368,7 +384,7 @@ try {
             await page.screenshot({ path: resolve(output, `${name}-failure.png`) }).catch(() => {});
         } finally { await page.close(); }
     }
-    for (const targetCount of [200, 1000, 2048]) {
+    for (const targetCount of requestedCase ? [] : [200, 1000, 2048]) {
         for (const zoom of [1, 1.5]) {
             if (stopping) break;
             const name = `assignments-${targetCount}-${zoom === 1 ? '100' : '150'}`;
@@ -475,3 +491,6 @@ try {
     await writeFile(resolve(output, 'results.json'), JSON.stringify({ port, serverStopped: true, browserStopped: !browser?.isConnected(), portReleased, results }, null, 2) + '\n');
     assert.equal(portReleased, true, 'Owned Vite port must be released');
 }
+
+// Vite plugins can retain worker handles after the owned browser and port are closed.
+process.exit(process.exitCode ?? 0);

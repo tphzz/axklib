@@ -391,6 +391,50 @@ TEST_F(SampleWaveDataRetarget, WindowUpdateRejectsRetainedLoopOutsideWindowAndSt
     EXPECT_FALSE(std::filesystem::exists(output));
 }
 
+TEST_F(SampleWaveDataRetarget, MappingBatchPreservesOtherObjectsAndRejectsStaleSecondMemberAtomically) {
+    auto first = operation("Mono", "Old Left");
+    auto second = operation("Stereo", "Old Left");
+    first["id"] = "member-1";
+    second["id"] = "member-2";
+    for (auto *edit : {&first, &second}) {
+        (*edit)["type"] = "update_sbnk_parameters";
+        edit->erase("waveform_name");
+    }
+    first["parameters"] = {{"key_low", 24}};
+    second["parameters"] = {{"velocity_high", 100}};
+    const auto original = image_bytes(source);
+    const auto valid_hash = second["expected_payload_sha256"];
+    second["expected_payload_sha256"] = std::string(64U, '0');
+    auto manifest = axk::parse_alteration_manifest(
+        Json{{"schema_version", "1.0"}, {"operations", Json::array({first, second})}}.dump());
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    EXPECT_FALSE(axk::alter_hds(source, *manifest, output));
+    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_EQ(image_bytes(source), original);
+
+    second["expected_payload_sha256"] = valid_hash;
+    manifest = axk::parse_alteration_manifest(
+        Json{{"schema_version", "1.0"}, {"operations", Json::array({first, second})}}.dump());
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    const auto changed = axk::alter_hds(source, *manifest, output);
+    ASSERT_TRUE(changed) << changed.error().message;
+    ASSERT_EQ(changed->operations.size(), 2U);
+    EXPECT_EQ(image_bytes(source), original);
+    const auto after = catalog(output);
+    ASSERT_TRUE(after) << after.error().message;
+    ASSERT_EQ(after->objects.size(), before.objects.size());
+    for (const auto &old : before.objects) {
+        const auto *current = find(*after, old.object.header.type, old.object.header.name);
+        ASSERT_NE(current, nullptr);
+        auto expected = old.raw_payload;
+        if (old.object.header.type == axk::ObjectType::sbnk && old.object.header.name == "Mono")
+            expected[0xe3U] = std::byte{24};
+        if (old.object.header.type == axk::ObjectType::sbnk && old.object.header.name == "Stereo")
+            expected[0x11aU] = std::byte{100};
+        EXPECT_EQ(current->raw_payload, expected) << old.object.header.name;
+    }
+}
+
 TEST_F(SampleWaveDataRetarget, StereoRetargetRefreshesBothRatesAndPitchCachesPreservingProgramLinksAndParameters) {
     expect_exact_retarget("Stereo", "New Left", "New Right");
 }
