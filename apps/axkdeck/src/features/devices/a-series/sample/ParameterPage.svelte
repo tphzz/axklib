@@ -73,8 +73,10 @@
                 {/if}
             </section>
         {/each}
+        {#if page.id === 'mix-key'}
+            <div class="mapping-row"><SampleMapping {document} {disabled} /></div>
+        {/if}
     </div>
-    {#if page.id === 'mix-key'}<SampleMapping {document} {disabled} />{/if}
 {/if}
 
 <style>
@@ -83,6 +85,12 @@
         gap: var(--density-section-gap, 12px);
         align-content: start;
         justify-content: start;
+    }
+    .mapping-row {
+        grid-column: 1 / -1;
+        min-width: 0;
+        /* The mapping component already supplies its vertical spacing. */
+        margin-top: calc(-1 * var(--density-section-gap, 12px));
     }
     section {
         min-width: 0;

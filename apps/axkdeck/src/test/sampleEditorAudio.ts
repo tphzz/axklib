@@ -28,10 +28,10 @@ export function fixtureWave() {
     pcm.forEach((value, i) => view.setInt16(44 + i * 2, Math.round(value * 32767), true));
     return bytes;
 }
-export function fixtureBins() {
+export function fixtureBins(count = 1024) {
     const pcm = fixturePcm();
-    return Array.from({ length: 1024 }, (_, i) => {
-        const chunk = pcm.subarray(Math.floor((i * pcm.length) / 1024), Math.floor(((i + 1) * pcm.length) / 1024));
+    return Array.from({ length: count }, (_, i) => {
+        const chunk = pcm.subarray(Math.floor((i * pcm.length) / count), Math.floor(((i + 1) * pcm.length) / count));
         return { minimum: Math.min(...chunk), maximum: Math.max(...chunk) };
     });
 }

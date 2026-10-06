@@ -10,6 +10,7 @@
     import { userFacingMessage } from '../../../../lib/userFacingMessage';
     import { mappingMembers } from './mappingMembers';
     import { loadMappingMember } from './mappingLoad';
+    import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     let { document, onready }: { document: ObjectEditorDocument; onready: () => void } = $props();
     const editors = objectEditors();
     const audio = editorAudio();
@@ -17,6 +18,15 @@
     const confirmed = $derived(mappingMembers(document.detail!));
     const isConfirmed = (id: string | null) => confirmed.some((member) => member.id === id);
     const index = $derived(members.findIndex((member) => member.objectId === document.previewMemberId));
+    const options = $derived([
+        ...(index < 0
+            ? [{ value: -1, label: members.length ? 'Unresolved member' : 'No samples', disabled: true }]
+            : []),
+        ...members.map((member, value) => {
+            const resolved = isConfirmed(member.objectId);
+            return { value, label: `${member.name}${resolved ? '' : ' (unresolved)'}`, disabled: !resolved };
+        }),
+    ]);
     const previous = $derived(members.slice(0, Math.max(0, index)).findLast((member) => isConfirmed(member.objectId)));
     const next = $derived(members.slice(index + 1).find((member) => isConfirmed(member.objectId)));
     function select(id: string | null) {
@@ -93,18 +103,19 @@
         onclick={() => select(previous!.objectId)}
         ><span class="previous"><Icon name="chevron" size={13} /></span></button
     >
-    <select
-        class="editor-control"
-        aria-label="Preview sample"
-        value={document.previewMemberId ?? ''}
-        disabled={!members.length}
-        onchange={(event) => select(event.currentTarget.value || null)}
-    >
-        {#if index < 0}<option value="">{members.length ? 'Unresolved member' : 'No samples'}</option>{/if}
-        {#each members as member}<option value={member.objectId ?? ''} disabled={!isConfirmed(member.objectId)}
-                >{member.name}{isConfirmed(member.objectId) ? '' : ' (unresolved)'}</option
-            >{/each}
-    </select>
+    <div class="preview-choice">
+        <EditorChoice
+            label="Preview sample"
+            value={index}
+            {options}
+            segmented={false}
+            disabled={!members.length}
+            onchange={(value) => {
+                const member = members[value];
+                if (member?.objectId && isConfirmed(member.objectId)) select(member.objectId);
+            }}
+        />
+    </div>
     <button class="editor-icon" aria-label="Next preview sample" disabled={!next} onclick={() => select(next!.objectId)}
         ><Icon name="chevron" size={13} /></button
     >
@@ -115,11 +126,11 @@
         display: flex;
         align-items: center;
         gap: 2px;
-        max-width: 210px;
-        min-width: 100px;
+        flex: 0 0 auto;
     }
-    select {
+    .preview-choice {
         width: 144px;
+        flex: 0 0 144px;
         min-width: 0;
     }
     .previous {

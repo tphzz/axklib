@@ -10,7 +10,7 @@
     import type { AuditionWorkflow } from '../features/audition/workflow.svelte';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
     import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
-    import type { ObjectDetail, ImageTransport } from '../lib/transport';
+    import type { ObjectDetail, ImageTransport, PreviewEnvelope } from '../lib/transport';
     import { sampleSnapshot } from '../lib/objectEditing';
     import type {
         ObjectParameterEdit,
@@ -21,6 +21,11 @@
     import type { InspectorSelection } from '../lib/types';
     import { bankEditorUnits } from './bankEditorFixture';
     let { bank = false }: { bank?: boolean } = $props();
+    const resolvedMembers = [
+        { objectId: 'Member A', name: 'PB BRASS A' },
+        { objectId: 'Member B', name: 'DNBS drum loop 1' },
+        { objectId: 'Member C', name: 'A deliberately long sample preview name' },
+    ];
     let selected = $state(untrack(() => (bank ? 'Bank A' : 'Sample A')));
     const bankOverrides = new Map<string, Set<number>>();
     let lowerOpen = $state(false);
@@ -96,7 +101,22 @@
         }
         return {
             image: { revision: writes + 1 },
-            object: { id: name, key: name, name, type: isBank ? 'SBAC' : 'SBNK' },
+            object: {
+                id: name,
+                key: name,
+                name: bank ? (resolvedMembers.find((member) => member.objectId === name)?.name ?? name) : name,
+                type: isBank ? 'SBAC' : 'SBNK',
+            },
+            relationships: isBank
+                ? resolvedMembers.map((member, index) => ({
+                      id: `slot-${index}`,
+                      type: 'SBAC_SLOT_TO_SBNK',
+                      quality: 'KNOWN',
+                      selectedObjectRoles: ['SOURCE'],
+                      sourceObject: { id: name, type: 'SBAC' },
+                      targetObject: { id: member.objectId, type: 'SBNK' },
+                  }))
+                : [],
             formatConversion: sampleConversionFixture(format.sampleFormat.format, { volumeName: 'Test' }),
             editing: {
                 profile: isBank ? 'a-series/sample-bank' : 'a-series/sample',
@@ -133,11 +153,7 @@
                                   format.sampleFormat.format === 'A3000_188',
                                   bankOverrides.get(name) ?? new Set(),
                               ),
-                              members: [
-                                  { name: 'Member A', objectId: 'Member A' },
-                                  { name: 'Member B', objectId: 'Member B' },
-                                  { name: 'Missing member', objectId: null },
-                              ],
+                              members: [...resolvedMembers, { name: 'Missing member', objectId: null }],
                           },
                       }
                     : {}),
@@ -146,6 +162,21 @@
     }
     const transport = {
         objectDetail: async (_: number, id: string) => detail(id),
+        preview: async (_: number, objectId: string, count: number): Promise<PreviewEnvelope> => ({
+            objectId,
+            lanes: (stereo ? (['LEFT', 'RIGHT'] as const) : (['MONO'] as const)).map((role) => ({
+                role,
+                sourceObjectId: `${objectId}-${role}`,
+                sampleRate: fixtureRate,
+                sampleWidthBytes: 2,
+                storedFrameCount: fixtureFrames,
+                playbackStartFrame: 0,
+                playbackLengthFrames: fixtureFrames,
+                loopStartFrame: 20401,
+                loopLengthFrames: 42195,
+                bins: fixtureBins(count),
+            })),
+        }),
         startObjectParameterEdit: async (_: number, edit: ObjectParameterEdit) => {
             writes++;
             for (const operation of edit.operations) {
