@@ -208,7 +208,7 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
         EXPECT_TRUE(program->sample_format.is_null());
         const auto detail = sessions.object_detail(opened->image_id, "owner", program->id);
         ASSERT_TRUE(detail) << detail.error().message;
-        EXPECT_EQ(detail->at("object").at("programFormat"), program->program_format);
+        EXPECT_EQ(Json(detail->at("object").at("programFormat")), program->program_format);
         EXPECT_TRUE(detail->at("object").at("sampleFormat").is_null());
         const auto &editing = detail->at("editing");
         ASSERT_TRUE(editing.is_object());
@@ -220,7 +220,7 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
         EXPECT_EQ(editing.at("programName"), "Format");
         const auto &conversion = detail->at("formatConversion");
         EXPECT_EQ(conversion.at("kind"), "program");
-        EXPECT_EQ(conversion.at("programFormat"), program->program_format);
+        EXPECT_EQ(Json(conversion.at("programFormat")), program->program_format);
         EXPECT_EQ(conversion.at("programNumber"), 33U);
         EXPECT_EQ(conversion.at("programName"), "Format");
         EXPECT_EQ(conversion.at("canConvertFormat"), writable);
@@ -237,7 +237,7 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
             EXPECT_TRUE(other->at("object").at("programFormat").is_null());
             if (item.type == "SBNK" || item.type == "SBAC") {
                 EXPECT_EQ(item.sample_format.at("format"), item.type == "SBNK" ? "a3000_188" : "a4000_a5000_224");
-                EXPECT_EQ(other->at("object").at("sampleFormat"), item.sample_format);
+                EXPECT_EQ(Json(other->at("object").at("sampleFormat")), item.sample_format);
             }
         }
         if (!writable)
@@ -418,7 +418,7 @@ TEST_F(ProgramFormatSession, MalformedProgramsRemainVisibleWithUnknownStorageInS
                     EXPECT_TRUE(program->program_format.at(metric).is_null());
                 const auto detail = sessions.object_detail(opened->image_id, "owner", program->id);
                 ASSERT_TRUE(detail) << detail.error().message;
-                EXPECT_EQ(detail->at("object").at("programFormat"), program->program_format);
+                EXPECT_EQ(Json(detail->at("object").at("programFormat")), program->program_format);
                 EXPECT_TRUE(detail->at("formatConversion").is_null());
                 EXPECT_TRUE(detail->at("editing").is_null());
                 const auto roots = sessions.content(opened->image_id, "owner", 100U);
