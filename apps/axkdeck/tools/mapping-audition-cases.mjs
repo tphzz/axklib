@@ -20,10 +20,14 @@ export async function mappingAuditionCases(browser, base, output, results) {
         await child.locator('.keyboard g[data-key="60"]').waitFor();
         const before = await mainState();
         const key = child.locator('.keyboard g[data-key="60"]');
+        const face = key.locator('[data-note="60"]');
+        const normalStroke = await face.evaluate(node => getComputedStyle(node).stroke);
         const box = await key.boundingBox();
         await child.mouse.move(box.x + box.width / 2, box.y + box.height - 3);
         await child.mouse.down();
         await waitAudio('playing');
+        assert.equal(await key.evaluate(node => node.classList.contains('pressed')), true);
+        assert.notEqual(await face.evaluate(node => getComputedStyle(node).stroke), normalStroke);
         result.firstKey = await audio();
         assert.equal(result.firstKey.outputState, 'running', 'The first auxiliary key must start the owning AudioContext without an autoplay override');
         assert.equal(result.firstKey.voices, 2, 'Every matching assignment must play, not just the selected one');
@@ -32,6 +36,8 @@ export async function mappingAuditionCases(browser, base, output, results) {
         await child.waitForTimeout(600);
         assert.equal((await audio()).state.status, 'playing', 'A declared loop remains held beyond short one-shot preview duration');
         await child.mouse.up(); await waitAudio('idle');
+        assert.equal(await key.evaluate(node => node.classList.contains('pressed')), false);
+        assert.equal(await face.evaluate(node => getComputedStyle(node).stroke), normalStroke, 'Release clears pointer feedback even in the real held-audio workflow');
         assert.equal((await mainState()).assignment, before.assignment, 'Keyboard audition never changes selection');
         assert.deepEqual((await mainState()).values, before.values, 'Keyboard audition never changes roots or drafts');
 

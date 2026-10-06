@@ -7,6 +7,7 @@ import { createServer } from 'vite';
 import { bankMappingCases } from './bank-mapping-cases.mjs';
 import { mappingPresentationCases } from './mapping-presentation-cases.mjs';
 import { mappingAuditionCases } from './mapping-audition-cases.mjs';
+import { mappingNavigationCases } from './mapping-navigation-cases.mjs';
 
 assert.ok(process.argv[2], 'Provide a build/reports output directory');
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
@@ -245,6 +246,7 @@ try {
     await bankMappingCases(browser, `http://127.0.0.1:${port}`, output, results);
     await mappingPresentationCases(browser, `http://127.0.0.1:${port}`, output, results);
     await mappingAuditionCases(browser, `http://127.0.0.1:${port}`, output, results);
+    await mappingNavigationCases(browser, `http://127.0.0.1:${port}`, output, results);
 } finally {
     clearTimeout(deadline);
     process.removeListener('SIGTERM', signal);

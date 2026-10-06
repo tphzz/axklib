@@ -303,6 +303,19 @@ only velocity overrides. A completed movement is one undo step. Escape,
 pointer cancellation and stale-draft updates discard unfinished movements.
 Keyboard fills use the same surface colors as the blocks above, with visible
 key edges rather than brighter selection colors.
+Dragging a limit shows the quantized key or velocity range near its handle,
+clamped inside the full plot. Movement shows every editable axis. Compact views
+use the existing summary line so readouts cannot obscure keys or add a row.
+Limit handles have accessible names but no hover tooltips.
+
+Both views expose the same slim keyboard overview when zoomed. Drag the outlined
+viewport to pan, or click the strip to recenter it. Arrow keys move one semitone,
+Shift+Arrow an octave, Page Up/Down a viewport, and Home/End reach either MIDI
+edge. Escape cancels an unfinished pan. These operations change only the view;
+they do not edit Samples, select members, create undo steps or start audition.
+The overview is hidden when all notes are visible. Compact mapping blocks are
+left-aligned and capped at 1280 CSS pixels, with white-key width limited to 20 CSS
+pixels. Compact zoom stops at that limit; full editors have no such width cap.
 Member details load only when a mapping view is visible and reuse the same
 canonical drafts. Active bank overrides affect effective coverage, not stored
 member values. Storage badges use the same neutral styling for all formats;
@@ -311,6 +324,8 @@ units, not inactive placeholder bytes or Sample-only fields.
 
 Press and hold a keyboard key to audition all matching Samples at the chosen
 velocity (1-127, initially 100), without selecting a block or moving its root.
+Its key outline lasts only for the press and clears on release or focus loss;
+keyboard-only focus cues remain available for navigation.
 Sample Bank and Member Mapping audition all matching confirmed members,
 including overlapping velocity layers and active Bank overrides, not just the
 preview member. Release stops the whole group; loops remain active only while

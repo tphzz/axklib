@@ -114,6 +114,33 @@ try {
             return { selectionWorkMs: summarize(times), selectionFrameMs: summarize(paints), zoomWorkMs: summarize(zoom), panWorkMs: summarize(pan), longTasksMs: longTasks.map(entry => entry.duration), longTasks: longTasks.map(entry => ({ ...entry, phase: operations.findLast(operation => operation.startTime <= entry.startTime + entry.duration)?.phase ?? 'unknown' })) };
         }, count);
         assert.deepEqual(errors, []);
+        await page.locator('.full [aria-label="Zoom keyboard in"]').click();
+        const rail = page.locator('.full [role="scrollbar"]');
+        const thumb = await rail.locator('.viewport').boundingBox(), railBox = await rail.boundingBox();
+        await page.evaluate(() => {
+            window.panFrames = []; window.panTasks = [];
+            let previous;
+            const record = now => {
+                if (previous !== undefined) window.panFrames.push(now - previous);
+                previous = now;
+                window.panFrame = requestAnimationFrame(record);
+            };
+            window.panObserver = new PerformanceObserver(list => window.panTasks.push(...list.getEntries().map(entry => entry.duration)));
+            window.panObserver.observe({ type: 'longtask' });
+            window.panFrame = requestAnimationFrame(record);
+        });
+        await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(thumb.x + thumb.width / 2 - railBox.width / 8, thumb.y + thumb.height / 2, { steps: 45 });
+        await page.mouse.up();
+        const overview = await page.evaluate(async () => {
+            await new Promise(resolve => setTimeout(resolve, 0));
+            cancelAnimationFrame(window.panFrame);
+            window.panTasks.push(...window.panObserver.takeRecords().map(entry => entry.duration));
+            window.panObserver.disconnect();
+            return { framesMs: window.panFrames, longTasksMs: window.panTasks };
+        });
+        await page.locator('.full [aria-label="Zoom keyboard out"]').click();
         const handle = page.getByRole('button', { name: 'High velocity limit', exact: true });
         const box = await handle.boundingBox(), plot = await page.locator('.full .plot').boundingBox();
         await page.evaluate(() => {
@@ -141,7 +168,7 @@ try {
             await writeFile(resolve(output, `trace-${count}-${dense ? 'dense' : 'adjacent'}.json`), JSON.stringify({ traceEvents }) + '\n');
             await tracing.detach();
         }
-        results.push({ count, dense, ...metrics, dragFramesMs: dragFrames });
+        results.push({ count, dense, ...metrics, dragFramesMs: dragFrames, overview });
         if (process.argv.includes('--verify')) {
             assert.ok(metrics.selectionWorkMs.p95 < 50, 'Selection feedback work stays below 50 ms');
             assert.ok(metrics.selectionFrameMs.p95 < 50, 'Selection reaches a frame within 50 ms');
@@ -149,6 +176,9 @@ try {
             assert.ok(metrics.panWorkMs.p95 < 50, 'Pan feedback work stays below 50 ms');
             const sorted = [...dragFrames].sort((a, b) => a-b);
             assert.ok(sorted[Math.ceil(sorted.length * .95) - 1] < 33, 'Drag frames stay below 33 ms at p95');
+            const panFrames = [...overview.framesMs].sort((a, b) => a-b);
+            assert.ok(panFrames[Math.ceil(panFrames.length * .95) - 1] < 33, 'Overview pan frames stay below 33 ms at p95');
+            assert.equal(overview.longTasksMs.length, 0, 'Overview panning introduces no long tasks');
             assert.equal(metrics.longTasksMs.length, 0, 'No long tasks after warm-up');
         }
         console.log(JSON.stringify({ ...results.at(-1), dragFramesMs: { max: Math.max(...dragFrames), samples: dragFrames.length } }));

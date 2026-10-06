@@ -24,11 +24,44 @@ describe('mapping keyboard audition', () => {
         key.hasPointerCapture = () => false;
         await fireEvent.pointerDown(key, { button: 0, pointerId: 1 });
         expect(onpress).toHaveBeenCalledExactlyOnceWith(36);
+        expect(key.classList.contains('pressed')).toBe(true);
+        expect(key.classList.contains('keyboard-focus')).toBe(false);
         await fireEvent.pointerUp(key, { pointerId: 1 });
+        expect(key.classList.contains('pressed')).toBe(false);
+        expect(key.classList.contains('keyboard-focus')).toBe(false);
         await fireEvent.click(key);
         expect(onrelease).toHaveBeenCalledTimes(1);
         expect(onrootmenu).not.toHaveBeenCalled();
         expect(onpress).toHaveBeenCalledTimes(1);
+    });
+    it.each(['pointercancel', 'lostpointercapture', 'blur'])('clears pressed feedback on %s', async (type) => {
+        const onrelease = vi.fn();
+        const view = render(KeyboardAxis, { formatNote: String, onpress: vi.fn(), onrelease });
+        const key = view.getByRole('button', { name: '36' });
+        key.setPointerCapture = vi.fn();
+        await fireEvent.pointerDown(key, { button: 0, pointerId: 1 });
+        expect(key.classList.contains('pressed')).toBe(true);
+        await fireEvent(key, new Event(type));
+        expect(key.classList.contains('pressed')).toBe(false);
+        expect(onrelease).toHaveBeenCalledTimes(1);
+    });
+    it('retains keyboard-only focus feedback and clears audition on window blur and destruction', async () => {
+        const onrelease = vi.fn();
+        const view = render(KeyboardAxis, { formatNote: String, onpress: vi.fn(), onrelease });
+        const key = view.getByRole('button', { name: '36' });
+        await fireEvent.focus(key);
+        expect(key.classList.contains('keyboard-focus')).toBe(true);
+        await fireEvent.keyDown(key, { key: 'Enter' });
+        expect(key.classList.contains('pressed')).toBe(true);
+        await fireEvent.keyUp(key, { key: 'Enter' });
+        expect(key.classList.contains('pressed')).toBe(false);
+        expect(key.classList.contains('keyboard-focus')).toBe(true);
+        await fireEvent.keyDown(key, { key: 'Enter' });
+        await fireEvent.blur(window);
+        expect(key.classList.contains('pressed')).toBe(false);
+        await fireEvent.keyDown(key, { key: 'Enter' });
+        view.unmount();
+        expect(onrelease).toHaveBeenCalledTimes(3);
     });
     it('supports held keyboard activation and releases on blur without repeating notes', async () => {
         const onpress = vi.fn(),

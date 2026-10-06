@@ -64,7 +64,7 @@ describe('shared keyboard mapping view', () => {
         handle.hasPointerCapture = () => false;
         const pointer = async (type: string, x: number) => {
             const event = new Event(type, { bubbles: true });
-            Object.assign(event, { pointerId: 1, clientX: x, clientY: 14 });
+            Object.assign(event, { pointerId: 1, clientX: x, clientY: 14, button: 0 });
             await fireEvent(handle, event);
         };
         await pointer('pointerdown', 0);
@@ -83,7 +83,7 @@ describe('shared keyboard mapping view', () => {
         handle.hasPointerCapture = () => false;
         const pointer = (type: string, y: number) => {
             const event = new Event(type, { bubbles: true });
-            Object.assign(event, { pointerId: 1, clientX: 60, clientY: y });
+            Object.assign(event, { pointerId: 1, clientX: 60, clientY: y, button: 0 });
             return fireEvent(handle, event);
         };
         await pointer('pointerdown', 50);
@@ -233,7 +233,7 @@ describe('shared keyboard mapping view', () => {
         handle.hasPointerCapture = () => false;
         const pointer = (type: string, x: number) => {
             const event = new Event(type, { bubbles: true });
-            Object.assign(event, { pointerId: 1, clientX: x, clientY: 14 });
+            Object.assign(event, { pointerId: 1, clientX: x, clientY: 14, button: 0 });
             return fireEvent(handle, event);
         };
         await pointer('pointerdown', 0);

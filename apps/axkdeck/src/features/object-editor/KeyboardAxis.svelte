@@ -42,7 +42,9 @@
     const span = $derived(end - start + 1);
     const enabled = $derived(interactive || !!onpress || !!onrootmenu);
     let focused = $state<number | null>(null);
-    let held: number | null = null;
+    let held = $state<number | null>(null);
+    let keyboardFocus = $state(false);
+    let pointerFocus = false;
     const tabStop = $derived(Math.max(start, Math.min(end, focused ?? roots[0] ?? start)));
     function release() {
         if (held === null) return;
@@ -59,11 +61,15 @@
         if (event.button !== 0 || !onpress) return;
         event.preventDefault();
         const target = event.currentTarget as SVGGElement;
+        keyboardFocus = false;
+        pointerFocus = true;
         target.focus();
+        pointerFocus = false;
         target.setPointerCapture(event.pointerId);
         press(note);
     }
     function keydown(event: KeyboardEvent, note: number) {
+        keyboardFocus = true;
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
             event.preventDefault();
             release();
@@ -140,12 +146,20 @@
             data-key={note}
             aria-label={formatNote(note)}
             aria-hidden={!visible}
-            onfocus={() => (focused = note)}
+            class:pressed={held === note}
+            class:keyboard-focus={keyboardFocus && focused === note}
+            onfocus={() => {
+                focused = note;
+                keyboardFocus = !pointerFocus;
+            }}
             onpointerdown={(event) => visible && pointer(event, note)}
             onpointerup={release}
             onpointercancel={release}
             onlostpointercapture={release}
-            onblur={release}
+            onblur={() => {
+                keyboardFocus = false;
+                release();
+            }}
             onkeydown={(event) => visible && keydown(event, note)}
             onkeyup={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') release();
@@ -236,7 +250,10 @@
     g:focus-visible {
         outline: none;
     }
-    g:focus-visible rect {
+    g.pressed > .white,
+    g.pressed > .black,
+    g.keyboard-focus:focus-visible > .white,
+    g.keyboard-focus:focus-visible > .black {
         stroke: var(--color-text);
         stroke-width: 2px;
     }

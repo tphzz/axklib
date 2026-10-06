@@ -3,10 +3,19 @@
     import KeyboardAxis from './KeyboardAxis.svelte';
     import MappingRegions from './MappingRegions.svelte';
     import MappingRootMenu from './MappingRootMenu.svelte';
-    import EditorNumber from './EditorNumber.svelte';
+    import MappingOverview from './MappingOverview.svelte';
+    import MappingViewTools from './MappingViewTools.svelte';
+    import MappingDragReadout from './MappingDragReadout.svelte';
+    import { mappingDragText, type MappingFeedback } from './mappingFeedback';
+    import {
+        minimumKeyboardSpan,
+        resizeViewport,
+        zoomViewport,
+        fitViewport,
+        type MappingViewport,
+    } from './mappingViewport';
     import { mappingRectangle, MappingGeometryCache } from './keyboardGeometry';
     import { velocityGrid } from './mappingPresentation';
-    import Icon from '../../lib/components/Icon.svelte';
     import { graphDrag } from './graphDrag';
     import {
         editKeyboardRange,
@@ -69,6 +78,16 @@
     let plotWidth = $state(128);
     let rootMenu = $state<{ note: number; x: number; y: number; identity: string } | null>(null);
     let cancel: (() => void) | undefined;
+    let feedback = $state<MappingFeedback | null>(null);
+    const plotId = $props.id();
+    const minimum = $derived(minimumKeyboardSpan(plotWidth, !mapping));
+    const selectionIdentity = $derived(
+        [...new Set(zones.filter((zone) => zone.selected).map((zone) => zone.selectionId ?? zone.id))]
+            .sort()
+            .join('\n'),
+    );
+    const selectedIds = $derived(new Set(zones.filter((zone) => zone.selected).map((zone) => zone.id)));
+    const busy = $derived(feedback !== null);
     const x = (note: number) => ((note - start) / span) * 100;
     const selected = $derived(zones.filter((zone) => zone.selected));
     const rectangle = $derived(mappingRectangle(limits, start, span));
@@ -103,8 +122,13 @@
     $effect(() => {
         if (!plot || typeof ResizeObserver === 'undefined') return;
         const observer = new ResizeObserver(([entry]) => {
+            if (plotHeight !== entry.contentRect.height || plotWidth !== entry.contentRect.width) {
+                cancel?.();
+                feedback = null;
+            }
             plotHeight = entry.contentRect.height;
             plotWidth = entry.contentRect.width;
+            view({ start, span });
         });
         observer.observe(plot);
         return () => observer.disconnect();
@@ -112,6 +136,22 @@
     $effect(() => {
         if (disabled || !rootEditable || !mapping || (rootMenu && rootMenu.identity !== rootIdentity)) rootMenu = null;
     });
+    $effect(() => {
+        if (feedback && (disabled || feedback.identity !== selectionIdentity)) {
+            cancel?.();
+            feedback = null;
+        }
+    });
+    function clearFeedback() {
+        if (!feedback?.pointer) feedback = null;
+    }
+    function blurFeedback() {
+        cancel?.();
+        feedback = null;
+    }
+    function view(next: MappingViewport) {
+        ({ start, span } = resizeViewport(next, minimum));
+    }
     function openRoot(note: number, event: MouseEvent | KeyboardEvent) {
         if (disabled || !rootEditable || !mapping) return;
         event.preventDefault();
@@ -134,19 +174,17 @@
         );
     }
     function zoom(factor: number) {
-        const next = Math.max(12, Math.min(128, Math.round(span * factor)));
-        start = Math.max(0, Math.min(128 - next, Math.round(start + (span - next) / 2)));
-        span = next;
+        if (!busy) view(zoomViewport({ start, span }, factor, minimum));
     }
     function fit() {
+        if (busy) return;
         const shown = selected.length ? selected : zones;
         const low = Math.min(limits.low, ...shown.map((zone) => zone.low));
         const high = Math.max(limits.high, ...shown.map((zone) => zone.high));
-        span = Math.max(12, Math.min(128, high - low + 13));
-        start = Math.max(0, Math.min(128 - span, low - 6));
+        view(fitViewport(low, high, minimum));
     }
     function drag(event: PointerEvent, handle: RangeHandle) {
-        if (disabled || !plot || !rangeBoundaries(handle, axes).length) return;
+        if (disabled || !plot || event.button !== 0 || !rangeBoundaries(handle, axes).length) return;
         event.preventDefault();
         cancel?.();
         const original = { ...limits },
@@ -154,6 +192,7 @@
         const changed = new Set<RangeBoundary>();
         let previous = original;
         onbegin();
+        feedback = { range: original, handle, axes, identity: selectionIdentity, pointer: true };
         cancel = graphDrag(
             event,
             { x: 0.5, y: 0.5 },
@@ -165,6 +204,7 @@
                 if (Object.keys(range).every((key) => range[key as RangeBoundary] === previous[key as RangeBoundary]))
                     return;
                 previous = range;
+                if (feedback) feedback.range = range;
                 for (const boundary of rangeBoundaries(handle, axes))
                     if (range[boundary] !== original[boundary]) changed.add(boundary);
                 onchange(range, [...changed]);
@@ -172,6 +212,7 @@
             (cancelled) => {
                 onend(cancelled, handle === 'move');
                 cancel = undefined;
+                feedback = null;
             },
         );
     }
@@ -190,6 +231,9 @@
         let begun = false,
             previous = original;
         const changed = new Set<RangeBoundary>();
+        const identity = selected.some((zone) => zone.id === id)
+            ? selectionIdentity
+            : String(zones.find((zone) => zone.id === id)?.selectionId ?? id);
         cancel = graphDrag(
             event,
             { x: 0.5, y: 0.5 },
@@ -199,6 +243,13 @@
                 if (!begun) {
                     begun = true;
                     onbegin(id);
+                    feedback = {
+                        range: original,
+                        handle: 'move',
+                        axes: target.axes,
+                        identity,
+                        pointer: true,
+                    };
                 }
                 const range = editKeyboardRange(
                     original,
@@ -209,12 +260,14 @@
                 if (Object.keys(range).every((key) => range[key as RangeBoundary] === previous[key as RangeBoundary]))
                     return;
                 previous = range;
+                if (feedback) feedback.range = range;
                 for (const boundary of rangeBoundaries('move', target.axes))
                     if (range[boundary] !== original[boundary]) changed.add(boundary);
                 onchange(range, [...changed]);
             },
             (cancelled) => {
                 cancel = undefined;
+                feedback = null;
                 if (begun) {
                     if (!cancelled)
                         element.addEventListener(
@@ -246,15 +299,25 @@
         const vertical =
             handle.startsWith('velocity') || (handle === 'move' && ['ArrowUp', 'ArrowDown'].includes(event.key));
         const permitted = vertical ? axes.velocity : axes.keys;
-        if (permitted)
+        if (permitted) {
+            const range = editKeyboardRange(limits, handle, vertical ? 0 : delta, vertical ? delta : 0);
+            feedback = { range, handle, axes, identity: selectionIdentity, pointer: false };
             onchange(
-                editKeyboardRange(limits, handle, vertical ? 0 : delta, vertical ? delta : 0),
+                range,
                 rangeBoundaries(handle, { keys: !vertical && axes.keys, velocity: vertical && axes.velocity }),
             );
+        }
         onend();
     }
     onDestroy(() => cancel?.());
 </script>
+
+<svelte:window
+    onblur={() => {
+        cancel?.();
+        feedback = null;
+    }}
+/>
 
 {#snippet keyboard()}
     <KeyboardAxis
@@ -277,7 +340,6 @@
             class:velocity={handle.id.startsWith('velocity')}
             {disabled}
             aria-label={handle.label}
-            title={handle.label}
             style:left={`${handle.x}%`}
             style:margin-left={mapping && (rectangle.height / 100) * plotHeight < 18 && handle.id.startsWith('velocity')
                 ? `${handle.id === 'velocityLow' ? -velocityOffset : velocityOffset}px`
@@ -286,60 +348,37 @@
             hidden={handle.x < 0 || handle.x > 100}
             onpointerdown={(event) => drag(event, handle.id)}
             onkeydown={(event) => key(event, handle.id)}
+            onkeyup={clearFeedback}
+            onblur={blurFeedback}
         ></button>
     {/each}
 {/snippet}
-<section class="keyboard-mapping" class:full={mapping === 1} aria-label="Key and velocity mapping">
+<section
+    class="keyboard-mapping"
+    class:full={mapping === 1}
+    class:zoomed={span < 128}
+    aria-label="Key and velocity mapping"
+>
     <div class="toolbar">
         {#if tools}{@render tools()}{/if}
-        <span class="summary"
-            >{formatNote(limits.low)}–{formatNote(limits.high)}{#if mapping}
-                · Velocity {limits.velocityLow}–{limits.velocityHigh}{/if}</span
+        <span class="summary" data-drag-readout={!mapping && feedback ? '' : undefined}
+            >{#if !mapping && feedback}{mappingDragText(feedback, formatNote)}{:else}{formatNote(
+                    limits.low,
+                )}–{formatNote(limits.high)}{#if mapping}
+                    · Velocity {limits.velocityLow}–{limits.velocityHigh}{/if}{/if}</span
         >
-        <div class="view-tools">
-            {#if onpress}<div class="audition-velocity">
-                    <span>Velocity</span><EditorNumber
-                        label="Audition velocity"
-                        value={velocity}
-                        min={1}
-                        max={127}
-                        onchange={onvelocity}
-                    />
-                </div>{/if}
-            <div class="viewport-tools">
-                <button
-                    class="editor-icon pan-left"
-                    aria-label="Pan keyboard left"
-                    title="Pan left"
-                    disabled={start === 0}
-                    onclick={() => (start = Math.max(0, start - 12))}><Icon name="chevron" size={14} /></button
-                >
-                <button
-                    class="editor-icon pan-right"
-                    aria-label="Pan keyboard right"
-                    title="Pan right"
-                    disabled={start + span >= 128}
-                    onclick={() => (start = Math.min(128 - span, start + 12))}><Icon name="chevron" size={14} /></button
-                >
-                <button
-                    class="editor-icon"
-                    aria-label="Zoom keyboard out"
-                    title="Zoom out"
-                    disabled={span === 128}
-                    onclick={() => zoom(2)}><Icon name="zoom-out" size={14} /></button
-                >
-                <button
-                    class="editor-icon"
-                    aria-label="Zoom keyboard in"
-                    title="Zoom in"
-                    disabled={span === 12}
-                    onclick={() => zoom(0.5)}><Icon name="zoom-in" size={14} /></button
-                >
-                <button class="editor-icon" aria-label="Fit keyboard ranges" title="Fit ranges" onclick={fit}
-                    ><Icon name="fit-width" size={14} /></button
-                >
-            </div>
-        </div>
+        <MappingViewTools
+            {start}
+            {span}
+            {minimum}
+            {busy}
+            audition={!!onpress}
+            {velocity}
+            {onvelocity}
+            onpan={(delta) => !busy && view({ start: start + delta, span })}
+            onzoom={zoom}
+            onfit={fit}
+        />
     </div>
     {#if mapping}
         <div class="mapping-layout">
@@ -351,6 +390,7 @@
             </div>
             <div
                 class="plot"
+                id={plotId}
                 class:extended={mapping === 1}
                 bind:this={plot}
                 role="group"
@@ -377,6 +417,8 @@
                         title={`${rangeLabel}; drag to move`}
                         onpointerdown={(event) => drag(event, 'move')}
                         onkeydown={(event) => key(event, 'move')}
+                        onkeyup={clearFeedback}
+                        onblur={blurFeedback}
                         style:left={`${rectangle.left}%`}
                         style:width={`${rectangle.width}%`}
                         style:top={`${rectangle.top}%`}
@@ -384,9 +426,28 @@
                     ></button>
                 </div>
                 {@render boundaries()}
+                {#if feedback}<MappingDragReadout
+                        {feedback}
+                        {formatNote}
+                        {start}
+                        {span}
+                        width={plotWidth}
+                        height={plotHeight}
+                    />{/if}
             </div>
             <div></div>
             {@render keyboard()}
+            {#if span < 128}<div></div>
+                <MappingOverview
+                    {start}
+                    {span}
+                    {geometry}
+                    selected={selectedIds}
+                    disabled={busy}
+                    {formatNote}
+                    controls={plotId}
+                    onchange={view}
+                />{/if}
         </div>
         <div class="legend">
             <span><i class="source-key"></i>Source</span>
@@ -395,13 +456,23 @@
             <span><i class="root-key"></i>Root</span>
         </div>
     {:else}
-        <div class="keyboard-surface" bind:this={plot}>
+        <div class="keyboard-surface" id={plotId} bind:this={plot}>
             {@render keyboard()}
             <div class="compact-outline">
                 <div class="compact-limits" style:left={`${rectangle.left}%`} style:width={`${rectangle.width}%`}></div>
             </div>
             {@render boundaries()}
         </div>
+        {#if span < 128}<MappingOverview
+                {start}
+                {span}
+                {geometry}
+                selected={selectedIds}
+                disabled={busy}
+                {formatNote}
+                controls={plotId}
+                onchange={view}
+            />{/if}
     {/if}
 </section>
 {#if rootMenu}<MappingRootMenu {...rootMenu} {formatNote} onchange={onroot} onclose={() => (rootMenu = null)} />{/if}
@@ -411,8 +482,12 @@
         min-width: 0;
         margin-top: 8px;
     }
+    .keyboard-mapping:not(.full) {
+        max-width: 1280px;
+    }
     .toolbar {
         display: flex;
+        flex: none;
         flex-wrap: wrap;
         align-items: center;
         gap: 4px;
@@ -428,35 +503,10 @@
     .full .mapping-layout {
         flex: 1;
         min-height: 376px;
-        grid-template-rows: minmax(320px, 1fr) auto;
+        grid-template-rows: minmax(320px, 1fr) auto auto;
     }
-    .pan-left :global(svg) {
-        transform: rotate(90deg);
-    }
-    .view-tools {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 4px;
-        margin-left: auto;
-        max-width: 100%;
-        flex: none;
-    }
-    .viewport-tools {
-        display: flex;
-        gap: 4px;
-        flex: none;
-    }
-    .audition-velocity {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        width: 190px;
-        max-width: 100%;
-        font-size: 10px;
-    }
-    .pan-right :global(svg) {
-        transform: rotate(-90deg);
+    .full.zoomed .mapping-layout {
+        min-height: 398px;
     }
     .summary {
         flex: 1;
@@ -546,6 +596,7 @@
     }
     .legend {
         display: flex;
+        flex: none;
         flex-wrap: wrap;
         align-items: center;
         gap: 6px;

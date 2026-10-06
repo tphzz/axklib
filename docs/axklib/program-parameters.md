@@ -283,6 +283,19 @@ Four dashed guides mark the outer edges of selected
 effective coverage, including grouped assignments. Individual member outlines
 remain visible; the group envelope does not fill unmapped gaps. The blue editable
 Program limits and handles remain separate and preview dragging locally.
+During a handle drag, a nearby readout shows the quantized key or velocity range;
+block movement shows both editable axes. The readout stays within the full plot.
+The compact view uses its existing summary line instead of covering the keys.
+Limit handles retain accessible names without hover tooltips.
+
+When zoomed, both views show a slim overview of the complete keyboard beneath
+the key labels. Drag its viewport to pan, or click elsewhere on the strip to
+recenter it. Arrow keys pan by one semitone, Shift+Arrow by an octave, Page Up/Down
+by a viewport, and Home/End reach the MIDI boundaries. Escape cancels an unfinished
+pan. Navigation changes only the view, not assignments, undo history or playback.
+The overview disappears when all 128 notes are visible. Compact keyboards are
+left-aligned and capped at 1280 CSS pixels, with white keys no wider than 20 CSS
+pixels; compact zoom stops at this cap. Full mapping views remain unrestricted.
 Thin or overlapping labels yield to the selected
 region, with complete names retained in tooltips.
 Program list subtitles summarize assignments,
@@ -293,6 +306,8 @@ Press and hold a keyboard key to audition every assignment whose effective
 key/velocity range matches it, regardless of selection. The audition velocity
 defaults to 100 and can be adjusted from 1 to 127. Releasing the key stops the
 group, including held loops; focus loss or window closure also releases it.
+The audition outline appears only while a key is pressed. Keyboard-only focus
+feedback remains available for navigation without leaving a pointer-click outline.
 Keyboard audition changes neither selection nor roots. The main window owns
 playback and uses the current canonical Sample/Bank drafts. Unresolved or
 unsupported members fail the group rather than playing a silently incomplete
