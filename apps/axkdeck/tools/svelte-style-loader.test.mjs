@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
+import { createServer as createHttpServer } from 'node:http';
 import { test } from 'node:test';
 import { createServer } from 'vite';
 import { svelteStyleLoader } from './svelte-style-loader.mjs';
 
 test('cold component styles and concurrent parent requests return compiled CSS', { timeout: 30000 }, async () => {
-    const server = await createServer({ server: { port: 0, strictPort: false }, logLevel: 'error' });
+    const server = await createServer({ server: { middlewareMode: true, ws: false }, logLevel: 'error' });
     try {
-        await server.listen();
         const cold = await server.transformRequest(
             '/src/features/object-editor/EditorBoundary.svelte?svelte&type=style&lang.css',
         );
@@ -29,9 +29,19 @@ test('cold component styles and concurrent parent requests return compiled CSS',
 });
 
 test('stale stylesheets for components without local styles return empty CSS', { timeout: 30000 }, async () => {
-    const server = await createServer({ server: { port: 0, strictPort: false }, logLevel: 'error' });
+    const server = await createServer({ server: { middlewareMode: true, ws: false }, logLevel: 'error' });
+    const http = createHttpServer(server.middlewares);
     try {
-        await server.listen();
+        // The test owns its listener, independently of Tauri host settings and localhost DNS.
+        await new Promise((resolve, reject) => {
+            http.once('error', reject);
+            http.listen(0, '127.0.0.1', resolve);
+        });
+        const address = http.address();
+        assert(address && typeof address !== 'string');
+        assert.equal(address.address, '127.0.0.1');
+        assert(address.port > 0);
+        const origin = new URL(`http://${address.address}:${address.port}/`);
         for (const name of ['SampleFormatBadge', 'ProgramFormatBadge']) {
             const component = `/src/features/object-editor/${name}.svelte`;
             const [style, script] = await Promise.all([
@@ -43,7 +53,8 @@ test('stale stylesheets for components without local styles return empty CSS', {
             assert(!style.code.includes('<script'));
             assert(script?.code.includes('StorageFormatBadge'));
             const response = await fetch(
-                new URL(`${component}?svelte&type=style&lang.css`, server.resolvedUrls.local[0]),
+                new URL(`${component}?svelte&type=style&lang.css`, origin),
+                { signal: AbortSignal.timeout(5000) },
             );
             assert.equal(response.status, 200);
             assert((await response.text()).includes('const __vite__css = ""'));
@@ -53,7 +64,15 @@ test('stale stylesheets for components without local styles return empty CSS', {
         );
         assert(badge?.code.includes('.format-badge'));
     } finally {
-        await server.close();
+        try {
+            if (http.listening) await new Promise((resolve, reject) => {
+                http.close(error => error ? reject(error) : resolve());
+                http.closeAllConnections();
+            });
+            assert.equal(http.listening, false);
+        } finally {
+            await server.close();
+        }
     }
 });
 
